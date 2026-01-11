@@ -33,17 +33,36 @@ def _parse_bool(value) -> bool:
     """Parse various boolean representations from data sources.
 
     Handles OSM-style values like "yes", "no", "true", "false",
-    as well as Python booleans and numeric values.
+    as well as Python booleans and numeric 0/1 values.
+
+    Args:
+        value: Value to parse (bool, int, float, str, or None)
+
+    Returns:
+        Boolean interpretation of the value
     """
     if value is None:
         return False
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        return bool(value)
+        # Only treat 1 as True, 0 as False; log unexpected values
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        logger.debug(f"Unexpected numeric boolean value: {value}, treating as False")
+        return False
     if isinstance(value, str):
-        return value.lower() in ("yes", "true", "1")
-    return bool(value)
+        normalized = value.lower().strip()
+        if normalized in ("yes", "true", "1"):
+            return True
+        if normalized in ("no", "false", "0", ""):
+            return False
+        logger.debug(f"Unexpected string boolean value: '{value}', treating as False")
+        return False
+    logger.debug(f"Unexpected boolean value type: {type(value).__name__}, treating as False")
+    return False
 
 
 def _ensure_projected_crs(gdf: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, Optional[CRS]]:

@@ -194,17 +194,18 @@ class TestBridgeStringParsing:
         """bridge='no' should NOT suppress intersection with ground roads."""
         result = planarize(bridge_with_string_values, snap_tolerance=0.5, respect_z_levels=True)
 
-        # Ground road (bridge="no") and tunnel exit (bridge="no") should intersect
-        # if they cross. Bridge (bridge="yes") should not intersect ground.
+        # Ground road (index 0, bridge="no") and tunnel exit (index 2, bridge="no")
+        # are both at layer=0, so they should create an intersection where they cross.
+        # The tunnel exit is at x=7 and ground road is at y=5, crossing at (7, 5).
 
-        # The bridge (id=2) should not intersect with ground road (id=1)
-        # because bridge="yes" should be parsed as True
-        # Ground roads should intersect if they cross
+        # Count edges for the tunnel exit (index 2, original_id=2)
+        # It should be split into 2 edges because it crosses the ground road
+        tunnel_exit_edges = result.edges[result.edges["original_id"] == 2]
+        assert len(tunnel_exit_edges) == 2, "Tunnel exit should be split at intersection with ground road"
 
-        # With respect_z_levels=True:
-        # - Bridge (level 1) shouldn't intersect ground (level 0)
-        # - Ground roads at level 0 should intersect each other
-        pass  # Structure validation is enough
+        # Ground road (index 0, original_id=0) should also be split
+        ground_road_edges = result.edges[result.edges["original_id"] == 0]
+        assert len(ground_road_edges) >= 2, "Ground road should be split at intersections"
 
     def test_bridge_yes_prevents_intersection(self, bridge_with_string_values):
         """bridge='yes' should prevent intersection with ground roads."""

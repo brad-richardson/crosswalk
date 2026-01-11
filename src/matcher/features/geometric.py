@@ -116,12 +116,8 @@ def _discrete_frechet(P: np.ndarray, Q: np.ndarray, max_points: int = 50) -> flo
         m = len(Q)
 
     # Use iterative DP instead of recursive to avoid stack overflow
-    ca = np.zeros((n, m))
-
-    # Precompute distance matrix
-    for i in range(n):
-        for j in range(m):
-            ca[i, j] = np.linalg.norm(P[i] - Q[j])
+    # Vectorized distance matrix using broadcasting (much faster than nested loops)
+    ca = np.linalg.norm(P[:, np.newaxis, :] - Q[np.newaxis, :, :], axis=2)
 
     # DP table
     dp = np.zeros((n, m))

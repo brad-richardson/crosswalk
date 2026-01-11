@@ -8,6 +8,22 @@ Road network conflation pipeline for linking local road datasets to Overture Map
 pip install -e ".[dev]"
 ```
 
+### Optional Dependencies
+
+```bash
+# For OSM data fetching via pyrosm
+pip install -e ".[osm]"
+
+# For machine learning matching (XGBoost, LightGBM)
+pip install -e ".[ml]"
+
+# For distributed processing with Apache Spark/Sedona
+pip install -e ".[spark]"
+
+# All optional dependencies
+pip install -e ".[dev,osm,ml]"
+```
+
 ## Usage
 
 ```bash

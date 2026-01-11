@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -78,6 +78,15 @@ class MatcherSettings(BaseSettings):
         },
         description="Feature weights for match scoring (must sum to 1.0)",
     )
+
+    @field_validator("matching_weights")
+    @classmethod
+    def validate_weights_sum(cls, v: dict[str, float]) -> dict[str, float]:
+        """Validate that matching weights sum to 1.0."""
+        total = sum(v.values())
+        if not (0.99 <= total <= 1.01):  # Allow small floating point tolerance
+            raise ValueError(f"matching_weights must sum to 1.0, got {total:.4f}")
+        return v
 
     # CRS settings
     default_crs: str = Field(

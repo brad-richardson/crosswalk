@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import geopandas as gpd
+import pandas as pd
 from loguru import logger
 
 from ..blocking.spatial_index import CandidatePair
@@ -225,11 +226,15 @@ def score_candidates(
         ref_class = ref_classes[cand.ref_idx]
         target_class = target_classes[cand.target_idx]
 
-        # Handle NaN values
-        if ref_name is not None and (isinstance(ref_name, float) and ref_name != ref_name):
+        # Handle NaN values using pandas for clarity
+        if pd.isna(ref_name):
             ref_name = None
-        if target_name is not None and (isinstance(target_name, float) and target_name != target_name):
+        if pd.isna(target_name):
             target_name = None
+        if pd.isna(ref_class):
+            ref_class = None
+        if pd.isna(target_class):
+            target_class = None
 
         # Compute score
         confidence, scores, features = compute_match_score(

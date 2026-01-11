@@ -9,7 +9,7 @@ Supports both 1:1 matching (Hungarian algorithm) and 1:N matching
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
