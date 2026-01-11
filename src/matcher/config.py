@@ -3,12 +3,14 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 
 
 class MatcherSettings(BaseSettings):
     """Global settings for the matcher pipeline."""
+
+    model_config = ConfigDict(env_prefix="MATCHER_", env_file=".env")
 
     # Paths
     data_dir: Path = Field(default=Path("data"), description="Base data directory")
@@ -63,6 +65,19 @@ class MatcherSettings(BaseSettings):
         default=0.5,
         description="Confidence threshold for review (below this = no match)",
     )
+    matching_weights: dict[str, float] = Field(
+        default={
+            "hausdorff_norm": 0.20,
+            "frechet_norm": 0.10,
+            "buffer_iou": 0.20,
+            "heading_norm": 0.10,
+            "length_ratio": 0.10,
+            "projection_norm": 0.10,
+            "name_similarity": 0.15,
+            "class_similarity": 0.05,
+        },
+        description="Feature weights for match scoring (must sum to 1.0)",
+    )
 
     # CRS settings
     default_crs: str = Field(
@@ -73,10 +88,6 @@ class MatcherSettings(BaseSettings):
         default=None,
         description="Working CRS for metric calculations (auto-detected if None)",
     )
-
-    class Config:
-        env_prefix = "MATCHER_"
-        env_file = ".env"
 
 
 # Global settings instance

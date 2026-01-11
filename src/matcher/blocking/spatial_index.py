@@ -9,11 +9,54 @@ from typing import Iterator, Optional
 
 import geopandas as gpd
 import numpy as np
+import shapely
 from loguru import logger
 from shapely import LineString
 from shapely.strtree import STRtree
 
 from ..config import settings
+
+
+def _compute_headings_vectorized(geometries: gpd.GeoSeries) -> np.ndarray:
+    """Compute headings for all geometries using vectorized operations.
+
+    Args:
+        geometries: GeoSeries of LineString geometries
+
+    Returns:
+        Array of headings in degrees (0-360)
+    """
+    coords = shapely.get_coordinates(geometries.values)
+    n_coords = shapely.get_num_coordinates(geometries.values)
+
+    # Get indices for first and last points of each geometry
+    end_indices = np.cumsum(n_coords) - 1
+    start_indices = np.concatenate([[0], end_indices[:-1] + 1])
+
+    start_coords = coords[start_indices]
+    end_coords = coords[end_indices]
+
+    dx = end_coords[:, 0] - start_coords[:, 0]
+    dy = end_coords[:, 1] - start_coords[:, 1]
+
+    headings = np.degrees(np.arctan2(dy, dx))
+    return (headings + 360) % 360
+
+
+def _angle_diff_vectorized(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Vectorized angle difference computation.
+
+    Args:
+        a: First array of angles in degrees
+        b: Second array of angles in degrees
+
+    Returns:
+        Array of minimum angle differences (0-90 for bidirectional roads)
+    """
+    diff = np.abs(a - b)
+    diff = np.where(diff > 180, 360 - diff, diff)
+    opposite_diff = np.abs(180 - diff)
+    return np.minimum(diff, opposite_diff)
 
 
 @dataclass
@@ -38,7 +81,10 @@ def generate_candidates(
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> list[CandidatePair]:
-    """Generate candidate pairs using buffer-based spatial join.
+    """Generate candidate pairs using vectorized spatial join.
+
+    Uses gpd.sjoin for efficient spatial joining, then applies vectorized
+    heading and length filters.
 
     Args:
         reference: Reference edges (Overture) GeoDataFrame
@@ -63,78 +109,90 @@ def generate_candidates(
     logger.info(f"  max_heading_diff: {max_heading_diff}°")
     logger.info(f"  max_length_ratio: {max_length_ratio}")
 
-    # Build spatial index on reference
-    ref_tree = STRtree(reference.geometry.values)
+    # Prepare target with buffer geometry and pre-computed attributes
+    target_prep = target.copy()
+    target_prep["_target_idx"] = range(len(target))
+    target_prep["_target_heading"] = _compute_headings_vectorized(target.geometry)
+    target_prep["_target_length"] = target.geometry.length
+    target_prep["_target_id"] = (
+        target[target_id_column] if target_id_column in target.columns else range(len(target))
+    )
+    # Store original geometry before buffering
+    target_prep["_target_geom"] = target_prep.geometry
 
-    # Pre-compute headings and lengths
-    ref_headings = reference.geometry.apply(_compute_overall_heading)
-    target_headings = target.geometry.apply(_compute_overall_heading)
+    # Buffer target geometries for spatial join
+    target_prep = target_prep.set_geometry(target_prep.geometry.buffer(buffer_distance))
 
-    ref_lengths = reference.geometry.length
-    target_lengths = target.geometry.length
+    # Prepare reference with pre-computed attributes
+    reference_prep = reference.copy()
+    reference_prep["_ref_idx"] = range(len(reference))
+    reference_prep["_ref_heading"] = _compute_headings_vectorized(reference.geometry)
+    reference_prep["_ref_length"] = reference.geometry.length
+    reference_prep["_ref_id"] = (
+        reference[ref_id_column] if ref_id_column in reference.columns else range(len(reference))
+    )
+    reference_prep["_ref_geom"] = reference_prep.geometry
 
+    # Perform spatial join (vectorized!)
+    # Keep only needed columns from reference to avoid column name conflicts
+    ref_cols = ["geometry", "_ref_idx", "_ref_heading", "_ref_length", "_ref_id", "_ref_geom"]
+    joined = gpd.sjoin(
+        target_prep,
+        reference_prep[ref_cols],
+        how="inner",
+        predicate="intersects",
+    )
+
+    logger.info(f"  Spatial join found {len(joined)} candidate pairs")
+
+    if len(joined) == 0:
+        return []
+
+    # Vectorized heading filter
+    heading_diff = _angle_diff_vectorized(
+        joined["_target_heading"].values,
+        joined["_ref_heading"].values,
+    )
+    heading_mask = heading_diff <= max_heading_diff
+
+    # Vectorized length ratio filter
+    min_len = np.minimum(joined["_target_length"].values, joined["_ref_length"].values)
+    max_len = np.maximum(joined["_target_length"].values, joined["_ref_length"].values)
+    length_ratio = max_len / np.maximum(min_len, 0.1)
+    length_mask = length_ratio <= max_length_ratio
+
+    # Apply filters
+    mask = heading_mask & length_mask
+    joined_filtered = joined[mask].copy()
+    heading_diff_filtered = heading_diff[mask]
+    length_ratio_filtered = length_ratio[mask]
+
+    logger.info(f"  After filtering: {len(joined_filtered)} candidates")
+
+    if len(joined_filtered) == 0:
+        return []
+
+    # Compute centroid distances (vectorized)
+    target_centroids = joined_filtered["_target_geom"].centroid
+    ref_centroids = joined_filtered["_ref_geom"].centroid
+    distances = target_centroids.distance(ref_centroids).values
+
+    # Build CandidatePair objects
     candidates = []
-    n_checked = 0
-    n_passed_spatial = 0
-
-    for target_idx in range(len(target)):
-        target_row = target.iloc[target_idx]
-        target_geom = target_row.geometry
-        target_heading = target_headings.iloc[target_idx]
-        target_length = target_lengths.iloc[target_idx]
-
-        if target_id_column in target_row.index:
-            target_id = target_row[target_id_column]
-        else:
-            target_id = target_idx
-
-        # Buffer query
-        buffered = target_geom.buffer(buffer_distance)
-        candidate_indices = ref_tree.query(buffered)
-        n_checked += len(candidate_indices)
-
-        for ref_idx in candidate_indices:
-            ref_row = reference.iloc[ref_idx]
-            ref_heading = ref_headings.iloc[ref_idx]
-            ref_length = ref_lengths.iloc[ref_idx]
-
-            if ref_id_column in ref_row.index:
-                ref_id = ref_row[ref_id_column]
-            else:
-                ref_id = ref_idx
-
-            # Coarse filter: heading difference
-            heading_diff = _angle_diff(target_heading, ref_heading)
-            if heading_diff > max_heading_diff:
-                continue
-
-            # Coarse filter: length ratio
-            length_ratio = (
-                max(target_length, ref_length) / max(min(target_length, ref_length), 0.1)
+    for i, (idx, row) in enumerate(joined_filtered.iterrows()):
+        candidates.append(
+            CandidatePair(
+                ref_id=row["_ref_id"],
+                ref_idx=int(row["_ref_idx"]),
+                target_id=row["_target_id"],
+                target_idx=int(row["_target_idx"]),
+                distance_estimate=distances[i],
+                heading_diff=heading_diff_filtered[i],
+                length_ratio=1.0 / length_ratio_filtered[i],  # Normalize to 0-1
             )
-            if length_ratio > max_length_ratio:
-                continue
+        )
 
-            n_passed_spatial += 1
-
-            # Estimate distance (centroid to centroid for speed)
-            distance_estimate = target_geom.centroid.distance(ref_row.geometry.centroid)
-
-            candidates.append(
-                CandidatePair(
-                    ref_id=ref_id,
-                    ref_idx=ref_idx,
-                    target_id=target_id,
-                    target_idx=target_idx,
-                    distance_estimate=distance_estimate,
-                    heading_diff=heading_diff,
-                    length_ratio=1.0 / length_ratio,  # Normalize to 0-1
-                )
-            )
-
-    logger.info(f"  Checked {n_checked} spatial candidates")
-    logger.info(f"  Generated {len(candidates)} candidates after filtering")
-
+    logger.info(f"  Generated {len(candidates)} candidates")
     return candidates
 
 

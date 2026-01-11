@@ -37,7 +37,8 @@ class MatchResult:
     features: dict[str, float]
 
 
-# Default feature weights (can be tuned)
+# Default feature weights - now configured via settings.matching_weights
+# Kept for backwards compatibility
 DEFAULT_WEIGHTS = {
     "hausdorff_norm": 0.20,  # Lower is better, normalized
     "frechet_norm": 0.10,  # Lower is better, normalized
@@ -48,6 +49,16 @@ DEFAULT_WEIGHTS = {
     "name_similarity": 0.15,  # Higher is better (0-1)
     "class_similarity": 0.05,  # Higher is better (0-1)
 }
+
+
+def _get_weights(weights: dict[str, float] = None) -> dict[str, float]:
+    """Get matching weights from config or provided dict."""
+    if weights is not None:
+        return weights
+    # Use configured weights if available
+    if hasattr(settings, "matching_weights"):
+        return settings.matching_weights
+    return DEFAULT_WEIGHTS
 
 
 def compute_match_score(
@@ -77,7 +88,7 @@ def compute_match_score(
     Returns:
         Tuple of (confidence, scores dict, raw features dict)
     """
-    weights = weights or DEFAULT_WEIGHTS
+    weights = _get_weights(weights)
 
     # Compute geometric features
     geom_features = compute_geometric_features(ref_geom, target_geom, buffer_radius)
@@ -173,29 +184,52 @@ def score_candidates(
     """
     logger.info(f"Scoring {len(candidates)} candidates...")
 
+    weights = _get_weights(weights)
+
+    # Pre-extract arrays for faster access (avoid repeated .iloc calls)
+    ref_geoms = reference.geometry.values
+    target_geoms = target.geometry.values
+
+    ref_names = (
+        reference[ref_name_column].values
+        if ref_name_column in reference.columns
+        else [None] * len(reference)
+    )
+    target_names = (
+        target[target_name_column].values
+        if target_name_column in target.columns
+        else [None] * len(target)
+    )
+    ref_classes = (
+        reference[ref_class_column].values
+        if ref_class_column in reference.columns
+        else [None] * len(reference)
+    )
+    target_classes = (
+        target[target_class_column].values
+        if target_class_column in target.columns
+        else [None] * len(target)
+    )
+
     results = []
 
     for i, cand in enumerate(candidates):
         if i > 0 and i % 1000 == 0:
             logger.info(f"  Scored {i}/{len(candidates)} candidates")
 
-        ref_row = reference.iloc[cand.ref_idx]
-        target_row = target.iloc[cand.target_idx]
+        ref_geom = ref_geoms[cand.ref_idx]
+        target_geom = target_geoms[cand.target_idx]
 
-        ref_geom = ref_row.geometry
-        target_geom = target_row.geometry
+        ref_name = ref_names[cand.ref_idx]
+        target_name = target_names[cand.target_idx]
+        ref_class = ref_classes[cand.ref_idx]
+        target_class = target_classes[cand.target_idx]
 
-        # Get names and classes
-        ref_name = ref_row.get(ref_name_column) if ref_name_column in ref_row.index else None
-        target_name = (
-            target_row.get(target_name_column) if target_name_column in target_row.index else None
-        )
-        ref_class = ref_row.get(ref_class_column) if ref_class_column in ref_row.index else None
-        target_class = (
-            target_row.get(target_class_column)
-            if target_class_column in target_row.index
-            else None
-        )
+        # Handle NaN values
+        if ref_name is not None and (isinstance(ref_name, float) and ref_name != ref_name):
+            ref_name = None
+        if target_name is not None and (isinstance(target_name, float) and target_name != target_name):
+            target_name = None
 
         # Compute score
         confidence, scores, features = compute_match_score(
