@@ -19,6 +19,7 @@ from typing import NamedTuple, Optional
 import geopandas as gpd
 import numpy as np
 from loguru import logger
+from pyproj import CRS
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 from shapely import LineString, Point, get_coordinates
@@ -26,6 +27,75 @@ from shapely.ops import linemerge, split, snap
 from shapely.strtree import STRtree
 
 from ..config import settings
+
+
+def _parse_bool(value) -> bool:
+    """Parse various boolean representations from data sources.
+
+    Handles OSM-style values like "yes", "no", "true", "false",
+    as well as Python booleans and numeric 0/1 values.
+
+    Args:
+        value: Value to parse (bool, int, float, str, or None)
+
+    Returns:
+        Boolean interpretation of the value
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        # Only treat 1 as True, 0 as False; log unexpected values
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        logger.debug(f"Unexpected numeric boolean value: {value}, treating as False")
+        return False
+    if isinstance(value, str):
+        normalized = value.lower().strip()
+        if normalized in ("yes", "true", "1"):
+            return True
+        if normalized in ("no", "false", "0", ""):
+            return False
+        logger.debug(f"Unexpected string boolean value: '{value}', treating as False")
+        return False
+    logger.debug(f"Unexpected boolean value type: {type(value).__name__}, treating as False")
+    return False
+
+
+def _ensure_projected_crs(gdf: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, Optional[CRS]]:
+    """Ensure GeoDataFrame is in a projected CRS for metric operations.
+
+    If the input is in a geographic CRS (e.g., EPSG:4326), it will be
+    auto-projected to the appropriate UTM zone based on the centroid.
+
+    Args:
+        gdf: Input GeoDataFrame
+
+    Returns:
+        Tuple of (projected GeoDataFrame, original CRS or None)
+    """
+    original_crs = gdf.crs
+
+    if original_crs is None:
+        logger.warning("No CRS set on input data, assuming EPSG:4326")
+        gdf = gdf.set_crs("EPSG:4326")
+        original_crs = gdf.crs
+
+    if original_crs.is_geographic:
+        # Auto-detect UTM zone from centroid
+        centroid = gdf.union_all().centroid
+        utm_zone = int((centroid.x + 180) / 6) + 1
+        hemisphere = "N" if centroid.y >= 0 else "S"
+        epsg_code = 32600 + utm_zone if hemisphere == "N" else 32700 + utm_zone
+        utm_crs = f"EPSG:{epsg_code}"
+
+        logger.info(f"Auto-projecting from {original_crs} to {utm_crs} for metric operations")
+        gdf = gdf.to_crs(utm_crs)
+
+    return gdf, original_crs
 
 
 class PlanarizedNetwork(NamedTuple):
@@ -61,6 +131,10 @@ def planarize(
     logger.info(f"  snap_tolerance: {snap_tolerance}m")
     logger.info(f"  node_cluster_tolerance: {node_cluster_tolerance}m")
     logger.info(f"  respect_z_levels: {respect_z_levels}")
+
+    # Ensure projected CRS for metric operations
+    lines, original_crs = _ensure_projected_crs(lines)
+    working_crs = lines.crs
 
     # Ensure we have an ID column
     if id_column not in lines.columns:
@@ -105,30 +179,36 @@ def planarize(
 
     # Step 8: Build node and edge GeoDataFrames with connectivity
     logger.info("Step 7: Building node/edge tables...")
-    nodes_gdf, edges_gdf = _build_node_edge_tables(split_edges, clustered_nodes)
+    nodes_gdf, edges_gdf = _build_node_edge_tables(split_edges, clustered_nodes, working_crs)
+
+    # Reproject back to original CRS if it was geographic
+    if original_crs and original_crs.is_geographic:
+        logger.info(f"Reprojecting output back to {original_crs}")
+        nodes_gdf = nodes_gdf.to_crs(original_crs)
+        edges_gdf = edges_gdf.to_crs(original_crs)
 
     logger.info(f"Planarization complete: {len(nodes_gdf)} nodes, {len(edges_gdf)} edges")
     return PlanarizedNetwork(nodes=nodes_gdf, edges=edges_gdf)
 
 
 def _get_z_level(row) -> int:
-    """Extract z-level from row attributes."""
+    """Extract z-level from row attributes.
+
+    Handles OSM-style values like bridge="yes", tunnel="no", layer=1.
+    """
     # Check for explicit level/layer
     level = 0
-    if "level" in row.index and row["level"] is not None:
-        try:
-            level = int(row["level"])
-        except (ValueError, TypeError):
-            pass
-    elif "layer" in row.index and row["layer"] is not None:
-        try:
-            level = int(row["layer"])
-        except (ValueError, TypeError):
-            pass
+    for col in ["level", "layer"]:
+        if col in row.index and row[col] is not None:
+            try:
+                level = int(row[col])
+                break
+            except (ValueError, TypeError):
+                pass
 
-    # Bridge/tunnel flags override
-    is_bridge = row.get("is_bridge", False) or row.get("bridge", False)
-    is_tunnel = row.get("is_tunnel", False) or row.get("tunnel", False)
+    # Bridge/tunnel flags override (using proper boolean parsing)
+    is_bridge = _parse_bool(row.get("is_bridge")) or _parse_bool(row.get("bridge"))
+    is_tunnel = _parse_bool(row.get("is_tunnel")) or _parse_bool(row.get("tunnel"))
 
     if is_bridge and level == 0:
         level = 1
@@ -152,7 +232,11 @@ def should_intersect(row_a, row_b, respect_z_levels: bool) -> bool:
 def _find_intersections(
     lines: gpd.GeoDataFrame, respect_z_levels: bool
 ) -> list[Point]:
-    """Find all intersection points between lines (respecting z-levels)."""
+    """Find all intersection points between lines (respecting z-levels).
+
+    Detects both crossing intersections (X-junctions) and T-junctions
+    where one line's endpoint touches another line.
+    """
     tree = STRtree(lines.geometry.values)
     intersection_points = []
 
@@ -171,18 +255,28 @@ def _find_intersections(
             if not should_intersect(row, other_row, respect_z_levels):
                 continue
 
-            # Check for crossing
+            # Check for crossing (interior intersection - X-junction)
             if geom.crosses(other_geom):
                 isect = geom.intersection(other_geom)
-                if isinstance(isect, Point):
-                    intersection_points.append(isect)
-                elif hasattr(isect, "geoms"):
-                    # MultiPoint or GeometryCollection
-                    for part in isect.geoms:
-                        if isinstance(part, Point):
-                            intersection_points.append(part)
+                _collect_points(isect, intersection_points)
+
+            # Check for T-junction (endpoint touches interior of other line)
+            elif geom.touches(other_geom):
+                touch_point = geom.intersection(other_geom)
+                _collect_points(touch_point, intersection_points)
 
     return intersection_points
+
+
+def _collect_points(geom, points_list: list[Point]) -> None:
+    """Extract Point geometries from intersection result."""
+    if isinstance(geom, Point):
+        points_list.append(geom)
+    elif hasattr(geom, "geoms"):
+        # MultiPoint or GeometryCollection
+        for part in geom.geoms:
+            if isinstance(part, Point):
+                points_list.append(part)
 
 
 def _collect_endpoints(lines: gpd.GeoDataFrame) -> list[Point]:
@@ -377,16 +471,26 @@ def _find_snap_point(
 
 
 def _build_node_edge_tables(
-    edges: list[dict], nodes: list[Point]
+    edges: list[dict], nodes: list[Point], crs: CRS
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """Build node and edge GeoDataFrames with connectivity."""
+    """Build node and edge GeoDataFrames with connectivity.
+
+    Args:
+        edges: List of edge dictionaries with geometry and attributes
+        nodes: List of node Point geometries
+        crs: CRS to set on output GeoDataFrames
+
+    Returns:
+        Tuple of (nodes_gdf, edges_gdf) with proper CRS set
+    """
     # Create node lookup tree
     node_tree = STRtree(nodes)
 
-    # Build nodes GeoDataFrame
+    # Build nodes GeoDataFrame with explicit CRS
     nodes_gdf = gpd.GeoDataFrame(
         {"node_id": range(len(nodes))},
         geometry=nodes,
+        crs=crs,
     )
 
     # Assign from_node and to_node to each edge
@@ -404,13 +508,8 @@ def _build_node_edge_tables(
         edge["from_node"] = start_idx
         edge["to_node"] = end_idx
 
-    # Build edges GeoDataFrame
-    edges_gdf = gpd.GeoDataFrame(edges)
+    # Build edges GeoDataFrame with explicit CRS
+    edges_gdf = gpd.GeoDataFrame(edges, crs=crs)
     edges_gdf["edge_id"] = range(len(edges_gdf))
-
-    # Preserve CRS if available
-    if hasattr(edges[0].get("geometry"), "crs"):
-        nodes_gdf.set_crs(edges[0]["geometry"].crs, inplace=True)
-        edges_gdf.set_crs(edges[0]["geometry"].crs, inplace=True)
 
     return nodes_gdf, edges_gdf

@@ -85,40 +85,61 @@ def _hausdorff_distance(P: np.ndarray, Q: np.ndarray) -> float:
     return max(h1, h2)
 
 
-def _discrete_frechet(P: np.ndarray, Q: np.ndarray) -> float:
+def _discrete_frechet(P: np.ndarray, Q: np.ndarray, max_points: int = 50) -> float:
     """Compute discrete Frechet distance using dynamic programming.
 
     This is an O(nm) approximation of the continuous Frechet distance.
+    For performance, lines with more than max_points are resampled.
+
+    Args:
+        P: First point sequence (n x 2)
+        Q: Second point sequence (m x 2)
+        max_points: Maximum points before resampling (for O(n*m) performance)
+
+    Returns:
+        Discrete Frechet distance
     """
     n, m = len(P), len(Q)
 
     if n == 0 or m == 0:
         return float("inf")
 
-    # Distance matrix
-    ca = np.full((n, m), -1.0)
+    # Resample if too many points (O(n*m) complexity can be expensive)
+    if n > max_points:
+        indices = np.linspace(0, n - 1, max_points, dtype=int)
+        P = P[indices]
+        n = len(P)
 
-    def _dist(i: int, j: int) -> float:
-        return np.linalg.norm(P[i] - Q[j])
+    if m > max_points:
+        indices = np.linspace(0, m - 1, max_points, dtype=int)
+        Q = Q[indices]
+        m = len(Q)
 
-    def _c(i: int, j: int) -> float:
-        if ca[i, j] > -0.5:
-            return ca[i, j]
+    # Use iterative DP instead of recursive to avoid stack overflow
+    # Vectorized distance matrix using broadcasting (much faster than nested loops)
+    ca = np.linalg.norm(P[:, np.newaxis, :] - Q[np.newaxis, :, :], axis=2)
 
-        if i == 0 and j == 0:
-            ca[i, j] = _dist(0, 0)
-        elif i > 0 and j == 0:
-            ca[i, j] = max(_c(i - 1, 0), _dist(i, 0))
-        elif i == 0 and j > 0:
-            ca[i, j] = max(_c(0, j - 1), _dist(0, j))
-        else:
-            ca[i, j] = max(
-                min(_c(i - 1, j), _c(i - 1, j - 1), _c(i, j - 1)),
-                _dist(i, j),
+    # DP table
+    dp = np.zeros((n, m))
+    dp[0, 0] = ca[0, 0]
+
+    # Fill first column
+    for i in range(1, n):
+        dp[i, 0] = max(dp[i - 1, 0], ca[i, 0])
+
+    # Fill first row
+    for j in range(1, m):
+        dp[0, j] = max(dp[0, j - 1], ca[0, j])
+
+    # Fill rest of table
+    for i in range(1, n):
+        for j in range(1, m):
+            dp[i, j] = max(
+                min(dp[i - 1, j], dp[i - 1, j - 1], dp[i, j - 1]),
+                ca[i, j],
             )
-        return ca[i, j]
 
-    return _c(n - 1, m - 1)
+    return dp[n - 1, m - 1]
 
 
 def _buffer_iou(line_a: LineString, line_b: LineString, radius: float) -> float:

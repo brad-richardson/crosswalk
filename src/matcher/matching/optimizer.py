@@ -2,15 +2,34 @@
 
 Resolves conflicts where multiple targets match the same reference
 (or vice versa) by finding the globally optimal assignment.
+
+Supports both 1:1 matching (Hungarian algorithm) and 1:N matching
+(where one reference can match multiple contiguous target segments).
 """
 
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
+import geopandas as gpd
 import numpy as np
 from loguru import logger
 from scipy.optimize import linear_sum_assignment
+from shapely import LineString, Point
 
 from .rules import MatchDecision, MatchResult
+
+
+@dataclass
+class MultiMatchResult:
+    """Result of a 1:N match where one reference matches multiple targets."""
+
+    ref_id: Any
+    target_ids: list[Any]
+    decision: MatchDecision
+    confidence: float
+    match_type: str = "1:N"
+    individual_confidences: list[float] = field(default_factory=list)
 
 
 def optimize_matches(
@@ -226,3 +245,236 @@ def compute_match_statistics(results: list[MatchResult]) -> dict[str, Any]:
         "confidence_median": np.median(confidences),
         "match_rate": n_match / len(results) if results else 0,
     }
+
+
+def resolve_one_to_many(
+    results: list[MatchResult],
+    target: gpd.GeoDataFrame,
+    min_confidence: float = 0.5,
+    contiguity_tolerance: float = 5.0,
+    target_id_column: str = "local_id",
+) -> tuple[list[MatchResult], list[MultiMatchResult]]:
+    """Resolve 1:N matches where one reference matches multiple targets.
+
+    A 1:N match is valid when multiple target segments that match the same
+    reference are spatially contiguous (their endpoints are close together).
+
+    Args:
+        results: List of MatchResult objects
+        target: Target GeoDataFrame (needed for contiguity check)
+        min_confidence: Minimum confidence to consider
+        contiguity_tolerance: Maximum distance between endpoints to consider contiguous (meters)
+        target_id_column: Column name for target IDs
+
+    Returns:
+        Tuple of (resolved 1:1 matches, new 1:N matches)
+    """
+    logger.info(f"Resolving 1:N matches from {len(results)} results...")
+
+    # Filter by confidence
+    valid_results = [r for r in results if r.confidence >= min_confidence]
+
+    # Group by reference ID
+    by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
+    for r in valid_results:
+        by_ref[r.ref_id].append(r)
+
+    # Build target geometry lookup
+    target_geoms = {}
+    for idx, row in target.iterrows():
+        tid = row.get(target_id_column, idx)
+        target_geoms[tid] = row.geometry
+
+    one_to_one = []
+    one_to_many = []
+
+    for ref_id, matches in by_ref.items():
+        if len(matches) == 1:
+            # Simple 1:1 match
+            one_to_one.append(matches[0])
+        else:
+            # Check if multiple targets are contiguous
+            contiguous_groups = _find_contiguous_groups(
+                matches, target_geoms, contiguity_tolerance
+            )
+
+            for group in contiguous_groups:
+                if len(group) == 1:
+                    # Single match in group
+                    one_to_one.append(group[0])
+                else:
+                    # Multiple contiguous matches -> 1:N
+                    avg_confidence = np.mean([m.confidence for m in group])
+                    multi_match = MultiMatchResult(
+                        ref_id=ref_id,
+                        target_ids=[m.target_id for m in group],
+                        decision=MatchDecision.MATCH if avg_confidence >= 0.75 else MatchDecision.REVIEW,
+                        confidence=avg_confidence,
+                        match_type="1:N",
+                        individual_confidences=[m.confidence for m in group],
+                    )
+                    one_to_many.append(multi_match)
+
+                    # Also add individual results with updated match_type
+                    for m in group:
+                        # Create a copy with match_type annotation in features
+                        updated_features = dict(m.features) if m.features else {}
+                        updated_features["match_type"] = "1:N"
+                        updated_features["group_size"] = len(group)
+                        one_to_one.append(
+                            MatchResult(
+                                ref_id=m.ref_id,
+                                target_id=m.target_id,
+                                decision=m.decision,
+                                confidence=m.confidence,
+                                score_breakdown=m.score_breakdown,
+                                features=updated_features,
+                            )
+                        )
+
+    logger.info(f"  Resolved to {len(one_to_one)} individual matches, {len(one_to_many)} 1:N groups")
+    return one_to_one, one_to_many
+
+
+def _find_contiguous_groups(
+    matches: list[MatchResult],
+    target_geoms: dict[Any, LineString],
+    tolerance: float,
+) -> list[list[MatchResult]]:
+    """Find groups of contiguous target geometries among matches.
+
+    Two targets are contiguous if one's endpoint is within tolerance of the other's.
+
+    Args:
+        matches: List of MatchResult for same reference
+        target_geoms: Dictionary mapping target_id to geometry
+        tolerance: Maximum endpoint distance to consider contiguous
+
+    Returns:
+        List of groups, where each group is a list of contiguous MatchResult
+    """
+    if len(matches) <= 1:
+        return [matches] if matches else []
+
+    # Get endpoints for each target
+    endpoints = {}
+    for m in matches:
+        if m.target_id in target_geoms:
+            geom = target_geoms[m.target_id]
+            coords = list(geom.coords)
+            if len(coords) >= 2:
+                endpoints[m.target_id] = (Point(coords[0]), Point(coords[-1]))
+
+    # Build adjacency based on endpoint proximity
+    n = len(matches)
+    adjacent = defaultdict(set)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            m_i, m_j = matches[i], matches[j]
+
+            if m_i.target_id not in endpoints or m_j.target_id not in endpoints:
+                continue
+
+            eps_i = endpoints[m_i.target_id]
+            eps_j = endpoints[m_j.target_id]
+
+            # Check all endpoint combinations
+            is_contiguous = False
+            for ep_i in eps_i:
+                for ep_j in eps_j:
+                    if ep_i.distance(ep_j) <= tolerance:
+                        is_contiguous = True
+                        break
+                if is_contiguous:
+                    break
+
+            if is_contiguous:
+                adjacent[i].add(j)
+                adjacent[j].add(i)
+
+    # Find connected components using BFS
+    visited = set()
+    groups = []
+
+    for start in range(n):
+        if start in visited:
+            continue
+
+        # BFS from start
+        group_indices = []
+        queue = [start]
+
+        while queue:
+            node = queue.pop(0)
+            if node in visited:
+                continue
+
+            visited.add(node)
+            group_indices.append(node)
+
+            for neighbor in adjacent[node]:
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        groups.append([matches[i] for i in group_indices])
+
+    return groups
+
+
+def optimize_with_one_to_many(
+    results: list[MatchResult],
+    target: gpd.GeoDataFrame,
+    min_confidence: float = 0.5,
+    contiguity_tolerance: float = 5.0,
+    target_id_column: str = "local_id",
+) -> list[MatchResult]:
+    """Optimize matches with support for 1:N relationships.
+
+    First resolves 1:N matches for contiguous target segments,
+    then runs Hungarian algorithm on remaining conflicts.
+
+    Args:
+        results: List of MatchResult objects
+        target: Target GeoDataFrame
+        min_confidence: Minimum confidence threshold
+        contiguity_tolerance: Max distance for contiguity check
+        target_id_column: Column name for target IDs
+
+    Returns:
+        List of optimized MatchResult objects
+    """
+    # First pass: identify and resolve 1:N matches
+    individual_matches, multi_matches = resolve_one_to_many(
+        results, target, min_confidence, contiguity_tolerance, target_id_column
+    )
+
+    # Track targets already assigned in 1:N groups
+    assigned_targets = set()
+    for mm in multi_matches:
+        assigned_targets.update(mm.target_ids)
+
+    # Filter out targets that are part of 1:N matches
+    remaining = [m for m in individual_matches if m.target_id not in assigned_targets]
+
+    # Run Hungarian algorithm on remaining conflicts
+    if remaining:
+        optimized = optimize_matches(remaining, min_confidence)
+    else:
+        optimized = []
+
+    # Add back the 1:N matches as individual results
+    for mm in multi_matches:
+        for i, tid in enumerate(mm.target_ids):
+            optimized.append(
+                MatchResult(
+                    ref_id=mm.ref_id,
+                    target_id=tid,
+                    decision=mm.decision,
+                    confidence=mm.individual_confidences[i] if mm.individual_confidences else mm.confidence,
+                    score_breakdown={},
+                    features={"match_type": "1:N", "group_size": len(mm.target_ids)},
+                )
+            )
+
+    return optimized

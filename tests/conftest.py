@@ -75,14 +75,18 @@ def bridge_over_road() -> gpd.GeoDataFrame:
 
 @pytest.fixture
 def undershoot_lines() -> gpd.GeoDataFrame:
-    """Lines with an undershoot that should be snapped."""
+    """Lines with an undershoot that should be snapped.
+
+    The side street ends 1.5m from the main road. With snap_tolerance=2.0,
+    it should be snapped to create a connected network.
+    """
     return gpd.GeoDataFrame(
         {
-            "id": [1, 2],
+            "local_id": [1, 2],
             "name": ["Main Road", "Side Street"],
             "geometry": [
-                LineString([(0, 0), (100, 0)]),  # Main road
-                LineString([(50, 50), (50, 1.5)]),  # Side street undershoots by 1.5m
+                LineString([(0, 0), (100, 0)]),  # Main road along x-axis
+                LineString([(50, 1.5), (50, 50)]),  # Side street undershoots by 1.5m
             ],
         },
         crs="EPSG:32610",
@@ -118,4 +122,59 @@ def perpendicular_lines() -> gpd.GeoDataFrame:
             ],
         },
         crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def t_junction() -> gpd.GeoDataFrame:
+    """T-junction where one line ends on another (touches but doesn't cross)."""
+    return gpd.GeoDataFrame(
+        {
+            "id": [1, 2],
+            "name": ["Main Road", "Side Street"],
+            "geometry": [
+                LineString([(0, 0), (100, 0)]),  # Main road
+                LineString([(50, 50), (50, 0)]),  # Side street ends at main road
+            ],
+        },
+        crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def bridge_with_string_values() -> gpd.GeoDataFrame:
+    """Bridge with OSM-style string values like 'yes', 'no'."""
+    return gpd.GeoDataFrame(
+        {
+            "id": [1, 2, 3],
+            "name": ["Ground Road", "Bridge", "Tunnel Exit"],
+            "bridge": ["no", "yes", "no"],  # OSM style strings
+            "tunnel": ["no", "no", "no"],
+            "layer": [0, 1, 0],
+            "geometry": [
+                LineString([(0, 5), (10, 5)]),  # Ground level
+                LineString([(5, 0), (5, 10)]),  # Bridge over
+                LineString([(7, 0), (7, 10)]),  # Ground level, near bridge
+            ],
+        },
+        crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def lines_epsg4326() -> gpd.GeoDataFrame:
+    """Lines in EPSG:4326 (geographic CRS) for auto-projection testing.
+
+    These are roughly in Portland, OR area.
+    """
+    return gpd.GeoDataFrame(
+        {
+            "id": [1, 2],
+            "name": ["Line A", "Line B"],
+            "geometry": [
+                LineString([(-122.6, 45.5), (-122.5, 45.5)]),  # ~8km line
+                LineString([(-122.55, 45.45), (-122.55, 45.55)]),  # ~11km line
+            ],
+        },
+        crs="EPSG:4326",
     )

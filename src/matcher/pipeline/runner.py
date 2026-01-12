@@ -13,6 +13,12 @@ from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
 
 
+class PipelineError(Exception):
+    """Error during pipeline execution."""
+
+    pass
+
+
 @dataclass
 class PipelineResult:
     """Result of running the matching pipeline."""
@@ -64,10 +70,39 @@ def run_pipeline(
     logger.info("Starting matching pipeline")
     logger.info("=" * 60)
 
+    # Validate input files exist
+    if not reference_path.exists():
+        raise PipelineError(f"Reference file not found: {reference_path}")
+    if not target_path.exists():
+        raise PipelineError(f"Target file not found: {target_path}")
+
     # Step 1: Load data
     logger.info("Step 1: Loading data...")
-    reference = gpd.read_parquet(reference_path)
-    target = gpd.read_parquet(target_path)
+    try:
+        reference = gpd.read_parquet(reference_path)
+    except Exception as e:
+        raise PipelineError(f"Failed to read reference file {reference_path}: {e}")
+
+    try:
+        target = gpd.read_parquet(target_path)
+    except Exception as e:
+        raise PipelineError(f"Failed to read target file {target_path}: {e}")
+
+    # Validate geometry columns
+    if reference.geometry.isna().any():
+        n_null = reference.geometry.isna().sum()
+        logger.warning(f"Reference has {n_null} null geometries - these will be skipped")
+        reference = reference[~reference.geometry.isna()]
+
+    if target.geometry.isna().any():
+        n_null = target.geometry.isna().sum()
+        logger.warning(f"Target has {n_null} null geometries - these will be skipped")
+        target = target[~target.geometry.isna()]
+
+    if len(reference) == 0:
+        raise PipelineError("Reference dataset is empty after removing null geometries")
+    if len(target) == 0:
+        raise PipelineError("Target dataset is empty after removing null geometries")
 
     logger.info(f"  Reference: {len(reference)} features from {reference_path}")
     logger.info(f"  Target: {len(target)} features from {target_path}")
@@ -110,6 +145,22 @@ def run_pipeline(
 
     if not candidates:
         logger.warning("No candidates found! Check data alignment and buffer distance.")
+
+        # Still write empty output files for consistency
+        generate_bridge_file(
+            matches=[],
+            output_path=output_path,
+            match_method=method,
+        )
+
+        unmatched_path = output_path.parent / "unmatched.parquet"
+        generate_unmatched_report(
+            target=target,
+            matched_ids=set(),
+            output_path=unmatched_path,
+            id_column=target_id_column,
+        )
+
         return PipelineResult(
             n_reference=len(reference),
             n_target=len(target),
@@ -118,7 +169,7 @@ def run_pipeline(
             n_review=0,
             n_unmatched=len(target),
             bridge_file=output_path,
-            unmatched_file=None,
+            unmatched_file=unmatched_path,
         )
 
     # Step 3: Score candidates
