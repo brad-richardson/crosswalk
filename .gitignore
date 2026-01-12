@@ -44,9 +44,7 @@ htmlcov/
 .tox/
 
 # Data directories
-data/raw/
-data/processed/
-data/output/
+data/
 
 # OS
 .DS_Store
