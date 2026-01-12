@@ -146,7 +146,7 @@ def render_comparison_view(label_store: LabelStore) -> None:
     st.subheader("Agreement by Label Type")
 
     # Create confusion matrix
-    label_types = ["match", "no_match", "unsure", "maybe", "skip"]
+    label_types = ["match", "no_match", "associated", "unsure", "maybe", "skip"]
     matrix_data = {la: {lb: 0 for lb in label_types} for la in label_types}
 
     for pair in common_pairs:
