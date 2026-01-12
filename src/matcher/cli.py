@@ -28,28 +28,59 @@ def fetch(
         "-o",
         help="Output directory for fetched data",
     ),
-    overture: bool = typer.Option(True, "--overture/--no-overture", help="Fetch Overture data"),
-    osm: bool = typer.Option(False, "--osm/--no-osm", help="Fetch OSM data"),
-    osm_pbf: Optional[Path] = typer.Option(
+    dataset: list[str] = typer.Option(
+        ["overture"],
+        "--dataset",
+        "-d",
+        help="Dataset(s) to fetch: 'overture' or 'osm' (can specify multiple)",
+    ),
+    cache_dir: Optional[Path] = typer.Option(
         None,
-        "--osm-pbf",
-        help="Local OSM PBF file (optional, will download if not provided)",
+        "--cache-dir",
+        help="Cache directory for PBF files (default: ~/.cache/matcher/pbf/)",
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Force fresh download, ignore cache",
+    ),
+    keep_pbf: bool = typer.Option(
+        False,
+        "--keep-pbf",
+        help="Keep extracted PBF file for debugging",
     ),
 ):
-    """Fetch road data for an area of interest."""
+    """Fetch road data for an area of interest.
+
+    Examples:
+        matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
+        matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
+        matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
+
+    Note: OSM fetching requires osmium-tool to be installed:
+        brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
+    """
     from .fetch import overture as ov_module, osm as osm_module
+
+    # Validate datasets
+    valid_datasets = {"overture", "osm"}
+    datasets = {d.lower() for d in dataset}
+    invalid = datasets - valid_datasets
+    if invalid:
+        console.print(f"[red]Error: Invalid dataset(s): {invalid}. Must be 'overture' or 'osm'[/red]")
+        raise typer.Exit(1)
 
     coords = [float(x.strip()) for x in bbox.split(",")]
     if len(coords) != 4:
         console.print("[red]Error: bbox must have 4 values: minx,miny,maxx,maxy[/red]")
         raise typer.Exit(1)
 
-    minx, miny, maxx, maxy = coords
+    xmin, ymin, xmax, ymax = coords
     output_dir.mkdir(parents=True, exist_ok=True)
+    bbox_obj = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
-    if overture:
+    if "overture" in datasets:
         console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
-        bbox_obj = ov_module.BoundingBox(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
         segments_path = ov_module.fetch_overture_segments(
             bbox=bbox_obj,
             output_path=output_dir / "overture_segments.parquet",
@@ -63,14 +94,17 @@ def fetch(
         )
         console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
 
-    if osm:
-        console.print(f"[blue]Fetching OSM roads for bbox {bbox}...[/blue]")
-        osm_module.fetch_osm_roads(
-            bbox=(minx, miny, maxx, maxy),
-            pbf_path=osm_pbf,
-            output_path=output_dir / "osm_roads.parquet",
+    if "osm" in datasets:
+        console.print(f"[blue]Fetching OSM data for bbox {bbox}...[/blue]")
+        segments_path, connectors_path = osm_module.fetch_osm_data(
+            bbox=bbox_obj,
+            output_dir=output_dir,
+            cache_dir=cache_dir,
+            force_download=no_cache,
+            keep_pbf=keep_pbf,
         )
-        console.print(f"[green]Saved OSM roads to {output_dir / 'osm_roads.parquet'}[/green]")
+        console.print(f"[green]Saved OSM segments to {segments_path}[/green]")
+        console.print(f"[green]Saved OSM connectors to {connectors_path}[/green]")
 
 
 @app.command()

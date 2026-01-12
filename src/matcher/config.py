@@ -19,13 +19,19 @@ class MatcherSettings(BaseSettings):
     output_dir: Path = Field(default=Path("data/output"), description="Output directory")
 
     # Overture settings
-    overture_release: str = Field(
-        default="2024-12-18.0",
-        description="Overture Maps release version",
+    overture_release: Optional[str] = Field(
+        default=None,
+        description="Overture Maps release version (None = use latest)",
     )
-    overture_s3_region: str = Field(
-        default="us-west-2",
-        description="AWS region for Overture S3 bucket",
+
+    # OSM PBF settings
+    pbf_cache_dir: Path = Field(
+        default=Path.home() / ".cache" / "matcher" / "pbf",
+        description="Cache directory for downloaded PBF files",
+    )
+    pbf_cache_ttl_hours: int = Field(
+        default=24,
+        description="Cache TTL for PBF files in hours",
     )
 
     # Topology settings
