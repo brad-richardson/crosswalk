@@ -20,7 +20,7 @@ def fetch(
         ...,
         "--bbox",
         "-b",
-        help="Bounding box: minx,miny,maxx,maxy (EPSG:4326)",
+        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326)",
     ),
     output_dir: Path = typer.Option(
         Path("data/raw"),
@@ -72,7 +72,7 @@ def fetch(
 
     coords = [float(x.strip()) for x in bbox.split(",")]
     if len(coords) != 4:
-        console.print("[red]Error: bbox must have 4 values: minx,miny,maxx,maxy[/red]")
+        console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
         raise typer.Exit(1)
 
     xmin, ymin, xmax, ymax = coords

@@ -266,7 +266,7 @@ def download_and_extract(
     # Create unique filename based on bbox
     bbox_hash = hashlib.md5(
         f"{bbox.xmin},{bbox.ymin},{bbox.xmax},{bbox.ymax}".encode()
-    ).hexdigest()[:8]
+    ).hexdigest()[:16]
     output_pbf = output_dir / f"osm_extract_{bbox_hash}.osm.pbf"
 
     return extract_bbox(regional_pbf, bbox, output_pbf)

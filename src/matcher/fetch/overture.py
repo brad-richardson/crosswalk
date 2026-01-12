@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 
 import geopandas as gpd
 from loguru import logger
+from overturemaps.core import geodataframe, get_latest_release
 from pydantic import BaseModel
 
 
@@ -50,8 +51,6 @@ def fetch_overture_segments(
     Returns:
         Path to the output file
     """
-    from overturemaps.core import geodataframe, get_latest_release
-
     logger.info(f"Fetching Overture segments for bbox: {bbox}")
 
     if release is None:
@@ -94,8 +93,6 @@ def fetch_overture_connectors(
     Returns:
         Path to the output file
     """
-    from overturemaps.core import geodataframe, get_latest_release
-
     logger.info(f"Fetching Overture connectors for bbox: {bbox}")
 
     if release is None:

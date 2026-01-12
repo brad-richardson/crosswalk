@@ -245,9 +245,13 @@ def _build_road_flags(source_tags, road_class) -> list:
 
     flags = []
 
-    # Bridge: value != 'no' and != 'undefined'
+    # Bridge: explicit whitelist of valid bridge values from OSM wiki
     bridge = source_tags.get("bridge", "")
-    if bridge and bridge not in ("no", "undefined", ""):
+    valid_bridge_values = {
+        "yes", "viaduct", "boardwalk", "cantilever", "covered",
+        "low_water_crossing", "movable", "trestle", "aqueduct",
+    }
+    if bridge in valid_bridge_values:
         flags.append("is_bridge")
 
     # Tunnel: value == 'yes' or 'building_passage'
@@ -268,9 +272,8 @@ def _build_road_flags(source_tags, road_class) -> list:
     if indoor and indoor != "no":
         flags.append("is_indoor")
 
-    # Construction: value != 'no'
-    construction = source_tags.get("construction", "")
-    if construction and construction != "no":
+    # Construction: only when explicitly 'yes'
+    if source_tags.get("construction") == "yes":
         flags.append("is_under_construction")
 
     # Link: class ends with '_link'

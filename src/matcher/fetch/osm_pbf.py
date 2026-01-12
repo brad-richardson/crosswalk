@@ -57,7 +57,6 @@ class RoadHandler(osmium.SimpleHandler):
         self.node_refs = Counter()  # Count how many ways reference each node
         self.node_locations = {}  # Store node locations for connector extraction
         self.node_versions = {}  # Store node versions (populated in second pass)
-        self.needed_node_ids = set()  # Track which nodes we need version for
         self._invalid_count = 0
 
     def way(self, w):
@@ -86,11 +85,6 @@ class RoadHandler(osmium.SimpleHandler):
         # Count node references (endpoints and shared nodes become connectors)
         for node_id in node_ids:
             self.node_refs[node_id] += 1
-
-        # Track endpoints as needed nodes (they become connectors)
-        if node_ids:
-            self.needed_node_ids.add(node_ids[0])
-            self.needed_node_ids.add(node_ids[-1])
 
         # Extract relevant tags as dict
         tags = {
