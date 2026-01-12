@@ -1,137 +1,347 @@
-"""Fetch OSM road data using pyrosm for PBF parsing.
+"""Fetch OSM road data from Geofabrik PBF extracts.
 
-Two modes:
-1. From local PBF file with bbox filter
-2. Download regional extract then filter
+This module downloads regional PBF extracts from Geofabrik, clips to the
+requested bounding box using osmium CLI, and parses roads using pyosmium.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import geopandas as gpd
 from loguru import logger
 
+from ..config import settings
+from .osm_download import download_and_extract
+from .osm_pbf import parse_pbf
+from .overture import BoundingBox
 
-def fetch_osm_roads(
-    bbox: Tuple[float, float, float, float],
-    pbf_path: Optional[Path] = None,
-    region: Optional[str] = None,
-    output_path: Optional[Path] = None,
-) -> gpd.GeoDataFrame:
-    """Extract road network from OSM PBF file.
+
+def fetch_osm_data(
+    bbox: BoundingBox,
+    output_dir: Path,
+    cache_dir: Optional[Path] = None,
+    force_download: bool = False,
+    keep_pbf: bool = False,
+) -> tuple[Path, Path]:
+    """Download and parse OSM road segments and connectors for a bounding box.
+
+    This is the main entry point for OSM data fetching. It:
+    1. Finds the smallest Geofabrik region containing the bbox
+    2. Downloads the regional PBF (cached for 24 hours)
+    3. Extracts the bbox area using osmium CLI
+    4. Parses roads and connectors using pyosmium
+    5. Saves as GeoParquet
 
     Args:
-        bbox: (minx, miny, maxx, maxy) bounding box in WGS84
-        pbf_path: Path to local PBF file
-        region: Pyrosm region name for auto-download (e.g., "oregon" for testing)
-        output_path: Optional path to save as GeoParquet
+        bbox: Bounding box in WGS84 coordinates
+        output_dir: Directory for output GeoParquet files
+        cache_dir: Directory for caching PBF files (default from settings)
+        force_download: Force re-download even if cached
+        keep_pbf: Keep the extracted bbox PBF file
 
     Returns:
-        GeoDataFrame with road geometries and attributes
+        Tuple of (segments_path, connectors_path)
     """
-    from pyrosm import OSM, get_data
+    cache_dir = cache_dir or settings.pbf_cache_dir
 
-    if pbf_path is None and region:
-        logger.info(f"Downloading OSM extract for region: {region}")
-        pbf_path = Path(get_data(region))
+    logger.info(f"Fetching OSM data for bbox: {bbox}")
 
-    if pbf_path is None:
-        raise ValueError("Either pbf_path or region must be provided")
+    # Download and extract PBF
+    pbf_path = download_and_extract(
+        bbox=bbox,
+        output_dir=output_dir,
+        cache_dir=cache_dir,
+        force=force_download,
+    )
 
-    logger.info(f"Loading OSM data from {pbf_path} with bbox {bbox}")
-    osm = OSM(str(pbf_path), bounding_box=bbox)
+    # Parse roads and connectors from PBF
+    roads_gdf, connectors_gdf = parse_pbf(pbf_path)
 
-    # Get driving network (roads suitable for vehicles)
-    logger.info("Extracting driving network...")
-    roads = osm.get_network(network_type="driving")
+    # Transform roads to match expected schema (for load_osm_roads compatibility)
+    roads_gdf = _transform_to_overture_schema(roads_gdf)
 
-    if roads is None or len(roads) == 0:
-        logger.warning("No roads found in the specified area")
-        return gpd.GeoDataFrame()
+    # Transform connectors to match expected schema
+    connectors_gdf = _transform_connectors_schema(connectors_gdf)
 
-    logger.info(f"Found {len(roads)} road segments")
+    # Save to parquet
+    output_dir.mkdir(parents=True, exist_ok=True)
+    segments_path = output_dir / "osm_segments.parquet"
+    connectors_path = output_dir / "osm_connectors.parquet"
 
-    # Normalize to common schema
-    roads = _normalize_osm_schema(roads)
+    roads_gdf.to_parquet(segments_path)
+    connectors_gdf.to_parquet(connectors_path)
 
-    if output_path:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        roads.to_parquet(output_path)
-        logger.info(f"Saved OSM roads to {output_path}")
+    logger.info(f"Saved {len(roads_gdf)} OSM segments to {segments_path}")
+    logger.info(f"Saved {len(connectors_gdf)} OSM connectors to {connectors_path}")
 
-    return roads
+    # Cleanup extracted PBF unless keeping
+    if not keep_pbf and pbf_path.exists():
+        pbf_path.unlink()
+        logger.debug(f"Removed temporary PBF: {pbf_path}")
+
+    return segments_path, connectors_path
 
 
-def _normalize_osm_schema(roads: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Normalize OSM attributes to a common schema.
+def fetch_osm_segments(
+    bbox: BoundingBox,
+    output_path: Path,
+    cache_dir: Optional[Path] = None,
+    force_download: bool = False,
+    keep_pbf: bool = False,
+) -> Path:
+    """Download and parse OSM road segments for a bounding box.
 
-    Maps OSM tags to standardized column names and extracts
-    bridge/tunnel/layer information.
+    Convenience wrapper around fetch_osm_data that returns only segments.
+
+    Args:
+        bbox: Bounding box in WGS84 coordinates
+        output_path: Path for output GeoParquet file
+        cache_dir: Directory for caching PBF files (default from settings)
+        force_download: Force re-download even if cached
+        keep_pbf: Keep the extracted bbox PBF file
+
+    Returns:
+        Path to the output GeoParquet file
     """
-    # Create normalized columns
-    normalized = roads.copy()
+    segments_path, _ = fetch_osm_data(
+        bbox=bbox,
+        output_dir=output_path.parent,
+        cache_dir=cache_dir,
+        force_download=force_download,
+        keep_pbf=keep_pbf,
+    )
 
-    # Rename standard columns
-    column_mapping = {
-        "name": "name",
-        "highway": "road_class",
-        "maxspeed": "speed_limit",
-        "oneway": "oneway",
-        "lanes": "lanes",
-        "surface": "surface",
+    # Move to requested path if different
+    if segments_path != output_path:
+        segments_path.rename(output_path)
+        return output_path
+
+    return segments_path
+
+
+def _transform_to_overture_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Transform PBF-parsed data to match Overture schema.
+
+    Builds the full Overture-compatible schema at fetch time:
+    - id, geometry, names, class, subtype, sources
+    - road_flags, level_rules (transformed from OSM tags)
+    - source_tags (preserved for debugging/advanced use)
+    """
+    if len(gdf) == 0:
+        return gdf
+
+    result = gdf.copy()
+
+    # Extract class from tags (highway value)
+    result["class"] = result["tags"].apply(
+        lambda t: t.get("highway", "unclassified") if isinstance(t, dict) else "unclassified"
+    )
+
+    # Build names struct to match Overture format
+    result["names"] = result["name"].apply(lambda n: {"primary": n} if n else None)
+
+    # Subtype is always 'road' for highway features
+    result["subtype"] = "road"
+
+    # Sources array with record_id
+    result["sources"] = result["id"].apply(
+        lambda osm_id: [{"dataset": "OpenStreetMap", "record_id": osm_id}]
+    )
+
+    # Build road_flags from tags (matching Overture schema)
+    result["road_flags"] = result.apply(
+        lambda row: _build_road_flags(row["tags"], row["class"]),
+        axis=1,
+    )
+
+    # Build level_rules from tags
+    result["level_rules"] = result["tags"].apply(_build_level_rules)
+
+    # Rename tags to source_tags for clarity
+    result["source_tags"] = result["tags"]
+
+    # Drop internal columns
+    columns_to_drop = ["tags", "name", "node_ids"]
+    result = result.drop(columns=[c for c in columns_to_drop if c in result.columns])
+
+    return result
+
+
+def _transform_connectors_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Transform connector data to match Overture-like schema."""
+    if len(gdf) == 0:
+        return gdf
+
+    result = gdf.copy()
+
+    # Sources array with record_id (OSM node ID)
+    result["sources"] = result["id"].apply(
+        lambda osm_id: [{"dataset": "OpenStreetMap", "record_id": osm_id}]
+    )
+
+    return result
+
+
+def load_osm_roads(path: Path) -> gpd.GeoDataFrame:
+    """Load OSM roads from GeoParquet and add convenience fields.
+
+    The data already has Overture schema (road_flags, level_rules, names, etc.)
+    from fetch time. This function adds flat convenience fields for downstream
+    processing.
+
+    Args:
+        path: Path to GeoParquet file
+
+    Returns:
+        GeoDataFrame with OSM roads and flat convenience fields
+    """
+    logger.info(f"Loading OSM roads from {path}")
+    gdf = gpd.read_parquet(path)
+
+    # Extract flat name from names struct
+    if "names" in gdf.columns:
+        gdf["name"] = gdf["names"].apply(
+            lambda x: x.get("primary") if isinstance(x, dict) else None
+        )
+    else:
+        gdf["name"] = None
+
+    # Extract flat fields from road_flags (already in Overture schema)
+    if "road_flags" in gdf.columns:
+        gdf["is_bridge"] = gdf["road_flags"].apply(lambda f: _has_flag(f, "is_bridge"))
+        gdf["is_tunnel"] = gdf["road_flags"].apply(lambda f: _has_flag(f, "is_tunnel"))
+    else:
+        gdf["is_bridge"] = False
+        gdf["is_tunnel"] = False
+
+    # Extract level from level_rules
+    if "level_rules" in gdf.columns:
+        gdf["level"] = gdf["level_rules"].apply(_get_level_from_rules)
+    else:
+        gdf["level"] = 0
+
+    # Also populate 'layer' for compatibility with existing code
+    gdf["layer"] = gdf["level"]
+
+    # Normalize road class
+    if "class" in gdf.columns:
+        gdf["road_class"] = gdf["class"]
+        gdf["road_class_normalized"] = gdf["class"].apply(_normalize_road_class)
+    else:
+        gdf["road_class"] = "unclassified"
+        gdf["road_class_normalized"] = "unclassified"
+
+    logger.info(f"Loaded {len(gdf)} OSM road segments")
+    return gdf
+
+
+def _build_road_flags(source_tags, road_class) -> list:
+    """Build Overture road_flags array from OSM source_tags.
+
+    Matches combobulator logic from tf-data-platform/overture_transportation.
+    """
+    if not source_tags:
+        source_tags = {}
+
+    flags = []
+
+    # Bridge: explicit whitelist of valid bridge values from OSM wiki
+    bridge = source_tags.get("bridge", "")
+    valid_bridge_values = {
+        "yes", "viaduct", "boardwalk", "cantilever", "covered",
+        "low_water_crossing", "movable", "trestle", "aqueduct",
     }
+    if bridge in valid_bridge_values:
+        flags.append("is_bridge")
 
-    for osm_col, new_col in column_mapping.items():
-        if osm_col in normalized.columns and osm_col != new_col:
-            normalized[new_col] = normalized[osm_col]
+    # Tunnel: value == 'yes' or 'building_passage'
+    tunnel = source_tags.get("tunnel", "")
+    if tunnel in ("yes", "building_passage"):
+        flags.append("is_tunnel")
 
-    # Extract bridge/tunnel/layer attributes
-    if "bridge" in normalized.columns:
-        normalized["is_bridge"] = normalized["bridge"].apply(
-            lambda x: x is not None and x not in ["no", "0", False]
-        )
-    else:
-        normalized["is_bridge"] = False
+    # Covered: value == 'yes'
+    if source_tags.get("covered") == "yes":
+        flags.append("is_covered")
 
-    if "tunnel" in normalized.columns:
-        normalized["is_tunnel"] = normalized["tunnel"].apply(
-            lambda x: x is not None and x not in ["no", "0", False]
-        )
-    else:
-        normalized["is_tunnel"] = False
+    # Abandoned/disused: value == 'yes'
+    if source_tags.get("abandoned") == "yes" or source_tags.get("disused") == "yes":
+        flags.append("is_abandoned")
 
-    if "layer" in normalized.columns:
-        normalized["layer"] = normalized["layer"].apply(_parse_layer)
-    else:
-        normalized["layer"] = 0
+    # Indoor: value != 'no' (and not empty)
+    indoor = source_tags.get("indoor", "")
+    if indoor and indoor != "no":
+        flags.append("is_indoor")
 
-    # Map highway classes to standardized road classes
-    if "road_class" in normalized.columns:
-        normalized["road_class_normalized"] = normalized["road_class"].apply(
-            _normalize_road_class
-        )
+    # Construction: only when explicitly 'yes'
+    if source_tags.get("construction") == "yes":
+        flags.append("is_under_construction")
 
-    return normalized
+    # Link: class ends with '_link'
+    if road_class and str(road_class).endswith("_link"):
+        flags.append("is_link")
+
+    if flags:
+        return [{"values": flags}]
+    return []
 
 
-def _parse_layer(layer_value) -> int:
-    """Parse OSM layer tag to integer."""
-    if layer_value is None:
-        return 0
+def _build_level_rules(source_tags) -> list:
+    """Build Overture level_rules array from OSM source_tags."""
+    if not source_tags:
+        return []
+
+    layer = source_tags.get("layer")
+    if layer is None:
+        return []
+
     try:
-        return int(layer_value)
+        level = int(layer)
+        if level == 0:
+            return []  # Ground level is omitted
+        return [{"value": level}]
     except (ValueError, TypeError):
+        return []
+
+
+def _has_flag(road_flags, flag_name: str) -> bool:
+    """Check if road_flags array contains a specific flag."""
+    if road_flags is None or (hasattr(road_flags, "__len__") and len(road_flags) == 0):
+        return False
+    for rule in road_flags:
+        if isinstance(rule, dict):
+            values = rule.get("values", [])
+            # Handle numpy arrays
+            if hasattr(values, "__iter__") and flag_name in values:
+                return True
+    return False
+
+
+def _get_level_from_rules(level_rules) -> int:
+    """Extract level value from level_rules array."""
+    if level_rules is None or (hasattr(level_rules, "__len__") and len(level_rules) == 0):
         return 0
+    first_rule = level_rules[0]
+    if isinstance(first_rule, dict):
+        return first_rule.get("value", 0)
+    return 0
 
 
-def _normalize_road_class(highway: Optional[str]) -> str:
-    """Normalize OSM highway tag to standard road class."""
-    if highway is None:
+def _normalize_road_class(road_class: Optional[str]) -> str:
+    """Normalize road class to standard values.
+
+    Args:
+        road_class: Overture road class value
+
+    Returns:
+        Normalized road class string
+    """
+    if road_class is None:
         return "unclassified"
 
-    highway = highway.lower()
+    road_class = road_class.lower()
 
-    # Map to Overture-like classes
+    # Map to standard classes (Overture classes are already normalized,
+    # but handle link variants)
     class_mapping = {
         "motorway": "motorway",
         "motorway_link": "motorway",
@@ -149,21 +359,11 @@ def _normalize_road_class(highway: Optional[str]) -> str:
         "unclassified": "unclassified",
         "track": "track",
         "path": "path",
+        "footway": "path",
+        "cycleway": "path",
+        "pedestrian": "path",
+        "steps": "path",
+        "bridleway": "path",
     }
 
-    return class_mapping.get(highway, "unclassified")
-
-
-def load_osm_roads(path: Path) -> gpd.GeoDataFrame:
-    """Load OSM roads from a GeoParquet file.
-
-    Args:
-        path: Path to GeoParquet file
-
-    Returns:
-        GeoDataFrame with OSM roads
-    """
-    logger.info(f"Loading OSM roads from {path}")
-    gdf = gpd.read_parquet(path)
-    logger.info(f"Loaded {len(gdf)} OSM road segments")
-    return gdf
+    return class_mapping.get(road_class, "unclassified")
