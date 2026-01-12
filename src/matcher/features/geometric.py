@@ -4,7 +4,7 @@ from typing import NamedTuple, Union
 
 import numpy as np
 from shapely import LineString, MultiLineString, Point
-from shapely.ops import linemerge, nearest_points
+from shapely.ops import linemerge
 from scipy.spatial.distance import directed_hausdorff
 
 
@@ -16,6 +16,9 @@ def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
     if isinstance(geom, LineString):
         return geom
     if isinstance(geom, MultiLineString):
+        # Handle empty MultiLineString
+        if geom.is_empty or len(geom.geoms) == 0:
+            return LineString()
         # Try to merge connected components
         merged = linemerge(geom)
         if isinstance(merged, LineString):

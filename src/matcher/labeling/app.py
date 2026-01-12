@@ -171,7 +171,9 @@ def render_sidebar(reference_path: Path, target_path: Path) -> None:
             filter_options = ["All", "Review", "Match", "No Match"]
             current_filter = session.decision_filter
             if current_filter:
-                default_idx = filter_options.index(current_filter.title())
+                # Convert "no_match" -> "No Match" for display
+                display_filter = current_filter.replace("_", " ").title()
+                default_idx = filter_options.index(display_filter) if display_filter in filter_options else 0
             else:
                 default_idx = 0
 
@@ -261,6 +263,19 @@ def render_main_content() -> None:
     if "selected_refs" not in st.session_state:
         st.session_state.selected_refs = set()
 
+    # Check if we're reviewing specific disagreements from comparison view
+    review_disagreements = st.session_state.get("review_disagreements", None)
+
+    # Show notice if in disagreement review mode
+    if review_disagreements:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info(f"📋 Reviewing {len(review_disagreements)} disagreement pairs")
+        with col2:
+            if st.button("✕ Exit Review Mode"):
+                st.session_state.review_disagreements = None
+                st.rerun()
+
     # Get filtered candidates - filter out pairs this labeler already labeled
     current_labeler = session.labeler_name or ""
     filtered = filter_candidates(
@@ -268,6 +283,7 @@ def render_main_content() -> None:
         decision_filter=session.decision_filter,
         labeled_pairs=label_store.get_labeled_pairs(labeler=current_labeler) if current_labeler else set(),
         show_labeled=False,
+        specific_pairs=review_disagreements,
     )
 
     if not filtered:
@@ -316,21 +332,23 @@ def _add_keyboard_shortcuts():
             }
 
             const key = e.key.toLowerCase();
-            let buttonText = null;
+            // Match button by shortcut key shown in parentheses, e.g. "(M)"
+            // This is more robust than matching full button text
+            let shortcutMatch = null;
 
-            if (key === 'm') buttonText = 'Match';
-            else if (key === 'n') buttonText = 'No Match';
-            else if (key === 'i') buttonText = 'Associated';
-            else if (key === 'u') buttonText = 'Unsure';
-            else if (key === 'z') buttonText = 'Undo';
-            else if (key === 'arrowleft') buttonText = '←';
-            else if (key === 'arrowright') buttonText = '→';
+            if (key === 'm') shortcutMatch = '(M)';
+            else if (key === 'n') shortcutMatch = '(N)';
+            else if (key === 'i') shortcutMatch = '(I)';
+            else if (key === 'u') shortcutMatch = '(U)';
+            else if (key === 'z') shortcutMatch = '(Z)';
+            else if (key === 'arrowleft') shortcutMatch = '←';
+            else if (key === 'arrowright') shortcutMatch = '→';
 
-            if (buttonText) {
-                // Find button containing the text
+            if (shortcutMatch) {
+                // Find button containing the shortcut pattern
                 const buttons = doc.querySelectorAll('button');
                 for (const btn of buttons) {
-                    if (btn.innerText.includes(buttonText) && !btn.disabled) {
+                    if (btn.innerText.includes(shortcutMatch) && !btn.disabled) {
                         btn.click();
                         e.preventDefault();
                         break;

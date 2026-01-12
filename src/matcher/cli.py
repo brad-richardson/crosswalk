@@ -298,13 +298,16 @@ def label(
     console.print(f"  Target: {target}")
     console.print(f"  Labels: {labels_path}")
     console.print()
-    console.print("[green]Open http://localhost:{port} in your browser[/green]".format(port=port))
+    console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
 
     # Launch Streamlit
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
         env=env,
     )
+    if result.returncode != 0:
+        console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
+        raise typer.Exit(result.returncode)
 
 
 @app.command()

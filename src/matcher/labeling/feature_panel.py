@@ -1,7 +1,5 @@
 """Feature display components for the labeling UI."""
 
-from typing import Optional
-
 import streamlit as st
 
 from .data_loader import CandidatePairView

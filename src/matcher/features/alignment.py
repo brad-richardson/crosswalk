@@ -263,6 +263,12 @@ def linestring_alignment(
     Compares reference with target, and reference with a reversed target,
     to find the best possible match.
 
+    NOTE: The ternary search refinement assumes the score function is unimodal
+    (has a single peak). Complex geometries like switchbacks might have multiple
+    local optima. The initial grid search (16 samples) mitigates this by finding
+    the right region first, but edge cases may be slightly suboptimal.
+    Consider multi-start optimization if needed for complex road geometries.
+
     Args:
         reference: Reference LineString (e.g., Overture segment)
         target: Target LineString (e.g., local road segment)
@@ -381,6 +387,9 @@ def _walk_distance_numba(
     samples: int = 16,
 ) -> float:
     """Numba-optimized walk distance calculation."""
+    # Ensure at least 2 samples to avoid division by zero
+    if samples < 2:
+        samples = 2
     cum_distance = 0.0
     for i in range(samples):
         x = i / (samples - 1)
@@ -424,6 +433,9 @@ def _walk_parallelness_numba(
     samples: int = 16,
 ) -> float:
     """Numba-optimized walk parallelness calculation."""
+    # Ensure at least 2 samples to avoid division by zero
+    if samples < 2:
+        samples = 2
     # Pre-compute all positions
     posA_arr = np.zeros((samples, 2))
     posB_arr = np.zeros((samples, 2))

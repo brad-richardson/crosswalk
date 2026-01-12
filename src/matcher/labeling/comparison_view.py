@@ -129,8 +129,8 @@ def render_comparison_view(label_store: LabelStore) -> None:
                 "original": str(original),
             })
 
-        disagree_df = pd.DataFrame(disagree_data)
-        st.dataframe(disagree_df, use_container_width=True, hide_index=True)
+        disagreements_df = pd.DataFrame(disagree_data)
+        st.dataframe(disagreements_df, use_container_width=True, hide_index=True)
 
         # Option to review disagreements
         st.markdown("---")

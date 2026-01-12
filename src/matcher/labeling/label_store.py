@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 import pandas as pd
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 
 LABELS_SCHEMA = pa.schema([
@@ -118,7 +117,13 @@ class LabelStore:
         }
 
     def remove_last(self) -> Optional[dict]:
-        """Remove the last label (for undo). Returns removed row or None."""
+        """Remove the last label (for undo). Returns removed row or None.
+
+        NOTE: This is designed for single-user/single-session use. It removes the
+        last row in the file, which may not be the user's own label if multiple
+        labelers share the file concurrently. For multi-user scenarios, implement
+        undo by tracking specific (ref_id, target_id, labeler) tuples instead.
+        """
         # Use self.df to trigger lazy load
         df = self.df
         if df is None or len(df) == 0:

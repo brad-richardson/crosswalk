@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import Optional
 
 import geopandas as gpd
-import pandas as pd
 from shapely.geometry import LineString
 
 from ..blocking import generate_candidates
 from ..features.semantic import _extract_name_string
-from ..matching.rules import MatchDecision, score_candidates
+from ..matching.rules import score_candidates
 
 
 @dataclass
@@ -159,6 +158,7 @@ def filter_candidates(
     decision_filter: Optional[str] = None,
     labeled_pairs: Optional[set[tuple[str, str]]] = None,
     show_labeled: bool = False,
+    specific_pairs: Optional[list[tuple[str, str]]] = None,
 ) -> list[CandidatePairView]:
     """Filter candidate views based on criteria.
 
@@ -167,11 +167,17 @@ def filter_candidates(
         decision_filter: Only show this decision type ("match", "review", "no_match")
         labeled_pairs: Set of already-labeled (ref_id, target_id) pairs
         show_labeled: If False, exclude already-labeled pairs
+        specific_pairs: If provided, only show these specific (ref_id, target_id) pairs
 
     Returns:
         Filtered list of views
     """
     filtered = views
+
+    # Filter to specific pairs if provided (e.g., for reviewing disagreements)
+    if specific_pairs:
+        specific_set = set(specific_pairs)
+        filtered = [v for v in filtered if (v.ref_id, v.target_id) in specific_set]
 
     # Filter by decision
     if decision_filter:
