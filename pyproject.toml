@@ -26,6 +26,7 @@ dependencies = [
     "pydantic-settings>=2.1",
     "rich>=13.0",
     "loguru>=0.7",
+    "numba>=0.59",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,11 @@ spark = [
 ml = [
     "xgboost>=2.0",
     "lightgbm>=4.2",
+]
+label = [
+    "streamlit>=1.28",
+    "streamlit-folium>=0.15",
+    "folium>=0.15",
 ]
 dev = [
     "pytest>=8.0",

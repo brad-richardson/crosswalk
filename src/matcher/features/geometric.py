@@ -1,11 +1,28 @@
 """Geometric feature extraction for candidate edge pairs."""
 
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 import numpy as np
-from shapely import LineString, Point
-from shapely.ops import nearest_points
+from shapely import LineString, MultiLineString, Point
+from shapely.ops import linemerge, nearest_points
 from scipy.spatial.distance import directed_hausdorff
+
+
+def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
+    """Convert geometry to LineString.
+
+    For MultiLineString, tries to merge first, then falls back to longest component.
+    """
+    if isinstance(geom, LineString):
+        return geom
+    if isinstance(geom, MultiLineString):
+        # Try to merge connected components
+        merged = linemerge(geom)
+        if isinstance(merged, LineString):
+            return merged
+        # Fall back to longest component
+        return max(geom.geoms, key=lambda g: g.length)
+    raise TypeError(f"Expected LineString or MultiLineString, got {type(geom)}")
 
 
 class GeometricFeatures(NamedTuple):
@@ -22,20 +39,24 @@ class GeometricFeatures(NamedTuple):
 
 
 def compute_geometric_features(
-    line_a: LineString,
-    line_b: LineString,
+    line_a: Union[LineString, MultiLineString],
+    line_b: Union[LineString, MultiLineString],
     buffer_radius: float = 10.0,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
     Args:
-        line_a: First LineString (should be in projected CRS, meters)
-        line_b: Second LineString (should be in projected CRS, meters)
+        line_a: First geometry (LineString or MultiLineString, projected CRS)
+        line_b: Second geometry (LineString or MultiLineString, projected CRS)
         buffer_radius: Buffer radius for IoU calculation (meters)
 
     Returns:
         GeometricFeatures tuple
     """
+    # Convert MultiLineString to LineString if needed
+    line_a = _to_linestring(line_a)
+    line_b = _to_linestring(line_b)
+
     coords_a = np.array(line_a.coords)
     coords_b = np.array(line_b.coords)
 
