@@ -1,5 +1,6 @@
-"""Data fetching module for Overture, OSM, and local sources."""
+"""Data fetching module for Overture, OSM, local, and ArcGIS sources."""
 
+from .arcgis import fetch_arcgis_layer
 from .local import load_local_roads
 from .osm import fetch_osm_data, fetch_osm_segments, load_osm_roads
 from .osm_download import download_and_extract
@@ -22,4 +23,5 @@ __all__ = [
     "download_and_extract",
     "parse_pbf",
     "load_local_roads",
+    "fetch_arcgis_layer",
 ]
