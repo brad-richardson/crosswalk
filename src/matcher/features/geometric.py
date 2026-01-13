@@ -3,7 +3,7 @@
 from typing import NamedTuple, Union
 
 import numpy as np
-from shapely import LineString, MultiLineString, Point, frechet_distance, hausdorff_distance
+from shapely import LineString, MultiLineString, Point, hausdorff_distance
 from shapely.ops import linemerge
 
 
@@ -31,7 +31,6 @@ class GeometricFeatures(NamedTuple):
     """Geometric features for a candidate pair."""
 
     hausdorff_distance: float  # Maximum deviation between curves
-    frechet_distance: float  # Shape similarity (discrete approximation)
     buffer_iou: float  # Intersection over Union of buffered geometries
     heading_delta: float  # Overall direction difference (degrees, 0-180)
     length_ratio: float  # Ratio of lengths (0-1, 1 = same length)
@@ -63,10 +62,8 @@ def compute_geometric_features(
     coords_b = np.array(line_b.coords)
 
     # Hausdorff distance (max deviation) - using Shapely's implementation
+    # Hausdorff is symmetric, so digitization direction doesn't matter
     hausdorff = hausdorff_distance(line_a, line_b)
-
-    # Frechet distance (shape similarity) - using Shapely's implementation
-    frechet = frechet_distance(line_a, line_b)
 
     # Buffer IoU
     buffer_iou = _buffer_iou(line_a, line_b, buffer_radius)
@@ -91,7 +88,6 @@ def compute_geometric_features(
 
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
-        frechet_distance=frechet,
         buffer_iou=buffer_iou,
         heading_delta=heading_delta,
         length_ratio=length_ratio,

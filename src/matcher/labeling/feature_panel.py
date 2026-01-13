@@ -8,10 +8,10 @@ from .data_loader import CandidatePairView
 # Feature display configuration
 # All scores are normalized 0-1 where higher = better match
 FEATURE_LABELS = {
-    "hausdorff_norm": "Shape (Hausdorff)",
-    "frechet_norm": "Shape (Frechet)",
-    "buffer_iou": "Overlap (IoU)",
-    "heading_norm": "Direction",
+    "hausdorff_norm": "Hausdorff",
+    "buffer_iou": "Buffer IoU",
+    "overlap_ratio": "Overlap",
+    "heading_norm": "Heading",
     "length_ratio": "Length",
     "projection_norm": "Proximity",
     "name_similarity": "Name",
@@ -20,11 +20,11 @@ FEATURE_LABELS = {
 
 RAW_FEATURE_UNITS = {
     "hausdorff_distance": "m",
-    "frechet_distance": "m",
     "projection_distance": "m",
     "centroid_distance": "m",
     "heading_delta": "deg",
     "buffer_iou": "",
+    "overlap_ratio": "",
     "length_ratio": "",
     "name_levenshtein": "",
     "name_jaro_winkler": "",
