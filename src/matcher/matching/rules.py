@@ -2,6 +2,38 @@
 
 Uses weighted combination of feature scores with thresholds
 to classify candidate pairs as Match, Review, or No Match.
+
+Scoring Philosophy:
+------------------
+All features are normalized to 0-1 where higher = better match likelihood.
+Distance-based features are normalized as: max(0, 1 - distance / threshold)
+
+The weighted sum produces a confidence score (0-1) which is then classified:
+- confidence >= match_threshold (0.75) → MATCH (auto-accept)
+- confidence >= review_threshold (0.5) → REVIEW (human review)
+- confidence < review_threshold → NO_MATCH (auto-reject)
+
+Weight Selection Rationale:
+--------------------------
+Weights balance geometric and semantic signals:
+
+Geometric (60% total):
+- hausdorff_norm (10%): Traditional metric, but sensitive to segmentation
+- mean_hausdorff_norm (10%): Robust to segmentation, preferred for partial overlaps
+- buffer_iou (15%): Good general-purpose overlap metric
+- overlap_ratio (15%): Captures "how much actually overlaps"
+- heading_norm (10%): Prevents matching parallel but different roads
+
+Semantic (20% total):
+- name_similarity (15%): Strong signal when available, but often missing
+- class_similarity (5%): Weak signal, road classes vary between datasets
+
+Other (20% total):
+- length_ratio (10%): Helps detect segmentation mismatches
+- projection_norm (10%): Average alignment quality
+
+The ML model will learn optimal weights from labeled data; these defaults
+provide a reasonable baseline for initial candidate scoring.
 """
 
 from dataclasses import dataclass
@@ -38,17 +70,25 @@ class MatchResult:
     features: dict[str, float]
 
 
-# Default feature weights - now configured via settings.matching_weights
-# Kept for backwards compatibility
+# Default feature weights - can be overridden via settings.matching_weights
+# All scores normalized 0-1, higher = better match
 DEFAULT_WEIGHTS = {
-    "hausdorff_norm": 0.15,  # Lower is better, normalized
-    "buffer_iou": 0.20,  # Higher is better (0-1)
-    "overlap_ratio": 0.15,  # Higher is better (0-1) - robust to segmentation differences
-    "heading_norm": 0.10,  # Lower is better, normalized
-    "length_ratio": 0.10,  # Higher is better (0-1)
-    "projection_norm": 0.10,  # Lower is better, normalized
-    "name_similarity": 0.15,  # Higher is better (0-1)
-    "class_similarity": 0.05,  # Higher is better (0-1)
+    # Geometric features (60% total)
+    "hausdorff_norm": 0.10,       # Max deviation - sensitive to segmentation, catches outliers
+    "mean_hausdorff_norm": 0.10,  # Mean deviation - robust to partial overlaps
+    "buffer_iou": 0.15,           # Overlap quality - robust general-purpose metric
+    "overlap_ratio": 0.15,        # Overlap quantity - "how much actually matches?"
+    "heading_norm": 0.10,         # Direction alignment - distinguishes parallel roads
+
+    # Length/proximity (10% total)
+    "length_ratio": 0.10,         # Similar lengths suggest same segment
+
+    # Alignment quality (10% total)
+    "projection_norm": 0.10,      # Average perpendicular distance
+
+    # Semantic features (20% total)
+    "name_similarity": 0.15,      # Strong signal when present, often missing
+    "class_similarity": 0.05,     # Weak signal - classes vary between datasets
 }
 
 
@@ -101,6 +141,7 @@ def compute_match_score(
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
         "hausdorff_norm": max(0, 1 - geom_features.hausdorff_distance / distance_threshold),
+        "mean_hausdorff_norm": max(0, 1 - geom_features.mean_hausdorff_distance / distance_threshold),
         "buffer_iou": geom_features.buffer_iou,
         "overlap_ratio": geom_features.overlap_ratio,  # Already 0-1
         "heading_norm": max(0, 1 - geom_features.heading_delta / 45.0),
@@ -113,6 +154,7 @@ def compute_match_score(
     # Raw features for debugging
     raw_features = {
         "hausdorff_distance": geom_features.hausdorff_distance,
+        "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
         "buffer_iou": geom_features.buffer_iou,
         "overlap_ratio": geom_features.overlap_ratio,
         "heading_delta": geom_features.heading_delta,

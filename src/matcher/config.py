@@ -73,9 +73,10 @@ class MatcherSettings(BaseSettings):
     )
     matching_weights: dict[str, float] = Field(
         default={
-            "hausdorff_norm": 0.20,
-            "frechet_norm": 0.10,
-            "buffer_iou": 0.20,
+            "hausdorff_norm": 0.10,
+            "mean_hausdorff_norm": 0.10,
+            "buffer_iou": 0.15,
+            "overlap_ratio": 0.15,
             "heading_norm": 0.10,
             "length_ratio": 0.10,
             "projection_norm": 0.10,
