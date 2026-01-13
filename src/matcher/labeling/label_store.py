@@ -12,7 +12,7 @@ import pyarrow as pa
 LABELS_SCHEMA = pa.schema([
     ("ref_id", pa.string()),
     ("target_id", pa.string()),
-    ("label", pa.string()),  # "match", "no_match", "skip"
+    ("label", pa.string()),  # "match", "no_match", "associated", "unsure"
     ("labeler", pa.string()),
     ("labeled_at", pa.timestamp("us", tz="UTC")),
     ("session_id", pa.string()),
@@ -20,8 +20,9 @@ LABELS_SCHEMA = pa.schema([
     ("original_confidence", pa.float64()),
     # Geometric features
     ("hausdorff_distance", pa.float64()),
-    ("frechet_distance", pa.float64()),
+    ("mean_hausdorff_distance", pa.float64()),  # Robust to segmentation differences
     ("buffer_iou", pa.float64()),
+    ("overlap_ratio", pa.float64()),  # Fraction of line_a in line_b's buffer
     ("heading_delta", pa.float64()),
     ("length_ratio", pa.float64()),
     ("projection_distance", pa.float64()),
@@ -187,8 +188,9 @@ def add_label(
         "original_decision": original_decision,
         "original_confidence": original_confidence,
         "hausdorff_distance": features.get("hausdorff_distance", 0.0),
-        "frechet_distance": features.get("frechet_distance", 0.0),
+        "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
         "buffer_iou": features.get("buffer_iou", 0.0),
+        "overlap_ratio": features.get("overlap_ratio", 0.0),
         "heading_delta": features.get("heading_delta", 0.0),
         "length_ratio": features.get("length_ratio", 0.0),
         "projection_distance": features.get("projection_distance", 0.0),

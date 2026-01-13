@@ -32,6 +32,8 @@ from .rules import MatchDecision, MatchResult
 
 
 # Features used for ML model (must match what's stored in labels)
+# Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
+# (both compute bidirectional mean of min distances). Including both would double-weight.
 FEATURE_COLUMNS = [
     "hausdorff_distance",
     "mean_hausdorff_distance",
@@ -39,7 +41,6 @@ FEATURE_COLUMNS = [
     "overlap_ratio",
     "heading_delta",
     "length_ratio",
-    "projection_distance",
     "centroid_distance",
     "name_levenshtein",
     "name_jaro_winkler",
@@ -143,9 +144,14 @@ class MLMatcher:
         df = pd.read_parquet(labels_path)
         logger.info(f"Loaded {len(df)} labeled pairs")
 
-        # Filter out 'unsure' labels
-        df = df[df["label"] != "unsure"].copy()
-        logger.info(f"After filtering unsure: {len(df)} pairs")
+        # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
+        valid_labels = {"match", "no_match", "associated"}
+        invalid_mask = ~df["label"].isin(valid_labels)
+        if invalid_mask.any():
+            invalid_labels = df.loc[invalid_mask, "label"].value_counts().to_dict()
+            logger.warning(f"Filtering out invalid labels: {invalid_labels}")
+        df = df[df["label"].isin(valid_labels)].copy()
+        logger.info(f"After filtering to valid labels: {len(df)} pairs")
 
         # Extract features (without imputation - we'll do that after split)
         X, y = self._extract_features_and_labels(df, binary=binary)
@@ -260,8 +266,14 @@ class MLMatcher:
         Returns:
             Tuple of (X features, y labels)
         """
+        if len(df) == 0:
+            raise ValueError("Cannot extract features from empty dataframe")
+
         # Check if features are in a nested dict or individual columns
-        if "features" in df.columns and df["features"].iloc[0]:
+        # Handle null/empty first row gracefully
+        has_features_col = "features" in df.columns
+        first_features = df["features"].iloc[0] if has_features_col else None
+        if has_features_col and first_features and isinstance(first_features, dict):
             return self._extract_from_dict(df, binary)
         else:
             return self._extract_from_columns(df, binary)
@@ -437,6 +449,10 @@ class MLMatcher:
             logger.warning("No ML model loaded, falling back to rules")
             from .rules import score_candidates
             return score_candidates(candidates, reference, target)
+
+        # Handle empty candidates list
+        if not candidates:
+            return []
 
         features_list = []
 
