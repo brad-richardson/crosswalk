@@ -41,9 +41,9 @@ class MatchResult:
 # Default feature weights - now configured via settings.matching_weights
 # Kept for backwards compatibility
 DEFAULT_WEIGHTS = {
-    "hausdorff_norm": 0.20,  # Lower is better, normalized
-    "frechet_norm": 0.10,  # Lower is better, normalized
+    "hausdorff_norm": 0.15,  # Lower is better, normalized
     "buffer_iou": 0.20,  # Higher is better (0-1)
+    "overlap_ratio": 0.15,  # Higher is better (0-1) - robust to segmentation differences
     "heading_norm": 0.10,  # Lower is better, normalized
     "length_ratio": 0.10,  # Higher is better (0-1)
     "projection_norm": 0.10,  # Lower is better, normalized
@@ -101,8 +101,8 @@ def compute_match_score(
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
         "hausdorff_norm": max(0, 1 - geom_features.hausdorff_distance / distance_threshold),
-        "frechet_norm": max(0, 1 - geom_features.frechet_distance / distance_threshold),
         "buffer_iou": geom_features.buffer_iou,
+        "overlap_ratio": geom_features.overlap_ratio,  # Already 0-1
         "heading_norm": max(0, 1 - geom_features.heading_delta / 45.0),
         "length_ratio": geom_features.length_ratio,
         "projection_norm": max(0, 1 - geom_features.projection_distance / distance_threshold),
@@ -113,8 +113,8 @@ def compute_match_score(
     # Raw features for debugging
     raw_features = {
         "hausdorff_distance": geom_features.hausdorff_distance,
-        "frechet_distance": geom_features.frechet_distance,
         "buffer_iou": geom_features.buffer_iou,
+        "overlap_ratio": geom_features.overlap_ratio,
         "heading_delta": geom_features.heading_delta,
         "length_ratio": geom_features.length_ratio,
         "projection_distance": geom_features.projection_distance,

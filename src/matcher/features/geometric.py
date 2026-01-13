@@ -1,18 +1,36 @@
 """Geometric feature extraction for candidate edge pairs."""
 
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 import numpy as np
-from shapely import LineString, Point
-from shapely.ops import nearest_points
-from scipy.spatial.distance import directed_hausdorff
+from shapely import LineString, MultiLineString, Point, hausdorff_distance
+from shapely.ops import linemerge
+
+
+def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
+    """Convert geometry to LineString.
+
+    For MultiLineString, tries to merge first, then falls back to longest component.
+    """
+    if isinstance(geom, LineString):
+        return geom
+    if isinstance(geom, MultiLineString):
+        # Handle empty MultiLineString
+        if geom.is_empty or len(geom.geoms) == 0:
+            return LineString()
+        # Try to merge connected components
+        merged = linemerge(geom)
+        if isinstance(merged, LineString):
+            return merged
+        # Fall back to longest component
+        return max(geom.geoms, key=lambda g: g.length)
+    raise TypeError(f"Expected LineString or MultiLineString, got {type(geom)}")
 
 
 class GeometricFeatures(NamedTuple):
     """Geometric features for a candidate pair."""
 
     hausdorff_distance: float  # Maximum deviation between curves
-    frechet_distance: float  # Shape similarity (discrete approximation)
     buffer_iou: float  # Intersection over Union of buffered geometries
     heading_delta: float  # Overall direction difference (degrees, 0-180)
     length_ratio: float  # Ratio of lengths (0-1, 1 = same length)
@@ -22,28 +40,30 @@ class GeometricFeatures(NamedTuple):
 
 
 def compute_geometric_features(
-    line_a: LineString,
-    line_b: LineString,
+    line_a: Union[LineString, MultiLineString],
+    line_b: Union[LineString, MultiLineString],
     buffer_radius: float = 10.0,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
     Args:
-        line_a: First LineString (should be in projected CRS, meters)
-        line_b: Second LineString (should be in projected CRS, meters)
+        line_a: First geometry (LineString or MultiLineString, projected CRS)
+        line_b: Second geometry (LineString or MultiLineString, projected CRS)
         buffer_radius: Buffer radius for IoU calculation (meters)
 
     Returns:
         GeometricFeatures tuple
     """
+    # Convert MultiLineString to LineString if needed
+    line_a = _to_linestring(line_a)
+    line_b = _to_linestring(line_b)
+
     coords_a = np.array(line_a.coords)
     coords_b = np.array(line_b.coords)
 
-    # Hausdorff distance (max deviation)
-    hausdorff = _hausdorff_distance(coords_a, coords_b)
-
-    # Discrete Frechet distance (approximate)
-    frechet = _discrete_frechet(coords_a, coords_b)
+    # Hausdorff distance (max deviation) - using Shapely's implementation
+    # Hausdorff is symmetric, so digitization direction doesn't matter
+    hausdorff = hausdorff_distance(line_a, line_b)
 
     # Buffer IoU
     buffer_iou = _buffer_iou(line_a, line_b, buffer_radius)
@@ -68,7 +88,6 @@ def compute_geometric_features(
 
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
-        frechet_distance=frechet,
         buffer_iou=buffer_iou,
         heading_delta=heading_delta,
         length_ratio=length_ratio,
@@ -76,70 +95,6 @@ def compute_geometric_features(
         centroid_distance=centroid_distance,
         overlap_ratio=overlap_ratio,
     )
-
-
-def _hausdorff_distance(P: np.ndarray, Q: np.ndarray) -> float:
-    """Compute Hausdorff distance between two point sequences."""
-    h1 = directed_hausdorff(P, Q)[0]
-    h2 = directed_hausdorff(Q, P)[0]
-    return max(h1, h2)
-
-
-def _discrete_frechet(P: np.ndarray, Q: np.ndarray, max_points: int = 50) -> float:
-    """Compute discrete Frechet distance using dynamic programming.
-
-    This is an O(nm) approximation of the continuous Frechet distance.
-    For performance, lines with more than max_points are resampled.
-
-    Args:
-        P: First point sequence (n x 2)
-        Q: Second point sequence (m x 2)
-        max_points: Maximum points before resampling (for O(n*m) performance)
-
-    Returns:
-        Discrete Frechet distance
-    """
-    n, m = len(P), len(Q)
-
-    if n == 0 or m == 0:
-        return float("inf")
-
-    # Resample if too many points (O(n*m) complexity can be expensive)
-    if n > max_points:
-        indices = np.linspace(0, n - 1, max_points, dtype=int)
-        P = P[indices]
-        n = len(P)
-
-    if m > max_points:
-        indices = np.linspace(0, m - 1, max_points, dtype=int)
-        Q = Q[indices]
-        m = len(Q)
-
-    # Use iterative DP instead of recursive to avoid stack overflow
-    # Vectorized distance matrix using broadcasting (much faster than nested loops)
-    ca = np.linalg.norm(P[:, np.newaxis, :] - Q[np.newaxis, :, :], axis=2)
-
-    # DP table
-    dp = np.zeros((n, m))
-    dp[0, 0] = ca[0, 0]
-
-    # Fill first column
-    for i in range(1, n):
-        dp[i, 0] = max(dp[i - 1, 0], ca[i, 0])
-
-    # Fill first row
-    for j in range(1, m):
-        dp[0, j] = max(dp[0, j - 1], ca[0, j])
-
-    # Fill rest of table
-    for i in range(1, n):
-        for j in range(1, m):
-            dp[i, j] = max(
-                min(dp[i - 1, j], dp[i - 1, j - 1], dp[i, j - 1]),
-                ca[i, j],
-            )
-
-    return dp[n - 1, m - 1]
 
 
 def _buffer_iou(line_a: LineString, line_b: LineString, radius: float) -> float:

@@ -247,6 +247,70 @@ def evaluate(
 
 
 @app.command()
+def label(
+    reference: Path = typer.Argument(
+        ...,
+        help="Reference edges (Overture segments parquet)",
+    ),
+    target: Path = typer.Argument(
+        ...,
+        help="Target edges (local data parquet)",
+    ),
+    labels_path: Path = typer.Option(
+        Path("data/labels/labels.parquet"),
+        "--labels",
+        "-l",
+        help="Path to labels file (created if not exists)",
+    ),
+    port: int = typer.Option(
+        8501,
+        "--port",
+        "-p",
+        help="Streamlit server port",
+    ),
+):
+    """Launch the labeling UI for creating training data.
+
+    Example:
+        matcher label data/raw/overture_segments.parquet data/raw/boston_streets.parquet
+    """
+    import os
+    import subprocess
+    import sys
+
+    # Set environment variables for the Streamlit app
+    env = {
+        **os.environ,
+        "MATCHER_REFERENCE_PATH": str(reference.absolute()),
+        "MATCHER_TARGET_PATH": str(target.absolute()),
+        "MATCHER_LABELS_PATH": str(labels_path.absolute()),
+    }
+
+    # Find the app.py path
+    app_path = Path(__file__).parent / "labeling" / "app.py"
+
+    if not app_path.exists():
+        console.print(f"[red]Error: Labeling app not found at {app_path}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Starting labeling UI on port {port}...[/blue]")
+    console.print(f"  Reference: {reference}")
+    console.print(f"  Target: {target}")
+    console.print(f"  Labels: {labels_path}")
+    console.print()
+    console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
+
+    # Launch Streamlit
+    result = subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
+        env=env,
+    )
+    if result.returncode != 0:
+        console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
+        raise typer.Exit(result.returncode)
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__

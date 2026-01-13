@@ -59,15 +59,49 @@ STREET_ABBREVIATIONS = {
 }
 
 
+def _extract_name_string(name) -> Optional[str]:
+    """Extract string from name, handling dict format.
+
+    Overture/OSM data often stores names as dicts like:
+    - {'primary': 'Main Street'}
+    - {'primary': 'Main St', 'common': None, 'rules': [...]}
+
+    Args:
+        name: String or dict containing name
+
+    Returns:
+        Extracted name string or None
+    """
+    if name is None:
+        return None
+    if isinstance(name, str):
+        return name
+    if isinstance(name, dict):
+        # Try common keys in order of preference
+        for key in ['primary', 'common', 'name', 'value']:
+            if key in name and name[key]:
+                val = name[key]
+                # Handle nested extraction
+                if isinstance(val, str):
+                    return val
+                if isinstance(val, dict):
+                    return _extract_name_string(val)
+        # Last resort - return first non-None string value
+        for v in name.values():
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
 def compute_name_similarity(
-    name_a: Optional[str],
-    name_b: Optional[str],
+    name_a,
+    name_b,
 ) -> dict[str, float]:
     """Compute multiple string similarity metrics.
 
     Args:
-        name_a: First street name
-        name_b: Second street name
+        name_a: First street name (string or dict with 'primary' key)
+        name_b: Second street name (string or dict with 'primary' key)
 
     Returns:
         Dictionary with:
@@ -77,6 +111,10 @@ def compute_name_similarity(
             - token_set_ratio: Token set ratio (0-1, handles subsets)
             - partial_ratio: Partial string ratio (0-1)
     """
+    # Extract string from dict if needed
+    name_a = _extract_name_string(name_a)
+    name_b = _extract_name_string(name_b)
+
     if not name_a or not name_b:
         return {
             "levenshtein_ratio": 0.0,
