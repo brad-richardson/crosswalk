@@ -110,7 +110,7 @@ class LabelStore:
 
         return {
             "total": len(df),
-            "match": (df["label"].str.contains("match", na=False)).sum(),
+            "match": (df["label"] == "match").sum(),
             "no_match": (df["label"] == "no_match").sum(),
             "skip": (df["label"] == "skip").sum(),
             "associated": (df["label"] == "associated").sum(),
