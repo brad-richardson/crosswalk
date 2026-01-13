@@ -255,21 +255,13 @@ def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
     For each vertex in A, finds distance to nearest point on B, and vice versa.
     Returns the mean of all these distances.
 
-    Bidirectional computation ensures symmetry: dist(A,B) == dist(B,A).
-    This is important because we don't know which dataset is "reference".
-
-    This metric is similar to mean_hausdorff but conceptually represents
-    "average alignment quality" rather than "average deviation".
+    Note: This is mathematically equivalent to mean_hausdorff_distance.
+    Kept as separate function for semantic clarity - "projection distance"
+    emphasizes alignment quality, while "mean Hausdorff" emphasizes the
+    relationship to the classic Hausdorff metric.
     """
-    dists_a_to_b = [line_b.distance(Point(coord)) for coord in line_a.coords]
-    dists_b_to_a = [line_a.distance(Point(coord)) for coord in line_b.coords]
-
-    all_distances = dists_a_to_b + dists_b_to_a
-
-    if not all_distances:
-        return float("inf")
-
-    return np.mean(all_distances)
+    # Delegate to mean_hausdorff_distance to avoid code duplication
+    return _mean_hausdorff_distance(line_a, line_b)
 
 
 def _overlap_ratio(line_a: LineString, line_b: LineString, buffer_radius: float) -> float:

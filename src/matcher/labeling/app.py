@@ -32,6 +32,7 @@ def save_config(config: dict) -> None:
     """Save config to file."""
     CONFIG_FILE.write_text(json.dumps(config))
 
+
 from matcher.config import settings
 from matcher.labeling.data_loader import (
     CandidatePairView,
