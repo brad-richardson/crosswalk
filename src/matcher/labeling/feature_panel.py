@@ -9,6 +9,7 @@ from .data_loader import CandidatePairView
 # All scores are normalized 0-1 where higher = better match
 FEATURE_LABELS = {
     "hausdorff_norm": "Hausdorff",
+    "mean_hausdorff_norm": "Mean Haus.",
     "buffer_iou": "Buffer IoU",
     "overlap_ratio": "Overlap",
     "heading_norm": "Heading",
@@ -20,6 +21,7 @@ FEATURE_LABELS = {
 
 RAW_FEATURE_UNITS = {
     "hausdorff_distance": "m",
+    "mean_hausdorff_distance": "m",
     "projection_distance": "m",
     "centroid_distance": "m",
     "heading_delta": "deg",

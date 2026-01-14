@@ -1,4 +1,47 @@
-"""Geometric feature extraction for candidate edge pairs."""
+"""Geometric feature extraction for candidate edge pairs.
+
+This module computes geometric similarity features between road segments for
+matching/conflation. The metrics are designed to handle common challenges in
+road network data:
+
+1. **Segmentation differences**: Different datasets split roads at different
+   points (intersections, administrative boundaries). Two segments may represent
+   the same road but only partially overlap.
+
+2. **Digitization direction**: Roads can be digitized in either direction.
+   Metrics should be direction-agnostic.
+
+3. **Positional accuracy**: Datasets have varying accuracy. Small offsets
+   shouldn't prevent matching.
+
+Metric Selection Rationale:
+--------------------------
+- **hausdorff_distance**: Classic max-deviation metric. Sensitive to segmentation
+  differences (one bad endpoint tanks the score). Useful for detecting outliers.
+
+- **mean_hausdorff_distance**: Mean of min-distances instead of max. Robust to
+  segmentation - a partial overlap still scores well if the overlapping portions
+  align. Preferred for datasets with different segmentation schemes.
+
+- **buffer_iou**: Intersection-over-Union of buffered geometries. Robust to small
+  positional offsets and segmentation. Good general-purpose similarity metric.
+
+- **overlap_ratio**: What fraction of line A falls within line B's buffer? Answers
+  "how much of this segment has a corresponding segment in the other dataset?"
+
+- **projection_distance**: Average perpendicular distance between curves. Computed
+  bidirectionally (A→B and B→A) for symmetry. More stable than Hausdorff for
+  typical road matching scenarios.
+
+- **heading_delta**: Overall direction difference. Handles bidirectional roads
+  (0° and 180° both score well). Helps distinguish parallel roads from the same road.
+
+- **length_ratio**: Ratio of lengths (shorter/longer). Helps identify segmentation
+  mismatches vs. true non-matches.
+
+- **centroid_distance**: Simple proximity check. Fast to compute, useful for
+  initial filtering.
+"""
 
 from typing import NamedTuple, Union
 
@@ -28,15 +71,53 @@ def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
 
 
 class GeometricFeatures(NamedTuple):
-    """Geometric features for a candidate pair."""
+    """Geometric features for a candidate pair.
 
-    hausdorff_distance: float  # Maximum deviation between curves
-    buffer_iou: float  # Intersection over Union of buffered geometries
-    heading_delta: float  # Overall direction difference (degrees, 0-180)
-    length_ratio: float  # Ratio of lengths (0-1, 1 = same length)
-    projection_distance: float  # Average perpendicular distance
-    centroid_distance: float  # Distance between centroids
-    overlap_ratio: float  # Ratio of overlapping length
+    All distance metrics are in the same units as the input geometries
+    (should be projected CRS, typically meters).
+
+    For matching scores, distances are normalized to 0-1 where higher = better:
+        score = max(0, 1 - distance / threshold)
+    """
+
+    hausdorff_distance: float
+    """Maximum deviation between curves (meters).
+    Sensitive to segmentation - one far endpoint ruins the score.
+    Use mean_hausdorff_distance for robustness to partial overlaps."""
+
+    mean_hausdorff_distance: float
+    """Mean of minimum distances from each vertex to the other curve (meters).
+    Robust to segmentation differences - partial overlaps score well if
+    the overlapping portions align. Preferred over hausdorff_distance for
+    datasets with different segmentation schemes."""
+
+    buffer_iou: float
+    """Intersection over Union of buffered geometries (0-1).
+    Robust to small positional offsets. Good general-purpose metric."""
+
+    heading_delta: float
+    """Overall direction difference in degrees (0-180).
+    Accounts for bidirectional roads (0° and 180° both indicate alignment).
+    Helps distinguish parallel roads from the same road."""
+
+    length_ratio: float
+    """Ratio of lengths: min(len_a, len_b) / max(len_a, len_b) (0-1).
+    Value of 1 means same length. Low values suggest segmentation mismatch
+    or different roads entirely."""
+
+    projection_distance: float
+    """Bidirectional average perpendicular distance (meters).
+    Averages distances from A's vertices to B and B's vertices to A.
+    More stable than Hausdorff for typical road matching."""
+
+    centroid_distance: float
+    """Distance between segment centroids (meters).
+    Simple proximity check, useful for initial filtering."""
+
+    overlap_ratio: float
+    """Fraction of line_a that falls within line_b's buffer (0-1).
+    Answers: 'how much of this segment has a corresponding segment?'
+    Useful for detecting segmentation mismatches."""
 
 
 def compute_geometric_features(
@@ -65,6 +146,9 @@ def compute_geometric_features(
     # Hausdorff is symmetric, so digitization direction doesn't matter
     hausdorff = hausdorff_distance(line_a, line_b)
 
+    # Mean Hausdorff (robust to segmentation - uses mean instead of max)
+    mean_hausdorff = _mean_hausdorff_distance(line_a, line_b)
+
     # Buffer IoU
     buffer_iou = _buffer_iou(line_a, line_b, buffer_radius)
 
@@ -88,6 +172,7 @@ def compute_geometric_features(
 
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
+        mean_hausdorff_distance=mean_hausdorff,
         buffer_iou=buffer_iou,
         heading_delta=heading_delta,
         length_ratio=length_ratio,
@@ -131,19 +216,52 @@ def _angle_diff(a: float, b: float) -> float:
     return min(diff, opposite_diff)
 
 
-def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
-    """Compute average perpendicular distance from line_a vertices to line_b."""
-    distances = []
+def _mean_hausdorff_distance(line_a: LineString, line_b: LineString) -> float:
+    """Compute mean Hausdorff distance (mean of min distances).
 
-    for coord in line_a.coords:
-        point = Point(coord)
-        dist = line_b.distance(point)
-        distances.append(dist)
+    Standard Hausdorff uses max(min_distances), which is sensitive to
+    segmentation - if one endpoint is far from the other curve, the whole
+    score is ruined. This "Modified Hausdorff" uses mean instead of max.
 
-    if not distances:
+    Example:
+        Line A: 100m long, overlaps with B for 70m
+        Line B: 70m long, fully within A's extent
+
+        Standard Hausdorff: ~30m (the gap at A's endpoints)
+        Mean Hausdorff: ~15m (averages the well-aligned middle with the gaps)
+
+    This is widely used in road conflation literature because real-world
+    datasets often have different segmentation schemes.
+
+    References:
+        Dubuisson & Jain (1994) "A Modified Hausdorff Distance for Object Matching"
+    """
+    # Min distances from each point in A to line B
+    dists_a_to_b = [line_b.distance(Point(coord)) for coord in line_a.coords]
+    # Min distances from each point in B to line A
+    dists_b_to_a = [line_a.distance(Point(coord)) for coord in line_b.coords]
+
+    all_min_dists = dists_a_to_b + dists_b_to_a
+
+    if not all_min_dists:
         return float("inf")
 
-    return np.mean(distances)
+    return np.mean(all_min_dists)
+
+
+def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
+    """Compute bidirectional average perpendicular distance.
+
+    For each vertex in A, finds distance to nearest point on B, and vice versa.
+    Returns the mean of all these distances.
+
+    Note: This is mathematically equivalent to mean_hausdorff_distance.
+    Kept as separate function for semantic clarity - "projection distance"
+    emphasizes alignment quality, while "mean Hausdorff" emphasizes the
+    relationship to the classic Hausdorff metric.
+    """
+    # Delegate to mean_hausdorff_distance to avoid code duplication
+    return _mean_hausdorff_distance(line_a, line_b)
 
 
 def _overlap_ratio(line_a: LineString, line_b: LineString, buffer_radius: float) -> float:

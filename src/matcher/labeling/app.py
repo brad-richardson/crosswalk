@@ -32,6 +32,8 @@ def save_config(config: dict) -> None:
     """Save config to file."""
     CONFIG_FILE.write_text(json.dumps(config))
 
+
+from matcher.config import settings
 from matcher.labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
@@ -550,10 +552,19 @@ def load_data(reference_path: Path, target_path: Path) -> None:
     reference = load_geodataframe(reference_path)
     target = load_geodataframe(target_path)
 
+    # Filter out non-road classes from reference (sidewalks, paths, etc.)
+    non_road_classes = {'footway', 'steps', 'cycleway', 'pedestrian', 'path', 'track'}
+    if 'class' in reference.columns:
+        before_count = len(reference)
+        reference = reference[~reference['class'].isin(non_road_classes)].reset_index(drop=True)
+        filtered_count = before_count - len(reference)
+        if filtered_count > 0:
+            st.toast(f"Filtered {filtered_count} non-road features (footways, paths, etc.)")
+
     candidates = generate_scored_candidates(
         reference=reference,
         target=target,
-        buffer_distance=50.0,
+        buffer_distance=settings.buffer_distance,
         ref_id_column="id",
         target_id_column="id",
         ref_name_column="names",
