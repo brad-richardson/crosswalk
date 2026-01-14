@@ -41,9 +41,14 @@ from matcher.labeling.data_loader import (
     load_geodataframe,
 )
 from matcher.labeling.comparison_view import render_comparison_view
-from matcher.labeling.feature_panel import render_feature_panel
+from matcher.labeling.feature_panel import (
+    get_subseg_state,
+    render_feature_panel,
+    render_subsegment_controls,
+    reset_subsegment_state,
+)
 from matcher.labeling.label_store import LabelStore
-from matcher.labeling.map_view import create_comparison_map
+from matcher.labeling.map_view import create_comparison_map, create_subsegment_map
 from matcher.labeling.state import (
     advance_to_next,
     get_session,
@@ -206,10 +211,9 @@ def render_sidebar(reference_path: Path, target_path: Path) -> None:
         with col2:
             st.metric("No Match", stats["no_match"])
         with col3:
-            st.metric("Associated", stats.get("associated", 0))
-
-        if stats.get("unsure", 0) > 0 or stats.get("maybe", 0) > 0 or stats.get("skip", 0) > 0:
-            st.metric("Unsure", stats.get("unsure", 0) + stats.get("maybe", 0) + stats.get("skip", 0))
+            unsure_count = stats.get("unsure", 0) + stats.get("maybe", 0) + stats.get("skip", 0)
+            if unsure_count > 0:
+                st.metric("Unsure", unsure_count)
 
         st.divider()
 
@@ -253,7 +257,7 @@ def render_main_content() -> None:
         return
 
     if not st.session_state.data_loaded:
-        st.info("👈 Click 'Load Data' in the sidebar to get started")
+        st.info("Click 'Load Data' in the sidebar to get started")
         return
 
     session = get_session()
@@ -340,7 +344,6 @@ def _add_keyboard_shortcuts():
 
             if (key === 'm') shortcutMatch = '(M)';
             else if (key === 'n') shortcutMatch = '(N)';
-            else if (key === 'i') shortcutMatch = '(I)';
             else if (key === 'u') shortcutMatch = '(U)';
             else if (key === 'z') shortcutMatch = '(Z)';
             else if (key === 'arrowleft') shortcutMatch = '←';
@@ -383,6 +386,7 @@ def render_single_pair_mode(pair, filtered, label_store, session):
         with nav_col1:
             if st.button("←", disabled=session.current_index == 0, key="prev_top", help="Previous (Left Arrow)"):
                 go_to_previous()
+                reset_subsegment_state()
                 st.rerun()
         with nav_col2:
             # Use dynamic key to force update after labeling
@@ -396,23 +400,21 @@ def render_single_pair_mode(pair, filtered, label_store, session):
             )
             if new_idx - 1 != session.current_index:
                 session.current_index = new_idx - 1
+                reset_subsegment_state()
                 st.rerun()
         with nav_col3:
             if st.button("→", disabled=session.current_index >= len(filtered) - 1, key="next_top", help="Next (Right Arrow)"):
                 advance_to_next()
+                reset_subsegment_state()
                 st.rerun()
+
+    # Get subsegment state for map rendering (auto-applies estimate if needed)
+    map_ref_start, map_ref_end, map_target_start, map_target_end, map_subseg_active = (
+        get_subseg_state(estimated_subsegment=pair.estimated_subsegment)
+    )
 
     # Main layout: map on left, features on right
     col_map, col_features = st.columns([2, 1])
-
-    with col_map:
-        # Map view
-        tile_layer = st.session_state.get("tile_layer_choice", "Light")
-        m = create_comparison_map(pair, tile_layer=tile_layer)
-        # Render map as static HTML - more reliable than st_folium for automated browsers
-        # Use get_root().render() to avoid "Trust Notebook" message
-        map_html = m.get_root().render()
-        components.html(map_html, height=550)
 
     with col_features:
         # Feature panel
@@ -426,30 +428,62 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 st.session_state.selected_refs = {pair.ref_id}
                 st.rerun()
 
+    with col_map:
+        # Map view - use subsegment map if active
+        tile_layer = st.session_state.get("tile_layer_choice", "Light")
+        if map_subseg_active:
+            m = create_subsegment_map(
+                pair,
+                ref_range=(map_ref_start, map_ref_end),
+                target_range=(map_target_start, map_target_end),
+                tile_layer=tile_layer,
+            )
+        else:
+            m = create_comparison_map(pair, tile_layer=tile_layer)
+        # Render map as static HTML - more reliable than st_folium for automated browsers
+        # Use get_root().render() to avoid "Trust Notebook" message
+        map_html = m.get_root().render()
+        components.html(map_html, height=550)
+
+    # Sub-segment controls + action buttons at bottom
+    ref_start, ref_end, target_start, target_end, subseg_active = (
+        render_subsegment_controls(
+            pair, estimated_subsegment=pair.estimated_subsegment
+        )
+    )
+
     # Action buttons - compact row with keyboard shortcuts shown
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
+
+    # Prepare subsegment kwargs if active
+    subseg_kwargs = {}
+    if subseg_active:
+        subseg_kwargs = {
+            "ref_start_pct": ref_start,
+            "ref_end_pct": ref_end,
+            "target_start_pct": target_start,
+            "target_end_pct": target_end,
+        }
 
     with col1:
         if st.button("✅ Match (M)", type="primary", use_container_width=True):
-            record_label(pair, "match", label_store)
+            record_label(pair, "match", label_store, **subseg_kwargs)
+            reset_subsegment_state()
             st.rerun()
 
     with col2:
         if st.button("❌ No Match (N)", use_container_width=True):
-            record_label(pair, "no_match", label_store)
+            record_label(pair, "no_match", label_store, **subseg_kwargs)
+            reset_subsegment_state()
             st.rerun()
 
     with col3:
-        if st.button("🔗 Associated (I)", use_container_width=True, help="Sidewalk of road or road of sidewalk"):
-            record_label(pair, "associated", label_store)
+        if st.button("🤔 Unsure (U)", use_container_width=True):
+            record_label(pair, "unsure", label_store, **subseg_kwargs)
+            reset_subsegment_state()
             st.rerun()
 
     with col4:
-        if st.button("🤔 Unsure (U)", use_container_width=True):
-            record_label(pair, "unsure", label_store)
-            st.rerun()
-
-    with col5:
         if st.button("↩️ Undo (Z)", disabled=len(session.undo_stack) == 0, use_container_width=True):
             undo_last_label(label_store)
             st.rerun()
@@ -581,15 +615,29 @@ def record_label(
     pair: CandidatePairView,
     label: str,
     label_store: LabelStore,
+    ref_start_pct: float = 0.0,
+    ref_end_pct: float = 1.0,
+    target_start_pct: float = 0.0,
+    target_end_pct: float = 1.0,
 ) -> None:
-    """Record a label for the current pair."""
+    """Record a label for the current pair.
+
+    Args:
+        pair: The candidate pair being labeled
+        label: Label value (match, no_match, associated, unsure)
+        label_store: Label storage manager
+        ref_start_pct: Start of reference sub-segment (0.0-1.0)
+        ref_end_pct: End of reference sub-segment (0.0-1.0)
+        target_start_pct: Start of target sub-segment (0.0-1.0)
+        target_end_pct: End of target sub-segment (0.0-1.0)
+    """
     session = get_session()
 
     if not session.labeler_name:
         st.error("Please enter your name in the sidebar first!")
         return
 
-    # Add to label store
+    # Add to label store with sub-segment info
     label_store.add(
         ref_id=pair.ref_id,
         target_id=pair.target_id,
@@ -599,6 +647,10 @@ def record_label(
         original_decision=pair.decision,
         original_confidence=pair.confidence,
         features=pair.features,
+        ref_start_pct=ref_start_pct,
+        ref_end_pct=ref_end_pct,
+        target_start_pct=target_start_pct,
+        target_end_pct=target_end_pct,
     )
 
     # Push to undo stack
