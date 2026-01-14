@@ -624,7 +624,7 @@ def record_label(
 
     Args:
         pair: The candidate pair being labeled
-        label: Label value (match, no_match, associated, unsure)
+        label: Label value (match, no_match, unsure)
         label_store: Label storage manager
         ref_start_pct: Start of reference sub-segment (0.0-1.0)
         ref_end_pct: End of reference sub-segment (0.0-1.0)

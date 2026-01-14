@@ -8,11 +8,13 @@ from typing import Any, Optional
 import pandas as pd
 import pyarrow as pa
 
+from .subsegment import is_subsegment_selection
+
 
 LABELS_SCHEMA = pa.schema([
     ("ref_id", pa.string()),
     ("target_id", pa.string()),
-    ("label", pa.string()),  # "match", "no_match", "associated", "unsure"
+    ("label", pa.string()),  # "match", "no_match", "unsure" (legacy: "associated")
     ("labeler", pa.string()),
     ("labeled_at", pa.timestamp("us", tz="UTC")),
     ("session_id", pa.string()),
@@ -88,7 +90,7 @@ class LabelStore:
         Args:
             ref_id: Reference segment ID
             target_id: Target segment ID
-            label: Label value (match, no_match, associated, unsure)
+            label: Label value (match, no_match, unsure)
             labeler: Name of the labeler
             session_id: Unique session identifier
             original_decision: Rule-based matcher decision
@@ -246,11 +248,8 @@ def add_label(
         Updated DataFrame with new label appended
     """
     # Determine if this is a sub-segment selection
-    is_subsegment = not (
-        abs(ref_start_pct) < 0.001
-        and abs(ref_end_pct - 1.0) < 0.001
-        and abs(target_start_pct) < 0.001
-        and abs(target_end_pct - 1.0) < 0.001
+    is_subsegment = is_subsegment_selection(
+        ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
     )
 
     new_row = {
