@@ -33,8 +33,7 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 | Label | Meaning |
 |-------|---------|
 | **match** | Same physical road segment (or same road with different segmentation) |
-| **no_match** | Different roads, not the same feature |
-| **associated** | Related but not the same (e.g., sidewalk next to road, service road) |
+| **no_match** | Different roads, not the same feature (includes related-but-different like sidewalks, split highways) |
 | **unsure** | Ambiguous case, needs review |
 
 ---
@@ -79,9 +78,9 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 
 **Scenario:** A road segment is being compared to a sidewalk/footpath that runs parallel to it.
 
-**Label:** `associated`
+**Label:** `no_match`
 
-**Reasoning:** They're spatially related but not the same feature. The "associated" label helps distinguish these from true matches and true non-matches.
+**Reasoning:** They're spatially related but not the same feature. For a binary match classifier, we want the model to reject these as non-matches. Teaching the model to distinguish parallel-but-different features (sidewalks, bike lanes, service roads) is valuable training signal.
 
 **Note:** The labeling app filters out non-road classes (footway, cycleway, pedestrian, path, steps, track) from Overture by default to reduce these cases.
 
@@ -111,14 +110,15 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 
 ### Sub-segment Matching
 
-**Problem:** Current labeling is whole-segment only. For cases like segmentation mismatch, we can't specify *which portion* of each segment actually matches.
+**Problem:** Whole-segment labeling can't capture cases where only a portion of each segment actually matches (e.g., segmentation mismatch, partial overlaps).
 
-**Potential solutions:**
-1. **Sub-segment selection** - UI to draw/select the overlapping portion
-2. **Linear referencing** - Store match as percentage ranges (e.g., "ref A matches target B from 0-30%")
-3. **Post-process alignment** - After ML matching, run geometric alignment to find exact overlap bounds
+**Solution:** The labeling UI now supports sub-segment selection:
+- Enable "Subsegment" checkbox to activate sub-segment mode
+- Estimate is auto-applied based on endpoint projection
+- Use sliders to fine-tune the matching portions (0-100% for each segment)
+- Labels store `ref_start_pct`, `ref_end_pct`, `target_start_pct`, `target_end_pct`
 
-**Status:** Deferred. For training the initial classifier, whole-segment labels are sufficient. Sub-segment matching would be valuable for the actual conflation output pipeline.
+**When to use:** When segments clearly represent the same road but have different extents. Specify which portion of each segment actually overlaps.
 
 ---
 
@@ -128,7 +128,6 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 |-----|--------|
 | M | Match |
 | N | No Match |
-| I | Associated |
 | U | Unsure |
 | Z | Undo |
 | Arrow Left/Right | Navigate |

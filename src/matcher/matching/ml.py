@@ -1,14 +1,14 @@
 """Machine learning-based matcher using gradient boosted trees.
 
 This module provides XGBoost-based matching trained on labeled data.
-The model learns to classify road segment pairs as match/no_match/associated
+The model learns to classify road segment pairs as match/no_match
 based on geometric and semantic features.
 
 Training Data Format:
 --------------------
 Uses labels from data/labels/labels.parquet which contains:
 - ref_id, target_id: Segment identifiers
-- label: Human label (match, no_match, associated, unsure)
+- label: Human label (match, no_match, unsure; legacy: associated)
 - features: Dict of precomputed features (hausdorff_distance, buffer_iou, etc.)
 
 Model Architecture:
@@ -122,8 +122,8 @@ class MLMatcher:
 
         Args:
             labels_path: Path to labels parquet file
-            binary: If True, train binary classifier (match vs non-match)
-                   If False, train multiclass (match/no_match/associated)
+            binary: If True (default), train binary classifier (match vs non-match)
+                   If False, train multiclass (legacy, includes associated)
             test_size: Fraction of data to hold out for testing
             **kwargs: Additional XGBoost parameters
 

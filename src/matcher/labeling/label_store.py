@@ -8,16 +8,24 @@ from typing import Any, Optional
 import pandas as pd
 import pyarrow as pa
 
+from .subsegment import is_subsegment_selection
+
 
 LABELS_SCHEMA = pa.schema([
     ("ref_id", pa.string()),
     ("target_id", pa.string()),
-    ("label", pa.string()),  # "match", "no_match", "associated", "unsure"
+    ("label", pa.string()),  # "match", "no_match", "unsure" (legacy: "associated")
     ("labeler", pa.string()),
     ("labeled_at", pa.timestamp("us", tz="UTC")),
     ("session_id", pa.string()),
     ("original_decision", pa.string()),  # From rule-based matcher
     ("original_confidence", pa.float64()),
+    # Sub-segment linear referencing (0.0-1.0 percentages)
+    ("ref_start_pct", pa.float64()),  # 0.0 = start of reference line
+    ("ref_end_pct", pa.float64()),  # 1.0 = end of reference line
+    ("target_start_pct", pa.float64()),  # 0.0 = start of target line
+    ("target_end_pct", pa.float64()),  # 1.0 = end of target line
+    ("is_subsegment", pa.bool_()),  # True if not whole segment match
     # Geometric features
     ("hausdorff_distance", pa.float64()),
     ("mean_hausdorff_distance", pa.float64()),  # Robust to segmentation differences
@@ -33,6 +41,15 @@ LABELS_SCHEMA = pa.schema([
     ("name_token_sort", pa.float64()),
     ("class_similarity", pa.float64()),
 ])
+
+# Default values for sub-segment columns (for backward compatibility)
+SUBSEGMENT_DEFAULTS = {
+    "ref_start_pct": 0.0,
+    "ref_end_pct": 1.0,
+    "target_start_pct": 0.0,
+    "target_end_pct": 1.0,
+    "is_subsegment": False,
+}
 
 
 @dataclass
@@ -63,8 +80,27 @@ class LabelStore:
         original_decision: str,
         original_confidence: float,
         features: dict[str, float],
+        ref_start_pct: float = 0.0,
+        ref_end_pct: float = 1.0,
+        target_start_pct: float = 0.0,
+        target_end_pct: float = 1.0,
     ) -> None:
-        """Add a new label."""
+        """Add a new label.
+
+        Args:
+            ref_id: Reference segment ID
+            target_id: Target segment ID
+            label: Label value (match, no_match, unsure)
+            labeler: Name of the labeler
+            session_id: Unique session identifier
+            original_decision: Rule-based matcher decision
+            original_confidence: Rule-based matcher confidence
+            features: Dict of feature values
+            ref_start_pct: Start of reference sub-segment (0.0-1.0, default 0.0)
+            ref_end_pct: End of reference sub-segment (0.0-1.0, default 1.0)
+            target_start_pct: Start of target sub-segment (0.0-1.0, default 0.0)
+            target_end_pct: End of target sub-segment (0.0-1.0, default 1.0)
+        """
         self._df = add_label(
             self.df,
             ref_id=ref_id,
@@ -75,6 +111,10 @@ class LabelStore:
             original_decision=original_decision,
             original_confidence=original_confidence,
             features=features,
+            ref_start_pct=ref_start_pct,
+            ref_end_pct=ref_end_pct,
+            target_start_pct=target_start_pct,
+            target_end_pct=target_end_pct,
         )
         self.save()
 
@@ -140,10 +180,16 @@ def load_labels(path: Path) -> pd.DataFrame:
     """Load existing labels from parquet file.
 
     Creates empty DataFrame with correct schema if file doesn't exist.
+    Handles backward compatibility by adding default values for new columns.
     """
     if path.exists():
         try:
-            return pd.read_parquet(path)
+            df = pd.read_parquet(path)
+            # Add missing sub-segment columns with defaults for backward compatibility
+            for col, default_val in SUBSEGMENT_DEFAULTS.items():
+                if col not in df.columns:
+                    df[col] = default_val
+            return df
         except Exception:
             pass
 
@@ -176,8 +222,36 @@ def add_label(
     original_decision: str,
     original_confidence: float,
     features: dict[str, float],
+    ref_start_pct: float = 0.0,
+    ref_end_pct: float = 1.0,
+    target_start_pct: float = 0.0,
+    target_end_pct: float = 1.0,
 ) -> pd.DataFrame:
-    """Add a new label to the dataframe."""
+    """Add a new label to the dataframe.
+
+    Args:
+        df: Existing labels DataFrame
+        ref_id: Reference segment ID
+        target_id: Target segment ID
+        label: Label value
+        labeler: Name of labeler
+        session_id: Session identifier
+        original_decision: Rule-based decision
+        original_confidence: Rule-based confidence
+        features: Feature values dict
+        ref_start_pct: Reference sub-segment start (0.0-1.0)
+        ref_end_pct: Reference sub-segment end (0.0-1.0)
+        target_start_pct: Target sub-segment start (0.0-1.0)
+        target_end_pct: Target sub-segment end (0.0-1.0)
+
+    Returns:
+        Updated DataFrame with new label appended
+    """
+    # Determine if this is a sub-segment selection
+    is_subsegment = is_subsegment_selection(
+        ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
+    )
+
     new_row = {
         "ref_id": str(ref_id),
         "target_id": str(target_id),
@@ -187,6 +261,13 @@ def add_label(
         "session_id": session_id,
         "original_decision": original_decision,
         "original_confidence": original_confidence,
+        # Sub-segment fields
+        "ref_start_pct": ref_start_pct,
+        "ref_end_pct": ref_end_pct,
+        "target_start_pct": target_start_pct,
+        "target_end_pct": target_end_pct,
+        "is_subsegment": is_subsegment,
+        # Geometric features
         "hausdorff_distance": features.get("hausdorff_distance", 0.0),
         "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
         "buffer_iou": features.get("buffer_iou", 0.0),
@@ -212,4 +293,6 @@ def _pa_to_pd_dtype(pa_type):
         return "float64"
     if pa.types.is_timestamp(pa_type):
         return "datetime64[ns, UTC]"
+    if pa.types.is_boolean(pa_type):
+        return "bool"
     return "object"

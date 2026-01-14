@@ -1,6 +1,7 @@
 """Data loading and candidate preparation for labeling UI."""
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,9 @@ from shapely.geometry import LineString
 from ..blocking import generate_candidates
 from ..features.semantic import _extract_name_string
 from ..matching.rules import score_candidates
+from .subsegment import estimate_overlap_range
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +32,38 @@ class CandidatePairView:
     confidence: float
     score_breakdown: dict[str, float]
     features: dict[str, float]
+    # Precomputed sub-segment estimate (for quick "Use Estimate" button)
+    estimated_subsegment: dict[str, float] = field(default_factory=lambda: {
+        "ref_start_pct": 0.0,
+        "ref_end_pct": 1.0,
+        "target_start_pct": 0.0,
+        "target_end_pct": 1.0,
+    })
+
+
+def _filter_linestrings(gdf: gpd.GeoDataFrame, source_name: str) -> gpd.GeoDataFrame:
+    """Filter GeoDataFrame to only LineString geometries.
+
+    Args:
+        gdf: Input GeoDataFrame
+        source_name: Name for logging (e.g., "reference" or "target")
+
+    Returns:
+        Filtered GeoDataFrame with only LineString geometries
+    """
+    original_count = len(gdf)
+    mask = gdf.geometry.apply(lambda g: isinstance(g, LineString))
+    filtered = gdf[mask].copy()
+    excluded_count = original_count - len(filtered)
+
+    if excluded_count > 0:
+        logger.warning(
+            f"Excluded {excluded_count} non-LineString geometries from {source_name} "
+            f"({excluded_count}/{original_count} features). "
+            f"Sub-segment selection only supports LineString geometries."
+        )
+
+    return filtered
 
 
 def load_geodataframe(path: Path) -> gpd.GeoDataFrame:
@@ -71,6 +107,15 @@ def generate_scored_candidates(
     Returns:
         List of CandidatePairView objects sorted by confidence (REVIEW first)
     """
+    # Filter out non-LineString geometries (MultiLineString, etc.)
+    # Sub-segment selection only supports LineString
+    reference = _filter_linestrings(reference, "reference")
+    target = _filter_linestrings(target, "target")
+
+    if len(reference) == 0 or len(target) == 0:
+        logger.warning("No valid LineString geometries after filtering")
+        return []
+
     # Project to metric CRS for accurate distances
     if reference.crs and reference.crs.is_geographic:
         centroid = reference.unary_union.centroid
@@ -128,6 +173,13 @@ def generate_scored_candidates(
         if target_class_column in target.columns:
             target_class = target_row.get(target_class_column)
 
+        # Compute estimated sub-segment overlap
+        # Note: Using WGS84 geometries here - projection-based percentages
+        # work well enough for labeling purposes
+        # Non-LineStrings should have been filtered out above - if one gets
+        # through, estimate_overlap_range will raise
+        estimated = estimate_overlap_range(ref_row.geometry, target_row.geometry)
+
         views.append(CandidatePairView(
             ref_id=str(result.ref_id),
             target_id=str(result.target_id),
@@ -141,6 +193,7 @@ def generate_scored_candidates(
             confidence=result.confidence,
             score_breakdown=result.score_breakdown,
             features=result.features,
+            estimated_subsegment=estimated,
         ))
 
     # Sort: REVIEW first, then by confidence descending
