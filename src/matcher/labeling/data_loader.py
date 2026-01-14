@@ -148,6 +148,7 @@ def generate_scored_candidates(
 
     # Build view models (use original WGS84 geometries for map display)
     # Create index lookups for O(1) access (avoid O(n) DataFrame filtering per candidate)
+    # Note: If IDs are not unique, .loc returns DataFrame; we take first row
     ref_lookup = reference.set_index(ref_id_column)
     target_lookup = target.set_index(target_id_column)
 
@@ -157,11 +158,19 @@ def generate_scored_candidates(
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
 
+    def get_row(lookup, id_val):
+        """Get single row from lookup, handling duplicate IDs."""
+        row = lookup.loc[id_val]
+        # If duplicate IDs exist, .loc returns DataFrame - take first row
+        if hasattr(row, 'iloc'):
+            row = row.iloc[0]
+        return row
+
     views = []
     for result in results:
         # Get rows from indexed lookup (O(1) instead of O(n))
-        ref_row = ref_lookup.loc[result.ref_id]
-        target_row = target_lookup.loc[result.target_id]
+        ref_row = get_row(ref_lookup, result.ref_id)
+        target_row = get_row(target_lookup, result.target_id)
 
         # Extract names
         ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None

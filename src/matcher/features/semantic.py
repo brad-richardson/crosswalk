@@ -226,12 +226,14 @@ def compute_class_similarity(
 
     # Exact class match - check subclass for finer distinction
     if class_a == class_b:
+        # Normalize subclass values (handle None, NaN, non-str)
+        sub_a = subclass_a.lower().strip() if isinstance(subclass_a, str) else None
+        sub_b = subclass_b.lower().strip() if isinstance(subclass_b, str) else None
+
         # If neither has subclass, or subclasses match, full score
-        if not subclass_a and not subclass_b:
+        if not sub_a and not sub_b:
             return 1.0
-        if subclass_a and subclass_b:
-            sub_a = subclass_a.lower().strip()
-            sub_b = subclass_b.lower().strip()
+        if sub_a and sub_b:
             if sub_a == sub_b:
                 return 1.0
             # Same class, different subclass (e.g., sidewalk vs crosswalk)
