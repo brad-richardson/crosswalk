@@ -486,6 +486,7 @@ def render_single_pair_mode(pair, filtered, label_store, session):
     with col4:
         if st.button("↩️ Undo (Z)", disabled=len(session.undo_stack) == 0, use_container_width=True):
             undo_last_label(label_store)
+            reset_subsegment_state()
             st.rerun()
 
 

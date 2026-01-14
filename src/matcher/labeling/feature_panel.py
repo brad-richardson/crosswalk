@@ -320,6 +320,8 @@ def reset_subsegment_state() -> None:
     The slider values reset to defaults - if subsegment mode is active,
     the estimate will be auto-applied on the next render.
     """
+    # Ensure state is initialized before modifying
+    _init_subseg_state()
     # Preserve subseg_active - don't reset it
     st.session_state.subseg_ref_start = 0
     st.session_state.subseg_ref_end = 100
