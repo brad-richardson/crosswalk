@@ -197,14 +197,19 @@ def _normalize_street_name(name: str) -> str:
 def compute_class_similarity(
     class_a: Optional[str],
     class_b: Optional[str],
+    subclass_a: Optional[str] = None,
+    subclass_b: Optional[str] = None,
 ) -> float:
     """Compute road class similarity (0-1).
 
     Higher similarity for same or adjacent classes in the hierarchy.
+    When subclasses are provided, they affect the score for same-class pairs.
 
     Args:
         class_a: First road class
         class_b: Second road class
+        subclass_a: First subclass (e.g., sidewalk, crosswalk)
+        subclass_b: Second subclass
 
     Returns:
         Similarity score (0-1)
@@ -215,9 +220,24 @@ def compute_class_similarity(
     class_a = class_a.lower().strip()
     class_b = class_b.lower().strip()
 
-    # Exact match
+    # Treat "unknown" as neutral - don't penalize or reward
+    if class_a == "unknown" or class_b == "unknown":
+        return 0.5
+
+    # Exact class match - check subclass for finer distinction
     if class_a == class_b:
-        return 1.0
+        # If neither has subclass, or subclasses match, full score
+        if not subclass_a and not subclass_b:
+            return 1.0
+        if subclass_a and subclass_b:
+            sub_a = subclass_a.lower().strip()
+            sub_b = subclass_b.lower().strip()
+            if sub_a == sub_b:
+                return 1.0
+            # Same class, different subclass (e.g., sidewalk vs crosswalk)
+            return 0.85
+        # One has subclass, other doesn't - slight penalty
+        return 0.9
 
     # Get hierarchy ranks
     rank_a = ROAD_CLASS_HIERARCHY.get(class_a, 5)

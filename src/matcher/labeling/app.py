@@ -17,6 +17,33 @@ import streamlit.components.v1 as components
 # Config file for persisting settings like labeler name
 CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
+# Project root for resolving data paths (src/matcher/labeling -> project root)
+PROJECT_ROOT = Path(__file__).parents[3]
+
+# Available target datasets
+DATASETS = {
+    "boston_streets": {
+        "name": "Boston Streets",
+        "path": PROJECT_ROOT / "data/raw/boston_streets.parquet",
+        "labels": PROJECT_ROOT / "data/labels/labels_boston_streets.parquet",
+    },
+    "boston_bikes": {
+        "name": "Boston Bikes",
+        "path": PROJECT_ROOT / "data/raw/boston_bike_network.parquet",
+        "labels": PROJECT_ROOT / "data/labels/labels_boston_bikes.parquet",
+    },
+    "boston_sidewalks": {
+        "name": "Boston Sidewalks",
+        "path": PROJECT_ROOT / "data/raw/boston_sidewalks.parquet",
+        "labels": PROJECT_ROOT / "data/labels/labels_boston_sidewalks.parquet",
+    },
+    "osm": {
+        "name": "OSM Segments",
+        "path": PROJECT_ROOT / "data/raw/osm_segments.parquet",
+        "labels": PROJECT_ROOT / "data/labels/labels_osm.parquet",
+    },
+}
+
 
 def load_config() -> dict:
     """Load config from file."""
@@ -38,6 +65,7 @@ from matcher.labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
     generate_scored_candidates,
+    get_subsegment_estimate,
     load_geodataframe,
 )
 from matcher.labeling.comparison_view import render_comparison_view
@@ -59,6 +87,73 @@ from matcher.labeling.state import (
     set_decision_filter,
     set_labeler_name,
 )
+
+
+def get_data_paths() -> tuple[Path, Path, Path]:
+    """Get reference, target, and labels paths with env var precedence.
+
+    Returns:
+        Tuple of (reference_path, target_path, labels_path)
+    """
+    # Get selected dataset from session state or query params
+    default_dataset = st.query_params.get("dataset", "boston_streets")
+    selected = st.session_state.get("selected_dataset", default_dataset)
+
+    # Validate selection
+    if selected not in DATASETS:
+        selected = "boston_streets"
+
+    config = DATASETS[selected]
+
+    # Env vars override dropdown selection (for CLI compatibility)
+    reference_path = Path(os.environ.get(
+        "MATCHER_REFERENCE_PATH",
+        str(PROJECT_ROOT / "data/raw/overture_segments.parquet")
+    ))
+    target_path = Path(os.environ.get(
+        "MATCHER_TARGET_PATH",
+        str(config["path"])
+    ))
+    labels_path = Path(os.environ.get(
+        "MATCHER_LABELS_PATH",
+        str(config["labels"])
+    ))
+    return reference_path, target_path, labels_path
+
+
+def check_dataset_change() -> bool:
+    """Detect and handle dataset switching.
+
+    Returns:
+        True if dataset changed and state was reset, False otherwise
+    """
+    current = st.session_state.get("selected_dataset", "boston_streets")
+    previous = st.session_state.get("_last_dataset")
+
+    if previous is not None and previous != current:
+        # Clear data cache
+        st.session_state.pop("candidates", None)
+        st.session_state.pop("reference", None)
+        st.session_state.pop("target", None)
+        st.session_state.data_loaded = False
+
+        # Reset label store (CRITICAL: prevents cross-dataset label pollution)
+        st.session_state.label_store = None
+
+        # Reset navigation
+        st.session_state.current_index = 0
+
+        # Reset subsegment UI state
+        reset_subsegment_state()
+
+        # Reset undo stack
+        st.session_state.undo_stack = []
+
+        st.session_state._last_dataset = current
+        return True
+
+    st.session_state._last_dataset = current
+    return False
 
 
 def main():
@@ -94,35 +189,62 @@ def main():
     # Initialize state
     init_session_state()
 
-    # Get paths from environment or use defaults
-    reference_path = Path(os.environ.get(
-        "MATCHER_REFERENCE_PATH",
-        "data/raw/overture_segments.parquet"
-    ))
-    target_path = Path(os.environ.get(
-        "MATCHER_TARGET_PATH",
-        "data/raw/boston_streets.parquet"
-    ))
-    labels_path = Path(os.environ.get(
-        "MATCHER_LABELS_PATH",
-        "data/labels/labels.parquet"
-    ))
+    # Check for dataset change and reset state if needed
+    check_dataset_change()
+
+    # Get paths (respects env vars and dataset selection)
+    reference_path, target_path, labels_path = get_data_paths()
 
     # Initialize label store
     if st.session_state.label_store is None:
         st.session_state.label_store = LabelStore(labels_path)
 
     # Render UI
-    render_sidebar(reference_path, target_path)
+    render_sidebar(reference_path, target_path, labels_path)
     render_main_content()
 
 
-def render_sidebar(reference_path: Path, target_path: Path) -> None:
+def render_sidebar(reference_path: Path, target_path: Path, labels_path: Path) -> None:
     """Render the sidebar with controls and stats."""
     session = get_session()
 
     with st.sidebar:
         st.title("🛣️ Road Labeling")
+
+        # Dataset selector
+        st.subheader("Dataset")
+
+        # Get default from query params for persistence across refreshes
+        default_dataset = st.query_params.get("dataset", "boston_streets")
+        if default_dataset not in DATASETS:
+            default_dataset = "boston_streets"
+
+        dataset_keys = list(DATASETS.keys())
+        selected_dataset = st.selectbox(
+            "Target Dataset",
+            options=dataset_keys,
+            format_func=lambda k: DATASETS[k]["name"],
+            index=dataset_keys.index(default_dataset),
+            key="selected_dataset",
+        )
+
+        # Update query params for persistence
+        st.query_params["dataset"] = selected_dataset
+
+        # Show env var override indicator
+        if os.environ.get("MATCHER_TARGET_PATH"):
+            st.info("Using env var override")
+
+        # Warnings for file issues
+        dataset_config = DATASETS[selected_dataset]
+        if not dataset_config["path"].exists():
+            st.warning(f"Dataset not found: {dataset_config['path'].name}")
+
+        legacy_path = PROJECT_ROOT / "data/labels/labels.parquet"
+        if legacy_path.exists():
+            st.warning("Found legacy labels.parquet - rename to labels_boston_streets.parquet")
+
+        st.divider()
 
         # Session info
         st.subheader("Session")
@@ -409,8 +531,10 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 st.rerun()
 
     # Get subsegment state for map rendering (auto-applies estimate if needed)
+    # Compute subsegment estimate on-demand (deferred from bulk loading for performance)
+    estimated_subsegment = get_subsegment_estimate(pair)
     map_ref_start, map_ref_end, map_target_start, map_target_end, map_subseg_active = (
-        get_subseg_state(estimated_subsegment=pair.estimated_subsegment)
+        get_subseg_state(estimated_subsegment=estimated_subsegment)
     )
 
     # Main layout: map on left, features on right
@@ -448,7 +572,7 @@ def render_single_pair_mode(pair, filtered, label_store, session):
     # Sub-segment controls + action buttons at bottom
     ref_start, ref_end, target_start, target_end, subseg_active = (
         render_subsegment_controls(
-            pair, estimated_subsegment=pair.estimated_subsegment
+            pair, estimated_subsegment=estimated_subsegment
         )
     )
 
@@ -586,15 +710,6 @@ def load_data(reference_path: Path, target_path: Path) -> None:
     """Load reference and target data and generate candidates."""
     reference = load_geodataframe(reference_path)
     target = load_geodataframe(target_path)
-
-    # Filter out non-road classes from reference (sidewalks, paths, etc.)
-    non_road_classes = {'footway', 'steps', 'cycleway', 'pedestrian', 'path', 'track'}
-    if 'class' in reference.columns:
-        before_count = len(reference)
-        reference = reference[~reference['class'].isin(non_road_classes)].reset_index(drop=True)
-        filtered_count = before_count - len(reference)
-        if filtered_count > 0:
-            st.toast(f"Filtered {filtered_count} non-road features (footways, paths, etc.)")
 
     candidates = generate_scored_candidates(
         reference=reference,

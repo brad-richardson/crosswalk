@@ -22,13 +22,14 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 # Class mappings for standardization
 
 # MassDOT functional classification codes
+# Based on F_CLASS cross-reference: CLASS 3/4/5 were mismapped
 STREET_CLASS_MAPPING = {
-    1: "motorway",       # Interstate
+    1: "motorway",       # Interstate (not in Boston data)
     2: "primary",        # Principal arterial
-    3: "secondary",      # Minor arterial
-    4: "residential",    # Collector/local streets
-    5: "tertiary",       # Other
-    6: "service",        # Service roads
+    3: "primary",        # Also Principal arterial (79% are F_CLASS 3)
+    4: "tertiary",       # Major Collector (65% are F_CLASS 5)
+    5: "residential",    # Local/Minor Collector (83% F_CLASS 0/unknown)
+    6: "service",        # Service roads (not in Boston data)
 }
 
 # Sidewalk type codes -> Overture "footway" class
@@ -42,20 +43,34 @@ SIDEWALK_CLASS_MAPPING = {
     "Privatewalk centerline": "footway",
 }
 
+# Sidewalk type codes -> subclass (to match Overture schema)
+SIDEWALK_SUBCLASS_MAPPING = {
+    "SWALK-CL": "sidewalk",
+    "CWALK-CL": "crosswalk",
+    "CWALK-CL-UM": "crosswalk",  # Unmarked crosswalks
+    "PWALK-CL": "sidewalk",      # Private walkway -> sidewalk
+    "Sidewalk centerline": "sidewalk",
+    "Crosswalk centerline": "crosswalk",
+    "Privatewalk centerline": "sidewalk",
+}
+
 # Bike facility type codes -> Overture classes
+# Key distinction: facilities on road surface vs physically separated
 BIKE_CLASS_MAPPING = {
-    # Dedicated bike infrastructure -> cycleway
-    "BL": "cycleway",           # Bike lane
-    "BL-PEAKBUS": "cycleway",   # Bike lane (peak bus hours)
-    "BFBL": "cycleway",         # Buffered bike lane
-    "BLSL": "cycleway",         # Bike lane + shared lane (has dedicated component)
-    "CFBL": "cycleway",         # Contraflow bike lane
-    "SBL": "cycleway",          # Separated bike lane
+    # Physically separated infrastructure -> cycleway
+    "SBL": "cycleway",          # Separated bike lane (raised/curbed)
     "SBLBL": "cycleway",        # Separated + bike lane
-    "SBLSL": "cycleway",        # Separated + shared lane (has dedicated component)
+    "SBLSL": "cycleway",        # Separated + shared lane
     "CFSBL": "cycleway",        # Contraflow separated bike lane
-    "CFBS": "cycleway",         # Contraflow bike street
-    # Shared use paths -> path
+    # On-road painted facilities -> unknown (same surface as road)
+    # These may match to road segments, not cycleways
+    "BL": "unknown",            # Bike lane (painted on road)
+    "BL-PEAKBUS": "unknown",    # Bike lane (peak bus hours)
+    "BFBL": "unknown",          # Buffered bike lane (paint only)
+    "BLSL": "unknown",          # Bike lane + shared lane
+    "CFBL": "unknown",          # Contraflow bike lane (painted)
+    "CFBS": "unknown",          # Contraflow bike street
+    # Shared use paths -> path (separate from road)
     "SUP": "path",              # Shared use path
     "SUPN": "path",             # Natural surface shared use path
     "SUPM": "path",             # Minor shared use path
@@ -86,6 +101,8 @@ BOSTON_DATASETS = [
         "name_column": None,  # Sidewalks unnamed
         "class_column": "TYPE",
         "class_mapping": SIDEWALK_CLASS_MAPPING,
+        "subclass_column": "TYPE",
+        "subclass_mapping": SIDEWALK_SUBCLASS_MAPPING,
         "level_column": None,
         "source_name": "Boston Sidewalk Centerlines",
     },

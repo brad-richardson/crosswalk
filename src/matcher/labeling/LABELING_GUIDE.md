@@ -24,7 +24,7 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 - Focus on geometric alignment as the primary indicator
 - Name similarity helps but isn't required for a match
 - When in doubt, use "unsure" - better than mislabeling
-- Use keyboard shortcuts for speed (M, N, I, U, Z)
+- Use keyboard shortcuts for speed (M, N, U, Z)
 
 ---
 
@@ -80,13 +80,36 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 
 **Label:** `no_match`
 
-**Reasoning:** They're spatially related but not the same feature. For a binary match classifier, we want the model to reject these as non-matches. Teaching the model to distinguish parallel-but-different features (sidewalks, bike lanes, service roads) is valuable training signal.
-
-**Note:** The labeling app filters out non-road classes (footway, cycleway, pedestrian, path, steps, track) from Overture by default to reduce these cases.
+**Reasoning:** Sidewalks are physically separate features - different surface, different grade (raised curb). They warrant their own stable ID in Overture/OSM. Match sidewalks to footway segments, not roads.
 
 ---
 
-### 5. Same Name, Different Road
+### 5. Bike Lanes and Cycle Facilities
+
+**Core principle:** Would Overture/OSM create a new feature with a stable ID for this?
+
+| Facility Type | Same feature as road? | Label vs Road | Label vs Cycleway |
+|---------------|----------------------|---------------|-------------------|
+| Painted bike lane (sharrows, bike arrows) | Yes - same surface/grade | **match** | **no_match** |
+| Flexpost-separated lane (same pavement) | Yes - still same surface | **match** | **no_match** |
+| Buffered lane with paint only | Yes - same surface | **match** | **no_match** |
+| Raised/curbed bike lane | No - different grade | **no_match** | **match** |
+| Separated cycle track | No - physically separate | **no_match** | **match** |
+
+**How OSM models this:**
+- `cycleway=lane` → attribute on road way (same feature) → **match** to road
+- `highway=cycleway` → separate way (new feature) → **match** to cycleway
+
+**When facility type is unknown:**
+If you can't determine from the data or satellite whether a bike facility is painted (same surface) or separated (different surface), use **unsure**. This prevents polluting training data with incorrect class relationships.
+
+**Check satellite imagery** when possible:
+- Same asphalt, same grade → same feature as road → **match** to road
+- Raised, curbed, or separate surface → different feature → **match** to cycleway, **no_match** to road
+
+---
+
+### 6. Same Name, Different Road
 
 **Scenario:** Two segments share a name but are clearly different roads (e.g., two different "Main Street" segments in different locations).
 
@@ -96,7 +119,7 @@ The training data is imbalanced (86% match, only 1.5% no_match). To build a robu
 
 ---
 
-### 6. Different Names, Same Road
+### 7. Different Names, Same Road
 
 **Scenario:** Segments are clearly the same road but have different names (e.g., name missing in one dataset, or alternate name used).
 

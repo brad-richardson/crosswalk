@@ -109,6 +109,8 @@ def compute_match_score(
     target_name: Optional[str] = None,
     ref_class: Optional[str] = None,
     target_class: Optional[str] = None,
+    ref_subclass: Optional[str] = None,
+    target_subclass: Optional[str] = None,
     weights: dict[str, float] = None,
     buffer_radius: float = 10.0,
     distance_threshold: float = 50.0,
@@ -122,6 +124,8 @@ def compute_match_score(
         target_name: Target road name
         ref_class: Reference road class
         target_class: Target road class
+        ref_subclass: Reference subclass (e.g., sidewalk, crosswalk)
+        target_subclass: Target subclass
         weights: Feature weights (default if None)
         buffer_radius: Buffer radius for IoU calculation
         distance_threshold: Distance for normalization
@@ -136,7 +140,7 @@ def compute_match_score(
 
     # Compute semantic features
     name_sim = compute_name_similarity(ref_name, target_name)
-    class_sim = compute_class_similarity(ref_class, target_class)
+    class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
 
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
