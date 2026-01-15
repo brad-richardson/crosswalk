@@ -21,6 +21,8 @@ def fetch_arcgis_layer(
     name_column: Optional[str] = None,
     class_column: Optional[str] = None,
     class_mapping: Optional[dict] = None,
+    subclass_column: Optional[str] = None,
+    subclass_mapping: Optional[dict] = None,
     level_column: Optional[str] = None,
     source_name: str = "ArcGIS",
     page_size: int = 2000,
@@ -37,6 +39,8 @@ def fetch_arcgis_layer(
         name_column: Column name for feature names
         class_column: Column name for road classification
         class_mapping: Dict mapping source class values to standard classes
+        subclass_column: Column name for subclass (e.g., sidewalk vs crosswalk)
+        subclass_mapping: Dict mapping source values to subclass values
         level_column: Column name for z-level/layer
         source_name: Name for the data source in sources array
         page_size: Number of features per API request
@@ -65,6 +69,8 @@ def fetch_arcgis_layer(
         name_column=name_column,
         class_column=class_column,
         class_mapping=class_mapping,
+        subclass_column=subclass_column,
+        subclass_mapping=subclass_mapping,
         level_column=level_column,
         source_name=source_name,
     )
@@ -144,6 +150,8 @@ def _transform_to_overture_schema(
     name_column: Optional[str],
     class_column: Optional[str],
     class_mapping: Optional[dict],
+    subclass_column: Optional[str],
+    subclass_mapping: Optional[dict],
     level_column: Optional[str],
     source_name: str,
 ) -> gpd.GeoDataFrame:
@@ -155,6 +163,8 @@ def _transform_to_overture_schema(
         name_column: Column name for feature names
         class_column: Column name for road classification
         class_mapping: Dict mapping source values to standard classes
+        subclass_column: Column name for subclass
+        subclass_mapping: Dict mapping source values to subclass values
         level_column: Column name for z-level
         source_name: Name for the data source
 
@@ -198,6 +208,17 @@ def _transform_to_overture_schema(
 
     # Subtype (constant)
     data["subtype"] = ["road"] * len(gdf)
+
+    # Subclass with mapping (e.g., sidewalk vs crosswalk)
+    if subclass_column and subclass_column in gdf.columns:
+        if subclass_mapping:
+            data["subclass"] = (
+                gdf[subclass_column].map(subclass_mapping).values
+            )
+        else:
+            data["subclass"] = gdf[subclass_column].astype(str).values
+    else:
+        data["subclass"] = [None] * len(gdf)
 
     # Sources array
     data["sources"] = gdf[id_col].apply(

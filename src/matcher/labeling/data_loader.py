@@ -32,13 +32,9 @@ class CandidatePairView:
     confidence: float
     score_breakdown: dict[str, float]
     features: dict[str, float]
-    # Precomputed sub-segment estimate (for quick "Use Estimate" button)
-    estimated_subsegment: dict[str, float] = field(default_factory=lambda: {
-        "ref_start_pct": 0.0,
-        "ref_end_pct": 1.0,
-        "target_start_pct": 0.0,
-        "target_end_pct": 1.0,
-    })
+    # Sub-segment estimate - computed on-demand when viewing the pair
+    # None means not yet computed, dict contains the estimated ranges
+    estimated_subsegment: Optional[dict[str, float]] = None
 
 
 def _filter_linestrings(gdf: gpd.GeoDataFrame, source_name: str) -> gpd.GeoDataFrame:
@@ -151,34 +147,42 @@ def generate_scored_candidates(
     )
 
     # Build view models (use original WGS84 geometries for map display)
+    # Create index lookups for O(1) access (avoid O(n) DataFrame filtering per candidate)
+    # Note: If IDs are not unique, .loc returns DataFrame; we take first row
+    ref_lookup = reference.set_index(ref_id_column)
+    target_lookup = target.set_index(target_id_column)
+
+    # Pre-check column existence
+    has_ref_name = ref_name_column in reference.columns
+    has_target_name = target_name_column in target.columns
+    has_ref_class = ref_class_column in reference.columns
+    has_target_class = target_class_column in target.columns
+
+    def get_row(lookup, id_val):
+        """Get single row from lookup, handling duplicate IDs."""
+        row = lookup.loc[id_val]
+        # If duplicate IDs exist, .loc returns DataFrame - take first row
+        if hasattr(row, 'iloc'):
+            row = row.iloc[0]
+        return row
+
     views = []
     for result in results:
-        # Get geometries from original (unprojected) data
-        ref_row = reference[reference[ref_id_column] == result.ref_id].iloc[0]
-        target_row = target[target[target_id_column] == result.target_id].iloc[0]
+        # Get rows from indexed lookup (O(1) instead of O(n))
+        ref_row = get_row(ref_lookup, result.ref_id)
+        target_row = get_row(target_lookup, result.target_id)
 
         # Extract names
-        ref_name = None
-        target_name = None
-        if ref_name_column in reference.columns:
-            ref_name = _extract_name_string(ref_row.get(ref_name_column))
-        if target_name_column in target.columns:
-            target_name = _extract_name_string(target_row.get(target_name_column))
+        ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
+        target_name = _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
 
         # Extract classes
-        ref_class = None
-        target_class = None
-        if ref_class_column in reference.columns:
-            ref_class = ref_row.get(ref_class_column)
-        if target_class_column in target.columns:
-            target_class = target_row.get(target_class_column)
+        ref_class = ref_row.get(ref_class_column) if has_ref_class else None
+        target_class = target_row.get(target_class_column) if has_target_class else None
 
-        # Compute estimated sub-segment overlap
-        # Note: Using WGS84 geometries here - projection-based percentages
-        # work well enough for labeling purposes
-        # Non-LineStrings should have been filtered out above - if one gets
-        # through, estimate_overlap_range will raise
-        estimated = estimate_overlap_range(ref_row.geometry, target_row.geometry)
+        # Skip sub-segment estimation during bulk loading - compute on-demand
+        # when the pair is actually viewed in the UI
+        # estimated = estimate_overlap_range(ref_row.geometry, target_row.geometry)
 
         views.append(CandidatePairView(
             ref_id=str(result.ref_id),
@@ -193,7 +197,8 @@ def generate_scored_candidates(
             confidence=result.confidence,
             score_breakdown=result.score_breakdown,
             features=result.features,
-            estimated_subsegment=estimated,
+            # Defer subsegment estimation - computed on-demand when viewing
+            estimated_subsegment=None,
         ))
 
     # Sort: REVIEW first, then by confidence descending
@@ -204,6 +209,26 @@ def generate_scored_candidates(
     views.sort(key=sort_key)
 
     return views
+
+
+def get_subsegment_estimate(pair: CandidatePairView) -> dict[str, float]:
+    """Get or compute subsegment estimate for a candidate pair.
+
+    Computes on-demand if not already cached.
+
+    Args:
+        pair: The candidate pair
+
+    Returns:
+        Dict with ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
+    """
+    if pair.estimated_subsegment is not None:
+        return pair.estimated_subsegment
+
+    # Compute and cache
+    estimated = estimate_overlap_range(pair.ref_geometry, pair.target_geometry)
+    pair.estimated_subsegment = estimated
+    return estimated
 
 
 def filter_candidates(

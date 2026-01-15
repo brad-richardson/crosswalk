@@ -431,6 +431,8 @@ class MLMatcher:
         target_name_column: str = "names",
         ref_class_column: str = "class",
         target_class_column: str = "class",
+        ref_subclass_column: str = "subclass",
+        target_subclass_column: str = "subclass",
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
 
@@ -471,6 +473,8 @@ class MLMatcher:
             class_sim = compute_class_similarity(
                 ref_row.get(ref_class_column),
                 target_row.get(target_class_column),
+                ref_row.get(ref_subclass_column),
+                target_row.get(target_subclass_column),
             )
 
             features = {

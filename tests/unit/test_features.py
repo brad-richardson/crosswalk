@@ -135,6 +135,24 @@ class TestSemanticFeatures:
 
         assert result < 0.5
 
+    def test_class_similarity_same_class_same_subclass(self):
+        """Same class and subclass should return 1.0."""
+        result = compute_class_similarity("footway", "footway", "sidewalk", "sidewalk")
+
+        assert result == pytest.approx(1.0)
+
+    def test_class_similarity_same_class_different_subclass(self):
+        """Same class but different subclass should have slightly lower similarity."""
+        result = compute_class_similarity("footway", "footway", "sidewalk", "crosswalk")
+
+        assert result == pytest.approx(0.85)
+
+    def test_class_similarity_same_class_one_subclass_missing(self):
+        """Same class with one subclass missing should have slight penalty."""
+        result = compute_class_similarity("footway", "footway", "sidewalk", None)
+
+        assert result == pytest.approx(0.9)
+
     def test_names_likely_same_road(self):
         """Test quick name matching heuristic."""
         assert names_likely_same_road("Main Street", "Main St")

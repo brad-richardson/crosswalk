@@ -109,6 +109,8 @@ def compute_match_score(
     target_name: Optional[str] = None,
     ref_class: Optional[str] = None,
     target_class: Optional[str] = None,
+    ref_subclass: Optional[str] = None,
+    target_subclass: Optional[str] = None,
     weights: dict[str, float] = None,
     buffer_radius: float = 10.0,
     distance_threshold: float = 50.0,
@@ -122,6 +124,8 @@ def compute_match_score(
         target_name: Target road name
         ref_class: Reference road class
         target_class: Target road class
+        ref_subclass: Reference subclass (e.g., sidewalk, crosswalk)
+        target_subclass: Target subclass
         weights: Feature weights (default if None)
         buffer_radius: Buffer radius for IoU calculation
         distance_threshold: Distance for normalization
@@ -136,7 +140,7 @@ def compute_match_score(
 
     # Compute semantic features
     name_sim = compute_name_similarity(ref_name, target_name)
-    class_sim = compute_class_similarity(ref_class, target_class)
+    class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
 
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
@@ -208,6 +212,8 @@ def score_candidates(
     target_name_column: str = "name",
     ref_class_column: str = "class",
     target_class_column: str = "road_class",
+    ref_subclass_column: str = "subclass",
+    target_subclass_column: str = "subclass",
     weights: dict[str, float] = None,
 ) -> list[MatchResult]:
     """Score all candidate pairs.
@@ -220,6 +226,8 @@ def score_candidates(
         target_name_column: Name column in target
         ref_class_column: Class column in reference
         target_class_column: Class column in target
+        ref_subclass_column: Subclass column in reference
+        target_subclass_column: Subclass column in target
         weights: Feature weights
 
     Returns:
@@ -253,6 +261,16 @@ def score_candidates(
         if target_class_column in target.columns
         else [None] * len(target)
     )
+    ref_subclasses = (
+        reference[ref_subclass_column].values
+        if ref_subclass_column in reference.columns
+        else [None] * len(reference)
+    )
+    target_subclasses = (
+        target[target_subclass_column].values
+        if target_subclass_column in target.columns
+        else [None] * len(target)
+    )
 
     results = []
 
@@ -267,6 +285,8 @@ def score_candidates(
         target_name = target_names[cand.target_idx]
         ref_class = ref_classes[cand.ref_idx]
         target_class = target_classes[cand.target_idx]
+        ref_subclass = ref_subclasses[cand.ref_idx]
+        target_subclass = target_subclasses[cand.target_idx]
 
         # Handle NaN values using pandas for clarity
         if pd.isna(ref_name):
@@ -277,6 +297,10 @@ def score_candidates(
             ref_class = None
         if pd.isna(target_class):
             target_class = None
+        if pd.isna(ref_subclass):
+            ref_subclass = None
+        if pd.isna(target_subclass):
+            target_subclass = None
 
         # Compute score
         confidence, scores, features = compute_match_score(
@@ -286,6 +310,8 @@ def score_candidates(
             target_name=target_name,
             ref_class=ref_class,
             target_class=target_class,
+            ref_subclass=ref_subclass,
+            target_subclass=target_subclass,
             weights=weights,
         )
 

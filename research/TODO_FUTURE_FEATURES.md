@@ -135,3 +135,69 @@ Considerations:
 - Bike/sidewalk have different geometry patterns (narrower, more curves)
 - Often lack names entirely
 - May benefit from geometry-only model approach
+
+---
+
+## Graphlet Signature / Topology Features
+
+**Priority:** Medium-High (for sidewalk/bike matching)
+**Status:** Research needed
+
+### Problem
+
+Sidewalks on opposite sides of a street have nearly identical:
+- Geometry (parallel lines, same length)
+- Heading (same direction)
+- Class (both footway/sidewalk)
+- Name (if inherited from adjacent road)
+
+Current features cannot disambiguate between them. This leads to false positive matches where left-side sidewalk matches right-side sidewalk.
+
+### "Side of Street" as a Feature
+
+The key differentiator is **topological relationship to the road network**:
+- Left sidewalk is connected to road network from one side
+- Right sidewalk is connected from the opposite side
+- At intersections, they connect to different corners
+
+### Potential Approaches
+
+1. **Offset Direction from Road Centerline**
+   - For each sidewalk, find nearest road segment
+   - Compute perpendicular offset direction (left vs right of road)
+   - Encode as signed distance or binary left/right
+   - Challenge: Requires road network as context, not just segment pairs
+
+2. **Intersection Connectivity Signature**
+   - At endpoints, which other segments connect?
+   - Build a local "graphlet" (small subgraph pattern)
+   - Encode connectivity pattern as feature vector
+   - Same-side sidewalks connect to same intersection corners
+
+3. **Cross-Street Segment Detection**
+   - Look for perpendicular segments (crosswalks) that connect sidewalks
+   - Sidewalks connected by crosswalk are on opposite sides
+   - Could use as hard constraint in matching
+
+4. **Relative Position to Named Road**
+   - If sidewalk is associated with "Main St", compute offset
+   - Left-side = negative offset, right-side = positive offset
+   - Requires road-sidewalk association (from network or spatial proximity)
+
+5. **Bearing Delta to Nearest Road**
+   - Sidewalk heading vs road heading
+   - Plus perpendicular offset direction
+   - Combined gives unique "signature" for each side
+
+### Implementation Notes
+
+- May require loading road network as context during matching
+- Could be expensive to compute for all candidates
+- Consider computing only for high-confidence geometric matches that need disambiguation
+- Overture has `road_surface` and connector data that might help
+
+### Related Work
+
+- OSM models sidewalks with `sidewalk=left|right|both` on road ways
+- Some datasets associate sidewalks with their parent road via attributes
+- Graph neural networks for road network embedding (but may be overkill)
