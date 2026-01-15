@@ -25,7 +25,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from loguru import logger
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import cross_val_score, train_test_split
 
 from .rules import MatchDecision, MatchResult
@@ -46,6 +46,14 @@ FEATURE_COLUMNS = [
     "name_jaro_winkler",
     "name_token_sort",
     "class_similarity",
+]
+
+# Additional relational features (optional, for connectivity-aware matching)
+# Endpoint features help capture network topology without requiring explicit topology in target data
+RELATIONAL_FEATURE_COLUMNS = [
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
 ]
 
 
@@ -231,7 +239,7 @@ class MLMatcher:
                 target_names=target_names,
                 output_dict=True,
             ),
-            "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+            "confusion_matrix": sklearn_confusion_matrix(y_test, y_pred).tolist(),
             "feature_importance": dict(zip(self.feature_names, self.model.feature_importances_)),
         }
 
@@ -296,6 +304,11 @@ class MLMatcher:
                 if "buffer_iou" not in actual_features:
                     actual_features.append("buffer_iou")
 
+        # Add relational features if present in the data
+        for feat in RELATIONAL_FEATURE_COLUMNS:
+            if feat in df.columns:
+                actual_features.append(feat)
+
         # Remove duplicates while preserving order
         seen = set()
         unique_features = []
@@ -322,6 +335,20 @@ class MLMatcher:
         self, df: pd.DataFrame, binary: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract features from nested dict column."""
+        # Check if relational features are present in any row's feature dict
+        sample_features = df["features"].iloc[0] if len(df) > 0 else {}
+        has_relational = any(
+            feat in sample_features for feat in RELATIONAL_FEATURE_COLUMNS
+        ) if sample_features else False
+
+        # Build feature names list including relational if present
+        feature_names = self.feature_names.copy()
+        if has_relational:
+            for feat in RELATIONAL_FEATURE_COLUMNS:
+                if feat not in feature_names:
+                    feature_names.append(feat)
+            self.feature_names = feature_names
+
         feature_rows = []
 
         for _, row in df.iterrows():
@@ -433,6 +460,7 @@ class MLMatcher:
         target_class_column: str = "class",
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
+        spatial_context=None,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
 
@@ -440,6 +468,13 @@ class MLMatcher:
             candidates: List of CandidatePair objects
             reference: Reference GeoDataFrame
             target: Target GeoDataFrame
+            ref_name_column: Column name for reference names
+            target_name_column: Column name for target names
+            ref_class_column: Column name for reference class
+            target_class_column: Column name for target class
+            ref_subclass_column: Column name for reference subclass
+            target_subclass_column: Column name for target subclass
+            spatial_context: Optional SpatialContextIndex for endpoint features
 
         Returns:
             List of MatchResult objects
@@ -491,6 +526,17 @@ class MLMatcher:
                 "name_token_sort": name_sim["token_sort_ratio"],
                 "class_similarity": class_sim,
             }
+
+            # Add endpoint features if spatial context provided
+            if spatial_context is not None:
+                from ..features.spatial_context import compute_endpoint_features
+                ep_features = compute_endpoint_features(
+                    target_row.geometry,
+                    spatial_context,
+                    exclude_segment_idx=cand.target_idx,
+                )
+                features.update(ep_features)
+
             features_list.append(features)
 
         # Batch prediction
@@ -521,7 +567,6 @@ class MLMatcher:
 
         return results
 
-
 def train_model(
     labels_path: str = "data/labels/labels.parquet",
     output_path: str = "data/models/matcher_model.joblib",
@@ -542,4 +587,133 @@ def train_model(
     matcher = MLMatcher()
     results = matcher.train(labels_path=labels_path, binary=binary, **kwargs)
     matcher.save_model(output_path)
+    return results
+
+
+def evaluate_by_dataset(
+    model_path: str,
+    labels_dir: str = "data/labels",
+    binary: bool = True,
+    show_by_dataset: bool = True,
+) -> dict[str, dict[str, Any]]:
+    """Evaluate model performance broken down by dataset.
+
+    Loads all label files from the labels directory and evaluates
+    the model on each dataset separately.
+
+    Args:
+        model_path: Path to trained model
+        labels_dir: Directory containing label parquet files
+        binary: Evaluate as binary (match vs no_match)
+        show_by_dataset: If True, show per-dataset metrics; if False, only show overall
+
+    Returns:
+        Dictionary mapping dataset name to metrics dict
+    """
+    from sklearn.metrics import (
+        accuracy_score,
+        confusion_matrix,
+        f1_score,
+        precision_score,
+        recall_score,
+    )
+
+    # Load model
+    matcher = MLMatcher(model_path)
+
+    # Find all label files
+    labels_path = Path(labels_dir)
+    label_files = list(labels_path.glob("labels_*.parquet"))
+
+    if not label_files:
+        logger.warning(f"No label files found in {labels_dir}")
+        return {}
+
+    results = {}
+    all_y_true = []
+    all_y_pred = []
+
+    if show_by_dataset:
+        print("\n" + "=" * 60)
+        print("EVALUATION BY DATASET")
+        print("=" * 60)
+
+    for label_file in sorted(label_files):
+        # Extract dataset name from filename (e.g., labels_boston_streets.parquet -> boston_streets)
+        dataset_name = label_file.stem.replace("labels_", "")
+
+        # Load labels
+        df = pd.read_parquet(label_file)
+
+        # Filter to valid labels
+        valid_labels = {"match", "no_match", "associated"}
+        df = df[df["label"].isin(valid_labels)].copy()
+
+        if len(df) == 0:
+            logger.warning(f"No valid labels in {label_file}")
+            continue
+
+        # Extract features
+        X, y = matcher._extract_features_and_labels(df, binary=binary)
+
+        # Impute missing values
+        X = matcher._impute_missing(X)
+
+        # Predict
+        y_pred = matcher.model.predict(X)
+
+        # Compute metrics
+        accuracy = accuracy_score(y, y_pred)
+        f1 = f1_score(y, y_pred, average="weighted")
+        precision = precision_score(y, y_pred, average="weighted", zero_division=0)
+        recall = recall_score(y, y_pred, average="weighted", zero_division=0)
+
+        # Count labels
+        n_match = (y == 1).sum() if binary else (df["label"] == "match").sum()
+        n_no_match = (y == 0).sum() if binary else (df["label"] == "no_match").sum()
+
+        results[dataset_name] = {
+            "n_samples": len(df),
+            "n_match": int(n_match),
+            "n_no_match": int(n_no_match),
+            "accuracy": accuracy,
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "confusion_matrix": confusion_matrix(y, y_pred).tolist(),
+        }
+
+        # Accumulate for overall
+        all_y_true.extend(y)
+        all_y_pred.extend(y_pred)
+
+        # Print summary (only if showing by dataset)
+        if show_by_dataset:
+            print(f"\n{dataset_name}:")
+            print(f"  Samples: {len(df)} ({n_match} match, {n_no_match} no_match)")
+            print(f"  Accuracy: {accuracy:.3f}")
+            print(f"  F1: {f1:.3f}")
+            print(f"  Precision: {precision:.3f}")
+            print(f"  Recall: {recall:.3f}")
+
+    # Overall metrics
+    if all_y_true:
+        overall_accuracy = accuracy_score(all_y_true, all_y_pred)
+        overall_f1 = f1_score(all_y_true, all_y_pred, average="weighted")
+
+        if show_by_dataset:
+            print("\n" + "-" * 60)
+        else:
+            print("\n" + "=" * 60)
+        print("OVERALL:")
+        print(f"  Total samples: {len(all_y_true)}")
+        print(f"  Accuracy: {overall_accuracy:.3f}")
+        print(f"  F1: {overall_f1:.3f}")
+
+        results["_overall"] = {
+            "n_samples": len(all_y_true),
+            "accuracy": overall_accuracy,
+            "f1": overall_f1,
+        }
+
     return results
