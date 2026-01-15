@@ -311,6 +311,110 @@ def label(
 
 
 @app.command()
+def train(
+    labels: Path = typer.Option(
+        Path("data/labels"),
+        "--labels",
+        "-l",
+        help="Labels directory or parquet file",
+    ),
+    output: Path = typer.Option(
+        Path("data/models/matcher_model.joblib"),
+        "--output",
+        "-o",
+        help="Output path for trained model",
+    ),
+    combined: bool = typer.Option(
+        False,
+        "--combined",
+        "-c",
+        help="Combine all label files in directory for training",
+    ),
+):
+    """Train an ML model on labeled data.
+
+    Examples:
+        matcher train --labels data/labels/labels_boston_streets.parquet
+        matcher train --labels data/labels --combined -o data/models/combined.joblib
+    """
+    from .matching.ml import MLMatcher, train_model
+
+    import pandas as pd
+
+    labels_path = Path(labels)
+
+    if labels_path.is_dir() and combined:
+        # Combine all label files
+        console.print(f"[blue]Loading labels from {labels_path}...[/blue]")
+        label_files = list(labels_path.glob("labels_*.parquet"))
+        if not label_files:
+            console.print("[red]No label files found[/red]")
+            raise typer.Exit(1)
+
+        dfs = []
+        for f in label_files:
+            df = pd.read_parquet(f)
+            df["_source"] = f.stem
+            dfs.append(df)
+            console.print(f"  {f.name}: {len(df)} labels")
+
+        combined_df = pd.concat(dfs, ignore_index=True)
+        console.print(f"[green]Combined: {len(combined_df)} total labels[/green]")
+
+        # Save combined temporarily
+        temp_path = labels_path / "_combined_temp.parquet"
+        combined_df.to_parquet(temp_path)
+
+        try:
+            results = train_model(str(temp_path), str(output))
+        finally:
+            temp_path.unlink()  # Clean up temp file
+    else:
+        if labels_path.is_dir():
+            console.print("[red]Specify a parquet file or use --combined[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[blue]Training on {labels_path}...[/blue]")
+        results = train_model(str(labels_path), str(output))
+
+    console.print(f"\n[green]Model saved to {output}[/green]")
+
+
+@app.command("eval-model")
+def eval_model(
+    model: Path = typer.Argument(..., help="Path to trained model"),
+    labels_dir: Path = typer.Option(
+        Path("data/labels"),
+        "--labels",
+        "-l",
+        help="Labels directory for evaluation",
+    ),
+    by_dataset: bool = typer.Option(
+        True,
+        "--by-dataset/--overall",
+        help="Show metrics broken down by dataset",
+    ),
+):
+    """Evaluate ML model performance on labeled data.
+
+    Examples:
+        matcher eval-model data/models/matcher_model.joblib
+        matcher eval-model data/models/combined.joblib --labels data/labels
+    """
+    from .matching.ml import evaluate_by_dataset
+
+    if not model.exists():
+        console.print(f"[red]Model not found: {model}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Evaluating {model.name}...[/blue]")
+    results = evaluate_by_dataset(str(model), str(labels_dir))
+
+    if not results:
+        console.print("[yellow]No results - check labels directory[/yellow]")
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__

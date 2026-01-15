@@ -569,3 +569,119 @@ def train_model(
     results = matcher.train(labels_path=labels_path, binary=binary, **kwargs)
     matcher.save_model(output_path)
     return results
+
+
+def evaluate_by_dataset(
+    model_path: str,
+    labels_dir: str = "data/labels",
+    binary: bool = True,
+) -> dict[str, dict[str, Any]]:
+    """Evaluate model performance broken down by dataset.
+
+    Loads all label files from the labels directory and evaluates
+    the model on each dataset separately.
+
+    Args:
+        model_path: Path to trained model
+        labels_dir: Directory containing label parquet files
+        binary: Evaluate as binary (match vs no_match)
+
+    Returns:
+        Dictionary mapping dataset name to metrics dict
+    """
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+    # Load model
+    matcher = MLMatcher(model_path)
+
+    # Find all label files
+    labels_path = Path(labels_dir)
+    label_files = list(labels_path.glob("labels_*.parquet"))
+
+    if not label_files:
+        logger.warning(f"No label files found in {labels_dir}")
+        return {}
+
+    results = {}
+    all_y_true = []
+    all_y_pred = []
+
+    print("\n" + "=" * 60)
+    print("EVALUATION BY DATASET")
+    print("=" * 60)
+
+    for label_file in sorted(label_files):
+        # Extract dataset name from filename (e.g., labels_boston_streets.parquet -> boston_streets)
+        dataset_name = label_file.stem.replace("labels_", "")
+
+        # Load labels
+        df = pd.read_parquet(label_file)
+
+        # Filter to valid labels
+        valid_labels = {"match", "no_match", "associated"}
+        df = df[df["label"].isin(valid_labels)].copy()
+
+        if len(df) == 0:
+            logger.warning(f"No valid labels in {label_file}")
+            continue
+
+        # Extract features
+        X, y = matcher._extract_features_and_labels(df, binary=binary)
+
+        # Impute missing values
+        X = matcher._impute_missing(X)
+
+        # Predict
+        y_pred = matcher.model.predict(X)
+
+        # Compute metrics
+        accuracy = accuracy_score(y, y_pred)
+        f1 = f1_score(y, y_pred, average="weighted")
+        precision = precision_score(y, y_pred, average="weighted", zero_division=0)
+        recall = recall_score(y, y_pred, average="weighted", zero_division=0)
+
+        # Count labels
+        n_match = (y == 1).sum() if binary else (df["label"] == "match").sum()
+        n_no_match = (y == 0).sum() if binary else (df["label"] == "no_match").sum()
+
+        results[dataset_name] = {
+            "n_samples": len(df),
+            "n_match": int(n_match),
+            "n_no_match": int(n_no_match),
+            "accuracy": accuracy,
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "confusion_matrix": confusion_matrix(y, y_pred).tolist(),
+        }
+
+        # Accumulate for overall
+        all_y_true.extend(y)
+        all_y_pred.extend(y_pred)
+
+        # Print summary
+        print(f"\n{dataset_name}:")
+        print(f"  Samples: {len(df)} ({n_match} match, {n_no_match} no_match)")
+        print(f"  Accuracy: {accuracy:.3f}")
+        print(f"  F1: {f1:.3f}")
+        print(f"  Precision: {precision:.3f}")
+        print(f"  Recall: {recall:.3f}")
+
+    # Overall metrics
+    if all_y_true:
+        overall_accuracy = accuracy_score(all_y_true, all_y_pred)
+        overall_f1 = f1_score(all_y_true, all_y_pred, average="weighted")
+
+        print("\n" + "-" * 60)
+        print("OVERALL:")
+        print(f"  Total samples: {len(all_y_true)}")
+        print(f"  Accuracy: {overall_accuracy:.3f}")
+        print(f"  F1: {overall_f1:.3f}")
+
+        results["_overall"] = {
+            "n_samples": len(all_y_true),
+            "accuracy": overall_accuracy,
+            "f1": overall_f1,
+        }
+
+    return results

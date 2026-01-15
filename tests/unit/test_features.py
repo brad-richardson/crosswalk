@@ -26,7 +26,7 @@ class TestGeometricFeatures:
         features = compute_geometric_features(line, line)
 
         assert features.hausdorff_distance == pytest.approx(0.0)
-        assert features.frechet_distance == pytest.approx(0.0)
+        assert features.mean_hausdorff_distance == pytest.approx(0.0)
         assert features.buffer_iou == pytest.approx(1.0, abs=0.01)
         assert features.heading_delta == pytest.approx(0.0)
         assert features.length_ratio == pytest.approx(1.0)
