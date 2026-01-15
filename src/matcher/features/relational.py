@@ -25,7 +25,7 @@ Key Features:
    - neighbor_agreement: Score based on nearby match confidence
 """
 
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Union
 
 import numpy as np
 from shapely import LineString, MultiLineString, Point

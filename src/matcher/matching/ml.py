@@ -25,7 +25,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from loguru import logger
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import cross_val_score, train_test_split
 
 from .rules import MatchDecision, MatchResult
@@ -239,7 +239,7 @@ class MLMatcher:
                 target_names=target_names,
                 output_dict=True,
             ),
-            "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+            "confusion_matrix": sklearn_confusion_matrix(y_test, y_pred).tolist(),
             "feature_importance": dict(zip(self.feature_names, self.model.feature_importances_)),
         }
 
@@ -304,6 +304,11 @@ class MLMatcher:
                 if "buffer_iou" not in actual_features:
                     actual_features.append("buffer_iou")
 
+        # Add relational features if present in the data
+        for feat in RELATIONAL_FEATURE_COLUMNS:
+            if feat in df.columns:
+                actual_features.append(feat)
+
         # Remove duplicates while preserving order
         seen = set()
         unique_features = []
@@ -330,6 +335,20 @@ class MLMatcher:
         self, df: pd.DataFrame, binary: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract features from nested dict column."""
+        # Check if relational features are present in any row's feature dict
+        sample_features = df["features"].iloc[0] if len(df) > 0 else {}
+        has_relational = any(
+            feat in sample_features for feat in RELATIONAL_FEATURE_COLUMNS
+        ) if sample_features else False
+
+        # Build feature names list including relational if present
+        feature_names = self.feature_names.copy()
+        if has_relational:
+            for feat in RELATIONAL_FEATURE_COLUMNS:
+                if feat not in feature_names:
+                    feature_names.append(feat)
+            self.feature_names = feature_names
+
         feature_rows = []
 
         for _, row in df.iterrows():
@@ -575,6 +594,7 @@ def evaluate_by_dataset(
     model_path: str,
     labels_dir: str = "data/labels",
     binary: bool = True,
+    show_by_dataset: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate model performance broken down by dataset.
 
@@ -585,11 +605,18 @@ def evaluate_by_dataset(
         model_path: Path to trained model
         labels_dir: Directory containing label parquet files
         binary: Evaluate as binary (match vs no_match)
+        show_by_dataset: If True, show per-dataset metrics; if False, only show overall
 
     Returns:
         Dictionary mapping dataset name to metrics dict
     """
-    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    from sklearn.metrics import (
+        accuracy_score,
+        confusion_matrix,
+        f1_score,
+        precision_score,
+        recall_score,
+    )
 
     # Load model
     matcher = MLMatcher(model_path)
@@ -606,9 +633,10 @@ def evaluate_by_dataset(
     all_y_true = []
     all_y_pred = []
 
-    print("\n" + "=" * 60)
-    print("EVALUATION BY DATASET")
-    print("=" * 60)
+    if show_by_dataset:
+        print("\n" + "=" * 60)
+        print("EVALUATION BY DATASET")
+        print("=" * 60)
 
     for label_file in sorted(label_files):
         # Extract dataset name from filename (e.g., labels_boston_streets.parquet -> boston_streets)
@@ -659,20 +687,24 @@ def evaluate_by_dataset(
         all_y_true.extend(y)
         all_y_pred.extend(y_pred)
 
-        # Print summary
-        print(f"\n{dataset_name}:")
-        print(f"  Samples: {len(df)} ({n_match} match, {n_no_match} no_match)")
-        print(f"  Accuracy: {accuracy:.3f}")
-        print(f"  F1: {f1:.3f}")
-        print(f"  Precision: {precision:.3f}")
-        print(f"  Recall: {recall:.3f}")
+        # Print summary (only if showing by dataset)
+        if show_by_dataset:
+            print(f"\n{dataset_name}:")
+            print(f"  Samples: {len(df)} ({n_match} match, {n_no_match} no_match)")
+            print(f"  Accuracy: {accuracy:.3f}")
+            print(f"  F1: {f1:.3f}")
+            print(f"  Precision: {precision:.3f}")
+            print(f"  Recall: {recall:.3f}")
 
     # Overall metrics
     if all_y_true:
         overall_accuracy = accuracy_score(all_y_true, all_y_pred)
         overall_f1 = f1_score(all_y_true, all_y_pred, average="weighted")
 
-        print("\n" + "-" * 60)
+        if show_by_dataset:
+            print("\n" + "-" * 60)
+        else:
+            print("\n" + "=" * 60)
         print("OVERALL:")
         print(f"  Total samples: {len(all_y_true)}")
         print(f"  Accuracy: {overall_accuracy:.3f}")

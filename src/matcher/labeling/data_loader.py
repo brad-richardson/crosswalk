@@ -162,14 +162,10 @@ def generate_scored_candidates(
         """Get single row from lookup, handling duplicate IDs and single-column DataFrames."""
         # Use [[id_val]] to always get a DataFrame, then take first row as Series
         # This handles: duplicate IDs, single-column DataFrames (where .loc returns scalar)
-        try:
-            row = lookup.loc[[id_val]].iloc[0]
-        except KeyError:
-            # Fallback for edge cases
-            row = lookup.loc[id_val]
-            if hasattr(row, 'iloc'):
-                row = row.iloc[0]
-        return row
+        result = lookup.loc[[id_val]]
+        if len(result) == 0:
+            raise KeyError(f"ID {id_val} not found in lookup")
+        return result.iloc[0]
 
     views = []
     for result in results:

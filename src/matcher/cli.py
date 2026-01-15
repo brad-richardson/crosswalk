@@ -366,7 +366,7 @@ def train(
         combined_df.to_parquet(temp_path)
 
         try:
-            results = train_model(str(temp_path), str(output))
+            train_model(str(temp_path), str(output))
         finally:
             temp_path.unlink()  # Clean up temp file
     else:
@@ -375,7 +375,7 @@ def train(
             raise typer.Exit(1)
 
         console.print(f"[blue]Training on {labels_path}...[/blue]")
-        results = train_model(str(labels_path), str(output))
+        train_model(str(labels_path), str(output))
 
     console.print(f"\n[green]Model saved to {output}[/green]")
 
@@ -408,10 +408,9 @@ def eval_model(
         raise typer.Exit(1)
 
     console.print(f"[blue]Evaluating {model.name}...[/blue]")
-    results = evaluate_by_dataset(str(model), str(labels_dir))
+    evaluate_by_dataset(str(model), str(labels_dir), show_by_dataset=by_dataset)
 
-    if not results:
-        console.print("[yellow]No results - check labels directory[/yellow]")
+    console.print("[green]Evaluation complete[/green]")
 
 
 @app.command()

@@ -447,9 +447,20 @@ def compute_endpoint_features(
             "shared_endpoint_count": 0,
         }
 
-    coords = np.array(target_geom.coords)
-    start_point = Point(coords[0])
-    end_point = Point(coords[-1])
+    # Handle both LineString and MultiLineString
+    if target_geom.geom_type == 'MultiLineString':
+        if len(target_geom.geoms) == 0:
+            return {
+                "start_endpoint_proximity": float("inf"),
+                "end_endpoint_proximity": float("inf"),
+                "shared_endpoint_count": 0,
+            }
+        start_point = Point(target_geom.geoms[0].coords[0])
+        end_point = Point(target_geom.geoms[-1].coords[-1])
+    else:
+        coords = np.array(target_geom.coords)
+        start_point = Point(coords[0])
+        end_point = Point(coords[-1])
 
     # Query nearby endpoints
     start_nearby = context.query_nearby_endpoints(start_point, tolerance * 2)
