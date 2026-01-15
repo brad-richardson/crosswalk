@@ -48,6 +48,14 @@ FEATURE_COLUMNS = [
     "class_similarity",
 ]
 
+# Additional relational features (optional, for connectivity-aware matching)
+# Endpoint features help capture network topology without requiring explicit topology in target data
+RELATIONAL_FEATURE_COLUMNS = [
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
+]
+
 
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
@@ -433,6 +441,7 @@ class MLMatcher:
         target_class_column: str = "class",
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
+        spatial_context=None,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
 
@@ -440,6 +449,13 @@ class MLMatcher:
             candidates: List of CandidatePair objects
             reference: Reference GeoDataFrame
             target: Target GeoDataFrame
+            ref_name_column: Column name for reference names
+            target_name_column: Column name for target names
+            ref_class_column: Column name for reference class
+            target_class_column: Column name for target class
+            ref_subclass_column: Column name for reference subclass
+            target_subclass_column: Column name for target subclass
+            spatial_context: Optional SpatialContextIndex for endpoint features
 
         Returns:
             List of MatchResult objects
@@ -491,6 +507,17 @@ class MLMatcher:
                 "name_token_sort": name_sim["token_sort_ratio"],
                 "class_similarity": class_sim,
             }
+
+            # Add endpoint features if spatial context provided
+            if spatial_context is not None:
+                from ..features.spatial_context import compute_endpoint_features
+                ep_features = compute_endpoint_features(
+                    target_row.geometry,
+                    spatial_context,
+                    exclude_segment_idx=cand.target_idx,
+                )
+                features.update(ep_features)
+
             features_list.append(features)
 
         # Batch prediction
@@ -520,7 +547,6 @@ class MLMatcher:
             ))
 
         return results
-
 
 def train_model(
     labels_path: str = "data/labels/labels.parquet",

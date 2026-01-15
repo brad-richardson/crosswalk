@@ -159,11 +159,16 @@ def generate_scored_candidates(
     has_target_class = target_class_column in target.columns
 
     def get_row(lookup, id_val):
-        """Get single row from lookup, handling duplicate IDs."""
-        row = lookup.loc[id_val]
-        # If duplicate IDs exist, .loc returns DataFrame - take first row
-        if hasattr(row, 'iloc'):
-            row = row.iloc[0]
+        """Get single row from lookup, handling duplicate IDs and single-column DataFrames."""
+        # Use [[id_val]] to always get a DataFrame, then take first row as Series
+        # This handles: duplicate IDs, single-column DataFrames (where .loc returns scalar)
+        try:
+            row = lookup.loc[[id_val]].iloc[0]
+        except KeyError:
+            # Fallback for edge cases
+            row = lookup.loc[id_val]
+            if hasattr(row, 'iloc'):
+                row = row.iloc[0]
         return row
 
     views = []

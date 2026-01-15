@@ -95,6 +95,24 @@ class MatcherSettings(BaseSettings):
             raise ValueError(f"matching_weights must sum to 1.0, got {total:.4f}")
         return v
 
+    # Relational feature settings
+    anchor_search_radius: float = Field(
+        default=30.0,
+        description="Max distance to search for anchor road (meters)",
+    )
+    anchor_min_alignment: float = Field(
+        default=0.7,
+        description="Minimum parallel alignment to consider as anchor (0-1)",
+    )
+    endpoint_snap_tolerance: float = Field(
+        default=5.0,
+        description="Tolerance for considering endpoints connected (meters)",
+    )
+    neighbor_context_radius: float = Field(
+        default=100.0,
+        description="Radius for finding neighboring segments for context propagation (meters)",
+    )
+
     # CRS settings
     default_crs: str = Field(
         default="EPSG:4326",
