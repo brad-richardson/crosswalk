@@ -8,7 +8,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..matching import MatchDecision, compute_match_score, optimize_matches
+from ..matching import MatchDecision, compute_match_score, optimize_matches, optimize_with_one_to_many
 from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
 
@@ -38,7 +38,10 @@ def run_pipeline(
     target_path: Path,
     output_path: Path,
     method: str = "rule",
-    buffer_distance: float = 50.0,
+    buffer_distance: float = 75.0,
+    max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
+    max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
+    min_confidence: float = 0.1,  # Lower = more aggressive matching
     progress_callback: Optional[Callable[[int], None]] = None,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
@@ -134,6 +137,8 @@ def run_pipeline(
         reference=reference,
         target=target,
         buffer_distance=buffer_distance,
+        max_heading_diff=max_heading_diff,
+        max_length_ratio=max_length_ratio,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )
@@ -188,17 +193,33 @@ def run_pipeline(
     elif method == "xgboost":
         from ..matching.ml import MLMatcher
 
-        matcher = MLMatcher()
-        results = matcher.score_candidates(candidates, reference, target)
+        # Load trained model from default location (combined model for better generalization)
+        model_path = "data/models/matcher_model_combined.joblib"
+        matcher = MLMatcher(model_path=model_path)
+        results = matcher.score_candidates(
+            candidates, reference, target,
+            ref_name_column=ref_name_column,
+            target_name_column=target_name_column,
+            ref_class_column=ref_class_column,
+            target_class_column=target_class_column,
+        )
     else:
         raise ValueError(f"Unknown method: {method}")
 
     if progress_callback:
         progress_callback(70)
 
-    # Step 4: Optimize matches (resolve conflicts)
-    logger.info("Step 4: Optimizing matches...")
-    optimized = optimize_matches(results)
+    # Step 4: Optimize matches with 1:N support (resolve conflicts)
+    # 1:N matching allows multiple contiguous target segments to match the same reference
+    # This handles different segmentation schemes between datasets
+    logger.info(f"Step 4: Optimizing matches with 1:N support (min_confidence={min_confidence})...")
+    optimized = optimize_with_one_to_many(
+        results,
+        target,
+        min_confidence=min_confidence,
+        contiguity_tolerance=5.0,  # Segments within 5m are considered contiguous
+        target_id_column=target_id_column,
+    )
 
     if progress_callback:
         progress_callback(85)

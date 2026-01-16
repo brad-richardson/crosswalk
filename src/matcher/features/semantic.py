@@ -61,6 +61,18 @@ STREET_ABBREVIATIONS = {
 }
 
 
+# Default result when names are missing - neutral scores
+_MISSING_NAMES_RESULT = {
+    "levenshtein_ratio": 0.5,
+    "jaro_winkler": 0.5,
+    "token_sort_ratio": 0.5,
+    "token_set_ratio": 0.5,
+    "partial_ratio": 0.5,
+    "names_match": False,
+    "names_missing": True,
+}
+
+
 def _extract_name_string(name) -> Optional[str]:
     """Extract string from name, handling dict format.
 
@@ -118,29 +130,18 @@ def compute_name_similarity(
     name_b = _extract_name_string(name_b)
 
     if not name_a or not name_b:
-        return {
-            "levenshtein_ratio": 0.0,
-            "jaro_winkler": 0.0,
-            "token_sort_ratio": 0.0,
-            "token_set_ratio": 0.0,
-            "partial_ratio": 0.0,
-            "names_match": False,
-        }
+        # Return neutral scores when names are missing
+        # This prevents penalizing valid geometric matches just because
+        # one dataset doesn't have name data for this segment
+        return _MISSING_NAMES_RESULT.copy()
 
     # Normalize names
     norm_a = _normalize_street_name(name_a)
     norm_b = _normalize_street_name(name_b)
 
-    # Handle empty after normalization
+    # Handle empty after normalization (e.g., name was just punctuation)
     if not norm_a or not norm_b:
-        return {
-            "levenshtein_ratio": 0.0,
-            "jaro_winkler": 0.0,
-            "token_sort_ratio": 0.0,
-            "token_set_ratio": 0.0,
-            "partial_ratio": 0.0,
-            "names_match": False,
-        }
+        return _MISSING_NAMES_RESULT.copy()
 
     # Compute various similarity metrics
     levenshtein_ratio = fuzz.ratio(norm_a, norm_b) / 100.0
@@ -163,6 +164,7 @@ def compute_name_similarity(
         "token_set_ratio": token_set_ratio,
         "partial_ratio": partial_ratio,
         "names_match": names_match,
+        "names_missing": False,
     }
 
 

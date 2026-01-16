@@ -76,22 +76,23 @@ def generate_candidates(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
     buffer_distance: float = None,
-    max_heading_diff: float = None,
-    max_length_ratio: float = None,
+    max_heading_diff: float = None,  # Kept for API compatibility, not used for filtering
+    max_length_ratio: float = None,  # Kept for API compatibility, not used for filtering
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> list[CandidatePair]:
     """Generate candidate pairs using vectorized spatial join.
 
-    Uses gpd.sjoin for efficient spatial joining, then applies vectorized
-    heading and length filters.
+    Uses gpd.sjoin for efficient spatial joining. Heading and length ratio
+    are computed for use as ML features but NOT used as blocking filters,
+    since different segmentation schemes make them unreliable for filtering.
 
     Args:
         reference: Reference edges (Overture) GeoDataFrame
         target: Target edges (local data) GeoDataFrame
         buffer_distance: Search radius in meters
-        max_heading_diff: Maximum heading difference to consider (degrees)
-        max_length_ratio: Maximum length ratio to consider
+        max_heading_diff: Deprecated - not used for filtering (ML model handles scoring)
+        max_length_ratio: Deprecated - not used for filtering (ML model handles scoring)
         ref_id_column: Column name for reference IDs
         target_id_column: Column name for target IDs
 
@@ -99,15 +100,13 @@ def generate_candidates(
         List of CandidatePair objects
     """
     buffer_distance = buffer_distance or settings.buffer_distance
-    max_heading_diff = max_heading_diff or settings.max_heading_diff
-    max_length_ratio = max_length_ratio or settings.max_length_ratio
+    # Note: heading/length params kept for API compatibility but not used
 
     logger.info(
         f"Generating candidates: {len(reference)} reference x {len(target)} target"
     )
     logger.info(f"  buffer_distance: {buffer_distance}m")
-    logger.info(f"  max_heading_diff: {max_heading_diff}°")
-    logger.info(f"  max_length_ratio: {max_length_ratio}")
+    logger.info(f"  Note: heading/length filters disabled - ML model handles scoring")
 
     # Prepare target with buffer geometry and pre-computed attributes
     target_prep = target.copy()
@@ -148,26 +147,24 @@ def generate_candidates(
     if len(joined) == 0:
         return []
 
-    # Vectorized heading filter
+    # Compute heading and length ratio for use as CandidatePair attributes
+    # (used by ML model as features, not as blocking filters)
     heading_diff = _angle_diff_vectorized(
         joined["_target_heading"].values,
         joined["_ref_heading"].values,
     )
-    heading_mask = heading_diff <= max_heading_diff
 
-    # Vectorized length ratio filter
     min_len = np.minimum(joined["_target_length"].values, joined["_ref_length"].values)
     max_len = np.maximum(joined["_target_length"].values, joined["_ref_length"].values)
     length_ratio = max_len / np.maximum(min_len, 0.1)
-    length_mask = length_ratio <= max_length_ratio
 
-    # Apply filters
-    mask = heading_mask & length_mask
-    joined_filtered = joined[mask].copy()
-    heading_diff_filtered = heading_diff[mask]
-    length_ratio_filtered = length_ratio[mask]
+    # No blocking filters - spatial proximity is sufficient for candidate generation
+    # The ML model will use heading_diff and length_ratio as scoring features
+    joined_filtered = joined
+    heading_diff_filtered = heading_diff
+    length_ratio_filtered = length_ratio
 
-    logger.info(f"  After filtering: {len(joined_filtered)} candidates")
+    logger.info(f"  After spatial join: {len(joined_filtered)} candidates")
 
     if len(joined_filtered) == 0:
         return []
@@ -200,23 +197,22 @@ def generate_candidates_iter(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
     buffer_distance: float = None,
-    max_heading_diff: float = None,
-    max_length_ratio: float = None,
+    max_heading_diff: float = None,  # Kept for API compatibility, not used
+    max_length_ratio: float = None,  # Kept for API compatibility, not used
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> Iterator[CandidatePair]:
     """Iterator version of generate_candidates for memory efficiency.
 
     Yields candidate pairs one at a time instead of building full list.
+    Like generate_candidates, only uses spatial proximity for filtering.
     """
     buffer_distance = buffer_distance or settings.buffer_distance
-    max_heading_diff = max_heading_diff or settings.max_heading_diff
-    max_length_ratio = max_length_ratio or settings.max_length_ratio
 
     # Build spatial index on reference
     ref_tree = STRtree(reference.geometry.values)
 
-    # Pre-compute headings
+    # Pre-compute headings for feature computation (not filtering)
     ref_headings = reference.geometry.apply(_compute_overall_heading)
 
     for target_idx in range(len(target)):
@@ -230,7 +226,7 @@ def generate_candidates_iter(
         else:
             target_id = target_idx
 
-        # Buffer query
+        # Buffer query - only spatial filtering
         buffered = target_geom.buffer(buffer_distance)
         candidate_indices = ref_tree.query(buffered)
 
@@ -244,16 +240,11 @@ def generate_candidates_iter(
             else:
                 ref_id = ref_idx
 
-            # Coarse filters
+            # Compute heading and length for ML features (not filtering)
             heading_diff = _angle_diff(target_heading, ref_heading)
-            if heading_diff > max_heading_diff:
-                continue
-
             length_ratio = (
                 max(target_length, ref_length) / max(min(target_length, ref_length), 0.1)
             )
-            if length_ratio > max_length_ratio:
-                continue
 
             distance_estimate = target_geom.centroid.distance(ref_row.geometry.centroid)
 

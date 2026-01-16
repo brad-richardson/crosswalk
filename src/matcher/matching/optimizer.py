@@ -314,23 +314,8 @@ def resolve_one_to_many(
                         individual_confidences=[m.confidence for m in group],
                     )
                     one_to_many.append(multi_match)
-
-                    # Also add individual results with updated match_type
-                    for m in group:
-                        # Create a copy with match_type annotation in features
-                        updated_features = dict(m.features) if m.features else {}
-                        updated_features["match_type"] = "1:N"
-                        updated_features["group_size"] = len(group)
-                        one_to_one.append(
-                            MatchResult(
-                                ref_id=m.ref_id,
-                                target_id=m.target_id,
-                                decision=m.decision,
-                                confidence=m.confidence,
-                                score_breakdown=m.score_breakdown,
-                                features=updated_features,
-                            )
-                        )
+                    # Note: Individual 1:N matches are NOT added to one_to_one here.
+                    # They're handled by optimize_with_one_to_many() to avoid duplicates.
 
     logger.info(f"  Resolved to {len(one_to_one)} individual matches, {len(one_to_many)} 1:N groups")
     return one_to_one, one_to_many
@@ -361,9 +346,19 @@ def _find_contiguous_groups(
     for m in matches:
         if m.target_id in target_geoms:
             geom = target_geoms[m.target_id]
-            coords = list(geom.coords)
-            if len(coords) >= 2:
-                endpoints[m.target_id] = (Point(coords[0]), Point(coords[-1]))
+            # Handle both LineString and MultiLineString
+            if geom.geom_type == "MultiLineString":
+                # For MultiLineString, get first point of first part and last point of last part
+                first_part = geom.geoms[0]
+                last_part = geom.geoms[-1]
+                first_coords = list(first_part.coords)
+                last_coords = list(last_part.coords)
+                if first_coords and last_coords:
+                    endpoints[m.target_id] = (Point(first_coords[0]), Point(last_coords[-1]))
+            elif geom.geom_type == "LineString":
+                coords = list(geom.coords)
+                if len(coords) >= 2:
+                    endpoints[m.target_id] = (Point(coords[0]), Point(coords[-1]))
 
     # Build adjacency based on endpoint proximity
     n = len(matches)
@@ -445,25 +440,19 @@ def optimize_with_one_to_many(
         List of optimized MatchResult objects
     """
     # First pass: identify and resolve 1:N matches
+    # individual_matches contains only 1:1 matches (single matches per reference)
+    # multi_matches contains 1:N groups
     individual_matches, multi_matches = resolve_one_to_many(
         results, target, min_confidence, contiguity_tolerance, target_id_column
     )
 
-    # Track targets already assigned in 1:N groups
-    assigned_targets = set()
-    for mm in multi_matches:
-        assigned_targets.update(mm.target_ids)
-
-    # Filter out targets that are part of 1:N matches
-    remaining = [m for m in individual_matches if m.target_id not in assigned_targets]
-
-    # Run Hungarian algorithm on remaining conflicts
-    if remaining:
-        optimized = optimize_matches(remaining, min_confidence)
+    # Run Hungarian algorithm on 1:1 matches to resolve remaining conflicts
+    if individual_matches:
+        optimized = optimize_matches(individual_matches, min_confidence)
     else:
         optimized = []
 
-    # Add back the 1:N matches as individual results
+    # Add the 1:N matches as individual results
     for mm in multi_matches:
         for i, tid in enumerate(mm.target_ids):
             optimized.append(
