@@ -414,6 +414,189 @@ def eval_model(
 
 
 @app.command()
+def integrate(
+    reference: Path = typer.Argument(
+        ...,
+        help="Reference edges (Overture segments parquet)",
+    ),
+    target: list[str] = typer.Option(
+        ...,
+        "--target",
+        "-t",
+        help="Target dataset: name:bridge_path:unmatched_path:priority (can specify multiple)",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/integrated"),
+        "--output",
+        "-o",
+        help="Output directory",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="YAML config file (alternative to --target options)",
+    ),
+    overlap_threshold: float = typer.Option(
+        0.8,
+        "--overlap-threshold",
+        help="IoU threshold for overlap detection",
+    ),
+    min_length: float = typer.Option(
+        3.0,
+        "--min-length",
+        help="Minimum segment length to include (meters)",
+    ),
+):
+    """Integrate unmatched segments into reference network.
+
+    Takes the output of the matching pipeline and creates a unified
+    planarized network, flagging disconnected orphan components for QA.
+
+    Examples:
+        # Single dataset
+        matcher integrate data/raw/overture.parquet \\
+            -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \\
+            -o data/integrated
+
+        # Multiple datasets with priority
+        matcher integrate data/raw/overture.parquet \\
+            -t boston_streets:data/boston_streets/bridge.parquet:data/boston_streets/unmatched.parquet:1 \\
+            -t boston_bikes:data/boston_bikes/bridge.parquet:data/boston_bikes/unmatched.parquet:2 \\
+            -o data/integrated
+
+        # From config file
+        matcher integrate data/raw/overture.parquet -c integration_config.yaml -o data/integrated
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from .integration import TargetConfig, run_integration_from_config, run_integration_pipeline
+
+    if config:
+        # Use config file
+        console.print(f"[blue]Running integration from config: {config}[/blue]")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Integrating...", total=None)
+            result = run_integration_from_config(config, output_dir)
+            progress.update(task, completed=True)
+    else:
+        # Parse target options
+        target_configs = []
+        for t in target:
+            parts = t.split(":")
+            if len(parts) != 4:
+                console.print(
+                    f"[red]Error: Target must be name:bridge_path:unmatched_path:priority[/red]"
+                )
+                raise typer.Exit(1)
+
+            name, bridge_path, unmatched_path, priority = parts
+            target_configs.append(
+                TargetConfig(
+                    name=name,
+                    bridge_path=Path(bridge_path),
+                    unmatched_path=Path(unmatched_path),
+                    priority=int(priority),
+                )
+            )
+
+        console.print("[blue]Running integration pipeline...[/blue]")
+        console.print(f"  Reference: {reference}")
+        console.print(f"  Targets: {len(target_configs)}")
+        for tc in target_configs:
+            console.print(f"    - {tc.name} (priority {tc.priority})")
+        console.print(f"  Output: {output_dir}")
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Integrating...", total=None)
+            result = run_integration_pipeline(
+                reference_path=reference,
+                target_configs=target_configs,
+                output_dir=output_dir,
+                overlap_iou_threshold=overlap_threshold,
+                min_segment_length=min_length,
+            )
+            progress.update(task, completed=True)
+
+    # Print summary
+    stats = result.statistics
+    console.print()
+    console.print("[green]Integration complete![/green]")
+    console.print(f"  Reference edges: {stats.reference_edges}")
+    console.print(f"  Target edges (matched): {stats.target_edges_matched}")
+    console.print(f"  Target edges (unmatched): {stats.target_edges_unmatched}")
+    console.print(f"  Dropped overlaps: {stats.dropped_overlaps}")
+    console.print(f"  Total nodes: {stats.total_nodes}")
+    console.print(f"  Total edges: {stats.total_edges}")
+    console.print(f"  Main component edges: {stats.main_component_edges}")
+    console.print(f"  Orphan edges: {stats.orphan_edges}")
+    console.print(f"  Orphan components: {stats.orphan_components}")
+    console.print()
+    console.print(f"[green]Outputs saved to {output_dir}[/green]")
+
+
+@app.command("qa-integration")
+def qa_integration(
+    output_dir: Path = typer.Option(
+        Path("data/integrated"),
+        "--output",
+        "-o",
+        help="Integration output directory",
+    ),
+    port: int = typer.Option(
+        8502,
+        "--port",
+        "-p",
+        help="Streamlit server port",
+    ),
+):
+    """Launch the integration QA app.
+
+    Review orphan components and merged edges from the integration pipeline.
+
+    Example:
+        matcher qa-integration -o data/integrated
+    """
+    import os
+    import subprocess
+    import sys
+
+    # Set environment variables
+    env = {
+        **os.environ,
+        "INTEGRATION_DIR": str(output_dir.absolute()),
+    }
+
+    # Find the app.py path
+    app_path = Path(__file__).parent / "integration_qa" / "app.py"
+
+    if not app_path.exists():
+        console.print(f"[red]Error: QA app not found at {app_path}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Starting integration QA on port {port}...[/blue]")
+    console.print(f"  Integration output: {output_dir}")
+    console.print()
+    console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
+
+    # Launch Streamlit
+    result = subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
+        env=env,
+    )
+    if result.returncode != 0:
+        console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
+        raise typer.Exit(result.returncode)
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__

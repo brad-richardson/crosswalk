@@ -539,20 +539,23 @@ class MLMatcher:
 
             features_list.append(features)
 
-        # Batch prediction
+        # Batch prediction - use probability (confidence), not predicted class
+        # This allows the downstream optimizer to use confidence threshold
         probs = self.predict(features_list)
-        labels = self.predict_class(features_list)
 
-        # Build results
+        # Build results - use confidence-based decision, not class-based
+        # This ensures high-confidence matches aren't filtered just because
+        # the model's decision boundary puts them in "no_match" class
         results = []
         for i, cand in enumerate(candidates):
             prob = probs[i]
-            label = labels[i]
 
-            if label == "match":
+            # Use confidence thresholds instead of class prediction
+            # This makes the ML model behave more like a confidence scorer
+            if prob >= 0.5:
                 decision = MatchDecision.MATCH
-            elif label == "associated":
-                decision = MatchDecision.REVIEW  # Treat associated as review
+            elif prob >= 0.1:
+                decision = MatchDecision.REVIEW  # Low confidence but possible
             else:
                 decision = MatchDecision.NO_MATCH
 
