@@ -4,7 +4,17 @@ from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely import LineString, Point
+from shapely import LineString
+
+# =============================================================================
+# Label Data Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def labels_dir() -> Path:
+    """Return the path to the labels directory."""
+    return Path(__file__).parent.parent / "labels"
 
 
 @pytest.fixture
@@ -40,13 +50,13 @@ def simple_grid() -> gpd.GeoDataFrame:
     for i, y in enumerate(range(0, 50, 10)):
         lines.append(LineString([(0, y), (40, y)]))
         ids.append(f"h_{i}")
-        names.append(f"Street {i+1}")
+        names.append(f"Street {i + 1}")
 
     # Vertical lines
     for i, x in enumerate(range(0, 50, 10)):
         lines.append(LineString([(x, 0), (x, 40)]))
         ids.append(f"v_{i}")
-        names.append(f"Avenue {i+1}")
+        names.append(f"Avenue {i + 1}")
 
     return gpd.GeoDataFrame(
         {"id": ids, "name": names, "geometry": lines},
@@ -178,3 +188,70 @@ def lines_epsg4326() -> gpd.GeoDataFrame:
         },
         crs="EPSG:4326",
     )
+
+
+# =============================================================================
+# Integration Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def reference_gdf() -> gpd.GeoDataFrame:
+    """Reference network with two connected segments."""
+    return gpd.GeoDataFrame(
+        {
+            "id": ["ref_1", "ref_2"],
+            "name": ["Main St", "Oak Ave"],
+            "geometry": [
+                LineString([(0, 0), (100, 0)]),  # Horizontal
+                LineString([(100, 0), (100, 100)]),  # Vertical, connects at (100, 0)
+            ],
+        },
+        crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def target_matched_gdf() -> gpd.GeoDataFrame:
+    """Target segments that match reference."""
+    return gpd.GeoDataFrame(
+        {
+            "local_id": ["t_1"],
+            "name": ["Main Street"],
+            "geometry": [
+                LineString([(0, 5), (100, 5)]),  # Parallel to Main St
+            ],
+        },
+        crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def target_unmatched_gdf() -> gpd.GeoDataFrame:
+    """Target segments without matches."""
+    return gpd.GeoDataFrame(
+        {
+            "local_id": ["t_new_1", "t_orphan"],
+            "name": ["New Rd", "Orphan Rd"],
+            "geometry": [
+                LineString([(50, 0), (50, 50)]),  # Connects to Main St
+                LineString([(200, 200), (250, 250)]),  # Disconnected orphan
+            ],
+        },
+        crs="EPSG:32610",
+    )
+
+
+@pytest.fixture
+def match_results():
+    """Match results for target_matched."""
+
+    class MockMatchResult:
+        def __init__(self, ref_id, target_id, confidence):
+            self.ref_id = ref_id
+            self.target_id = target_id
+            self.confidence = confidence
+
+    return [
+        MockMatchResult("ref_1", "t_1", 0.9),
+    ]
