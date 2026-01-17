@@ -1,4 +1,4 @@
-"""Label persistence - parquet I/O for labeled training data."""
+"""Label persistence - Hive-partitioned CSV storage for labeled training data."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -6,41 +6,44 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
-import pyarrow as pa
+import pyarrow.dataset as pa_ds
 
 from .subsegment import is_subsegment_selection
 
+# Default paths
+DEFAULT_LABELS_DIR = Path("data/labels/labels")
 
-LABELS_SCHEMA = pa.schema([
-    ("ref_id", pa.string()),
-    ("target_id", pa.string()),
-    ("label", pa.string()),  # "match", "no_match", "unsure" (legacy: "associated")
-    ("labeler", pa.string()),
-    ("labeled_at", pa.timestamp("us", tz="UTC")),
-    ("session_id", pa.string()),
-    ("original_decision", pa.string()),  # From rule-based matcher
-    ("original_confidence", pa.float64()),
+# Column definitions for labels
+LABEL_COLUMNS = [
+    "gers_id",  # Overture reference segment ID (renamed from ref_id)
+    "target_id",
+    "label",  # "match", "no_match", "unsure"
+    "labeler",
+    "labeled_at",  # ISO timestamp string
+    "session_id",
+    "original_decision",
+    "original_confidence",
     # Sub-segment linear referencing (0.0-1.0 percentages)
-    ("ref_start_pct", pa.float64()),  # 0.0 = start of reference line
-    ("ref_end_pct", pa.float64()),  # 1.0 = end of reference line
-    ("target_start_pct", pa.float64()),  # 0.0 = start of target line
-    ("target_end_pct", pa.float64()),  # 1.0 = end of target line
-    ("is_subsegment", pa.bool_()),  # True if not whole segment match
+    "ref_start_pct",
+    "ref_end_pct",
+    "target_start_pct",
+    "target_end_pct",
+    "is_subsegment",
     # Geometric features
-    ("hausdorff_distance", pa.float64()),
-    ("mean_hausdorff_distance", pa.float64()),  # Robust to segmentation differences
-    ("buffer_iou", pa.float64()),
-    ("overlap_ratio", pa.float64()),  # Fraction of line_a in line_b's buffer
-    ("heading_delta", pa.float64()),
-    ("length_ratio", pa.float64()),
-    ("projection_distance", pa.float64()),
-    ("centroid_distance", pa.float64()),
+    "hausdorff_distance",
+    "mean_hausdorff_distance",
+    "buffer_iou",
+    "overlap_ratio",
+    "heading_delta",
+    "length_ratio",
+    "projection_distance",
+    "centroid_distance",
     # Semantic features
-    ("name_levenshtein", pa.float64()),
-    ("name_jaro_winkler", pa.float64()),
-    ("name_token_sort", pa.float64()),
-    ("class_similarity", pa.float64()),
-])
+    "name_levenshtein",
+    "name_jaro_winkler",
+    "name_token_sort",
+    "class_similarity",
+]
 
 # Default values for sub-segment columns (for backward compatibility)
 SUBSEGMENT_DEFAULTS = {
@@ -54,25 +57,54 @@ SUBSEGMENT_DEFAULTS = {
 
 @dataclass
 class LabelStore:
-    """Manages labeled data storage."""
+    """Manages labeled data storage for a single dataset partition."""
 
-    path: Path
+    dataset_id: str
+    labels_dir: Path = DEFAULT_LABELS_DIR
     _df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
-        self.path = Path(self.path)
+        self.labels_dir = Path(self.labels_dir)
+        self.partition_path = self.labels_dir / f"dataset={self.dataset_id}"
+        self.csv_path = self.partition_path / "data.csv"
         self._df = None
 
     @property
     def df(self) -> pd.DataFrame:
         """Lazy load dataframe."""
         if self._df is None:
-            self._df = load_labels(self.path)
+            self._df = self._load()
         return self._df
+
+    def _load(self) -> pd.DataFrame:
+        """Load labels from CSV."""
+        if self.csv_path.exists():
+            try:
+                df = pd.read_csv(self.csv_path)
+                # Handle backward compatibility - add missing columns
+                for col, default_val in SUBSEGMENT_DEFAULTS.items():
+                    if col not in df.columns:
+                        df[col] = default_val
+                # Handle ref_id -> gers_id rename for backward compatibility
+                if "ref_id" in df.columns and "gers_id" not in df.columns:
+                    df = df.rename(columns={"ref_id": "gers_id"})
+                return df
+            except Exception:
+                pass
+        return self._empty_dataframe()
+
+    def _empty_dataframe(self) -> pd.DataFrame:
+        """Create empty DataFrame with correct schema."""
+        return pd.DataFrame(columns=LABEL_COLUMNS)
+
+    def save(self) -> None:
+        """Save labels to CSV."""
+        self.partition_path.mkdir(parents=True, exist_ok=True)
+        self._df.to_csv(self.csv_path, index=False)
 
     def add(
         self,
-        ref_id: str,
+        gers_id: str,
         target_id: str,
         label: str,
         labeler: str,
@@ -88,7 +120,7 @@ class LabelStore:
         """Add a new label.
 
         Args:
-            ref_id: Reference segment ID
+            gers_id: Overture reference segment ID (GERS ID)
             target_id: Target segment ID
             label: Label value (match, no_match, unsure)
             labeler: Name of the labeler
@@ -96,40 +128,56 @@ class LabelStore:
             original_decision: Rule-based matcher decision
             original_confidence: Rule-based matcher confidence
             features: Dict of feature values
-            ref_start_pct: Start of reference sub-segment (0.0-1.0, default 0.0)
-            ref_end_pct: End of reference sub-segment (0.0-1.0, default 1.0)
-            target_start_pct: Start of target sub-segment (0.0-1.0, default 0.0)
-            target_end_pct: End of target sub-segment (0.0-1.0, default 1.0)
+            ref_start_pct: Start of reference sub-segment (0.0-1.0)
+            ref_end_pct: End of reference sub-segment (0.0-1.0)
+            target_start_pct: Start of target sub-segment (0.0-1.0)
+            target_end_pct: End of target sub-segment (0.0-1.0)
         """
-        self._df = add_label(
-            self.df,
-            ref_id=ref_id,
-            target_id=target_id,
-            label=label,
-            labeler=labeler,
-            session_id=session_id,
-            original_decision=original_decision,
-            original_confidence=original_confidence,
-            features=features,
-            ref_start_pct=ref_start_pct,
-            ref_end_pct=ref_end_pct,
-            target_start_pct=target_start_pct,
-            target_end_pct=target_end_pct,
+        # Determine if this is a sub-segment selection
+        is_subseg = is_subsegment_selection(
+            ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
         )
+
+        new_row = {
+            "gers_id": str(gers_id),
+            "target_id": str(target_id),
+            "label": label,
+            "labeler": labeler,
+            "labeled_at": datetime.now(timezone.utc).isoformat(),
+            "session_id": session_id,
+            "original_decision": original_decision,
+            "original_confidence": original_confidence,
+            # Sub-segment fields
+            "ref_start_pct": ref_start_pct,
+            "ref_end_pct": ref_end_pct,
+            "target_start_pct": target_start_pct,
+            "target_end_pct": target_end_pct,
+            "is_subsegment": is_subseg,
+            # Geometric features
+            "hausdorff_distance": features.get("hausdorff_distance", 0.0),
+            "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
+            "buffer_iou": features.get("buffer_iou", 0.0),
+            "overlap_ratio": features.get("overlap_ratio", 0.0),
+            "heading_delta": features.get("heading_delta", 0.0),
+            "length_ratio": features.get("length_ratio", 0.0),
+            "projection_distance": features.get("projection_distance", 0.0),
+            "centroid_distance": features.get("centroid_distance", 0.0),
+            # Semantic features
+            "name_levenshtein": features.get("name_levenshtein", 0.0),
+            "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
+            "name_token_sort": features.get("name_token_sort", 0.0),
+            "class_similarity": features.get("class_similarity", 0.0),
+        }
+
+        self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
 
-    def save(self) -> None:
-        """Save labels to disk."""
-        save_labels(self._df, self.path)
-
     def get_labeled_pairs(self, labeler: Optional[str] = None) -> set[tuple[str, str]]:
-        """Get set of already-labeled (ref_id, target_id) pairs.
+        """Get set of already-labeled (gers_id, target_id) pairs.
 
         Args:
             labeler: If provided, only return pairs labeled by this labeler.
-                    If None, returns all labeled pairs.
         """
-        # Use self.df to trigger lazy load
         df = self.df
         if df is None or len(df) == 0:
             return set()
@@ -139,11 +187,10 @@ class LabelStore:
 
         if len(df) == 0:
             return set()
-        return set(zip(df["ref_id"], df["target_id"]))
+        return set(zip(df["gers_id"], df["target_id"]))
 
     def get_stats(self) -> dict[str, Any]:
         """Get labeling statistics."""
-        # Use self.df to trigger lazy load
         df = self.df
         if df is None or len(df) == 0:
             return {"total": 0, "match": 0, "no_match": 0, "skip": 0}
@@ -158,14 +205,7 @@ class LabelStore:
         }
 
     def remove_last(self) -> Optional[dict]:
-        """Remove the last label (for undo). Returns removed row or None.
-
-        NOTE: This is designed for single-user/single-session use. It removes the
-        last row in the file, which may not be the user's own label if multiple
-        labelers share the file concurrently. For multi-user scenarios, implement
-        undo by tracking specific (ref_id, target_id, labeler) tuples instead.
-        """
-        # Use self.df to trigger lazy load
+        """Remove the last label (for undo). Returns removed row or None."""
         df = self.df
         if df is None or len(df) == 0:
             return None
@@ -175,124 +215,74 @@ class LabelStore:
         self.save()
         return last_row
 
+    @staticmethod
+    def load_all(labels_dir: Path = DEFAULT_LABELS_DIR) -> pd.DataFrame:
+        """Load all label partitions for ML training.
 
-def load_labels(path: Path) -> pd.DataFrame:
-    """Load existing labels from parquet file.
+        Uses PyArrow's Hive partitioning to read all dataset partitions
+        and adds a 'dataset' column from the partition path.
 
-    Creates empty DataFrame with correct schema if file doesn't exist.
-    Handles backward compatibility by adding default values for new columns.
-    """
-    if path.exists():
+        Returns:
+            DataFrame with all labels and 'dataset' column
+        """
+        labels_dir = Path(labels_dir)
+        if not labels_dir.exists():
+            return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
+
         try:
-            df = pd.read_parquet(path)
-            # Add missing sub-segment columns with defaults for backward compatibility
-            for col, default_val in SUBSEGMENT_DEFAULTS.items():
-                if col not in df.columns:
-                    df[col] = default_val
+            dataset = pa_ds.dataset(
+                labels_dir,
+                format="csv",
+                partitioning="hive",
+            )
+            df = dataset.to_table().to_pandas()
+            # Handle ref_id -> gers_id rename for backward compatibility
+            if "ref_id" in df.columns and "gers_id" not in df.columns:
+                df = df.rename(columns={"ref_id": "gers_id"})
             return df
         except Exception:
-            pass
+            # Fallback: manual loading if pyarrow dataset fails
+            dfs = []
+            for partition_dir in labels_dir.glob("dataset=*"):
+                dataset_id = partition_dir.name.split("=")[1]
+                csv_path = partition_dir / "data.csv"
+                if csv_path.exists():
+                    df = pd.read_csv(csv_path)
+                    df["dataset"] = dataset_id
+                    dfs.append(df)
+            if dfs:
+                result = pd.concat(dfs, ignore_index=True)
+                if "ref_id" in result.columns and "gers_id" not in result.columns:
+                    result = result.rename(columns={"ref_id": "gers_id"})
+                return result
+            return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
 
-    # Return empty DataFrame with schema
-    return pd.DataFrame({
-        col.name: pd.Series(dtype=_pa_to_pd_dtype(col.type))
-        for col in LABELS_SCHEMA
-    })
+
+# Backward compatibility aliases
+def load_labels(path: Path) -> pd.DataFrame:
+    """Load labels from a single partition (backward compatibility).
+
+    For new code, use LabelStore(dataset_id).df instead.
+    """
+    # Extract dataset_id from path
+    if path.name == "data.csv":
+        # New format: data/labels/labels/dataset=xxx/data.csv
+        partition_name = path.parent.name
+        if partition_name.startswith("dataset="):
+            dataset_id = partition_name.split("=")[1]
+            store = LabelStore(dataset_id, labels_dir=path.parent.parent)
+            return store.df
+    # Old format: data/labels/labels_xxx.parquet
+    dataset_id = path.stem.replace("labels_", "")
+    store = LabelStore(dataset_id)
+    return store.df
 
 
 def save_labels(df: pd.DataFrame, path: Path) -> None:
-    """Save labels to parquet file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Save labels to a partition (backward compatibility).
 
-    # Ensure labeled_at is timezone-aware
-    if "labeled_at" in df.columns and len(df) > 0:
-        if df["labeled_at"].dt.tz is None:
-            df["labeled_at"] = df["labeled_at"].dt.tz_localize("UTC")
-
-    df.to_parquet(path, index=False)
-
-
-def add_label(
-    df: pd.DataFrame,
-    ref_id: str,
-    target_id: str,
-    label: str,
-    labeler: str,
-    session_id: str,
-    original_decision: str,
-    original_confidence: float,
-    features: dict[str, float],
-    ref_start_pct: float = 0.0,
-    ref_end_pct: float = 1.0,
-    target_start_pct: float = 0.0,
-    target_end_pct: float = 1.0,
-) -> pd.DataFrame:
-    """Add a new label to the dataframe.
-
-    Args:
-        df: Existing labels DataFrame
-        ref_id: Reference segment ID
-        target_id: Target segment ID
-        label: Label value
-        labeler: Name of labeler
-        session_id: Session identifier
-        original_decision: Rule-based decision
-        original_confidence: Rule-based confidence
-        features: Feature values dict
-        ref_start_pct: Reference sub-segment start (0.0-1.0)
-        ref_end_pct: Reference sub-segment end (0.0-1.0)
-        target_start_pct: Target sub-segment start (0.0-1.0)
-        target_end_pct: Target sub-segment end (0.0-1.0)
-
-    Returns:
-        Updated DataFrame with new label appended
+    For new code, use LabelStore(dataset_id).save() instead.
     """
-    # Determine if this is a sub-segment selection
-    is_subsegment = is_subsegment_selection(
-        ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
-    )
-
-    new_row = {
-        "ref_id": str(ref_id),
-        "target_id": str(target_id),
-        "label": label,
-        "labeler": labeler,
-        "labeled_at": datetime.now(timezone.utc),
-        "session_id": session_id,
-        "original_decision": original_decision,
-        "original_confidence": original_confidence,
-        # Sub-segment fields
-        "ref_start_pct": ref_start_pct,
-        "ref_end_pct": ref_end_pct,
-        "target_start_pct": target_start_pct,
-        "target_end_pct": target_end_pct,
-        "is_subsegment": is_subsegment,
-        # Geometric features
-        "hausdorff_distance": features.get("hausdorff_distance", 0.0),
-        "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
-        "buffer_iou": features.get("buffer_iou", 0.0),
-        "overlap_ratio": features.get("overlap_ratio", 0.0),
-        "heading_delta": features.get("heading_delta", 0.0),
-        "length_ratio": features.get("length_ratio", 0.0),
-        "projection_distance": features.get("projection_distance", 0.0),
-        "centroid_distance": features.get("centroid_distance", 0.0),
-        "name_levenshtein": features.get("name_levenshtein", 0.0),
-        "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
-        "name_token_sort": features.get("name_token_sort", 0.0),
-        "class_similarity": features.get("class_similarity", 0.0),
-    }
-
-    return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-
-
-def _pa_to_pd_dtype(pa_type):
-    """Convert PyArrow type to pandas dtype."""
-    if pa.types.is_string(pa_type):
-        return "object"
-    if pa.types.is_float64(pa_type):
-        return "float64"
-    if pa.types.is_timestamp(pa_type):
-        return "datetime64[ns, UTC]"
-    if pa.types.is_boolean(pa_type):
-        return "bool"
-    return "object"
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)

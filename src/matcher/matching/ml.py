@@ -6,10 +6,11 @@ based on geometric and semantic features.
 
 Training Data Format:
 --------------------
-Uses labels from data/labels/labels.parquet which contains:
-- ref_id, target_id: Segment identifiers
+Uses labels from Hive-partitioned CSVs in data/labels/labels/ which contains:
+- gers_id: Overture reference segment ID (GERS ID)
+- target_id: Target segment identifier
 - label: Human label (match, no_match, unsure; legacy: associated)
-- features: Dict of precomputed features (hausdorff_distance, buffer_iou, etc.)
+- Feature columns: hausdorff_distance, buffer_iou, etc.
 
 Model Architecture:
 ------------------
@@ -121,7 +122,7 @@ class MLMatcher:
 
     def train(
         self,
-        labels_path: str = "data/labels/labels.parquet",
+        labels_dir: str = "data/labels/labels",
         binary: bool = True,
         test_size: float = 0.2,
         **kwargs,
@@ -129,7 +130,7 @@ class MLMatcher:
         """Train the model on labeled data.
 
         Args:
-            labels_path: Path to labels parquet file
+            labels_dir: Path to Hive-partitioned labels directory
             binary: If True (default), train binary classifier (match vs non-match)
                    If False, train multiclass (legacy, includes associated)
             test_size: Fraction of data to hold out for testing
@@ -146,11 +147,13 @@ class MLMatcher:
                 "Install it with: pip install 'matcher[ml]' or pip install xgboost"
             )
 
+        from ..labeling.label_store import LabelStore
+
         self.is_binary = binary
 
-        # Load and prepare data
-        df = pd.read_parquet(labels_path)
-        logger.info(f"Loaded {len(df)} labeled pairs")
+        # Load all partitions using LabelStore
+        df = LabelStore.load_all(Path(labels_dir))
+        logger.info(f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets")
 
         # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
         valid_labels = {"match", "no_match", "associated"}
@@ -571,7 +574,7 @@ class MLMatcher:
         return results
 
 def train_model(
-    labels_path: str = "data/labels/labels.parquet",
+    labels_dir: str = "data/labels/labels",
     output_path: str = "data/models/matcher_model.joblib",
     binary: bool = True,
     **kwargs,
@@ -579,7 +582,7 @@ def train_model(
     """Convenience function to train and save a model.
 
     Args:
-        labels_path: Path to labels parquet
+        labels_dir: Path to Hive-partitioned labels directory
         output_path: Path to save trained model
         binary: Train binary (match/no_match) or multiclass
         **kwargs: XGBoost parameters
@@ -588,25 +591,24 @@ def train_model(
         Training results dict
     """
     matcher = MLMatcher()
-    results = matcher.train(labels_path=labels_path, binary=binary, **kwargs)
+    results = matcher.train(labels_dir=labels_dir, binary=binary, **kwargs)
     matcher.save_model(output_path)
     return results
 
 
 def evaluate_by_dataset(
     model_path: str,
-    labels_dir: str = "data/labels",
+    labels_dir: str = "data/labels/labels",
     binary: bool = True,
     show_by_dataset: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate model performance broken down by dataset.
 
-    Loads all label files from the labels directory and evaluates
-    the model on each dataset separately.
+    Loads all label partitions and evaluates the model on each dataset separately.
 
     Args:
         model_path: Path to trained model
-        labels_dir: Directory containing label parquet files
+        labels_dir: Directory containing Hive-partitioned label CSVs
         binary: Evaluate as binary (match vs no_match)
         show_by_dataset: If True, show per-dataset metrics; if False, only show overall
 
@@ -621,16 +623,24 @@ def evaluate_by_dataset(
         recall_score,
     )
 
+    from ..labeling.label_store import LabelStore
+
     # Load model
     matcher = MLMatcher(model_path)
 
-    # Find all label files
-    labels_path = Path(labels_dir)
-    label_files = list(labels_path.glob("labels_*.parquet"))
+    # Load all labels using LabelStore
+    all_labels = LabelStore.load_all(Path(labels_dir))
 
-    if not label_files:
-        logger.warning(f"No label files found in {labels_dir}")
+    if len(all_labels) == 0:
+        logger.warning(f"No labels found in {labels_dir}")
         return {}
+
+    # Get unique datasets
+    if "dataset" not in all_labels.columns:
+        logger.warning("No 'dataset' column found - cannot evaluate by dataset")
+        return {}
+
+    datasets = all_labels["dataset"].unique()
 
     results = {}
     all_y_true = []
@@ -641,19 +651,16 @@ def evaluate_by_dataset(
         print("EVALUATION BY DATASET")
         print("=" * 60)
 
-    for label_file in sorted(label_files):
-        # Extract dataset name from filename (e.g., labels_boston_streets.parquet -> boston_streets)
-        dataset_name = label_file.stem.replace("labels_", "")
-
-        # Load labels
-        df = pd.read_parquet(label_file)
+    for dataset_name in sorted(datasets):
+        # Filter to this dataset
+        df = all_labels[all_labels["dataset"] == dataset_name].copy()
 
         # Filter to valid labels
         valid_labels = {"match", "no_match", "associated"}
         df = df[df["label"].isin(valid_labels)].copy()
 
         if len(df) == 0:
-            logger.warning(f"No valid labels in {label_file}")
+            logger.warning(f"No valid labels for dataset {dataset_name}")
             continue
 
         # Extract features

@@ -1,6 +1,6 @@
 """Decision persistence for integration QA.
 
-Stores QA decisions in parquet format for training data collection.
+Stores QA decisions in CSV format for git-trackable storage.
 """
 
 from dataclasses import dataclass
@@ -9,52 +9,54 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
-import pyarrow as pa
 from loguru import logger
 
 
-# Schema for orphan decisions
-ORPHAN_DECISION_SCHEMA = pa.schema([
-    ("edge_id", pa.int64()),
-    ("original_id", pa.string()),
-    ("source_dataset", pa.string()),
-    ("component_id", pa.int64()),
-    ("decision", pa.string()),  # "keep", "discard"
-    ("reason", pa.string()),  # "legitimate_new", "data_error", "out_of_scope"
-    ("reviewer", pa.string()),
-    ("reviewed_at", pa.timestamp("us", tz="UTC")),
-    ("session_id", pa.string()),
-    # Context features for future ML
-    ("length_m", pa.float64()),
-    ("road_class", pa.string()),
-    ("nearest_main_dist_m", pa.float64()),
-    ("component_size", pa.int64()),
-])
+# Default paths
+DEFAULT_ORPHAN_PATH = Path("data/labels/integration_orphans.csv")
+DEFAULT_MERGED_PATH = Path("data/labels/integration_merged.csv")
 
-# Schema for merged edge decisions
-MERGED_DECISION_SCHEMA = pa.schema([
-    ("edge_id", pa.int64()),
-    ("original_id", pa.string()),
-    ("source_dataset", pa.string()),
-    ("source_type", pa.string()),  # "target_matched", "target_new"
-    ("match_ref_id", pa.string()),
-    ("decision", pa.string()),  # "correct", "incorrect"
-    ("reason", pa.string()),  # "matching_error", "duplicate", "wrong_source"
-    ("reviewer", pa.string()),
-    ("reviewed_at", pa.timestamp("us", tz="UTC")),
-    ("session_id", pa.string()),
+# Column definitions
+ORPHAN_COLUMNS = [
+    "edge_id",
+    "original_id",
+    "dataset_id",  # Changed from source_dataset for consistency
+    "component_id",
+    "decision",  # "keep", "discard"
+    "reason",  # "legitimate_new", "data_error", "out_of_scope"
+    "reviewer",
+    "reviewed_at",  # ISO timestamp string
+    "session_id",
     # Context features for future ML
-    ("match_confidence", pa.float64()),
-    ("length_m", pa.float64()),
-    ("road_class", pa.string()),
-])
+    "length_m",
+    "road_class",
+    "nearest_main_dist_m",
+    "component_size",
+]
+
+MERGED_COLUMNS = [
+    "edge_id",
+    "original_id",
+    "dataset_id",  # Changed from source_dataset for consistency
+    "source_type",  # "target_matched", "target_new"
+    "match_ref_id",
+    "decision",  # "correct", "incorrect"
+    "reason",  # "matching_error", "duplicate", "wrong_source"
+    "reviewer",
+    "reviewed_at",  # ISO timestamp string
+    "session_id",
+    # Context features for future ML
+    "match_confidence",
+    "length_m",
+    "road_class",
+]
 
 
 @dataclass
 class OrphanDecisionStore:
     """Manages orphan QA decisions."""
 
-    path: Path
+    path: Path = DEFAULT_ORPHAN_PATH
     _df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
@@ -65,14 +67,32 @@ class OrphanDecisionStore:
     def df(self) -> pd.DataFrame:
         """Lazy load dataframe."""
         if self._df is None:
-            self._df = _load_orphan_decisions(self.path)
+            self._df = self._load()
         return self._df
+
+    def _load(self) -> pd.DataFrame:
+        """Load decisions from CSV."""
+        if self.path.exists():
+            try:
+                df = pd.read_csv(self.path)
+                # Handle source_dataset -> dataset_id rename for backward compatibility
+                if "source_dataset" in df.columns and "dataset_id" not in df.columns:
+                    df = df.rename(columns={"source_dataset": "dataset_id"})
+                return df
+            except Exception:
+                pass
+        return pd.DataFrame(columns=ORPHAN_COLUMNS)
+
+    def _save(self) -> None:
+        """Save decisions to CSV."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._df.to_csv(self.path, index=False)
 
     def add_decision(
         self,
         edge_id: int,
         original_id: str,
-        source_dataset: str,
+        dataset_id: str,
         component_id: int,
         decision: str,
         reason: str,
@@ -87,12 +107,12 @@ class OrphanDecisionStore:
         new_row = {
             "edge_id": edge_id,
             "original_id": str(original_id),
-            "source_dataset": source_dataset,
+            "dataset_id": dataset_id,
             "component_id": component_id,
             "decision": decision,
             "reason": reason,
             "reviewer": reviewer,
-            "reviewed_at": datetime.now(timezone.utc),
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
             "session_id": session_id,
             "length_m": length_m,
             "road_class": road_class,
@@ -136,20 +156,12 @@ class OrphanDecisionStore:
         self._save()
         return last_row
 
-    def _save(self) -> None:
-        """Save decisions to disk."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if "reviewed_at" in self._df.columns and len(self._df) > 0:
-            if self._df["reviewed_at"].dt.tz is None:
-                self._df["reviewed_at"] = self._df["reviewed_at"].dt.tz_localize("UTC")
-        self._df.to_parquet(self.path, index=False)
-
 
 @dataclass
 class MergedDecisionStore:
     """Manages merged edge QA decisions."""
 
-    path: Path
+    path: Path = DEFAULT_MERGED_PATH
     _df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
@@ -160,14 +172,32 @@ class MergedDecisionStore:
     def df(self) -> pd.DataFrame:
         """Lazy load dataframe."""
         if self._df is None:
-            self._df = _load_merged_decisions(self.path)
+            self._df = self._load()
         return self._df
+
+    def _load(self) -> pd.DataFrame:
+        """Load decisions from CSV."""
+        if self.path.exists():
+            try:
+                df = pd.read_csv(self.path)
+                # Handle source_dataset -> dataset_id rename for backward compatibility
+                if "source_dataset" in df.columns and "dataset_id" not in df.columns:
+                    df = df.rename(columns={"source_dataset": "dataset_id"})
+                return df
+            except Exception:
+                pass
+        return pd.DataFrame(columns=MERGED_COLUMNS)
+
+    def _save(self) -> None:
+        """Save decisions to CSV."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._df.to_csv(self.path, index=False)
 
     def add_decision(
         self,
         edge_id: int,
         original_id: str,
-        source_dataset: str,
+        dataset_id: str,
         source_type: str,
         match_ref_id: Optional[str],
         decision: str,
@@ -182,13 +212,13 @@ class MergedDecisionStore:
         new_row = {
             "edge_id": edge_id,
             "original_id": str(original_id),
-            "source_dataset": source_dataset,
+            "dataset_id": dataset_id,
             "source_type": source_type,
             "match_ref_id": match_ref_id,
             "decision": decision,
             "reason": reason,
             "reviewer": reviewer,
-            "reviewed_at": datetime.now(timezone.utc),
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
             "session_id": session_id,
             "match_confidence": match_confidence,
             "length_m": length_m,
@@ -230,54 +260,3 @@ class MergedDecisionStore:
         self._df = df.iloc[:-1].reset_index(drop=True)
         self._save()
         return last_row
-
-    def _save(self) -> None:
-        """Save decisions to disk."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if "reviewed_at" in self._df.columns and len(self._df) > 0:
-            if self._df["reviewed_at"].dt.tz is None:
-                self._df["reviewed_at"] = self._df["reviewed_at"].dt.tz_localize("UTC")
-        self._df.to_parquet(self.path, index=False)
-
-
-def _load_orphan_decisions(path: Path) -> pd.DataFrame:
-    """Load existing orphan decisions."""
-    if path.exists():
-        try:
-            return pd.read_parquet(path)
-        except Exception:
-            pass
-
-    # Return empty DataFrame with schema
-    return pd.DataFrame({
-        col.name: pd.Series(dtype=_pa_to_pd_dtype(col.type))
-        for col in ORPHAN_DECISION_SCHEMA
-    })
-
-
-def _load_merged_decisions(path: Path) -> pd.DataFrame:
-    """Load existing merged edge decisions."""
-    if path.exists():
-        try:
-            return pd.read_parquet(path)
-        except Exception:
-            pass
-
-    # Return empty DataFrame with schema
-    return pd.DataFrame({
-        col.name: pd.Series(dtype=_pa_to_pd_dtype(col.type))
-        for col in MERGED_DECISION_SCHEMA
-    })
-
-
-def _pa_to_pd_dtype(pa_type):
-    """Convert PyArrow type to pandas dtype."""
-    if pa.types.is_string(pa_type):
-        return "object"
-    if pa.types.is_float64(pa_type):
-        return "float64"
-    if pa.types.is_int64(pa_type):
-        return "Int64"  # Nullable integer
-    if pa.types.is_timestamp(pa_type):
-        return "datetime64[ns, UTC]"
-    return "object"

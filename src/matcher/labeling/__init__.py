@@ -1,5 +1,12 @@
 """Labeling UI for creating training data."""
 
-from .label_store import LabelStore, add_label, load_labels, save_labels
+from .dataset_registry import Dataset, DatasetRegistry
+from .label_store import LabelStore, load_labels, save_labels
 
-__all__ = ["LabelStore", "add_label", "load_labels", "save_labels"]
+__all__ = [
+    "Dataset",
+    "DatasetRegistry",
+    "LabelStore",
+    "load_labels",
+    "save_labels",
+]
