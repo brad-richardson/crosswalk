@@ -93,6 +93,7 @@ def run_validation_experiment(
         source_dataset: Dataset to drop for "source" strategy
         road_class: Road class to drop for "class" strategy
         seed: Random seed for reproducibility
+        fast_mode: If True, only match dropped segments instead of the full set
 
     Returns:
         ExperimentResult with metrics and statistics
@@ -174,9 +175,11 @@ def run_validation_experiment(
     logger.info(f"  Fetched {len(fresh_osm_all)} fresh OSM segments")
 
     # Identify which OSM segments correspond to dropped record_ids
+    # Pre-compute normalized dropped IDs once for efficiency
+    normalized_dropped = {rid.split("@")[0] if "@" in str(rid) else str(rid) for rid in dropped_ids}
+
     def matches_dropped_id(osm_id):
         base_id = osm_id.split("@")[0] if "@" in str(osm_id) else str(osm_id)
-        normalized_dropped = {rid.split("@")[0] if "@" in str(rid) else str(rid) for rid in dropped_ids}
         return base_id in normalized_dropped
 
     should_match_mask = fresh_osm_all["id"].apply(matches_dropped_id)
@@ -187,6 +190,13 @@ def run_validation_experiment(
         # Fast mode: only match segments that should match
         fresh_osm = fresh_osm_all[should_match_mask].copy()
         logger.info(f"  FAST MODE: Using only {len(fresh_osm)} segments that should match")
+
+        if len(fresh_osm) == 0:
+            logger.warning("No OSM segments match dropped record_ids - cannot run validation")
+            raise ValueError(
+                "No OSM segments correspond to dropped record_ids. "
+                "This may indicate a mismatch between Overture provenance and current OSM data."
+            )
     else:
         fresh_osm = fresh_osm_all
 
@@ -301,11 +311,13 @@ def compare_experiments(
         with open(metrics_path) as f:
             metrics = json.load(f)
 
-        records.append({
-            "experiment": exp_dir.name,
-            "strategy": config.get("strategy"),
-            "matcher_method": config.get("matcher_method"),
-            **metrics,
-        })
+        records.append(
+            {
+                "experiment": exp_dir.name,
+                "strategy": config.get("strategy"),
+                "matcher_method": config.get("matcher_method"),
+                **metrics,
+            }
+        )
 
     return pd.DataFrame(records)

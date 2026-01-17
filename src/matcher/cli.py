@@ -688,7 +688,7 @@ def validate(
         if len(coords) != 4:
             raise ValueError()
         bbox_tuple = tuple(coords)
-    except (ValueError, AttributeError):
+    except ValueError:
         console.print("[red]Error: bbox must be 4 comma-separated values: xmin,ymin,xmax,ymax[/red]")
         raise typer.Exit(1)
 
@@ -696,6 +696,11 @@ def validate(
     valid_strategies = {"random", "bbox", "source", "class"}
     if strategy not in valid_strategies:
         console.print(f"[red]Error: strategy must be one of {valid_strategies}[/red]")
+        raise typer.Exit(1)
+
+    # Validate fraction for random strategy
+    if strategy == "random" and not 0.0 <= fraction <= 1.0:
+        console.print("[red]Error: fraction must be between 0.0 and 1.0[/red]")
         raise typer.Exit(1)
 
     # Validate input file

@@ -145,7 +145,13 @@ def drop_random_osm(
     Returns:
         reduced_reference: Overture without dropped segments
         dropped_record_ids: All record_ids from dropped segments
+
+    Raises:
+        ValueError: If fraction is not in range [0.0, 1.0]
     """
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError(f"fraction must be between 0.0 and 1.0, got {fraction}")
+
     if "sources" not in overture.columns:
         raise ValueError("Overture data must have 'sources' column")
 
@@ -157,6 +163,12 @@ def drop_random_osm(
 
     # Sample random fraction
     n_to_drop = int(len(osm_segments) * fraction)
+
+    # Handle edge case where n_to_drop is 0
+    if n_to_drop == 0:
+        logger.warning("No segments to drop (fraction too small or no OSM segments)")
+        return overture.copy(), set()
+
     np.random.seed(seed)
     drop_indices = np.random.choice(osm_segments.index, size=n_to_drop, replace=False)
 

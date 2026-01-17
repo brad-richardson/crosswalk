@@ -4,8 +4,6 @@ Compares matcher results to known dropped record_ids to compute
 recall and other metrics.
 """
 
-from typing import Optional
-
 import geopandas as gpd
 import pandas as pd
 from loguru import logger
@@ -37,8 +35,8 @@ def get_osm_way_id(osm_id: str) -> str:
 
 
 def evaluate_by_record_id(
-    bridge: gpd.GeoDataFrame,
-    unmatched: gpd.GeoDataFrame,
+    bridge: pd.DataFrame,
+    unmatched: pd.DataFrame,
     fresh_osm: gpd.GeoDataFrame,
     dropped_record_ids: set[str],
     osm_id_column: str = "id",
@@ -49,7 +47,7 @@ def evaluate_by_record_id(
     - Check if it was matched (appears in bridge) or orphaned (in unmatched)
 
     Args:
-        bridge: Match results from matcher (target_id -> gers_id)
+        bridge: Match results from matcher (target_id -> reference_id)
         unmatched: Orphaned target segments
         fresh_osm: Fresh OSM data with way IDs
         dropped_record_ids: Record IDs that were dropped from reference
@@ -68,45 +66,65 @@ def evaluate_by_record_id(
     if osm_id_column not in fresh_osm.columns:
         raise ValueError(f"OSM ID column '{osm_id_column}' not found in fresh_osm")
 
-    # Build evaluation records
-    eval_records = []
+    # Build evaluation DataFrame using vectorized operations
+    osm_ids = fresh_osm[osm_id_column].astype(str)
+    record_ids = osm_ids.map(get_osm_way_id)
 
-    for idx, row in fresh_osm.iterrows():
-        osm_id = str(row[osm_id_column])
-        base_id = get_osm_way_id(osm_id)
+    eval_df = pd.DataFrame(
+        {
+            "osm_id": osm_ids.values,
+            "record_id": record_ids.values,
+        }
+    )
 
-        # Should this segment have matched? (was its Overture equivalent dropped?)
-        should_match = base_id in dropped_ids_normalized
+    # Should this segment have matched? (was its Overture equivalent dropped?)
+    eval_df["should_match"] = eval_df["record_id"].isin(dropped_ids_normalized)
 
-        # Was it actually matched?
-        # Check if osm_id appears in bridge's target_id column
-        matched = False
-        confidence = None
+    # Initialize matched/confidence columns
+    eval_df["matched"] = False
+    eval_df["confidence"] = None
 
-        if "target_id" in bridge.columns:
-            bridge_match = bridge[bridge["target_id"] == osm_id]
-            if len(bridge_match) > 0:
-                matched = True
-                if "confidence" in bridge_match.columns:
-                    confidence = bridge_match["confidence"].iloc[0]
+    # Build sets of matched IDs for O(1) lookup
+    has_confidence = "confidence" in bridge.columns
 
-        # Also check local_id (alternative column name)
-        if not matched and "local_id" in bridge.columns:
-            bridge_match = bridge[bridge["local_id"] == osm_id]
-            if len(bridge_match) > 0:
-                matched = True
-                if "confidence" in bridge_match.columns:
-                    confidence = bridge_match["confidence"].iloc[0]
+    # Check target_id matches
+    if "target_id" in bridge.columns:
+        target_matches = set(bridge["target_id"].astype(str))
+        target_matched_mask = eval_df["osm_id"].isin(target_matches)
+        eval_df.loc[target_matched_mask, "matched"] = True
 
-        eval_records.append({
-            "osm_id": osm_id,
-            "record_id": base_id,
-            "should_match": should_match,
-            "matched": matched,
-            "confidence": confidence,
-        })
+        if has_confidence:
+            # Merge to get confidence for target_id matches
+            bridge_target = bridge[["target_id", "confidence"]].copy()
+            bridge_target["target_id"] = bridge_target["target_id"].astype(str)
+            bridge_target = bridge_target.drop_duplicates(subset=["target_id"], keep="first")
+            eval_df = eval_df.merge(
+                bridge_target.rename(columns={"target_id": "osm_id", "confidence": "conf_target"}),
+                on="osm_id",
+                how="left",
+            )
+            eval_df["confidence"] = eval_df["conf_target"].combine_first(eval_df["confidence"])
+            eval_df = eval_df.drop(columns=["conf_target"])
 
-    eval_df = pd.DataFrame(eval_records)
+    # Check local_id matches (for segments not matched via target_id)
+    if "local_id" in bridge.columns:
+        local_matches = set(bridge["local_id"].astype(str))
+        # Only mark as matched if not already matched
+        local_matched_mask = eval_df["osm_id"].isin(local_matches) & ~eval_df["matched"]
+        eval_df.loc[local_matched_mask, "matched"] = True
+
+        if has_confidence:
+            # Merge to get confidence for local_id matches (only where not already set)
+            bridge_local = bridge[["local_id", "confidence"]].copy()
+            bridge_local["local_id"] = bridge_local["local_id"].astype(str)
+            bridge_local = bridge_local.drop_duplicates(subset=["local_id"], keep="first")
+            eval_df = eval_df.merge(
+                bridge_local.rename(columns={"local_id": "osm_id", "confidence": "conf_local"}),
+                on="osm_id",
+                how="left",
+            )
+            eval_df["confidence"] = eval_df["confidence"].combine_first(eval_df["conf_local"])
+            eval_df = eval_df.drop(columns=["conf_local"])
 
     # Log summary
     should_match_count = eval_df["should_match"].sum()
@@ -193,7 +211,6 @@ def analyze_failures(
     failures = fresh_osm[fresh_osm[osm_id_column].isin(fn_ids)].copy()
 
     # Add evaluation columns
-    eval_lookup = eval_df.set_index("osm_id")
     failures["should_match"] = True
     failures["matched"] = False
 
