@@ -10,6 +10,7 @@ from matcher.features.geometric import (
 from matcher.features.semantic import (
     compute_class_similarity,
     compute_name_similarity,
+    get_class_info,
     names_likely_same_road,
 )
 
@@ -159,6 +160,50 @@ class TestSemanticFeatures:
         assert names_likely_same_road("Main Street", "Main St")
         assert names_likely_same_road("Interstate 5", "I-5")
         assert not names_likely_same_road("Main Street", "Oak Avenue")
+
+
+class TestClassInfo:
+    """Tests for get_class_info diagnostic function."""
+
+    def test_known_class(self):
+        """Known classes should return correct info."""
+        result = get_class_info("motorway")
+        assert result["normalized"] == "motorway"
+        assert result["known"] is True
+        assert result["rank"] == 1
+
+    def test_known_class_case_insensitive(self):
+        """Class lookup should be case-insensitive."""
+        result = get_class_info("RESIDENTIAL")
+        assert result["normalized"] == "residential"
+        assert result["known"] is True
+        assert result["rank"] == 6
+
+    def test_unknown_class(self):
+        """Unknown classes should return default rank."""
+        result = get_class_info("some_unknown_class")
+        assert result["normalized"] == "some_unknown_class"
+        assert result["known"] is False
+        assert result["rank"] == 6  # Default residential rank
+
+    def test_none_class(self):
+        """None input should return None values."""
+        result = get_class_info(None)
+        assert result["normalized"] is None
+        assert result["known"] is False
+        assert result["rank"] is None
+
+    def test_link_road_class(self):
+        """Link roads should be in hierarchy."""
+        result = get_class_info("motorway_link")
+        assert result["known"] is True
+        assert result["rank"] == 1
+
+    def test_pedestrian_class(self):
+        """Pedestrian infrastructure should be in hierarchy."""
+        result = get_class_info("footway")
+        assert result["known"] is True
+        assert result["rank"] == 10
 
 
 class TestPhoneticFeatures:
