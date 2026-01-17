@@ -10,6 +10,9 @@ For installation and usage instructions, see [README.md](README.md).
 # Install with all dependencies
 pip install -e ".[dev,ml]"
 
+# Train ML model (required after fresh clone)
+matcher train --combined
+
 # Run tests
 pytest tests/
 
@@ -79,6 +82,8 @@ Each CSV contains: `gers_id`, `target_id`, `label` (match/no_match/unsure), and 
 - **Algorithm**: XGBoost binary classifier
 - **Features**: 12 geometric/semantic features (hausdorff_distance, buffer_iou, name_levenshtein, etc.)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
+
+**Note**: The trained model is not committed to git. After cloning, run `matcher train` before using `-m xgboost`.
 
 ### Key Thresholds
 - `confidence >= 0.5` → MATCH

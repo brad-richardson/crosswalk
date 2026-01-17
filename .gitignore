@@ -56,3 +56,6 @@ logs/
 
 # Trained models (derived from labels)
 models/
+
+# Validation outputs
+validation/

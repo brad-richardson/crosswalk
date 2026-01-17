@@ -195,6 +195,11 @@ def run_pipeline(
 
         # Load trained model from default location (combined model for better generalization)
         model_path = "data/models/matcher_model_combined.joblib"
+        if not Path(model_path).exists():
+            raise FileNotFoundError(
+                f"ML model not found at {model_path}. "
+                "Run 'matcher train --combined' to train the model on labeled data from data/labels/."
+            )
         matcher = MLMatcher(model_path=model_path)
         results = matcher.score_candidates(
             candidates, reference, target,
