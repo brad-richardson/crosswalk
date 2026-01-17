@@ -1,0 +1,168 @@
+# Utah Salt Lake County Roads - UGRC CARTOCODE Mapping
+# Source: Utah Geospatial Resource Center (UGRC) SGID
+# Documentation: https://gis.utah.gov/products/sgid/transportation/road-centerlines/
+
+name: utah_roads
+description: |
+  Salt Lake County road centerlines from Utah's SGID (State Geographic Information Database).
+  Uses CARTOCODE as primary classification - Utah's cartographic road coding system.
+
+confidence: high
+default_class: residential
+
+source_classification:
+  column: CARTOCODE
+  description: |
+    Utah CARTOCODE - Cartographic classification for road display and analysis.
+    Values 1-17 represent different road types from interstates to trails.
+  documentation_url: https://gis.utah.gov/products/sgid/transportation/road-centerlines/
+  values:
+    1:
+      description: Interstate
+      count: 340
+    2:
+      description: US Highway (divided)
+      count: 1
+    3:
+      description: US Highway
+      count: 262
+    4:
+      description: Parkway
+      count: 170
+    5:
+      description: State Route (major)
+      count: 1602
+    6:
+      description: State Route (minor)
+      count: 73
+    7:
+      description: Ramp/Interchange
+      count: 682
+    8:
+      description: Major Street
+      count: 4305
+    9:
+      description: Minor Road
+      count: 6
+    10:
+      description: Secondary Street
+      count: 3325
+    11:
+      description: Local Street
+      count: 52003
+    12:
+      description: Unpaved/Dirt Road
+      count: 11
+    14:
+      description: Private Road
+      count: 41
+    15:
+      description: Private Road (restricted)
+      count: 9
+    16:
+      description: Path/Trail
+      count: 0
+    17:
+      description: Other/Unknown
+      count: 155
+
+physical_attributes:
+  speed_column: SPEED_LMT
+  traffic_column: DOT_AADT
+
+# Mapping rules derived from 49,438 name-verified matches (84.4% accuracy)
+# Based on majority vote from matched pairs with Overture data
+class_mapping_rules:
+  # Interstate → motorway
+  - source_value: "1"
+    target_class: motorway
+    priority: 100
+
+  # US Highways → trunk
+  - source_value: "2"
+    target_class: trunk
+    priority: 95
+
+  - source_value: "3"
+    target_class: trunk
+    priority: 95
+
+  # Parkway → primary
+  - source_value: "4"
+    target_class: primary
+    priority: 90
+
+  # State Routes → primary (73.7% agreement from name-verified)
+  - source_value: "5"
+    target_class: primary
+    priority: 85
+
+  - source_value: "6"
+    target_class: secondary
+    priority: 80
+
+  # Ramps → motorway_link
+  - source_value: "7"
+    target_class: motorway_link
+    priority: 85
+
+  # Major Street → secondary
+  - source_value: "8"
+    target_class: secondary
+    priority: 75
+
+  # Minor Road → tertiary
+  - source_value: "9"
+    target_class: tertiary
+    priority: 70
+
+  # Secondary Street → tertiary (71.9% agreement from name-verified)
+  - source_value: "10"
+    target_class: tertiary
+    priority: 65
+
+  # Local Street → residential (88.7% agreement from name-verified)
+  - source_value: "11"
+    target_class: residential
+    priority: 50
+
+  # Unpaved → track
+  - source_value: "12"
+    target_class: track
+    priority: 40
+
+  # Private roads → service
+  - source_value: "14"
+    target_class: service
+    priority: 30
+
+  - source_value: "15"
+    target_class: service
+    priority: 30
+
+  # Path/Trail → path
+  - source_value: "16"
+    target_class: path
+    priority: 20
+
+  # Other → unclassified
+  - source_value: "17"
+    target_class: unclassified
+    priority: 10
+
+notes: |
+  Mapping derived from 49,438 name-verified matches with Overture data.
+  Name verification threshold: 70% token sort similarity.
+
+  Key observations from analysis:
+  1. Local streets (CARTOCODE 11) have 88.7% agreement with Overture "residential"
+  2. Primary roads (CARTOCODE 5) have 73.7% agreement with Overture "primary"
+  3. Tertiary roads (CARTOCODE 10) have 71.9% agreement with Overture "tertiary"
+  4. Secondary roads (CARTOCODE 8) show split: 50.7% secondary, 38% tertiary
+
+  Overall accuracy:
+  - All high-confidence matches: 77.0%
+  - Name-verified matches only: 84.4%
+
+  Utah data quality is excellent - 99.4% of roads have street names,
+  enabling robust name-based match verification.

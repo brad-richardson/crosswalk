@@ -1,0 +1,93 @@
+# Fresno County Roads - Caltrans Functional Classification Mapping
+# Source: Caltrans CRS Functional Classification
+# Documentation: https://gisdata-caltrans.opendata.arcgis.com/
+
+name: fresno_roads
+description: |
+  Fresno County road centerlines from Caltrans Functional Classification dataset.
+  Uses F_System (FHWA Functional Class) as primary classification.
+
+confidence: high
+default_class: residential
+
+source_classification:
+  column: F_System
+  description: |
+    FHWA Functional Classification system (1-7).
+    Based on federal highway functional classification standards.
+  documentation_url: https://www.fhwa.dot.gov/planning/processes/statewide/related/highway_functional_classifications/
+  values:
+    1:
+      description: Interstate
+      count: 138
+    2:
+      description: Principal Arterial - Freeways/Expressways
+      count: 714
+    3:
+      description: Principal Arterial - Other
+      count: 1018
+    4:
+      description: Minor Arterial
+      count: 5251
+    5:
+      description: Major Collector
+      count: 6437
+    6:
+      description: Minor Collector
+      count: 864
+    7:
+      description: Local
+      count: 38630
+
+# Mapping rules derived from 53,052 high-confidence matches (75.5% accuracy)
+# Based on majority vote from matched pairs with Overture data
+class_mapping_rules:
+  # Interstate → motorway (97.8% agreement)
+  - source_value: 1
+    target_class: motorway
+    priority: 100
+
+  # Principal Arterial - Freeways → motorway (95.1% agreement)
+  # Note: Caltrans "trunk" (F_System 2) maps to Overture "motorway" in practice
+  - source_value: 2
+    target_class: motorway
+    priority: 90
+
+  # Principal Arterial - Other → primary (53.4% agreement)
+  - source_value: 3
+    target_class: primary
+    priority: 80
+
+  # Minor Arterial → secondary (48.6% agreement)
+  - source_value: 4
+    target_class: secondary
+    priority: 70
+
+  # Major Collector → tertiary (42.2% agreement)
+  - source_value: 5
+    target_class: tertiary
+    priority: 60
+
+  # Minor Collector → tertiary (same as major collector in Overture)
+  - source_value: 6
+    target_class: tertiary
+    priority: 55
+
+  # Local → residential (87.4% agreement)
+  - source_value: 7
+    target_class: residential
+    priority: 50
+
+notes: |
+  Mapping derived from 53,052 high-confidence geometric matches with Overture data.
+
+  Key observations:
+  1. Interstate (F_System 1) and Freeways (F_System 2) both map to Overture "motorway"
+     - Standard FHWA mapping puts F_System 2 as "trunk", but Overture uses "motorway"
+  2. Local roads (F_System 7) have 87.4% agreement - very reliable
+  3. Middle tiers (arterials/collectors) have more variance:
+     - Minor Arterial: 48.6% secondary, 34.0% primary
+     - Major Collector: 42.2% tertiary, 25.6% secondary
+  4. This is a rural county so classifications may differ from urban areas
+
+  Overall accuracy: 75.5% exact class match with Overture
