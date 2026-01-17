@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+import jellyfish
 from rapidfuzz import fuzz
 from rapidfuzz.distance import JaroWinkler
 
@@ -71,6 +72,8 @@ _MISSING_NAMES_RESULT = {
     "token_sort_ratio": 0.5,
     "token_set_ratio": 0.5,
     "partial_ratio": 0.5,
+    "soundex_match": 0.5,
+    "metaphone_similarity": 0.5,
     "names_match": False,
     "names_missing": True,
 }
@@ -95,7 +98,7 @@ def _extract_name_string(name) -> Optional[str]:
         return name
     if isinstance(name, dict):
         # Try common keys in order of preference
-        for key in ['primary', 'common', 'name', 'value']:
+        for key in ["primary", "common", "name", "value"]:
             if key in name and name[key]:
                 val = name[key]
                 # Handle nested extraction
@@ -153,12 +156,23 @@ def compute_name_similarity(
     token_set_ratio = fuzz.token_set_ratio(norm_a, norm_b) / 100.0
     partial_ratio = fuzz.partial_ratio(norm_a, norm_b) / 100.0
 
-    # Names match if any metric is very high
-    names_match = (
-        levenshtein_ratio > 0.9
-        or token_sort_ratio > 0.9
-        or token_set_ratio > 0.95
+    # Phonetic matching - catches typos and transcription errors
+    # Use first word for Soundex (usually the main street name)
+    first_word_a = norm_a.split()[0] if norm_a else ""
+    first_word_b = norm_b.split()[0] if norm_b else ""
+    soundex_a = jellyfish.soundex(first_word_a) if first_word_a else ""
+    soundex_b = jellyfish.soundex(first_word_b) if first_word_b else ""
+    soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
+
+    # Metaphone on full name for better typo tolerance
+    metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
+    metaphone_b = jellyfish.metaphone(norm_b) if norm_b else ""
+    metaphone_similarity = (
+        fuzz.ratio(metaphone_a, metaphone_b) / 100.0 if metaphone_a and metaphone_b else 0.5
     )
+
+    # Names match if any metric is very high
+    names_match = levenshtein_ratio > 0.9 or token_sort_ratio > 0.9 or token_set_ratio > 0.95
 
     return {
         "levenshtein_ratio": levenshtein_ratio,
@@ -166,6 +180,8 @@ def compute_name_similarity(
         "token_sort_ratio": token_sort_ratio,
         "token_set_ratio": token_set_ratio,
         "partial_ratio": partial_ratio,
+        "soundex_match": soundex_match,
+        "metaphone_similarity": metaphone_similarity,
         "names_match": names_match,
         "names_missing": False,
     }

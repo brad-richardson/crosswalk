@@ -280,14 +280,10 @@ def compute_relational_features(
         RelationalFeatures named tuple
     """
     # Perpendicular offset
-    offset, offset_std = compute_perpendicular_offset(
-        target_geom, anchor_geom, sample_interval
-    )
+    offset, offset_std = compute_perpendicular_offset(target_geom, anchor_geom, sample_interval)
 
     # Side of street
-    side, side_conf = compute_side_of_street(
-        target_geom, anchor_geom, sample_interval * 2
-    )
+    side, side_conf = compute_side_of_street(target_geom, anchor_geom, sample_interval * 2)
 
     # Parallel alignment
     alignment = compute_parallel_alignment(target_geom, anchor_geom)

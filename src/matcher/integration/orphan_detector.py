@@ -217,10 +217,7 @@ def detect_orphan_components(
 
     for comp_id, node_set in enumerate(components):
         # Get edges in this component
-        comp_edges = [
-            eid for eid, cid in edge_to_component.items()
-            if cid == comp_id
-        ]
+        comp_edges = [eid for eid, cid in edge_to_component.items() if cid == comp_id]
 
         # Check if any edge is from reference
         has_reference = any(eid in reference_edge_ids for eid in comp_edges)
@@ -315,7 +312,8 @@ def _annotate_edges_with_components(
     # Add columns
     annotated["component_id"] = annotated["edge_id"].map(edge_to_component)
     annotated["component_status"] = annotated["component_id"].apply(
-        lambda cid: ComponentStatus.MAIN.value if cid in main_component_ids
+        lambda cid: ComponentStatus.MAIN.value
+        if cid in main_component_ids
         else ComponentStatus.ORPHAN.value
     )
     annotated["component_size"] = annotated["component_id"].map(component_sizes)
@@ -379,7 +377,8 @@ def annotate_nodes_with_components(
     # Add columns
     annotated["component_id"] = annotated["node_id"].map(node_to_component)
     annotated["component_status"] = annotated["component_id"].apply(
-        lambda cid: ComponentStatus.MAIN.value if cid in main_component_ids
+        lambda cid: ComponentStatus.MAIN.value
+        if cid in main_component_ids
         else ComponentStatus.ORPHAN.value
     )
 

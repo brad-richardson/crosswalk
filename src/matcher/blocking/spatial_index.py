@@ -102,9 +102,7 @@ def generate_candidates(
     buffer_distance = buffer_distance or settings.buffer_distance
     # Note: heading/length params kept for API compatibility but not used
 
-    logger.info(
-        f"Generating candidates: {len(reference)} reference x {len(target)} target"
-    )
+    logger.info(f"Generating candidates: {len(reference)} reference x {len(target)} target")
     logger.info(f"  buffer_distance: {buffer_distance}m")
     logger.info(f"  Note: heading/length filters disabled - ML model handles scoring")
 
@@ -242,9 +240,7 @@ def generate_candidates_iter(
 
             # Compute heading and length for ML features (not filtering)
             heading_diff = _angle_diff(target_heading, ref_heading)
-            length_ratio = (
-                max(target_length, ref_length) / max(min(target_length, ref_length), 0.1)
-            )
+            length_ratio = max(target_length, ref_length) / max(min(target_length, ref_length), 0.1)
 
             distance_estimate = target_geom.centroid.distance(ref_row.geometry.centroid)
 

@@ -245,9 +245,7 @@ def compare_topology_features(
 
     # Dead end comparison
     if "is_dead_end" in features_a and "is_dead_end" in features_b:
-        comparison["dead_end_match"] = float(
-            features_a["is_dead_end"] == features_b["is_dead_end"]
-        )
+        comparison["dead_end_match"] = float(features_a["is_dead_end"] == features_b["is_dead_end"])
 
     # Intersection edge comparison
     if "is_intersection_edge" in features_a and "is_intersection_edge" in features_b:

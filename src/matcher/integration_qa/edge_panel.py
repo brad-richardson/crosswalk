@@ -12,7 +12,9 @@ def render_edge_details(edge: dict[str, Any], is_orphan: bool = True) -> None:
     # Basic info
     st.markdown(f"**Edge ID:** {edge.get('edge_id', 'N/A')}")
     st.markdown(f"**Original ID:** {edge.get('_original_id', edge.get('original_id', 'N/A'))}")
-    st.markdown(f"**Source Dataset:** {edge.get('_source_dataset', edge.get('source_dataset', 'N/A'))}")
+    st.markdown(
+        f"**Source Dataset:** {edge.get('_source_dataset', edge.get('source_dataset', 'N/A'))}"
+    )
     st.markdown(f"**Source Type:** {edge.get('_source', edge.get('source_type', 'N/A'))}")
 
     # Geometry info

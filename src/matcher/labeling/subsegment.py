@@ -13,9 +13,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import substring
 
 
-def extract_subsegment(
-    line: LineString, start_pct: float, end_pct: float
-) -> LineString:
+def extract_subsegment(line: LineString, start_pct: float, end_pct: float) -> LineString:
     """Extract a portion of a line using percentage-based linear referencing.
 
     Args:
@@ -116,9 +114,7 @@ def get_point_at_pct(line: LineString, pct: float) -> Point:
     return line.interpolate(dist)
 
 
-def estimate_overlap_range(
-    ref_line: LineString, target_line: LineString
-) -> dict[str, float]:
+def estimate_overlap_range(ref_line: LineString, target_line: LineString) -> dict[str, float]:
     """Estimate which portions of each line overlap.
 
     Uses projection of endpoints to estimate the overlapping ranges.
@@ -182,9 +178,7 @@ def estimate_overlap_range(
     }
 
 
-def compute_subsegment_length(
-    line: LineString, start_pct: float, end_pct: float
-) -> float:
+def compute_subsegment_length(line: LineString, start_pct: float, end_pct: float) -> float:
     """Compute the length of a subsegment in the line's units.
 
     Args:
@@ -220,7 +214,5 @@ def is_subsegment_selection(
         True if this is a sub-segment selection (not 0-100% for both)
     """
     ref_is_full = abs(ref_start) < tolerance and abs(ref_end - 1.0) < tolerance
-    target_is_full = (
-        abs(target_start) < tolerance and abs(target_end - 1.0) < tolerance
-    )
+    target_is_full = abs(target_start) < tolerance and abs(target_end - 1.0) < tolerance
     return not (ref_is_full and target_is_full)

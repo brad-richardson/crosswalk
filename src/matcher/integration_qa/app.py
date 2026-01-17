@@ -13,7 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from matcher.integration.output import load_integration_result
 from matcher.integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
-from matcher.integration_qa.edge_panel import render_decision_buttons, render_edge_details, render_stats
+from matcher.integration_qa.edge_panel import (
+    render_decision_buttons,
+    render_edge_details,
+    render_stats,
+)
 from matcher.integration_qa.map_view import create_integration_map
 from matcher.integration_qa.state import QASession, load_reviewer_name, save_reviewer_name
 
@@ -112,17 +116,25 @@ def main():
                 ["All", "High", "Medium", "Low"],
                 index=0,
             )
-            session.filter_by_priority = None if priority_filter == "All" else priority_filter.lower()
+            session.filter_by_priority = (
+                None if priority_filter == "All" else priority_filter.lower()
+            )
 
             # Filter by component (if available)
-            if orphan_edges is not None and len(orphan_edges) > 0 and "component_id" in orphan_edges.columns:
+            if (
+                orphan_edges is not None
+                and len(orphan_edges) > 0
+                and "component_id" in orphan_edges.columns
+            ):
                 component_ids = sorted(orphan_edges["component_id"].dropna().unique())
                 component_filter = st.selectbox(
                     "Component",
                     ["All"] + [str(c) for c in component_ids],
                     index=0,
                 )
-                session.filter_by_component = None if component_filter == "All" else int(component_filter)
+                session.filter_by_component = (
+                    None if component_filter == "All" else int(component_filter)
+                )
             else:
                 session.filter_by_component = None
 
@@ -152,11 +164,23 @@ def main():
             if not show_reviewed and len(filtered_edges) > 0 and id_col in filtered_edges.columns:
                 filtered_edges = filtered_edges[~filtered_edges[id_col].isin(reviewed_orphan_ids)]
 
-            if session.filter_by_priority and len(filtered_edges) > 0 and "qa_priority" in filtered_edges.columns:
-                filtered_edges = filtered_edges[filtered_edges["qa_priority"] == session.filter_by_priority]
+            if (
+                session.filter_by_priority
+                and len(filtered_edges) > 0
+                and "qa_priority" in filtered_edges.columns
+            ):
+                filtered_edges = filtered_edges[
+                    filtered_edges["qa_priority"] == session.filter_by_priority
+                ]
 
-            if session.filter_by_component is not None and len(filtered_edges) > 0 and "component_id" in filtered_edges.columns:
-                filtered_edges = filtered_edges[filtered_edges["component_id"] == session.filter_by_component]
+            if (
+                session.filter_by_component is not None
+                and len(filtered_edges) > 0
+                and "component_id" in filtered_edges.columns
+            ):
+                filtered_edges = filtered_edges[
+                    filtered_edges["component_id"] == session.filter_by_component
+                ]
 
             display_edges = filtered_edges
             current_store = orphan_store
@@ -173,7 +197,9 @@ def main():
                 filtered_edges = filtered_edges[~filtered_edges[id_col].isin(reviewed_merged_ids)]
 
             if session.filter_by_source and len(filtered_edges) > 0:
-                filtered_edges = filtered_edges[filtered_edges["_source_dataset"] == session.filter_by_source]
+                filtered_edges = filtered_edges[
+                    filtered_edges["_source_dataset"] == session.filter_by_source
+                ]
 
             display_edges = filtered_edges
             current_store = merged_store
@@ -181,7 +207,9 @@ def main():
 
         # Navigation
         if len(display_edges) > 0:
-            st.subheader(f"{'Orphan' if is_orphan else 'Merged'} Edges ({len(display_edges)} remaining)")
+            st.subheader(
+                f"{'Orphan' if is_orphan else 'Merged'} Edges ({len(display_edges)} remaining)"
+            )
 
             col_prev, col_idx, col_next = st.columns([1, 2, 1])
 
@@ -226,22 +254,38 @@ def main():
                     try:
                         edge_id_int = int(edge_id_val) if edge_id_val else 0
                     except (ValueError, TypeError):
-                        edge_id_int = hash(str(edge_id_val)) % (10**9)  # Create numeric ID from string
+                        edge_id_int = hash(str(edge_id_val)) % (
+                            10**9
+                        )  # Create numeric ID from string
 
                     if is_orphan:
                         orphan_store.add_decision(
                             edge_id=edge_id_int,
                             original_id=str(current_edge.get("_original_id", "")),
                             source_dataset=str(current_edge.get("_source_dataset", "")),
-                            component_id=int(current_edge.get("component_id", 0)) if current_edge.get("component_id") else 0,
+                            component_id=int(current_edge.get("component_id", 0))
+                            if current_edge.get("component_id")
+                            else 0,
                             decision=decision,
                             reason=reason or st.session_state.get("orphan_reason", ""),
                             reviewer=session.reviewer_name,
                             session_id=session.session_id,
-                            length_m=float(current_edge.geometry.length) if current_edge.geometry else 0,
-                            road_class=str(current_edge.get("class", current_edge.get("road_class", ""))),
-                            nearest_main_dist_m=float(current_edge.get("nearest_main_distance", current_edge.get("nearest_ref_distance", 0)) or 0),
-                            component_size=int(current_edge.get("component_size", 0)) if current_edge.get("component_size") else 0,
+                            length_m=float(current_edge.geometry.length)
+                            if current_edge.geometry
+                            else 0,
+                            road_class=str(
+                                current_edge.get("class", current_edge.get("road_class", ""))
+                            ),
+                            nearest_main_dist_m=float(
+                                current_edge.get(
+                                    "nearest_main_distance",
+                                    current_edge.get("nearest_ref_distance", 0),
+                                )
+                                or 0
+                            ),
+                            component_size=int(current_edge.get("component_size", 0))
+                            if current_edge.get("component_size")
+                            else 0,
                         )
                     else:
                         merged_store.add_decision(
@@ -249,21 +293,27 @@ def main():
                             original_id=str(current_edge.get("_original_id", "")),
                             source_dataset=str(current_edge.get("_source_dataset", "")),
                             source_type=str(current_edge.get("_source", "")),
-                            match_ref_id=str(current_edge.get("_match_ref_id", "")) if current_edge.get("_match_ref_id") else None,
+                            match_ref_id=str(current_edge.get("_match_ref_id", ""))
+                            if current_edge.get("_match_ref_id")
+                            else None,
                             decision=decision,
                             reason=reason or st.session_state.get("merged_reason", ""),
                             reviewer=session.reviewer_name,
                             session_id=session.session_id,
                             match_confidence=float(current_edge.get("_match_confidence", 0) or 0),
-                            length_m=float(current_edge.geometry.length) if current_edge.geometry else 0,
+                            length_m=float(current_edge.geometry.length)
+                            if current_edge.geometry
+                            else 0,
                             road_class=str(current_edge.get("road_class", "")),
                         )
 
                     # Save undo action
-                    session.push_undo({
-                        "type": "orphan" if is_orphan else "merged",
-                        "edge_id": edge_id_int,
-                    })
+                    session.push_undo(
+                        {
+                            "type": "orphan" if is_orphan else "merged",
+                            "edge_id": edge_id_int,
+                        }
+                    )
 
                     # Move to next
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)

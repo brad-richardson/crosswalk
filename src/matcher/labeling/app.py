@@ -92,14 +92,14 @@ def get_data_paths() -> tuple[Path, Path, str]:
     raw_filename = DATASET_RAW_FILES[selected]
 
     # Env vars override dropdown selection (for CLI compatibility)
-    reference_path = Path(os.environ.get(
-        "MATCHER_REFERENCE_PATH",
-        str(PROJECT_ROOT / "data/raw/overture_segments.parquet")
-    ))
-    target_path = Path(os.environ.get(
-        "MATCHER_TARGET_PATH",
-        str(PROJECT_ROOT / "data/raw" / raw_filename)
-    ))
+    reference_path = Path(
+        os.environ.get(
+            "MATCHER_REFERENCE_PATH", str(PROJECT_ROOT / "data/raw/overture_segments.parquet")
+        )
+    )
+    target_path = Path(
+        os.environ.get("MATCHER_TARGET_PATH", str(PROJECT_ROOT / "data/raw" / raw_filename))
+    )
     # Return dataset_id instead of labels_path - LabelStore uses partitions
     return reference_path, target_path, selected
 
@@ -149,7 +149,8 @@ def main():
     )
 
     # Reduce margins for compact layout
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .block-container {
             padding-top: 0.5rem;
@@ -167,7 +168,9 @@ def main():
             min-height: 50vh;
         }
         </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Initialize state
     init_session_state()
@@ -295,7 +298,9 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             if current_filter:
                 # Convert "no_match" -> "No Match" for display
                 display_filter = current_filter.replace("_", " ").title()
-                default_idx = filter_options.index(display_filter) if display_filter in filter_options else 0
+                default_idx = (
+                    filter_options.index(display_filter) if display_filter in filter_options else 0
+                )
             else:
                 default_idx = 0
 
@@ -345,7 +350,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             label_visibility="collapsed",
         )
         if (mode == "Compare Labelers") != st.session_state.show_comparison:
-            st.session_state.show_comparison = (mode == "Compare Labelers")
+            st.session_state.show_comparison = mode == "Compare Labelers"
             st.rerun()
 
         st.divider()
@@ -402,7 +407,9 @@ def render_main_content() -> None:
     filtered = filter_candidates(
         st.session_state.candidates,
         decision_filter=session.decision_filter,
-        labeled_pairs=label_store.get_labeled_pairs(labeler=current_labeler) if current_labeler else set(),
+        labeled_pairs=label_store.get_labeled_pairs(labeler=current_labeler)
+        if current_labeler
+        else set(),
         show_labeled=False,
         specific_pairs=review_disagreements,
     )
@@ -495,11 +502,18 @@ def render_single_pair_mode(pair, filtered, label_store, session):
     col_shortcuts, col_nav = st.columns([2, 1])
     with col_shortcuts:
         labeled_this_session = st.session_state.session_label_count
-        st.markdown(f"**Keys:** M N I U Z ←/→ &nbsp;|&nbsp; **Labeled:** {labeled_this_session} &nbsp;|&nbsp; **Remaining:** {len(filtered)}")
+        st.markdown(
+            f"**Keys:** M N I U Z ←/→ &nbsp;|&nbsp; **Labeled:** {labeled_this_session} &nbsp;|&nbsp; **Remaining:** {len(filtered)}"
+        )
     with col_nav:
         nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
         with nav_col1:
-            if st.button("←", disabled=session.current_index == 0, key="prev_top", help="Previous (Left Arrow)"):
+            if st.button(
+                "←",
+                disabled=session.current_index == 0,
+                key="prev_top",
+                help="Previous (Left Arrow)",
+            ):
                 go_to_previous()
                 reset_subsegment_state()
                 st.rerun()
@@ -518,7 +532,12 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 reset_subsegment_state()
                 st.rerun()
         with nav_col3:
-            if st.button("→", disabled=session.current_index >= len(filtered) - 1, key="next_top", help="Next (Right Arrow)"):
+            if st.button(
+                "→",
+                disabled=session.current_index >= len(filtered) - 1,
+                key="next_top",
+                help="Next (Right Arrow)",
+            ):
                 advance_to_next()
                 reset_subsegment_state()
                 st.rerun()
@@ -538,9 +557,13 @@ def render_single_pair_mode(pair, filtered, label_store, session):
         render_feature_panel(pair)
 
         # 1:N mode button (compact)
-        related_count = len([c for c in st.session_state.candidates if c.target_id == pair.target_id])
+        related_count = len(
+            [c for c in st.session_state.candidates if c.target_id == pair.target_id]
+        )
         if related_count > 1:
-            if st.button(f"🔗 {related_count} candidates", help="View all candidates for this target"):
+            if st.button(
+                f"🔗 {related_count} candidates", help="View all candidates for this target"
+            ):
                 st.session_state.one_to_n_mode = True
                 st.session_state.selected_refs = {pair.ref_id}
                 st.rerun()
@@ -563,10 +586,8 @@ def render_single_pair_mode(pair, filtered, label_store, session):
         components.html(map_html, height=550)
 
     # Sub-segment controls + action buttons at bottom
-    ref_start, ref_end, target_start, target_end, subseg_active = (
-        render_subsegment_controls(
-            pair, estimated_subsegment=estimated_subsegment
-        )
+    ref_start, ref_end, target_start, target_end, subseg_active = render_subsegment_controls(
+        pair, estimated_subsegment=estimated_subsegment
     )
 
     # Action buttons - compact row with keyboard shortcuts shown
@@ -623,7 +644,13 @@ def render_one_to_n_mode(pair, filtered, label_store):
     with col_map:
         # Map showing target + all related references
         tile_layer = st.session_state.get("tile_layer_choice", "Light")
-        m = create_multi_reference_map(pair.target_geometry, pair.target_name, related_candidates, st.session_state.selected_refs, tile_layer=tile_layer)
+        m = create_multi_reference_map(
+            pair.target_geometry,
+            pair.target_name,
+            related_candidates,
+            st.session_state.selected_refs,
+            tile_layer=tile_layer,
+        )
         # Render map as static HTML
         map_html = m.get_root().render()
         components.html(map_html, height=500)
@@ -648,7 +675,11 @@ def render_one_to_n_mode(pair, filtered, label_store):
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
     with col1:
-        if st.button("✅ Label as 1:N Match", type="primary", disabled=len(st.session_state.selected_refs) == 0):
+        if st.button(
+            "✅ Label as 1:N Match",
+            type="primary",
+            disabled=len(st.session_state.selected_refs) == 0,
+        ):
             record_one_to_n_label(target_id, related_candidates, label_store)
             st.session_state.one_to_n_mode = False
             st.session_state.selected_refs = set()
@@ -675,7 +706,9 @@ def render_one_to_n_mode(pair, filtered, label_store):
             st.rerun()
 
 
-def record_one_to_n_label(target_id: str, related_candidates: list, label_store: LabelStore) -> None:
+def record_one_to_n_label(
+    target_id: str, related_candidates: list, label_store: LabelStore
+) -> None:
     """Record a 1:N match where multiple ref segments match one target."""
     session = get_session()
 

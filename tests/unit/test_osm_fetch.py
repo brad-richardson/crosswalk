@@ -310,7 +310,9 @@ class TestFindBestRegion:
                     "properties": {"name": "Oregon", "urls": {"pbf": "http://or.pbf"}},
                     "geometry": {
                         "type": "Polygon",
-                        "coordinates": [[[-125, 42], [-125, 46], [-116, 46], [-116, 42], [-125, 42]]],
+                        "coordinates": [
+                            [[-125, 42], [-125, 46], [-116, 46], [-116, 42], [-125, 42]]
+                        ],
                     },
                 },
             ]

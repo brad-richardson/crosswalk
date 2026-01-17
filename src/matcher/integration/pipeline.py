@@ -108,9 +108,7 @@ def run_integration_pipeline(
         # If we have full target, separate matched/unmatched
         if config.target_path is not None:
             target = gpd.read_parquet(config.target_path)
-            matched, unmatched = separate_matched_unmatched(
-                target, match_results, target_id_column
-            )
+            matched, unmatched = separate_matched_unmatched(target, match_results, target_id_column)
         else:
             # Assume unmatched_path contains unmatched segments
             # For matched, we need the full target - create empty if not provided

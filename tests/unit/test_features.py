@@ -161,6 +161,50 @@ class TestSemanticFeatures:
         assert not names_likely_same_road("Main Street", "Oak Avenue")
 
 
+class TestPhoneticFeatures:
+    """Tests for phonetic name matching features."""
+
+    def test_soundex_match_same_sound(self):
+        """Phonetically similar names should match via Soundex."""
+        # "Main" and "Mane" have the same Soundex code (M500)
+        result = compute_name_similarity("Main Street", "Mane Street")
+        assert result["soundex_match"] == 1.0
+
+    def test_soundex_no_match_different_sound(self):
+        """Phonetically different names should not match via Soundex."""
+        result = compute_name_similarity("Main Street", "Oak Street")
+        assert result["soundex_match"] == 0.0
+
+    def test_metaphone_typo_tolerance(self):
+        """Metaphone should tolerate common typos."""
+        result = compute_name_similarity("Main Street", "Main Stret")
+        assert result["metaphone_similarity"] > 0.8
+
+    def test_metaphone_similar_names(self):
+        """Metaphone should give high similarity for similar-sounding names."""
+        result = compute_name_similarity("Washington Avenue", "Washingten Avenue")
+        assert result["metaphone_similarity"] > 0.9
+
+    def test_phonetic_missing_one_name(self):
+        """Missing one name should return neutral phonetic scores."""
+        result = compute_name_similarity(None, "Main Street")
+        assert result["soundex_match"] == 0.5
+        assert result["metaphone_similarity"] == 0.5
+
+    def test_phonetic_missing_both_names(self):
+        """Missing both names should return neutral phonetic scores."""
+        result = compute_name_similarity(None, None)
+        assert result["soundex_match"] == 0.5
+        assert result["metaphone_similarity"] == 0.5
+
+    def test_phonetic_with_abbreviations(self):
+        """Phonetic matching should work with abbreviations after normalization."""
+        result = compute_name_similarity("N Main St", "North Main Street")
+        # After normalization, both become "north main street"
+        assert result["soundex_match"] == 1.0
+        assert result["metaphone_similarity"] > 0.9
+
+
 class TestComputeSegmentHeading:
     """Tests for segment heading calculation."""
 

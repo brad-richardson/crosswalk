@@ -161,10 +161,12 @@ def fit_bounds(m: folium.Map, gdf: gpd.GeoDataFrame) -> folium.Map:
         gdf = gdf.to_crs("EPSG:4326")
 
     bounds = gdf.total_bounds
-    m.fit_bounds([
-        [bounds[1], bounds[0]],  # SW corner
-        [bounds[3], bounds[2]],  # NE corner
-    ])
+    m.fit_bounds(
+        [
+            [bounds[1], bounds[0]],  # SW corner
+            [bounds[3], bounds[2]],  # NE corner
+        ]
+    )
     return m
 
 
@@ -183,6 +185,7 @@ def create_integration_map(
     # Find selected edge for centering
     selected_edge = None
     if selected_edge_id is not None:
+
         def find_edge(gdf, edge_id):
             if gdf is None or len(gdf) == 0:
                 return None
@@ -224,6 +227,7 @@ def create_integration_map(
         if len(ref_edges) > 1000 and selected_edge is not None:
             # Only show reference edges within ~0.01 degrees (~1km) of selected
             from shapely.geometry import box
+
             cx, cy = center_lon, center_lat
             bbox = box(cx - 0.01, cy - 0.01, cx + 0.01, cy + 0.01)
             ref_edges = ref_edges[ref_edges.geometry.intersects(bbox)]

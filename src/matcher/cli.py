@@ -67,7 +67,9 @@ def fetch(
     datasets = {d.lower() for d in dataset}
     invalid = datasets - valid_datasets
     if invalid:
-        console.print(f"[red]Error: Invalid dataset(s): {invalid}. Must be 'overture' or 'osm'[/red]")
+        console.print(
+            f"[red]Error: Invalid dataset(s): {invalid}. Must be 'overture' or 'osm'[/red]"
+        )
         raise typer.Exit(1)
 
     coords = [float(x.strip()) for x in bbox.split(",")]
@@ -154,9 +156,7 @@ def topology(
     network.nodes.to_parquet(output_dir / "nodes.parquet")
     network.edges.to_parquet(output_dir / "edges.parquet")
 
-    console.print(
-        f"[green]Created {len(network.nodes)} nodes, {len(network.edges)} edges[/green]"
-    )
+    console.print(f"[green]Created {len(network.nodes)} nodes, {len(network.edges)} edges[/green]")
     console.print(f"[green]Saved to {output_dir}[/green]")
 
 
@@ -236,8 +236,12 @@ def evaluate(
     console.print(f"Mean confidence: {bridge['confidence'].mean():.3f}")
     console.print(f"Confidence distribution:")
     console.print(f"  >= 0.9: {(bridge['confidence'] >= 0.9).sum()}")
-    console.print(f"  0.75-0.9: {((bridge['confidence'] >= 0.75) & (bridge['confidence'] < 0.9)).sum()}")
-    console.print(f"  0.5-0.75: {((bridge['confidence'] >= 0.5) & (bridge['confidence'] < 0.75)).sum()}")
+    console.print(
+        f"  0.75-0.9: {((bridge['confidence'] >= 0.75) & (bridge['confidence'] < 0.9)).sum()}"
+    )
+    console.print(
+        f"  0.5-0.75: {((bridge['confidence'] >= 0.5) & (bridge['confidence'] < 0.75)).sum()}"
+    )
     console.print(f"  < 0.5: {(bridge['confidence'] < 0.5).sum()}")
 
     if ground_truth:
@@ -689,7 +693,9 @@ def validate(
             raise ValueError()
         bbox_tuple = tuple(coords)
     except ValueError:
-        console.print("[red]Error: bbox must be 4 comma-separated values: xmin,ymin,xmax,ymax[/red]")
+        console.print(
+            "[red]Error: bbox must be 4 comma-separated values: xmin,ymin,xmax,ymax[/red]"
+        )
         raise typer.Exit(1)
 
     # Validate strategy

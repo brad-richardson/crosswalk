@@ -79,10 +79,12 @@ def create_comparison_map(
     _add_tile_layer(m, tile_layer)
 
     # Fit bounds
-    m.fit_bounds([
-        [miny - pady, minx - padx],
-        [maxy + pady, maxx + padx],
-    ])
+    m.fit_bounds(
+        [
+            [miny - pady, minx - padx],
+            [maxy + pady, maxx + padx],
+        ]
+    )
 
     # Add reference geometry (blue, solid)
     ref_popup = _create_popup(
@@ -254,10 +256,12 @@ def create_multi_reference_map(
     # Add selected tile layer
     _add_tile_layer(m, tile_layer)
 
-    m.fit_bounds([
-        [miny - pady, minx - padx],
-        [maxy + pady, maxx + padx],
-    ])
+    m.fit_bounds(
+        [
+            [miny - pady, minx - padx],
+            [maxy + pady, maxx + padx],
+        ]
+    )
 
     # Add target geometry (red, thick, solid)
     target_popup = _create_popup("Target (Local)", "target", target_name, None)
@@ -382,10 +386,12 @@ def create_subsegment_map(
     _add_tile_layer(m, tile_layer)
 
     # Fit bounds
-    m.fit_bounds([
-        [miny - pady, minx - padx],
-        [maxy + pady, maxx + padx],
-    ])
+    m.fit_bounds(
+        [
+            [miny - pady, minx - padx],
+            [maxy + pady, maxx + padx],
+        ]
+    )
 
     ref_start, ref_end = ref_range
     target_start, target_end = target_range
@@ -482,7 +488,7 @@ def _add_subsegment_layers(
     selected = extract_subsegment(geometry, start_pct, end_pct)
     if selected.length > 0:
         popup = _create_popup(
-            f"{label} (SELECTED: {start_pct*100:.0f}%-{end_pct*100:.0f}%)",
+            f"{label} (SELECTED: {start_pct * 100:.0f}%-{end_pct * 100:.0f}%)",
             segment_id,
             name,
             road_class,

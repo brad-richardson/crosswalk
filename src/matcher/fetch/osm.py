@@ -267,8 +267,15 @@ def _build_road_flags(source_tags, road_class) -> list:
     # Bridge: explicit whitelist of valid bridge values from OSM wiki
     bridge = source_tags.get("bridge", "")
     valid_bridge_values = {
-        "yes", "viaduct", "boardwalk", "cantilever", "covered",
-        "low_water_crossing", "movable", "trestle", "aqueduct",
+        "yes",
+        "viaduct",
+        "boardwalk",
+        "cantilever",
+        "covered",
+        "low_water_crossing",
+        "movable",
+        "trestle",
+        "aqueduct",
     }
     if bridge in valid_bridge_values:
         flags.append("is_bridge")
