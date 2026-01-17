@@ -1,13 +1,11 @@
 """Tests for feature extraction."""
 
 import pytest
-import numpy as np
 from shapely import LineString
 
 from matcher.features.geometric import (
     compute_geometric_features,
     compute_segment_heading,
-    GeometricFeatures,
 )
 from matcher.features.semantic import (
     compute_name_similarity,

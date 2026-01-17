@@ -6,7 +6,6 @@ from shapely import LineString
 
 from matcher.blocking.spatial_index import (
     generate_candidates,
-    CandidatePair,
     _compute_overall_heading,
     _angle_diff,
 )

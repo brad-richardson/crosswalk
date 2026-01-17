@@ -4,7 +4,7 @@ Identifies disconnected components (orphans) that are not connected
 to the reference network, flagging them for QA review.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 import networkx as nx

@@ -8,7 +8,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..matching import MatchDecision, compute_match_score, optimize_matches, optimize_with_one_to_many
+from ..matching import MatchDecision, optimize_with_one_to_many
 from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
 

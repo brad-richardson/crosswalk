@@ -4,7 +4,6 @@ from typing import Optional
 
 import folium
 import geopandas as gpd
-from folium.plugins import Draw
 
 
 # Color scheme for different edge sources

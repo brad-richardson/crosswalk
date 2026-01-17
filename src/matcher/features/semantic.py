@@ -3,7 +3,7 @@
 from typing import Optional
 
 from rapidfuzz import fuzz
-from rapidfuzz.distance import JaroWinkler, Levenshtein
+from rapidfuzz.distance import JaroWinkler
 
 
 # Road class mapping to hierarchy levels
