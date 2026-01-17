@@ -20,28 +20,13 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 # Project root for resolving data paths (src/matcher/labeling -> project root)
 PROJECT_ROOT = Path(__file__).parents[3]
 
-# Available target datasets
-DATASETS = {
-    "boston_streets": {
-        "name": "Boston Streets",
-        "path": PROJECT_ROOT / "data/raw/boston_streets.parquet",
-        "labels": PROJECT_ROOT / "data/labels/labels_boston_streets.parquet",
-    },
-    "boston_bikes": {
-        "name": "Boston Bikes",
-        "path": PROJECT_ROOT / "data/raw/boston_bike_network.parquet",
-        "labels": PROJECT_ROOT / "data/labels/labels_boston_bikes.parquet",
-    },
-    "boston_sidewalks": {
-        "name": "Boston Sidewalks",
-        "path": PROJECT_ROOT / "data/raw/boston_sidewalks.parquet",
-        "labels": PROJECT_ROOT / "data/labels/labels_boston_sidewalks.parquet",
-    },
-    "osm": {
-        "name": "OSM Segments",
-        "path": PROJECT_ROOT / "data/raw/osm_segments.parquet",
-        "labels": PROJECT_ROOT / "data/labels/labels_osm.parquet",
-    },
+# Dataset configurations - maps dataset_id to raw data filename
+# Dataset metadata (name, type, urls) comes from DatasetRegistry
+DATASET_RAW_FILES = {
+    "boston_streets": "boston_streets.parquet",
+    "boston_bikes": "boston_bike_network.parquet",
+    "boston_sidewalks": "boston_sidewalks.parquet",
+    "osm": "osm_segments.parquet",
 }
 
 
@@ -75,6 +60,7 @@ from matcher.labeling.feature_panel import (
     render_subsegment_controls,
     reset_subsegment_state,
 )
+from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.label_store import LabelStore
 from matcher.labeling.map_view import create_comparison_map, create_subsegment_map
 from matcher.labeling.state import (
@@ -89,21 +75,21 @@ from matcher.labeling.state import (
 )
 
 
-def get_data_paths() -> tuple[Path, Path, Path]:
-    """Get reference, target, and labels paths with env var precedence.
+def get_data_paths() -> tuple[Path, Path, str]:
+    """Get reference, target paths and dataset_id with env var precedence.
 
     Returns:
-        Tuple of (reference_path, target_path, labels_path)
+        Tuple of (reference_path, target_path, dataset_id)
     """
     # Get selected dataset from session state or query params
     default_dataset = st.query_params.get("dataset", "boston_streets")
     selected = st.session_state.get("selected_dataset", default_dataset)
 
     # Validate selection
-    if selected not in DATASETS:
+    if selected not in DATASET_RAW_FILES:
         selected = "boston_streets"
 
-    config = DATASETS[selected]
+    raw_filename = DATASET_RAW_FILES[selected]
 
     # Env vars override dropdown selection (for CLI compatibility)
     reference_path = Path(os.environ.get(
@@ -112,13 +98,10 @@ def get_data_paths() -> tuple[Path, Path, Path]:
     ))
     target_path = Path(os.environ.get(
         "MATCHER_TARGET_PATH",
-        str(config["path"])
+        str(PROJECT_ROOT / "data/raw" / raw_filename)
     ))
-    labels_path = Path(os.environ.get(
-        "MATCHER_LABELS_PATH",
-        str(config["labels"])
-    ))
-    return reference_path, target_path, labels_path
+    # Return dataset_id instead of labels_path - LabelStore uses partitions
+    return reference_path, target_path, selected
 
 
 def check_dataset_change() -> bool:
@@ -193,20 +176,23 @@ def main():
     check_dataset_change()
 
     # Get paths (respects env vars and dataset selection)
-    reference_path, target_path, labels_path = get_data_paths()
+    reference_path, target_path, dataset_id = get_data_paths()
 
-    # Initialize label store
+    # Initialize label store with dataset_id (uses Hive partitioning)
     if st.session_state.label_store is None:
-        st.session_state.label_store = LabelStore(labels_path)
+        st.session_state.label_store = LabelStore(dataset_id)
 
     # Render UI
-    render_sidebar(reference_path, target_path, labels_path)
+    render_sidebar(reference_path, target_path, dataset_id)
     render_main_content()
 
 
-def render_sidebar(reference_path: Path, target_path: Path, labels_path: Path) -> None:
+def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> None:
     """Render the sidebar with controls and stats."""
     session = get_session()
+
+    # Get dataset registry for metadata
+    registry = DatasetRegistry()
 
     with st.sidebar:
         st.title("🛣️ Road Labeling")
@@ -216,14 +202,20 @@ def render_sidebar(reference_path: Path, target_path: Path, labels_path: Path) -
 
         # Get default from query params for persistence across refreshes
         default_dataset = st.query_params.get("dataset", "boston_streets")
-        if default_dataset not in DATASETS:
+        if default_dataset not in DATASET_RAW_FILES:
             default_dataset = "boston_streets"
 
-        dataset_keys = list(DATASETS.keys())
+        dataset_keys = list(DATASET_RAW_FILES.keys())
+
+        def get_dataset_display_name(key: str) -> str:
+            """Get display name from registry or fallback to key."""
+            ds = registry.get(key)
+            return ds.name if ds else key.replace("_", " ").title()
+
         selected_dataset = st.selectbox(
             "Target Dataset",
             options=dataset_keys,
-            format_func=lambda k: DATASETS[k]["name"],
+            format_func=get_dataset_display_name,
             index=dataset_keys.index(default_dataset),
             key="selected_dataset",
         )
@@ -236,9 +228,10 @@ def render_sidebar(reference_path: Path, target_path: Path, labels_path: Path) -
             st.info("Using env var override")
 
         # Warnings for file issues
-        dataset_config = DATASETS[selected_dataset]
-        if not dataset_config["path"].exists():
-            st.warning(f"Dataset not found: {dataset_config['path'].name}")
+        raw_file = DATASET_RAW_FILES.get(selected_dataset, "")
+        raw_path = PROJECT_ROOT / "data/raw" / raw_file
+        if raw_file and not raw_path.exists():
+            st.warning(f"Dataset not found: {raw_file}")
 
         legacy_path = PROJECT_ROOT / "data/labels/labels.parquet"
         if legacy_path.exists():
@@ -694,7 +687,7 @@ def record_one_to_n_label(target_id: str, related_candidates: list, label_store:
     for cand in related_candidates:
         if cand.ref_id in st.session_state.selected_refs:
             label_store.add(
-                ref_id=cand.ref_id,
+                gers_id=cand.ref_id,  # ref_id is the Overture GERS ID
                 target_id=cand.target_id,
                 label="match_1n",  # Special label for 1:N matches
                 labeler=session.labeler_name,
@@ -755,7 +748,7 @@ def record_label(
 
     # Add to label store with sub-segment info
     label_store.add(
-        ref_id=pair.ref_id,
+        gers_id=pair.ref_id,  # ref_id is the Overture GERS ID
         target_id=pair.target_id,
         label=label,
         labeler=session.labeler_name,

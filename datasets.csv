@@ -1,0 +1,7 @@
+dataset_id,name,type,fetch_url,info_url,metadata
+boston_bikes,Boston Bikes,bike,,,{}
+boston_sidewalks,Boston Sidewalks,sidewalk,,,{}
+boston_sidewalks_full,Boston Sidewalks Full,sidewalk,,,{}
+boston_sidewalks_relational,Boston Sidewalks Relational,sidewalk,,,{}
+boston_streets,Boston Streets,road,,,{}
+osm,Osm,road,,,{}

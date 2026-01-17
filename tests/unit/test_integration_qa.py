@@ -12,12 +12,12 @@ class TestOrphanDecisionStore:
 
     def test_add_decision(self, tmp_path):
         """Can add orphan decision."""
-        store = OrphanDecisionStore(tmp_path / "orphans.parquet")
+        store = OrphanDecisionStore(tmp_path / "orphans.csv")
 
         store.add_decision(
             edge_id=123,
             original_id="t_1",
-            source_dataset="boston_streets",
+            dataset_id="boston_streets",
             component_id=5,
             decision="keep",
             reason="legitimate_new",
@@ -35,12 +35,12 @@ class TestOrphanDecisionStore:
 
     def test_get_reviewed_edges(self, tmp_path):
         """Can get set of reviewed edge IDs."""
-        store = OrphanDecisionStore(tmp_path / "orphans.parquet")
+        store = OrphanDecisionStore(tmp_path / "orphans.csv")
 
         store.add_decision(
             edge_id=1,
             original_id="t_1",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="keep",
             reason="",
@@ -50,7 +50,7 @@ class TestOrphanDecisionStore:
         store.add_decision(
             edge_id=2,
             original_id="t_2",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="discard",
             reason="",
@@ -68,12 +68,12 @@ class TestOrphanDecisionStore:
 
     def test_undo(self, tmp_path):
         """Can undo last decision."""
-        store = OrphanDecisionStore(tmp_path / "orphans.parquet")
+        store = OrphanDecisionStore(tmp_path / "orphans.csv")
 
         store.add_decision(
             edge_id=1,
             original_id="t_1",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="keep",
             reason="",
@@ -83,7 +83,7 @@ class TestOrphanDecisionStore:
         store.add_decision(
             edge_id=2,
             original_id="t_2",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="discard",
             reason="",
@@ -99,12 +99,12 @@ class TestOrphanDecisionStore:
 
     def test_stats(self, tmp_path):
         """Can get decision statistics."""
-        store = OrphanDecisionStore(tmp_path / "orphans.parquet")
+        store = OrphanDecisionStore(tmp_path / "orphans.csv")
 
         store.add_decision(
             edge_id=1,
             original_id="t_1",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="keep",
             reason="",
@@ -114,7 +114,7 @@ class TestOrphanDecisionStore:
         store.add_decision(
             edge_id=2,
             original_id="t_2",
-            source_dataset="test",
+            dataset_id="test",
             component_id=1,
             decision="discard",
             reason="",
@@ -133,12 +133,12 @@ class TestMergedDecisionStore:
 
     def test_add_decision(self, tmp_path):
         """Can add merged edge decision."""
-        store = MergedDecisionStore(tmp_path / "merged.parquet")
+        store = MergedDecisionStore(tmp_path / "merged.csv")
 
         store.add_decision(
             edge_id=456,
             original_id="t_1",
-            source_dataset="boston_streets",
+            dataset_id="boston_streets",
             source_type="target_matched",
             match_ref_id="gers_123",
             decision="correct",
@@ -157,12 +157,12 @@ class TestMergedDecisionStore:
 
     def test_stats(self, tmp_path):
         """Can get decision statistics."""
-        store = MergedDecisionStore(tmp_path / "merged.parquet")
+        store = MergedDecisionStore(tmp_path / "merged.csv")
 
         store.add_decision(
             edge_id=1,
             original_id="t_1",
-            source_dataset="test",
+            dataset_id="test",
             source_type="target_matched",
             match_ref_id="ref_1",
             decision="correct",
@@ -173,7 +173,7 @@ class TestMergedDecisionStore:
         store.add_decision(
             edge_id=2,
             original_id="t_2",
-            source_dataset="test",
+            dataset_id="test",
             source_type="target_new",
             match_ref_id=None,
             decision="incorrect",
