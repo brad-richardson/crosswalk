@@ -10,14 +10,12 @@ Usage:
 Output files will be saved to data/raw/fresno_roads.parquet
 """
 
-import json
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 import requests
 from loguru import logger
-from shapely.geometry import LineString, MultiLineString
 
 # Output directory
 DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
@@ -26,10 +24,10 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 CALTRANS_URL = "https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0/query"
 
 # FHWA Functional Classification to Overture class mapping
-# Based on standard FHWA-to-OSM conventions
+# Based on match analysis showing F_System 2 maps to Overture "motorway" (95.1% agreement)
 F_SYSTEM_MAPPING = {
     1: "motorway",      # Interstate
-    2: "trunk",         # Principal Arterial - Freeways/Expressways
+    2: "motorway",      # Principal Arterial - Freeways/Expressways (maps to motorway in Overture)
     3: "primary",       # Principal Arterial - Other
     4: "secondary",     # Minor Arterial
     5: "tertiary",      # Major Collector
@@ -103,6 +101,8 @@ def fetch_fresno_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoData
     gdf["class"] = gdf["F_System"].map(F_SYSTEM_MAPPING).fillna("unclassified")
 
     # Extract road name from RouteID (e.g., "SHS_041._P" -> "SR 41")
+    route_type_prefixes = {"IS": "I-", "US": "US ", "SHS": "SR "}
+
     def parse_route_name(route_id):
         if pd.isna(route_id):
             return None
@@ -111,12 +111,9 @@ def fetch_fresno_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoData
         if len(parts) >= 2:
             route_type = parts[0]
             route_num = parts[1].lstrip("0")
-            if route_type == "IS":
-                return f"I-{route_num}"
-            elif route_type == "US":
-                return f"US {route_num}"
-            elif route_type == "SHS":
-                return f"SR {route_num}"
+            prefix = route_type_prefixes.get(route_type)
+            if prefix:
+                return f"{prefix}{route_num}"
         return None
 
     gdf["primary_name"] = gdf["RouteID"].apply(parse_route_name)

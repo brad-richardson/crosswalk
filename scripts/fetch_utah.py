@@ -13,10 +13,8 @@ Output files will be saved to data/raw/utah_roads.parquet
 from pathlib import Path
 
 import geopandas as gpd
-import pandas as pd
 import requests
 from loguru import logger
-from shapely.geometry import shape
 
 # Output directory
 DATA_DIR = Path(__file__).parent.parent / "data" / "raw"

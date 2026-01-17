@@ -329,7 +329,7 @@ matcher discover-classes data/raw/new_data.parquet
 
 1. **Data quality**: 99.4% of roads have street names (excellent)
 2. **Classification**: CARTOCODE system (1-17 values)
-3. **Match rate**: 71,603 matched out of 63,005 source roads
+3. **Match rate**: 71,603 match pairs from 63,005 source roads (some roads match multiple Overture segments)
 4. **Name-verified matches**: 49,438 (84.4% of high-confidence)
 5. **Accuracy**: 84.4% for name-verified matches
 

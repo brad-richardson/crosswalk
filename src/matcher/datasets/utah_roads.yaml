@@ -59,6 +59,9 @@ source_classification:
     15:
       description: Private Road (restricted)
       count: 9
+    16:
+      description: Path/Trail
+      count: 0
     17:
       description: Other/Unknown
       count: 155
@@ -136,6 +139,11 @@ class_mapping_rules:
   - source_value: "15"
     target_class: service
     priority: 30
+
+  # Path/Trail → path
+  - source_value: "16"
+    target_class: path
+    priority: 20
 
   # Other → unclassified
   - source_value: "17"
