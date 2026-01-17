@@ -4,9 +4,8 @@ Writes integration results to parquet files with proper schemas.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import geopandas as gpd
 from loguru import logger
@@ -213,13 +212,13 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
         with open(stats_path) as f:
             stats_data = json.load(f)
         created_at = datetime.fromisoformat(
-            stats_data.pop("created_at", datetime.now(timezone.utc).isoformat())
+            stats_data.pop("created_at", datetime.now(UTC).isoformat())
         )
         stats_data.pop("pipeline_version", None)
         statistics = IntegrationStatistics(**stats_data)
     else:
         statistics = IntegrationStatistics()
-        created_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
 
     return IntegrationResult(
         nodes=nodes,

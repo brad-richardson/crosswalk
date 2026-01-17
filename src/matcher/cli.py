@@ -1,7 +1,6 @@
 """CLI entry point for the road network conflation pipeline."""
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -34,7 +33,7 @@ def fetch(
         "-d",
         help="Dataset(s) to fetch: 'overture' or 'osm' (can specify multiple)",
     ),
-    cache_dir: Optional[Path] = typer.Option(
+    cache_dir: Path | None = typer.Option(
         None,
         "--cache-dir",
         help="Cache directory for PBF files (default: ~/.cache/matcher/pbf/)",
@@ -60,7 +59,8 @@ def fetch(
     Note: OSM fetching requires osmium-tool to be installed:
         brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
     """
-    from .fetch import overture as ov_module, osm as osm_module
+    from .fetch import osm as osm_module
+    from .fetch import overture as ov_module
 
     # Validate datasets
     valid_datasets = {"overture", "osm"}
@@ -132,6 +132,7 @@ def topology(
 ):
     """Reconstruct topology from spaghetti road data."""
     import geopandas as gpd
+
     from .topology import planarize
 
     console.print(f"[blue]Loading {input_file}...[/blue]")
@@ -185,6 +186,7 @@ def match(
 ):
     """Run the full matching pipeline."""
     from rich.progress import Progress, SpinnerColumn, TextColumn
+
     from .pipeline import run_pipeline
 
     console.print("[blue]Running matching pipeline...[/blue]")
@@ -219,7 +221,7 @@ def match(
 @app.command()
 def evaluate(
     bridge_file: Path = typer.Argument(..., help="Bridge file to evaluate"),
-    ground_truth: Optional[Path] = typer.Option(
+    ground_truth: Path | None = typer.Option(
         None,
         "--ground-truth",
         "-g",
@@ -234,7 +236,7 @@ def evaluate(
     bridge = pd.read_parquet(bridge_file)
     console.print(f"Total matches: {len(bridge)}")
     console.print(f"Mean confidence: {bridge['confidence'].mean():.3f}")
-    console.print(f"Confidence distribution:")
+    console.print("Confidence distribution:")
     console.print(f"  >= 0.9: {(bridge['confidence'] >= 0.9).sum()}")
     console.print(
         f"  0.75-0.9: {((bridge['confidence'] >= 0.75) & (bridge['confidence'] < 0.9)).sum()}"
@@ -245,7 +247,7 @@ def evaluate(
     console.print(f"  < 0.5: {(bridge['confidence'] < 0.5).sum()}")
 
     if ground_truth:
-        gt = pd.read_parquet(ground_truth)
+        _gt = pd.read_parquet(ground_truth)  # noqa: F841 - reserved for future use
         # TODO: Compute precision/recall against ground truth
         console.print("[yellow]Ground truth evaluation not yet implemented[/yellow]")
 
@@ -341,9 +343,9 @@ def train(
         matcher train --labels data/labels/labels_boston_streets.parquet
         matcher train --labels data/labels --combined -o data/models/combined.joblib
     """
-    from .matching.ml import MLMatcher, train_model
-
     import pandas as pd
+
+    from .matching.ml import train_model
 
     labels_path = Path(labels)
 
@@ -435,7 +437,7 @@ def integrate(
         "-o",
         help="Output directory",
     ),
-    config: Optional[Path] = typer.Option(
+    config: Path | None = typer.Option(
         None,
         "--config",
         "-c",
@@ -473,6 +475,7 @@ def integrate(
         matcher integrate data/raw/overture.parquet -c integration_config.yaml -o data/integrated
     """
     from rich.progress import Progress, SpinnerColumn, TextColumn
+
     from .integration import TargetConfig, run_integration_from_config, run_integration_pipeline
 
     if config:
@@ -493,7 +496,7 @@ def integrate(
             parts = t.split(":")
             if len(parts) != 4:
                 console.print(
-                    f"[red]Error: Target must be name:bridge_path:unmatched_path:priority[/red]"
+                    "[red]Error: Target must be name:bridge_path:unmatched_path:priority[/red]"
                 )
                 raise typer.Exit(1)
 
@@ -696,7 +699,7 @@ def validate(
         console.print(
             "[red]Error: bbox must be 4 comma-separated values: xmin,ymin,xmax,ymax[/red]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Validate strategy
     valid_strategies = {"random", "bbox", "source", "class"}
@@ -750,7 +753,7 @@ def validate(
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()

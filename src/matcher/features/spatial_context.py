@@ -10,7 +10,6 @@ making them suitable for raw "spaghetti" line datasets.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
 
 import geopandas as gpd
 import numpy as np
@@ -32,7 +31,7 @@ class AnchorMatch:
     anchor_idx: int
     """Index of the anchor road in the roads GeoDataFrame."""
 
-    anchor_id: Optional[str]
+    anchor_id: str | None
     """ID of the anchor road (if available)."""
 
     perpendicular_offset: float
@@ -101,8 +100,8 @@ class AnchorRoadMatcher:
 
     def find_anchor_road(
         self,
-        target_geom: Union[LineString, MultiLineString],
-    ) -> Optional[AnchorMatch]:
+        target_geom: LineString | MultiLineString,
+    ) -> AnchorMatch | None:
         """Find the most likely anchor road for a target segment.
 
         Args:
@@ -122,7 +121,7 @@ class AnchorRoadMatcher:
             return None
 
         # Score each candidate
-        best_match: Optional[AnchorMatch] = None
+        best_match: AnchorMatch | None = None
         best_score = -1.0
 
         for road_idx in candidate_indices:
@@ -160,7 +159,7 @@ class AnchorRoadMatcher:
     def find_anchor_roads_batch(
         self,
         targets_gdf: gpd.GeoDataFrame,
-    ) -> list[Optional[AnchorMatch]]:
+    ) -> list[AnchorMatch | None]:
         """Find anchor roads for multiple targets efficiently.
 
         Args:
@@ -207,9 +206,9 @@ class SpatialContextIndex:
     segment_ids: np.ndarray = field(default_factory=lambda: np.array([]))
     """Array of segment IDs corresponding to indices."""
 
-    _endpoint_tree: Optional[STRtree] = field(default=None, repr=False)
-    _segment_tree: Optional[STRtree] = field(default=None, repr=False)
-    _geometries: Optional[gpd.GeoSeries] = field(default=None, repr=False)
+    _endpoint_tree: STRtree | None = field(default=None, repr=False)
+    _segment_tree: STRtree | None = field(default=None, repr=False)
+    _geometries: gpd.GeoSeries | None = field(default=None, repr=False)
 
     def build_from_gdf(
         self,
@@ -349,7 +348,7 @@ class SpatialContextIndex:
 
     def query_nearby_segments(
         self,
-        geom: Union[LineString, MultiLineString, Point],
+        geom: LineString | MultiLineString | Point,
         radius: float,
     ) -> list[int]:
         """Find segment indices within radius of a geometry.
@@ -400,11 +399,11 @@ class SpatialContextIndex:
             start_point = Point(self.endpoint_coords[start_ep_idx])
             end_point = Point(self.endpoint_coords[end_ep_idx])
 
-            for nearby_ep, dist in self.query_nearby_endpoints(start_point, tolerance):
+            for nearby_ep, _dist in self.query_nearby_endpoints(start_point, tolerance):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
-            for nearby_ep, dist in self.query_nearby_endpoints(end_point, tolerance):
+            for nearby_ep, _dist in self.query_nearby_endpoints(end_point, tolerance):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
@@ -413,7 +412,7 @@ class SpatialContextIndex:
 
         return list(connected)
 
-    def get_segment_geometry(self, segment_idx: int) -> Optional[LineString]:
+    def get_segment_geometry(self, segment_idx: int) -> LineString | None:
         """Get geometry for a segment index."""
         if self._geometries is None or segment_idx >= len(self._geometries):
             return None
@@ -421,9 +420,9 @@ class SpatialContextIndex:
 
 
 def compute_endpoint_features(
-    target_geom: Union[LineString, MultiLineString],
+    target_geom: LineString | MultiLineString,
     context: SpatialContextIndex,
-    exclude_segment_idx: Optional[int] = None,
+    exclude_segment_idx: int | None = None,
     tolerance: float = 5.0,
 ) -> dict[str, float]:
     """Compute endpoint connectivity features for a target segment.

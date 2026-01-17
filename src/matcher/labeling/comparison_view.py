@@ -1,7 +1,5 @@
 """Comparison view for evaluating labeler agreement."""
 
-from typing import Optional
-
 import pandas as pd
 import streamlit as st
 
@@ -29,7 +27,7 @@ def render_comparison_view(label_store: LabelStore) -> None:
     with col1:
         labeler_a = st.selectbox("Labeler A", labelers, index=0)
     with col2:
-        remaining = [l for l in labelers if l != labeler_a]
+        remaining = [labeler for labeler in labelers if labeler != labeler_a]
         labeler_b = st.selectbox("Labeler B", remaining, index=0) if remaining else None
 
     if not labeler_b:
@@ -187,8 +185,8 @@ def render_comparison_view(label_store: LabelStore) -> None:
     if used_labels:
         matrix_df = pd.DataFrame(
             [[matrix_data[la][lb] for lb in used_labels] for la in used_labels],
-            index=[f"{labeler_a}: {l}" for l in used_labels],
-            columns=[f"{labeler_b}: {l}" for l in used_labels],
+            index=[f"{labeler_a}: {lbl}" for lbl in used_labels],
+            columns=[f"{labeler_b}: {lbl}" for lbl in used_labels],
         )
         st.dataframe(matrix_df, use_container_width=True)
 

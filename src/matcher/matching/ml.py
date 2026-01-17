@@ -243,11 +243,11 @@ class MLMatcher:
         """
         try:
             import xgboost as xgb
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "XGBoost is required for ML training. "
                 "Install it with: pip install 'matcher[ml]' or pip install xgboost"
-            )
+            ) from err
 
         from ..labeling.label_store import LabelStore
 

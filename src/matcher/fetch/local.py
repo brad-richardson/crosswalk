@@ -1,7 +1,6 @@
 """Load local road datasets from various formats."""
 
 from pathlib import Path
-from typing import Optional
 
 import geopandas as gpd
 from loguru import logger
@@ -9,12 +8,12 @@ from loguru import logger
 
 def load_local_roads(
     path: Path,
-    id_column: Optional[str] = None,
-    name_column: Optional[str] = None,
-    class_column: Optional[str] = None,
-    bridge_column: Optional[str] = None,
-    tunnel_column: Optional[str] = None,
-    layer_column: Optional[str] = None,
+    id_column: str | None = None,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    bridge_column: str | None = None,
+    tunnel_column: str | None = None,
+    layer_column: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Load local road data from various formats.
 
@@ -78,12 +77,12 @@ def load_local_roads(
 
 def _normalize_local_schema(
     gdf: gpd.GeoDataFrame,
-    id_column: Optional[str] = None,
-    name_column: Optional[str] = None,
-    class_column: Optional[str] = None,
-    bridge_column: Optional[str] = None,
-    tunnel_column: Optional[str] = None,
-    layer_column: Optional[str] = None,
+    id_column: str | None = None,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    bridge_column: str | None = None,
+    tunnel_column: str | None = None,
+    layer_column: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Normalize local data schema to standard format."""
     result = gdf.copy()

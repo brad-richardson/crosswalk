@@ -1,11 +1,9 @@
 """Tests for topology reconstruction."""
 
 import pytest
-import geopandas as gpd
-from shapely import LineString, Point
 
-from matcher.topology.planarize import planarize, should_intersect, PlanarizedNetwork
 from matcher.topology.graph import build_graph, compute_topology_features
+from matcher.topology.planarize import PlanarizedNetwork, planarize, should_intersect
 
 
 class TestPlanarize:

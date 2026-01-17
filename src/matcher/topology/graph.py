@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import geopandas as gpd
 import networkx as nx
 from loguru import logger
 

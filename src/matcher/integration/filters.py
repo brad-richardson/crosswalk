@@ -4,8 +4,6 @@ Provides filtering logic to remove noise and detect potential duplicates
 before integration.
 """
 
-from typing import Optional
-
 import geopandas as gpd
 from loguru import logger
 from shapely.strtree import STRtree
@@ -107,7 +105,7 @@ def detect_near_duplicates(
 
     for idx, row in unmatched.iterrows():
         geom = row.geometry
-        original_id = row.get(id_column, idx)
+        _original_id = row.get(id_column, idx)  # noqa: F841 - reserved for debugging
 
         # Find nearby matched segments
         buffered = geom.buffer(distance_tolerance)
@@ -153,7 +151,7 @@ def detect_near_duplicates(
 
 def filter_by_road_class(
     gdf: gpd.GeoDataFrame,
-    exclude_classes: Optional[list[str]] = None,
+    exclude_classes: list[str] | None = None,
     road_class_column: str = "road_class",
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Filter segments by road class.

@@ -83,7 +83,7 @@ def detect_orphans_by_proximity(
     connected_mask = []
     min_distances = []
 
-    for idx, row in target_edges.iterrows():
+    for _idx, row in target_edges.iterrows():
         geom = row.geometry
         if geom is None or geom.is_empty:
             connected_mask.append(False)
@@ -202,7 +202,7 @@ def detect_orphan_components(
 
     # Identify which edges are from reference
     reference_edge_ids = set()
-    for idx, row in edges_gdf.iterrows():
+    for _idx, row in edges_gdf.iterrows():
         if row.get("_source") == EdgeSource.REFERENCE.value:
             reference_edge_ids.add(row["edge_id"])
 
@@ -215,7 +215,7 @@ def detect_orphan_components(
     main_component_ids = set()
     orphan_component_ids = set()
 
-    for comp_id, node_set in enumerate(components):
+    for comp_id, _node_set in enumerate(components):
         # Get edges in this component
         comp_edges = [eid for eid, cid in edge_to_component.items() if cid == comp_id]
 
@@ -306,7 +306,7 @@ def _annotate_edges_with_components(
 
     # Compute component sizes (number of edges in each)
     component_sizes = {}
-    for edge_id, comp_id in edge_to_component.items():
+    for _edge_id, comp_id in edge_to_component.items():
         component_sizes[comp_id] = component_sizes.get(comp_id, 0) + 1
 
     # Add columns

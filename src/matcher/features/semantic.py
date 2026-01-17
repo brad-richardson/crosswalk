@@ -1,11 +1,8 @@
 """Semantic feature extraction (names, classifications)."""
 
-from typing import Optional
-
 import jellyfish
 from rapidfuzz import fuzz
 from rapidfuzz.distance import JaroWinkler
-
 
 # Road class mapping to hierarchy levels
 ROAD_CLASS_HIERARCHY = {
@@ -79,7 +76,7 @@ _MISSING_NAMES_RESULT = {
 }
 
 
-def _extract_name_string(name) -> Optional[str]:
+def _extract_name_string(name) -> str | None:
     """Extract string from name, handling dict format.
 
     Overture/OSM data often stores names as dicts like:
@@ -218,10 +215,10 @@ def _normalize_street_name(name: str) -> str:
 
 
 def compute_class_similarity(
-    class_a: Optional[str],
-    class_b: Optional[str],
-    subclass_a: Optional[str] = None,
-    subclass_b: Optional[str] = None,
+    class_a: str | None,
+    class_b: str | None,
+    subclass_a: str | None = None,
+    subclass_b: str | None = None,
 ) -> float:
     """Compute road class similarity (0-1).
 
@@ -276,8 +273,8 @@ def compute_class_similarity(
 
 
 def compute_class_match(
-    class_a: Optional[str],
-    class_b: Optional[str],
+    class_a: str | None,
+    class_b: str | None,
 ) -> bool:
     """Check if road classes are compatible for matching.
 
@@ -308,7 +305,7 @@ def compute_class_match(
     return abs(rank_a - rank_b) <= 2
 
 
-def extract_numeric_suffix(name: Optional[str]) -> Optional[int]:
+def extract_numeric_suffix(name: str | None) -> int | None:
     """Extract numeric suffix from road name (e.g., 'Interstate 5' -> 5).
 
     Useful for matching numbered routes.
@@ -328,7 +325,7 @@ def extract_numeric_suffix(name: Optional[str]) -> Optional[int]:
     return None
 
 
-def names_likely_same_road(name_a: Optional[str], name_b: Optional[str]) -> bool:
+def names_likely_same_road(name_a: str | None, name_b: str | None) -> bool:
     """Quick check if two names likely refer to the same road.
 
     Uses multiple heuristics for a quick yes/no decision.

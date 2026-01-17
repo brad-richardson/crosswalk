@@ -4,10 +4,7 @@ Combines reference network with multiple target datasets,
 tracking provenance and handling overlap conflicts with priority-based resolution.
 """
 
-from typing import Any, Optional
-
 import geopandas as gpd
-import numpy as np
 from loguru import logger
 from shapely import LineString
 from shapely.strtree import STRtree
@@ -74,14 +71,20 @@ def combine_networks(
 
     # Align all targets to working CRS
     for target_input in target_inputs:
-        if target_input.matched is not None and len(target_input.matched) > 0:
-            if target_input.matched.crs != working_crs:
-                logger.info(f"Reprojecting '{target_input.name}' matched to working CRS")
-                target_input.matched = target_input.matched.to_crs(working_crs)
-        if target_input.unmatched is not None and len(target_input.unmatched) > 0:
-            if target_input.unmatched.crs != working_crs:
-                logger.info(f"Reprojecting '{target_input.name}' unmatched to working CRS")
-                target_input.unmatched = target_input.unmatched.to_crs(working_crs)
+        if (
+            target_input.matched is not None
+            and len(target_input.matched) > 0
+            and target_input.matched.crs != working_crs
+        ):
+            logger.info(f"Reprojecting '{target_input.name}' matched to working CRS")
+            target_input.matched = target_input.matched.to_crs(working_crs)
+        if (
+            target_input.unmatched is not None
+            and len(target_input.unmatched) > 0
+            and target_input.unmatched.crs != working_crs
+        ):
+            logger.info(f"Reprojecting '{target_input.name}' unmatched to working CRS")
+            target_input.unmatched = target_input.unmatched.to_crs(working_crs)
 
     all_segments = []
     dropped_segments: list[DroppedSegment] = []
@@ -207,7 +210,7 @@ def _add_target_segments(
     id_column: str,
     match_lookup: dict,
     existing_geoms: list,
-    existing_tree: Optional[STRtree],
+    existing_tree: STRtree | None,
     overlap_iou_threshold: float,
     overlap_buffer_distance: float,
 ) -> tuple[list[dict], list[DroppedSegment]]:
@@ -277,7 +280,7 @@ def _find_overlapping_segment(
     tree: STRtree,
     buffer_distance: float,
     iou_threshold: float,
-) -> tuple[Optional[int], Optional[float]]:
+) -> tuple[int | None, float | None]:
     """Find an overlapping segment in existing geometries.
 
     Returns:

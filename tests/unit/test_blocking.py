@@ -1,13 +1,13 @@
 """Tests for blocking and candidate generation."""
 
-import pytest
 import geopandas as gpd
+import pytest
 from shapely import LineString
 
 from matcher.blocking.spatial_index import (
-    generate_candidates,
-    _compute_overall_heading,
     _angle_diff,
+    _compute_overall_heading,
+    generate_candidates,
 )
 
 

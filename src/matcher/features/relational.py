@@ -25,7 +25,7 @@ Key Features:
    - neighbor_agreement: Score based on nearby match confidence
 """
 
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import numpy as np
 from shapely import LineString, MultiLineString, Point
@@ -60,7 +60,7 @@ class RelationalFeatures(NamedTuple):
     Low when segment crosses back and forth across anchor."""
 
 
-def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
+def _to_linestring(geom: LineString | MultiLineString) -> LineString:
     """Convert geometry to LineString."""
     if isinstance(geom, LineString):
         return geom
@@ -75,8 +75,8 @@ def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
 
 
 def compute_perpendicular_offset(
-    target_geom: Union[LineString, MultiLineString],
-    anchor_geom: Union[LineString, MultiLineString],
+    target_geom: LineString | MultiLineString,
+    anchor_geom: LineString | MultiLineString,
     sample_interval: float = 5.0,
 ) -> tuple[float, float]:
     """Compute perpendicular offset from target to anchor line.
@@ -124,8 +124,8 @@ def compute_perpendicular_offset(
 
 
 def compute_side_of_street(
-    target_geom: Union[LineString, MultiLineString],
-    anchor_geom: Union[LineString, MultiLineString],
+    target_geom: LineString | MultiLineString,
+    anchor_geom: LineString | MultiLineString,
     sample_interval: float = 10.0,
 ) -> tuple[str, float]:
     """Determine which side of the anchor road the target is on.
@@ -212,8 +212,8 @@ def compute_side_of_street(
 
 
 def compute_parallel_alignment(
-    line_a: Union[LineString, MultiLineString],
-    line_b: Union[LineString, MultiLineString],
+    line_a: LineString | MultiLineString,
+    line_b: LineString | MultiLineString,
 ) -> float:
     """Compute how parallel two lines are (0-1).
 
@@ -265,8 +265,8 @@ def _compute_heading(start: np.ndarray, end: np.ndarray) -> float:
 
 
 def compute_relational_features(
-    target_geom: Union[LineString, MultiLineString],
-    anchor_geom: Union[LineString, MultiLineString],
+    target_geom: LineString | MultiLineString,
+    anchor_geom: LineString | MultiLineString,
     sample_interval: float = 5.0,
 ) -> RelationalFeatures:
     """Compute all relational features for a target/anchor pair.
@@ -298,7 +298,7 @@ def compute_relational_features(
 
 
 def compute_endpoint_proximity(
-    target_geom: Union[LineString, MultiLineString],
+    target_geom: LineString | MultiLineString,
     endpoint_coords: np.ndarray,
     tolerance: float = 5.0,
 ) -> tuple[float, float, int]:

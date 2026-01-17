@@ -4,9 +4,8 @@ Main entry point for running the network integration pipeline.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
 
 import geopandas as gpd
 from loguru import logger
@@ -18,7 +17,6 @@ from .filters import detect_near_duplicates, filter_short_segments
 from .orphan_detector import detect_orphans_by_proximity
 from .output import write_integration_outputs
 from .provenance import (
-    EdgeSource,
     IntegrationResult,
     IntegrationStatistics,
     TargetInput,
@@ -33,7 +31,7 @@ class TargetConfig:
     bridge_path: Path
     unmatched_path: Path
     priority: int
-    target_path: Optional[Path] = None  # Full target for separating matched/unmatched
+    target_path: Path | None = None  # Full target for separating matched/unmatched
 
 
 def run_integration_pipeline(
@@ -172,12 +170,12 @@ def run_integration_pipeline(
         orphan_edges=orphan_edges,
         dropped_overlaps=dropped_overlaps,
         statistics=stats,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     # Step 6: Write outputs
     logger.info("Step 6: Writing outputs...")
-    output_paths = write_integration_outputs(result, output_dir)
+    write_integration_outputs(result, output_dir)
 
     logger.info("=" * 60)
     logger.info("Integration pipeline complete!")

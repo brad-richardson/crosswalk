@@ -13,7 +13,6 @@ if str(src_path) not in sys.path:
 import streamlit as st
 import streamlit.components.v1 as components
 
-
 # Config file for persisting settings like labeler name
 CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
@@ -46,6 +45,7 @@ def save_config(config: dict) -> None:
 
 
 from matcher.config import settings
+from matcher.labeling.comparison_view import render_comparison_view
 from matcher.labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
@@ -53,14 +53,13 @@ from matcher.labeling.data_loader import (
     get_subsegment_estimate,
     load_geodataframe,
 )
-from matcher.labeling.comparison_view import render_comparison_view
+from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.feature_panel import (
     get_subseg_state,
     render_feature_panel,
     render_subsegment_controls,
     reset_subsegment_state,
 )
-from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.label_store import LabelStore
 from matcher.labeling.map_view import create_comparison_map, create_subsegment_map
 from matcher.labeling.state import (

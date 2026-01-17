@@ -10,7 +10,6 @@ Key functions:
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import numpy as np
 from numba import jit
@@ -41,7 +40,7 @@ class AlignmentResult:
 @jit(nopython=True, cache=True)
 def _interpolate_along_line(
     coords: np.ndarray, distances: np.ndarray, t: float
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Interpolate a point at distance t along the line defined by coords.
     coords: Nx2 array of (x, y) coordinates
@@ -154,7 +153,7 @@ def _find_best_alignment_numba(
     dataset_length: float,
     grid_samples: int,
     refinement_steps: int,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Numba-optimized grid search + ternary refinement for best alignment.
     Returns: (best_offset, best_score)
@@ -233,7 +232,7 @@ def _find_best_alignment_numba(
     return best_offset, best_score
 
 
-def _prepare_line_data(line: LineString) -> Tuple[np.ndarray, np.ndarray, float]:
+def _prepare_line_data(line: LineString) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Extract coordinates and compute cumulative distances for a LineString.
     Returns: (coords array, distances array, total_length)
@@ -342,7 +341,7 @@ def linestring_alignment(
         )
 
 
-def create_subline(line: LineString, start_frac: float, end_frac: float) -> Optional[LineString]:
+def create_subline(line: LineString, start_frac: float, end_frac: float) -> LineString | None:
     """
     Extracts a sub-linestring from a LineString given start and end fractions.
 

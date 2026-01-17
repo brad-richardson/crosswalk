@@ -1,9 +1,8 @@
 """Data loading and candidate preparation for labeling UI."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import geopandas as gpd
 from shapely.geometry import LineString
@@ -24,17 +23,17 @@ class CandidatePairView:
     target_id: str
     ref_geometry: LineString
     target_geometry: LineString
-    ref_name: Optional[str]
-    target_name: Optional[str]
-    ref_class: Optional[str]
-    target_class: Optional[str]
+    ref_name: str | None
+    target_name: str | None
+    ref_class: str | None
+    target_class: str | None
     decision: str  # "match", "review", "no_match"
     confidence: float
     score_breakdown: dict[str, float]
     features: dict[str, float]
     # Sub-segment estimate - computed on-demand when viewing the pair
     # None means not yet computed, dict contains the estimated ranges
-    estimated_subsegment: Optional[dict[str, float]] = None
+    estimated_subsegment: dict[str, float] | None = None
 
 
 def _filter_linestrings(gdf: gpd.GeoDataFrame, source_name: str) -> gpd.GeoDataFrame:
@@ -238,10 +237,10 @@ def get_subsegment_estimate(pair: CandidatePairView) -> dict[str, float]:
 
 def filter_candidates(
     views: list[CandidatePairView],
-    decision_filter: Optional[str] = None,
-    labeled_pairs: Optional[set[tuple[str, str]]] = None,
+    decision_filter: str | None = None,
+    labeled_pairs: set[tuple[str, str]] | None = None,
     show_labeled: bool = False,
-    specific_pairs: Optional[list[tuple[str, str]]] = None,
+    specific_pairs: list[tuple[str, str]] | None = None,
 ) -> list[CandidatePairView]:
     """Filter candidate views based on criteria.
 

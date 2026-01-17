@@ -1,23 +1,21 @@
 """Tests for validation module."""
 
-import numpy as np
-import pandas as pd
 import geopandas as gpd
+import pandas as pd
 import pytest
 from shapely import LineString
 
 from matcher.validation.evaluate import (
-    get_osm_way_id,
-    evaluate_by_record_id,
-    compute_metrics,
     analyze_failures,
+    compute_metrics,
+    evaluate_by_record_id,
+    get_osm_way_id,
 )
 from matcher.validation.holdout import (
-    extract_record_ids,
-    extract_all_record_ids,
-    has_source,
-    drop_random_osm,
     create_holdout,
+    drop_random_osm,
+    extract_record_ids,
+    has_source,
 )
 
 
@@ -89,19 +87,19 @@ class TestEvaluateByRecordId:
 
         # w100: should match (dropped), matched (in bridge)
         w100_row = eval_df[eval_df["osm_id"] == "w100"].iloc[0]
-        assert w100_row["should_match"] == True
-        assert w100_row["matched"] == True
+        assert w100_row["should_match"]
+        assert w100_row["matched"]
         assert w100_row["confidence"] == 0.95
 
         # w200: should NOT match (not dropped), but was matched
         w200_row = eval_df[eval_df["osm_id"] == "w200"].iloc[0]
-        assert w200_row["should_match"] == False
-        assert w200_row["matched"] == True
+        assert not w200_row["should_match"]
+        assert w200_row["matched"]
 
         # w300: should match (dropped), NOT matched (in unmatched)
         w300_row = eval_df[eval_df["osm_id"] == "w300"].iloc[0]
-        assert w300_row["should_match"] == True
-        assert w300_row["matched"] == False
+        assert w300_row["should_match"]
+        assert not w300_row["matched"]
 
     def test_versioned_record_id_matching(self):
         """Should match versioned record IDs correctly."""

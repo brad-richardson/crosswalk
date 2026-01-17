@@ -1,13 +1,10 @@
 """Map visualization component using folium."""
 
-from typing import Optional
-
 import folium
 from shapely.geometry import LineString, MultiLineString, mapping
 
 from .data_loader import CandidatePairView
 from .subsegment import extract_subsegment
-
 
 # Colors for visualization
 REFERENCE_COLOR = "#2196F3"  # Blue
@@ -131,7 +128,7 @@ def _add_geometry_layer(
     geometry,
     color: str,
     weight: int,
-    dash_array: Optional[str],
+    dash_array: str | None,
     popup: str,
 ) -> None:
     """Add a geometry to the map."""
@@ -155,8 +152,8 @@ def _add_geometry_layer(
 def _create_popup(
     label: str,
     segment_id: str,
-    name: Optional[str],
-    road_class: Optional[str],
+    name: str | None,
+    road_class: str | None,
 ) -> str:
     """Create HTML popup content."""
     lines = [f"<b>{label}</b>"]
@@ -211,7 +208,7 @@ def _add_legend(m: folium.Map) -> None:
 
 def create_multi_reference_map(
     target_geometry,
-    target_name: Optional[str],
+    target_name: str | None,
     related_candidates: list,
     selected_refs: set,
     height: int = 500,
@@ -442,8 +439,8 @@ def _add_subsegment_layers(
     weight: int,
     label: str,
     segment_id: str,
-    name: Optional[str],
-    road_class: Optional[str],
+    name: str | None,
+    road_class: str | None,
 ) -> None:
     """Add geometry layers split into selected and unselected portions.
 

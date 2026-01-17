@@ -1,9 +1,5 @@
 """Tests for OSM PBF fetching modules."""
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point

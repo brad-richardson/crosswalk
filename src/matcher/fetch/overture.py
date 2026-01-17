@@ -5,7 +5,6 @@ and automatically handles release version detection.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
 
 import geopandas as gpd
 from loguru import logger
@@ -28,7 +27,7 @@ class BoundingBox(BaseModel):
             f"{self.xmax} {self.ymax}, {self.xmin} {self.ymax}, {self.xmin} {self.ymin}))"
         )
 
-    def to_tuple(self) -> Tuple[float, float, float, float]:
+    def to_tuple(self) -> tuple[float, float, float, float]:
         """Convert to tuple (xmin, ymin, xmax, ymax) for overturemaps."""
         return (self.xmin, self.ymin, self.xmax, self.ymax)
 
@@ -36,7 +35,7 @@ class BoundingBox(BaseModel):
 def fetch_overture_segments(
     bbox: BoundingBox,
     output_path: Path,
-    release: Optional[str] = None,
+    release: str | None = None,
 ) -> Path:
     """Download Overture road segments for a bounding box.
 
@@ -78,7 +77,7 @@ def fetch_overture_segments(
 def fetch_overture_connectors(
     bbox: BoundingBox,
     output_path: Path,
-    release: Optional[str] = None,
+    release: str | None = None,
 ) -> Path:
     """Download Overture connectors (intersections) for a bounding box.
 

@@ -1,8 +1,9 @@
 """Pipeline orchestration - runs the full matching pipeline."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import geopandas as gpd
 from loguru import logger
@@ -30,7 +31,7 @@ class PipelineResult:
     n_review: int
     n_unmatched: int
     bridge_file: Path
-    unmatched_file: Optional[Path]
+    unmatched_file: Path | None
 
 
 def run_pipeline(
@@ -42,7 +43,7 @@ def run_pipeline(
     max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
     max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
     min_confidence: float = 0.1,  # Lower = more aggressive matching
-    progress_callback: Optional[Callable[[int], None]] = None,
+    progress_callback: Callable[[int], None] | None = None,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
     ref_name_column: str = "name",
@@ -84,12 +85,12 @@ def run_pipeline(
     try:
         reference = gpd.read_parquet(reference_path)
     except Exception as e:
-        raise PipelineError(f"Failed to read reference file {reference_path}: {e}")
+        raise PipelineError(f"Failed to read reference file {reference_path}: {e}") from e
 
     try:
         target = gpd.read_parquet(target_path)
     except Exception as e:
-        raise PipelineError(f"Failed to read target file {target_path}: {e}")
+        raise PipelineError(f"Failed to read target file {target_path}: {e}") from e
 
     # Validate geometry columns
     if reference.geometry.isna().any():

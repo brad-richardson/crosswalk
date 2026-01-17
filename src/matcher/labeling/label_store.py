@@ -1,9 +1,9 @@
 """Label persistence - Hive-partitioned CSV storage for labeled training data."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 import pyarrow.dataset as pa_ds
@@ -62,7 +62,7 @@ class LabelStore:
 
     dataset_id: str
     labels_dir: Path = DEFAULT_LABELS_DIR
-    _df: Optional[pd.DataFrame] = None
+    _df: pd.DataFrame | None = None
 
     def __post_init__(self):
         self.labels_dir = Path(self.labels_dir)
@@ -144,7 +144,7 @@ class LabelStore:
             "target_id": str(target_id),
             "label": label,
             "labeler": labeler,
-            "labeled_at": datetime.now(timezone.utc).isoformat(),
+            "labeled_at": datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "original_decision": original_decision,
             "original_confidence": original_confidence,
@@ -173,7 +173,7 @@ class LabelStore:
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
 
-    def get_labeled_pairs(self, labeler: Optional[str] = None) -> set[tuple[str, str]]:
+    def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
 
         Args:
@@ -205,7 +205,7 @@ class LabelStore:
             "unsure": (df["label"] == "unsure").sum(),
         }
 
-    def remove_last(self) -> Optional[dict]:
+    def remove_last(self) -> dict | None:
         """Remove the last label (for undo). Returns removed row or None."""
         df = self.df
         if df is None or len(df) == 0:

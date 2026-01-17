@@ -8,8 +8,8 @@ from matcher.features.geometric import (
     compute_segment_heading,
 )
 from matcher.features.semantic import (
-    compute_name_similarity,
     compute_class_similarity,
+    compute_name_similarity,
     names_likely_same_road,
 )
 

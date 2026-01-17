@@ -38,7 +38,7 @@ provide a reasonable baseline for initial candidate scoring.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
@@ -46,7 +46,7 @@ from loguru import logger
 
 from ..blocking.spatial_index import CandidatePair
 from ..config import settings
-from ..features.geometric import GeometricFeatures, compute_geometric_features
+from ..features.geometric import compute_geometric_features
 from ..features.semantic import compute_class_similarity, compute_name_similarity
 
 
@@ -102,12 +102,12 @@ def _get_weights(weights: dict[str, float] = None) -> dict[str, float]:
 def compute_match_score(
     ref_geom,
     target_geom,
-    ref_name: Optional[str] = None,
-    target_name: Optional[str] = None,
-    ref_class: Optional[str] = None,
-    target_class: Optional[str] = None,
-    ref_subclass: Optional[str] = None,
-    target_subclass: Optional[str] = None,
+    ref_name: str | None = None,
+    target_name: str | None = None,
+    ref_class: str | None = None,
+    target_class: str | None = None,
+    ref_subclass: str | None = None,
+    target_subclass: str | None = None,
     weights: dict[str, float] = None,
     buffer_radius: float = 10.0,
     distance_threshold: float = 50.0,
@@ -354,9 +354,7 @@ def get_best_match_per_target(
     for result in results:
         target_id = result.target_id
 
-        if target_id not in best_matches:
-            best_matches[target_id] = result
-        elif result.confidence > best_matches[target_id].confidence:
+        if target_id not in best_matches or result.confidence > best_matches[target_id].confidence:
             best_matches[target_id] = result
 
     return best_matches
@@ -378,9 +376,7 @@ def get_best_match_per_reference(
     for result in results:
         ref_id = result.ref_id
 
-        if ref_id not in best_matches:
-            best_matches[ref_id] = result
-        elif result.confidence > best_matches[ref_id].confidence:
+        if ref_id not in best_matches or result.confidence > best_matches[ref_id].confidence:
             best_matches[ref_id] = result
 
     return best_matches

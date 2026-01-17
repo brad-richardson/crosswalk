@@ -1,7 +1,6 @@
 """Configuration settings for the matcher pipeline."""
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
@@ -21,7 +20,7 @@ class MatcherSettings(BaseSettings):
     output_dir: Path = Field(default=Path("data/output"), description="Output directory")
 
     # Overture settings
-    overture_release: Optional[str] = Field(
+    overture_release: str | None = Field(
         default=None,
         description="Overture Maps release version (None = use latest)",
     )
@@ -120,7 +119,7 @@ class MatcherSettings(BaseSettings):
         default="EPSG:4326",
         description="Default CRS for input data",
     )
-    working_crs: Optional[str] = Field(
+    working_crs: str | None = Field(
         default=None,
         description="Working CRS for metric calculations (auto-detected if None)",
     )

@@ -4,8 +4,8 @@ Uses STRtree for efficient spatial queries to find potential matches
 without O(N*M) comparisons.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Optional
 
 import geopandas as gpd
 import numpy as np
@@ -104,7 +104,7 @@ def generate_candidates(
 
     logger.info(f"Generating candidates: {len(reference)} reference x {len(target)} target")
     logger.info(f"  buffer_distance: {buffer_distance}m")
-    logger.info(f"  Note: heading/length filters disabled - ML model handles scoring")
+    logger.info("  Note: heading/length filters disabled - ML model handles scoring")
 
     # Prepare target with buffer geometry and pre-computed attributes
     target_prep = target.copy()
@@ -174,7 +174,7 @@ def generate_candidates(
 
     # Build CandidatePair objects
     candidates = []
-    for i, (idx, row) in enumerate(joined_filtered.iterrows()):
+    for i, (_idx, row) in enumerate(joined_filtered.iterrows()):
         candidates.append(
             CandidatePair(
                 ref_id=row["_ref_id"],
@@ -233,10 +233,7 @@ def generate_candidates_iter(
             ref_heading = ref_headings.iloc[ref_idx]
             ref_length = ref_row.geometry.length
 
-            if ref_id_column in ref_row.index:
-                ref_id = ref_row[ref_id_column]
-            else:
-                ref_id = ref_idx
+            ref_id = ref_row[ref_id_column] if ref_id_column in ref_row.index else ref_idx
 
             # Compute heading and length for ML features (not filtering)
             heading_diff = _angle_diff(target_heading, ref_heading)

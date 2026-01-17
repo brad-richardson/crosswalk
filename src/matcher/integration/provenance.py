@@ -5,10 +5,9 @@ supporting multi-dataset merging with priority-based conflict resolution.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 
@@ -67,8 +66,8 @@ class DroppedSegment:
     source_type: EdgeSource
     geometry: Any  # LineString
     dropped_reason: str
-    overlapping_edge_id: Optional[int] = None
-    overlap_iou: Optional[float] = None
+    overlapping_edge_id: int | None = None
+    overlap_iou: float | None = None
     priority: int = 0
 
 
@@ -134,7 +133,7 @@ class IntegrationResult:
     orphan_edges: gpd.GeoDataFrame
     dropped_overlaps: gpd.GeoDataFrame
     statistics: IntegrationStatistics
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # Column names for provenance tracking (prefixed with _ to distinguish from source data)
