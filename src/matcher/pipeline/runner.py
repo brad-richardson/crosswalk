@@ -198,7 +198,7 @@ def run_pipeline(
         if not Path(model_path).exists():
             raise FileNotFoundError(
                 f"ML model not found at {model_path}. "
-                f"Run 'matcher train' first to train the model on labeled data."
+                "Run 'matcher train --combined' to train the model on labeled data from data/labels/."
             )
         matcher = MLMatcher(model_path=model_path)
         results = matcher.score_candidates(
