@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 import pandas as pd
 import pyarrow.dataset as pa_ds
+from loguru import logger
 
 from .subsegment import is_subsegment_selection
 
@@ -89,8 +90,8 @@ class LabelStore:
                 if "ref_id" in df.columns and "gers_id" not in df.columns:
                     df = df.rename(columns={"ref_id": "gers_id"})
                 return df
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load labels from {self.csv_path}: {e}")
         return self._empty_dataframe()
 
     def _empty_dataframe(self) -> pd.DataFrame:
@@ -240,8 +241,9 @@ class LabelStore:
             if "ref_id" in df.columns and "gers_id" not in df.columns:
                 df = df.rename(columns={"ref_id": "gers_id"})
             return df
-        except Exception:
+        except Exception as e:
             # Fallback: manual loading if pyarrow dataset fails
+            logger.warning(f"PyArrow dataset loading failed, using manual fallback: {e}")
             dfs = []
             for partition_dir in labels_dir.glob("dataset=*"):
                 dataset_id = partition_dir.name.split("=")[1]
@@ -266,7 +268,7 @@ def load_labels(path: Path) -> pd.DataFrame:
     """
     # Extract dataset_id from path
     if path.name == "data.csv":
-        # New format: data/labels/labels/dataset=xxx/data.csv
+        # New format: data/labels/dataset=xxx/data.csv
         partition_name = path.parent.name
         if partition_name.startswith("dataset="):
             dataset_id = partition_name.split("=")[1]

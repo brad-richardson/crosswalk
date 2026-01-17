@@ -79,8 +79,8 @@ class OrphanDecisionStore:
                 if "source_dataset" in df.columns and "dataset_id" not in df.columns:
                     df = df.rename(columns={"source_dataset": "dataset_id"})
                 return df
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load orphan decisions from {self.path}: {e}")
         return pd.DataFrame(columns=ORPHAN_COLUMNS)
 
     def _save(self) -> None:
@@ -184,8 +184,8 @@ class MergedDecisionStore:
                 if "source_dataset" in df.columns and "dataset_id" not in df.columns:
                     df = df.rename(columns={"source_dataset": "dataset_id"})
                 return df
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load merged decisions from {self.path}: {e}")
         return pd.DataFrame(columns=MERGED_COLUMNS)
 
     def _save(self) -> None:
