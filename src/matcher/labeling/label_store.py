@@ -11,7 +11,7 @@ import pyarrow.dataset as pa_ds
 from .subsegment import is_subsegment_selection
 
 # Default paths
-DEFAULT_LABELS_DIR = Path("data/labels/labels")
+DEFAULT_LABELS_DIR = Path("data/labels")
 
 # Column definitions for labels
 LABEL_COLUMNS = [

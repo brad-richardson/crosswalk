@@ -37,7 +37,7 @@ def migrate_labels_to_csv(labels_dir: Path, dry_run: bool = False) -> None:
         return
 
     # Create new labels directory structure
-    new_labels_dir = labels_dir / "labels"
+    new_labels_dir = labels_dir
     if not dry_run:
         new_labels_dir.mkdir(parents=True, exist_ok=True)
 
