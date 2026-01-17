@@ -82,8 +82,8 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
                     <strong style="font-size: 14px;">Reference</strong>
                 </div>
                 <div style="color: #888; font-size: 11px;">ID: {ref_id_short}</div>
-                <div style="font-size: 16px;">Name: {pair.ref_name or 'N/A'}</div>
-                <div style="font-size: 15px;">Class: {pair.ref_class or 'N/A'}</div>
+                <div style="font-size: 16px;">Name: {pair.ref_name or "N/A"}</div>
+                <div style="font-size: 15px;">Class: {pair.ref_class or "N/A"}</div>
             </div>
             <div>
                 <div style="display: flex; align-items: center; margin-bottom: 6px;">
@@ -91,8 +91,8 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
                     <strong style="font-size: 14px;">Target</strong>
                 </div>
                 <div style="color: #888; font-size: 11px;">ID: {pair.target_id}</div>
-                <div style="font-size: 16px;">Name: {pair.target_name or 'N/A'}</div>
-                <div style="font-size: 15px;">Class: {pair.target_class or 'N/A'}</div>
+                <div style="font-size: 16px;">Name: {pair.target_name or "N/A"}</div>
+                <div style="font-size: 15px;">Class: {pair.target_class or "N/A"}</div>
             </div>
         </div>
         """,
@@ -115,16 +115,16 @@ def render_score_breakdown(pair: CandidatePairView) -> None:
         else:
             bar_color = "#F44336"
 
-        scores_html += f'''
+        scores_html += f"""
         <div style="display: flex; align-items: center; margin-bottom: 2px;">
             <span style="width: 90px; flex-shrink: 0;">{label}</span>
             <div style="flex-grow: 1; background: #333; border-radius: 2px; height: 6px; margin: 0 6px;">
                 <div style="background: {bar_color}; width: {bar_width}%; height: 100%; border-radius: 2px;"></div>
             </div>
             <span style="width: 32px; text-align: right; font-weight: bold;">{score:.2f}</span>
-        </div>'''
+        </div>"""
 
-    scores_html += '</div>'
+    scores_html += "</div>"
     st.markdown(scores_html, unsafe_allow_html=True)
 
 
@@ -302,9 +302,7 @@ def _init_subseg_state() -> None:
         st.session_state.subseg_target_end = 100
 
 
-def _set_subseg_values(
-    ref_start: int, ref_end: int, target_start: int, target_end: int
-) -> None:
+def _set_subseg_values(ref_start: int, ref_end: int, target_start: int, target_end: int) -> None:
     """Set subsegment values and increment version to force slider update."""
     st.session_state.subseg_ref_start = ref_start
     st.session_state.subseg_ref_end = ref_end

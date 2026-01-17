@@ -212,7 +212,9 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
     if stats_path.exists():
         with open(stats_path) as f:
             stats_data = json.load(f)
-        created_at = datetime.fromisoformat(stats_data.pop("created_at", datetime.now(timezone.utc).isoformat()))
+        created_at = datetime.fromisoformat(
+            stats_data.pop("created_at", datetime.now(timezone.utc).isoformat())
+        )
         stats_data.pop("pipeline_version", None)
         statistics = IntegrationStatistics(**stats_data)
     else:

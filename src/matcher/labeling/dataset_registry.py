@@ -73,9 +73,9 @@ class DatasetRegistry:
             except Exception:
                 pass
         # Return empty DataFrame with correct columns
-        return pd.DataFrame(columns=[
-            "dataset_id", "name", "type", "fetch_url", "info_url", "metadata"
-        ])
+        return pd.DataFrame(
+            columns=["dataset_id", "name", "type", "fetch_url", "info_url", "metadata"]
+        )
 
     def _save(self) -> None:
         """Save registry to CSV."""

@@ -60,7 +60,9 @@ class TestPlanarize:
         # 4 endpoints + 1 intersection = 5 nodes
         assert len(result.nodes) == 5
 
-    @pytest.mark.xfail(reason="Undershoot snapping needs re-splitting of target edge - future enhancement")
+    @pytest.mark.xfail(
+        reason="Undershoot snapping needs re-splitting of target edge - future enhancement"
+    )
     def test_undershoot_snapping(self, undershoot_lines):
         """Undershoot should be snapped to nearby edge."""
         result = planarize(undershoot_lines, snap_tolerance=2.0)
@@ -201,7 +203,9 @@ class TestBridgeStringParsing:
         # Count edges for the tunnel exit (index 2, original_id=2)
         # It should be split into 2 edges because it crosses the ground road
         tunnel_exit_edges = result.edges[result.edges["original_id"] == 2]
-        assert len(tunnel_exit_edges) == 2, "Tunnel exit should be split at intersection with ground road"
+        assert len(tunnel_exit_edges) == 2, (
+            "Tunnel exit should be split at intersection with ground road"
+        )
 
         # Ground road (index 0, original_id=0) should also be split
         ground_road_edges = result.edges[result.edges["original_id"] == 0]

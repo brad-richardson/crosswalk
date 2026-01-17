@@ -246,7 +246,7 @@ class SpatialContextIndex:
                 continue
 
             # Handle MultiLineString by getting endpoints of first/last component
-            if geom.geom_type == 'MultiLineString':
+            if geom.geom_type == "MultiLineString":
                 if len(geom.geoms) == 0:
                     continue
                 start = np.array(geom.geoms[0].coords[0])
@@ -448,7 +448,7 @@ def compute_endpoint_features(
         }
 
     # Handle both LineString and MultiLineString
-    if target_geom.geom_type == 'MultiLineString':
+    if target_geom.geom_type == "MultiLineString":
         if len(target_geom.geoms) == 0:
             return {
                 "start_endpoint_proximity": float("inf"),

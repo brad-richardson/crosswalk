@@ -105,9 +105,7 @@ def _get_score_numba(
 
     # Sample points along the overlapping portion
     for i in range(num_samples):
-        t = comparison_start + (comparison_end - comparison_start) * i / (
-            num_samples - 1
-        )
+        t = comparison_start + (comparison_end - comparison_start) * i / (num_samples - 1)
 
         # Interpolate points
         a_x, a_y = _interpolate_along_line(overture_coords, overture_distances, t)
@@ -344,9 +342,7 @@ def linestring_alignment(
         )
 
 
-def create_subline(
-    line: LineString, start_frac: float, end_frac: float
-) -> Optional[LineString]:
+def create_subline(line: LineString, start_frac: float, end_frac: float) -> Optional[LineString]:
     """
     Extracts a sub-linestring from a LineString given start and end fractions.
 

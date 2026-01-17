@@ -190,10 +190,12 @@ def parse_pbf(pbf_path: Path) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
         if node_id in handler.node_locations:
             lon, lat = handler.node_locations[node_id]
             version = handler.node_versions.get(node_id, 1)
-            connectors.append({
-                "id": f"n{node_id}@{version}",
-                "geometry": Point(lon, lat),
-            })
+            connectors.append(
+                {
+                    "id": f"n{node_id}@{version}",
+                    "geometry": Point(lon, lat),
+                }
+            )
 
     logger.info(f"Found {len(connectors)} connectors (intersections/endpoints)")
 

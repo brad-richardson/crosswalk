@@ -15,7 +15,9 @@ class MatcherSettings(BaseSettings):
     # Paths
     data_dir: Path = Field(default=Path("data"), description="Base data directory")
     raw_dir: Path = Field(default=Path("data/raw"), description="Raw data directory")
-    processed_dir: Path = Field(default=Path("data/processed"), description="Processed data directory")
+    processed_dir: Path = Field(
+        default=Path("data/processed"), description="Processed data directory"
+    )
     output_dir: Path = Field(default=Path("data/output"), description="Output directory")
 
     # Overture settings

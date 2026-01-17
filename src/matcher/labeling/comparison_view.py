@@ -37,12 +37,18 @@ def render_comparison_view(label_store: LabelStore) -> None:
         return
 
     # Filter to selected labelers, keep only most recent label per pair
-    df_a = df[df["labeler"] == labeler_a].sort_values("labeled_at").drop_duplicates(
-        subset=["ref_id", "target_id"], keep="last"
-    ).set_index(["ref_id", "target_id"])
-    df_b = df[df["labeler"] == labeler_b].sort_values("labeled_at").drop_duplicates(
-        subset=["ref_id", "target_id"], keep="last"
-    ).set_index(["ref_id", "target_id"])
+    df_a = (
+        df[df["labeler"] == labeler_a]
+        .sort_values("labeled_at")
+        .drop_duplicates(subset=["ref_id", "target_id"], keep="last")
+        .set_index(["ref_id", "target_id"])
+    )
+    df_b = (
+        df[df["labeler"] == labeler_b]
+        .sort_values("labeled_at")
+        .drop_duplicates(subset=["ref_id", "target_id"], keep="last")
+        .set_index(["ref_id", "target_id"])
+    )
 
     # Find common pairs
     common_pairs = df_a.index.intersection(df_b.index)
@@ -88,7 +94,9 @@ def render_comparison_view(label_store: LabelStore) -> None:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        color = "#4CAF50" if agreement_rate >= 80 else "#FF9800" if agreement_rate >= 60 else "#F44336"
+        color = (
+            "#4CAF50" if agreement_rate >= 80 else "#FF9800" if agreement_rate >= 60 else "#F44336"
+        )
         st.markdown(
             f"""
             <div style="text-align: center;">
@@ -120,14 +128,20 @@ def render_comparison_view(label_store: LabelStore) -> None:
             row_a = df_a.loc[(ref_id, target_id)]
             confidence = row_a["original_confidence"] if "original_confidence" in row_a.index else 0
             original = row_a["original_decision"] if "original_decision" in row_a.index else ""
-            disagree_data.append({
-                "ref_id": ref_id[:12] + "..." if len(ref_id) > 15 else ref_id,
-                "target_id": str(target_id)[:12] + "..." if len(str(target_id)) > 15 else target_id,
-                labeler_a: label_a,
-                labeler_b: label_b,
-                "confidence": f"{confidence:.0%}" if isinstance(confidence, (int, float)) else str(confidence),
-                "original": str(original),
-            })
+            disagree_data.append(
+                {
+                    "ref_id": ref_id[:12] + "..." if len(ref_id) > 15 else ref_id,
+                    "target_id": str(target_id)[:12] + "..."
+                    if len(str(target_id)) > 15
+                    else target_id,
+                    labeler_a: label_a,
+                    labeler_b: label_b,
+                    "confidence": f"{confidence:.0%}"
+                    if isinstance(confidence, (int, float))
+                    else str(confidence),
+                    "original": str(original),
+                }
+            )
 
         disagreements_df = pd.DataFrame(disagree_data)
         st.dataframe(disagreements_df, use_container_width=True, hide_index=True)

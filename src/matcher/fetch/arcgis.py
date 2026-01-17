@@ -189,18 +189,18 @@ def _transform_to_overture_schema(
 
     # Names struct
     if name_column and name_column in gdf.columns:
-        data["names"] = gdf[name_column].apply(
-            lambda x: {"primary": str(x)} if pd.notna(x) and x else None
-        ).values
+        data["names"] = (
+            gdf[name_column]
+            .apply(lambda x: {"primary": str(x)} if pd.notna(x) and x else None)
+            .values
+        )
     else:
         data["names"] = [None] * len(gdf)
 
     # Class with mapping
     if class_column and class_column in gdf.columns:
         if class_mapping:
-            data["class"] = (
-                gdf[class_column].map(class_mapping).fillna("unclassified").values
-            )
+            data["class"] = gdf[class_column].map(class_mapping).fillna("unclassified").values
         else:
             data["class"] = gdf[class_column].fillna("unclassified").astype(str).values
     else:
@@ -212,18 +212,16 @@ def _transform_to_overture_schema(
     # Subclass with mapping (e.g., sidewalk vs crosswalk)
     if subclass_column and subclass_column in gdf.columns:
         if subclass_mapping:
-            data["subclass"] = (
-                gdf[subclass_column].map(subclass_mapping).values
-            )
+            data["subclass"] = gdf[subclass_column].map(subclass_mapping).values
         else:
             data["subclass"] = gdf[subclass_column].astype(str).values
     else:
         data["subclass"] = [None] * len(gdf)
 
     # Sources array
-    data["sources"] = gdf[id_col].apply(
-        lambda x: [{"dataset": source_name, "record_id": str(x)}]
-    ).values
+    data["sources"] = (
+        gdf[id_col].apply(lambda x: [{"dataset": source_name, "record_id": str(x)}]).values
+    )
 
     # Road flags (empty - no bridge/tunnel info in these sources)
     data["road_flags"] = [[] for _ in range(len(gdf))]

@@ -268,11 +268,31 @@ def _extract_bbox_pyosmium(
 
     # Highway values to include
     HIGHWAY_VALUES = {
-        "motorway", "trunk", "primary", "secondary", "tertiary",
-        "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
-        "residential", "unclassified", "service", "living_street", "road",
-        "footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "track",
-        "construction", "proposed", "abandoned",
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "motorway_link",
+        "trunk_link",
+        "primary_link",
+        "secondary_link",
+        "tertiary_link",
+        "residential",
+        "unclassified",
+        "service",
+        "living_street",
+        "road",
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "track",
+        "construction",
+        "proposed",
+        "abandoned",
     }
 
     class DirectExtractHandler(osmium.SimpleHandler):
@@ -308,8 +328,10 @@ def _extract_bbox_pyosmium(
                         coords.append((lon, lat))
                         node_ids.append(n.ref)
                         self.node_locations[n.ref] = (lon, lat)
-                        if (self.bbox.xmin <= lon <= self.bbox.xmax and
-                                self.bbox.ymin <= lat <= self.bbox.ymax):
+                        if (
+                            self.bbox.xmin <= lon <= self.bbox.xmax
+                            and self.bbox.ymin <= lat <= self.bbox.ymax
+                        ):
                             has_node_in_bbox = True
             except osmium.InvalidLocationError:
                 self._invalid_count += 1
@@ -333,13 +355,15 @@ def _extract_bbox_pyosmium(
             }
             tags = {k: v for k, v in tags.items() if v is not None}
 
-            self.roads.append({
-                "id": f"w{w.id}@{w.version}",
-                "geometry": LineString(coords),
-                "tags": tags,
-                "name": w.tags.get("name"),
-                "node_ids": node_ids,
-            })
+            self.roads.append(
+                {
+                    "id": f"w{w.id}@{w.version}",
+                    "geometry": LineString(coords),
+                    "tags": tags,
+                    "name": w.tags.get("name"),
+                    "node_ids": node_ids,
+                }
+            )
 
     handler = DirectExtractHandler(bbox)
     handler.apply_file(str(input_pbf), locations=True, idx="flex_mem")
@@ -365,10 +389,12 @@ def _extract_bbox_pyosmium(
         if node_id in handler.node_locations:
             lon, lat = handler.node_locations[node_id]
             version = handler.node_versions.get(node_id, 1)
-            connectors.append({
-                "id": f"n{node_id}@{version}",
-                "geometry": Point(lon, lat),
-            })
+            connectors.append(
+                {
+                    "id": f"n{node_id}@{version}",
+                    "geometry": Point(lon, lat),
+                }
+            )
 
     # Save directly to parquet (bypassing PBF)
     output_dir = output_pbf.parent
@@ -388,9 +414,7 @@ def _extract_bbox_pyosmium(
         connectors_gdf = gpd.GeoDataFrame(connectors, crs="EPSG:4326")
         connectors_gdf.to_parquet(connectors_path)
     else:
-        connectors_gdf = gpd.GeoDataFrame(
-            columns=["id", "geometry"], crs="EPSG:4326"
-        )
+        connectors_gdf = gpd.GeoDataFrame(columns=["id", "geometry"], crs="EPSG:4326")
         connectors_gdf.to_parquet(connectors_path)
 
     # Return a marker path - the caller will check for parquet files

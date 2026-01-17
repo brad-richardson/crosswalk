@@ -172,9 +172,7 @@ def planarize(
 
     # Step 7: Snap undershoots/overshoots
     logger.info("Step 6: Snapping undershoots/overshoots...")
-    split_edges, clustered_nodes = _snap_undershoots(
-        split_edges, clustered_nodes, snap_tolerance
-    )
+    split_edges, clustered_nodes = _snap_undershoots(split_edges, clustered_nodes, snap_tolerance)
     logger.info(f"  After snapping: {len(clustered_nodes)} nodes, {len(split_edges)} edges")
 
     # Step 8: Build node and edge GeoDataFrames with connectivity
@@ -229,9 +227,7 @@ def should_intersect(row_a, row_b, respect_z_levels: bool) -> bool:
     return level_a == level_b
 
 
-def _find_intersections(
-    lines: gpd.GeoDataFrame, respect_z_levels: bool
-) -> list[Point]:
+def _find_intersections(lines: gpd.GeoDataFrame, respect_z_levels: bool) -> list[Point]:
     """Find all intersection points between lines (respecting z-levels).
 
     Detects both crossing intersections (X-junctions) and T-junctions
@@ -333,11 +329,13 @@ def _split_lines_at_nodes(
         # No nodes - return original lines as edges
         edges = []
         for idx, row in lines.iterrows():
-            edges.append({
-                "geometry": row.geometry,
-                "original_id": row[id_column],
-                **{k: row[k] for k in row.index if k not in ["geometry", id_column]},
-            })
+            edges.append(
+                {
+                    "geometry": row.geometry,
+                    "original_id": row[id_column],
+                    **{k: row[k] for k in row.index if k not in ["geometry", id_column]},
+                }
+            )
         return edges
 
     splitter = unary_union(nodes)
@@ -354,19 +352,23 @@ def _split_lines_at_nodes(
 
             for part in split_result.geoms:
                 if isinstance(part, LineString) and part.length > 0.01:
-                    edges.append({
-                        "geometry": part,
-                        "original_id": row[id_column],
-                        **original_attrs,
-                    })
+                    edges.append(
+                        {
+                            "geometry": part,
+                            "original_id": row[id_column],
+                            **original_attrs,
+                        }
+                    )
         except Exception as e:
             # If split fails, keep original
             logger.warning(f"Split failed for line {idx}: {e}")
-            edges.append({
-                "geometry": geom,
-                "original_id": row[id_column],
-                **original_attrs,
-            })
+            edges.append(
+                {
+                    "geometry": geom,
+                    "original_id": row[id_column],
+                    **original_attrs,
+                }
+            )
 
     return edges
 

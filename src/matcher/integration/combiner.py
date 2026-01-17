@@ -76,15 +76,11 @@ def combine_networks(
     for target_input in target_inputs:
         if target_input.matched is not None and len(target_input.matched) > 0:
             if target_input.matched.crs != working_crs:
-                logger.info(
-                    f"Reprojecting '{target_input.name}' matched to working CRS"
-                )
+                logger.info(f"Reprojecting '{target_input.name}' matched to working CRS")
                 target_input.matched = target_input.matched.to_crs(working_crs)
         if target_input.unmatched is not None and len(target_input.unmatched) > 0:
             if target_input.unmatched.crs != working_crs:
-                logger.info(
-                    f"Reprojecting '{target_input.name}' unmatched to working CRS"
-                )
+                logger.info(f"Reprojecting '{target_input.name}' unmatched to working CRS")
                 target_input.unmatched = target_input.unmatched.to_crs(working_crs)
 
     all_segments = []
@@ -314,9 +310,17 @@ def _build_match_lookup(match_results: list) -> dict:
     """Build lookup from target_id to match info."""
     lookup = {}
     for result in match_results:
-        target_id = str(result.target_id) if hasattr(result, "target_id") else str(result.get("local_id", ""))
-        gers_id = str(result.ref_id) if hasattr(result, "ref_id") else str(result.get("gers_id", ""))
-        confidence = result.confidence if hasattr(result, "confidence") else result.get("confidence", 0.0)
+        target_id = (
+            str(result.target_id)
+            if hasattr(result, "target_id")
+            else str(result.get("local_id", ""))
+        )
+        gers_id = (
+            str(result.ref_id) if hasattr(result, "ref_id") else str(result.get("gers_id", ""))
+        )
+        confidence = (
+            result.confidence if hasattr(result, "confidence") else result.get("confidence", 0.0)
+        )
 
         lookup[target_id] = {
             "gers_id": gers_id,
@@ -347,16 +351,18 @@ def _build_dropped_gdf(
 
     records = []
     for ds in dropped_segments:
-        records.append({
-            "geometry": ds.geometry,
-            "original_id": ds.original_id,
-            "source_dataset": ds.source_dataset,
-            "source_type": ds.source_type.value,
-            "dropped_reason": ds.dropped_reason,
-            "overlapping_edge_id": ds.overlapping_edge_id,
-            "overlap_iou": ds.overlap_iou,
-            "priority": ds.priority,
-        })
+        records.append(
+            {
+                "geometry": ds.geometry,
+                "original_id": ds.original_id,
+                "source_dataset": ds.source_dataset,
+                "source_type": ds.source_type.value,
+                "dropped_reason": ds.dropped_reason,
+                "overlapping_edge_id": ds.overlapping_edge_id,
+                "overlap_iou": ds.overlap_iou,
+                "priority": ds.priority,
+            }
+        )
 
     return gpd.GeoDataFrame(records, crs=crs)
 

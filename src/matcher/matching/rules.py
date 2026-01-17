@@ -74,21 +74,18 @@ class MatchResult:
 # All scores normalized 0-1, higher = better match
 DEFAULT_WEIGHTS = {
     # Geometric features (60% total)
-    "hausdorff_norm": 0.10,       # Max deviation - sensitive to segmentation, catches outliers
+    "hausdorff_norm": 0.10,  # Max deviation - sensitive to segmentation, catches outliers
     "mean_hausdorff_norm": 0.10,  # Mean deviation - robust to partial overlaps
-    "buffer_iou": 0.15,           # Overlap quality - robust general-purpose metric
-    "overlap_ratio": 0.15,        # Overlap quantity - "how much actually matches?"
-    "heading_norm": 0.10,         # Direction alignment - distinguishes parallel roads
-
+    "buffer_iou": 0.15,  # Overlap quality - robust general-purpose metric
+    "overlap_ratio": 0.15,  # Overlap quantity - "how much actually matches?"
+    "heading_norm": 0.10,  # Direction alignment - distinguishes parallel roads
     # Length/proximity (10% total)
-    "length_ratio": 0.10,         # Similar lengths suggest same segment
-
+    "length_ratio": 0.10,  # Similar lengths suggest same segment
     # Alignment quality (10% total)
-    "projection_norm": 0.10,      # Average perpendicular distance
-
+    "projection_norm": 0.10,  # Average perpendicular distance
     # Semantic features (20% total)
-    "name_similarity": 0.15,      # Strong signal when present, often missing
-    "class_similarity": 0.05,     # Weak signal - classes vary between datasets
+    "name_similarity": 0.15,  # Strong signal when present, often missing
+    "class_similarity": 0.05,  # Weak signal - classes vary between datasets
 }
 
 
@@ -145,7 +142,9 @@ def compute_match_score(
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
         "hausdorff_norm": max(0, 1 - geom_features.hausdorff_distance / distance_threshold),
-        "mean_hausdorff_norm": max(0, 1 - geom_features.mean_hausdorff_distance / distance_threshold),
+        "mean_hausdorff_norm": max(
+            0, 1 - geom_features.mean_hausdorff_distance / distance_threshold
+        ),
         "buffer_iou": geom_features.buffer_iou,
         "overlap_ratio": geom_features.overlap_ratio,  # Already 0-1
         "heading_norm": max(0, 1 - geom_features.heading_delta / 45.0),

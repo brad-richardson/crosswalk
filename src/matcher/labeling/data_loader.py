@@ -175,7 +175,9 @@ def generate_scored_candidates(
 
         # Extract names
         ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
-        target_name = _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
+        target_name = (
+            _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
+        )
 
         # Extract classes
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
@@ -185,22 +187,24 @@ def generate_scored_candidates(
         # when the pair is actually viewed in the UI
         # estimated = estimate_overlap_range(ref_row.geometry, target_row.geometry)
 
-        views.append(CandidatePairView(
-            ref_id=str(result.ref_id),
-            target_id=str(result.target_id),
-            ref_geometry=ref_row.geometry,
-            target_geometry=target_row.geometry,
-            ref_name=ref_name,
-            target_name=target_name,
-            ref_class=ref_class,
-            target_class=target_class,
-            decision=result.decision.value,
-            confidence=result.confidence,
-            score_breakdown=result.score_breakdown,
-            features=result.features,
-            # Defer subsegment estimation - computed on-demand when viewing
-            estimated_subsegment=None,
-        ))
+        views.append(
+            CandidatePairView(
+                ref_id=str(result.ref_id),
+                target_id=str(result.target_id),
+                ref_geometry=ref_row.geometry,
+                target_geometry=target_row.geometry,
+                ref_name=ref_name,
+                target_name=target_name,
+                ref_class=ref_class,
+                target_class=target_class,
+                decision=result.decision.value,
+                confidence=result.confidence,
+                score_breakdown=result.score_breakdown,
+                features=result.features,
+                # Defer subsegment estimation - computed on-demand when viewing
+                estimated_subsegment=None,
+            )
+        )
 
     # Sort: REVIEW first, then by confidence descending
     def sort_key(v):
@@ -264,9 +268,6 @@ def filter_candidates(
 
     # Exclude already-labeled
     if labeled_pairs and not show_labeled:
-        filtered = [
-            v for v in filtered
-            if (v.ref_id, v.target_id) not in labeled_pairs
-        ]
+        filtered = [v for v in filtered if (v.ref_id, v.target_id) not in labeled_pairs]
 
     return filtered

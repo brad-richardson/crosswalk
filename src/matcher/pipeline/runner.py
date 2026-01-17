@@ -202,7 +202,9 @@ def run_pipeline(
             )
         matcher = MLMatcher(model_path=model_path)
         results = matcher.score_candidates(
-            candidates, reference, target,
+            candidates,
+            reference,
+            target,
             ref_name_column=ref_name_column,
             target_name_column=target_name_column,
             ref_class_column=ref_class_column,
@@ -243,9 +245,7 @@ def run_pipeline(
     )
 
     # Unmatched report
-    matched_target_ids = {
-        m.target_id for m in optimized if m.decision != MatchDecision.NO_MATCH
-    }
+    matched_target_ids = {m.target_id for m in optimized if m.decision != MatchDecision.NO_MATCH}
     unmatched_path = output_path.parent / "unmatched.parquet"
     generate_unmatched_report(
         target=target,

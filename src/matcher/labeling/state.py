@@ -68,12 +68,14 @@ def go_to_previous() -> None:
 
 def push_undo(ref_id: str, target_id: str, label: str) -> None:
     """Push an action to the undo stack."""
-    st.session_state.session.undo_stack.append({
-        "ref_id": ref_id,
-        "target_id": target_id,
-        "label": label,
-        "index": st.session_state.session.current_index,
-    })
+    st.session_state.session.undo_stack.append(
+        {
+            "ref_id": ref_id,
+            "target_id": target_id,
+            "label": label,
+            "index": st.session_state.session.current_index,
+        }
+    )
     # Keep only last 50 actions
     if len(st.session_state.session.undo_stack) > 50:
         st.session_state.session.undo_stack.pop(0)
