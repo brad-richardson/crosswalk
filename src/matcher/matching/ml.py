@@ -117,9 +117,7 @@ def _compute_single_feature(args):
         # Compute lateral offset for parallel infrastructure disambiguation
         # This measures perpendicular distance between target and reference geometries
         # Helps distinguish left vs right sidewalk (same side = low offset, opposite = high)
-        lateral_offset, lateral_consistency = compute_perpendicular_offset(
-            target_geom, ref_geom
-        )
+        lateral_offset, lateral_consistency = compute_perpendicular_offset(target_geom, ref_geom)
 
         # Get pre-computed endpoint features for target segment
         endpoint_features = _worker_data.get("endpoint_features", {})
