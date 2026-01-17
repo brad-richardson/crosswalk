@@ -42,6 +42,7 @@ MAX_DISTANCE_METERS = 9999.0
 # Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
 # (both compute bidirectional mean of min distances). Including both would double-weight.
 FEATURE_COLUMNS = [
+    # Geometric (7)
     "hausdorff_distance",
     "mean_hausdorff_distance",
     "buffer_iou",
@@ -49,14 +50,22 @@ FEATURE_COLUMNS = [
     "heading_delta",
     "length_ratio",
     "centroid_distance",
+    # Semantic - name (5)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    # Semantic - class (1)
     "class_similarity",
+    # Endpoint/connectivity (3)
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
 ]
 
-# Additional relational features (optional, for connectivity-aware matching)
-# Endpoint features help capture network topology without requiring explicit topology in target data
+# Additional relational features (kept for backward compatibility with old labels)
+# These are now part of FEATURE_COLUMNS
 RELATIONAL_FEATURE_COLUMNS = [
     "start_endpoint_proximity",
     "end_endpoint_proximity",
@@ -100,6 +109,10 @@ def _compute_single_feature(args):
             _worker_data["target_subclasses"][target_idx],
         )
 
+        # Get pre-computed endpoint features for target segment
+        endpoint_features = _worker_data.get("endpoint_features", {})
+        target_ep = endpoint_features.get(target_idx, {})
+
         return {
             "hausdorff_distance": geom_features.hausdorff_distance,
             "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
@@ -112,7 +125,14 @@ def _compute_single_feature(args):
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
             "name_token_sort": name_sim["token_sort_ratio"],
+            "name_soundex": name_sim.get("soundex_match", 0.5),
+            "name_metaphone": name_sim.get("metaphone_similarity", 0.5),
             "class_similarity": class_sim,
+            "start_endpoint_proximity": target_ep.get(
+                "start_endpoint_proximity", MAX_DISTANCE_METERS
+            ),
+            "end_endpoint_proximity": target_ep.get("end_endpoint_proximity", MAX_DISTANCE_METERS),
+            "shared_endpoint_count": target_ep.get("shared_endpoint_count", 0),
             "_error": None,
         }
     except Exception as e:
@@ -130,7 +150,12 @@ def _compute_single_feature(args):
             "name_levenshtein": 0.0,
             "name_jaro_winkler": 0.0,
             "name_token_sort": 0.0,
+            "name_soundex": 0.5,
+            "name_metaphone": 0.5,
             "class_similarity": 0.0,
+            "start_endpoint_proximity": MAX_DISTANCE_METERS,
+            "end_endpoint_proximity": MAX_DISTANCE_METERS,
+            "shared_endpoint_count": 0,
             "_error": str(e),
         }
 
@@ -595,11 +620,11 @@ class MLMatcher:
         if not candidates:
             return []
 
-        # Warn if spatial_context is provided (not supported in parallel mode)
+        # spatial_context parameter is now deprecated - endpoint features are computed automatically
         if spatial_context is not None:
-            logger.warning(
-                "spatial_context is not supported in parallel mode and will be ignored. "
-                "Use n_jobs=1 for sequential processing with spatial_context support."
+            logger.debug(
+                "spatial_context parameter is deprecated; endpoint features are now "
+                "computed automatically from target data."
             )
 
         # Pre-extract data into NumPy arrays for memory efficiency
@@ -636,6 +661,35 @@ class MLMatcher:
             else np.full(len(target), None, dtype=object)
         )
 
+        # Pre-compute endpoint features for target segments
+        # These capture network connectivity without requiring explicit topology
+        from ..features.spatial_context import SpatialContextIndex, compute_endpoint_features
+
+        logger.info("Building endpoint spatial index...")
+        endpoint_index = SpatialContextIndex()
+        endpoint_index.build_from_gdf(target, id_column="id")
+
+        # Get unique target indices from candidates to avoid recomputation
+        unique_target_indices = set(cand.target_idx for cand in candidates)
+        target_endpoint_features = {}
+
+        logger.info(
+            f"Pre-computing endpoint features for {len(unique_target_indices)} target segments..."
+        )
+        for target_idx in unique_target_indices:
+            target_geom = target_geoms[target_idx]
+            if target_geom is not None and not target_geom.is_empty:
+                ep_feats = compute_endpoint_features(
+                    target_geom, endpoint_index, exclude_segment_idx=target_idx
+                )
+                target_endpoint_features[target_idx] = ep_feats
+            else:
+                target_endpoint_features[target_idx] = {
+                    "start_endpoint_proximity": MAX_DISTANCE_METERS,
+                    "end_endpoint_proximity": MAX_DISTANCE_METERS,
+                    "shared_endpoint_count": 0,
+                }
+
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
             n_workers = max(1, mp.cpu_count() - 2)
@@ -657,6 +711,7 @@ class MLMatcher:
             "target_classes": target_classes,
             "ref_subclasses": ref_subclasses,
             "target_subclasses": target_subclasses,
+            "endpoint_features": target_endpoint_features,
         }
 
         # Prepare work items as simple tuples
