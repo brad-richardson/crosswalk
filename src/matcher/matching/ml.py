@@ -92,6 +92,16 @@ RELATIONAL_FEATURE_COLUMNS = [
     "shared_endpoint_count",
 ]
 
+# Default topology features for empty/missing geometries
+# Represents an isolated dead-end segment (degree 1 at both endpoints)
+DEFAULT_TOPOLOGY_FEATURES = {
+    "from_degree": 1,
+    "to_degree": 1,
+    "is_dead_end": True,
+    "is_intersection": False,
+    "degree_signature": (1,),
+}
+
 
 # Module-level globals for multiprocessing worker data
 _worker_data = None
@@ -234,19 +244,20 @@ def _compute_single_feature(args):
             "shared_endpoint_count": 0,
             "lateral_offset": MAX_DISTANCE_METERS,
             "lateral_offset_consistency": MAX_DISTANCE_METERS,
-            # Topology features - defaults for error case
-            "from_degree_ref": 1,
-            "to_degree_ref": 1,
-            "from_degree_target": 1,
-            "to_degree_target": 1,
-            "degree_match_score": 1.0,
-            "degree_signature_similarity": 1.0,
-            "is_dead_end_ref": 1.0,
-            "is_dead_end_target": 1.0,
-            "dead_end_match": 1.0,
-            "is_intersection_ref": 0.0,
-            "is_intersection_target": 0.0,
-            "intersection_match": 1.0,
+            # Topology features - use neutral/unknown values for error case
+            # to avoid artificially inflating match scores
+            "from_degree_ref": 0,
+            "to_degree_ref": 0,
+            "from_degree_target": 0,
+            "to_degree_target": 0,
+            "degree_match_score": 0.5,
+            "degree_signature_similarity": 0.5,
+            "is_dead_end_ref": 0.5,
+            "is_dead_end_target": 0.5,
+            "dead_end_match": 0.5,
+            "is_intersection_ref": 0.5,
+            "is_intersection_target": 0.5,
+            "intersection_match": 0.5,
             "_error": str(e),
         }
 
@@ -802,13 +813,7 @@ class MLMatcher:
                 topo_feats = compute_topology_features(target_geom, target_index)
                 target_topology_features[target_idx] = topo_feats
             else:
-                target_topology_features[target_idx] = {
-                    "from_degree": 1,
-                    "to_degree": 1,
-                    "is_dead_end": True,
-                    "is_intersection": False,
-                    "degree_signature": (1,),
-                }
+                target_topology_features[target_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
 
         # Pre-compute topology features for reference segments
         ref_topology_features = {}
@@ -821,13 +826,7 @@ class MLMatcher:
                 topo_feats = compute_topology_features(ref_geom, ref_index)
                 ref_topology_features[ref_idx] = topo_feats
             else:
-                ref_topology_features[ref_idx] = {
-                    "from_degree": 1,
-                    "to_degree": 1,
-                    "is_dead_end": True,
-                    "is_intersection": False,
-                    "degree_signature": (1,),
-                }
+                ref_topology_features[ref_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
 
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:

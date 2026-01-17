@@ -197,8 +197,8 @@ class TestInferEndpointDegree:
         dead_geom = dead_end_network.iloc[1].geometry
         start_deg, end_deg = infer_endpoint_degree(dead_geom, ctx, tolerance=5.0)
 
-        # Start connects to main road, end is dead end
-        assert start_deg >= 2  # Connects to main
+        # Start connects to main road (exactly 2: dead end + main road), end is dead end
+        assert start_deg == 2  # Connects to main road endpoint
         assert end_deg == 1  # Dead end
 
     def test_isolated_segment_degree_one(self, dead_end_network):

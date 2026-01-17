@@ -453,6 +453,9 @@ def infer_endpoint_degree(
         end_point = Point(coords[-1])
 
     # Query nearby endpoints at start
+    # Note: start_segments will include the segment itself since its own endpoint
+    # is within tolerance of itself. This is intentional - degree includes self,
+    # so an isolated segment has degree 1 (counting only itself).
     start_nearby = context.query_nearby_endpoints(start_point, tolerance)
     start_segments = set()
     for ep_idx, _dist in start_nearby:
@@ -599,26 +602,49 @@ def compute_degree_match_score(
 ) -> float:
     """Compute how well endpoint degrees match between reference and target.
 
-    Handles the ambiguity that endpoints might be swapped (reversed direction).
-    Higher score means more similar local topology.
+    This compares the degrees at the two endpoints of a reference segment
+    with those of a target segment, allowing for the possibility that the
+    segment direction is reversed (i.e. start/end swapped).
+
+    The score is based on the minimum total absolute difference between
+    endpoint degrees across both possible alignments:
+
+        diff_same = |ref_from - target_from| + |ref_to - target_to|
+        diff_swap = |ref_from - target_to| + |ref_to - target_from|
+        min_diff = min(diff_same, diff_swap)
+
+    This raw difference is then normalized by the sum of all four degrees:
+
+        max_possible = ref_from + ref_to + target_from + target_to
+        score = 1.0 - (min_diff / max_possible)
+
+    so that:
+    - The score is always in the range [0, 1].
+    - Identical degrees give score 1.0 (min_diff = 0).
+    - Larger total degree allows a larger absolute difference for the same
+      score, since the normalization is relative to the total degree mass.
+    - When all degrees are zero, the segments are treated as maximally
+      similar and the score is defined as 1.0.
 
     Args:
-        ref_from_degree: Reference segment's start degree
-        ref_to_degree: Reference segment's end degree
-        target_from_degree: Target segment's start degree
-        target_to_degree: Target segment's end degree
+        ref_from_degree: Reference segment's start degree.
+        ref_to_degree: Reference segment's end degree.
+        target_from_degree: Target segment's start degree.
+        target_to_degree: Target segment's end degree.
 
     Returns:
-        Similarity score between 0 and 1
+        Similarity score between 0 and 1, where higher values indicate
+        more similar local endpoint topology.
     """
     # Try both orderings (endpoints might be reversed)
     diff_same = abs(ref_from_degree - target_from_degree) + abs(ref_to_degree - target_to_degree)
     diff_swap = abs(ref_from_degree - target_to_degree) + abs(ref_to_degree - target_from_degree)
     min_diff = min(diff_same, diff_swap)
 
-    # Normalize: max possible diff is the sum of all degrees
+    # Normalize by the sum of all endpoint degrees to keep the score in [0, 1]
     max_possible = ref_from_degree + ref_to_degree + target_from_degree + target_to_degree
     if max_possible == 0:
+        # If all degrees are zero, treat the segments as maximally similar
         return 1.0
 
     return 1.0 - (min_diff / max_possible)

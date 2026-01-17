@@ -92,12 +92,10 @@ def load_and_index_geodataframe(
             if geom is not None and not geom.is_empty:
                 topology[row[id_column]] = compute_topology_features(geom, index)
 
-    return gdf, index, topology
+    return gdf_reset, index, topology
 
 
-def compute_topology_for_pair(
-    ref_topo: dict, target_topo: dict
-) -> dict[str, float]:
+def compute_topology_for_pair(ref_topo: dict, target_topo: dict) -> dict[str, float]:
     """Compute topology match features for a reference-target pair.
 
     Args:
@@ -202,9 +200,7 @@ def backfill_dataset(
 
     # Load and index target data (only compute for needed IDs)
     logger.info(f"  Loading target data: {target_file}")
-    _, _, target_topology = load_and_index_geodataframe(
-        target_path, ids_to_compute=target_ids
-    )
+    _, _, target_topology = load_and_index_geodataframe(target_path, ids_to_compute=target_ids)
     logger.info(f"  Computed topology for {len(target_topology)} target segments")
 
     # Compute topology features for each label
@@ -251,9 +247,7 @@ def backfill_dataset(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Backfill topology features into label files"
-    )
+    parser = argparse.ArgumentParser(description="Backfill topology features into label files")
     parser.add_argument(
         "--labels-dir",
         type=Path,
@@ -320,9 +314,7 @@ def main():
     # Process datasets
     total_processed = 0
     for dataset_name in datasets:
-        count = backfill_dataset(
-            dataset_name, labels_dir, data_dir, ref_topology, args.dry_run
-        )
+        count = backfill_dataset(dataset_name, labels_dir, data_dir, ref_topology, args.dry_run)
         total_processed += count
 
     logger.info(f"\nBackfill complete: {total_processed} labels processed")
