@@ -125,7 +125,8 @@ data/
 
 ## System Dependencies
 
-- **osmium-tool**: Required for OSM PBF extraction (`apt install osmium-tool`)
+- **osmium-tool**: Optional but recommended for fast OSM PBF extraction (`apt install osmium-tool`)
+  - If not available, the system falls back to pyosmium (slower but no system deps)
 - Python 3.10+
 
 ## Common Workflows
