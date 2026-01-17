@@ -1,0 +1,111 @@
+# Boston Street Centerlines - MassDOT Classification Mapping
+# Source: MassDOT Road Inventory
+# Documentation: https://www.mass.gov/info-details/massdot-road-inventory
+
+name: boston_streets
+description: |
+  Boston street centerlines from MassDOT Road Inventory.
+  Uses Functional Classification (F_F_CLASS) as primary classification.
+
+confidence: medium
+default_class: residential
+
+source_classification:
+  column: F_F_CLASS
+  description: |
+    MassDOT Functional Classification (Federal Functional Class)
+    Based on FHWA functional classification system.
+  documentation_url: https://www.fhwa.dot.gov/planning/processes/statewide/related/highway_functional_classifications/
+  values:
+    1:
+      description: Interstate
+      count: 0
+    2:
+      description: Other Freeways and Expressways
+      count: 73
+    3:
+      description: Other Principal Arterial
+      count: 1789
+    4:
+      description: Minor Arterial
+      count: 2464
+    5:
+      description: Major/Urban Collector
+      count: 1148
+    6:
+      description: Minor Collector
+      count: 0
+    7:
+      description: Local
+      count: 5459
+
+physical_attributes:
+  lanes_column: NUM_LANES
+  speed_column: SPEED_LIM
+  width_column: SURFACE_WD
+  traffic_column: AADT
+
+# Mapping rules ordered by priority (higher priority checked first)
+# Based on FHWA functional classification to Overture/OSM hierarchy
+class_mapping_rules:
+  # Interstate and Freeways → motorway
+  - source_value: 1
+    target_class: motorway
+    priority: 100
+
+  # Other Freeways and Expressways → trunk
+  - source_value: 2
+    target_class: trunk
+    priority: 90
+
+  # Principal Arterial - high traffic → primary
+  - source_value: 3
+    target_class: primary
+    conditions:
+      AADT: ">10000"
+    priority: 85
+
+  # Principal Arterial - moderate traffic → secondary
+  - source_value: 3
+    target_class: secondary
+    priority: 80
+
+  # Minor Arterial - high traffic → secondary
+  - source_value: 4
+    target_class: secondary
+    conditions:
+      AADT: ">5000"
+    priority: 75
+
+  # Minor Arterial - lower traffic → tertiary
+  - source_value: 4
+    target_class: tertiary
+    priority: 70
+
+  # Collectors → tertiary
+  - source_value: 5
+    target_class: tertiary
+    priority: 60
+
+  - source_value: 6
+    target_class: tertiary
+    priority: 60
+
+  # Local roads → residential
+  - source_value: 7
+    target_class: residential
+    priority: 50
+
+notes: |
+  Mapping based on FHWA Functional Classification system.
+
+  The match-based analysis showed weak correlation between MassDOT classes
+  and Overture classes due to:
+  1. Geometric matching noise (parallel/nearby roads)
+  2. Different segmentation between datasets
+  3. Overture's OSM-derived classification may differ from functional class
+
+  This mapping uses standard FHWA-to-OSM conventions with AADT-based
+  refinements for arterial roads.
+
+  To apply: Use apply_class_mapping() after loading the dataset.

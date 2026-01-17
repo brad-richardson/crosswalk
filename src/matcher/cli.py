@@ -756,6 +756,103 @@ def validate(
         raise typer.Exit(1) from e
 
 
+@app.command("discover-classes")
+def discover_classes(
+    dataset: Path = typer.Argument(..., help="Target dataset parquet file"),
+    reference: Path | None = typer.Option(
+        None,
+        "--reference",
+        "-r",
+        help="Reference data (Overture segments) for match-based analysis",
+    ),
+    bridge: Path | None = typer.Option(
+        None,
+        "--bridge",
+        "-b",
+        help="Existing bridge file for match-based analysis",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output YAML path (default: src/matcher/datasets/{name}.yaml)",
+    ),
+    print_only: bool = typer.Option(
+        False,
+        "--print-only",
+        "-p",
+        help="Only print report, don't save config",
+    ),
+):
+    """Discover class mapping for a new dataset.
+
+    Analyzes the dataset structure, detects classification columns,
+    and generates a mapping configuration to Overture road classes.
+
+    Examples:
+        # Basic discovery
+        matcher discover-classes data/raw/boston_streets.parquet
+
+        # With match-based analysis (more accurate)
+        matcher discover-classes data/raw/boston_streets.parquet \\
+            --reference data/raw/overture_segments.parquet \\
+            --bridge data/output/boston_streets_bridge.parquet
+
+        # Print report only (don't save config)
+        matcher discover-classes data/raw/new_dataset.parquet --print-only
+    """
+    from .datasets.discover import discover_dataset, print_discovery_report, save_dataset_config
+
+    if not dataset.exists():
+        console.print(f"[red]Error: Dataset not found: {dataset}[/red]")
+        raise typer.Exit(1)
+
+    if reference and not reference.exists():
+        console.print(f"[red]Error: Reference not found: {reference}[/red]")
+        raise typer.Exit(1)
+
+    if bridge and not bridge.exists():
+        console.print(f"[red]Error: Bridge file not found: {bridge}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Analyzing dataset: {dataset.name}[/blue]")
+    if reference:
+        console.print(f"  Reference: {reference}")
+    if bridge:
+        console.print(f"  Bridge: {bridge}")
+    console.print()
+
+    report = discover_dataset(
+        dataset_path=dataset,
+        reference_path=reference,
+        bridge_path=bridge,
+    )
+
+    print_discovery_report(report)
+
+    if not print_only and report.suggested_config:
+        saved_path = save_dataset_config(report.suggested_config, output)
+        console.print()
+        console.print(f"[green]Configuration saved to: {saved_path}[/green]")
+        console.print("[yellow]Review and adjust the mapping rules as needed.[/yellow]")
+
+
+@app.command("list-datasets")
+def list_datasets():
+    """List available dataset configurations."""
+    from .datasets import list_dataset_configs
+
+    configs = list_dataset_configs()
+    if not configs:
+        console.print("[yellow]No dataset configurations found.[/yellow]")
+        console.print("Use 'matcher discover-classes' to create one.")
+        return
+
+    console.print("[blue]Available dataset configurations:[/blue]")
+    for name in sorted(configs):
+        console.print(f"  - {name}")
+
+
 @app.command()
 def version():
     """Show version information."""
