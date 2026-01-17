@@ -5,6 +5,7 @@ class mapping rules that transform source classification systems to Overture's
 road hierarchy.
 """
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,9 @@ from typing import Any
 import geopandas as gpd
 import yaml
 from loguru import logger
+
+# Environment variable for custom config directories
+DATASET_CONFIG_DIR_ENV = "MATCHER_DATASET_CONFIG_DIR"
 
 
 @dataclass
@@ -33,12 +37,27 @@ class ClassMappingRule:
     def matches(self, row: dict, source_column: str) -> bool:
         """Check if this rule matches a data row.
 
+        The rule matches when:
+        - ``row[source_column]`` matches ``source_value`` (or is in the list when
+          ``source_value`` is a list), and
+        - every condition in ``self.conditions`` is satisfied.
+
+        String-based condition values support comparison operators:
+
+        * ``">N"`` / ``">=N"`` / ``"<N"`` / ``"<=N"``: ``N`` is parsed as float and
+          compared numerically. Example: ``{"AADT": ">15000"}`` matches rows where
+          ``row["AADT"] > 15000``.
+        * ``"==X"``: String equality comparison. Example: ``{"ROAD_TYPE": "==HIGHWAY"}``
+          matches when ``row["ROAD_TYPE"] == "HIGHWAY"``.
+        * Any other string is compared by converting both sides to str.
+        * Non-string condition values are compared directly with ``==``.
+
         Args:
-            row: Dict-like row from DataFrame
-            source_column: Name of the source classification column
+            row: Dict-like row from DataFrame.
+            source_column: Name of the source classification column.
 
         Returns:
-            True if rule matches
+            True if the rule matches the given row.
         """
         # Check source value
         source_val = row.get(source_column)
@@ -57,20 +76,50 @@ class ClassMappingRule:
             if isinstance(condition, str):
                 # Parse comparison operators
                 if condition.startswith(">="):
-                    if not (val >= float(condition[2:])):
+                    try:
+                        threshold = float(condition[2:])
+                    except (TypeError, ValueError):
+                        logger.warning(f"Invalid numeric condition for '{col}': {condition}")
+                        return False
+                    if not (val >= threshold):
                         return False
                 elif condition.startswith("<="):
-                    if not (val <= float(condition[2:])):
+                    try:
+                        threshold = float(condition[2:])
+                    except (TypeError, ValueError):
+                        logger.warning(f"Invalid numeric condition for '{col}': {condition}")
+                        return False
+                    if not (val <= threshold):
                         return False
                 elif condition.startswith(">"):
-                    if not (val > float(condition[1:])):
+                    try:
+                        threshold = float(condition[1:])
+                    except (TypeError, ValueError):
+                        logger.warning(f"Invalid numeric condition for '{col}': {condition}")
+                        return False
+                    if not (val > threshold):
                         return False
                 elif condition.startswith("<"):
-                    if not (val < float(condition[1:])):
+                    try:
+                        threshold = float(condition[1:])
+                    except (TypeError, ValueError):
+                        logger.warning(f"Invalid numeric condition for '{col}': {condition}")
+                        return False
+                    if not (val < threshold):
                         return False
                 elif condition.startswith("=="):
-                    if val != condition[2:]:
-                        return False
+                    # String equality comparison
+                    cond_val = condition[2:]
+                    if isinstance(val, (int, float)):
+                        try:
+                            if val != float(cond_val):
+                                return False
+                        except ValueError:
+                            if str(val) != cond_val:
+                                return False
+                    else:
+                        if str(val) != cond_val:
+                            return False
                 else:
                     # Direct comparison
                     if str(val) != str(condition):
@@ -150,7 +199,14 @@ class DatasetConfig:
 
 
 def _get_configs_dir() -> Path:
-    """Get the datasets config directory."""
+    """Get the datasets config directory.
+
+    Returns the directory from MATCHER_DATASET_CONFIG_DIR environment variable
+    if set, otherwise returns the package's datasets directory.
+    """
+    custom_dir = os.environ.get(DATASET_CONFIG_DIR_ENV)
+    if custom_dir:
+        return Path(custom_dir)
     return Path(__file__).parent
 
 
@@ -179,9 +235,31 @@ def load_dataset_config_from_file(path: Path) -> DatasetConfig:
 
     Returns:
         DatasetConfig
+
+    Raises:
+        ValueError: If the YAML file has invalid schema
     """
     with open(path) as f:
         data = yaml.safe_load(f)
+
+    # Validate schema
+    if data is None:
+        raise ValueError(f"Empty or invalid YAML file: {path}")
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML root must be a dict, got {type(data).__name__}: {path}")
+
+    # Validate required fields
+    if "name" not in data and path.stem == "":
+        raise ValueError(f"Config must have 'name' field or valid filename: {path}")
+
+    # Validate mapping rules structure if present
+    for i, rule in enumerate(data.get("class_mapping_rules", [])):
+        if not isinstance(rule, dict):
+            raise ValueError(f"Rule {i} must be a dict: {path}")
+        if "source_value" not in rule:
+            raise ValueError(f"Rule {i} missing 'source_value': {path}")
+        if "target_class" not in rule:
+            raise ValueError(f"Rule {i} missing 'target_class': {path}")
 
     # Parse source classification
     source_class = None
@@ -255,6 +333,11 @@ def apply_class_mapping(
 
     Returns:
         GeoDataFrame with updated class column
+
+    Note:
+        This function uses DataFrame.apply() with axis=1 which may be slow
+        for large datasets (>100k rows). For performance-critical applications
+        with simple mapping rules, consider using vectorized operations instead.
     """
     if not config.class_mapping_rules:
         logger.warning(f"No mapping rules in config for {config.name}")

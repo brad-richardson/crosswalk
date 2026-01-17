@@ -183,10 +183,26 @@ def _analyze_with_reference(
         if len(matches) == 0:
             return result
 
+        # Validate bridge has required columns
+        required_bridge_cols = {"local_id", "gers_id", "match_type", "confidence"}
+        missing_cols = required_bridge_cols - set(bridge.columns)
+        if missing_cols:
+            logger.warning(f"Bridge file missing required columns: {missing_cols}")
+            return result
+
+        # Validate gdf has required columns
+        if "id" not in gdf.columns:
+            logger.warning("Dataset missing 'id' column for merge")
+            return result
+
         # Extract numeric ID if needed (handle "dataset_N" format)
         gdf = gdf.copy()
-        if gdf["id"].iloc[0] and "_" in str(gdf["id"].iloc[0]):
-            gdf["id_numeric"] = gdf["id"].str.split("_").str[-1]
+        if not gdf.empty and "id" in gdf.columns:
+            first_id = gdf["id"].iloc[0]
+            if pd.notna(first_id) and "_" in str(first_id):
+                gdf["id_numeric"] = gdf["id"].astype(str).str.split("_").str[-1]
+            else:
+                gdf["id_numeric"] = gdf["id"].astype(str)
         else:
             gdf["id_numeric"] = gdf["id"].astype(str)
 
@@ -378,19 +394,36 @@ def discover_dataset(
     if reference_path and reference_path.exists():
         reference = gpd.read_parquet(reference_path)
 
-        # Determine source class column for matching
-        source_class_col = "class"  # Default to main class column
-        if report.source_tags_analysis and report.source_tags_analysis.get("detected_class_key"):
-            # Extract classification from source_tags for analysis
-            class_key = report.source_tags_analysis["detected_class_key"]
-            gdf[f"_source_{class_key}"] = gdf[source_tags_col].apply(
-                lambda t: t.get(class_key) if isinstance(t, dict) else None
-            )
-            source_class_col = f"_source_{class_key}"
+        # Validate reference has required columns
+        if "id" not in reference.columns or "class" not in reference.columns:
+            logger.warning("Reference file missing 'id' or 'class' column, skipping match analysis")
+        elif gdf.empty:
+            logger.warning("Dataset is empty, skipping match analysis")
+        else:
+            # Determine source class column for matching
+            source_class_col: str | None = None
 
-        report.match_analysis = _analyze_with_reference(
-            gdf, reference, bridge_path, source_class_col
-        )
+            if (
+                report.source_tags_analysis
+                and report.source_tags_analysis.get("detected_class_key")
+                and source_tags_col in gdf.columns
+            ):
+                # Extract classification from source_tags for analysis
+                class_key = report.source_tags_analysis["detected_class_key"]
+                gdf[f"_source_{class_key}"] = gdf[source_tags_col].apply(
+                    lambda t: t.get(class_key) if isinstance(t, dict) else None
+                )
+                source_class_col = f"_source_{class_key}"
+            elif "class" in gdf.columns:
+                # Fallback to main class column if present
+                source_class_col = "class"
+
+            if source_class_col and source_class_col in gdf.columns:
+                report.match_analysis = _analyze_with_reference(
+                    gdf, reference, bridge_path, source_class_col
+                )
+            else:
+                logger.warning("Source class column not found in dataset, skipping match analysis")
 
     # Generate suggested configuration
     report.suggested_config = _generate_config(report, dataset_path)
