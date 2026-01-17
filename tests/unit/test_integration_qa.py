@@ -1,12 +1,5 @@
 """Unit tests for integration QA module."""
 
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
-
-import pandas as pd
-import pytest
-
 from matcher.integration_qa.decision_store import (
     MergedDecisionStore,
     OrphanDecisionStore,

@@ -47,6 +47,8 @@ def load_reviewer_name() -> str:
                 config = json.load(f)
                 return config.get("reviewer_name", "")
         except Exception:
+            # Config file may be corrupted or have incompatible format;
+            # fall back to default value rather than crash
             pass
     return ""
 
@@ -59,6 +61,7 @@ def save_reviewer_name(name: str) -> None:
             with open(CONFIG_PATH) as f:
                 config = json.load(f)
         except Exception:
+            # Config file may be corrupted; start fresh rather than crash
             pass
 
     config["reviewer_name"] = name

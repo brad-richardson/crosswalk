@@ -199,12 +199,6 @@ def create_integration_map(
     # Center on selected edge if found
     if selected_edge is not None and selected_edge.geometry is not None:
         geom = selected_edge.geometry
-        # Convert to WGS84 if needed
-        if hasattr(selected_edge, "crs") and selected_edge.crs:
-            from shapely.ops import transform
-            import pyproj
-            # This is a single row, geometry is already extracted
-            pass
         centroid = geom.centroid
         center_lat, center_lon = centroid.y, centroid.x
         zoom = 17  # Zoom in on selected edge
@@ -255,7 +249,3 @@ def create_integration_map(
     folium.LayerControl().add_to(m)
 
     return m
-
-
-# Import pandas for concat
-import pandas as pd

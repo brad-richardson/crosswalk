@@ -21,7 +21,7 @@ from .provenance import ComponentStatus, EdgeSource
 
 def detect_orphans_by_proximity(
     combined_gdf: gpd.GeoDataFrame,
-    connection_tolerance: float = 5.0,
+    connection_tolerance: float = 75.0,  # Match buffer_distance from matching pipeline
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, dict[str, Any]]:
     """Identify orphan segments based on endpoint proximity to reference network.
 

@@ -61,7 +61,10 @@ STREET_ABBREVIATIONS = {
 }
 
 
-# Default result when names are missing - neutral scores
+# Default result when names are missing - use neutral scores (0.5)
+# to avoid penalizing valid geometric matches when one dataset lacks
+# name data. The 'names_missing' flag allows the ML model to handle
+# this case specifically if needed.
 _MISSING_NAMES_RESULT = {
     "levenshtein_ratio": 0.5,
     "jaro_winkler": 0.5,

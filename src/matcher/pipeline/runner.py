@@ -217,7 +217,10 @@ def run_pipeline(
         results,
         target,
         min_confidence=min_confidence,
-        contiguity_tolerance=5.0,  # Segments within 5m are considered contiguous
+        # Contiguity tolerance: segments within 5m of each other are considered
+        # connected for 1:N matching. This is tighter than buffer_distance (75m)
+        # because we want to be confident segments are actually adjacent, not just nearby.
+        contiguity_tolerance=5.0,
         target_id_column=target_id_column,
     )
 

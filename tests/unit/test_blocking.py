@@ -68,8 +68,8 @@ class TestGenerateCandidates:
 
         assert len(candidates) == 0
 
-    def test_filters_by_heading_difference(self):
-        """Should filter out candidates with large heading differences."""
+    def test_computes_heading_difference(self):
+        """Should compute heading difference as a feature (not filter)."""
         reference = gpd.GeoDataFrame(
             {
                 "id": ["ref_1"],
@@ -91,15 +91,16 @@ class TestGenerateCandidates:
             reference,
             target,
             buffer_distance=100.0,
-            max_heading_diff=30.0,  # Strict heading filter
             ref_id_column="id",
         )
 
-        # Should be filtered out due to 90° heading difference
-        assert len(candidates) == 0
+        # Heading difference is computed as a feature, not used as a filter
+        # The ML model uses this as a scoring feature
+        assert len(candidates) == 1
+        assert candidates[0].heading_diff == 90.0  # 90° difference computed
 
-    def test_filters_by_length_ratio(self):
-        """Should filter out candidates with extreme length ratios."""
+    def test_computes_length_ratio(self):
+        """Should compute length ratio as a feature (not filter)."""
         reference = gpd.GeoDataFrame(
             {
                 "id": ["ref_1"],
@@ -121,12 +122,13 @@ class TestGenerateCandidates:
             reference,
             target,
             buffer_distance=50.0,
-            max_length_ratio=2.0,  # Strict length filter
             ref_id_column="id",
         )
 
-        # Should be filtered out due to 10:1 length ratio
-        assert len(candidates) == 0
+        # Length ratio is computed as a feature, not used as a filter
+        # The ML model uses this as a scoring feature
+        assert len(candidates) == 1
+        assert candidates[0].length_ratio == 0.1  # 10/100 = 0.1
 
     def test_multiple_candidates_per_target(self):
         """Should generate multiple candidates when target matches multiple references."""

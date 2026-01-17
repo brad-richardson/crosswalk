@@ -138,7 +138,8 @@ class MatcherSettings(BaseSettings):
     )
     near_duplicate_tolerance: float = Field(
         default=2.0,
-        description="Distance tolerance for near-duplicate detection (meters)",
+        description="Distance to consider segments near-duplicates (meters). "
+        "Intentionally tight since near-duplicates should nearly overlay.",
     )
     near_duplicate_overlap: float = Field(
         default=0.8,
