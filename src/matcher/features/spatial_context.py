@@ -419,6 +419,61 @@ class SpatialContextIndex:
         return self._geometries.iloc[segment_idx]
 
 
+def infer_endpoint_degree(
+    geom: LineString | MultiLineString,
+    context: SpatialContextIndex,
+    tolerance: float = 5.0,
+) -> tuple[int, int]:
+    """Infer degree at each endpoint based on nearby segment count.
+
+    For spaghetti data without explicit topology, we infer connectivity
+    by counting segments with endpoints within tolerance distance.
+
+    Args:
+        geom: Segment geometry
+        context: SpatialContextIndex with all segments
+        tolerance: Distance threshold for connectivity (meters)
+
+    Returns:
+        Tuple of (start_degree, end_degree) where degree = count of segments
+        with endpoints within tolerance. Minimum degree is 1 (self).
+    """
+    if geom.is_empty or context.endpoint_coords.size == 0:
+        return (1, 1)
+
+    # Extract endpoints
+    if geom.geom_type == "MultiLineString":
+        if len(geom.geoms) == 0:
+            return (1, 1)
+        start_point = Point(geom.geoms[0].coords[0])
+        end_point = Point(geom.geoms[-1].coords[-1])
+    else:
+        coords = np.array(geom.coords)
+        start_point = Point(coords[0])
+        end_point = Point(coords[-1])
+
+    # Query nearby endpoints at start
+    # Note: start_segments will include the segment itself since its own endpoint
+    # is within tolerance of itself. This is intentional - degree includes self,
+    # so an isolated segment has degree 1 (counting only itself).
+    start_nearby = context.query_nearby_endpoints(start_point, tolerance)
+    start_segments = set()
+    for ep_idx, _dist in start_nearby:
+        if ep_idx in context.endpoint_to_segment:
+            start_segments.update(context.endpoint_to_segment[ep_idx])
+    start_degree = max(1, len(start_segments))
+
+    # Query nearby endpoints at end
+    end_nearby = context.query_nearby_endpoints(end_point, tolerance)
+    end_segments = set()
+    for ep_idx, _dist in end_nearby:
+        if ep_idx in context.endpoint_to_segment:
+            end_segments.update(context.endpoint_to_segment[ep_idx])
+    end_degree = max(1, len(end_segments))
+
+    return (start_degree, end_degree)
+
+
 def compute_endpoint_features(
     target_geom: LineString | MultiLineString,
     context: SpatialContextIndex,
@@ -494,3 +549,133 @@ def compute_endpoint_features(
         "end_endpoint_proximity": end_proximity,
         "shared_endpoint_count": len(shared_segments),
     }
+
+
+def compute_topology_features(
+    geom: LineString | MultiLineString,
+    context: SpatialContextIndex,
+    tolerance: float = 5.0,
+) -> dict[str, float]:
+    """Compute topology features for a segment based on inferred connectivity.
+
+    These features capture local network structure without requiring explicit
+    topology in the source data. Useful for matching spaghetti line data.
+
+    Args:
+        geom: Segment geometry
+        context: SpatialContextIndex with all segments
+        tolerance: Distance threshold for connectivity inference
+
+    Returns:
+        Dictionary with topology features:
+        - from_degree: Number of segments connected at start
+        - to_degree: Number of segments connected at end
+        - is_dead_end: True if either endpoint has degree 1
+        - is_intersection: True if either endpoint has degree > 2
+        - degree_signature: Tuple of sorted neighbor degrees
+    """
+    if geom.is_empty or context.endpoint_coords.size == 0:
+        return {
+            "from_degree": 1,
+            "to_degree": 1,
+            "is_dead_end": True,
+            "is_intersection": False,
+            "degree_signature": (1,),
+        }
+
+    from_degree, to_degree = infer_endpoint_degree(geom, context, tolerance)
+
+    return {
+        "from_degree": from_degree,
+        "to_degree": to_degree,
+        "is_dead_end": min(from_degree, to_degree) == 1,
+        "is_intersection": max(from_degree, to_degree) > 2,
+        "degree_signature": tuple(sorted([from_degree, to_degree])),
+    }
+
+
+def compute_degree_match_score(
+    ref_from_degree: int,
+    ref_to_degree: int,
+    target_from_degree: int,
+    target_to_degree: int,
+) -> float:
+    """Compute how well endpoint degrees match between reference and target.
+
+    This compares the degrees at the two endpoints of a reference segment
+    with those of a target segment, allowing for the possibility that the
+    segment direction is reversed (i.e. start/end swapped).
+
+    The score is based on the minimum total absolute difference between
+    endpoint degrees across both possible alignments:
+
+        diff_same = |ref_from - target_from| + |ref_to - target_to|
+        diff_swap = |ref_from - target_to| + |ref_to - target_from|
+        min_diff = min(diff_same, diff_swap)
+
+    This raw difference is then normalized by the sum of all four degrees:
+
+        max_possible = ref_from + ref_to + target_from + target_to
+        score = 1.0 - (min_diff / max_possible)
+
+    so that:
+    - The score is always in the range [0, 1].
+    - Identical degrees give score 1.0 (min_diff = 0).
+    - Larger total degree allows a larger absolute difference for the same
+      score, since the normalization is relative to the total degree mass.
+    - When all degrees are zero, the segments are treated as maximally
+      similar and the score is defined as 1.0.
+
+    Args:
+        ref_from_degree: Reference segment's start degree.
+        ref_to_degree: Reference segment's end degree.
+        target_from_degree: Target segment's start degree.
+        target_to_degree: Target segment's end degree.
+
+    Returns:
+        Similarity score between 0 and 1, where higher values indicate
+        more similar local endpoint topology.
+    """
+    # Try both orderings (endpoints might be reversed)
+    diff_same = abs(ref_from_degree - target_from_degree) + abs(ref_to_degree - target_to_degree)
+    diff_swap = abs(ref_from_degree - target_to_degree) + abs(ref_to_degree - target_from_degree)
+    min_diff = min(diff_same, diff_swap)
+
+    # Normalize by the sum of all endpoint degrees to keep the score in [0, 1]
+    max_possible = ref_from_degree + ref_to_degree + target_from_degree + target_to_degree
+    if max_possible == 0:
+        # If all degrees are zero, treat the segments as maximally similar
+        return 1.0
+
+    return 1.0 - (min_diff / max_possible)
+
+
+def compute_degree_signature_similarity(
+    sig_a: tuple[int, ...],
+    sig_b: tuple[int, ...],
+) -> float:
+    """Compute Jaccard similarity between degree signatures.
+
+    Degree signatures are sorted tuples of endpoint degrees. Similar local
+    topology should have similar signatures.
+
+    Args:
+        sig_a: First degree signature
+        sig_b: Second degree signature
+
+    Returns:
+        Similarity score between 0 and 1
+    """
+    from collections import Counter
+
+    if not sig_a or not sig_b:
+        return 0.0
+
+    counter_a = Counter(sig_a)
+    counter_b = Counter(sig_b)
+
+    # Jaccard similarity on multisets
+    intersection = sum((counter_a & counter_b).values())
+    union = sum((counter_a | counter_b).values())
+
+    return intersection / union if union > 0 else 0.0

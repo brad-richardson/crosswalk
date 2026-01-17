@@ -66,6 +66,22 @@ FEATURE_COLUMNS = [
     # Helps distinguish left vs right sidewalk by measuring perpendicular distance
     "lateral_offset",
     "lateral_offset_consistency",
+    # Topology features (12) - inferred from endpoint proximity
+    # Tier 1: Endpoint degree features
+    "from_degree_ref",  # Degree at reference segment's start
+    "to_degree_ref",  # Degree at reference segment's end
+    "from_degree_target",  # Degree at target segment's start
+    "to_degree_target",  # Degree at target segment's end
+    "degree_match_score",  # How well degrees match (0-1)
+    # Tier 2: Degree signature similarity
+    "degree_signature_similarity",  # Jaccard similarity of neighborhood degrees
+    # Tier 3: Topology flags
+    "is_dead_end_ref",  # Reference segment is dead end (0 or 1)
+    "is_dead_end_target",  # Target segment is dead end (0 or 1)
+    "dead_end_match",  # Both or neither are dead ends (0 or 1)
+    "is_intersection_ref",  # Reference has endpoint with degree > 2 (0 or 1)
+    "is_intersection_target",  # Target has endpoint with degree > 2 (0 or 1)
+    "intersection_match",  # Both or neither touch an intersection (0 or 1)
 ]
 
 # Additional relational features (kept for backward compatibility with old labels)
@@ -75,6 +91,16 @@ RELATIONAL_FEATURE_COLUMNS = [
     "end_endpoint_proximity",
     "shared_endpoint_count",
 ]
+
+# Default topology features for empty/missing geometries
+# Represents an isolated dead-end segment (degree 1 at both endpoints)
+DEFAULT_TOPOLOGY_FEATURES = {
+    "from_degree": 1,
+    "to_degree": 1,
+    "is_dead_end": True,
+    "is_intersection": False,
+    "degree_signature": (1,),
+}
 
 
 # Module-level globals for multiprocessing worker data
@@ -95,6 +121,10 @@ def _compute_single_feature(args):
     from ..features.geometric import compute_geometric_features
     from ..features.relational import compute_perpendicular_offset
     from ..features.semantic import compute_class_similarity, compute_name_similarity
+    from ..features.spatial_context import (
+        compute_degree_match_score,
+        compute_degree_signature_similarity,
+    )
 
     ref_idx, target_idx = args
 
@@ -123,6 +153,35 @@ def _compute_single_feature(args):
         endpoint_features = _worker_data.get("endpoint_features", {})
         target_ep = endpoint_features.get(target_idx, {})
 
+        # Get pre-computed topology features
+        ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx, {})
+        target_topology = _worker_data.get("target_topology", {}).get(target_idx, {})
+
+        # Extract degree values
+        from_degree_ref = ref_topology.get("from_degree", 1)
+        to_degree_ref = ref_topology.get("to_degree", 1)
+        from_degree_target = target_topology.get("from_degree", 1)
+        to_degree_target = target_topology.get("to_degree", 1)
+
+        # Compute degree match score
+        degree_match = compute_degree_match_score(
+            from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
+        )
+
+        # Compute degree signature similarity
+        ref_sig = ref_topology.get("degree_signature", (1,))
+        target_sig = target_topology.get("degree_signature", (1,))
+        sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
+
+        # Topology flags
+        is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
+        is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
+        dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
+
+        is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
+        is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
+        intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
+
         return {
             "hausdorff_distance": geom_features.hausdorff_distance,
             "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
@@ -145,6 +204,21 @@ def _compute_single_feature(args):
             "shared_endpoint_count": target_ep.get("shared_endpoint_count", 0),
             "lateral_offset": min(lateral_offset, MAX_DISTANCE_METERS),
             "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
+            # Topology features - Tier 1: Degree features
+            "from_degree_ref": from_degree_ref,
+            "to_degree_ref": to_degree_ref,
+            "from_degree_target": from_degree_target,
+            "to_degree_target": to_degree_target,
+            "degree_match_score": degree_match,
+            # Tier 2: Degree signature similarity
+            "degree_signature_similarity": sig_similarity,
+            # Tier 3: Topology flags
+            "is_dead_end_ref": is_dead_end_ref,
+            "is_dead_end_target": is_dead_end_target,
+            "dead_end_match": dead_end_match,
+            "is_intersection_ref": is_intersection_ref,
+            "is_intersection_target": is_intersection_target,
+            "intersection_match": intersection_match,
             "_error": None,
         }
     except Exception as e:
@@ -170,6 +244,20 @@ def _compute_single_feature(args):
             "shared_endpoint_count": 0,
             "lateral_offset": MAX_DISTANCE_METERS,
             "lateral_offset_consistency": MAX_DISTANCE_METERS,
+            # Topology features - use neutral/unknown values for error case
+            # to avoid artificially inflating match scores
+            "from_degree_ref": 0,
+            "to_degree_ref": 0,
+            "from_degree_target": 0,
+            "to_degree_target": 0,
+            "degree_match_score": 0.5,
+            "degree_signature_similarity": 0.5,
+            "is_dead_end_ref": 0.5,
+            "is_dead_end_target": 0.5,
+            "dead_end_match": 0.5,
+            "is_intersection_ref": 0.5,
+            "is_intersection_target": 0.5,
+            "intersection_match": 0.5,
             "_error": str(e),
         }
 
@@ -675,18 +763,28 @@ class MLMatcher:
             else np.full(len(target), None, dtype=object)
         )
 
-        # Pre-compute endpoint features for target segments
+        # Pre-compute endpoint and topology features for both reference and target
         # These capture network connectivity without requiring explicit topology
-        from ..features.spatial_context import SpatialContextIndex, compute_endpoint_features
+        from ..features.spatial_context import (
+            SpatialContextIndex,
+            compute_endpoint_features,
+            compute_topology_features,
+        )
 
-        logger.info("Building endpoint spatial index...")
-        endpoint_index = SpatialContextIndex()
-        endpoint_index.build_from_gdf(target, id_column="id")
+        # Build spatial indexes for both datasets
+        logger.info("Building spatial indexes for topology features...")
+        target_index = SpatialContextIndex()
+        target_index.build_from_gdf(target, id_column="id")
 
-        # Get unique target indices from candidates to avoid recomputation
+        ref_index = SpatialContextIndex()
+        ref_index.build_from_gdf(reference, id_column="id")
+
+        # Get unique indices from candidates to avoid recomputation
         unique_target_indices = set(cand.target_idx for cand in candidates)
-        target_endpoint_features = {}
+        unique_ref_indices = set(cand.ref_idx for cand in candidates)
 
+        # Pre-compute endpoint features for target segments
+        target_endpoint_features = {}
         logger.info(
             f"Pre-computing endpoint features for {len(unique_target_indices)} target segments..."
         )
@@ -694,7 +792,7 @@ class MLMatcher:
             target_geom = target_geoms[target_idx]
             if target_geom is not None and not target_geom.is_empty:
                 ep_feats = compute_endpoint_features(
-                    target_geom, endpoint_index, exclude_segment_idx=target_idx
+                    target_geom, target_index, exclude_segment_idx=target_idx
                 )
                 target_endpoint_features[target_idx] = ep_feats
             else:
@@ -703,6 +801,32 @@ class MLMatcher:
                     "end_endpoint_proximity": MAX_DISTANCE_METERS,
                     "shared_endpoint_count": 0,
                 }
+
+        # Pre-compute topology features for target segments
+        target_topology_features = {}
+        logger.info(
+            f"Pre-computing topology features for {len(unique_target_indices)} target segments..."
+        )
+        for target_idx in unique_target_indices:
+            target_geom = target_geoms[target_idx]
+            if target_geom is not None and not target_geom.is_empty:
+                topo_feats = compute_topology_features(target_geom, target_index)
+                target_topology_features[target_idx] = topo_feats
+            else:
+                target_topology_features[target_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
+
+        # Pre-compute topology features for reference segments
+        ref_topology_features = {}
+        logger.info(
+            f"Pre-computing topology features for {len(unique_ref_indices)} reference segments..."
+        )
+        for ref_idx in unique_ref_indices:
+            ref_geom = ref_geoms[ref_idx]
+            if ref_geom is not None and not ref_geom.is_empty:
+                topo_feats = compute_topology_features(ref_geom, ref_index)
+                ref_topology_features[ref_idx] = topo_feats
+            else:
+                ref_topology_features[ref_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
 
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
@@ -726,6 +850,8 @@ class MLMatcher:
             "ref_subclasses": ref_subclasses,
             "target_subclasses": target_subclasses,
             "endpoint_features": target_endpoint_features,
+            "ref_topology": ref_topology_features,
+            "target_topology": target_topology_features,
         }
 
         # Prepare work items as simple tuples
