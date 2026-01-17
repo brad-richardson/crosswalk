@@ -4,4 +4,6 @@ boston_sidewalks,Boston Sidewalks,sidewalk,,,{}
 boston_sidewalks_full,Boston Sidewalks Full,sidewalk,,,{}
 boston_sidewalks_relational,Boston Sidewalks Relational,sidewalk,,,{}
 boston_streets,Boston Streets,road,,,{}
+fresno_roads,Fresno County Roads,road,https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0,https://gisdata-caltrans.opendata.arcgis.com/,{"classification_column": "F_System"}
 osm,Osm,road,,,{}
+utah_roads,Utah Salt Lake County Roads,road,https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0,https://gis.utah.gov/products/sgid/transportation/road-centerlines/,{"classification_column": "CARTOCODE"}
