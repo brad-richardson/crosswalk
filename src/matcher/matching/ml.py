@@ -58,6 +58,55 @@ RELATIONAL_FEATURE_COLUMNS = [
 ]
 
 
+# Module-level globals for multiprocessing worker data
+_worker_data = None
+
+
+def _init_worker(data):
+    """Initialize worker process with shared data."""
+    global _worker_data
+    _worker_data = data
+
+
+def _compute_single_feature(args):
+    """Compute features for a single candidate pair (worker function)."""
+    from .rules import MatchDecision  # noqa: F401 - needed for unpickling
+    from ..features.geometric import compute_geometric_features
+    from ..features.semantic import compute_class_similarity, compute_name_similarity
+
+    ref_idx, target_idx = args
+
+    ref_geom = _worker_data['ref_geoms'][ref_idx]
+    target_geom = _worker_data['target_geoms'][target_idx]
+
+    geom_features = compute_geometric_features(ref_geom, target_geom)
+    name_sim = compute_name_similarity(
+        _worker_data['ref_names'][ref_idx],
+        _worker_data['target_names'][target_idx],
+    )
+    class_sim = compute_class_similarity(
+        _worker_data['ref_classes'][ref_idx],
+        _worker_data['target_classes'][target_idx],
+        _worker_data['ref_subclasses'][ref_idx],
+        _worker_data['target_subclasses'][target_idx],
+    )
+
+    return {
+        "hausdorff_distance": geom_features.hausdorff_distance,
+        "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
+        "buffer_iou": geom_features.buffer_iou,
+        "overlap_ratio": geom_features.overlap_ratio,
+        "heading_delta": geom_features.heading_delta,
+        "length_ratio": geom_features.length_ratio,
+        "projection_distance": geom_features.projection_distance,
+        "centroid_distance": geom_features.centroid_distance,
+        "name_levenshtein": name_sim["levenshtein_ratio"],
+        "name_jaro_winkler": name_sim["jaro_winkler"],
+        "name_token_sort": name_sim["token_sort_ratio"],
+        "class_similarity": class_sim,
+    }
+
+
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
@@ -464,6 +513,7 @@ class MLMatcher:
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
         spatial_context=None,
+        n_jobs: int = -1,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
 
@@ -478,10 +528,14 @@ class MLMatcher:
             ref_subclass_column: Column name for reference subclass
             target_subclass_column: Column name for target subclass
             spatial_context: Optional SpatialContextIndex for endpoint features
+            n_jobs: Number of parallel jobs (-1 for all cores)
 
         Returns:
             List of MatchResult objects
         """
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
         from ..features.geometric import compute_geometric_features
         from ..features.semantic import compute_class_similarity, compute_name_similarity
 
@@ -494,53 +548,53 @@ class MLMatcher:
         if not candidates:
             return []
 
+        # Pre-extract data into lists for faster parallel access
+        ref_geoms = reference.geometry.tolist()
+        target_geoms = target.geometry.tolist()
+        ref_names = reference[ref_name_column].tolist() if ref_name_column in reference.columns else [None] * len(reference)
+        target_names = target[target_name_column].tolist() if target_name_column in target.columns else [None] * len(target)
+        ref_classes = reference[ref_class_column].tolist() if ref_class_column in reference.columns else [None] * len(reference)
+        target_classes = target[target_class_column].tolist() if target_class_column in target.columns else [None] * len(target)
+        ref_subclasses = reference[ref_subclass_column].tolist() if ref_subclass_column in reference.columns else [None] * len(reference)
+        target_subclasses = target[target_subclass_column].tolist() if target_subclass_column in target.columns else [None] * len(target)
+
+        # Determine number of workers (leave 2 cores for system)
+        if n_jobs == -1:
+            n_workers = max(1, mp.cpu_count() - 2)
+        else:
+            n_workers = n_jobs
+
+        n_candidates = len(candidates)
+        logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
+
+        # Use module-level function with global data to avoid pickle overhead
+        # Store data in module globals for workers to access
+        global _worker_data
+        _worker_data = {
+            'ref_geoms': ref_geoms,
+            'target_geoms': target_geoms,
+            'ref_names': ref_names,
+            'target_names': target_names,
+            'ref_classes': ref_classes,
+            'target_classes': target_classes,
+            'ref_subclasses': ref_subclasses,
+            'target_subclasses': target_subclasses,
+        }
+
+        # Prepare work items as simple tuples
+        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+
+        # Process with map for ordered results
+        chunk_size = max(1000, n_candidates // (n_workers * 4))
         features_list = []
 
-        for cand in candidates:
-            ref_row = reference.iloc[cand.ref_idx]
-            target_row = target.iloc[cand.target_idx]
-
-            # Compute features
-            geom_features = compute_geometric_features(
-                ref_row.geometry, target_row.geometry
-            )
-            name_sim = compute_name_similarity(
-                ref_row.get(ref_name_column),
-                target_row.get(target_name_column),
-            )
-            class_sim = compute_class_similarity(
-                ref_row.get(ref_class_column),
-                target_row.get(target_class_column),
-                ref_row.get(ref_subclass_column),
-                target_row.get(target_subclass_column),
-            )
-
-            features = {
-                "hausdorff_distance": geom_features.hausdorff_distance,
-                "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-                "buffer_iou": geom_features.buffer_iou,
-                "overlap_ratio": geom_features.overlap_ratio,
-                "heading_delta": geom_features.heading_delta,
-                "length_ratio": geom_features.length_ratio,
-                "projection_distance": geom_features.projection_distance,
-                "centroid_distance": geom_features.centroid_distance,
-                "name_levenshtein": name_sim["levenshtein_ratio"],
-                "name_jaro_winkler": name_sim["jaro_winkler"],
-                "name_token_sort": name_sim["token_sort_ratio"],
-                "class_similarity": class_sim,
-            }
-
-            # Add endpoint features if spatial context provided
-            if spatial_context is not None:
-                from ..features.spatial_context import compute_endpoint_features
-                ep_features = compute_endpoint_features(
-                    target_row.geometry,
-                    spatial_context,
-                    exclude_segment_idx=cand.target_idx,
-                )
-                features.update(ep_features)
-
-            features_list.append(features)
+        with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker, initargs=(_worker_data,)) as executor:
+            # Process in chunks to show progress
+            for i in range(0, len(work_items), chunk_size * n_workers):
+                batch = work_items[i:i + chunk_size * n_workers]
+                batch_results = list(executor.map(_compute_single_feature, batch, chunksize=chunk_size))
+                features_list.extend(batch_results)
+                logger.info(f"Processed {min(i + len(batch), len(work_items))}/{len(work_items)} candidates...")
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
