@@ -17,6 +17,7 @@ from loguru import logger
 from scipy.optimize import linear_sum_assignment
 from shapely import LineString, Point
 
+from ..config import settings
 from .rules import MatchDecision, MatchResult
 
 
@@ -294,9 +295,7 @@ def resolve_one_to_many(
             one_to_one.append(matches[0])
         else:
             # Check if multiple targets are contiguous
-            contiguous_groups = _find_contiguous_groups(
-                matches, target_geoms, contiguity_tolerance
-            )
+            contiguous_groups = _find_contiguous_groups(matches, target_geoms, contiguity_tolerance)
 
             for group in contiguous_groups:
                 if len(group) == 1:
@@ -305,19 +304,25 @@ def resolve_one_to_many(
                 else:
                     # Multiple contiguous matches -> 1:N
                     avg_confidence = np.mean([m.confidence for m in group])
+                    target_ids = [m.target_id for m in group]
+                    individual_confidences = [m.confidence for m in group]
                     multi_match = MultiMatchResult(
                         ref_id=ref_id,
-                        target_ids=[m.target_id for m in group],
-                        decision=MatchDecision.MATCH if avg_confidence >= 0.5 else MatchDecision.REVIEW,
+                        target_ids=target_ids,
+                        decision=MatchDecision.MATCH
+                        if avg_confidence >= settings.review_threshold
+                        else MatchDecision.REVIEW,
                         confidence=avg_confidence,
                         match_type="1:N",
-                        individual_confidences=[m.confidence for m in group],
+                        individual_confidences=individual_confidences,
                     )
                     one_to_many.append(multi_match)
                     # Note: Individual 1:N matches are NOT added to one_to_one here.
                     # They're handled by optimize_with_one_to_many() to avoid duplicates.
 
-    logger.info(f"  Resolved to {len(one_to_one)} individual matches, {len(one_to_many)} 1:N groups")
+    logger.info(
+        f"  Resolved to {len(one_to_one)} individual matches, {len(one_to_many)} 1:N groups"
+    )
     return one_to_one, one_to_many
 
 
@@ -454,13 +459,19 @@ def optimize_with_one_to_many(
 
     # Add the 1:N matches as individual results
     for mm in multi_matches:
+        # Validate that individual_confidences matches target_ids length
+        has_valid_confidences = mm.individual_confidences and len(mm.individual_confidences) == len(
+            mm.target_ids
+        )
         for i, tid in enumerate(mm.target_ids):
+            # Use individual confidence if available and valid, otherwise fall back to group average
+            confidence = mm.individual_confidences[i] if has_valid_confidences else mm.confidence
             optimized.append(
                 MatchResult(
                     ref_id=mm.ref_id,
                     target_id=tid,
                     decision=mm.decision,
-                    confidence=mm.individual_confidences[i] if mm.individual_confidences else mm.confidence,
+                    confidence=confidence,
                     score_breakdown={},
                     features={"match_type": "1:N", "group_size": len(mm.target_ids)},
                 )

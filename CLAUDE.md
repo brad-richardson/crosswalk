@@ -86,10 +86,10 @@ Each CSV contains: `gers_id`, `target_id`, `label` (match/no_match/unsure), and 
 **Note**: The trained model is not committed to git. After cloning, run `matcher train` before using `-m xgboost`.
 
 ### Key Thresholds
-- `confidence >= 0.5` → MATCH
-- `confidence >= 0.1` → REVIEW
+- `confidence >= 0.5` → MATCH (configurable via `settings.match_threshold`)
+- `confidence >= 0.1` → REVIEW (configurable via `settings.review_threshold`)
 - `confidence < 0.1` → NO_MATCH
-- 1:N groups: `avg_confidence >= 0.5` → MATCH (in `optimizer.py`)
+- 1:N groups: `avg_confidence >= settings.review_threshold` → MATCH
 
 ## Testing
 
@@ -140,3 +140,32 @@ data/
 1. Label more examples in the labeling UI
 2. Retrain model: `matcher train`
 3. Evaluate: `matcher eval-model`
+
+## Change Tracking
+
+### Before/After Comparison for PRs
+
+When making changes to matching logic, feature computation, or optimization, run before/after comparisons on the Boston datasets to track impact:
+
+```bash
+# Before changes (on main branch)
+git checkout main
+matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet \
+    -m xgboost -o data/output/before_boston_streets_bridge.parquet
+
+# After changes (on feature branch)
+git checkout feature-branch
+matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet \
+    -m xgboost -o data/output/after_boston_streets_bridge.parquet
+```
+
+Include comparison in PR description:
+
+| Dataset | Metric | Before | After | Delta |
+|---------|--------|--------|-------|-------|
+| boston_streets | Matched | 10025 | 10025 | 0 |
+| boston_streets | Review | 1099 | 1099 | 0 |
+| boston_streets | Unmatched | 19 | 19 | 0 |
+| boston_streets | 1:N groups | 150 | 150 | 0 |
+
+Note: Numbers may not change for code cleanup/edge case fixes - include comparison for transparency.

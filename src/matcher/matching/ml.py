@@ -34,6 +34,10 @@ from sklearn.model_selection import cross_val_score, train_test_split
 
 from .rules import MatchDecision, MatchResult
 
+# Maximum distance value for features (used instead of infinity to avoid XGBoost issues)
+# 9999.0 meters (10km) represents "very far" for road segment matching
+MAX_DISTANCE_METERS = 9999.0
+
 # Features used for ML model (must match what's stored in labels)
 # Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
 # (both compute bidirectional mean of min distances). Including both would double-weight.
@@ -113,15 +117,16 @@ def _compute_single_feature(args):
         }
     except Exception as e:
         # Return error marker with default values (will result in low confidence)
+        # Use MAX_DISTANCE_METERS instead of infinity to avoid XGBoost issues
         return {
-            "hausdorff_distance": float("inf"),
-            "mean_hausdorff_distance": float("inf"),
+            "hausdorff_distance": MAX_DISTANCE_METERS,
+            "mean_hausdorff_distance": MAX_DISTANCE_METERS,
             "buffer_iou": 0.0,
             "overlap_ratio": 0.0,
             "heading_delta": 180.0,
             "length_ratio": 0.0,
-            "projection_distance": float("inf"),
-            "centroid_distance": float("inf"),
+            "projection_distance": MAX_DISTANCE_METERS,
+            "centroid_distance": MAX_DISTANCE_METERS,
             "name_levenshtein": 0.0,
             "name_jaro_winkler": 0.0,
             "name_token_sort": 0.0,
@@ -460,20 +465,25 @@ class MLMatcher:
         return X, y
 
     def _impute_missing(self, X: np.ndarray) -> np.ndarray:
-        """Impute missing values using stored medians.
+        """Impute missing and infinite values using stored medians.
 
         Args:
-            X: Feature matrix with potential NaNs
+            X: Feature matrix with potential NaNs or infinite values
 
         Returns:
-            Feature matrix with NaNs replaced by medians
+            Feature matrix with NaNs replaced by medians and infinities capped
         """
         X = X.copy()
         for i, feat_name in enumerate(self.feature_names):
+            # Handle NaN values
             nan_mask = np.isnan(X[:, i])
             if nan_mask.any():
                 fill_value = self.feature_medians.get(feat_name, 0.0)
                 X[nan_mask, i] = fill_value
+            # Handle infinite values (cap at MAX_DISTANCE_METERS)
+            inf_mask = np.isinf(X[:, i])
+            if inf_mask.any():
+                X[inf_mask, i] = MAX_DISTANCE_METERS
         return X
 
     def predict(self, features: list[dict[str, float]]) -> list[float]:
@@ -519,15 +529,22 @@ class MLMatcher:
         return [self.label_decoder.get(int(y), "unknown") for y in y_pred]
 
     def _features_to_array(self, features: list[dict[str, float]]) -> np.ndarray:
-        """Convert feature dicts to numpy array, using stored medians for missing values."""
+        """Convert feature dicts to numpy array, using stored medians for missing values.
+
+        Also handles infinite values by replacing them with MAX_DISTANCE_METERS,
+        which prevents XGBoost from producing NaN predictions.
+        """
         rows = []
         for feat_dict in features:
             row = []
             for col in self.feature_names:
                 val = feat_dict.get(col, np.nan)
-                # Use stored median if value is missing
+                # Use stored median if value is missing or NaN
                 if pd.isna(val):
                     val = self.feature_medians.get(col, 0.0)
+                # Replace infinite values with MAX_DISTANCE_METERS to avoid XGBoost issues
+                elif np.isinf(val):
+                    val = MAX_DISTANCE_METERS
                 row.append(val)
             rows.append(row)
         return np.array(rows, dtype=np.float32)
