@@ -19,18 +19,20 @@ Model Architecture:
 - Handles class imbalance via scale_pos_weight or class_weight
 """
 
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
 from loguru import logger
-from sklearn.metrics import classification_report, confusion_matrix as sklearn_confusion_matrix
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import cross_val_score, train_test_split
 
 from .rules import MatchDecision, MatchResult
-
 
 # Features used for ML model (must match what's stored in labels)
 # Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
@@ -58,10 +60,80 @@ RELATIONAL_FEATURE_COLUMNS = [
 ]
 
 
+# Module-level globals for multiprocessing worker data
+_worker_data = None
+
+
+def _init_worker(data):
+    """Initialize worker process with shared data."""
+    global _worker_data
+    _worker_data = data
+
+
+def _compute_single_feature(args):
+    """Compute features for a single candidate pair (worker function).
+
+    Returns a dict of features, or a dict with all None values if computation fails.
+    """
+    from ..features.geometric import compute_geometric_features
+    from ..features.semantic import compute_class_similarity, compute_name_similarity
+
+    ref_idx, target_idx = args
+
+    try:
+        ref_geom = _worker_data["ref_geoms"][ref_idx]
+        target_geom = _worker_data["target_geoms"][target_idx]
+
+        geom_features = compute_geometric_features(ref_geom, target_geom)
+        name_sim = compute_name_similarity(
+            _worker_data["ref_names"][ref_idx],
+            _worker_data["target_names"][target_idx],
+        )
+        class_sim = compute_class_similarity(
+            _worker_data["ref_classes"][ref_idx],
+            _worker_data["target_classes"][target_idx],
+            _worker_data["ref_subclasses"][ref_idx],
+            _worker_data["target_subclasses"][target_idx],
+        )
+
+        return {
+            "hausdorff_distance": geom_features.hausdorff_distance,
+            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
+            "buffer_iou": geom_features.buffer_iou,
+            "overlap_ratio": geom_features.overlap_ratio,
+            "heading_delta": geom_features.heading_delta,
+            "length_ratio": geom_features.length_ratio,
+            "projection_distance": geom_features.projection_distance,
+            "centroid_distance": geom_features.centroid_distance,
+            "name_levenshtein": name_sim["levenshtein_ratio"],
+            "name_jaro_winkler": name_sim["jaro_winkler"],
+            "name_token_sort": name_sim["token_sort_ratio"],
+            "class_similarity": class_sim,
+            "_error": None,
+        }
+    except Exception as e:
+        # Return error marker with default values (will result in low confidence)
+        return {
+            "hausdorff_distance": float("inf"),
+            "mean_hausdorff_distance": float("inf"),
+            "buffer_iou": 0.0,
+            "overlap_ratio": 0.0,
+            "heading_delta": 180.0,
+            "length_ratio": 0.0,
+            "projection_distance": float("inf"),
+            "centroid_distance": float("inf"),
+            "name_levenshtein": 0.0,
+            "name_jaro_winkler": 0.0,
+            "name_token_sort": 0.0,
+            "class_similarity": 0.0,
+            "_error": str(e),
+        }
+
+
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         """Initialize the ML matcher.
 
         Args:
@@ -153,7 +225,9 @@ class MLMatcher:
 
         # Load all partitions using LabelStore
         df = LabelStore.load_all(Path(labels_dir))
-        logger.info(f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets")
+        logger.info(
+            f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets"
+        )
 
         # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
         valid_labels = {"match", "no_match", "associated"}
@@ -191,7 +265,9 @@ class MLMatcher:
             n_neg = (y_train == 0).sum()
             n_pos = (y_train == 1).sum()
             scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-            logger.info(f"Class balance: {n_pos} positive, {n_neg} negative, scale={scale_pos_weight:.2f}")
+            logger.info(
+                f"Class balance: {n_pos} positive, {n_neg} negative, scale={scale_pos_weight:.2f}"
+            )
         else:
             scale_pos_weight = None
 
@@ -217,7 +293,8 @@ class MLMatcher:
         logger.info(f"Training XGBoost with params: {params}")
         self.model = xgb.XGBClassifier(**params)
         self.model.fit(
-            X_train, y_train,
+            X_train,
+            y_train,
             eval_set=[(X_test, y_test)],
             verbose=False,
         )
@@ -238,7 +315,8 @@ class MLMatcher:
             "cv_f1_mean": cv_scores.mean(),
             "cv_f1_std": cv_scores.std(),
             "classification_report": classification_report(
-                y_test, y_pred,
+                y_test,
+                y_pred,
                 target_names=target_names,
                 output_dict=True,
             ),
@@ -340,9 +418,11 @@ class MLMatcher:
         """Extract features from nested dict column."""
         # Check if relational features are present in any row's feature dict
         sample_features = df["features"].iloc[0] if len(df) > 0 else {}
-        has_relational = any(
-            feat in sample_features for feat in RELATIONAL_FEATURE_COLUMNS
-        ) if sample_features else False
+        has_relational = (
+            any(feat in sample_features for feat in RELATIONAL_FEATURE_COLUMNS)
+            if sample_features
+            else False
+        )
 
         # Build feature names list including relational if present
         feature_names = self.feature_names.copy()
@@ -464,6 +544,7 @@ class MLMatcher:
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
         spatial_context=None,
+        n_jobs: int = -1,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
 
@@ -478,69 +559,114 @@ class MLMatcher:
             ref_subclass_column: Column name for reference subclass
             target_subclass_column: Column name for target subclass
             spatial_context: Optional SpatialContextIndex for endpoint features
+            n_jobs: Number of parallel jobs (-1 for all cores)
 
         Returns:
             List of MatchResult objects
-        """
-        from ..features.geometric import compute_geometric_features
-        from ..features.semantic import compute_class_similarity, compute_name_similarity
 
+        Note:
+            spatial_context is not supported in parallel mode and will be ignored.
+            Use n_jobs=1 for sequential processing with spatial_context support.
+        """
         if self.model is None:
             logger.warning("No ML model loaded, falling back to rules")
             from .rules import score_candidates
+
             return score_candidates(candidates, reference, target)
 
         # Handle empty candidates list
         if not candidates:
             return []
 
+        # Warn if spatial_context is provided (not supported in parallel mode)
+        if spatial_context is not None:
+            logger.warning(
+                "spatial_context is not supported in parallel mode and will be ignored. "
+                "Use n_jobs=1 for sequential processing with spatial_context support."
+            )
+
+        # Pre-extract data into NumPy arrays for memory efficiency
+        ref_geoms = reference.geometry.to_numpy()
+        target_geoms = target.geometry.to_numpy()
+        ref_names = (
+            reference[ref_name_column].to_numpy()
+            if ref_name_column in reference.columns
+            else np.full(len(reference), None, dtype=object)
+        )
+        target_names = (
+            target[target_name_column].to_numpy()
+            if target_name_column in target.columns
+            else np.full(len(target), None, dtype=object)
+        )
+        ref_classes = (
+            reference[ref_class_column].to_numpy()
+            if ref_class_column in reference.columns
+            else np.full(len(reference), None, dtype=object)
+        )
+        target_classes = (
+            target[target_class_column].to_numpy()
+            if target_class_column in target.columns
+            else np.full(len(target), None, dtype=object)
+        )
+        ref_subclasses = (
+            reference[ref_subclass_column].to_numpy()
+            if ref_subclass_column in reference.columns
+            else np.full(len(reference), None, dtype=object)
+        )
+        target_subclasses = (
+            target[target_subclass_column].to_numpy()
+            if target_subclass_column in target.columns
+            else np.full(len(target), None, dtype=object)
+        )
+
+        # Determine number of workers (leave 2 cores for system)
+        if n_jobs == -1:
+            n_workers = max(1, mp.cpu_count() - 2)
+        else:
+            n_workers = n_jobs
+
+        n_candidates = len(candidates)
+        logger.info(
+            f"Computing features for {n_candidates} candidates using {n_workers} processes..."
+        )
+
+        # Prepare worker data (passed via initializer to avoid repeated pickling)
+        worker_data = {
+            "ref_geoms": ref_geoms,
+            "target_geoms": target_geoms,
+            "ref_names": ref_names,
+            "target_names": target_names,
+            "ref_classes": ref_classes,
+            "target_classes": target_classes,
+            "ref_subclasses": ref_subclasses,
+            "target_subclasses": target_subclasses,
+        }
+
+        # Prepare work items as simple tuples
+        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+
+        # Process with map for ordered results
+        chunk_size = max(1000, n_candidates // (n_workers * 4))
         features_list = []
 
-        for cand in candidates:
-            ref_row = reference.iloc[cand.ref_idx]
-            target_row = target.iloc[cand.target_idx]
-
-            # Compute features
-            geom_features = compute_geometric_features(
-                ref_row.geometry, target_row.geometry
-            )
-            name_sim = compute_name_similarity(
-                ref_row.get(ref_name_column),
-                target_row.get(target_name_column),
-            )
-            class_sim = compute_class_similarity(
-                ref_row.get(ref_class_column),
-                target_row.get(target_class_column),
-                ref_row.get(ref_subclass_column),
-                target_row.get(target_subclass_column),
-            )
-
-            features = {
-                "hausdorff_distance": geom_features.hausdorff_distance,
-                "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-                "buffer_iou": geom_features.buffer_iou,
-                "overlap_ratio": geom_features.overlap_ratio,
-                "heading_delta": geom_features.heading_delta,
-                "length_ratio": geom_features.length_ratio,
-                "projection_distance": geom_features.projection_distance,
-                "centroid_distance": geom_features.centroid_distance,
-                "name_levenshtein": name_sim["levenshtein_ratio"],
-                "name_jaro_winkler": name_sim["jaro_winkler"],
-                "name_token_sort": name_sim["token_sort_ratio"],
-                "class_similarity": class_sim,
-            }
-
-            # Add endpoint features if spatial context provided
-            if spatial_context is not None:
-                from ..features.spatial_context import compute_endpoint_features
-                ep_features = compute_endpoint_features(
-                    target_row.geometry,
-                    spatial_context,
-                    exclude_segment_idx=cand.target_idx,
+        with ProcessPoolExecutor(
+            max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
+        ) as executor:
+            # Process in chunks to show progress
+            for i in range(0, len(work_items), chunk_size * n_workers):
+                batch = work_items[i : i + chunk_size * n_workers]
+                batch_results = list(
+                    executor.map(_compute_single_feature, batch, chunksize=chunk_size)
                 )
-                features.update(ep_features)
+                features_list.extend(batch_results)
+                logger.info(
+                    f"Processed {min(i + len(batch), len(work_items))}/{len(work_items)} candidates..."
+                )
 
-            features_list.append(features)
+        # Log any errors encountered during feature computation
+        errors = [f for f in features_list if f.get("_error")]
+        if errors:
+            logger.warning(f"{len(errors)} candidates had feature computation errors")
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
@@ -562,16 +688,19 @@ class MLMatcher:
             else:
                 decision = MatchDecision.NO_MATCH
 
-            results.append(MatchResult(
-                ref_id=cand.ref_id,
-                target_id=cand.target_id,
-                decision=decision,
-                confidence=prob,
-                score_breakdown={},  # ML doesn't have component scores
-                features=features_list[i],
-            ))
+            results.append(
+                MatchResult(
+                    ref_id=cand.ref_id,
+                    target_id=cand.target_id,
+                    decision=decision,
+                    confidence=prob,
+                    score_breakdown={},  # ML doesn't have component scores
+                    features=features_list[i],
+                )
+            )
 
         return results
+
 
 def train_model(
     labels_dir: str = "labels",

@@ -308,7 +308,7 @@ def resolve_one_to_many(
                     multi_match = MultiMatchResult(
                         ref_id=ref_id,
                         target_ids=[m.target_id for m in group],
-                        decision=MatchDecision.MATCH if avg_confidence >= 0.75 else MatchDecision.REVIEW,
+                        decision=MatchDecision.MATCH if avg_confidence >= 0.5 else MatchDecision.REVIEW,
                         confidence=avg_confidence,
                         match_type="1:N",
                         individual_confidences=[m.confidence for m in group],
