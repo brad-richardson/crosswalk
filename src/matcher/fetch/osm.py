@@ -28,7 +28,7 @@ def fetch_osm_data(
     This is the main entry point for OSM data fetching. It:
     1. Finds the smallest Geofabrik region containing the bbox
     2. Downloads the regional PBF (cached for 24 hours)
-    3. Extracts the bbox area using osmium CLI
+    3. Extracts the bbox area using osmium CLI (or pyosmium fallback)
     4. Parses roads and connectors using pyosmium
     5. Saves as GeoParquet
 
@@ -43,19 +43,44 @@ def fetch_osm_data(
         Tuple of (segments_path, connectors_path)
     """
     cache_dir = cache_dir or settings.pbf_cache_dir
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Fetching OSM data for bbox: {bbox}")
 
     # Download and extract PBF
-    pbf_path = download_and_extract(
+    result_path = download_and_extract(
         bbox=bbox,
         output_dir=output_dir,
         cache_dir=cache_dir,
         force=force_download,
     )
 
-    # Parse roads and connectors from PBF
-    roads_gdf, connectors_gdf = parse_pbf(pbf_path)
+    # Check if pyosmium extraction was used (indicated by marker file)
+    pyosmium_marker = output_dir / ".pyosmium_extracted"
+    if pyosmium_marker.exists():
+        # Data was extracted directly by pyosmium - load and transform
+        logger.info("Using pyosmium-extracted data")
+        pyosmium_marker.unlink()
+
+        roads_path = output_dir / "osm_roads_raw.parquet"
+        connectors_raw_path = output_dir / "osm_connectors_raw.parquet"
+
+        roads_gdf = gpd.read_parquet(roads_path)
+        connectors_gdf = gpd.read_parquet(connectors_raw_path)
+
+        # Cleanup raw files
+        roads_path.unlink()
+        connectors_raw_path.unlink()
+    else:
+        # Standard path - parse from PBF
+        pbf_path = result_path
+        roads_gdf, connectors_gdf = parse_pbf(pbf_path)
+
+        # Cleanup extracted PBF unless keeping
+        if not keep_pbf and pbf_path.exists():
+            pbf_path.unlink()
+            logger.debug(f"Removed temporary PBF: {pbf_path}")
 
     # Transform roads to match expected schema (for load_osm_roads compatibility)
     roads_gdf = _transform_to_overture_schema(roads_gdf)
@@ -64,7 +89,6 @@ def fetch_osm_data(
     connectors_gdf = _transform_connectors_schema(connectors_gdf)
 
     # Save to parquet
-    output_dir.mkdir(parents=True, exist_ok=True)
     segments_path = output_dir / "osm_segments.parquet"
     connectors_path = output_dir / "osm_connectors.parquet"
 
@@ -73,11 +97,6 @@ def fetch_osm_data(
 
     logger.info(f"Saved {len(roads_gdf)} OSM segments to {segments_path}")
     logger.info(f"Saved {len(connectors_gdf)} OSM connectors to {connectors_path}")
-
-    # Cleanup extracted PBF unless keeping
-    if not keep_pbf and pbf_path.exists():
-        pbf_path.unlink()
-        logger.debug(f"Removed temporary PBF: {pbf_path}")
 
     return segments_path, connectors_path
 

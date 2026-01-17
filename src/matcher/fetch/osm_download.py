@@ -173,12 +173,27 @@ def download_pbf(
     return cache_path
 
 
+def _check_osmium_cli() -> bool:
+    """Check if osmium CLI tool is available."""
+    try:
+        result = subprocess.run(
+            ["osmium", "--version"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
 def extract_bbox(
     input_pbf: Path,
     bbox: BoundingBox,
     output_pbf: Path,
 ) -> Path:
-    """Extract a bounding box from a PBF using osmium CLI.
+    """Extract a bounding box from a PBF.
+
+    Tries osmium CLI first (faster), falls back to pyosmium if CLI unavailable.
 
     Args:
         input_pbf: Path to input PBF file
@@ -187,12 +202,22 @@ def extract_bbox(
 
     Returns:
         Path to the extracted PBF file
-
-    Raises:
-        RuntimeError: If osmium-tool is not installed or extraction fails
     """
     output_pbf.parent.mkdir(parents=True, exist_ok=True)
 
+    if _check_osmium_cli():
+        return _extract_bbox_cli(input_pbf, bbox, output_pbf)
+    else:
+        logger.info("osmium CLI not found, using pyosmium fallback")
+        return _extract_bbox_pyosmium(input_pbf, bbox, output_pbf)
+
+
+def _extract_bbox_cli(
+    input_pbf: Path,
+    bbox: BoundingBox,
+    output_pbf: Path,
+) -> Path:
+    """Extract bbox using osmium CLI (faster)."""
     # Format: west,south,east,north (lon,lat,lon,lat)
     bbox_str = f"{bbox.xmin},{bbox.ymin},{bbox.xmax},{bbox.ymax}"
 
@@ -207,28 +232,171 @@ def extract_bbox(
         str(input_pbf),
     ]
 
-    logger.info(f"Extracting bbox {bbox_str} from {input_pbf.name}...")
-    try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout:
-            logger.debug(result.stdout)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"osmium extract failed: {e.stderr}")
-        raise RuntimeError(f"osmium extract failed: {e.stderr}") from e
-    except FileNotFoundError:
-        raise RuntimeError(
-            "osmium-tool not found. Install with: brew install osmium-tool (macOS) "
-            "or apt install osmium-tool (Ubuntu)"
-        )
+    logger.info(f"Extracting bbox {bbox_str} from {input_pbf.name} using osmium CLI...")
+    result = subprocess.run(
+        cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        logger.debug(result.stdout)
 
     size_kb = output_pbf.stat().st_size / 1e3
     logger.info(f"Extracted bbox to {output_pbf} ({size_kb:.1f} KB)")
     return output_pbf
+
+
+def _extract_bbox_pyosmium(
+    input_pbf: Path,
+    bbox: BoundingBox,
+    output_pbf: Path,
+) -> Path:
+    """Extract bbox using pyosmium and save directly to parquet.
+
+    Note: This skips the PBF intermediate step since writing a valid PBF
+    with osmium.SimpleWriter requires careful handling of node references.
+    Instead, we extract directly to parquet files.
+    """
+    import osmium
+    import geopandas as gpd
+    from collections import Counter
+    from shapely.geometry import LineString, Point
+
+    logger.info(f"Extracting bbox from {input_pbf.name} using pyosmium...")
+    logger.warning("pyosmium extraction is slower than osmium CLI for large files")
+
+    # Highway values to include
+    HIGHWAY_VALUES = {
+        "motorway", "trunk", "primary", "secondary", "tertiary",
+        "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
+        "residential", "unclassified", "service", "living_street", "road",
+        "footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "track",
+        "construction", "proposed", "abandoned",
+    }
+
+    class DirectExtractHandler(osmium.SimpleHandler):
+        """Handler that extracts roads directly from PBF."""
+
+        def __init__(self, bbox: BoundingBox):
+            super().__init__()
+            self.bbox = bbox
+            self.roads = []
+            self.node_refs = Counter()
+            self.node_locations = {}
+            self.node_versions = {}
+            self._invalid_count = 0
+
+        def node(self, n):
+            """Store node versions for connector IDs."""
+            self.node_versions[n.id] = n.version
+
+        def way(self, w):
+            """Extract highway ways that intersect the bbox."""
+            highway = w.tags.get("highway")
+            if highway not in HIGHWAY_VALUES:
+                return
+
+            try:
+                coords = []
+                node_ids = []
+                has_node_in_bbox = False
+
+                for n in w.nodes:
+                    if n.location.valid():
+                        lon, lat = n.location.lon, n.location.lat
+                        coords.append((lon, lat))
+                        node_ids.append(n.ref)
+                        self.node_locations[n.ref] = (lon, lat)
+                        if (self.bbox.xmin <= lon <= self.bbox.xmax and
+                                self.bbox.ymin <= lat <= self.bbox.ymax):
+                            has_node_in_bbox = True
+            except osmium.InvalidLocationError:
+                self._invalid_count += 1
+                return
+
+            if not has_node_in_bbox or len(coords) < 2:
+                return
+
+            # Count node references for connector extraction
+            for node_id in node_ids:
+                self.node_refs[node_id] += 1
+
+            # Extract tags
+            tags = {
+                "highway": highway,
+                "name": w.tags.get("name"),
+                "bridge": w.tags.get("bridge"),
+                "tunnel": w.tags.get("tunnel"),
+                "layer": w.tags.get("layer"),
+                "oneway": w.tags.get("oneway"),
+            }
+            tags = {k: v for k, v in tags.items() if v is not None}
+
+            self.roads.append({
+                "id": f"w{w.id}@{w.version}",
+                "geometry": LineString(coords),
+                "tags": tags,
+                "name": w.tags.get("name"),
+                "node_ids": node_ids,
+            })
+
+    handler = DirectExtractHandler(bbox)
+    handler.apply_file(str(input_pbf), locations=True, idx="flex_mem")
+
+    if handler._invalid_count > 0:
+        logger.warning(f"Skipped {handler._invalid_count} ways with invalid locations")
+
+    logger.info(f"Extracted {len(handler.roads)} road segments in bbox")
+
+    # Build connectors
+    connector_node_ids = set()
+    for node_id, count in handler.node_refs.items():
+        if count >= 2:
+            connector_node_ids.add(node_id)
+    for road in handler.roads:
+        node_ids = road.get("node_ids", [])
+        if node_ids:
+            connector_node_ids.add(node_ids[0])
+            connector_node_ids.add(node_ids[-1])
+
+    connectors = []
+    for node_id in connector_node_ids:
+        if node_id in handler.node_locations:
+            lon, lat = handler.node_locations[node_id]
+            version = handler.node_versions.get(node_id, 1)
+            connectors.append({
+                "id": f"n{node_id}@{version}",
+                "geometry": Point(lon, lat),
+            })
+
+    # Save directly to parquet (bypassing PBF)
+    output_dir = output_pbf.parent
+    roads_path = output_dir / "osm_roads_raw.parquet"
+    connectors_path = output_dir / "osm_connectors_raw.parquet"
+
+    if handler.roads:
+        roads_gdf = gpd.GeoDataFrame(handler.roads, crs="EPSG:4326")
+        roads_gdf.to_parquet(roads_path)
+    else:
+        roads_gdf = gpd.GeoDataFrame(
+            columns=["id", "geometry", "tags", "name", "node_ids"], crs="EPSG:4326"
+        )
+        roads_gdf.to_parquet(roads_path)
+
+    if connectors:
+        connectors_gdf = gpd.GeoDataFrame(connectors, crs="EPSG:4326")
+        connectors_gdf.to_parquet(connectors_path)
+    else:
+        connectors_gdf = gpd.GeoDataFrame(
+            columns=["id", "geometry"], crs="EPSG:4326"
+        )
+        connectors_gdf.to_parquet(connectors_path)
+
+    # Return a marker path - the caller will check for parquet files
+    marker = output_dir / ".pyosmium_extracted"
+    marker.touch()
+    return marker
 
 
 def download_and_extract(
