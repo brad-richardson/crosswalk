@@ -170,3 +170,66 @@ Include comparison in PR description:
 | boston_streets | 1:N groups | 150 | 150 | 0 |
 
 Note: Numbers may not change for code cleanup/edge case fixes - include comparison for transparency.
+
+## Default Development Workflow
+
+For any code changes, follow this workflow:
+
+### 1. Implement and Test Locally
+
+```bash
+# Run formatting and linting
+ruff format src/ tests/ && ruff check src/ tests/
+
+# Run all tests
+pytest tests/ -v
+
+# Run training regression tests (if ML changes)
+pytest tests/regression/test_training.py -v
+```
+
+### 2. Self-Review Changes
+
+Before committing, review all changes:
+
+```bash
+git diff
+git status
+```
+
+Check for:
+- Unused imports or dead code
+- Proper formatting and linting
+- Test coverage for new functionality
+- Clear, descriptive commit messages
+
+### 3. Branch, Commit, Push, and Create PR
+
+```bash
+# Create a feature branch
+git checkout -b feature/your-feature-name
+
+# Stage and commit changes (do NOT use --amend unless explicitly requested)
+git add .
+git commit -m "Add feature description"
+
+# Push to remote
+git push -u origin feature/your-feature-name
+
+# Create PR
+gh pr create --title "PR title" --body "Description"
+```
+
+### 4. Monitor CI and Address Feedback
+
+- Wait for CI checks to complete (~5 minutes)
+- Check for any failing tests or lint issues
+- Address feedback with **new commits** (never amend unless explicitly requested)
+- Push additional commits as needed
+
+### Commit Rules
+
+- **Never amend commits** unless explicitly requested by the user
+- Always add new commits to address feedback or fix issues
+- Use descriptive commit messages that explain the "why"
+- Keep commits atomic and focused on single changes

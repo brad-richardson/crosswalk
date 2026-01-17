@@ -1,85 +1,24 @@
-"""Unit tests for integration module."""
+"""Unit tests for integration module.
 
-import tempfile
-from pathlib import Path
+Fixtures used (from conftest.py):
+- reference_gdf: Reference network with two connected segments
+- target_matched_gdf: Target segments that match reference
+- target_unmatched_gdf: Target segments without matches
+- match_results: Mock match results for target_matched
+"""
 
 import geopandas as gpd
-import numpy as np
-import pytest
-from shapely import LineString, Point
+from shapely import LineString
 
 from matcher.integration import (
-    ComponentStatus,
     EdgeSource,
-    IntegrationResult,
     IntegrationStatistics,
     TargetInput,
     combine_networks,
     detect_orphan_components,
     filter_short_segments,
 )
-from matcher.topology.planarize import PlanarizedNetwork, planarize
-
-
-@pytest.fixture
-def reference_gdf():
-    """Reference network with two connected segments."""
-    return gpd.GeoDataFrame(
-        {
-            "id": ["ref_1", "ref_2"],
-            "name": ["Main St", "Oak Ave"],
-            "geometry": [
-                LineString([(0, 0), (100, 0)]),  # Horizontal
-                LineString([(100, 0), (100, 100)]),  # Vertical, connects at (100, 0)
-            ],
-        },
-        crs="EPSG:32610",
-    )
-
-
-@pytest.fixture
-def target_matched_gdf():
-    """Target segments that match reference."""
-    return gpd.GeoDataFrame(
-        {
-            "local_id": ["t_1"],
-            "name": ["Main Street"],
-            "geometry": [
-                LineString([(0, 5), (100, 5)]),  # Parallel to Main St
-            ],
-        },
-        crs="EPSG:32610",
-    )
-
-
-@pytest.fixture
-def target_unmatched_gdf():
-    """Target segments without matches."""
-    return gpd.GeoDataFrame(
-        {
-            "local_id": ["t_new_1", "t_orphan"],
-            "name": ["New Rd", "Orphan Rd"],
-            "geometry": [
-                LineString([(50, 0), (50, 50)]),  # Connects to Main St
-                LineString([(200, 200), (250, 250)]),  # Disconnected orphan
-            ],
-        },
-        crs="EPSG:32610",
-    )
-
-
-@pytest.fixture
-def match_results():
-    """Match results for target_matched."""
-    class MockMatchResult:
-        def __init__(self, ref_id, target_id, confidence):
-            self.ref_id = ref_id
-            self.target_id = target_id
-            self.confidence = confidence
-
-    return [
-        MockMatchResult("ref_1", "t_1", 0.9),
-    ]
+from matcher.topology.planarize import planarize
 
 
 class TestCombineNetworks:
