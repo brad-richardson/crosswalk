@@ -62,6 +62,10 @@ FEATURE_COLUMNS = [
     "start_endpoint_proximity",
     "end_endpoint_proximity",
     "shared_endpoint_count",
+    # Lateral offset for parallel infrastructure disambiguation (2)
+    # Helps distinguish left vs right sidewalk by measuring perpendicular distance
+    "lateral_offset",
+    "lateral_offset_consistency",
 ]
 
 # Additional relational features (kept for backward compatibility with old labels)
@@ -89,6 +93,7 @@ def _compute_single_feature(args):
     Returns a dict of features, or a dict with all None values if computation fails.
     """
     from ..features.geometric import compute_geometric_features
+    from ..features.relational import compute_perpendicular_offset
     from ..features.semantic import compute_class_similarity, compute_name_similarity
 
     ref_idx, target_idx = args
@@ -107,6 +112,13 @@ def _compute_single_feature(args):
             _worker_data["target_classes"][target_idx],
             _worker_data["ref_subclasses"][ref_idx],
             _worker_data["target_subclasses"][target_idx],
+        )
+
+        # Compute lateral offset for parallel infrastructure disambiguation
+        # This measures perpendicular distance between target and reference geometries
+        # Helps distinguish left vs right sidewalk (same side = low offset, opposite = high)
+        lateral_offset, lateral_consistency = compute_perpendicular_offset(
+            target_geom, ref_geom
         )
 
         # Get pre-computed endpoint features for target segment
@@ -133,6 +145,8 @@ def _compute_single_feature(args):
             ),
             "end_endpoint_proximity": target_ep.get("end_endpoint_proximity", MAX_DISTANCE_METERS),
             "shared_endpoint_count": target_ep.get("shared_endpoint_count", 0),
+            "lateral_offset": min(lateral_offset, MAX_DISTANCE_METERS),
+            "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
             "_error": None,
         }
     except Exception as e:
@@ -156,6 +170,8 @@ def _compute_single_feature(args):
             "start_endpoint_proximity": MAX_DISTANCE_METERS,
             "end_endpoint_proximity": MAX_DISTANCE_METERS,
             "shared_endpoint_count": 0,
+            "lateral_offset": MAX_DISTANCE_METERS,
+            "lateral_offset_consistency": MAX_DISTANCE_METERS,
             "_error": str(e),
         }
 

@@ -5,17 +5,35 @@ from rapidfuzz import fuzz
 from rapidfuzz.distance import JaroWinkler
 
 # Road class mapping to hierarchy levels
+# Expanded to include link roads, bike/pedestrian infrastructure
+# Lower numbers = higher hierarchy (motorways at top)
 ROAD_CLASS_HIERARCHY = {
+    # Major roads
     "motorway": 1,
+    "motorway_link": 1,
     "trunk": 2,
+    "trunk_link": 2,
     "primary": 3,
+    "primary_link": 3,
     "secondary": 4,
+    "secondary_link": 4,
     "tertiary": 5,
+    "tertiary_link": 5,
+    # Local roads
     "residential": 6,
+    "living_street": 6,
     "service": 7,
     "unclassified": 8,
+    # Rural/unpaved
     "track": 9,
+    # Pedestrian/bike (separate category - use subclass for finer matching)
+    "footway": 10,
+    "sidewalk": 10,
+    "cycleway": 10,
     "path": 10,
+    "pedestrian": 10,
+    "bridleway": 10,
+    "steps": 10,
 }
 
 # Common street name abbreviations
@@ -261,9 +279,9 @@ def compute_class_similarity(
         # One has subclass, other doesn't - slight penalty
         return 0.9
 
-    # Get hierarchy ranks
-    rank_a = ROAD_CLASS_HIERARCHY.get(class_a, 5)
-    rank_b = ROAD_CLASS_HIERARCHY.get(class_b, 5)
+    # Get hierarchy ranks (default to residential level for unknown classes)
+    rank_a = ROAD_CLASS_HIERARCHY.get(class_a, 6)
+    rank_b = ROAD_CLASS_HIERARCHY.get(class_b, 6)
 
     # Compute difference
     diff = abs(rank_a - rank_b)
@@ -297,12 +315,32 @@ def compute_class_match(
     if class_a == class_b:
         return True
 
-    # Get hierarchy ranks
-    rank_a = ROAD_CLASS_HIERARCHY.get(class_a, 5)
-    rank_b = ROAD_CLASS_HIERARCHY.get(class_b, 5)
+    # Get hierarchy ranks (default to residential level for unknown classes)
+    rank_a = ROAD_CLASS_HIERARCHY.get(class_a, 6)
+    rank_b = ROAD_CLASS_HIERARCHY.get(class_b, 6)
 
     # Allow up to 2 levels difference
     return abs(rank_a - rank_b) <= 2
+
+
+def get_class_info(class_value: str | None) -> dict:
+    """Get diagnostic info about a road class value.
+
+    Returns dict with:
+    - normalized: Lowercase, stripped class value
+    - known: Whether it's in the hierarchy
+    - rank: Hierarchy rank (or default if unknown)
+
+    Useful for debugging class similarity issues.
+    """
+    if not class_value:
+        return {"normalized": None, "known": False, "rank": None}
+
+    normalized = class_value.lower().strip()
+    known = normalized in ROAD_CLASS_HIERARCHY
+    rank = ROAD_CLASS_HIERARCHY.get(normalized, 6)
+
+    return {"normalized": normalized, "known": known, "rank": rank}
 
 
 def extract_numeric_suffix(name: str | None) -> int | None:
