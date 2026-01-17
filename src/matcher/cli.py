@@ -319,7 +319,7 @@ def train(
         help="Labels directory or parquet file",
     ),
     output: Path = typer.Option(
-        Path("data/models/matcher_model.joblib"),
+        Path("data/models/matcher_model_combined.joblib"),
         "--output",
         "-o",
         help="Output path for trained model",
