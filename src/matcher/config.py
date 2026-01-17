@@ -123,6 +123,29 @@ class MatcherSettings(BaseSettings):
         description="Working CRS for metric calculations (auto-detected if None)",
     )
 
+    # Integration settings
+    min_segment_length: float = Field(
+        default=3.0,
+        description="Minimum segment length to include in integration (meters). Filters noise.",
+    )
+    overlap_iou_threshold: float = Field(
+        default=0.8,
+        description="IoU threshold for detecting overlapping segments during integration",
+    )
+    overlap_buffer_distance: float = Field(
+        default=10.0,
+        description="Buffer distance for overlap detection (meters)",
+    )
+    near_duplicate_tolerance: float = Field(
+        default=2.0,
+        description="Distance to consider segments near-duplicates (meters). "
+        "Intentionally tight since near-duplicates should nearly overlay.",
+    )
+    near_duplicate_overlap: float = Field(
+        default=0.8,
+        description="Minimum overlap ratio to consider as near-duplicate",
+    )
+
 
 # Global settings instance
 settings = MatcherSettings()

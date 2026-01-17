@@ -1,13 +1,11 @@
 """Tests for feature extraction."""
 
 import pytest
-import numpy as np
 from shapely import LineString
 
 from matcher.features.geometric import (
     compute_geometric_features,
     compute_segment_heading,
-    GeometricFeatures,
 )
 from matcher.features.semantic import (
     compute_name_similarity,
@@ -105,17 +103,20 @@ class TestSemanticFeatures:
         assert result["token_sort_ratio"] > 0.9
 
     def test_name_similarity_none(self):
-        """Missing names should return 0."""
+        """Missing names should return neutral score (0.5) and flag as missing."""
         result = compute_name_similarity(None, "Main Street")
 
-        assert result["levenshtein_ratio"] == 0.0
-        assert result["token_sort_ratio"] == 0.0
+        # Neutral scores avoid penalizing valid geometric matches
+        assert result["levenshtein_ratio"] == 0.5
+        assert result["token_sort_ratio"] == 0.5
+        assert result["names_missing"] is True
 
     def test_name_similarity_both_none(self):
-        """Both names missing should return 0."""
+        """Both names missing should return neutral score (0.5)."""
         result = compute_name_similarity(None, None)
 
-        assert result["levenshtein_ratio"] == 0.0
+        assert result["levenshtein_ratio"] == 0.5
+        assert result["names_missing"] is True
 
     def test_class_similarity_same(self):
         """Same road class should return 1.0."""
