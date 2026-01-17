@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
-DEFAULT_REGISTRY_PATH = Path("data/datasets.csv")
+DEFAULT_REGISTRY_PATH = Path("datasets.csv")
 
 
 @dataclass

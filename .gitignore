@@ -43,14 +43,8 @@ ENV/
 htmlcov/
 .tox/
 
-# Data directories (ignore all except tracked labels)
+# Data directories
 data/
-!data/datasets.csv
-!data/labels/
-data/labels/*
-!data/labels/dataset=*/
-data/labels/dataset=*/*
-!data/labels/dataset=*/data.csv
 
 # OS
 .DS_Store

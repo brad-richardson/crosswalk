@@ -6,7 +6,7 @@ based on geometric and semantic features.
 
 Training Data Format:
 --------------------
-Uses labels from Hive-partitioned CSVs in data/labels/ which contains:
+Uses labels from Hive-partitioned CSVs in labels/ which contains:
 - gers_id: Overture reference segment ID (GERS ID)
 - target_id: Target segment identifier
 - label: Human label (match, no_match, unsure; legacy: associated)
@@ -122,7 +122,7 @@ class MLMatcher:
 
     def train(
         self,
-        labels_dir: str = "data/labels",
+        labels_dir: str = "labels",
         binary: bool = True,
         test_size: float = 0.2,
         **kwargs,
@@ -574,7 +574,7 @@ class MLMatcher:
         return results
 
 def train_model(
-    labels_dir: str = "data/labels",
+    labels_dir: str = "labels",
     output_path: str = "data/models/matcher_model.joblib",
     binary: bool = True,
     **kwargs,
@@ -598,7 +598,7 @@ def train_model(
 
 def evaluate_by_dataset(
     model_path: str,
-    labels_dir: str = "data/labels",
+    labels_dir: str = "labels",
     binary: bool = True,
     show_by_dataset: bool = True,
 ) -> dict[str, dict[str, Any]]:

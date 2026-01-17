@@ -2,7 +2,7 @@
 """Migrate labels from parquet to Hive-partitioned CSV format.
 
 This script converts the existing label storage from:
-    data/labels/labels_*.parquet -> data/labels/dataset=*/data.csv
+    data/labels/labels_*.parquet -> labels/dataset=*/data.csv
     data/labels/integration_*.parquet -> data/labels/integration_*.csv
 
 It also creates the datasets.csv registry at data/datasets.csv.

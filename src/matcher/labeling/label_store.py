@@ -12,7 +12,7 @@ from loguru import logger
 from .subsegment import is_subsegment_selection
 
 # Default paths
-DEFAULT_LABELS_DIR = Path("data/labels")
+DEFAULT_LABELS_DIR = Path("labels")
 
 # Column definitions for labels
 LABEL_COLUMNS = [
@@ -268,7 +268,7 @@ def load_labels(path: Path) -> pd.DataFrame:
     """
     # Extract dataset_id from path
     if path.name == "data.csv":
-        # New format: data/labels/dataset=xxx/data.csv
+        # New format: labels/dataset=xxx/data.csv
         partition_name = path.parent.name
         if partition_name.startswith("dataset="):
             dataset_id = partition_name.split("=")[1]
