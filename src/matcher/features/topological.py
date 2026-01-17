@@ -1,6 +1,6 @@
 """Topological feature extraction for graph-based matching."""
 
-from typing import Any, Optional
+from typing import Any
 
 import networkx as nx
 
@@ -178,8 +178,8 @@ def edge_is_bridge(G: nx.Graph, edge_key: tuple[int, int]) -> bool:
 def compute_edge_centrality_features(
     G: nx.Graph,
     edge_key: tuple[int, int],
-    node_pagerank: Optional[dict[int, float]] = None,
-    node_betweenness: Optional[dict[int, float]] = None,
+    node_pagerank: dict[int, float] | None = None,
+    node_betweenness: dict[int, float] | None = None,
 ) -> dict[str, float]:
     """Compute centrality-based features for an edge.
 

@@ -14,7 +14,7 @@ Algorithm:
 8. Build node/edge tables with connectivity
 """
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import geopandas as gpd
 import numpy as np
@@ -23,7 +23,7 @@ from pyproj import CRS
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 from shapely import LineString, Point, get_coordinates
-from shapely.ops import linemerge, split, snap
+from shapely.ops import snap, split
 from shapely.strtree import STRtree
 
 from ..config import settings
@@ -65,7 +65,7 @@ def _parse_bool(value) -> bool:
     return False
 
 
-def _ensure_projected_crs(gdf: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, Optional[CRS]]:
+def _ensure_projected_crs(gdf: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, CRS | None]:
     """Ensure GeoDataFrame is in a projected CRS for metric operations.
 
     If the input is in a geographic CRS (e.g., EPSG:4326), it will be
@@ -328,7 +328,7 @@ def _split_lines_at_nodes(
     if not nodes:
         # No nodes - return original lines as edges
         edges = []
-        for idx, row in lines.iterrows():
+        for _idx, row in lines.iterrows():
             edges.append(
                 {
                     "geometry": row.geometry,
@@ -445,7 +445,7 @@ def _find_snap_point(
     edge_tree: STRtree,
     tolerance: float,
     exclude_geom: LineString,
-) -> Optional[Point]:
+) -> Point | None:
     """Find a point to snap to on nearby edges."""
     # Search for nearby edges
     search_buffer = point.buffer(tolerance)

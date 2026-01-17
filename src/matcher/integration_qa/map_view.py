@@ -1,10 +1,7 @@
 """Map rendering for integration QA app."""
 
-from typing import Optional
-
 import folium
 import geopandas as gpd
-
 
 # Color scheme for different edge sources
 SOURCE_COLORS = {
@@ -173,7 +170,7 @@ def fit_bounds(m: folium.Map, gdf: gpd.GeoDataFrame) -> folium.Map:
 def create_integration_map(
     edges: gpd.GeoDataFrame,
     orphan_edges: gpd.GeoDataFrame,
-    selected_edge_id: Optional[int] = None,
+    selected_edge_id: int | None = None,
     focus_on_selected: bool = True,
     context_radius: float = 500.0,  # meters around selected edge
 ) -> folium.Map:

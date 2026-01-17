@@ -1,6 +1,6 @@
 """Pipeline orchestration."""
 
-from .runner import run_pipeline, PipelineResult
+from .runner import PipelineResult, run_pipeline
 
 __all__ = [
     "run_pipeline",

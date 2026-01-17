@@ -3,7 +3,6 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
@@ -56,7 +55,7 @@ class DatasetRegistry:
 
     def __init__(self, path: Path = None):
         self.path = Path(path) if path else DEFAULT_REGISTRY_PATH
-        self._df: Optional[pd.DataFrame] = None
+        self._df: pd.DataFrame | None = None
 
     @property
     def df(self) -> pd.DataFrame:
@@ -82,7 +81,7 @@ class DatasetRegistry:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_csv(self.path, index=False)
 
-    def get(self, dataset_id: str) -> Optional[Dataset]:
+    def get(self, dataset_id: str) -> Dataset | None:
         """Get dataset by ID."""
         matches = self.df[self.df["dataset_id"] == dataset_id]
         if len(matches) == 0:

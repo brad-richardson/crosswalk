@@ -4,9 +4,9 @@ The bridge file is the primary output of the conflation pipeline,
 providing a mapping between local dataset IDs and Overture GERS IDs.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 import pyarrow as pa
@@ -14,7 +14,6 @@ import pyarrow.parquet as pq
 from loguru import logger
 
 from ..matching.rules import MatchDecision, MatchResult
-
 
 # Bridge file schema
 BRIDGE_SCHEMA = pa.schema(
@@ -50,7 +49,7 @@ def generate_bridge_file(
     """
     logger.info(f"Generating bridge file with {len(matches)} matches...")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     records = []
     for match in matches:

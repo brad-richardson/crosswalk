@@ -2,8 +2,7 @@
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import streamlit as st
 
@@ -16,7 +15,7 @@ class LabelingSession:
     labeler_name: str
     started_at: datetime
     current_index: int = 0
-    decision_filter: Optional[str] = None  # "review", "match", "no_match", or None
+    decision_filter: str | None = None  # "review", "match", "no_match", or None
     undo_stack: list = field(default_factory=list)
 
 
@@ -26,7 +25,7 @@ def init_session_state() -> None:
         st.session_state.session = LabelingSession(
             session_id=str(uuid.uuid4())[:8],
             labeler_name="",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
 
     if "candidates" not in st.session_state:
@@ -49,7 +48,7 @@ def set_labeler_name(name: str) -> None:
     st.session_state.session.labeler_name = name
 
 
-def set_decision_filter(filter_value: Optional[str]) -> None:
+def set_decision_filter(filter_value: str | None) -> None:
     """Set the decision filter and reset index."""
     st.session_state.session.decision_filter = filter_value
     st.session_state.session.current_index = 0
@@ -81,7 +80,7 @@ def push_undo(ref_id: str, target_id: str, label: str) -> None:
         st.session_state.session.undo_stack.pop(0)
 
 
-def pop_undo() -> Optional[dict]:
+def pop_undo() -> dict | None:
     """Pop the last action from the undo stack."""
     if st.session_state.session.undo_stack:
         return st.session_state.session.undo_stack.pop()
@@ -93,7 +92,7 @@ def reset_session() -> None:
     st.session_state.session = LabelingSession(
         session_id=str(uuid.uuid4())[:8],
         labeler_name=st.session_state.session.labeler_name,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
     )
     st.session_state.candidates = []
     st.session_state.data_loaded = False

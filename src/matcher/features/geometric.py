@@ -43,14 +43,14 @@ Metric Selection Rationale:
   initial filtering.
 """
 
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import numpy as np
 from shapely import LineString, MultiLineString, Point, hausdorff_distance
 from shapely.ops import linemerge
 
 
-def _to_linestring(geom: Union[LineString, MultiLineString]) -> LineString:
+def _to_linestring(geom: LineString | MultiLineString) -> LineString:
     """Convert geometry to LineString.
 
     For MultiLineString, tries to merge first, then falls back to longest component.
@@ -121,8 +121,8 @@ class GeometricFeatures(NamedTuple):
 
 
 def compute_geometric_features(
-    line_a: Union[LineString, MultiLineString],
-    line_b: Union[LineString, MultiLineString],
+    line_a: LineString | MultiLineString,
+    line_b: LineString | MultiLineString,
     buffer_radius: float = 10.0,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.

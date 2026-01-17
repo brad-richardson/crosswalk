@@ -258,9 +258,10 @@ def _extract_bbox_pyosmium(
     with osmium.SimpleWriter requires careful handling of node references.
     Instead, we extract directly to parquet files.
     """
-    import osmium
-    import geopandas as gpd
     from collections import Counter
+
+    import geopandas as gpd
+    import osmium
     from shapely.geometry import LineString, Point
 
     logger.info(f"Extracting bbox from {input_pbf.name} using pyosmium...")

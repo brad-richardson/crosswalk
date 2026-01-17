@@ -6,7 +6,7 @@ schema.
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
@@ -18,12 +18,12 @@ def fetch_arcgis_layer(
     url: str,
     output_path: Path,
     id_prefix: str,
-    name_column: Optional[str] = None,
-    class_column: Optional[str] = None,
-    class_mapping: Optional[dict] = None,
-    subclass_column: Optional[str] = None,
-    subclass_mapping: Optional[dict] = None,
-    level_column: Optional[str] = None,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    subclass_column: str | None = None,
+    subclass_mapping: dict | None = None,
+    level_column: str | None = None,
     source_name: str = "ArcGIS",
     page_size: int = 2000,
 ) -> Path:
@@ -147,12 +147,12 @@ def _fetch_all_features(url: str, page_size: int) -> list[dict]:
 def _transform_to_overture_schema(
     gdf: gpd.GeoDataFrame,
     id_prefix: str,
-    name_column: Optional[str],
-    class_column: Optional[str],
-    class_mapping: Optional[dict],
-    subclass_column: Optional[str],
-    subclass_mapping: Optional[dict],
-    level_column: Optional[str],
+    name_column: str | None,
+    class_column: str | None,
+    class_mapping: dict | None,
+    subclass_column: str | None,
+    subclass_mapping: dict | None,
+    level_column: str | None,
     source_name: str,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
@@ -241,7 +241,7 @@ def _transform_to_overture_schema(
     return result
 
 
-def _get_layer_id_field(url: str) -> Optional[str]:
+def _get_layer_id_field(url: str) -> str | None:
     """Get the object ID field name from layer metadata.
 
     Args:

@@ -4,13 +4,12 @@ Stores QA decisions in CSV format for git-trackable storage.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 from loguru import logger
-
 
 # Default paths
 DEFAULT_ORPHAN_PATH = Path("data/labels/integration_orphans.csv")
@@ -57,7 +56,7 @@ class OrphanDecisionStore:
     """Manages orphan QA decisions."""
 
     path: Path = DEFAULT_ORPHAN_PATH
-    _df: Optional[pd.DataFrame] = None
+    _df: pd.DataFrame | None = None
 
     def __post_init__(self):
         self.path = Path(self.path)
@@ -112,7 +111,7 @@ class OrphanDecisionStore:
             "decision": decision,
             "reason": reason,
             "reviewer": reviewer,
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_at": datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "length_m": length_m,
             "road_class": road_class,
@@ -122,7 +121,7 @@ class OrphanDecisionStore:
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self._save()
 
-    def get_reviewed_edges(self, reviewer: Optional[str] = None) -> set[int]:
+    def get_reviewed_edges(self, reviewer: str | None = None) -> set[int]:
         """Get set of already-reviewed edge IDs."""
         df = self.df
         if df is None or len(df) == 0:
@@ -145,7 +144,7 @@ class OrphanDecisionStore:
             "discard": (df["decision"] == "discard").sum(),
         }
 
-    def remove_last(self) -> Optional[dict]:
+    def remove_last(self) -> dict | None:
         """Remove the last decision (for undo)."""
         df = self.df
         if df is None or len(df) == 0:
@@ -162,7 +161,7 @@ class MergedDecisionStore:
     """Manages merged edge QA decisions."""
 
     path: Path = DEFAULT_MERGED_PATH
-    _df: Optional[pd.DataFrame] = None
+    _df: pd.DataFrame | None = None
 
     def __post_init__(self):
         self.path = Path(self.path)
@@ -199,7 +198,7 @@ class MergedDecisionStore:
         original_id: str,
         dataset_id: str,
         source_type: str,
-        match_ref_id: Optional[str],
+        match_ref_id: str | None,
         decision: str,
         reason: str,
         reviewer: str,
@@ -218,7 +217,7 @@ class MergedDecisionStore:
             "decision": decision,
             "reason": reason,
             "reviewer": reviewer,
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_at": datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "match_confidence": match_confidence,
             "length_m": length_m,
@@ -227,7 +226,7 @@ class MergedDecisionStore:
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self._save()
 
-    def get_reviewed_edges(self, reviewer: Optional[str] = None) -> set[int]:
+    def get_reviewed_edges(self, reviewer: str | None = None) -> set[int]:
         """Get set of already-reviewed edge IDs."""
         df = self.df
         if df is None or len(df) == 0:
@@ -250,7 +249,7 @@ class MergedDecisionStore:
             "incorrect": (df["decision"] == "incorrect").sum(),
         }
 
-    def remove_last(self) -> Optional[dict]:
+    def remove_last(self) -> dict | None:
         """Remove the last decision (for undo)."""
         df = self.df
         if df is None or len(df) == 0:

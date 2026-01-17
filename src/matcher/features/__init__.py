@@ -1,23 +1,23 @@
 """Feature engineering module for candidate pair comparison."""
 
-from .geometric import compute_geometric_features, GeometricFeatures
-from .semantic import compute_name_similarity, compute_class_similarity
-from .topological import compute_topological_features
+from .geometric import GeometricFeatures, compute_geometric_features
 from .relational import (
-    compute_relational_features,
-    compute_perpendicular_offset,
-    compute_side_of_street,
-    compute_parallel_alignment,
+    RelationalFeatures,
     compute_endpoint_proximity,
     compute_neighbor_agreement,
-    RelationalFeatures,
+    compute_parallel_alignment,
+    compute_perpendicular_offset,
+    compute_relational_features,
+    compute_side_of_street,
 )
+from .semantic import compute_class_similarity, compute_name_similarity
 from .spatial_context import (
-    AnchorRoadMatcher,
     AnchorMatch,
+    AnchorRoadMatcher,
     SpatialContextIndex,
     compute_endpoint_features,
 )
+from .topological import compute_topological_features
 
 __all__ = [
     "compute_geometric_features",

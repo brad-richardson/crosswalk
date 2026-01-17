@@ -3,9 +3,8 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 CONFIG_PATH = Path.home() / ".matcher_reviewer_config.json"
 
@@ -16,12 +15,12 @@ class QASession:
 
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     reviewer_name: str = ""
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     current_view: str = "orphans"  # "orphans" or "merged"
     current_index: int = 0
-    filter_by_component: Optional[int] = None
-    filter_by_source: Optional[str] = None
-    filter_by_priority: Optional[str] = None  # "high", "medium", "low"
+    filter_by_component: int | None = None
+    filter_by_source: str | None = None
+    filter_by_priority: str | None = None  # "high", "medium", "low"
     show_reviewed: bool = False
     undo_stack: list[dict] = field(default_factory=list)
 
@@ -32,7 +31,7 @@ class QASession:
         if len(self.undo_stack) > 50:
             self.undo_stack = self.undo_stack[-50:]
 
-    def pop_undo(self) -> Optional[dict]:
+    def pop_undo(self) -> dict | None:
         """Pop last action from undo stack."""
         if self.undo_stack:
             return self.undo_stack.pop()

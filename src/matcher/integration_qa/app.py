@@ -183,7 +183,7 @@ def main():
                 ]
 
             display_edges = filtered_edges
-            current_store = orphan_store
+            _current_store = orphan_store  # noqa: F841 - reserved for future use
             is_orphan = True
         else:
             # Filter to non-reference edges
@@ -202,7 +202,7 @@ def main():
                 ]
 
             display_edges = filtered_edges
-            current_store = merged_store
+            _current_store = merged_store  # noqa: F841 - reserved for future use
             is_orphan = False
 
         # Navigation

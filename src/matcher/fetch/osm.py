@@ -5,7 +5,6 @@ requested bounding box using osmium CLI, and parses roads using pyosmium.
 """
 
 from pathlib import Path
-from typing import Optional
 
 import geopandas as gpd
 from loguru import logger
@@ -19,7 +18,7 @@ from .overture import BoundingBox
 def fetch_osm_data(
     bbox: BoundingBox,
     output_dir: Path,
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
     force_download: bool = False,
     keep_pbf: bool = False,
 ) -> tuple[Path, Path]:
@@ -104,7 +103,7 @@ def fetch_osm_data(
 def fetch_osm_segments(
     bbox: BoundingBox,
     output_path: Path,
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
     force_download: bool = False,
     keep_pbf: bool = False,
 ) -> Path:
@@ -352,7 +351,7 @@ def _get_level_from_rules(level_rules) -> int:
     return 0
 
 
-def _normalize_road_class(road_class: Optional[str]) -> str:
+def _normalize_road_class(road_class: str | None) -> str:
     """Normalize road class to standard values.
 
     Args:

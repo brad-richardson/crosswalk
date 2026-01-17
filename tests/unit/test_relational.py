@@ -1,15 +1,15 @@
 """Tests for relational feature extraction."""
 
-import pytest
-import numpy as np
 import geopandas as gpd
+import numpy as np
+import pytest
 from shapely import LineString
 
 from matcher.features.relational import (
+    compute_endpoint_proximity,
+    compute_parallel_alignment,
     compute_perpendicular_offset,
     compute_side_of_street,
-    compute_parallel_alignment,
-    compute_endpoint_proximity,
 )
 from matcher.features.spatial_context import (
     AnchorRoadMatcher,

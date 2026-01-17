@@ -78,7 +78,7 @@ def render_decision_buttons(
                     on_decision("discard", "")
 
         # Reason selection
-        reason = st.selectbox(
+        _reason = st.selectbox(  # noqa: F841 - UI element, value used by Streamlit
             "Reason (optional)",
             ["", "legitimate_new", "data_error", "out_of_scope", "duplicate"],
             key="orphan_reason",
@@ -99,7 +99,7 @@ def render_decision_buttons(
                     on_decision("incorrect", "")
 
         # Reason selection
-        reason = st.selectbox(
+        _reason = st.selectbox(  # noqa: F841 - UI element, value used by Streamlit
             "Reason (optional)",
             ["", "matching_error", "duplicate", "wrong_source"],
             key="merged_reason",

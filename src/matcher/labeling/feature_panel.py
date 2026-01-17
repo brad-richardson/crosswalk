@@ -1,11 +1,8 @@
 """Feature display components for the labeling UI."""
 
-from typing import Optional
-
 import streamlit as st
 
 from .data_loader import CandidatePairView
-
 
 # Feature display configuration
 # All scores are normalized 0-1 where higher = better match
@@ -49,13 +46,10 @@ def render_confidence_badge(pair: CandidatePairView) -> None:
 
     decision = pair.decision.upper()
     if decision == "MATCH":
-        badge_color = "#4CAF50"
         badge_bg = "#1B5E20"
     elif decision == "REVIEW":
-        badge_color = "#FF9800"
         badge_bg = "#E65100"
     else:
-        badge_color = "#F44336"
         badge_bg = "#B71C1C"
 
     st.markdown(
@@ -150,7 +144,7 @@ def render_feature_panel(pair: CandidatePairView) -> None:
 
 def render_subsegment_controls(
     pair: CandidatePairView,
-    estimated_subsegment: Optional[dict[str, float]] = None,
+    estimated_subsegment: dict[str, float] | None = None,
 ) -> tuple[float, float, float, float, bool]:
     """Render compact horizontal sub-segment selection bar.
 
@@ -244,7 +238,7 @@ def render_subsegment_controls(
 
 
 def get_subseg_state(
-    estimated_subsegment: Optional[dict[str, float]] = None,
+    estimated_subsegment: dict[str, float] | None = None,
 ) -> tuple[float, float, float, float, bool]:
     """Get current subsegment state values, auto-applying estimate if needed.
 
