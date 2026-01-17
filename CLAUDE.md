@@ -11,7 +11,7 @@ For installation and usage instructions, see [README.md](README.md).
 pip install -e ".[dev,ml]"
 
 # Train ML model (required after fresh clone)
-matcher train
+matcher train --combined
 
 # Run tests
 pytest tests/
