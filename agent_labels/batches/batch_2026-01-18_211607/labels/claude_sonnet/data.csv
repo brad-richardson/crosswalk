@@ -1,0 +1,21 @@
+ref_id,target_id,label,confidence,reasoning
+2f3660c2-83e2-4802-89c1-5de5350c50d1,boston_streets_8473,no_match,0.9,Blue segment is short footway/crosswalk while red segment is much longer curved residential street
+31405bb0-a59e-4e51-a775-911799bf02d7,boston_streets_1389,no_match,0.95,Segments are on different parts of Austin Street separated by ~96m with no overlap
+3767fba2-e17a-46e0-a08e-4a5edfe4c190,boston_streets_2456,no_match,0.9,Blue is parallel parking area red is main road
+39e1d219-5053-4d5f-bb62-cb688e719588,boston_streets_4940,match,0.95,Blue and red segments clearly overlap along same diagonal street - red extends further but covers entire blue segment
+3f2ec9f5-2df5-4ac8-bcca-fb9b5426a738,boston_streets_5543,no_match,0.85,Blue footway is parallel but separate from red Washington Street roadway
+463ef9bf-ddd4-4ff1-927b-e0b58954c757,boston_streets_4823,no_match,0.95,Perpendicular intersecting roads - footway vs tertiary street at ~89° angle
+4b9aef75-4c66-4591-bef1-183fa8120cba,boston_streets_9077,no_match,0.95,Red segment is main Seaver St; blue is perpendicular side street or footway
+4ce5a090-4cba-4942-a64c-397fbccdf0ca,boston_streets_7927,no_match,0.9,Blue footway crosses red street at perpendicular angle - different segments
+542320ec-5919-4764-bb84-45e6865b931b,boston_streets_8187,no_match,0.95,Blue footway segment is much shorter (10.6m) than red road segment (77.6m) and they do not represent the same physical feature
+5ffb43ab-c927-4f3e-b5fd-103beda31c01,boston_streets_8442,no_match,0.95,Different streets at intersection - blue is Washington St footway red is Columbus Ave roadway
+7487ce89-b6f9-4584-8f1a-34a2690f3879,boston_streets_7714,no_match,0.15,Red segment is southern half of blue segment - partial overlap not same segment
+80eff0ff-1f8a-44c9-a6df-c774a83b0f05,boston_streets_5674,no_match,0.95,Blue segment only covers small portion of long red segment - different extents
+83b3cf12-ce3c-4b4d-8e06-70881a693c79,boston_streets_10595,no_match,0.85,Blue segment includes footway extension around park that red segment does not contain
+a132c3c0-36b7-499f-baaa-f0b1b46b2bf9,boston_streets_4875,match,0.95,Blue and red segments closely align along same diagonal residential street with near-identical geometry and both labeled Fenwood Road
+a7daeffb-43a8-47a9-8c40-18d204add769,boston_streets_1015,no_match,0.85,Blue segment is horizontal footway/crosswalk while red segment is diagonal road at 57-degree angle; different orientations and locations indicate distinct features
+a92ada51-9fc5-41cb-9dc9-bee212894b90,boston_streets_4758,no_match,0.95,Blue segment is very short footway/pathway while red is long residential street; completely different features with minimal spatial overlap
+b6addbc4-cdbf-4765-9026-374cf57b4f04,boston_streets_5916,match,0.98,Blue and red segments overlay same road centerline with near-perfect alignment
+d43310d5-b8a7-4907-923d-8399725f7c45,boston_streets_971,no_match,0.9,Red segment is long diagonal road; blue is short perpendicular driveway/service way
+f7d0d286-4a54-4786-aa55-f70e8791b400,boston_streets_7152,no_match,0.95,Different streets - blue is short perpendicular segment red is long diagonal street different orientations and locations
+ffd2a200-d538-4434-bd73-9da751a96c15,boston_streets_990,match,1.0,Blue and red segments overlay perfectly on the same residential street (Goff Street) with identical alignment and geometry

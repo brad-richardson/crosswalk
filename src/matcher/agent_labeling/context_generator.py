@@ -49,6 +49,7 @@ def _calculate_length_meters(geom: Any) -> float:
 def generate_metadata_yaml(
     candidate: SampledCandidate,
     batch_id: str,
+    image_size: dict[str, tuple[int, int]] | None = None,
 ) -> str:
     """Generate YAML metadata for a candidate.
 
@@ -136,6 +137,8 @@ def generate_metadata_yaml(
         "images": {
             "satellite": "satellite.png",
             "geometry": "geometry.png",
+            "geometry_size": list(image_size["geometry"]) if image_size else None,
+            "satellite_size": list(image_size["satellite"]) if image_size else None,
         },
     }
 
@@ -180,18 +183,20 @@ def write_candidate_package(
     candidate_dir = output_dir / candidate_dir_name
     candidate_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate and write metadata
-    yaml_content = generate_metadata_yaml(candidate, batch_id)
-    metadata_path = candidate_dir / "metadata.yaml"
-    metadata_path.write_text(yaml_content)
-
-    # Generate and write images
-    satellite_img, geometry_img = render_candidate_images(
+    # Generate images (dynamic sizing based on target geometry)
+    satellite_img, geometry_img, image_size = render_candidate_images(
         ref_geom=candidate.ref_geometry,
         target_geom=candidate.target_geometry,
+        size=None,  # Dynamic sizing based on target geometry
         fetch_satellite=fetch_satellite,
     )
 
+    # Generate and write metadata (includes image size)
+    yaml_content = generate_metadata_yaml(candidate, batch_id, image_size=image_size)
+    metadata_path = candidate_dir / "metadata.yaml"
+    metadata_path.write_text(yaml_content)
+
+    # Write images
     geometry_path = candidate_dir / "geometry.png"
     geometry_img.save(geometry_path)
 
