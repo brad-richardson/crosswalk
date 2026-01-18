@@ -1,5 +1,17 @@
 # Agent Labeling - Future Work
 
+## Usage
+
+Unified script for all agents:
+```bash
+./run_agent.sh <agent> [batch_dir] [--model <model>] [--grayscale] [--low-res]
+
+# Examples:
+./run_agent.sh gemini --model flash
+./run_agent.sh claude --model haiku --low-res
+./run_agent.sh codex --grayscale
+```
+
 ## Batch Processing (Priority)
 
 Current approach sends one candidate per API call, which burns through quotas quickly.

@@ -1250,10 +1250,16 @@ def generate_agent_test_batch(
     # Filter by labeler if specified
     if labeler and "labeler" in labels_df.columns:
         labels_df = labels_df[labels_df["labeler"].str.lower() == labeler.lower()]
+        if len(labels_df) == 0:
+            console.print(f"[red]Error: No labels found for labeler '{labeler}'[/red]")
+            raise typer.Exit(1)
 
     # Filter to match/no_match only (exclude unsure for cleaner testing)
     if "label" in labels_df.columns:
         labels_df = labels_df[labels_df["label"].isin(["match", "no_match"])]
+        if len(labels_df) == 0:
+            console.print("[red]Error: No match/no_match labels found after filtering[/red]")
+            raise typer.Exit(1)
 
     console.print(f"[blue]Found {len(labels_df)} labeled pairs[/blue]")
 
