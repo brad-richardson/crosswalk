@@ -29,14 +29,20 @@ fi
 # Start Ollama server if not running
 if ! curl -s http://localhost:11434/api/tags &>/dev/null 2>&1; then
     echo "Starting Ollama server..."
-    ollama serve &
-    sleep 3
+    ollama serve >/dev/null 2>&1 &
 
-    # Verify server started
-    if ! curl -s http://localhost:11434/api/tags &>/dev/null 2>&1; then
-        echo "Error: Failed to start Ollama server"
-        exit 1
-    fi
+    # Wait for server with retry loop (more reliable than fixed sleep)
+    echo "Waiting for Ollama server..."
+    max_attempts=30
+    attempt=1
+    until curl -s http://localhost:11434/api/tags &>/dev/null 2>&1; do
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            echo "Error: Ollama server failed to start within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
     echo "Ollama server started."
     echo ""
 fi

@@ -105,29 +105,39 @@ COUNT=0
 FAILED=0
 TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
 
-# Build the prompt (same for all agents)
+# Build the prompt - static prefix first for caching, variable content last
 build_prompt() {
     local ref_id="$1"
     local target_id="$2"
     local metadata_content="$3"
 
-    cat <<PROMPT
-Do NOT explore files or the codebase. Only analyze the attached images.
+    # Static prefix (cacheable across all candidates)
+    cat <<'STATIC_PREFIX'
+You are analyzing road segment matches. Do NOT explore files or the codebase.
 
 TASK: Do the blue and red road segments represent the same physical road?
 
-Images attached:
-- satellite.png: satellite view (blue=reference, red=target segments)
+Images provided:
+- satellite.png: satellite view (blue=reference segment, red=target segment)
 - geometry.png: geometry view (same color coding)
+
+Output format: ref_id,target_id,LABEL,CONFIDENCE,REASON
+- LABEL: match, no_match, or unsure
+- CONFIDENCE: 0.0 to 1.0
+- REASON: brief explanation (no commas)
+
+Output exactly ONE CSV line, nothing else.
+
+---
+STATIC_PREFIX
+
+    # Variable suffix (changes per candidate)
+    cat <<VARIABLE_SUFFIX
+Candidate: $ref_id,$target_id
 
 Metadata:
 $metadata_content
-
-OUTPUT exactly one CSV line:
-$ref_id,$target_id,LABEL,CONFIDENCE,REASON
-
-LABEL=match/no_match/unsure, CONFIDENCE=0.0-1.0, REASON=brief text (no commas)
-PROMPT
+VARIABLE_SUFFIX
 }
 
 # Run agent command
@@ -140,11 +150,16 @@ run_agent() {
         claude)
             local model_arg=""
             [[ -n "$MODEL" ]] && model_arg="--model $MODEL"
-            timeout 30 claude -p $model_arg "$prompt" 2>&1
+            # Claude CLI reads images referenced in the prompt from the working directory
+            # We need to run from the candidate directory so images are accessible
+            local candidate_dir
+            candidate_dir=$(dirname "$img_sat")
+            (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$prompt") 2>&1
             ;;
         codex)
             local tmpout="$TEMP_DIR/codex_out.txt"
-            timeout 30 codex exec -o "$tmpout" -- "$prompt" 2>&1 || true
+            # Codex supports -i flag for image attachments
+            timeout 60 codex exec -i "$img_sat" -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
             cat "$tmpout" 2>/dev/null
             ;;
         gemini)
@@ -155,10 +170,9 @@ run_agent() {
             local sandbox="$TEMP_DIR/gemini_sandbox"
             mkdir -p "$sandbox"
 
-            # Copy only the needed files (use absolute paths)
+            # Copy images with consistent names for prompt caching
             cp "$img_sat" "$sandbox/satellite.png"
             cp "$img_geo" "$sandbox/geometry.png"
-            cp "$SCRIPT_DIR/$CONTEXT_DOC" "$sandbox/LABELING_INSTRUCTIONS.md" 2>/dev/null || true
 
             # Write prompt to file to avoid shell escaping issues
             printf '%s' "$prompt" > "$sandbox/prompt.txt"
@@ -167,32 +181,37 @@ run_agent() {
             local orig_dir="$PWD"
             cd "$sandbox"
 
-            # Run Gemini with --sandbox
+            # Run Gemini with --sandbox (requires Docker)
             gemini --sandbox --yolo -o text \
-                "Read prompt.txt and analyze satellite.png geometry.png" \
+                "Analyze satellite.png and geometry.png using instructions in prompt.txt" \
                 prompt.txt satellite.png geometry.png 2>&1
             local exit_code=$?
 
             # Restore directory and cleanup
             cd "$orig_dir"
-            rm -rf "$sandbox"
+            rm -rf "$sandbox" 2>/dev/null || echo "WARNING: Failed to clean up $sandbox" >&2
 
             [[ $exit_code -ne 0 ]] && echo "GEMINI_ERROR: exit code $exit_code"
             ;;
         ollama)
+            # Cross-platform base64 (macOS doesn't support -w0)
             local sat_base64 geo_base64
-            sat_base64=$(base64 -w0 "$img_sat")
-            geo_base64=$(base64 -w0 "$img_geo")
+            sat_base64=$(base64 "$img_sat" | tr -d '\n')
+            geo_base64=$(base64 "$img_geo" | tr -d '\n')
             local model_name="${MODEL:-llava}"
 
-            # Use Ollama API via curl for vision models (both images)
+            # Build JSON payload safely with jq to handle escaping
+            local json_payload
+            json_payload=$(jq -n \
+                --arg model "$model_name" \
+                --arg prompt "$prompt" \
+                --arg sat "$sat_base64" \
+                --arg geo "$geo_base64" \
+                '{model: $model, prompt: $prompt, images: [$sat, $geo], stream: false}')
+
+            # Ollama vision models need more time than text-only (120s timeout)
             timeout 120 curl -s http://localhost:11434/api/generate \
-                -d "{
-                    \"model\": \"$model_name\",
-                    \"prompt\": $(echo "$prompt" | jq -Rs .),
-                    \"images\": [\"$sat_base64\", \"$geo_base64\"],
-                    \"stream\": false
-                }" | jq -r '.response // .error // "No response"'
+                -d "$json_payload" | jq -r '.response // .error // "No response"'
             ;;
     esac
 }
