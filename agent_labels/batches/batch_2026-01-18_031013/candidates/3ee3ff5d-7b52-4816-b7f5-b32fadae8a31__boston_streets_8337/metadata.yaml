@@ -13,8 +13,8 @@ ml_prediction:
   decision: no_match
   confidence: 0.3999
 geometry:
-  ref_length_m: 0.0001
-  target_length_m: 0.0005
+  ref_length_m: 35.2
+  target_length_m: 48.7
   bbox:
   - -71.071
   - 42.3421

@@ -7,11 +7,43 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pyproj
 import yaml
 from loguru import logger
+from shapely.ops import transform
 
 from .image_renderer import render_candidate_images
 from .sampler import SampledCandidate
+
+
+def _calculate_length_meters(geom: Any) -> float:
+    """Calculate geometry length in meters.
+
+    Projects WGS84 geometry to appropriate UTM zone for accurate length calculation.
+    """
+    if geom is None or geom.is_empty:
+        return 0.0
+
+    try:
+        # Get centroid for UTM zone calculation
+        centroid = geom.centroid
+        lon, lat = centroid.x, centroid.y
+
+        # Determine UTM zone
+        utm_zone = int((lon + 180) / 6) + 1
+        hemisphere = "north" if lat >= 0 else "south"
+        utm_crs = f"+proj=utm +zone={utm_zone} +{hemisphere} +datum=WGS84"
+
+        # Create transformer
+        transformer = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+
+        # Project and calculate length
+        projected = transform(transformer.transform, geom)
+        return projected.length
+    except Exception:
+        # Fallback: rough approximation using degrees
+        # 1 degree ≈ 111km at equator
+        return geom.length * 111000
 
 
 def generate_metadata_yaml(
@@ -31,8 +63,9 @@ def generate_metadata_yaml(
     ref_geom = candidate.ref_geometry
     target_geom = candidate.target_geometry
 
-    ref_length = ref_geom.length if ref_geom else 0.0
-    target_length = target_geom.length if target_geom else 0.0
+    # Calculate lengths in meters (project from WGS84 to UTM)
+    ref_length = _calculate_length_meters(ref_geom)
+    target_length = _calculate_length_meters(target_geom)
 
     # Calculate bbox
     if ref_geom and target_geom:
