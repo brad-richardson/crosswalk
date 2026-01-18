@@ -4,12 +4,13 @@
 
 Unified script for all agents:
 ```bash
-./run_agent.sh <agent> [batch_dir] [--model <model>] [--grayscale] [--low-res]
+./run_agent.sh <agent> [batch_dir] [--model <model>]
 
 # Examples:
 ./run_agent.sh gemini --model flash
-./run_agent.sh claude --model haiku --low-res
-./run_agent.sh codex --grayscale
+./run_agent.sh claude --model haiku
+./run_agent.sh codex
+./run_agent.sh ollama --model llava  # Local GPU mode
 ```
 
 ## Batch Processing (Priority)
@@ -56,49 +57,63 @@ ref_id,target_id,label,confidence,reason
 - Works well but expensive for Sonnet
 - Consider Haiku for bulk labeling
 
-## Local Multimodal Models (No API Quota)
+## Local Multimodal Models (Implemented)
 
-Run vision models locally on Intel Arc iGPU to avoid API costs/quotas.
+Run vision models locally via Ollama to avoid API costs/quotas.
 
-### Recommended Models
+### Setup
 
-| Model | Size | Quality | Speed (Arc iGPU) | Notes |
-|-------|------|---------|------------------|-------|
-| moondream2 | 1.8B | Good | ~20-40 t/s | Best for efficiency |
-| LLaVA-1.6-Mistral-7B | 7B | Great | ~8-15 t/s | Good balance |
-| Qwen2-VL-7B | 7B | Excellent | ~8-15 t/s | State-of-art |
-| PaliGemma-3B | 3B | Good | ~15-25 t/s | Google's efficient option |
-
-### Runtime Options
-
-**Option 1: Ollama + IPEX** (Recommended for simplicity)
 ```bash
-# Install Ollama with Intel GPU support
-ollama run moondream
-
-# Add to run_agent.sh as new agent type
-./run_agent.sh ollama --model moondream
+# One-time setup
+./setup_ollama.sh
 ```
-- Easy setup, API-compatible
-- ~10-20 tokens/sec for 7B models
 
-**Option 2: llama.cpp + SYCL** (Better performance)
+This installs Ollama and pulls vision models.
+
+### Usage
+
 ```bash
-# Compile with Intel SYCL backend
+# Requires GPU - task is too complex for CPU-only inference
+./run_agent.sh ollama --model llava
+```
+
+### Available Models
+
+| Model | Size | Quality | Speed | Notes |
+|-------|------|---------|-------|-------|
+| moondream | 1.8B | Poor | Fast | Too small for this task - mostly echoes prompts |
+| llava | 7B | Good | Medium | Recommended minimum |
+| llava:13b | 13B | Better | Slow | Better quality, needs more VRAM |
+
+Pull additional models with `ollama pull <model>`.
+
+**Note on small models**: Testing with moondream (1.8B) showed very poor results -
+the model struggled with the spatial reasoning required and mostly echoed the
+prompt template back. This task requires at least a 7B+ parameter model.
+CPU-only inference is not viable due to speed constraints (~160s per candidate).
+
+### Remote Ollama
+
+For machines without a GPU, you can run Ollama on a remote machine with a GPU:
+
+```bash
+# On GPU machine: start Ollama with network access
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+
+# On local machine: point to remote
+export OLLAMA_HOST=http://gpu-machine:11434
+./run_agent.sh ollama --model llava
+```
+
+### Alternative: llama.cpp + SYCL (Future)
+
+For better performance on Intel Arc GPUs:
+```bash
 cmake -B build -DGGML_SYCL=ON
 ./build/bin/llava-cli -m model.gguf --image satellite.png -p "prompt"
 ```
 - 20-50% faster than Ollama
 - More setup work, vision model support is newer
-
-### System Requirements (tested)
-- Intel Core Ultra 7 265K + Arc 140V iGPU
-- 62GB RAM (can run 7B+ models on CPU if needed)
-
-### Implementation Notes
-- Add `ollama` agent type to run_agent.sh
-- Use Ollama's OpenAI-compatible API for easy integration
-- Consider running multiple instances in parallel (no quota limits)
 
 ## Other Ideas
 

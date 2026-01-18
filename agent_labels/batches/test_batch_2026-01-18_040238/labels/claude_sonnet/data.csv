@@ -1,27 +1,142 @@
 ref_id,target_id,label,confidence,reasoning
-001ca42e-96cc-4d20-869b-4e2e15e7d613,boston_streets_1461,no_match,0.85,Poor geometric alignment; reference is short subsection while target extends far beyond with minimal overlap
-00b1f8ad-a783-4121-a7e0-51dee6d0af79,boston_streets_6680,no_match,0.95,Footway vs tertiary road - different feature types
-00c74c00-45e2-43a5-be92-a3f2ba77a53e,boston_streets_20,no_match,0.95,Footway vs residential road - different feature types
-02d2b67a-3d89-4b6d-ab56-8bec360f6edd,boston_bike_1082,no_match,0.90,Footway/sidewalk vs bike lane - different feature types
-09e81068-be11-4bf2-9c68-083b5a2cffba,boston_streets_6624,no_match,0.95,Footway vs residential road with 38m separation and minimal overlap
-0bbc8b14-fa43-48ea-ae32-40b971829602,boston_streets_730,no_match,0.95,Different non-overlapping segments of Franklin Street separated by 68m
-0be77255-f8cb-422a-a629-0c7df4414a52,boston_streets_10051,no_match,0.95,Segments spatially separated with no geometric overlap despite same name
-0c63aead-3cac-4c24-9bb5-18390fb37ce9,boston_streets_125,no_match,0.98,Different streets with different names and non-overlapping geometries
-10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Road centerline vs adjacent sidewalk - different physical features
-10991d41-8a6d-4b95-a691-fb9ed07126e5,boston_streets_2078,no_match,0.85,Different road segments with poor geometric alignment despite shared name
-129b25a6-af04-4a91-8641-532f7d8caf82,w57743633@23,no_match,0.95,Footway vs residential road - different feature types
-1666cfa9-4145-48bf-96fd-015af4595e5b,w842963289@2,no_match,0.75,Extreme length mismatch (12m vs 37m) with poor buffer_iou (0.24) suggests different footway segments
-16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.95,Road vs adjacent sidewalk - different physical features
-18637422-a7e0-4e28-8711-566f1a7bcaa5,boston_streets_6041,no_match,0.95,Different sections of Centre Street separated by 53m - no geometric overlap
-196ce58a-00dd-44ba-92ff-21c041f12116,boston_streets_6150,no_match,0.85,Minimal geometric overlap (10.6% IOU) and large 70m offset despite same street name
-1f2ac020-7ff0-428a-be14-55ee05cffceb,boston_streets_450,no_match,0.85,Different streets with different names and clear geometric offset
-1fed679a-4c1b-4540-a5db-dff45199257e,boston_streets_176,no_match,0.95,Segments separated by 80m despite same name - different physical locations
-215c143a-f5d7-4e77-b075-2d24ae4d8190,boston_streets_5075,no_match,0.95,Different streets - clear geometric separation and different names
-218a329c-2a5d-49fb-983c-4b9bf5399a0d,boston_streets_1359,no_match,0.95,Footway vs residential road - different physical features
-23206f40-9809-4005-99b0-51d42caf243a,boston_streets_9174,no_match,0.95,Different features: service driveway vs main road with poor geometric alignment
-23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.90,Parallel footways ~10m apart; distinct physical features
-24dce6da-fca4-4eda-923f-f10fe6b0d07a,w1078094504@1,no_match,0.85,Geometries do not align - reference is short diagonal segment while target shows zigzag pattern with poor overlap metrics
-26a375ed-b74b-4da6-9535-be408b0e6a6a,boston_streets_2970,no_match,0.9,Segments diverge in different directions with only 12% overlap despite same name
-29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Sidewalk parallel to Beacon Street road - different feature types
-2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.85,Parallel sidewalks on opposite sides of street with 28m offset
-2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,match,0.85,Same footpath with segmentation difference
+001ca42e-96cc-4d20-869b-4e2e15e7d613,boston_streets_1461,no_match,0.85,Red segment is 3x longer and extends far beyond blue segment on same road
+00b1f8ad-a783-4121-a7e0-51dee6d0af79,boston_streets_6680,no_match,0.8,Blue footway is only small portion near end of longer red street
+00c74c00-45e2-43a5-be92-a3f2ba77a53e,boston_streets_20,no_match,0.85,Blue segment is footway/path while red is Chestnut Street road - parallel but different features
+02d2b67a-3d89-4b6d-ab56-8bec360f6edd,boston_bike_1082,no_match,0.85,Blue segment is sidewalk/footway while red is street bike lane - parallel but different infrastructure
+09e81068-be11-4bf2-9c68-083b5a2cffba,boston_streets_6624,no_match,0.95,Blue segment is short footway on side street; red segment is main diagonal road
+0bbc8b14-fa43-48ea-ae32-40b971829602,boston_streets_730,no_match,0.95,Segments represent different parallel roads approximately 70m apart with different orientations
+0be77255-f8cb-422a-a629-0c7df4414a52,boston_streets_10051,no_match,0.95,Segments are spatially separated and have different orientations - they represent different physical roads
+0c63aead-3cac-4c24-9bb5-18390fb37ce9,boston_streets_125,no_match,0.9,Different roads - blue is vertical street segment; red is diagonal curved segment on different road
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Blue segment is Seaport Boulevard (primary road) while red is parallel sidewalk/footway
+10991d41-8a6d-4b95-a691-fb9ed07126e5,boston_streets_2078,no_match,0.85,Different roads - blue is straight segment red is curved road running parallel
+129b25a6-af04-4a91-8641-532f7d8caf82,w57743633@23,no_match,0.9,Different roads - blue is footway/path red is Leighton Street; parallel but offset with significant spatial separation
+1666cfa9-4145-48bf-96fd-015af4595e5b,w842963289@2,no_match,0.85,Blue segment is short stub; red segment extends much longer along different curved path
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.9,Blue is street centerline; red is parallel sidewalk
+18637422-a7e0-4e28-8711-566f1a7bcaa5,boston_streets_6041,no_match,0.85,Different parallel sections of Centre Street with significant spatial offset
+196ce58a-00dd-44ba-92ff-21c041f12116,boston_streets_6150,no_match,0.95,Red segment is distinct parallel road northwest of blue segment
+1f2ac020-7ff0-428a-be14-55ee05cffceb,boston_streets_450,no_match,0.85,Red segment extends significantly beyond blue segment and represents different road portion
+1fed679a-4c1b-4540-a5db-dff45199257e,boston_streets_176,no_match,0.95,Segments represent different parallel roads approximately 76m apart
+215c143a-f5d7-4e77-b075-2d24ae4d8190,boston_streets_5075,no_match,0.9,Different roads - blue is Derne Street (curved northwest) red is Bowdoin Street (runs north-south) clearly separate parallel streets
+218a329c-2a5d-49fb-983c-4b9bf5399a0d,boston_streets_1359,no_match,0.85,Different roads: blue is footway along building edge; red is residential Bedford Street below
+23206f40-9809-4005-99b0-51d42caf243a,boston_streets_9174,no_match,0.9,Blue is curved driveway/parking access; red is straight main road
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.9,Segments are on opposite sides of the road with ~10m separation
+24dce6da-fca4-4eda-923f-f10fe6b0d07a,w1078094504@1,no_match,0.9,Different footway paths with distinct geometries and locations
+26a375ed-b74b-4da6-9535-be408b0e6a6a,boston_streets_2970,no_match,0.85,Segments are adjacent but represent distinct portions of North Washington Street with significant spatial offset
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.85,Red segment is sidewalk parallel to blue roadway segment
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.85,Segments are on opposite sides of street running parallel
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.85,Red segment is only half of blue Y-shaped path; covers upper branch only
+2c6feb55-b6b2-4bda-b8fa-90103209da56,boston_streets_891,no_match,0.85,Segments cover different portions of Hanover Street with minimal overlap
+2e579ee6-3cdf-4e25-bdde-f91e6fbd0c3f,boston_streets_4972,match,0.85,Blue and red segments follow the same diagonal road with excellent alignment; red extends further southeast but clearly represents same physical road (Kenton Road)
+302540ea-53c6-4be0-a4c6-9f8de781540c,boston_streets_9780,no_match,0.95,Segments follow different roads with distinct paths and orientations; no spatial overlap
+310a0055-6d7a-4fe0-b822-b31f22ac59fc,boston_streets_4325,no_match,0.95,Red segment is vertical crossing railroad tracks while blue segment is diagonal crossing same area - different roads
+31a708b5-22e2-4646-bf7f-0019b31800fb,boston_streets_461,no_match,0.9,Different roads - red segment runs parallel and offset from blue L-shaped segment
+32f8a658-9b4b-4733-b33f-67888fd7eac4,boston_streets_3217,no_match,0.85,Segments represent different portions of Beacon Street with minimal spatial overlap and offset alignment
+351f73aa-db85-4c3e-a050-e056a650da4c,boston_bike_2934,no_match,0.85,Red segment extends much longer and covers different section of street than blue segment
+39c3dd6b-5ad7-4d38-a86b-eaca1483a9f4,boston_streets_3519,no_match,0.85,Segments diverge at different angles; blue continues northeast while red extends southwest on different roadway alignments
+39c3dd6b-5ad7-4d38-a86b-eaca1483a9f4,boston_streets_684,no_match,0.9,Segments are parallel but clearly on different roads with ~30m separation
+3a4ff50e-19fd-46ff-a6c8-606dfcec3a8b,boston_streets_4780,no_match,0.95,Blue is sidewalk/footway along building; red is vehicular street - different physical features
+3af46e0f-c3ac-415d-8fb2-ac535f6cb194,boston_streets_2257,no_match,0.85,Red segment extends beyond blue segment on different road section
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,no_match,0.65,Red segment is only small subsection of blue segment - different spatial extents
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.9,Distinct parallel footways with significant spatial offset and different lengths
+3f4d080b-0c5c-4f25-8f67-5004ab9fa2b5,boston_bike_3179,match,0.85,Blue and red segments closely align along same bridge structure with similar curvature
+41f531fb-d46d-475a-834b-0f68a5bd1c46,boston_streets_4918,no_match,0.85,Segments are spatially separated and represent different parallel road sections despite same name
+421e2ef2-194f-455d-a149-5948eba7432a,boston_streets_2089,no_match,0.75,Red segment extends beyond blue and covers different portion of road
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.85,Different physical paths - red is diagonal crosswalk while blue follows sidewalk along street edge
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_bike_272,match,0.85,Both segments follow Arlington Street with parallel alignment representing bike lane alongside main road
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_streets_8071,no_match,0.85,Red segment is parallel access road offset from blue main street
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_streets_8181,no_match,0.85,Segments are adjacent but on different parallel roads with significant offset
+48645b31-0b06-4e4a-a5aa-040f608c95e1,w863038355@4,no_match,0.9,Red segment missing - only blue reference visible
+4b8b740f-22df-4dc2-bb42-16eb61983030,boston_streets_10839,no_match,0.95,Blue and red segments are on parallel but separate roadways with ~140m offset - different physical roads
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.95,Blue segment is short and separated from longer red segment with different alignment
+4d52d3a0-849e-453f-b3b3-d25bb4f532cc,boston_streets_2086,no_match,0.85,Blue segment is small portion at northwest end of longer red segment
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,match,0.8,Red segment covers portion of blue footway segment
+578ed470-4be6-49e6-9df9-d01f68fbf140,boston_streets_9793,no_match,0.8,Red segment extends far beyond blue segment covering different road section
+57d78031-75dc-44c9-a9cb-54d993e9a742,boston_streets_3128,no_match,0.85,Segments are spatially separated and do not overlap the same road feature
+5aecbc9d-8ca7-4975-b5b8-452f094b072d,boston_streets_8718,match,0.95,Blue and red segments trace the same diagonal road with nearly identical path and endpoints
+5da0d45a-4f25-4786-9de8-bdec8b8e554b,boston_streets_6552,no_match,0.85,Blue segment is short stub while red segment is long diagonal road - different extents
+5e5a57ef-4d21-4fe2-a140-2016c5889ee9,boston_streets_7256,no_match,0.85,Blue and red segments are parallel but represent different physical roads with significant lateral offset
+616dc619-d070-4c6f-aa4f-a6887c6a0217,boston_streets_5708,no_match,0.85,Different physical roads at different elevations despite shared street name
+640e0b5a-ffba-4404-a006-43659dd43466,boston_bike_325,no_match,0.85,Blue segment represents parking lot path while red segment follows adjacent street
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.85,Red segment is sidewalk parallel to blue road segment
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.95,Blue and red segments nearly overlap representing same diagonal footway with minor digitization offset
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,no_match,0.9,Segments are parallel but clearly offset - represent different footways not same physical path
+6e25a5de-4ad3-4f00-9046-66516592d000,boston_streets_7029,no_match,0.85,Segments are parallel but separated by ~54m with no spatial overlap
+6ffe34e3-a279-44f8-bb0b-e71c494b981c,boston_streets_3938,match,0.95,Blue segment is subset of red segment on same diagonal road
+704c80d5-afd9-4efe-82e7-f27ecd736dcd,boston_streets_9559,no_match,0.85,Blue segment is much longer diagonal road; red is short segment at different location on same road
+70fa4312-800c-4b83-a9c6-f4b9ad8d0983,boston_streets_10842,no_match,0.85,Blue segment is shorter curved section while red extends much longer on same road but represents different portion
+71392e41-09ca-44b5-bd85-908b7b19551d,w8644437@22,no_match,0.85,Blue segment is shorter footway/path while red segment is longer primary road Charles Street - parallel but distinct features
+716892e5-bd7b-4fd9-9007-81df587bd4b9,boston_sidewalk_861,no_match,0.95,Blue is highway on-ramp and red is parallel sidewalk - different physical infrastructure
+74129703-100f-40c5-b128-ed8c70a5f4e1,boston_streets_9202,match,0.95,Red segment is subset of blue segment on same road alignment
+742b2102-512d-46f9-a7ca-bb52b091b167,boston_streets_8289,match,0.85,Red segment is subsection of blue Atlantic Ave road
+749f24d8-bed2-4099-923e-bf1ccab74fb6,boston_streets_4657,no_match,0.85,Red segment follows pedestrian path parallel to blue road segment on different side of median
+74b7fb7e-31b9-4163-8fbb-114b300fbfe9,boston_sidewalk_12671,no_match,0.9,Red segment is curved path in different location from blue diagonal segment
+776639f1-723c-4add-8c6a-abc616dc1306,boston_streets_5963,no_match,0.95,Segments are clearly separated roads with different alignments and no physical overlap
+79f6cd5f-da22-4ac9-8583-252214b36d13,boston_streets_1409,no_match,0.85,Segments are parallel but clearly offset by ~50m with no overlap on same road
+7a2f9440-93ac-4ca1-972d-2c6cef37e45b,boston_streets_3810,no_match,0.85,Blue segment covers only upper half of red segment same street
+7ae06b66-2626-4d3c-be12-a59bd67a881a,boston_streets_9186,no_match,0.85,Red segment is vertical north-south road while blue segment is horizontal east-west road at perpendicular intersection
+7c3f02f6-f96c-44b5-bf71-926ed10eedc4,boston_sidewalk_103996,match,0.85,Both segments follow the same diagonal sidewalk crossing the parking lot with same orientation and overlap
+7cf3ea1d-1e6f-42a7-96d4-0f91cd9248a0,boston_streets_3216,no_match,0.85,Red segment offset north of blue segment - different parallel sections of road
+7d978f23-01d2-413b-8025-2663a76ca5e8,boston_sidewalk_2188,no_match,0.85,Segments represent different footways on opposite sides of the street
+7f7d17c5-5eec-4a81-ba75-5b8691f8f35b,boston_streets_5459,no_match,0.85,Blue segment is a footway/path while red segment is West Concord Street road; they run parallel but are distinct features
+7fa900dd-a00d-430d-a565-3dc1f5bd43cb,boston_streets_2090,match,0.75,Same road - Arlington Street continuous diagonal path despite segmentation difference
+81a82e27-344f-421f-904a-d0ee0d3b197c,boston_streets_3595,no_match,0.85,Segments are parallel but offset - represent different lanes or adjacent roads not the same road
+81f5dc3d-9704-4527-bed6-386138834ec3,boston_sidewalk_2197,no_match,0.95,Red segment is short horizontal path while blue is L-shaped vertical path - completely different locations and orientations
+8337829c-0029-4926-9946-52d64f26ede2,boston_sidewalk_12349,no_match,0.95,Different physical paths - blue is parking lot crosswalk red is sidewalk along residential street
+863d2f1d-9f7e-4a6c-a95e-6acf8c43c8d7,boston_sidewalk_43221,no_match,0.85,Segments are spatially separated on different parts of the plaza with distinct orientations
+87d5fc65-7a29-422a-9473-93dd243f5acf,boston_bike_685,match,0.95,Nearly perfect overlap on Post Office Square with identical names and geometry
+8ab9d2f8-fbb7-4ab9-a293-5919533e6e4c,boston_streets_3491,no_match,0.9,Segments are spatially separated and not aligned - different roads
+8ea0fd06-5e32-45d4-bfd6-1ca46a01ae9c,boston_bike_2169,no_match,0.85,Segments represent parallel but distinct paths - blue appears to be a footway/alley while red traces the main roadway
+907beb18-fa22-4eec-ac39-1253be6a0a26,boston_streets_10750,no_match,0.8,Red segment extends beyond blue representing different road section
+916a0c15-78c9-4c30-9d66-57c16ec42bd1,boston_bike_2900,no_match,0.85,Red segment is bike lane parallel to but distinct from main road shown in blue
+91cb4548-5ddd-4e43-9889-10d2ae036660,boston_streets_9381,no_match,0.85,Segments are spatially separated and appear to represent different road sections despite same street name
+95560141-a1c1-4caf-bc78-f731950ede4c,boston_streets_4800,match,0.85,Segments are collinear and overlap on same road with matching names and alignment
+96f30fe0-4a3c-4c2f-a9b9-9f240becc1aa,boston_streets_2155,no_match,0.85,Blue and red segments represent different roads - blue is straight segment north of intersection while red is curved segment south of intersection
+97fcb960-9c60-4c6d-a903-e66da83f5f07,boston_sidewalk_74821,no_match,0.85,Red segment curves away from blue segment representing different paths
+98d792c6-8d86-47b1-93eb-1fbf20205585,boston_streets_283,no_match,0.85,Segments are clearly different roads - blue is straight horizontal while red is angled diagonal with kinks and they are spatially separated
+99e3e5fd-87c8-43c0-9bac-e22fa664d82a,boston_sidewalk_72951,no_match,0.9,Red segment is sidewalk on north side blue is roadway on south side
+9a9a5918-7d76-4985-9b6f-4d16dd756d55,boston_streets_9352,no_match,0.95,Parallel streets approximately 25m apart - different physical roads
+9ca5b5d8-d558-4f71-a37a-4585f976618d,boston_streets_10277,no_match,0.85,Red segment offset north from blue segment representing different parallel road
+9dfd0359-876c-4728-8543-fd40c1fb6c0d,boston_sidewalk_1633,no_match,0.85,Segments are spatially separated and represent parallel but distinct sidewalk paths
+9fda925d-8633-49b3-ab7c-06addaadf30a,boston_sidewalk_40452,no_match,0.85,Segments are parallel but offset by several meters representing adjacent paths not the same physical road
+9ffd1f97-e16c-4d75-a06c-5f45202a9079,w1219639187@1,no_match,0.95,Red segment only covers small portion of blue segment's horizontal section; blue has distinct diagonal section not represented by red
+a01e84bb-74aa-423b-8eec-c43aadf412b7,boston_streets_8379,no_match,0.95,Segments represent different parallel roads approximately 115m apart
+a09c706b-15b3-4481-9343-93838c20ab45,boston_sidewalk_103326,no_match,0.95,Segments are parallel but separated on opposite sides of the road
+a37b491e-cb37-4a26-9c8b-b9bca9293c2f,boston_streets_10067,no_match,0.85,Red segment offset parallel to blue not overlapping same road centerline
+a3b24405-9015-4641-998f-87ce86184d72,boston_streets_7860,match,0.7,Same road (Corey St) but different segment extents with partial overlap
+a40b572a-2bff-43cf-a473-19998ee1526a,boston_sidewalk_22823,no_match,0.85,Red segment is sidewalk alongside blue road segment (Utica Street) - parallel but different infrastructure types
+a4e19b35-4e85-4223-ac1c-1c382cab9122,boston_streets_10094,no_match,0.95,Parallel offset segments with 57m separation - different physical roads
+a94190b4-b8d7-453a-b934-4e4d74ec1233,boston_streets_1921,match,0.95,Segments form continuous diagonal road with aligned geometry and identical name
+aacea58a-881c-4e03-86a1-80bb189bb9e2,boston_streets_9569,no_match,0.9,Different consecutive segments of same street separated by intersection
+acfb54cb-ec4b-44c7-8ce9-c289b13fbb9d,boston_streets_8902,no_match,0.85,Blue segment is footway adjacent to red road (Seaver Street); parallel but distinct features
+ad6a9fff-e16c-4afc-9703-4c8f50cc8d6c,boston_streets_4640,match,0.85,Blue and red segments align on same diagonal street Moon Street with good overlap despite length difference
+b3888cbc-fbec-4386-9995-efc7a9ffe5bb,boston_sidewalk_27956,no_match,0.85,Red segment is only a small portion of blue segment representing different extents
+b4b4f74b-719a-48c0-a4d5-bcd0d9217dd3,boston_streets_1874,no_match,0.85,Segments on same road but non-overlapping portions with small gap between them
+b5f5a829-1c4c-41a0-932a-3f603b6b9c1d,boston_streets_2356,no_match,0.95,Blue is footway/path through triangular green space; red is Waltham Street road running diagonally - different physical features
+b9e0b42c-5968-40fc-9f34-e2cc5ce1ef65,boston_sidewalk_96945,no_match,0.9,Different footway segments on opposite sides of parking lot - blue is sidewalk along stairs red is separate path below
+ba99a3cb-1e7d-4b22-baeb-2c5a8256fd29,boston_streets_5261,no_match,0.75,Parallel segments offset laterally on same road corridor
+baf32705-78dc-43cd-87cf-4fed3eed43cf,boston_sidewalk_103229,no_match,0.95,Different physical features with clear spatial separation
+bb02a84e-afce-47f0-b164-6a5f7fd44487,boston_streets_7215,match,0.95,Blue and red segments closely align on same road centerline with matching names and geometry
+bb8e9942-ef3b-4588-a112-f98848f19307,boston_bike_714,match,0.85,Both segments follow the same bridge structure over water with parallel alignment and similar geometry
+bca16fe2-c568-42b5-aecd-250280181439,boston_sidewalk_1264,no_match,0.85,Different physical features: blue is road centerline red is sidewalk parallel to road
+beb5eca9-7fa3-4af2-80e4-4679ebf67647,boston_bike_1803,match,0.95,Segments overlay same path through park with identical alignment and matching name
+c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4,boston_streets_4696,match,0.95,Red segment covers portion of same road as blue segment with identical alignment and heading
+c71b9627-6687-4b3a-8900-157ee1c03412,boston_sidewalk_12464,no_match,0.85,Different sidewalks on opposite sides of intersection with different orientations
+c765792c-ffd7-49bf-97ad-5405a3b4b88d,boston_sidewalk_102890,no_match,0.85,Segments are parallel but spatially offset - red segment is clearly displaced from blue segment with no geometric overlap
+c98af621-ca07-4fd3-aeb1-a49c126bcaee,boston_streets_2710,match,0.95,Blue and red segments perfectly overlay on same diagonal road with identical alignment and length
+ce5b85e6-aaf9-42a0-98b8-98f7060c4a7e,boston_streets_4471,no_match,0.85,Red segment extends beyond blue covering different portion of Ditson Street
+d506d3a1-717b-4f8f-a356-a5849928b9c9,boston_sidewalk_14022,no_match,0.85,Blue and red segments are spatially separated and follow different paths - not the same physical road
+d7690b28-4210-4b20-8de6-287d7c7bfed9,boston_bike_2428,no_match,0.85,Blue segment curves at end while red continues straight - different physical features
+da5806a4-4581-4667-88cc-2e87b5b5f16b,boston_streets_7747,match,0.85,Same road - blue is northern portion and red extends further south along Cedar Lane Way
+db07eb5c-857e-4668-a7d2-405993bec6e3,boston_streets_8561,match,0.85,Same physical road - both segments align with Warren Street despite different segment lengths
+de490660-5553-4a1e-8f42-a0a8b610ac61,boston_streets_9611,no_match,0.9,Red segment covers double the length and different location despite same street name
+e38a55b2-7358-4eff-8800-a7b388b7959c,w1210189131@6,no_match,0.95,Segments are on parallel but distinct roads separated by ~20m with different alignments
+e66dbb89-0607-49d2-ad56-d361805ef3d5,boston_streets_3399,no_match,0.85,Different roads - blue curves along main street while red is offset to the side at different angle
+edc6031f-ee3d-4dbe-834c-de63e5a206c3,boston_streets_5075,match,0.85,Same road but different segmentation lengths - blue is subset of red segment
+ef054655-6cc9-4c87-b16b-4a7e9920c0fd,boston_streets_4008,no_match,0.85,Blue and red segments run parallel but are clearly separate road paths in parking lot area
+ef054655-6cc9-4c87-b16b-4a7e9920c0fd,boston_streets_6516,no_match,0.9,Segments are on parallel but separate streets despite same name
+efbcdfd7-af04-4ba6-a495-a753e546ee95,boston_sidewalk_103038,no_match,0.85,Different physical segments: blue is short stub while red is long curved path with significant spatial separation
+f39b7fda-9af9-4f40-8765-8b0d5e2550c6,boston_streets_8927,match,0.85,Red segment extends beyond blue but both trace same physical road (Charter Street)
+faa68d1d-da12-4388-ae97-78601cf7cd1f,boston_sidewalk_1647,no_match,0.95,Segments are spatially separated with ~13m distance representing different parallel footways
+faa68d1d-da12-4388-ae97-78601cf7cd1f,boston_streets_5430,no_match,0.85,Blue is footway/crosswalk red is Franklin Street roadway - different physical features
+fbb2256a-af6b-4b09-9153-92738a5b30f7,boston_streets_98,no_match,0.85,Red segment extends beyond blue covering different road sections
+fcd22110-6916-4d59-b782-41d75e60bb25,boston_sidewalk_103113,no_match,0.9,Blue follows road centerline while red follows sidewalk/pedestrian path parallel to road

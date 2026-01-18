@@ -2,11 +2,9 @@
 # Unified agent labeling script
 # Usage: ./run_agent.sh <agent> [batch_dir] [options]
 #
-# Agents: claude, codex, gemini
+# Agents: claude, codex, gemini, ollama
 # Options:
-#   --model <model>    Model variant (e.g., sonnet, haiku, flash)
-#   --grayscale        Convert satellite images to grayscale before sending
-#   --low-res          Reduce image resolution to 256x256
+#   --model <model>    Model variant (e.g., sonnet, haiku, flash, moondream)
 
 set -o pipefail
 
@@ -14,10 +12,14 @@ set -o pipefail
 cleanup() {
     echo ""
     echo "Interrupted! Results so far in $OUTPUT_FILE"
-    kill 0 2>/dev/null
+    # Kill any child processes
+    pkill -P $$ 2>/dev/null
     exit 130
 }
 trap cleanup INT TERM
+
+# Ensure child processes get signals
+set -m
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -28,22 +30,12 @@ shift || true
 
 BATCH_DIR=""
 MODEL=""
-GRAYSCALE=false
-LOW_RES=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)
             MODEL="$2"
             shift 2
-            ;;
-        --grayscale)
-            GRAYSCALE=true
-            shift
-            ;;
-        --low-res)
-            LOW_RES=true
-            shift
             ;;
         *)
             if [[ -z "$BATCH_DIR" ]]; then
@@ -59,22 +51,22 @@ BATCH_DIR="${BATCH_DIR:-$(ls -d batches/test_batch_* 2>/dev/null | tail -1)}"
 
 # Validate agent
 case "$AGENT" in
-    claude|codex|gemini)
+    claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [batch_dir] [--model <model>] [--grayscale] [--low-res]"
+        echo "Usage: $0 <agent> [batch_dir] [--model <model>]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
         echo "  codex     - OpenAI Codex CLI"
         echo "  gemini    - Google Gemini CLI (models: flash, pro)"
+        echo "  ollama    - Local Ollama (models: llava, llava:13b)"
         echo ""
         echo "Options:"
         echo "  --model      Model variant to use"
-        echo "  --grayscale  Convert satellite images to grayscale"
-        echo "  --low-res    Reduce images to 256x256"
         echo ""
         echo "Example: $0 gemini batches/test_batch_2026-01-18 --model flash"
+        echo "Example: $0 ollama --model llava"
         exit 1
         ;;
 esac
@@ -88,11 +80,9 @@ fi
 CONTEXT_DOC="LABELING_INSTRUCTIONS.md"
 CANDIDATES_DIR="$BATCH_DIR/candidates"
 
-# Build output dir name (include image processing flags)
+# Build output dir name
 OUTPUT_NAME="$AGENT"
 [[ -n "$MODEL" ]] && OUTPUT_NAME="${AGENT}_${MODEL}"
-[[ "$GRAYSCALE" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_gray"
-[[ "$LOW_RES" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_lowres"
 
 OUTPUT_DIR="$BATCH_DIR/labels/$OUTPUT_NAME"
 OUTPUT_FILE="$OUTPUT_DIR/data.csv"
@@ -109,76 +99,122 @@ echo "Agent: $AGENT"
 [[ -n "$MODEL" ]] && echo "Model: $MODEL"
 echo "Batch: $BATCH_DIR"
 echo "Output: $OUTPUT_FILE"
-[[ "$GRAYSCALE" == "true" ]] && echo "Image mode: grayscale"
-[[ "$LOW_RES" == "true" ]] && echo "Image resolution: 256x256"
 echo ""
 
 COUNT=0
 FAILED=0
 TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
 
-# Prepare image if needed (uses Python/PIL)
-prepare_image() {
-    local src="$1"
-    local dst="$2"
-
-    if [[ "$GRAYSCALE" == "true" || "$LOW_RES" == "true" ]]; then
-        python3 - "$src" "$dst" "$GRAYSCALE" "$LOW_RES" << 'PYTHON_EOF'
-import sys
-from PIL import Image
-
-src, dst, grayscale, lowres = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-img = Image.open(src)
-if grayscale == "true":
-    img = img.convert("L")
-if lowres == "true":
-    img = img.resize((256, 256), Image.LANCZOS)
-img.save(dst)
-print(dst)
-PYTHON_EOF
-        return
-    fi
-    echo "$src"
-}
-
-# Build the prompt (same for all agents)
+# Build the prompt - static prefix first for caching, variable content last
 build_prompt() {
     local ref_id="$1"
     local target_id="$2"
-    local img_sat="$3"
-    local metadata="$4"
+    local metadata_content="$3"
 
-    cat <<PROMPT
-Read $CONTEXT_DOC for labeling rules.
-Look at $img_sat (blue=reference, red=target) and $metadata.
-Do these segments represent the same physical feature?
+    # Static prefix (cacheable across all candidates)
+    cat <<'STATIC_PREFIX'
+You are analyzing road segment matches. Do NOT explore files or the codebase.
 
-Output ONLY one CSV line:
-$ref_id,$target_id,LABEL,CONFIDENCE,REASON
+TASK: Do the blue and red road segments represent the same physical road?
 
-Where LABEL=match/no_match/unsure, CONFIDENCE=0.0-1.0, REASON=brief text without commas
-PROMPT
+Images provided:
+- satellite.png: satellite view (blue=reference segment, red=target segment)
+- geometry.png: geometry view (same color coding)
+
+Output format: ref_id,target_id,LABEL,CONFIDENCE,REASON
+- LABEL: match, no_match, or unsure
+- CONFIDENCE: 0.0 to 1.0
+- REASON: brief explanation (no commas)
+
+Output exactly ONE CSV line, nothing else.
+
+---
+STATIC_PREFIX
+
+    # Variable suffix (changes per candidate)
+    cat <<VARIABLE_SUFFIX
+Candidate: $ref_id,$target_id
+
+Metadata:
+$metadata_content
+VARIABLE_SUFFIX
 }
 
 # Run agent command
 run_agent() {
     local prompt="$1"
+    local img_sat="$2"
+    local img_geo="$3"
 
     case "$AGENT" in
         claude)
             local model_arg=""
             [[ -n "$MODEL" ]] && model_arg="--model $MODEL"
-            timeout 30 claude -p $model_arg "$prompt" 2>&1
+            # Claude CLI requires explicit "read" instruction to access images
+            # Prepend instruction and run from candidate directory
+            local candidate_dir
+            candidate_dir=$(dirname "$img_sat")
+            local full_prompt="First read satellite.png and geometry.png, then answer:
+
+$prompt"
+            (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$full_prompt") 2>&1
             ;;
         codex)
             local tmpout="$TEMP_DIR/codex_out.txt"
-            timeout 30 codex exec -o "$tmpout" -- "$prompt" 2>&1 || true
+            # Codex supports -i flag for image attachments
+            timeout 60 codex exec -i "$img_sat" -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
             cat "$tmpout" 2>/dev/null
             ;;
         gemini)
             local model_arg=""
             [[ -n "$MODEL" ]] && model_arg="-m $MODEL"
-            timeout --signal=KILL 30 gemini --yolo -o text $model_arg "$prompt" 2>&1
+
+            # Create isolated working directory to avoid gitignore issues
+            local sandbox="$TEMP_DIR/gemini_sandbox"
+            mkdir -p "$sandbox"
+
+            # Copy images with consistent names for prompt caching
+            cp "$img_sat" "$sandbox/satellite.png"
+            cp "$img_geo" "$sandbox/geometry.png"
+
+            # Write prompt to file to avoid shell escaping issues
+            printf '%s' "$prompt" > "$sandbox/prompt.txt"
+
+            # cd to sandbox directory
+            local orig_dir="$PWD"
+            cd "$sandbox"
+
+            # Run Gemini with --sandbox (requires Docker)
+            gemini --sandbox --yolo -o text \
+                "Analyze satellite.png and geometry.png using instructions in prompt.txt" \
+                prompt.txt satellite.png geometry.png 2>&1
+            local exit_code=$?
+
+            # Restore directory and cleanup
+            cd "$orig_dir"
+            rm -rf "$sandbox" 2>/dev/null || echo "WARNING: Failed to clean up $sandbox" >&2
+
+            [[ $exit_code -ne 0 ]] && echo "GEMINI_ERROR: exit code $exit_code"
+            ;;
+        ollama)
+            # Cross-platform base64 (macOS doesn't support -w0)
+            local sat_base64 geo_base64
+            sat_base64=$(base64 "$img_sat" | tr -d '\n')
+            geo_base64=$(base64 "$img_geo" | tr -d '\n')
+            local model_name="${MODEL:-llava}"
+
+            # Build JSON payload safely with jq to handle escaping
+            local json_payload
+            json_payload=$(jq -n \
+                --arg model "$model_name" \
+                --arg prompt "$prompt" \
+                --arg sat "$sat_base64" \
+                --arg geo "$geo_base64" \
+                '{model: $model, prompt: $prompt, images: [$sat, $geo], stream: false}')
+
+            # Ollama vision models need more time than text-only (120s timeout)
+            timeout 120 curl -s http://localhost:11434/api/generate \
+                -d "$json_payload" | jq -r '.response // .error // "No response"'
             ;;
     esac
 }
@@ -191,23 +227,27 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
 
     METADATA="${CANDIDATE_DIR}metadata.yaml"
     IMG_SAT="${CANDIDATE_DIR}satellite.png"
+    IMG_GEO="${CANDIDATE_DIR}geometry.png"
 
     if [[ ! -f "$METADATA" ]]; then
         echo "[WARN] No metadata in $CANDIDATE_DIR" | tee -a "$LOG_FILE"
         continue
     fi
 
-    # Prepare image if needed
-    PROCESSED_IMG=$(prepare_image "$IMG_SAT" "$TEMP_DIR/${REF_ID}_sat.png")
+    # Read metadata content
+    METADATA_CONTENT=""
+    if [[ -f "$METADATA" ]]; then
+        METADATA_CONTENT=$(cat "$METADATA")
+    fi
 
-    # Build prompt
-    PROMPT=$(build_prompt "$REF_ID" "$TARGET_ID" "$PROCESSED_IMG" "$METADATA")
+    # Build prompt using the function
+    PROMPT=$(build_prompt "$REF_ID" "$TARGET_ID" "$METADATA_CONTENT")
 
     echo "[$(date +%H:%M:%S)] $REF_ID" >> "$LOG_FILE"
     echo -n "Processing $REF_ID... "
 
-    # Run agent
-    RAW=$(run_agent "$PROMPT") || true
+    # Run agent (pass image paths)
+    RAW=$(run_agent "$PROMPT" "$IMG_SAT" "$IMG_GEO") || true
 
     echo "=== $REF_ID ===" >> "$RAW_OUTPUT"
     echo "$RAW" >> "$RAW_OUTPUT"
