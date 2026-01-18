@@ -231,7 +231,7 @@ def _transform_hub_data(
     else:
         data["class"] = ["footway"] * len(gdf)  # Default for sidewalks
 
-    # Subclass - use explicit column/mapping if provided, otherwise use default
+    # Subclass - use explicit column/mapping if provided, otherwise use default or None
     if subclass_column and subclass_column in gdf.columns:
         if subclass_mapping:
             data["subclass"] = gdf[subclass_column].map(subclass_mapping).values
@@ -240,11 +240,7 @@ def _transform_hub_data(
     elif default_subclass is not None:
         data["subclass"] = [default_subclass] * len(gdf)
     else:
-        # Only default to "sidewalk" if all features are footway class
-        if set(data["class"]) == {"footway"}:
-            data["subclass"] = ["sidewalk"] * len(gdf)
-        else:
-            data["subclass"] = [None] * len(gdf)
+        data["subclass"] = [None] * len(gdf)
 
     return gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
