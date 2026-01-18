@@ -1,0 +1,27 @@
+ref_id,target_id,label,confidence,reasoning
+001ca42e-96cc-4d20-869b-4e2e15e7d613,boston_streets_1461,no_match,0.85,Poor geometric alignment; reference is short subsection while target extends far beyond with minimal overlap
+00b1f8ad-a783-4121-a7e0-51dee6d0af79,boston_streets_6680,no_match,0.95,Footway vs tertiary road - different feature types
+00c74c00-45e2-43a5-be92-a3f2ba77a53e,boston_streets_20,no_match,0.95,Footway vs residential road - different feature types
+02d2b67a-3d89-4b6d-ab56-8bec360f6edd,boston_bike_1082,no_match,0.90,Footway/sidewalk vs bike lane - different feature types
+09e81068-be11-4bf2-9c68-083b5a2cffba,boston_streets_6624,no_match,0.95,Footway vs residential road with 38m separation and minimal overlap
+0bbc8b14-fa43-48ea-ae32-40b971829602,boston_streets_730,no_match,0.95,Different non-overlapping segments of Franklin Street separated by 68m
+0be77255-f8cb-422a-a629-0c7df4414a52,boston_streets_10051,no_match,0.95,Segments spatially separated with no geometric overlap despite same name
+0c63aead-3cac-4c24-9bb5-18390fb37ce9,boston_streets_125,no_match,0.98,Different streets with different names and non-overlapping geometries
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Road centerline vs adjacent sidewalk - different physical features
+10991d41-8a6d-4b95-a691-fb9ed07126e5,boston_streets_2078,no_match,0.85,Different road segments with poor geometric alignment despite shared name
+129b25a6-af04-4a91-8641-532f7d8caf82,w57743633@23,no_match,0.95,Footway vs residential road - different feature types
+1666cfa9-4145-48bf-96fd-015af4595e5b,w842963289@2,no_match,0.75,Extreme length mismatch (12m vs 37m) with poor buffer_iou (0.24) suggests different footway segments
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.95,Road vs adjacent sidewalk - different physical features
+18637422-a7e0-4e28-8711-566f1a7bcaa5,boston_streets_6041,no_match,0.95,Different sections of Centre Street separated by 53m - no geometric overlap
+196ce58a-00dd-44ba-92ff-21c041f12116,boston_streets_6150,no_match,0.85,Minimal geometric overlap (10.6% IOU) and large 70m offset despite same street name
+1f2ac020-7ff0-428a-be14-55ee05cffceb,boston_streets_450,no_match,0.85,Different streets with different names and clear geometric offset
+1fed679a-4c1b-4540-a5db-dff45199257e,boston_streets_176,no_match,0.95,Segments separated by 80m despite same name - different physical locations
+215c143a-f5d7-4e77-b075-2d24ae4d8190,boston_streets_5075,no_match,0.95,Different streets - clear geometric separation and different names
+218a329c-2a5d-49fb-983c-4b9bf5399a0d,boston_streets_1359,no_match,0.95,Footway vs residential road - different physical features
+23206f40-9809-4005-99b0-51d42caf243a,boston_streets_9174,no_match,0.95,Different features: service driveway vs main road with poor geometric alignment
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.90,Parallel footways ~10m apart; distinct physical features
+24dce6da-fca4-4eda-923f-f10fe6b0d07a,w1078094504@1,no_match,0.85,Geometries do not align - reference is short diagonal segment while target shows zigzag pattern with poor overlap metrics
+26a375ed-b74b-4da6-9535-be408b0e6a6a,boston_streets_2970,no_match,0.9,Segments diverge in different directions with only 12% overlap despite same name
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Sidewalk parallel to Beacon Street road - different feature types
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.85,Parallel sidewalks on opposite sides of street with 28m offset
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,match,0.85,Same footpath with segmentation difference

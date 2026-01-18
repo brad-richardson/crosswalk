@@ -1,0 +1,9 @@
+# Batch input files (large, regeneratable)
+batches/*/candidates/
+batches/*/manifest.yaml
+
+# Raw logs (verbose, not needed in repo)
+batches/*/labels/*/raw_responses.log
+batches/*/labels/*/run.log
+
+# Keep label results (data.csv) - those are the outputs we want
