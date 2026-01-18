@@ -2,11 +2,10 @@
 # Unified agent labeling script
 # Usage: ./run_agent.sh <agent> [batch_dir] [options]
 #
-# Agents: claude, codex, gemini
+# Agents: claude, codex, gemini, ollama
 # Options:
-#   --model <model>    Model variant (e.g., sonnet, haiku, flash)
-#   --grayscale        Convert satellite images to grayscale before sending
-#   --low-res          Reduce image resolution to 256x256
+#   --model <model>    Model variant (e.g., sonnet, haiku, flash, moondream)
+#   --cpu              Force CPU-only mode (for ollama)
 
 set -o pipefail
 
@@ -14,10 +13,14 @@ set -o pipefail
 cleanup() {
     echo ""
     echo "Interrupted! Results so far in $OUTPUT_FILE"
-    kill 0 2>/dev/null
+    # Kill any child processes
+    pkill -P $$ 2>/dev/null
     exit 130
 }
 trap cleanup INT TERM
+
+# Ensure child processes get signals
+set -m
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -28,8 +31,7 @@ shift || true
 
 BATCH_DIR=""
 MODEL=""
-GRAYSCALE=false
-LOW_RES=false
+CPU_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,12 +39,8 @@ while [[ $# -gt 0 ]]; do
             MODEL="$2"
             shift 2
             ;;
-        --grayscale)
-            GRAYSCALE=true
-            shift
-            ;;
-        --low-res)
-            LOW_RES=true
+        --cpu)
+            CPU_ONLY=true
             shift
             ;;
         *)
@@ -59,22 +57,23 @@ BATCH_DIR="${BATCH_DIR:-$(ls -d batches/test_batch_* 2>/dev/null | tail -1)}"
 
 # Validate agent
 case "$AGENT" in
-    claude|codex|gemini)
+    claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [batch_dir] [--model <model>] [--grayscale] [--low-res]"
+        echo "Usage: $0 <agent> [batch_dir] [--model <model>] [--cpu]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
         echo "  codex     - OpenAI Codex CLI"
         echo "  gemini    - Google Gemini CLI (models: flash, pro)"
+        echo "  ollama    - Local Ollama (models: moondream, llava)"
         echo ""
         echo "Options:"
         echo "  --model      Model variant to use"
-        echo "  --grayscale  Convert satellite images to grayscale"
-        echo "  --low-res    Reduce images to 256x256"
+        echo "  --cpu        Force CPU-only mode (no GPU, for ollama)"
         echo ""
         echo "Example: $0 gemini batches/test_batch_2026-01-18 --model flash"
+        echo "Example: $0 ollama --model moondream --cpu"
         exit 1
         ;;
 esac
@@ -88,11 +87,10 @@ fi
 CONTEXT_DOC="LABELING_INSTRUCTIONS.md"
 CANDIDATES_DIR="$BATCH_DIR/candidates"
 
-# Build output dir name (include image processing flags)
+# Build output dir name
 OUTPUT_NAME="$AGENT"
 [[ -n "$MODEL" ]] && OUTPUT_NAME="${AGENT}_${MODEL}"
-[[ "$GRAYSCALE" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_gray"
-[[ "$LOW_RES" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_lowres"
+[[ "$CPU_ONLY" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_cpu"
 
 OUTPUT_DIR="$BATCH_DIR/labels/$OUTPUT_NAME"
 OUTPUT_FILE="$OUTPUT_DIR/data.csv"
@@ -109,60 +107,43 @@ echo "Agent: $AGENT"
 [[ -n "$MODEL" ]] && echo "Model: $MODEL"
 echo "Batch: $BATCH_DIR"
 echo "Output: $OUTPUT_FILE"
-[[ "$GRAYSCALE" == "true" ]] && echo "Image mode: grayscale"
-[[ "$LOW_RES" == "true" ]] && echo "Image resolution: 256x256"
+[[ "$CPU_ONLY" == "true" ]] && echo "Mode: CPU-only"
 echo ""
 
 COUNT=0
 FAILED=0
 TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
 
-# Prepare image if needed (uses Python/PIL)
-prepare_image() {
-    local src="$1"
-    local dst="$2"
-
-    if [[ "$GRAYSCALE" == "true" || "$LOW_RES" == "true" ]]; then
-        python3 - "$src" "$dst" "$GRAYSCALE" "$LOW_RES" << 'PYTHON_EOF'
-import sys
-from PIL import Image
-
-src, dst, grayscale, lowres = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-img = Image.open(src)
-if grayscale == "true":
-    img = img.convert("L")
-if lowres == "true":
-    img = img.resize((256, 256), Image.LANCZOS)
-img.save(dst)
-print(dst)
-PYTHON_EOF
-        return
-    fi
-    echo "$src"
-}
-
 # Build the prompt (same for all agents)
 build_prompt() {
     local ref_id="$1"
     local target_id="$2"
-    local img_sat="$3"
-    local metadata="$4"
+    local metadata_content="$3"
 
     cat <<PROMPT
-Read $CONTEXT_DOC for labeling rules.
-Look at $img_sat (blue=reference, red=target) and $metadata.
-Do these segments represent the same physical feature?
+Do NOT explore files or the codebase. Only analyze the attached images.
 
-Output ONLY one CSV line:
+TASK: Do the blue and red road segments represent the same physical road?
+
+Images attached:
+- satellite.png: satellite view (blue=reference, red=target segments)
+- geometry.png: geometry view (same color coding)
+
+Metadata:
+$metadata_content
+
+OUTPUT exactly one CSV line:
 $ref_id,$target_id,LABEL,CONFIDENCE,REASON
 
-Where LABEL=match/no_match/unsure, CONFIDENCE=0.0-1.0, REASON=brief text without commas
+LABEL=match/no_match/unsure, CONFIDENCE=0.0-1.0, REASON=brief text (no commas)
 PROMPT
 }
 
 # Run agent command
 run_agent() {
     local prompt="$1"
+    local img_sat="$2"
+    local img_geo="$3"
 
     case "$AGENT" in
         claude)
@@ -178,7 +159,58 @@ run_agent() {
         gemini)
             local model_arg=""
             [[ -n "$MODEL" ]] && model_arg="-m $MODEL"
-            timeout --signal=KILL 30 gemini --yolo -o text $model_arg "$prompt" 2>&1
+
+            # Create isolated working directory to avoid gitignore issues
+            local sandbox="$TEMP_DIR/gemini_sandbox"
+            mkdir -p "$sandbox"
+
+            # Copy only the needed files (use absolute paths)
+            cp "$img_sat" "$sandbox/satellite.png"
+            cp "$img_geo" "$sandbox/geometry.png"
+            cp "$SCRIPT_DIR/$CONTEXT_DOC" "$sandbox/LABELING_INSTRUCTIONS.md" 2>/dev/null || true
+
+            # Write prompt to file to avoid shell escaping issues
+            printf '%s' "$prompt" > "$sandbox/prompt.txt"
+
+            # cd to sandbox directory
+            local orig_dir="$PWD"
+            cd "$sandbox"
+
+            # Run Gemini with --sandbox
+            gemini --sandbox --yolo -o text \
+                "Read prompt.txt and analyze satellite.png geometry.png" \
+                prompt.txt satellite.png geometry.png 2>&1
+            local exit_code=$?
+
+            # Restore directory and cleanup
+            cd "$orig_dir"
+            rm -rf "$sandbox"
+
+            [[ $exit_code -ne 0 ]] && echo "GEMINI_ERROR: exit code $exit_code"
+            ;;
+        ollama)
+            local sat_base64 geo_base64
+            sat_base64=$(base64 -w0 "$img_sat")
+            geo_base64=$(base64 -w0 "$img_geo")
+            local model_name="${MODEL:-moondream}"
+
+            # CPU-only mode: disable GPU and set thread count
+            local env_prefix=""
+            if [[ "$CPU_ONLY" == "true" ]]; then
+                local total_cores
+                total_cores=$(nproc)
+                local ollama_threads=$((total_cores - 2))
+                env_prefix="CUDA_VISIBLE_DEVICES= OLLAMA_NUM_THREADS=$ollama_threads "
+            fi
+
+            # Use Ollama API via curl for vision models (both images)
+            eval "${env_prefix}timeout 60 curl -s http://localhost:11434/api/generate" \
+                -d "{
+                    \"model\": \"$model_name\",
+                    \"prompt\": $(echo "$prompt" | jq -Rs .),
+                    \"images\": [\"$sat_base64\", \"$geo_base64\"],
+                    \"stream\": false
+                }" | jq -r '.response // .error // "No response"'
             ;;
     esac
 }
@@ -191,23 +223,27 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
 
     METADATA="${CANDIDATE_DIR}metadata.yaml"
     IMG_SAT="${CANDIDATE_DIR}satellite.png"
+    IMG_GEO="${CANDIDATE_DIR}geometry.png"
 
     if [[ ! -f "$METADATA" ]]; then
         echo "[WARN] No metadata in $CANDIDATE_DIR" | tee -a "$LOG_FILE"
         continue
     fi
 
-    # Prepare image if needed
-    PROCESSED_IMG=$(prepare_image "$IMG_SAT" "$TEMP_DIR/${REF_ID}_sat.png")
+    # Read metadata content
+    METADATA_CONTENT=""
+    if [[ -f "$METADATA" ]]; then
+        METADATA_CONTENT=$(cat "$METADATA")
+    fi
 
-    # Build prompt
-    PROMPT=$(build_prompt "$REF_ID" "$TARGET_ID" "$PROCESSED_IMG" "$METADATA")
+    # Build prompt using the function
+    PROMPT=$(build_prompt "$REF_ID" "$TARGET_ID" "$METADATA_CONTENT")
 
     echo "[$(date +%H:%M:%S)] $REF_ID" >> "$LOG_FILE"
     echo -n "Processing $REF_ID... "
 
-    # Run agent
-    RAW=$(run_agent "$PROMPT") || true
+    # Run agent (pass image paths)
+    RAW=$(run_agent "$PROMPT" "$IMG_SAT" "$IMG_GEO") || true
 
     echo "=== $REF_ID ===" >> "$RAW_OUTPUT"
     echo "$RAW" >> "$RAW_OUTPUT"
