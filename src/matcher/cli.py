@@ -1214,10 +1214,12 @@ def generate_agent_test_batch(
         # Filter by labeler
         matcher generate-agent-test-batch -n 50 --labeler brad
     """
-    import pandas as pd
+    from datetime import UTC, datetime
+
     import geopandas as gpd
-    from datetime import datetime, UTC
-    from .agent_labeling.context_generator import write_candidate_package, write_batch_manifest
+    import pandas as pd
+
+    from .agent_labeling.context_generator import write_candidate_package
     from .agent_labeling.sampler import SampledCandidate
 
     # Load human labels
@@ -1265,6 +1267,7 @@ def generate_agent_test_batch(
 
     # Stratified sample across datasets
     import numpy as np
+
     rng = np.random.default_rng(seed)
 
     sampled = []
@@ -1316,7 +1319,7 @@ def generate_agent_test_batch(
 
     # Build SampledCandidate objects and write packages
     candidates = []
-    for i, row in sampled_df.iterrows():
+    for _, row in sampled_df.iterrows():
         ref_id = row["gers_id"]
         target_id = row["target_id"]
         dataset = row["dataset"]
@@ -1332,10 +1335,19 @@ def generate_agent_test_batch(
 
         # Extract features from row (if available)
         feature_cols = [
-            "hausdorff_distance", "buffer_iou", "heading_delta", "length_ratio",
-            "name_levenshtein", "name_jaro_winkler", "class_similarity",
-            "centroid_distance", "overlap_ratio", "mean_hausdorff_distance",
-            "degree_match_score", "dead_end_match", "intersection_match"
+            "hausdorff_distance",
+            "buffer_iou",
+            "heading_delta",
+            "length_ratio",
+            "name_levenshtein",
+            "name_jaro_winkler",
+            "class_similarity",
+            "centroid_distance",
+            "overlap_ratio",
+            "mean_hausdorff_distance",
+            "degree_match_score",
+            "dead_end_match",
+            "intersection_match",
         ]
         features = {col: row.get(col, 0.0) for col in feature_cols if col in row.index}
 
@@ -1376,6 +1388,7 @@ def generate_agent_test_batch(
 
     # Write manifest with ground truth info
     import yaml
+
     manifest = {
         "batch_id": batch_id,
         "batch_type": "agent_test",
@@ -1390,8 +1403,7 @@ def generate_agent_test_batch(
             "by_dataset": sampled_df["dataset"].value_counts().to_dict(),
         },
         "candidates": [
-            {"ref_id": c.ref_id, "target_id": c.target_id, "dataset": c.dataset}
-            for c in candidates
+            {"ref_id": c.ref_id, "target_id": c.target_id, "dataset": c.dataset} for c in candidates
         ],
     }
     (batch_dir / "manifest.yaml").write_text(
@@ -1405,7 +1417,9 @@ def generate_agent_test_batch(
     console.print()
     console.print("Next steps:")
     console.print("  1. Have agents label candidates in candidates/")
-    console.print(f"  2. Import labels: matcher import-agent-labels {batch_dir} -a <agent-id> -l <labels.csv>")
+    console.print(
+        f"  2. Import labels: matcher import-agent-labels {batch_dir} -a <agent-id> -l <labels.csv>"
+    )
     console.print(f"  3. Compare: matcher agent-consensus {batch_dir}")
 
 
