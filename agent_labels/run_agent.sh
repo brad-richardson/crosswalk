@@ -5,7 +5,6 @@
 # Agents: claude, codex, gemini, ollama
 # Options:
 #   --model <model>    Model variant (e.g., sonnet, haiku, flash, moondream)
-#   --cpu              Force CPU-only mode (for ollama)
 
 set -o pipefail
 
@@ -31,17 +30,12 @@ shift || true
 
 BATCH_DIR=""
 MODEL=""
-CPU_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)
             MODEL="$2"
             shift 2
-            ;;
-        --cpu)
-            CPU_ONLY=true
-            shift
             ;;
         *)
             if [[ -z "$BATCH_DIR" ]]; then
@@ -60,20 +54,19 @@ case "$AGENT" in
     claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [batch_dir] [--model <model>] [--cpu]"
+        echo "Usage: $0 <agent> [batch_dir] [--model <model>]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
         echo "  codex     - OpenAI Codex CLI"
         echo "  gemini    - Google Gemini CLI (models: flash, pro)"
-        echo "  ollama    - Local Ollama (models: moondream, llava)"
+        echo "  ollama    - Local Ollama (models: llava, llava:13b)"
         echo ""
         echo "Options:"
         echo "  --model      Model variant to use"
-        echo "  --cpu        Force CPU-only mode (no GPU, for ollama)"
         echo ""
         echo "Example: $0 gemini batches/test_batch_2026-01-18 --model flash"
-        echo "Example: $0 ollama --model moondream --cpu"
+        echo "Example: $0 ollama --model llava"
         exit 1
         ;;
 esac
@@ -90,7 +83,6 @@ CANDIDATES_DIR="$BATCH_DIR/candidates"
 # Build output dir name
 OUTPUT_NAME="$AGENT"
 [[ -n "$MODEL" ]] && OUTPUT_NAME="${AGENT}_${MODEL}"
-[[ "$CPU_ONLY" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_cpu"
 
 OUTPUT_DIR="$BATCH_DIR/labels/$OUTPUT_NAME"
 OUTPUT_FILE="$OUTPUT_DIR/data.csv"
@@ -107,7 +99,6 @@ echo "Agent: $AGENT"
 [[ -n "$MODEL" ]] && echo "Model: $MODEL"
 echo "Batch: $BATCH_DIR"
 echo "Output: $OUTPUT_FILE"
-[[ "$CPU_ONLY" == "true" ]] && echo "Mode: CPU-only"
 echo ""
 
 COUNT=0
@@ -192,19 +183,10 @@ run_agent() {
             local sat_base64 geo_base64
             sat_base64=$(base64 -w0 "$img_sat")
             geo_base64=$(base64 -w0 "$img_geo")
-            local model_name="${MODEL:-moondream}"
-
-            # CPU-only mode: disable GPU and set thread count
-            local env_prefix=""
-            if [[ "$CPU_ONLY" == "true" ]]; then
-                local total_cores
-                total_cores=$(nproc)
-                local ollama_threads=$((total_cores - 2))
-                env_prefix="CUDA_VISIBLE_DEVICES= OLLAMA_NUM_THREADS=$ollama_threads "
-            fi
+            local model_name="${MODEL:-llava}"
 
             # Use Ollama API via curl for vision models (both images)
-            eval "${env_prefix}timeout 60 curl -s http://localhost:11434/api/generate" \
+            timeout 120 curl -s http://localhost:11434/api/generate \
                 -d "{
                     \"model\": \"$model_name\",
                     \"prompt\": $(echo "$prompt" | jq -Rs .),

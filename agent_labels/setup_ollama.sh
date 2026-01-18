@@ -1,8 +1,11 @@
 #!/bin/bash
 # Setup Ollama for local agent labeling
 #
-# This script installs Ollama and pulls the moondream vision model.
+# This script installs Ollama and pulls the llava vision model.
 # Run this once before using: ./run_agent.sh ollama
+#
+# Note: This task requires at least a 7B model. Smaller models like
+# moondream (1.8B) struggle with the spatial reasoning required.
 
 set -e
 
@@ -39,17 +42,17 @@ if ! curl -s http://localhost:11434/api/tags &>/dev/null 2>&1; then
 fi
 
 # Pull recommended vision model
-echo "Pulling moondream (1.8B vision model, ~1GB download)..."
-ollama pull moondream
+echo "Pulling llava (7B vision model, ~4GB download)..."
+ollama pull llava
 
 echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Usage:"
-echo "  ./run_agent.sh ollama --model moondream       # GPU mode (faster)"
-echo "  ./run_agent.sh ollama --model moondream --cpu # CPU mode (no GPU)"
+echo "  ./run_agent.sh ollama --model llava"
 echo ""
-echo "Other vision models you can try:"
-echo "  ollama pull llava        # LLaVA 7B (better quality, slower)"
-echo "  ollama pull llava:13b    # LLaVA 13B (best quality, slowest)"
+echo "Other vision models:"
+echo "  ollama pull llava:13b    # LLaVA 13B (better quality, needs more VRAM)"
+echo ""
+echo "Note: Requires GPU. CPU-only inference is too slow for this task."
 echo ""

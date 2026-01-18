@@ -4,14 +4,13 @@
 
 Unified script for all agents:
 ```bash
-./run_agent.sh <agent> [batch_dir] [--model <model>] [--cpu]
+./run_agent.sh <agent> [batch_dir] [--model <model>]
 
 # Examples:
 ./run_agent.sh gemini --model flash
 ./run_agent.sh claude --model haiku
 ./run_agent.sh codex
-./run_agent.sh ollama --model moondream        # Local GPU mode
-./run_agent.sh ollama --model moondream --cpu  # Local CPU mode
+./run_agent.sh ollama --model llava  # Local GPU mode
 ```
 
 ## Batch Processing (Priority)
@@ -69,36 +68,42 @@ Run vision models locally via Ollama to avoid API costs/quotas.
 ./setup_ollama.sh
 ```
 
-This installs Ollama and pulls the moondream vision model.
+This installs Ollama and pulls vision models.
 
 ### Usage
 
 ```bash
-# GPU mode (faster, ~20-40 tok/s with moondream)
-./run_agent.sh ollama --model moondream
-
-# CPU mode (slower, ~5-10 tok/s, reserves 2 cores for system)
-./run_agent.sh ollama --model moondream --cpu
+# Requires GPU - task is too complex for CPU-only inference
+./run_agent.sh ollama --model llava
 ```
 
 ### Available Models
 
 | Model | Size | Quality | Speed | Notes |
 |-------|------|---------|-------|-------|
-| moondream | 1.8B | Good | Fast | Default, best for efficiency |
-| llava | 7B | Great | Medium | Better quality |
-| llava:13b | 13B | Excellent | Slow | Best quality |
+| moondream | 1.8B | Poor | Fast | Too small for this task - mostly echoes prompts |
+| llava | 7B | Good | Medium | Recommended minimum |
+| llava:13b | 13B | Better | Slow | Better quality, needs more VRAM |
 
 Pull additional models with `ollama pull <model>`.
 
-### CPU vs GPU Mode
+**Note on small models**: Testing with moondream (1.8B) showed very poor results -
+the model struggled with the spatial reasoning required and mostly echoed the
+prompt template back. This task requires at least a 7B+ parameter model.
+CPU-only inference is not viable due to speed constraints (~160s per candidate).
 
-| Mode | Flag | Speed | Use Case |
-|------|------|-------|----------|
-| GPU | (default) | ~20-40 tok/s | External batch processing |
-| CPU | `--cpu` | ~5-10 tok/s | Background processing while monitoring |
+### Remote Ollama
 
-CPU mode sets `CUDA_VISIBLE_DEVICES=` and uses (total_cores - 2) threads.
+For machines without a GPU, you can run Ollama on a remote machine with a GPU:
+
+```bash
+# On GPU machine: start Ollama with network access
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+
+# On local machine: point to remote
+export OLLAMA_HOST=http://gpu-machine:11434
+./run_agent.sh ollama --model llava
+```
 
 ### Alternative: llama.cpp + SYCL (Future)
 
