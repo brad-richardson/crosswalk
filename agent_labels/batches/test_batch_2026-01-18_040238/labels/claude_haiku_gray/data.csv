@@ -1,0 +1,65 @@
+ref_id,target_id,label,confidence,reasoning
+001ca42e-96cc-4d20-869b-4e2e15e7d613,boston_streets_1461,no_match,0.92,Perpendicular geometries with 142m Hausdorff distance; target is 3x longer and separate segment
+00b1f8ad-a783-4121-a7e0-51dee6d0af79,boston_streets_6680,no_match,0.92,Footway vs road - different feature types; parallel but spatially distinct
+00c74c00-45e2-43a5-be92-a3f2ba77a53e,boston_streets_20,no_match,0.92,Footway and road are distinct features running parallel with 48m offset
+02d2b67a-3d89-4b6d-ab56-8bec360f6edd,boston_bike_1082,no_match,0.85,Footway vs bike facility are different feature types despite geometric alignment
+09e81068-be11-4bf2-9c68-083b5a2cffba,boston_streets_6624,no_match,0.92,Different feature types: footway vs residential street
+0bbc8b14-fa43-48ea-ae32-40b971829602,boston_streets_730,no_match,0.92,Segments separated by 70m with minimal overlap; different roads despite same name
+0be77255-f8cb-422a-a629-0c7df4414a52,boston_streets_10051,no_match,0.92,Parallel lines with 40m offset and poor geometric overlap; likely opposite carriageways or adjacent feature
+0c63aead-3cac-4c24-9bb5-18390fb37ce9,boston_streets_125,no_match,0.95,Perpendicular geometry with 35deg heading delta and different names
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.92,Road centerline and parallel sidewalk are different physical features
+10991d41-8a6d-4b95-a691-fb9ed07126e5,boston_streets_2078,no_match,0.92,Lines diverge at 37.7° angle with poor geometric overlap despite name match
+129b25a6-af04-4a91-8641-532f7d8caf82,w57743633@23,no_match,0.92,Different feature types (footway vs residential road) and poor geometric overlap with 81m offset
+1666cfa9-4145-48bf-96fd-015af4595e5b,w842963289@2,no_match,0.88,Segments significantly offset with high Hausdorff distance (36.9m) and low buffer_iou (0.24) despite similar heading
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.92,Sidewalk and road are parallel but distinct features on different grades
+18637422-a7e0-4e28-8711-566f1a7bcaa5,boston_streets_6041,no_match,0.90,Poor geometric overlap (16% overlap; 62m Hausdorff distance; 53m centroid offset) despite name match suggests different road segments
+196ce58a-00dd-44ba-92ff-21c041f12116,boston_streets_6150,no_match,0.92,Lines are parallel but separated by 65m; insufficient geometric alignment despite name match
+1f2ac020-7ff0-428a-be14-55ee05cffceb,boston_streets_450,no_match,0.85,Different roads: service road (Red Auerbach Way) vs residential street (Cotting Street) with completely different names
+1fed679a-4c1b-4540-a5db-dff45199257e,boston_streets_176,no_match,0.92,Geometries offset 76m with only 20% overlap; high hausdorff distance despite name match indicates different segments or parallel features
+215c143a-f5d7-4e77-b075-2d24ae4d8190,boston_streets_5075,no_match,0.95,Different roads diverge at intersection; Derne Street and Bowdoin Street are distinct features
+218a329c-2a5d-49fb-983c-4b9bf5399a0d,boston_streets_1359,no_match,0.92,Reference is 69m footway; target is 154m Bedford Street. Geometries diverge substantially with low buffer_iou (0.29) and high hausdorff distance (73m).
+23206f40-9809-4005-99b0-51d42caf243a,boston_streets_9174,no_match,0.92,Service road vs tertiary road; 65m Hausdorff distance indicates poor geometric alignment; very different lengths (46m vs 131m)
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.85,Poor geometric overlap despite topological connection; likely separate footway segments
+24dce6da-fca4-4eda-923f-f10fe6b0d07a,w1078094504@1,no_match,0.85,30.9° heading delta and low buffer IoU indicate different footway segments
+26a375ed-b74b-4da6-9535-be408b0e6a6a,boston_streets_2970,no_match,0.85,Minimal geometric overlap (buffer_iou=0.10) with 62.8m hausdorff distance despite matching names; separate road segments
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Road centerline vs adjacent parallel sidewalk; distinct features
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.92,Parallel sidewalk segments on opposite sides of street with 16m centroid offset
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.85,Target segment only partially overlaps with significant directional deviation (39.7 degrees)
+2c6feb55-b6b2-4bda-b8fa-90103209da56,boston_streets_891,no_match,0.85,Poor geometric overlap despite same name; segments offset/fragmented
+2e579ee6-3cdf-4e25-bdde-f91e6fbd0c3f,boston_streets_4972,match,0.72,Same road with identical names and direction; target extends beyond reference segment indicating different segmentation of same feature
+302540ea-53c6-4be0-a4c6-9f8de781540c,boston_streets_9780,no_match,0.85,Segments diverge with 31.9° heading difference despite matching names; poor geometric overlap (buffer_iou=0.455)
+310a0055-6d7a-4fe0-b822-b31f22ac59fc,boston_streets_4325,match,0.72,Offset geometries but identical names and road class suggest same street with different digitization accuracy
+31a708b5-22e2-4646-bf7f-0019b31800fb,boston_streets_461,no_match,0.92,Large heading delta (35°) and poor geometric overlap despite matching names; segments diverge significantly
+32f8a658-9b4b-4733-b33f-67888fd7eac4,boston_streets_3217,no_match,0.92,Segments share name but have poor geometric overlap (11%); target is short subset with 107m max distance from reference
+351f73aa-db85-4c3e-a050-e056a650da4c,boston_bike_2934,no_match,0.92,Geometries offset with poor alignment (buffer_iou=0.37); different lengths (30m vs 67m); different feature types (road vs bike)
+39c3dd6b-5ad7-4d38-a86b-eaca1483a9f4,boston_streets_3519,no_match,0.92,Segments diverge significantly; 72m hausdorff distance and only 21% overlap despite same name
+39c3dd6b-5ad7-4d38-a86b-eaca1483a9f4,boston_streets_684,no_match,0.95,Geometries diverge completely; red and blue lines are perpendicular with no overlap despite matching names
+3a4ff50e-19fd-46ff-a6c8-606dfcec3a8b,boston_streets_4780,no_match,0.95,Reference is footway/sidewalk; target is road centerline - different physical features
+3af46e0f-c3ac-415d-8fb2-ac535f6cb194,boston_streets_2257,no_match,0.88,Different segment lengths; target twice as long as reference; large Hausdorff distance indicates misalignment
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,no_match,0.85,Target is only 25% of reference length; poor spatial overlap despite same direction
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.72,Poor overlap (IOU=0.30) and 16m centroid distance suggest different/parallel sidewalk segments
+3f4d080b-0c5c-4f25-8f67-5004ab9fa2b5,boston_bike_3179,no_match,0.75,Different feature types (cycleway vs path) on same bridge infrastructure
+41f531fb-d46d-475a-834b-0f68a5bd1c46,boston_streets_4918,no_match,0.75,Different sections of State Street with poor geometric overlap and significant length disparity
+421e2ef2-194f-455d-a149-5948eba7432a,boston_streets_2089,no_match,0.85,Hausdorff distance 68m and length ratio 0.579 indicate different segmentation; geometries don't align despite matching name
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.88,Red line diverges significantly from blue line with 29.8m hausdorff distance and poor overlap metrics indicating different sidewalk segments
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_bike_272,no_match,0.85,Separate cycleway facility with poor geometric alignment; not same feature as primary road
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_streets_8071,no_match,0.85,Segments diverge significantly with 43.9m Hausdorff distance despite same street name; different angular paths
+44538cf4-9d1b-41ec-ad2e-0603d359bbfb,boston_streets_8181,no_match,0.95,Segments spatially separated 60m apart despite same street name; different physical locations
+48645b31-0b06-4e4a-a5aa-040f608c95e1,w863038355@4,match,0.5,parsed
+4b8b740f-22df-4dc2-bb42-16eb61983030,boston_streets_10839,no_match,0.92,Segments separated by ~140m despite same name; different road sections
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.92,Geometries completely misaligned; hausdorff_distance 39m indicates different segments
+4d52d3a0-849e-453f-b3b3-d25bb4f532cc,boston_streets_2086,no_match,0.92,Significant length difference (46m vs 224m) and poor geometric overlap despite matching names
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,no_match,0.85,Large geometric offset (26.8m centroid distance) and poor overlap (0.49 IOU) despite matching class
+578ed470-4be6-49e6-9df9-d01f68fbf140,boston_streets_9793,match,0.85,Same road (North Square); target segment longer due to different segmentation; perfect name match and topological alignment
+57d78031-75dc-44c9-a9cb-54d993e9a742,boston_streets_3128,no_match,0.92,Lines are spatially separated with 40m offset; no geometric overlap despite same name
+5aecbc9d-8ca7-4975-b5b8-452f094b072d,boston_streets_8718,match,0.97,Lines perfectly overlap on Lynn Street with identical names and road class
+5da0d45a-4f25-4786-9de8-bdec8b8e554b,boston_streets_6552,match,0.5,parsed
+5e5a57ef-4d21-4fe2-a140-2016c5889ee9,boston_streets_7256,no_match,0.92,Segments diverge with 37m offset and 31° heading difference; poor geometric alignment
+616dc619-d070-4c6f-aa4f-a6887c6a0217,boston_streets_5708,no_match,0.92,Segments substantially offset with minimal overlap despite matching names; hausdorff distance 38.5m and buffer IOU 0.13 indicate different locations
+640e0b5a-ffba-4404-a006-43659dd43466,boston_bike_325,no_match,0.85,Footway and bike facility are distinct features despite alignment; offset ~7m suggests parallel adjacent paths
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.95,Road vs sidewalk: different feature types running parallel
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.92,Strong geometric and topological alignment; same footway feature type; minor length difference due to segmentation
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,no_match,0.88,Parallel segments with 28.7° heading difference; geometrically offset not overlapping
+6e25a5de-4ad3-4f00-9046-66516592d000,boston_streets_7029,no_match,0.92,Parallel roads with 50m+ offset; same name but different geometry
+6ffe34e3-a279-44f8-bb0b-e71c494b981c,boston_streets_3938,match,0.85,Reference is subset of target on same road; segmentation difference
+704c80d5-afd9-4efe-82e7-f27ecd736dcd,boston_streets_9559,no_match,0.92,Geometries significantly offset and non-aligned; target is 36% length of reference

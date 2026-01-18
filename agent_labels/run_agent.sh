@@ -88,9 +88,11 @@ fi
 CONTEXT_DOC="LABELING_INSTRUCTIONS.md"
 CANDIDATES_DIR="$BATCH_DIR/candidates"
 
-# Build output dir name
+# Build output dir name (include image processing flags)
 OUTPUT_NAME="$AGENT"
 [[ -n "$MODEL" ]] && OUTPUT_NAME="${AGENT}_${MODEL}"
+[[ "$GRAYSCALE" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_gray"
+[[ "$LOW_RES" == "true" ]] && OUTPUT_NAME="${OUTPUT_NAME}_lowres"
 
 OUTPUT_DIR="$BATCH_DIR/labels/$OUTPUT_NAME"
 OUTPUT_FILE="$OUTPUT_DIR/data.csv"
@@ -115,19 +117,26 @@ COUNT=0
 FAILED=0
 TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
 
-# Prepare image if needed
+# Prepare image if needed (uses Python/PIL)
 prepare_image() {
     local src="$1"
     local dst="$2"
 
     if [[ "$GRAYSCALE" == "true" || "$LOW_RES" == "true" ]]; then
-        local convert_args=()
-        [[ "$GRAYSCALE" == "true" ]] && convert_args+=("-colorspace" "Gray")
-        [[ "$LOW_RES" == "true" ]] && convert_args+=("-resize" "256x256")
+        python3 - "$src" "$dst" "$GRAYSCALE" "$LOW_RES" << 'PYTHON_EOF'
+import sys
+from PIL import Image
 
-        if command -v convert &>/dev/null; then
-            convert "$src" "${convert_args[@]}" "$dst" 2>/dev/null && echo "$dst" && return
-        fi
+src, dst, grayscale, lowres = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+img = Image.open(src)
+if grayscale == "true":
+    img = img.convert("L")
+if lowres == "true":
+    img = img.resize((256, 256), Image.LANCZOS)
+img.save(dst)
+print(dst)
+PYTHON_EOF
+        return
     fi
     echo "$src"
 }
