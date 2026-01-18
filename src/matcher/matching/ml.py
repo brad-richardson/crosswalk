@@ -767,21 +767,18 @@ class MLMatcher:
         # These capture network connectivity without requiring explicit topology
         from ..features.spatial_context import (
             SpatialContextIndex,
+            compute_all_topology,
             compute_endpoint_features,
-            compute_topology_features,
         )
-
-        # Build spatial indexes for both datasets
-        logger.info("Building spatial indexes for topology features...")
-        target_index = SpatialContextIndex()
-        target_index.build_from_gdf(target, id_column="id")
-
-        ref_index = SpatialContextIndex()
-        ref_index.build_from_gdf(reference, id_column="id")
 
         # Get unique indices from candidates to avoid recomputation
         unique_target_indices = set(cand.target_idx for cand in candidates)
         unique_ref_indices = set(cand.ref_idx for cand in candidates)
+
+        # Build spatial index for endpoint proximity features (target only)
+        logger.info("Building spatial index for endpoint features...")
+        target_index = SpatialContextIndex()
+        target_index.build_from_gdf(target, id_column="id")
 
         # Pre-compute endpoint features for target segments
         target_endpoint_features = {}
@@ -802,31 +799,40 @@ class MLMatcher:
                     "shared_endpoint_count": 0,
                 }
 
-        # Pre-compute topology features for target segments
-        target_topology_features = {}
-        logger.info(
-            f"Pre-computing topology features for {len(unique_target_indices)} target segments..."
-        )
-        for target_idx in unique_target_indices:
-            target_geom = target_geoms[target_idx]
-            if target_geom is not None and not target_geom.is_empty:
-                topo_feats = compute_topology_features(target_geom, target_index)
-                target_topology_features[target_idx] = topo_feats
-            else:
-                target_topology_features[target_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
+        # Pre-compute topology features using efficient Union-Find batch computation
+        # Get unique segment IDs for only the candidates we need
+        target_ids = target["id"].to_numpy()
+        ref_ids = reference["id"].to_numpy()
+        unique_target_ids = {str(target_ids[idx]) for idx in unique_target_indices}
+        unique_ref_ids = {str(ref_ids[idx]) for idx in unique_ref_indices}
 
-        # Pre-compute topology features for reference segments
-        ref_topology_features = {}
         logger.info(
-            f"Pre-computing topology features for {len(unique_ref_indices)} reference segments..."
+            f"Computing topology features for {len(unique_target_ids)} target "
+            f"and {len(unique_ref_ids)} reference segments (batch)..."
         )
+
+        # Compute topology for target and reference using efficient batch algorithm
+        target_topology_by_id = compute_all_topology(
+            target, id_column="id", tolerance=5.0, ids_to_compute=unique_target_ids
+        )
+        ref_topology_by_id = compute_all_topology(
+            reference, id_column="id", tolerance=5.0, ids_to_compute=unique_ref_ids
+        )
+
+        # Map topology from segment IDs to DataFrame indices
+        target_topology_features = {}
+        for target_idx in unique_target_indices:
+            seg_id = str(target_ids[target_idx])
+            target_topology_features[target_idx] = target_topology_by_id.get(
+                seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
+            )
+
+        ref_topology_features = {}
         for ref_idx in unique_ref_indices:
-            ref_geom = ref_geoms[ref_idx]
-            if ref_geom is not None and not ref_geom.is_empty:
-                topo_feats = compute_topology_features(ref_geom, ref_index)
-                ref_topology_features[ref_idx] = topo_feats
-            else:
-                ref_topology_features[ref_idx] = DEFAULT_TOPOLOGY_FEATURES.copy()
+            seg_id = str(ref_ids[ref_idx])
+            ref_topology_features[ref_idx] = ref_topology_by_id.get(
+                seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
+            )
 
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
