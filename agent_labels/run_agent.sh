@@ -150,11 +150,14 @@ run_agent() {
         claude)
             local model_arg=""
             [[ -n "$MODEL" ]] && model_arg="--model $MODEL"
-            # Claude CLI reads images referenced in the prompt from the working directory
-            # We need to run from the candidate directory so images are accessible
+            # Claude CLI requires explicit "read" instruction to access images
+            # Prepend instruction and run from candidate directory
             local candidate_dir
             candidate_dir=$(dirname "$img_sat")
-            (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$prompt") 2>&1
+            local full_prompt="First read satellite.png and geometry.png, then answer:
+
+$prompt"
+            (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$full_prompt") 2>&1
             ;;
         codex)
             local tmpout="$TEMP_DIR/codex_out.txt"
