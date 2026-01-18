@@ -1150,6 +1150,279 @@ def agent_consensus(
         console.print(f"  Perfect agreement: {perfect}/{len(consensus)}")
 
 
+@app.command("generate-agent-test-batch")
+def generate_agent_test_batch(
+    n_samples: int = typer.Option(
+        100,
+        "--n-samples",
+        "-n",
+        help="Number of labeled pairs to sample for testing",
+    ),
+    output_dir: Path = typer.Option(
+        Path("agent_labels"),
+        "--output",
+        "-o",
+        help="Output directory for agent labeling batches",
+    ),
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Directory containing human labels (Hive-partitioned)",
+    ),
+    reference: Path = typer.Option(
+        Path("data/raw/overture_segments.parquet"),
+        "--reference",
+        "-r",
+        help="Reference segments (Overture)",
+    ),
+    datasets: list[str] = typer.Option(
+        None,
+        "--dataset",
+        "-d",
+        help="Datasets to include (can specify multiple). If not specified, uses all.",
+    ),
+    labeler: str | None = typer.Option(
+        None,
+        "--labeler",
+        help="Filter by labeler name",
+    ),
+    seed: int = typer.Option(
+        42,
+        "--seed",
+        help="Random seed for reproducibility",
+    ),
+    no_satellite: bool = typer.Option(
+        False,
+        "--no-satellite",
+        help="Skip satellite imagery (faster, geometry-only images)",
+    ),
+):
+    """Generate a batch from existing human labels for agent agreement testing.
+
+    Unlike generate-agent-batch which samples NEW candidates, this command
+    uses existing human-labeled pairs so you can measure agent agreement
+    with human ground truth.
+
+    Examples:
+        # Generate 200 samples across all datasets
+        matcher generate-agent-test-batch -n 200
+
+        # Specific datasets only
+        matcher generate-agent-test-batch -n 100 -d boston_streets -d boston_bikes
+
+        # Filter by labeler
+        matcher generate-agent-test-batch -n 50 --labeler brad
+    """
+    from datetime import UTC, datetime
+
+    import geopandas as gpd
+    import pandas as pd
+
+    from .agent_labeling.context_generator import write_candidate_package
+    from .agent_labeling.sampler import SampledCandidate
+
+    # Load human labels
+    if not labels_dir.exists():
+        console.print(f"[red]Error: Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Find all label files
+    label_files = list(labels_dir.glob("dataset=*/data.csv"))
+    if not label_files:
+        console.print(f"[red]Error: No label files found in {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Load and combine labels
+    all_labels = []
+    for f in label_files:
+        dataset = f.parent.name.replace("dataset=", "")
+        if datasets and dataset not in datasets:
+            continue
+        df = pd.read_csv(f)
+        df["dataset"] = dataset
+        all_labels.append(df)
+
+    if not all_labels:
+        console.print("[red]Error: No labels found for specified datasets[/red]")
+        raise typer.Exit(1)
+
+    labels_df = pd.concat(all_labels, ignore_index=True)
+
+    # Filter by labeler if specified
+    if labeler and "labeler" in labels_df.columns:
+        labels_df = labels_df[labels_df["labeler"].str.lower() == labeler.lower()]
+        if len(labels_df) == 0:
+            console.print(f"[red]Error: No labels found for labeler '{labeler}'[/red]")
+            raise typer.Exit(1)
+
+    # Filter to match/no_match only (exclude unsure for cleaner testing)
+    if "label" in labels_df.columns:
+        labels_df = labels_df[labels_df["label"].isin(["match", "no_match"])]
+        if len(labels_df) == 0:
+            console.print("[red]Error: No match/no_match labels found after filtering[/red]")
+            raise typer.Exit(1)
+
+    console.print(f"[blue]Found {len(labels_df)} labeled pairs[/blue]")
+
+    # Stratified sample across datasets
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+
+    sampled = []
+    for dataset in labels_df["dataset"].unique():
+        dataset_df = labels_df[labels_df["dataset"] == dataset]
+        n_dataset = max(1, int(n_samples * len(dataset_df) / len(labels_df)))
+        n_dataset = min(n_dataset, len(dataset_df))
+        indices = rng.choice(len(dataset_df), size=n_dataset, replace=False)
+        sampled.append(dataset_df.iloc[indices])
+
+    sampled_df = pd.concat(sampled, ignore_index=True)
+    console.print(f"[blue]Sampled {len(sampled_df)} pairs for testing[/blue]")
+
+    # Load reference data
+    if not reference.exists():
+        console.print(f"[red]Error: Reference file not found: {reference}[/red]")
+        raise typer.Exit(1)
+
+    ref_gdf = gpd.read_parquet(reference)
+    ref_lookup = ref_gdf.set_index("id")
+
+    # Load target datasets
+    target_gdfs = {}
+    dataset_paths = {
+        "boston_streets": Path("data/raw/boston_streets.parquet"),
+        "boston_sidewalks": Path("data/raw/boston_sidewalks.parquet"),
+        "boston_bikes": Path("data/raw/boston_bike_network.parquet"),
+        "osm": Path("data/raw/osm_segments.parquet"),
+    }
+
+    for dataset in sampled_df["dataset"].unique():
+        path = dataset_paths.get(dataset)
+        if path and path.exists():
+            target_gdfs[dataset] = gpd.read_parquet(path).set_index("id")
+        else:
+            console.print(f"[yellow]Warning: No data file for {dataset}[/yellow]")
+
+    # Generate batch
+    batch_id = f"test_batch_{datetime.now(UTC).strftime('%Y-%m-%d_%H%M%S')}"
+    batch_dir = output_dir / "batches" / batch_id
+    candidates_dir = batch_dir / "candidates"
+    labels_out_dir = batch_dir / "labels"
+
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    labels_out_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"\n[blue]Generating batch: {batch_id}[/blue]")
+
+    # Build SampledCandidate objects and write packages
+    candidates = []
+    for _, row in sampled_df.iterrows():
+        ref_id = row["gers_id"]
+        target_id = row["target_id"]
+        dataset = row["dataset"]
+
+        if dataset not in target_gdfs:
+            continue
+
+        try:
+            ref_row = ref_lookup.loc[ref_id]
+            target_row = target_gdfs[dataset].loc[target_id]
+        except KeyError:
+            continue
+
+        # Extract features from row (if available)
+        feature_cols = [
+            "hausdorff_distance",
+            "buffer_iou",
+            "heading_delta",
+            "length_ratio",
+            "name_levenshtein",
+            "name_jaro_winkler",
+            "class_similarity",
+            "centroid_distance",
+            "overlap_ratio",
+            "mean_hausdorff_distance",
+            "degree_match_score",
+            "dead_end_match",
+            "intersection_match",
+        ]
+        features = {col: row.get(col, 0.0) for col in feature_cols if col in row.index}
+
+        candidate = SampledCandidate(
+            ref_id=str(ref_id),
+            target_id=str(target_id),
+            ref_geometry=ref_row.geometry,
+            target_geometry=target_row.geometry,
+            ref_name=ref_row.get("names") if hasattr(ref_row, "get") else None,
+            target_name=target_row.get("names") if hasattr(target_row, "get") else None,
+            ref_class=ref_row.get("class") if hasattr(ref_row, "get") else None,
+            target_class=target_row.get("class") if hasattr(target_row, "get") else None,
+            ml_confidence=row.get("original_confidence", 0.5),
+            ml_decision=row.get("original_decision", "review"),
+            features=features,
+            dataset=dataset,
+            confidence_bucket="ground_truth",
+        )
+        candidates.append(candidate)
+
+        # Write candidate package with images
+        write_candidate_package(
+            output_dir=candidates_dir,
+            candidate=candidate,
+            batch_id=batch_id,
+            fetch_satellite=not no_satellite,
+        )
+
+        if (len(candidates)) % 20 == 0:
+            console.print(f"  Progress: {len(candidates)}/{len(sampled_df)}")
+
+    # Write ground truth labels
+    ground_truth_path = labels_out_dir / "ground_truth" / "data.csv"
+    ground_truth_path.parent.mkdir(parents=True, exist_ok=True)
+    sampled_df[["gers_id", "target_id", "label", "dataset"]].rename(
+        columns={"gers_id": "ref_id"}
+    ).to_csv(ground_truth_path, index=False)
+
+    # Write manifest with ground truth info
+    import yaml
+
+    manifest = {
+        "batch_id": batch_id,
+        "batch_type": "agent_test",
+        "created_at": datetime.now(UTC).isoformat(),
+        "total_candidates": len(candidates),
+        "datasets": list(sampled_df["dataset"].unique()),
+        "labeler_filter": labeler,
+        "ground_truth": {
+            "file": "labels/ground_truth/data.csv",
+            "total": len(sampled_df),
+            "by_label": sampled_df["label"].value_counts().to_dict(),
+            "by_dataset": sampled_df["dataset"].value_counts().to_dict(),
+        },
+        "candidates": [
+            {"ref_id": c.ref_id, "target_id": c.target_id, "dataset": c.dataset} for c in candidates
+        ],
+    }
+    (batch_dir / "manifest.yaml").write_text(
+        yaml.dump(manifest, default_flow_style=False, sort_keys=False)
+    )
+
+    console.print()
+    console.print(f"[green]Batch generated at {batch_dir}[/green]")
+    console.print(f"  Candidates: {len(candidates)}")
+    console.print(f"  Ground truth: {ground_truth_path}")
+    console.print()
+    console.print("Next steps:")
+    console.print("  1. Have agents label candidates in candidates/")
+    console.print(
+        f"  2. Import labels: matcher import-agent-labels {batch_dir} -a <agent-id> -l <labels.csv>"
+    )
+    console.print(f"  3. Compare: matcher agent-consensus {batch_dir}")
+
+
 @app.command()
 def version():
     """Show version information."""

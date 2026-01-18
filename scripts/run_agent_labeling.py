@@ -69,7 +69,7 @@ AGENT_CONFIGS = {
 
 def load_context_prompt() -> str:
     """Load the context/instructions for agents."""
-    context_path = Path(__file__).parent.parent / "docs" / "agent_labeling" / "CONTEXT.md"
+    context_path = Path(__file__).parent.parent / "agent_labels" / "LABELING_INSTRUCTIONS.md"
     if context_path.exists():
         return context_path.read_text()
     return """You are labeling road segment matching candidates.
