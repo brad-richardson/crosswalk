@@ -31,6 +31,67 @@ GEOMETRY_LINE_WIDTH = 3
 # Default image size
 DEFAULT_IMAGE_SIZE = (512, 512)
 
+# Dynamic image sizing constants
+MIN_IMAGE_SIZE = 128
+MAX_IMAGE_SIZE = 512
+TARGET_METERS_PER_PIXEL = 0.5  # Geometry resolution (reverted)
+MIN_REFERENCE_VISIBLE_M = 25  # Minimum meters of reference geometry to show
+SATELLITE_SIZE_MULTIPLIER = 2  # Satellite images are 2x geometry size
+
+
+def _calculate_size_from_bbox(
+    bbox: tuple[float, float, float, float],
+    min_size: int = MIN_IMAGE_SIZE,
+    max_size: int = MAX_IMAGE_SIZE,
+) -> tuple[int, int]:
+    """Calculate image size based on bbox extent in meters.
+
+    Size is clamped to [min_size, max_size] and rounded to nearest 64.
+    """
+    minx, miny, maxx, maxy = bbox
+
+    # Convert degrees to meters (approximate)
+    lat_center = (miny + maxy) / 2
+    lon_span_m = (maxx - minx) * 111000 * math.cos(math.radians(lat_center))
+    lat_span_m = (maxy - miny) * 111000
+
+    max_span = max(lon_span_m, lat_span_m)
+    ideal_size = int(max_span / TARGET_METERS_PER_PIXEL)
+
+    # Clamp to [min_size, max_size] and round to nearest 64
+    clamped = max(min_size, min(max_size, ideal_size))
+    rounded = ((clamped + 63) // 64) * 64
+
+    return (rounded, rounded)
+
+
+def calculate_image_size(
+    target_geom: LineString | MultiLineString,
+    min_size: int = MIN_IMAGE_SIZE,
+    max_size: int = MAX_IMAGE_SIZE,
+    padding_ratio: float = 0.3,
+) -> tuple[int, int]:
+    """Calculate appropriate image size based on target geometry extent.
+
+    Uses target geometry only (not union with reference) to determine size.
+    Size is clamped to [128, 512] and rounded to nearest 64.
+
+    Args:
+        target_geom: Target geometry to size around
+        min_size: Minimum image dimension
+        max_size: Maximum image dimension
+        padding_ratio: Padding around geometry as ratio of extent
+
+    Returns:
+        Tuple of (width, height) in pixels
+    """
+    line = _to_linestring(target_geom)
+    if not line:
+        return (min_size, min_size)
+
+    bbox = _expand_bbox(line.bounds, padding_ratio)
+    return _calculate_size_from_bbox(bbox, min_size, max_size)
+
 
 def _to_linestring(geom: Any) -> LineString | None:
     """Convert geometry to LineString."""
@@ -54,6 +115,125 @@ def _expand_bbox(
     pad_x = width * padding_ratio
     pad_y = height * padding_ratio
     return (minx - pad_x, miny - pad_y, maxx + pad_x, maxy + pad_y)
+
+
+def _make_bbox_square(
+    bbox: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Expand bbox to be square (in degrees) to avoid image stretching.
+
+    Expands the smaller dimension to match the larger one, centered on the original.
+    """
+    minx, miny, maxx, maxy = bbox
+    width = maxx - minx
+    height = maxy - miny
+
+    if width > height:
+        # Expand height
+        diff = (width - height) / 2
+        miny -= diff
+        maxy += diff
+    elif height > width:
+        # Expand width
+        diff = (height - width) / 2
+        minx -= diff
+        maxx += diff
+
+    return (minx, miny, maxx, maxy)
+
+
+def _bbox_to_polygon(bbox: tuple[float, float, float, float]):
+    """Convert bbox to a Shapely polygon for intersection calculations."""
+    from shapely.geometry import box
+
+    minx, miny, maxx, maxy = bbox
+    return box(minx, miny, maxx, maxy)
+
+
+def _geometry_length_in_bbox_meters(
+    geom: LineString, bbox: tuple[float, float, float, float]
+) -> float:
+    """Calculate the length in meters of a geometry that falls within a bbox."""
+    if geom is None or geom.is_empty:
+        return 0.0
+
+    bbox_poly = _bbox_to_polygon(bbox)
+    clipped = geom.intersection(bbox_poly)
+
+    if clipped.is_empty:
+        return 0.0
+
+    # Convert clipped geometry length from degrees to meters (approximate)
+    # Use the bbox center latitude for the conversion
+    minx, miny, maxx, maxy = bbox
+    lat_center = (miny + maxy) / 2
+
+    # For a LineString, length is in degrees - convert to meters
+    # At the equator, 1 degree ≈ 111km. Adjust for latitude.
+    meters_per_degree = 111000 * math.cos(math.radians(lat_center))
+
+    return clipped.length * meters_per_degree
+
+
+def _expand_bbox_for_reference(
+    target_bbox: tuple[float, float, float, float],
+    ref_line: LineString,
+    min_visible_m: float = MIN_REFERENCE_VISIBLE_M,
+) -> tuple[float, float, float, float]:
+    """Expand bbox to ensure minimum reference geometry is visible.
+
+    Starts with target-based bbox and expands toward reference geometry
+    until at least min_visible_m meters of reference are within the bbox.
+
+    Args:
+        target_bbox: Initial bbox based on target geometry
+        ref_line: Reference geometry LineString
+        min_visible_m: Minimum meters of reference to make visible
+
+    Returns:
+        Expanded bbox that includes sufficient reference geometry
+    """
+    if ref_line is None or ref_line.is_empty:
+        return target_bbox
+
+    # Check current visibility
+    current_visible = _geometry_length_in_bbox_meters(ref_line, target_bbox)
+    if current_visible >= min_visible_m:
+        return target_bbox
+
+    # Need to expand - calculate how much of reference we need to include
+    # Strategy: progressively expand bbox toward reference until we have enough
+    ref_bounds = ref_line.bounds  # (minx, miny, maxx, maxy)
+    minx, miny, maxx, maxy = target_bbox
+
+    # Iteratively expand bbox toward reference (max 10 iterations)
+    for _ in range(10):
+        # Expand each edge toward reference bounds if reference extends beyond
+        expansion_factor = 0.2  # Expand 20% toward reference each iteration
+
+        if ref_bounds[0] < minx:  # Reference extends left
+            minx = minx - (minx - ref_bounds[0]) * expansion_factor
+        if ref_bounds[1] < miny:  # Reference extends down
+            miny = miny - (miny - ref_bounds[1]) * expansion_factor
+        if ref_bounds[2] > maxx:  # Reference extends right
+            maxx = maxx + (ref_bounds[2] - maxx) * expansion_factor
+        if ref_bounds[3] > maxy:  # Reference extends up
+            maxy = maxy + (ref_bounds[3] - maxy) * expansion_factor
+
+        expanded_bbox = (minx, miny, maxx, maxy)
+        visible = _geometry_length_in_bbox_meters(ref_line, expanded_bbox)
+
+        if visible >= min_visible_m:
+            return expanded_bbox
+
+    # If we still don't have enough after iterations, use union of both bounds
+    # This ensures reference is fully visible as a fallback
+    return (
+        min(minx, ref_bounds[0]),
+        min(miny, ref_bounds[1]),
+        max(maxx, ref_bounds[2]),
+        max(maxy, ref_bounds[3]),
+    )
 
 
 def _get_combined_bbox(
@@ -277,8 +457,8 @@ def render_with_overlay(
 
     Args:
         satellite: Background satellite image
-        ref_geom: Reference geometry (drawn in blue, solid)
-        target_geom: Target geometry (drawn in red, dashed)
+        ref_geom: Reference geometry (drawn in blue, dashed)
+        target_geom: Target geometry (drawn in red, solid)
         bbox: Bounding box of the image
 
     Returns:
@@ -294,14 +474,14 @@ def render_with_overlay(
 
     size = satellite.size
 
-    # Draw target first (underneath), then reference
-    if target_line:
-        _draw_linestring(
-            draw, target_line, bbox, size, TARGET_COLOR, OVERLAY_LINE_WIDTH, dashed=True
-        )
+    # Draw reference first (underneath, dashed), then target (solid)
     if ref_line:
         _draw_linestring(
-            draw, ref_line, bbox, size, REFERENCE_COLOR, OVERLAY_LINE_WIDTH, dashed=False
+            draw, ref_line, bbox, size, REFERENCE_COLOR, OVERLAY_LINE_WIDTH, dashed=True
+        )
+    if target_line:
+        _draw_linestring(
+            draw, target_line, bbox, size, TARGET_COLOR, OVERLAY_LINE_WIDTH, dashed=False
         )
 
     return result
@@ -343,14 +523,14 @@ def render_geometry_only(
     result = Image.new("RGB", size, BACKGROUND_COLOR)
     draw = ImageDraw.Draw(result)
 
-    # Draw target first (underneath), then reference
-    if target_line:
-        _draw_linestring(
-            draw, target_line, bbox, size, TARGET_COLOR, GEOMETRY_LINE_WIDTH, dashed=True
-        )
+    # Draw reference first (underneath, dashed), then target (solid)
     if ref_line:
         _draw_linestring(
-            draw, ref_line, bbox, size, REFERENCE_COLOR, GEOMETRY_LINE_WIDTH, dashed=False
+            draw, ref_line, bbox, size, REFERENCE_COLOR, GEOMETRY_LINE_WIDTH, dashed=True
+        )
+    if target_line:
+        _draw_linestring(
+            draw, target_line, bbox, size, TARGET_COLOR, GEOMETRY_LINE_WIDTH, dashed=False
         )
 
     return result
@@ -359,22 +539,27 @@ def render_geometry_only(
 def render_candidate_images(
     ref_geom: LineString | MultiLineString,
     target_geom: LineString | MultiLineString,
-    size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
-    padding_ratio: float = 0.2,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
     fetch_satellite: bool = True,
-) -> tuple[Image.Image | None, Image.Image]:
+) -> tuple[Image.Image | None, Image.Image, tuple[int, int]]:
     """Render both satellite overlay and geometry-only images for a candidate.
+
+    When size is None (default), calculates dynamic size based on the final bbox.
+    The bbox starts from target geometry with padding, then expands to ensure
+    at least MIN_REFERENCE_VISIBLE_M meters of reference geometry are visible.
 
     Args:
         ref_geom: Reference geometry
         target_geom: Target geometry
-        size: Output image size
-        padding_ratio: Padding around geometries
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around target geometry as ratio of extent
         fetch_satellite: Whether to fetch satellite imagery
 
     Returns:
-        Tuple of (satellite_with_overlay, geometry_only).
+        Tuple of (satellite_with_overlay, geometry_only, actual_size).
         satellite_with_overlay may be None if fetch fails.
+        actual_size is the computed or provided size tuple.
     """
     # Convert to LineString
     ref_line = _to_linestring(ref_geom)
@@ -382,20 +567,67 @@ def render_candidate_images(
 
     if not ref_line or not target_line:
         logger.warning("Invalid geometries, returning empty images")
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
         empty = Image.new("RGB", size, BACKGROUND_COLOR)
-        return None, empty
+        return None, empty, {"geometry": size, "satellite": size}
 
-    # Get combined bbox
-    bbox = _get_combined_bbox(ref_line, target_line, padding_ratio)
+    # Get bbox based on TARGET geometry with padding
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
 
-    # Render geometry-only
-    geometry_img = render_geometry_only(ref_geom, target_geom, size, padding_ratio)
+    # Expand bbox to ensure minimum reference visibility
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
 
-    # Fetch and render satellite overlay
+    # Make bbox square to avoid image stretching
+    bbox = _make_bbox_square(bbox)
+
+    # Calculate dynamic size based on FINAL bbox (after reference expansion)
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    # Satellite size is 2x geometry size (for better detail)
+    sat_dim = min(size[0] * SATELLITE_SIZE_MULTIPLIER, 1024)  # Cap at 1024
+    satellite_size = (sat_dim, sat_dim)
+
+    # Render geometry-only (using target-based bbox)
+    geometry_img = _render_geometry_with_bbox(ref_geom, target_geom, bbox, size, padding_ratio)
+
+    # Fetch and render satellite overlay at higher resolution
     satellite_img = None
     if fetch_satellite:
-        satellite = fetch_satellite_tile(bbox, size=size)
+        satellite = fetch_satellite_tile(bbox, size=satellite_size)
         if satellite:
             satellite_img = render_with_overlay(satellite, ref_geom, target_geom, bbox)
 
-    return satellite_img, geometry_img
+    return satellite_img, geometry_img, {"geometry": size, "satellite": satellite_size}
+
+
+def _render_geometry_with_bbox(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    bbox: tuple[float, float, float, float],
+    size: tuple[int, int],
+    padding_ratio: float = 0.3,
+) -> Image.Image:
+    """Render geometry-only image with explicit bbox.
+
+    Internal helper for render_candidate_images() to use target-based bbox.
+    """
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    # Create white background
+    result = Image.new("RGB", size, BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(result)
+
+    # Draw reference first (underneath, dashed), then target (solid)
+    if ref_line:
+        _draw_linestring(
+            draw, ref_line, bbox, size, REFERENCE_COLOR, GEOMETRY_LINE_WIDTH, dashed=True
+        )
+    if target_line:
+        _draw_linestring(
+            draw, target_line, bbox, size, TARGET_COLOR, GEOMETRY_LINE_WIDTH, dashed=False
+        )
+
+    return result

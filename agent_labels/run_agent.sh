@@ -128,12 +128,15 @@ build_prompt() {
 
     # Static prefix (cacheable across all candidates)
     cat <<'STATIC_PREFIX'
-You are analyzing road segment matches. Do NOT explore files or the codebase.
+You are analyzing road network segment matches. Do NOT explore files or the codebase.
 
-TASK: Do the blue and red road segments represent the same physical road?
+TASK: Do the blue and red segments represent the same physical road network segment (road, trail, sidewalk, etc)?
 
-Image provided:
-- geometry.png: geometry view (blue=reference segment, red=target segment)
+IMPORTANT: Segments match if they overlap on the same physical road even if one is longer than the other (subsegment matches count as match). Only mark as no_match if they are clearly different roads (parallel lanes, perpendicular streets, or completely separate locations).
+
+Images provided:
+- satellite.png: aerial view with geometry overlay (blue dashed=reference, red solid=target)
+- geometry.png: clean geometry view on white background (same colors)
 
 Output format: ref_id,target_id,LABEL,CONFIDENCE,REASON
 - LABEL: match, no_match, or unsure
@@ -168,15 +171,15 @@ run_agent() {
             # Prepend instruction and run from candidate directory
             local candidate_dir
             candidate_dir=$(dirname "$img_sat")
-            local full_prompt="First read geometry.png, then answer:
+            local full_prompt="First read satellite.png and geometry.png, then answer:
 
 $prompt"
             (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$full_prompt") 2>&1
             ;;
         codex)
             local tmpout="$TEMP_DIR/codex_out.txt"
-            # Codex supports -i flag for image attachments
-            timeout 60 codex exec -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
+            # Codex supports -i flag for image attachments (include both images)
+            timeout 60 codex exec -i "$img_sat" -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
             cat "$tmpout" 2>/dev/null
             ;;
         gemini)
@@ -187,7 +190,8 @@ $prompt"
             local sandbox="$TEMP_DIR/gemini_sandbox"
             mkdir -p "$sandbox"
 
-            # Copy image with consistent name for prompt caching
+            # Copy images with consistent names for prompt caching
+            [[ -f "$img_sat" ]] && cp "$img_sat" "$sandbox/satellite.png"
             cp "$img_geo" "$sandbox/geometry.png"
 
             # Write prompt to file to avoid shell escaping issues
@@ -198,9 +202,16 @@ $prompt"
             cd "$sandbox"
 
             # Run Gemini with --sandbox (requires Docker)
-            gemini --sandbox --yolo -o text \
-                "Analyze geometry.png using instructions in prompt.txt" \
-                prompt.txt geometry.png 2>&1
+            # Include both images if satellite exists
+            if [[ -f "satellite.png" ]]; then
+                gemini --sandbox --yolo -o text \
+                    "Analyze satellite.png and geometry.png using instructions in prompt.txt" \
+                    prompt.txt satellite.png geometry.png 2>&1
+            else
+                gemini --sandbox --yolo -o text \
+                    "Analyze geometry.png using instructions in prompt.txt" \
+                    prompt.txt geometry.png 2>&1
+            fi
             local exit_code=$?
 
             # Restore directory and cleanup
@@ -211,17 +222,29 @@ $prompt"
             ;;
         ollama)
             # Cross-platform base64 (macOS doesn't support -w0)
+            local sat_base64=""
             local geo_base64
+            [[ -f "$img_sat" ]] && sat_base64=$(base64 "$img_sat" | tr -d '\n')
             geo_base64=$(base64 "$img_geo" | tr -d '\n')
             local model_name="${MODEL:-llava}"
 
             # Build JSON payload safely with jq to handle escaping
+            # Include both images if satellite exists
             local json_payload
-            json_payload=$(jq -n \
-                --arg model "$model_name" \
-                --arg prompt "$prompt" \
-                --arg geo "$geo_base64" \
-                '{model: $model, prompt: $prompt, images: [$geo], stream: false}')
+            if [[ -n "$sat_base64" ]]; then
+                json_payload=$(jq -n \
+                    --arg model "$model_name" \
+                    --arg prompt "$prompt" \
+                    --arg sat "$sat_base64" \
+                    --arg geo "$geo_base64" \
+                    '{model: $model, prompt: $prompt, images: [$sat, $geo], stream: false}')
+            else
+                json_payload=$(jq -n \
+                    --arg model "$model_name" \
+                    --arg prompt "$prompt" \
+                    --arg geo "$geo_base64" \
+                    '{model: $model, prompt: $prompt, images: [$geo], stream: false}')
+            fi
 
             # Ollama vision models need more time than text-only (120s timeout)
             timeout 120 curl -s http://localhost:11434/api/generate \
