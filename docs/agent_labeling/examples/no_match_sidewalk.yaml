@@ -1,0 +1,58 @@
+# Example: No Match - Sidewalk vs Road Centerline
+#
+# The target segment represents a sidewalk or pedestrian path running
+# alongside the road, not the road centerline itself.
+#
+# Label: no_match
+# Reasoning: Different infrastructure types (sidewalk vs road)
+
+candidate:
+  ref_id: "example_ref_004"
+  target_id: "example_target_004"
+  dataset: "boston_sidewalks"
+  batch: "example_batch"
+
+names:
+  reference: "Boylston Street"
+  target: "Boylston Street Sidewalk"
+
+classes:
+  reference: "tertiary"
+  target: "Sidewalk"
+
+ml_prediction:
+  decision: "review"
+  confidence: 0.48
+
+geometry:
+  ref_length_m: 187.4
+  target_length_m: 192.1
+  bbox: [-71.0823, 42.3512, -71.0798, 42.3524]
+
+features:
+  geometric:
+    hausdorff_distance: 8.2
+    mean_hausdorff_distance: 6.5
+    buffer_iou: 0.58
+    overlap_ratio: 0.62
+    heading_delta: 1.8
+    length_ratio: 0.98
+    centroid_distance: 7.1
+  semantic:
+    name_levenshtein: 0.78
+    name_jaro_winkler: 0.85
+    name_token_sort: 0.82
+    class_similarity: 0.0
+  topological:
+    degree_match_score: 0.45
+    dead_end_match: false
+    intersection_match: false
+
+images:
+  satellite: "satellite.png"
+  geometry: "geometry.png"
+
+# --- Expected Label ---
+expected_label: "no_match"
+expected_confidence: 0.90
+expected_reasoning: "Target is a sidewalk (class 'Sidewalk') parallel to the road centerline. The 6-8m offset is consistent with sidewalk placement. Different infrastructure type despite similar names."

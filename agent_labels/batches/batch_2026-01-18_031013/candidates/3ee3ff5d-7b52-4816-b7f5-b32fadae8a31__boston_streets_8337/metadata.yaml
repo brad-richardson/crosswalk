@@ -1,0 +1,43 @@
+candidate:
+  ref_id: 3ee3ff5d-7b52-4816-b7f5-b32fadae8a31
+  target_id: boston_streets_8337
+  dataset: boston_streets
+  batch: batch_2026-01-18_031013
+names:
+  reference: null
+  target: UNION PARK
+classes:
+  reference: footway
+  target: residential
+ml_prediction:
+  decision: no_match
+  confidence: 0.3999
+geometry:
+  ref_length_m: 0.0001
+  target_length_m: 0.0005
+  bbox:
+  - -71.071
+  - 42.3421
+  - -71.0705
+  - 42.3425
+features:
+  geometric:
+    hausdorff_distance: 54.6053
+    mean_hausdorff_distance: 15.708
+    buffer_iou: 0.1155
+    overlap_ratio: 0.9068
+    heading_delta: 78.0828
+    length_ratio: 0.2443
+    centroid_distance: 31.9318
+  semantic:
+    name_levenshtein: 0.5
+    name_jaro_winkler: 0.5
+    name_token_sort: 0.5
+    class_similarity: 0.2
+  topological:
+    degree_match_score: null
+    dead_end_match: false
+    intersection_match: false
+images:
+  satellite: satellite.png
+  geometry: geometry.png

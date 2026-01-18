@@ -24,20 +24,20 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 # MassDOT functional classification codes
 # Based on F_CLASS cross-reference: CLASS 3/4/5 were mismapped
 STREET_CLASS_MAPPING = {
-    1: "motorway",       # Interstate (not in Boston data)
-    2: "primary",        # Principal arterial
-    3: "primary",        # Also Principal arterial (79% are F_CLASS 3)
-    4: "tertiary",       # Major Collector (65% are F_CLASS 5)
-    5: "residential",    # Local/Minor Collector (83% F_CLASS 0/unknown)
-    6: "service",        # Service roads (not in Boston data)
+    1: "motorway",  # Interstate (not in Boston data)
+    2: "primary",  # Principal arterial
+    3: "primary",  # Also Principal arterial (79% are F_CLASS 3)
+    4: "tertiary",  # Major Collector (65% are F_CLASS 5)
+    5: "residential",  # Local/Minor Collector (83% F_CLASS 0/unknown)
+    6: "service",  # Service roads (not in Boston data)
 }
 
 # Sidewalk type codes -> Overture "footway" class
 SIDEWALK_CLASS_MAPPING = {
     "SWALK-CL": "footway",
-    "CWALK-CL": "footway",       # Crosswalks are pedestrian paths
-    "CWALK-CL-UM": "footway",    # Unmarked crosswalks
-    "PWALK-CL": "footway",       # Private walkway
+    "CWALK-CL": "footway",  # Crosswalks are pedestrian paths
+    "CWALK-CL-UM": "footway",  # Unmarked crosswalks
+    "PWALK-CL": "footway",  # Private walkway
     "Sidewalk centerline": "footway",
     "Crosswalk centerline": "footway",
     "Privatewalk centerline": "footway",
@@ -48,7 +48,7 @@ SIDEWALK_SUBCLASS_MAPPING = {
     "SWALK-CL": "sidewalk",
     "CWALK-CL": "crosswalk",
     "CWALK-CL-UM": "crosswalk",  # Unmarked crosswalks
-    "PWALK-CL": "sidewalk",      # Private walkway -> sidewalk
+    "PWALK-CL": "sidewalk",  # Private walkway -> sidewalk
     "Sidewalk centerline": "sidewalk",
     "Crosswalk centerline": "crosswalk",
     "Privatewalk centerline": "sidewalk",
@@ -58,28 +58,28 @@ SIDEWALK_SUBCLASS_MAPPING = {
 # Key distinction: facilities on road surface vs physically separated
 BIKE_CLASS_MAPPING = {
     # Physically separated infrastructure -> cycleway
-    "SBL": "cycleway",          # Separated bike lane (raised/curbed)
-    "SBLBL": "cycleway",        # Separated + bike lane
-    "SBLSL": "cycleway",        # Separated + shared lane
-    "CFSBL": "cycleway",        # Contraflow separated bike lane
+    "SBL": "cycleway",  # Separated bike lane (raised/curbed)
+    "SBLBL": "cycleway",  # Separated + bike lane
+    "SBLSL": "cycleway",  # Separated + shared lane
+    "CFSBL": "cycleway",  # Contraflow separated bike lane
     # On-road painted facilities -> unknown (same surface as road)
     # These may match to road segments, not cycleways
-    "BL": "unknown",            # Bike lane (painted on road)
-    "BL-PEAKBUS": "unknown",    # Bike lane (peak bus hours)
-    "BFBL": "unknown",          # Buffered bike lane (paint only)
-    "BLSL": "unknown",          # Bike lane + shared lane
-    "CFBL": "unknown",          # Contraflow bike lane (painted)
-    "CFBS": "unknown",          # Contraflow bike street
+    "BL": "unknown",  # Bike lane (painted on road)
+    "BL-PEAKBUS": "unknown",  # Bike lane (peak bus hours)
+    "BFBL": "unknown",  # Buffered bike lane (paint only)
+    "BLSL": "unknown",  # Bike lane + shared lane
+    "CFBL": "unknown",  # Contraflow bike lane (painted)
+    "CFBS": "unknown",  # Contraflow bike street
     # Shared use paths -> path (separate from road)
-    "SUP": "path",              # Shared use path
-    "SUPN": "path",             # Natural surface shared use path
-    "SUPM": "path",             # Minor shared use path
+    "SUP": "path",  # Shared use path
+    "SUPN": "path",  # Natural surface shared use path
+    "SUPM": "path",  # Minor shared use path
     # Shared lane markings (not dedicated) -> unknown
-    "SLM": "unknown",           # Shared lane markings (sharrows)
-    "SLMTC": "unknown",         # Shared lane traffic calmed
+    "SLM": "unknown",  # Shared lane markings (sharrows)
+    "SLMTC": "unknown",  # Shared lane traffic calmed
     # Other infrastructure types
-    "PED": "pedestrian",        # Pedestrianized street
-    "WALK": "footway",          # Walkway
+    "PED": "pedestrian",  # Pedestrianized street
+    "WALK": "footway",  # Walkway
 }
 
 # Dataset configurations

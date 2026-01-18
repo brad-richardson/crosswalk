@@ -875,6 +875,281 @@ def list_datasets():
         console.print(f"  - {name}")
 
 
+@app.command("generate-agent-batch")
+def generate_agent_batch(
+    dataset: str = typer.Argument(..., help="Target dataset name (e.g., 'boston_streets')"),
+    n_candidates: int = typer.Option(
+        100,
+        "--n-candidates",
+        "-n",
+        help="Number of candidates to sample",
+    ),
+    output_dir: Path = typer.Option(
+        Path("agent_labels"),
+        "--output",
+        "-o",
+        help="Output directory for agent labeling batches",
+    ),
+    reference: Path = typer.Option(
+        Path("data/raw/overture_segments.parquet"),
+        "--reference",
+        "-r",
+        help="Reference segments (Overture)",
+    ),
+    target: Path | None = typer.Option(
+        None,
+        "--target",
+        "-t",
+        help="Target segments (inferred from dataset name if not provided)",
+    ),
+    model: Path | None = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="ML model for confidence scoring (uses rules if not provided)",
+    ),
+    no_satellite: bool = typer.Option(
+        False,
+        "--no-satellite",
+        help="Skip satellite imagery (faster, geometry-only images)",
+    ),
+    seed: int = typer.Option(
+        42,
+        "--seed",
+        help="Random seed for reproducibility",
+    ),
+):
+    """Generate a batch of candidates for AI agent labeling.
+
+    Samples diverse candidates across confidence ranges and creates
+    packages with metadata YAML and images for each candidate.
+
+    Examples:
+        # Generate 100 candidates for boston_streets
+        matcher generate-agent-batch boston_streets
+
+        # Generate 50 candidates with custom paths
+        matcher generate-agent-batch boston_streets -n 50 \\
+            -r data/raw/overture_segments.parquet \\
+            -t data/raw/boston_streets.parquet \\
+            -o agent_labels
+
+        # Use ML model for confidence scoring
+        matcher generate-agent-batch boston_streets \\
+            -m data/models/matcher_model_combined.joblib
+    """
+    from .agent_labeling import SamplingConfig, sample_candidates
+    from .agent_labeling.context_generator import generate_batch
+
+    # Infer target path if not provided
+    if target is None:
+        target = Path(f"data/raw/{dataset}.parquet")
+
+    # Validate paths
+    if not reference.exists():
+        console.print(f"[red]Error: Reference file not found: {reference}[/red]")
+        raise typer.Exit(1)
+
+    if not target.exists():
+        console.print(f"[red]Error: Target file not found: {target}[/red]")
+        console.print("[yellow]Hint: Specify target path with --target[/yellow]")
+        raise typer.Exit(1)
+
+    if model and not model.exists():
+        console.print(
+            f"[yellow]Warning: Model not found: {model}, using rule-based scoring[/yellow]"
+        )
+        model = None
+
+    console.print("[blue]Generating agent labeling batch...[/blue]")
+    console.print(f"  Dataset: {dataset}")
+    console.print(f"  Reference: {reference}")
+    console.print(f"  Target: {target}")
+    console.print(f"  Candidates: {n_candidates}")
+    console.print(f"  Output: {output_dir}")
+
+    # Sample candidates
+    config = SamplingConfig(
+        n_candidates=n_candidates,
+        seed=seed,
+    )
+
+    candidates = sample_candidates(
+        reference_path=reference,
+        target_path=target,
+        config=config,
+        dataset_name=dataset,
+        model_path=model,
+    )
+
+    if not candidates:
+        console.print("[red]Error: No candidates generated[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Sampled {len(candidates)} candidates[/green]")
+
+    # Generate batch
+    batch_dir = generate_batch(
+        candidates=candidates,
+        output_dir=output_dir,
+        dataset_name=dataset,
+        fetch_satellite=not no_satellite,
+        config_info={
+            "n_candidates": n_candidates,
+            "seed": seed,
+            "reference": str(reference),
+            "target": str(target),
+            "model": str(model) if model else None,
+        },
+    )
+
+    console.print()
+    console.print(f"[green]Batch generated at {batch_dir}[/green]")
+    console.print()
+    console.print("Next steps:")
+    console.print(f"  1. Review candidates in {batch_dir / 'candidates'}")
+    console.print("  2. Have agents label candidates")
+    console.print(f"  3. Import labels: matcher import-agent-labels {batch_dir} --agent-id <id>")
+
+
+@app.command("import-agent-labels")
+def import_agent_labels(
+    batch_dir: Path = typer.Argument(..., help="Batch directory"),
+    agent_id: str = typer.Option(
+        ...,
+        "--agent-id",
+        "-a",
+        help="Agent identifier (e.g., 'claude', 'gpt4', 'human')",
+    ),
+    labels_file: Path = typer.Option(
+        ...,
+        "--labels",
+        "-l",
+        help="Path to labels CSV file",
+    ),
+):
+    """Import agent labels from a CSV file.
+
+    The CSV must have columns: ref_id, target_id, label
+    Optional columns: confidence, reasoning
+
+    Examples:
+        # Import Claude's labels
+        matcher import-agent-labels agent_labels/batches/batch_2026-01-18_001 \\
+            --agent-id claude --labels claude_labels.csv
+
+        # Import with confidence and reasoning
+        matcher import-agent-labels agent_labels/batches/batch_* \\
+            -a gpt4 -l gpt4_labels.csv
+    """
+    from .agent_labeling.agent_store import import_labels_csv
+
+    # Validate paths
+    if not batch_dir.exists():
+        console.print(f"[red]Error: Batch directory not found: {batch_dir}[/red]")
+        raise typer.Exit(1)
+
+    if not labels_file.exists():
+        console.print(f"[red]Error: Labels file not found: {labels_file}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Importing labels for agent '{agent_id}'...[/blue]")
+    console.print(f"  Batch: {batch_dir}")
+    console.print(f"  Labels: {labels_file}")
+
+    count = import_labels_csv(batch_dir, agent_id, labels_file)
+
+    console.print(f"[green]Imported {count} labels[/green]")
+
+
+@app.command("agent-consensus")
+def agent_consensus(
+    batch_dir: Path = typer.Argument(..., help="Batch directory"),
+    show_disagreements: bool = typer.Option(
+        False,
+        "--disagreements",
+        "-d",
+        help="Show only disagreements between agents",
+    ),
+    min_agents: int = typer.Option(
+        2,
+        "--min-agents",
+        help="Minimum agents required for consensus",
+    ),
+):
+    """Analyze agent consensus and disagreements.
+
+    Shows agreement statistics across multiple agents and identifies
+    candidates where agents disagree for human review.
+
+    Examples:
+        # Show consensus summary
+        matcher agent-consensus agent_labels/batches/batch_2026-01-18_001
+
+        # Show disagreements only
+        matcher agent-consensus agent_labels/batches/batch_* --disagreements
+    """
+    from .agent_labeling.agent_store import AgentLabelStore
+
+    if not batch_dir.exists():
+        console.print(f"[red]Error: Batch directory not found: {batch_dir}[/red]")
+        raise typer.Exit(1)
+
+    # List agents
+    agents = AgentLabelStore.list_agents(batch_dir)
+    if not agents:
+        console.print("[yellow]No agent labels found in batch[/yellow]")
+        return
+
+    console.print(f"[blue]Agents who have labeled: {', '.join(agents)}[/blue]")
+    console.print()
+
+    # Show per-agent stats
+    for agent_id in agents:
+        store = AgentLabelStore(batch_dir, agent_id)
+        stats = store.get_stats()
+        console.print(f"  {agent_id}: {stats['total']} labels")
+        console.print(
+            f"    match: {stats['match']}, no_match: {stats['no_match']}, unsure: {stats['unsure']}"
+        )
+
+    console.print()
+
+    if show_disagreements:
+        # Show disagreements
+        disagreements = AgentLabelStore.find_disagreements(batch_dir)
+        if len(disagreements) == 0:
+            console.print("[green]No disagreements found![/green]")
+            return
+
+        console.print(f"[yellow]Found {len(disagreements)} disagreements:[/yellow]")
+        for _, row in disagreements.iterrows():
+            console.print(f"  {row['ref_id']} <-> {row['target_id']}")
+            console.print(f"    Labels: {row['labels']}")
+            console.print(f"    Agreement: {row['agreement_ratio']:.0%}")
+    else:
+        # Show consensus
+        consensus = AgentLabelStore.compute_consensus(batch_dir, min_agents)
+        if len(consensus) == 0:
+            console.print(f"[yellow]No candidates have >= {min_agents} agent labels[/yellow]")
+            return
+
+        console.print(f"[green]Consensus on {len(consensus)} candidates:[/green]")
+
+        # Summary by consensus label
+        label_counts = consensus["consensus_label"].value_counts()
+        for label, count in label_counts.items():
+            console.print(f"  {label}: {count}")
+
+        # Agreement distribution
+        mean_agreement = consensus["agreement_ratio"].mean()
+        console.print(f"\n  Mean agreement: {mean_agreement:.0%}")
+
+        # Count perfect agreement
+        perfect = (consensus["agreement_ratio"] == 1.0).sum()
+        console.print(f"  Perfect agreement: {perfect}/{len(consensus)}")
+
+
 @app.command()
 def version():
     """Show version information."""

@@ -1,0 +1,43 @@
+candidate:
+  ref_id: d464fb79-d751-4326-bbf5-98003f7d6e81
+  target_id: boston_streets_4752
+  dataset: boston_streets
+  batch: batch_2026-01-18_031013
+names:
+  reference: null
+  target: HIGH STREET
+classes:
+  reference: footway
+  target: residential
+ml_prediction:
+  decision: match
+  confidence: 0.7531
+geometry:
+  ref_length_m: 0.0003
+  target_length_m: 0.0004
+  bbox:
+  - -71.0662
+  - 42.3781
+  - -71.0659
+  - 42.3784
+features:
+  geometric:
+    hausdorff_distance: 7.6308
+    mean_hausdorff_distance: 6.0473
+    buffer_iou: 0.5155
+    overlap_ratio: 1.0
+    heading_delta: 1.6595
+    length_ratio: 0.8389
+    centroid_distance: 5.818
+  semantic:
+    name_levenshtein: 0.5
+    name_jaro_winkler: 0.5
+    name_token_sort: 0.5
+    class_similarity: 0.2
+  topological:
+    degree_match_score: null
+    dead_end_match: false
+    intersection_match: false
+images:
+  satellite: satellite.png
+  geometry: geometry.png

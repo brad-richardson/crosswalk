@@ -29,6 +29,8 @@ dependencies = [
     "rich>=13.0",
     "loguru>=0.7",
     "numba>=0.59",
+    "pillow>=10.0",
+    "mercantile>=1.2",
 ]
 
 [project.optional-dependencies]

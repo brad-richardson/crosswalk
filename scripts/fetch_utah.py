@@ -28,22 +28,22 @@ SALT_LAKE_COUNTY = "49035"
 # CARTOCODE to Overture class mapping
 # Based on Utah's cartographic codes
 CARTOCODE_MAPPING = {
-    "1": "motorway",      # Interstate
-    "2": "trunk",         # US Highway
-    "3": "trunk",         # US Highway
-    "4": "primary",       # Parkway
-    "5": "primary",       # State Route (major)
-    "6": "secondary",     # State Route (minor)
-    "7": "motorway_link", # Ramps
-    "8": "secondary",     # Major street
-    "9": "tertiary",      # Minor road
-    "10": "tertiary",     # Secondary street
+    "1": "motorway",  # Interstate
+    "2": "trunk",  # US Highway
+    "3": "trunk",  # US Highway
+    "4": "primary",  # Parkway
+    "5": "primary",  # State Route (major)
+    "6": "secondary",  # State Route (minor)
+    "7": "motorway_link",  # Ramps
+    "8": "secondary",  # Major street
+    "9": "tertiary",  # Minor road
+    "10": "tertiary",  # Secondary street
     "11": "residential",  # Local street
-    "12": "track",        # Unpaved/dirt road
-    "14": "service",      # Private road
-    "15": "service",      # Private road
-    "16": "path",         # Trail/path
-    "17": "unclassified", # Other
+    "12": "track",  # Unpaved/dirt road
+    "14": "service",  # Private road
+    "15": "service",  # Private road
+    "16": "path",  # Trail/path
+    "17": "unclassified",  # Other
 }
 
 
@@ -111,9 +111,7 @@ def fetch_utah_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoDataFr
     gdf["class"] = gdf["CARTOCODE"].map(CARTOCODE_MAPPING).fillna("unclassified")
 
     # Create names dict (Overture format)
-    gdf["names"] = gdf["FULLNAME"].apply(
-        lambda n: {"primary": n} if n and n.strip() else None
-    )
+    gdf["names"] = gdf["FULLNAME"].apply(lambda n: {"primary": n} if n and n.strip() else None)
 
     # Store original attributes in source_tags
     gdf["source_tags"] = gdf.apply(
@@ -144,7 +142,7 @@ def fetch_utah_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoDataFr
 
     # Count roads with names
     has_names = gdf["names"].notna().sum()
-    logger.info(f"Roads with names: {has_names} ({has_names/len(gdf)*100:.1f}%)")
+    logger.info(f"Roads with names: {has_names} ({has_names / len(gdf) * 100:.1f}%)")
 
     return gdf
 
