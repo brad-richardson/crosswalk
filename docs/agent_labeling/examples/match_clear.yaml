@@ -1,0 +1,58 @@
+# Example: Clear Match
+#
+# This is a straightforward match case where geometries clearly align
+# and names are similar.
+#
+# Label: match
+# Reasoning: Lines overlap precisely, same road name with minor variation
+
+candidate:
+  ref_id: "example_ref_001"
+  target_id: "example_target_001"
+  dataset: "boston_streets"
+  batch: "example_batch"
+
+names:
+  reference: "Commonwealth Avenue"
+  target: "COMMONWEALTH AVE"
+
+classes:
+  reference: "secondary"
+  target: "Major Arterial"
+
+ml_prediction:
+  decision: "match"
+  confidence: 0.92
+
+geometry:
+  ref_length_m: 245.3
+  target_length_m: 242.1
+  bbox: [-71.0912, 42.3498, -71.0876, 42.3512]
+
+features:
+  geometric:
+    hausdorff_distance: 3.2
+    mean_hausdorff_distance: 1.8
+    buffer_iou: 0.94
+    overlap_ratio: 0.98
+    heading_delta: 1.5
+    length_ratio: 0.99
+    centroid_distance: 2.1
+  semantic:
+    name_levenshtein: 0.82
+    name_jaro_winkler: 0.91
+    name_token_sort: 1.0
+    class_similarity: 0.7
+  topological:
+    degree_match_score: 0.95
+    dead_end_match: false
+    intersection_match: true
+
+images:
+  satellite: "satellite.png"
+  geometry: "geometry.png"
+
+# --- Expected Label ---
+expected_label: "match"
+expected_confidence: 0.95
+expected_reasoning: "Geometries clearly align with minimal offset. Name difference is just abbreviation (Avenue vs AVE)."

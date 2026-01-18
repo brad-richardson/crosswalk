@@ -8,10 +8,7 @@ Usage:
     python scripts/fetch_osm_overpass.py --bbox 75.78,26.90,75.82,26.94 -o data/india_test/
 """
 
-import json
-import time
 from pathlib import Path
-from typing import Optional
 
 import geopandas as gpd
 import requests
@@ -106,15 +103,17 @@ out geom;
         records.append(record)
 
         # Extract connectors (endpoints and intersections)
-        for i, point in enumerate(geometry):
+        for _i, point in enumerate(geometry):
             node_id = f"n{hash((point['lon'], point['lat'])) % 10000000000}"
             if node_id not in connector_ids:
                 connector_ids.add(node_id)
-                connectors.append({
-                    "id": node_id,
-                    "geometry": Point(point["lon"], point["lat"]),
-                    "sources": [{"dataset": "OpenStreetMap", "record_id": node_id}],
-                })
+                connectors.append(
+                    {
+                        "id": node_id,
+                        "geometry": Point(point["lon"], point["lat"]),
+                        "sources": [{"dataset": "OpenStreetMap", "record_id": node_id}],
+                    }
+                )
 
     # Create GeoDataFrames
     segments_gdf = gpd.GeoDataFrame(records, crs="EPSG:4326")
@@ -141,8 +140,15 @@ def _build_road_flags(tags: dict, road_class: str) -> list:
     # Bridge
     bridge = tags.get("bridge", "")
     valid_bridge_values = {
-        "yes", "viaduct", "boardwalk", "cantilever", "covered",
-        "low_water_crossing", "movable", "trestle", "aqueduct",
+        "yes",
+        "viaduct",
+        "boardwalk",
+        "cantilever",
+        "covered",
+        "low_water_crossing",
+        "movable",
+        "trestle",
+        "aqueduct",
     }
     if bridge in valid_bridge_values:
         flags.append("is_bridge")

@@ -1,0 +1,43 @@
+candidate:
+  ref_id: d43310d5-b8a7-4907-923d-8399725f7c45
+  target_id: boston_streets_971
+  dataset: boston_streets
+  batch: batch_2026-01-18_031013
+names:
+  reference: null
+  target: PARKER STREET
+classes:
+  reference: service
+  target: residential
+ml_prediction:
+  decision: no_match
+  confidence: 0.2026
+geometry:
+  ref_length_m: 55.3
+  target_length_m: 185.6
+  bbox:
+  - -71.1012
+  - 42.324
+  - -71.1003
+  - 42.3261
+features:
+  geometric:
+    hausdorff_distance: 120.9795
+    mean_hausdorff_distance: 43.4642
+    buffer_iou: 0.0606
+    overlap_ratio: 0.2437
+    heading_delta: 50.9493
+    length_ratio: 0.1583
+    centroid_distance: 20.7053
+  semantic:
+    name_levenshtein: 0.5
+    name_jaro_winkler: 0.5
+    name_token_sort: 0.5
+    class_similarity: 0.8
+  topological:
+    degree_match_score: null
+    dead_end_match: false
+    intersection_match: false
+images:
+  satellite: satellite.png
+  geometry: geometry.png

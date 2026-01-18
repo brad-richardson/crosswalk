@@ -1,0 +1,58 @@
+# Example: No Match - Parallel Carriageways
+#
+# This shows a case where the reference and target are on parallel but
+# separate roads (e.g., divided highway with separate northbound/southbound).
+#
+# Label: no_match
+# Reasoning: Separate physical roadways despite being part of same "road"
+
+candidate:
+  ref_id: "example_ref_003"
+  target_id: "example_target_003"
+  dataset: "boston_streets"
+  batch: "example_batch"
+
+names:
+  reference: "Interstate 93 South"
+  target: "Interstate 93"
+
+classes:
+  reference: "motorway"
+  target: "Interstate Highway"
+
+ml_prediction:
+  decision: "review"
+  confidence: 0.58
+
+geometry:
+  ref_length_m: 523.8
+  target_length_m: 518.2
+  bbox: [-71.0654, 42.3789, -71.0598, 42.3834]
+
+features:
+  geometric:
+    hausdorff_distance: 28.5
+    mean_hausdorff_distance: 24.3
+    buffer_iou: 0.42
+    overlap_ratio: 0.35
+    heading_delta: 3.2
+    length_ratio: 0.99
+    centroid_distance: 25.1
+  semantic:
+    name_levenshtein: 0.85
+    name_jaro_winkler: 0.92
+    name_token_sort: 0.95
+    class_similarity: 1.0
+  topological:
+    degree_match_score: 0.72
+    dead_end_match: false
+    intersection_match: false
+
+images:
+  satellite: "satellite.png"
+  geometry: "geometry.png"
+
+# --- Expected Label ---
+expected_label: "no_match"
+expected_confidence: 0.90
+expected_reasoning: "Parallel carriageways approximately 25m apart. Despite similar names (both I-93), these are separate physical roadways on opposite sides of the highway median."

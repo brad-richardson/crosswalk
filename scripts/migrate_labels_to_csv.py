@@ -89,14 +89,16 @@ def migrate_labels_to_csv(labels_dir: Path, dry_run: bool = False) -> None:
         logger.info(f"    Created: {csv_path}")
 
         # Add to registry
-        datasets.append({
-            "dataset_id": dataset_id,
-            "name": dataset_id.replace("_", " ").title(),
-            "type": infer_dataset_type(dataset_id),
-            "fetch_url": "",
-            "info_url": "",
-            "metadata": "{}",
-        })
+        datasets.append(
+            {
+                "dataset_id": dataset_id,
+                "name": dataset_id.replace("_", " ").title(),
+                "type": infer_dataset_type(dataset_id),
+                "fetch_url": "",
+                "info_url": "",
+                "metadata": "{}",
+            }
+        )
 
     # Create datasets.csv registry
     if datasets:
@@ -191,7 +193,9 @@ def main():
         logger.info("")
         logger.info("Next steps:")
         logger.info("  1. Verify CSV files were created correctly")
-        logger.info("  2. Test with: python -c 'from matcher.labeling.label_store import LabelStore; print(LabelStore.load_all())'")
+        logger.info(
+            "  2. Test with: python -c 'from matcher.labeling.label_store import LabelStore; print(LabelStore.load_all())'"
+        )
         logger.info("  3. If all looks good, delete old parquet files:")
         logger.info("     rm data/labels/labels_*.parquet")
         logger.info("     rm data/labels/integration_*.parquet")

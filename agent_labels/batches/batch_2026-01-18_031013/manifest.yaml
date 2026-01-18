@@ -1,0 +1,39 @@
+batch_id: batch_2026-01-18_031013
+created_at: '2026-01-18T03:10:13.579119+00:00'
+dataset: boston_streets
+total_candidates: 4
+by_confidence_bucket:
+  low: 1
+  medium: 2
+  high: 1
+by_ml_decision:
+  no_match: 2
+  review: 1
+  match: 1
+config:
+  n_candidates: 5
+  seed: 42
+  reference: data/raw/overture_segments.parquet
+  target: data/raw/boston_streets.parquet
+  model: null
+candidates:
+- ref_id: d43310d5-b8a7-4907-923d-8399725f7c45
+  target_id: boston_streets_971
+  ml_confidence: 0.2026
+  ml_decision: no_match
+  confidence_bucket: low
+- ref_id: 2d62d71d-657e-44ab-ad27-d49f407577fa
+  target_id: boston_streets_7026
+  ml_confidence: 0.5068
+  ml_decision: review
+  confidence_bucket: medium
+- ref_id: 3ee3ff5d-7b52-4816-b7f5-b32fadae8a31
+  target_id: boston_streets_8337
+  ml_confidence: 0.3999
+  ml_decision: no_match
+  confidence_bucket: medium
+- ref_id: d464fb79-d751-4326-bbf5-98003f7d6e81
+  target_id: boston_streets_4752
+  ml_confidence: 0.7531
+  ml_decision: match
+  confidence_bucket: high

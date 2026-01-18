@@ -26,13 +26,13 @@ CALTRANS_URL = "https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/C
 # FHWA Functional Classification to Overture class mapping
 # Based on match analysis showing F_System 2 maps to Overture "motorway" (95.1% agreement)
 F_SYSTEM_MAPPING = {
-    1: "motorway",      # Interstate
-    2: "motorway",      # Principal Arterial - Freeways/Expressways (maps to motorway in Overture)
-    3: "primary",       # Principal Arterial - Other
-    4: "secondary",     # Minor Arterial
-    5: "tertiary",      # Major Collector
-    6: "tertiary",      # Minor Collector
-    7: "residential",   # Local
+    1: "motorway",  # Interstate
+    2: "motorway",  # Principal Arterial - Freeways/Expressways (maps to motorway in Overture)
+    3: "primary",  # Principal Arterial - Other
+    4: "secondary",  # Minor Arterial
+    5: "tertiary",  # Major Collector
+    6: "tertiary",  # Minor Collector
+    7: "residential",  # Local
 }
 
 
@@ -119,9 +119,7 @@ def fetch_fresno_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoData
     gdf["primary_name"] = gdf["RouteID"].apply(parse_route_name)
 
     # Create names dict (Overture format)
-    gdf["names"] = gdf["primary_name"].apply(
-        lambda n: {"primary": n} if n else None
-    )
+    gdf["names"] = gdf["primary_name"].apply(lambda n: {"primary": n} if n else None)
 
     # Store original attributes in source_tags
     gdf["source_tags"] = gdf.apply(
