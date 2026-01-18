@@ -19,14 +19,37 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 # Project root for resolving data paths (src/matcher/labeling -> project root)
 PROJECT_ROOT = Path(__file__).parents[3]
 
-# Dataset configurations - maps dataset_id to raw data filename
+# Dataset configurations - maps dataset_id to (target_file, reference_file)
 # Dataset metadata (name, type, urls) comes from DatasetRegistry
-DATASET_RAW_FILES = {
-    "boston_streets": "boston_streets.parquet",
-    "boston_bikes": "boston_bike_network.parquet",
-    "boston_sidewalks": "boston_sidewalks.parquet",
-    "osm": "osm_segments.parquet",
+# Reference file is the Overture segments file for the region
+DATASET_CONFIG = {
+    # Boston area (default Overture reference)
+    "boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
+    "boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
+    "boston_sidewalks": ("boston_sidewalks.parquet", "overture_segments.parquet"),
+    "osm": ("osm_segments.parquet", "overture_segments.parquet"),
+    # Fort Collins, CO
+    "fort_collins_streets": (
+        "fort_collins_streets.parquet",
+        "overture_fort_collins_segments.parquet",
+    ),
+    "fort_collins_sidewalks": (
+        "fort_collins_sidewalks.parquet",
+        "overture_fort_collins_segments.parquet",
+    ),
+    # Frisco, TX
+    "frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
+    "frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
+    # Salt Lake City, UT (uses same Overture as Utah)
+    "salt_lake_roads": ("utah_roads.parquet", "overture_salt_lake_segments.parquet"),
+    # Fresno, CA
+    "fresno_roads": ("fresno_roads.parquet", "fresno_overture/overture_segments.parquet"),
+    # Utah (legacy - uses subdirectory)
+    "utah_roads": ("utah_roads.parquet", "utah_overture/overture_segments.parquet"),
 }
+
+# For backwards compatibility
+DATASET_RAW_FILES = {k: v[0] for k, v in DATASET_CONFIG.items()}
 
 
 def load_config() -> dict:
@@ -89,19 +112,19 @@ def get_data_paths() -> tuple[Path, Path, str]:
     selected = st.session_state.get("selected_dataset", default_dataset)
 
     # Validate selection
-    if selected not in DATASET_RAW_FILES:
+    if selected not in DATASET_CONFIG:
         selected = "boston_streets"
 
-    raw_filename = DATASET_RAW_FILES[selected]
+    target_filename, reference_filename = DATASET_CONFIG[selected]
 
     # Env vars override dropdown selection (for CLI compatibility)
     reference_path = Path(
         os.environ.get(
-            "MATCHER_REFERENCE_PATH", str(PROJECT_ROOT / "data/raw/overture_segments.parquet")
+            "MATCHER_REFERENCE_PATH", str(PROJECT_ROOT / "data/raw" / reference_filename)
         )
     )
     target_path = Path(
-        os.environ.get("MATCHER_TARGET_PATH", str(PROJECT_ROOT / "data/raw" / raw_filename))
+        os.environ.get("MATCHER_TARGET_PATH", str(PROJECT_ROOT / "data/raw" / target_filename))
     )
     # Return dataset_id instead of labels_path - LabelStore uses partitions
     return reference_path, target_path, selected
