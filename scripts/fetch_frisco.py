@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-"""Fetch Boston-area datasets from ArcGIS REST APIs.
+"""Fetch Frisco, Texas trail and road data.
 
-Downloads municipal road, sidewalk, and bike network data from Boston's
-open data portals and converts them to GeoParquet with Overture-compatible schema.
+Downloads trail network and road centerlines from Frisco GIS
+and converts them to GeoParquet with Overture-compatible schema.
 
 Usage:
-    python scripts/fetch_boston.py
+    python scripts/fetch_frisco.py
 
-Output files will be saved to data/raw/boston_*.parquet
+Output files will be saved to:
+    - data/raw/frisco_trails.parquet
+    - data/raw/frisco_roads.parquet
 """
 
 import sys
@@ -19,7 +21,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent))  # scripts directory for dataset_configs
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # src directory for matcher
 
-from dataset_configs import BOSTON_DATASETS
+from dataset_configs import FRISCO_DATASETS
 
 from matcher.fetch.arcgis import fetch_arcgis_layer
 
@@ -28,15 +30,14 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 
 
 def main():
-    """Fetch all Boston datasets."""
-    logger.info("Fetching Boston datasets...")
-    logger.info("  - Streets: Managed roads with MassDOT functional classification")
-    logger.info("  - Sidewalks: Centerlines including crosswalks")
-    logger.info("  - Bike Network: 2024 bicycle facilities")
+    """Fetch all Frisco datasets."""
+    logger.info("Fetching Frisco, TX datasets...")
+    logger.info("  - Trails: Pedestrian paths, bike routes, walking loops")
+    logger.info("  - Roads: Centerlines with 9 classifications and lifecycle status")
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    for dataset in BOSTON_DATASETS:
+    for dataset in FRISCO_DATASETS:
         name = dataset.pop("name")
         description = dataset.pop("description", None)
         output_path = DATA_DIR / f"{name}.parquet"
@@ -56,7 +57,7 @@ def main():
         if description:
             dataset["description"] = description
 
-    logger.info("\nDone fetching Boston datasets!")
+    logger.info("\nDone fetching Frisco datasets!")
 
 
 if __name__ == "__main__":

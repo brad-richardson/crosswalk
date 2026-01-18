@@ -24,8 +24,13 @@ def fetch_arcgis_layer(
     subclass_column: str | None = None,
     subclass_mapping: dict | None = None,
     level_column: str | None = None,
+    bridge_column: str | None = None,
+    tunnel_column: str | None = None,
+    status_column: str | None = None,
+    status_mapping: dict | None = None,
     source_name: str = "ArcGIS",
     page_size: int = 2000,
+    where_clause: str = "1=1",
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -42,16 +47,23 @@ def fetch_arcgis_layer(
         subclass_column: Column name for subclass (e.g., sidewalk vs crosswalk)
         subclass_mapping: Dict mapping source values to subclass values
         level_column: Column name for z-level/layer
+        bridge_column: Column name for bridge indicator (truthy value = bridge)
+        tunnel_column: Column name for tunnel indicator (truthy value = tunnel)
+        status_column: Column name for lifecycle status (proposed/construction)
+        status_mapping: Dict mapping source status values to standard status values
         source_name: Name for the data source in sources array
         page_size: Number of features per API request
+        where_clause: SQL WHERE clause to filter features (default: "1=1" for all)
 
     Returns:
         Path to the output GeoParquet file
     """
     logger.info(f"Fetching ArcGIS layer: {url}")
+    if where_clause != "1=1":
+        logger.info(f"Filtering with: {where_clause}")
 
     # Fetch all features with pagination
-    features = _fetch_all_features(url, page_size)
+    features = _fetch_all_features(url, page_size, where_clause)
 
     if not features:
         logger.warning(f"No features returned from {url}")
@@ -72,6 +84,10 @@ def fetch_arcgis_layer(
         subclass_column=subclass_column,
         subclass_mapping=subclass_mapping,
         level_column=level_column,
+        bridge_column=bridge_column,
+        tunnel_column=tunnel_column,
+        status_column=status_column,
+        status_mapping=status_mapping,
         source_name=source_name,
     )
 
@@ -83,12 +99,13 @@ def fetch_arcgis_layer(
     return output_path
 
 
-def _fetch_all_features(url: str, page_size: int) -> list[dict]:
+def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> list[dict]:
     """Fetch all features from ArcGIS REST API with pagination.
 
     Args:
         url: ArcGIS REST API layer URL
         page_size: Number of features per request
+        where_clause: SQL WHERE clause to filter features
 
     Returns:
         List of GeoJSON features
@@ -101,7 +118,7 @@ def _fetch_all_features(url: str, page_size: int) -> list[dict]:
 
     while True:
         params = {
-            "where": "1=1",
+            "where": where_clause,
             "outFields": "*",
             "f": "geojson",
             "returnGeometry": "true",
@@ -153,6 +170,10 @@ def _transform_to_overture_schema(
     subclass_column: str | None,
     subclass_mapping: dict | None,
     level_column: str | None,
+    bridge_column: str | None,
+    tunnel_column: str | None,
+    status_column: str | None,
+    status_mapping: dict | None,
     source_name: str,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
@@ -166,6 +187,10 @@ def _transform_to_overture_schema(
         subclass_column: Column name for subclass
         subclass_mapping: Dict mapping source values to subclass values
         level_column: Column name for z-level
+        bridge_column: Column name for bridge indicator
+        tunnel_column: Column name for tunnel indicator
+        status_column: Column name for lifecycle status
+        status_mapping: Dict mapping source status values to standard values
         source_name: Name for the data source
 
     Returns:
@@ -223,14 +248,23 @@ def _transform_to_overture_schema(
         gdf[id_col].apply(lambda x: [{"dataset": source_name, "record_id": str(x)}]).values
     )
 
-    # Road flags (empty - no bridge/tunnel info in these sources)
-    data["road_flags"] = [[] for _ in range(len(gdf))]
+    # Road flags (bridge/tunnel indicators)
+    data["road_flags"] = _build_road_flags(gdf, bridge_column, tunnel_column)
 
     # Level rules
     if level_column and level_column in gdf.columns:
         data["level_rules"] = gdf[level_column].apply(_build_level_rules).values
     else:
         data["level_rules"] = [[] for _ in range(len(gdf))]
+
+    # Status (lifecycle: proposed, construction, etc.)
+    if status_column and status_column in gdf.columns:
+        if status_mapping:
+            data["status"] = gdf[status_column].map(status_mapping).values
+        else:
+            data["status"] = gdf[status_column].astype(str).values
+    else:
+        data["status"] = [None] * len(gdf)
 
     # Source tags (all original columns as dict)
     data["source_tags"] = source_tags_data
@@ -318,3 +352,69 @@ def _build_level_rules(value: Any) -> list:
         return [{"value": level}]
     except (ValueError, TypeError):
         return []
+
+
+def _build_road_flags(
+    gdf: gpd.GeoDataFrame,
+    bridge_column: str | None,
+    tunnel_column: str | None,
+) -> list[list[str]]:
+    """Build road_flags arrays from bridge/tunnel columns.
+
+    Args:
+        gdf: Input GeoDataFrame
+        bridge_column: Column name for bridge indicator
+        tunnel_column: Column name for tunnel indicator
+
+    Returns:
+        List of road flag lists (one per row)
+    """
+    result = []
+
+    for idx in range(len(gdf)):
+        flags = []
+
+        # Check bridge
+        if bridge_column and bridge_column in gdf.columns:
+            val = gdf.iloc[idx][bridge_column]
+            if _is_truthy(val):
+                flags.append("is_bridge")
+
+        # Check tunnel
+        if tunnel_column and tunnel_column in gdf.columns:
+            val = gdf.iloc[idx][tunnel_column]
+            if _is_truthy(val):
+                flags.append("is_tunnel")
+
+        result.append(flags)
+
+    return result
+
+
+def _is_truthy(value: Any) -> bool:
+    """Check if a value indicates True/Yes/1.
+
+    Handles various representations from different data sources:
+    - Boolean True/False
+    - Numeric 1/0
+    - String "Y"/"N", "Yes"/"No", "True"/"False", "1"/"0"
+
+    Args:
+        value: Value to check
+
+    Returns:
+        True if value indicates a truthy state
+    """
+    if pd.isna(value):
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value == 1 or value > 0
+
+    if isinstance(value, str):
+        return value.upper() in ("Y", "YES", "TRUE", "1", "T")
+
+    return bool(value)

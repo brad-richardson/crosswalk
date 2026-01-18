@@ -7,3 +7,8 @@ boston_streets,Boston Streets,road,,,{}
 fresno_roads,Fresno County Roads,road,https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0,https://gisdata-caltrans.opendata.arcgis.com/,{"classification_column": "F_System"}
 osm,Osm,road,,,{}
 utah_roads,Utah Salt Lake County Roads,road,https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0,https://gis.utah.gov/products/sgid/transportation/road-centerlines/,{"classification_column": "CARTOCODE"}
+fort_collins_sidewalks,Fort Collins Sidewalks,sidewalk,https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Sidewalks/FeatureServer/0,https://data-fcgov.opendata.arcgis.com/,{"classification_column": "TYPE"}
+fort_collins_streets,Fort Collins Streets,road,https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Street_Centerlines/FeatureServer/0,https://data-fcgov.opendata.arcgis.com/,{"classification_column": "STREETTYPE"}
+frisco_trails,Frisco Trails,trail,https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/10,https://geodata-frisco.hub.arcgis.com/,{"classification_column": "TrailType"}
+frisco_roads,Frisco Roads,road,https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/8,https://geodata-frisco.hub.arcgis.com/,{"classification_column": "SUBTYPE"}
+salt_lake_city_sidewalks,Salt Lake City Sidewalks,sidewalk,,https://gis-slcgov.opendata.arcgis.com/datasets/sidewalk-1,{}

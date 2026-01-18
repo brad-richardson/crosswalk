@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-"""Fetch Boston-area datasets from ArcGIS REST APIs.
+"""Fetch Fort Collins sidewalk and street data.
 
-Downloads municipal road, sidewalk, and bike network data from Boston's
-open data portals and converts them to GeoParquet with Overture-compatible schema.
+Downloads sidewalk inventory and street centerlines from Fort Collins GIS
+and converts them to GeoParquet with Overture-compatible schema.
 
 Usage:
-    python scripts/fetch_boston.py
+    python scripts/fetch_fort_collins.py
 
-Output files will be saved to data/raw/boston_*.parquet
+Output files will be saved to:
+    - data/raw/fort_collins_sidewalks.parquet
+    - data/raw/fort_collins_streets.parquet
 """
 
 import sys
@@ -19,7 +21,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent))  # scripts directory for dataset_configs
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # src directory for matcher
 
-from dataset_configs import BOSTON_DATASETS
+from dataset_configs import FORT_COLLINS_DATASETS
 
 from matcher.fetch.arcgis import fetch_arcgis_layer
 
@@ -28,15 +30,14 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 
 
 def main():
-    """Fetch all Boston datasets."""
-    logger.info("Fetching Boston datasets...")
-    logger.info("  - Streets: Managed roads with MassDOT functional classification")
-    logger.info("  - Sidewalks: Centerlines including crosswalks")
-    logger.info("  - Bike Network: 2024 bicycle facilities")
+    """Fetch all Fort Collins datasets."""
+    logger.info("Fetching Fort Collins datasets...")
+    logger.info("  - Sidewalks: 540 miles of inventory with attachment type")
+    logger.info("  - Streets: Centerlines with 10 road type classifications")
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    for dataset in BOSTON_DATASETS:
+    for dataset in FORT_COLLINS_DATASETS:
         name = dataset.pop("name")
         description = dataset.pop("description", None)
         output_path = DATA_DIR / f"{name}.parquet"
@@ -56,7 +57,7 @@ def main():
         if description:
             dataset["description"] = description
 
-    logger.info("\nDone fetching Boston datasets!")
+    logger.info("\nDone fetching Fort Collins datasets!")
 
 
 if __name__ == "__main__":
