@@ -1,10 +1,15 @@
 """Data loading and candidate preparation for labeling UI."""
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
+import pandas as pd
+from shapely import wkt
 from shapely.geometry import LineString
 
 from ..blocking import generate_candidates
@@ -13,6 +18,9 @@ from ..matching.rules import score_candidates
 from .subsegment import estimate_overlap_range
 
 logger = logging.getLogger(__name__)
+
+# Cache directory relative to project root (data/cache/labeling/)
+CACHE_DIR = Path(__file__).parents[4] / "data" / "cache" / "labeling"
 
 
 @dataclass
@@ -29,11 +37,193 @@ class CandidatePairView:
     target_class: str | None
     decision: str  # "match", "review", "no_match"
     confidence: float
-    score_breakdown: dict[str, float]
-    features: dict[str, float]
+    score_breakdown: dict[str, float] = field(default_factory=dict)
+    features: dict[str, float] = field(default_factory=dict)
     # Sub-segment estimate - computed on-demand when viewing the pair
     # None means not yet computed, dict contains the estimated ranges
     estimated_subsegment: dict[str, float] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for cache storage."""
+        return {
+            "ref_id": self.ref_id,
+            "target_id": self.target_id,
+            "ref_geometry_wkt": self.ref_geometry.wkt,
+            "target_geometry_wkt": self.target_geometry.wkt,
+            "ref_name": self.ref_name,
+            "target_name": self.target_name,
+            "ref_class": self.ref_class,
+            "target_class": self.target_class,
+            "decision": self.decision,
+            "confidence": self.confidence,
+            "score_breakdown_json": json.dumps(self.score_breakdown),
+            "features_json": json.dumps(self.features),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CandidatePairView":
+        """Deserialize from dictionary loaded from cache."""
+        return cls(
+            ref_id=data["ref_id"],
+            target_id=data["target_id"],
+            ref_geometry=wkt.loads(data["ref_geometry_wkt"]),
+            target_geometry=wkt.loads(data["target_geometry_wkt"]),
+            ref_name=data.get("ref_name"),
+            target_name=data.get("target_name"),
+            ref_class=data.get("ref_class"),
+            target_class=data.get("target_class"),
+            decision=data["decision"],
+            confidence=data["confidence"],
+            score_breakdown=json.loads(data.get("score_breakdown_json", "{}")),
+            features=json.loads(data.get("features_json", "{}")),
+            # Subsegment estimate is always computed on-demand, not cached
+            estimated_subsegment=None,
+        )
+
+
+def get_cache_path(dataset_id: str) -> Path:
+    """Get the cache file path for a dataset.
+
+    Args:
+        dataset_id: Unique identifier for the dataset (e.g., "boston_streets")
+
+    Returns:
+        Path to the cache parquet file
+    """
+    return CACHE_DIR / f"{dataset_id}_candidates.parquet"
+
+
+def get_cache_info(
+    dataset_id: str,
+    reference_path: Path | None = None,
+    target_path: Path | None = None,
+) -> dict[str, Any]:
+    """Get information about the candidate cache for a dataset.
+
+    Args:
+        dataset_id: Unique identifier for the dataset
+        reference_path: Path to reference data file (for freshness check)
+        target_path: Path to target data file (for freshness check)
+
+    Returns:
+        Dictionary with cache info:
+        - exists: Whether cache file exists
+        - path: Path to cache file
+        - created: Cache creation timestamp (or None)
+        - age_hours: Hours since cache creation (or None)
+        - is_fresh: Whether cache is newer than source files (or None)
+        - candidate_count: Number of candidates in cache (or None)
+    """
+    cache_path = get_cache_path(dataset_id)
+    info: dict[str, Any] = {
+        "exists": cache_path.exists(),
+        "path": cache_path,
+        "created": None,
+        "age_hours": None,
+        "is_fresh": None,
+        "candidate_count": None,
+    }
+
+    if not cache_path.exists():
+        return info
+
+    # Get cache modification time
+    cache_mtime = cache_path.stat().st_mtime
+    cache_datetime = datetime.fromtimestamp(cache_mtime)
+    info["created"] = cache_datetime
+    info["age_hours"] = (datetime.now() - cache_datetime).total_seconds() / 3600
+
+    # Check freshness against source files
+    if reference_path and target_path:
+        source_mtimes = []
+        if reference_path.exists():
+            source_mtimes.append(reference_path.stat().st_mtime)
+        if target_path.exists():
+            source_mtimes.append(target_path.stat().st_mtime)
+        if source_mtimes:
+            info["is_fresh"] = cache_mtime > max(source_mtimes)
+
+    # Get candidate count from metadata without loading full file
+    try:
+        import pyarrow.parquet as pq
+
+        metadata = pq.read_metadata(cache_path)
+        info["candidate_count"] = metadata.num_rows
+    except Exception:
+        pass
+
+    return info
+
+
+def load_cached_candidates(dataset_id: str) -> list[CandidatePairView] | None:
+    """Load scored candidates from cache if available.
+
+    Args:
+        dataset_id: Unique identifier for the dataset
+
+    Returns:
+        List of CandidatePairView objects, or None if cache doesn't exist
+    """
+    cache_path = get_cache_path(dataset_id)
+    if not cache_path.exists():
+        logger.info(f"No cache found for dataset {dataset_id}")
+        return None
+
+    logger.info(f"Loading cached candidates from {cache_path}")
+    try:
+        df = pd.read_parquet(cache_path)
+        candidates = [CandidatePairView.from_dict(row) for _, row in df.iterrows()]
+        logger.info(f"Loaded {len(candidates)} candidates from cache")
+        return candidates
+    except Exception as e:
+        logger.warning(f"Failed to load cache for {dataset_id}: {e}")
+        return None
+
+
+def save_candidates_to_cache(
+    dataset_id: str,
+    candidates: list[CandidatePairView],
+) -> Path:
+    """Save scored candidates to cache.
+
+    Args:
+        dataset_id: Unique identifier for the dataset
+        candidates: List of CandidatePairView objects to cache
+
+    Returns:
+        Path to the saved cache file
+    """
+    cache_path = get_cache_path(dataset_id)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Saving {len(candidates)} candidates to cache at {cache_path}")
+
+    # Convert to DataFrame
+    records = [c.to_dict() for c in candidates]
+    df = pd.DataFrame(records)
+
+    # Save as parquet
+    df.to_parquet(cache_path, index=False)
+
+    logger.info(f"Cache saved successfully: {cache_path}")
+    return cache_path
+
+
+def delete_cache(dataset_id: str) -> bool:
+    """Delete the cache for a dataset.
+
+    Args:
+        dataset_id: Unique identifier for the dataset
+
+    Returns:
+        True if cache was deleted, False if it didn't exist
+    """
+    cache_path = get_cache_path(dataset_id)
+    if cache_path.exists():
+        cache_path.unlink()
+        logger.info(f"Deleted cache for {dataset_id}")
+        return True
+    return False
 
 
 def _filter_linestrings(gdf: gpd.GeoDataFrame, source_name: str) -> gpd.GeoDataFrame:

@@ -142,6 +142,65 @@ def render_feature_panel(pair: CandidatePairView) -> None:
     render_score_breakdown(pair)
 
 
+def render_minimal_feature_panel(pair: CandidatePairView) -> None:
+    """Render a minimal feature panel for quick/mobile mode.
+
+    Shows only the most essential information:
+    - Confidence score with decision badge
+    - Name comparison (reference vs target)
+    - Road class comparison
+    """
+    # Confidence and decision in a compact format
+    confidence_pct = pair.confidence * 100
+    if pair.confidence >= 0.75:
+        color = "#4CAF50"
+    elif pair.confidence >= 0.5:
+        color = "#FF9800"
+    else:
+        color = "#F44336"
+
+    decision = pair.decision.upper()
+    if decision == "MATCH":
+        badge_bg = "#1B5E20"
+    elif decision == "REVIEW":
+        badge_bg = "#E65100"
+    else:
+        badge_bg = "#B71C1C"
+
+    # Single compact row with all key info
+    ref_name = pair.ref_name or "No name"
+    target_name = pair.target_name or "No name"
+    ref_class = pair.ref_class or "-"
+    target_class = pair.target_class or "-"
+
+    st.markdown(
+        f"""
+        <div style="background: #1E1E1E; border-radius: 8px; padding: 12px; margin: 8px 0;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span style="font-size: 28px; font-weight: bold; color: {color};">{confidence_pct:.0f}%</span>
+                <span style="background: {badge_bg}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;">{decision}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 14px;">
+                <div style="flex: 1;">
+                    <div style="color: #2196F3; font-weight: bold;">Reference</div>
+                    <div style="color: #EEE;">{ref_name}</div>
+                    <div style="color: #888; font-size: 12px;">{ref_class}</div>
+                </div>
+                <div style="flex: 0 0 30px; display: flex; align-items: center; justify-content: center;">
+                    <span style="color: #666;">↔</span>
+                </div>
+                <div style="flex: 1; text-align: right;">
+                    <div style="color: #F44336; font-weight: bold;">Target</div>
+                    <div style="color: #EEE;">{target_name}</div>
+                    <div style="color: #888; font-size: 12px;">{target_class}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_subsegment_controls(
     pair: CandidatePairView,
     estimated_subsegment: dict[str, float] | None = None,

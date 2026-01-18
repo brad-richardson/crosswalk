@@ -48,10 +48,14 @@ from matcher.config import settings
 from matcher.labeling.comparison_view import render_comparison_view
 from matcher.labeling.data_loader import (
     CandidatePairView,
+    delete_cache,
     filter_candidates,
     generate_scored_candidates,
+    get_cache_info,
     get_subsegment_estimate,
+    load_cached_candidates,
     load_geodataframe,
+    save_candidates_to_cache,
 )
 from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.feature_panel import (
@@ -269,9 +273,49 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             st.text(f"Reference: {reference_path.name}")
             st.text(f"Target: {target_path.name}")
 
+            # Cache controls
+            cache_info = get_cache_info(dataset_id, reference_path, target_path)
+
+            # Initialize cache preference in session state
+            if "use_cache" not in st.session_state:
+                st.session_state.use_cache = True
+
+            use_cache = st.checkbox(
+                "Use cached candidates",
+                value=st.session_state.use_cache,
+                key="use_cache_checkbox",
+                help="Load pre-computed candidates from cache for faster startup",
+            )
+            st.session_state.use_cache = use_cache
+
+            # Show cache status
+            if cache_info["exists"]:
+                age_str = (
+                    f"{cache_info['age_hours']:.1f}h ago"
+                    if cache_info["age_hours"] is not None
+                    else "unknown"
+                )
+                count_str = (
+                    f"{cache_info['candidate_count']:,}" if cache_info["candidate_count"] else "?"
+                )
+                fresh_indicator = (
+                    ("✓" if cache_info["is_fresh"] else "⚠️ stale")
+                    if cache_info["is_fresh"] is not None
+                    else ""
+                )
+
+                st.caption(f"Cache: {count_str} pairs, {age_str} {fresh_indicator}")
+
+                if st.button("🔄 Regenerate Cache", help="Force fresh computation"):
+                    delete_cache(dataset_id)
+                    st.session_state.use_cache = False
+                    st.rerun()
+            else:
+                st.caption("No cache available - will compute fresh")
+
             if st.button("Load Data", type="primary"):
                 with st.spinner("Loading and scoring candidates..."):
-                    load_data(reference_path, target_path)
+                    load_data(reference_path, target_path, dataset_id, use_cache)
                 st.rerun()
         else:
             st.success(f"Loaded {len(st.session_state.candidates)} candidates")
@@ -340,6 +384,8 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         st.subheader("Mode")
         if "show_comparison" not in st.session_state:
             st.session_state.show_comparison = False
+        if "quick_mode" not in st.session_state:
+            st.session_state.quick_mode = False
 
         mode = st.radio(
             "View",
@@ -350,6 +396,16 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         )
         if (mode == "Compare Labelers") != st.session_state.show_comparison:
             st.session_state.show_comparison = mode == "Compare Labelers"
+            st.rerun()
+
+        # Quick Mode toggle (mobile-optimized)
+        quick_mode = st.checkbox(
+            "📱 Quick Mode",
+            value=st.session_state.quick_mode,
+            help="Simplified UI optimized for mobile/touch",
+        )
+        if quick_mode != st.session_state.quick_mode:
+            st.session_state.quick_mode = quick_mode
             st.rerun()
 
         st.divider()
@@ -490,6 +546,11 @@ def _add_keyboard_shortcuts():
 
 def render_single_pair_mode(pair, filtered, label_store, session):
     """Render the standard single-pair labeling mode."""
+    # Check if quick mode is enabled
+    if st.session_state.get("quick_mode", False):
+        render_quick_mode(pair, filtered, label_store, session)
+        return
+
     # Add keyboard shortcut handler via JavaScript
     _add_keyboard_shortcuts()
 
@@ -627,6 +688,183 @@ def render_single_pair_mode(pair, filtered, label_store, session):
             st.rerun()
 
 
+def render_quick_mode(pair, filtered, label_store, session):
+    """Render mobile-optimized quick labeling mode.
+
+    Provides a simplified single-column layout with large touch targets
+    and minimal feature display for efficient labeling on mobile devices.
+    """
+    from matcher.labeling.feature_panel import render_minimal_feature_panel
+
+    # Add keyboard shortcut handler
+    _add_keyboard_shortcuts()
+
+    # Track session labels count
+    if "session_label_count" not in st.session_state:
+        st.session_state.session_label_count = 0
+
+    # Navigation bar - simplified for mobile
+    nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+
+    with nav_col1:
+        if st.button(
+            "◀",
+            disabled=session.current_index == 0,
+            key="prev_quick",
+            use_container_width=True,
+        ):
+            go_to_previous()
+            reset_subsegment_state()
+            st.rerun()
+
+    with nav_col2:
+        st.markdown(
+            f"<div style='text-align: center; font-size: 16px; padding: 8px;'>"
+            f"<b>Pair {session.current_index + 1} / {len(filtered)}</b></div>",
+            unsafe_allow_html=True,
+        )
+
+    with nav_col3:
+        if st.button(
+            "▶",
+            disabled=session.current_index >= len(filtered) - 1,
+            key="next_quick",
+            use_container_width=True,
+        ):
+            advance_to_next()
+            reset_subsegment_state()
+            st.rerun()
+
+    # Map - full width, taller for mobile viewing
+    tile_layer = st.session_state.get("tile_layer_choice", "Light")
+    m = create_comparison_map(pair, tile_layer=tile_layer)
+    map_html = m.get_root().render()
+    components.html(map_html, height=450)
+
+    # Minimal feature display (confidence + names)
+    render_minimal_feature_panel(pair)
+
+    # Large action buttons - Match and No Match prominently displayed
+    st.markdown(
+        """
+        <style>
+        .quick-mode-btn button {
+            height: 60px !important;
+            font-size: 20px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button(
+            "✅ MATCH (M)",
+            type="primary",
+            use_container_width=True,
+            key="quick_match",
+        ):
+            record_label(pair, "match", label_store)
+            reset_subsegment_state()
+            st.rerun()
+
+    with col2:
+        if st.button(
+            "❌ NO MATCH (N)",
+            use_container_width=True,
+            key="quick_no_match",
+        ):
+            record_label(pair, "no_match", label_store)
+            reset_subsegment_state()
+            st.rerun()
+
+    # More options in an expander for secondary actions
+    with st.expander("More Options"):
+        more_col1, more_col2, more_col3 = st.columns(3)
+
+        with more_col1:
+            if st.button("🤔 Unsure (U)", use_container_width=True, key="quick_unsure"):
+                record_label(pair, "unsure", label_store)
+                reset_subsegment_state()
+                st.rerun()
+
+        with more_col2:
+            if st.button(
+                "↩️ Undo (Z)",
+                disabled=len(session.undo_stack) == 0,
+                use_container_width=True,
+                key="quick_undo",
+            ):
+                undo_last_label(label_store)
+                reset_subsegment_state()
+                st.rerun()
+
+        with more_col3:
+            # 1:N mode button
+            related_count = len(
+                [c for c in st.session_state.candidates if c.target_id == pair.target_id]
+            )
+            if related_count > 1:
+                if st.button(
+                    f"🔗 1:N ({related_count})",
+                    use_container_width=True,
+                    key="quick_1n",
+                ):
+                    st.session_state.one_to_n_mode = True
+                    st.session_state.selected_refs = {pair.ref_id}
+                    st.rerun()
+
+        # Subsegment presets (simplified)
+        st.markdown("**Quick Subsegment:**")
+        sub_col1, sub_col2, sub_col3 = st.columns(3)
+
+        estimated_subsegment = get_subsegment_estimate(pair)
+
+        with sub_col1:
+            if st.button("1st Half", use_container_width=True, key="quick_sub_first"):
+                record_label(
+                    pair,
+                    "match",
+                    label_store,
+                    ref_start_pct=0.0,
+                    ref_end_pct=0.5,
+                    target_start_pct=0.0,
+                    target_end_pct=0.5,
+                )
+                reset_subsegment_state()
+                st.rerun()
+
+        with sub_col2:
+            if st.button("2nd Half", use_container_width=True, key="quick_sub_second"):
+                record_label(
+                    pair,
+                    "match",
+                    label_store,
+                    ref_start_pct=0.5,
+                    ref_end_pct=1.0,
+                    target_start_pct=0.5,
+                    target_end_pct=1.0,
+                )
+                reset_subsegment_state()
+                st.rerun()
+
+        with sub_col3:
+            if st.button("Estimate", use_container_width=True, key="quick_sub_est"):
+                record_label(
+                    pair,
+                    "match",
+                    label_store,
+                    ref_start_pct=estimated_subsegment["ref_start_pct"],
+                    ref_end_pct=estimated_subsegment["ref_end_pct"],
+                    target_start_pct=estimated_subsegment["target_start_pct"],
+                    target_end_pct=estimated_subsegment["target_end_pct"],
+                )
+                reset_subsegment_state()
+                st.rerun()
+
+
 def render_one_to_n_mode(pair, filtered, label_store):
     """Render the 1:N labeling mode showing all candidates for a target."""
     from matcher.labeling.map_view import create_multi_reference_map
@@ -731,8 +969,31 @@ def record_one_to_n_label(
             push_undo(cand.ref_id, cand.target_id, "match_1n")
 
 
-def load_data(reference_path: Path, target_path: Path) -> None:
-    """Load reference and target data and generate candidates."""
+def load_data(
+    reference_path: Path,
+    target_path: Path,
+    dataset_id: str,
+    use_cache: bool = True,
+) -> None:
+    """Load reference and target data and generate candidates.
+
+    Args:
+        reference_path: Path to reference (Overture) data
+        target_path: Path to target (local) data
+        dataset_id: Unique identifier for dataset (used for caching)
+        use_cache: Whether to use cached candidates if available
+    """
+    candidates = None
+
+    # Try to load from cache first
+    if use_cache:
+        candidates = load_cached_candidates(dataset_id)
+        if candidates:
+            st.session_state.candidates = candidates
+            st.session_state.data_loaded = True
+            return
+
+    # Generate fresh candidates
     reference = load_geodataframe(reference_path)
     target = load_geodataframe(target_path)
 
@@ -747,6 +1008,10 @@ def load_data(reference_path: Path, target_path: Path) -> None:
         ref_class_column="class",
         target_class_column="class",
     )
+
+    # Save to cache for next time
+    if candidates:
+        save_candidates_to_cache(dataset_id, candidates)
 
     st.session_state.candidates = candidates
     st.session_state.data_loaded = True
