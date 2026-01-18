@@ -282,38 +282,62 @@ class SpatialContextIndex:
     def _cluster_endpoints(self, tolerance: float) -> None:
         """Cluster nearby endpoints and build endpoint->segment mapping.
 
+        Uses Union-Find for O(N log N) complexity instead of O(N × M²).
+
         Args:
             tolerance: Distance within which endpoints are considered the same
         """
-        # Simple approach: for each endpoint, find segments that share it
-        self.endpoint_to_segment = {}
+        n_endpoints = len(self.endpoint_coords)
+        if n_endpoints == 0:
+            self.endpoint_to_segment = {}
+            return
 
+        # Step 1: Build initial endpoint -> segments mapping
+        endpoint_segments: dict[int, list[int]] = {}
         for seg_idx, (start_ep, end_ep) in self.segment_endpoints.items():
-            # Add to start endpoint's segment list
-            if start_ep not in self.endpoint_to_segment:
-                self.endpoint_to_segment[start_ep] = []
-            self.endpoint_to_segment[start_ep].append(seg_idx)
+            if start_ep not in endpoint_segments:
+                endpoint_segments[start_ep] = []
+            endpoint_segments[start_ep].append(seg_idx)
 
-            # Add to end endpoint's segment list
-            if end_ep not in self.endpoint_to_segment:
-                self.endpoint_to_segment[end_ep] = []
-            self.endpoint_to_segment[end_ep].append(seg_idx)
+            if end_ep not in endpoint_segments:
+                endpoint_segments[end_ep] = []
+            endpoint_segments[end_ep].append(seg_idx)
 
-        # Now cluster: for nearby endpoints, merge their segment lists
-        if tolerance > 0 and len(self.endpoint_coords) > 0:
-            tree = STRtree([Point(c) for c in self.endpoint_coords])
+        # Step 2: Use Union-Find to cluster nearby endpoints
+        if tolerance > 0:
+            # Build STRtree for spatial queries
+            endpoint_points = [Point(c) for c in self.endpoint_coords]
+            tree = STRtree(endpoint_points)
 
-            for ep_idx in range(len(self.endpoint_coords)):
-                point = Point(self.endpoint_coords[ep_idx])
-                nearby = tree.query(point.buffer(tolerance))
+            # Initialize Union-Find
+            uf = UnionFind(n_endpoints)
 
-                # Merge segment lists from nearby endpoints
-                merged_segments = set()
+            # Union nearby endpoints using dwithin predicate (faster than buffer)
+            for ep_idx in range(n_endpoints):
+                point = endpoint_points[ep_idx]
+                nearby = tree.query(point, predicate="dwithin", distance=tolerance)
+
                 for other_idx in nearby:
-                    if other_idx in self.endpoint_to_segment:
-                        merged_segments.update(self.endpoint_to_segment[other_idx])
+                    if ep_idx != other_idx:
+                        uf.union(ep_idx, other_idx)
 
-                self.endpoint_to_segment[ep_idx] = list(merged_segments)
+            # Step 3: Build cluster -> segments mapping
+            cluster_segments: dict[int, set[int]] = {}
+            for ep_idx in range(n_endpoints):
+                root = uf.find(ep_idx)
+                if root not in cluster_segments:
+                    cluster_segments[root] = set()
+                if ep_idx in endpoint_segments:
+                    cluster_segments[root].update(endpoint_segments[ep_idx])
+
+            # Step 4: For each endpoint, its segment list is the cluster's segments
+            self.endpoint_to_segment = {}
+            for ep_idx in range(n_endpoints):
+                root = uf.find(ep_idx)
+                self.endpoint_to_segment[ep_idx] = list(cluster_segments[root])
+        else:
+            # No clustering, just use direct mapping
+            self.endpoint_to_segment = {k: list(v) for k, v in endpoint_segments.items()}
 
     def query_nearby_endpoints(
         self,
@@ -648,6 +672,235 @@ def compute_degree_match_score(
         return 1.0
 
     return 1.0 - (min_diff / max_possible)
+
+
+class UnionFind:
+    """Disjoint set data structure for efficient endpoint clustering.
+
+    Union-Find provides near-constant time operations for:
+    - find(): Determine which set an element belongs to
+    - union(): Merge two sets together
+
+    This enables O(N log N) total complexity for clustering nearby endpoints,
+    compared to O(N²) for naive pairwise approaches.
+    """
+
+    def __init__(self, n: int):
+        """Initialize Union-Find with n elements.
+
+        Args:
+            n: Number of elements (0 to n-1)
+        """
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+    def find(self, x: int) -> int:
+        """Find the root/representative of the set containing x.
+
+        Uses path compression for efficiency.
+
+        Args:
+            x: Element index
+
+        Returns:
+            Root index of the set containing x
+        """
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])  # Path compression
+        return self.parent[x]
+
+    def union(self, x: int, y: int) -> None:
+        """Merge the sets containing x and y.
+
+        Uses union by rank for efficiency.
+
+        Args:
+            x: First element index
+            y: Second element index
+        """
+        root_x = self.find(x)
+        root_y = self.find(y)
+
+        if root_x == root_y:
+            return
+
+        # Union by rank
+        if self.rank[root_x] < self.rank[root_y]:
+            self.parent[root_x] = root_y
+        elif self.rank[root_x] > self.rank[root_y]:
+            self.parent[root_y] = root_x
+        else:
+            self.parent[root_y] = root_x
+            self.rank[root_x] += 1
+
+
+def compute_all_topology(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    tolerance: float = 5.0,
+    ids_to_compute: set[str] | None = None,
+) -> dict[str, dict]:
+    """Compute topology features for all segments using Union-Find clustering.
+
+    This is an O(N log N) batch computation that's much faster than per-segment
+    queries for large datasets. Uses Union-Find to cluster nearby endpoints
+    without materializing an O(N²) adjacency matrix.
+
+    Algorithm:
+        1. Extract endpoints from all segments              O(N)
+        2. Build STRtree from endpoints                     O(N log N)
+        3. For each endpoint, query nearby within tolerance O(N × log N)
+        4. Union nearby endpoints into clusters             O(N × α(N)) ≈ O(N)
+        5. Degree = number of unique segments per cluster   O(N)
+
+        Total: O(N log N) time, O(N) space
+
+    Note:
+        If the input data is in a geographic CRS (EPSG:4326), it will be
+        automatically projected to a local UTM zone for accurate distance
+        calculations. The tolerance is always interpreted as meters.
+
+    Args:
+        gdf: GeoDataFrame with LineString geometries
+        id_column: Column name for segment IDs
+        tolerance: Distance within which endpoints are considered connected (meters)
+        ids_to_compute: If provided, only return topology for these IDs
+
+    Returns:
+        Dict mapping segment_id -> topology features dict with:
+        - from_degree: Number of segments connected at start
+        - to_degree: Number of segments connected at end
+        - is_dead_end: True if either endpoint has degree 1
+        - is_intersection: True if either endpoint has degree > 2
+        - degree_signature: Tuple of sorted [from_degree, to_degree]
+    """
+    if gdf.empty:
+        return {}
+
+    # Project to local CRS if in geographic coordinates (EPSG:4326)
+    # This ensures tolerance is interpreted as meters
+    work_gdf = gdf
+    if gdf.crs is not None and gdf.crs.is_geographic:
+        # Estimate UTM zone from centroid
+        centroid = gdf.geometry.union_all().centroid
+        utm_zone = int((centroid.x + 180) / 6) + 1
+        hemisphere = "north" if centroid.y >= 0 else "south"
+        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+        work_gdf = gdf.to_crs(epsg=epsg)
+        logger.debug(f"Projected to EPSG:{epsg} for topology computation")
+
+    # Step 1: Extract endpoints from all geometries
+    # Each entry: (endpoint_coords, segment_id, is_start)
+    endpoint_coords = []
+    endpoint_segment_ids = []
+    endpoint_is_start = []
+
+    for _, row in work_gdf.iterrows():
+        seg_id = str(row[id_column])
+        geom = row.geometry
+
+        if geom is None or geom.is_empty:
+            continue
+
+        # Handle both LineString and MultiLineString
+        if geom.geom_type == "MultiLineString":
+            if len(geom.geoms) == 0:
+                continue
+            start_coords = geom.geoms[0].coords[0]
+            end_coords = geom.geoms[-1].coords[-1]
+        else:
+            coords = list(geom.coords)
+            start_coords = coords[0]
+            end_coords = coords[-1]
+
+        # Add start endpoint
+        endpoint_coords.append(start_coords)
+        endpoint_segment_ids.append(seg_id)
+        endpoint_is_start.append(True)
+
+        # Add end endpoint
+        endpoint_coords.append(end_coords)
+        endpoint_segment_ids.append(seg_id)
+        endpoint_is_start.append(False)
+
+    if not endpoint_coords:
+        return {}
+
+    n_endpoints = len(endpoint_coords)
+
+    # Step 2: Build STRtree from endpoint points
+    endpoint_points = [Point(c) for c in endpoint_coords]
+    tree = STRtree(endpoint_points)
+
+    # Step 3 & 4: For each endpoint, query nearby and union into clusters
+    uf = UnionFind(n_endpoints)
+
+    for i, point in enumerate(endpoint_points):
+        # Query all endpoints within tolerance using dwithin predicate (faster than buffer)
+        nearby_indices = tree.query(point, predicate="dwithin", distance=tolerance)
+
+        # Union this endpoint with all nearby endpoints
+        for j in nearby_indices:
+            if i != j:
+                uf.union(i, j)
+
+    # Step 5: Build cluster -> set of segment_ids mapping
+    cluster_segments: dict[int, set[str]] = {}
+    for ep_idx in range(n_endpoints):
+        root = uf.find(ep_idx)
+        if root not in cluster_segments:
+            cluster_segments[root] = set()
+        cluster_segments[root].add(endpoint_segment_ids[ep_idx])
+
+    # Step 6: Compute degrees for each segment
+    # For each segment, find the cluster its start and end belong to
+    segment_from_degree: dict[str, int] = {}
+    segment_to_degree: dict[str, int] = {}
+
+    for ep_idx in range(n_endpoints):
+        seg_id = endpoint_segment_ids[ep_idx]
+        is_start = endpoint_is_start[ep_idx]
+        root = uf.find(ep_idx)
+        degree = len(cluster_segments[root])
+
+        if is_start:
+            segment_from_degree[seg_id] = degree
+        else:
+            segment_to_degree[seg_id] = degree
+
+    # Build final topology dict
+    topology = {}
+    all_segment_ids = set(endpoint_segment_ids)
+
+    for seg_id in all_segment_ids:
+        # Skip if not in requested set
+        if ids_to_compute is not None and seg_id not in ids_to_compute:
+            continue
+
+        from_degree = segment_from_degree.get(seg_id, 1)
+        to_degree = segment_to_degree.get(seg_id, 1)
+
+        topology[seg_id] = {
+            "from_degree": from_degree,
+            "to_degree": to_degree,
+            "is_dead_end": min(from_degree, to_degree) == 1,
+            "is_intersection": max(from_degree, to_degree) > 2,
+            "degree_signature": tuple(sorted([from_degree, to_degree])),
+        }
+
+    # Fill in any missing segments from ids_to_compute with defaults
+    if ids_to_compute is not None:
+        for seg_id in ids_to_compute:
+            if seg_id not in topology:
+                topology[seg_id] = {
+                    "from_degree": 1,
+                    "to_degree": 1,
+                    "is_dead_end": True,
+                    "is_intersection": False,
+                    "degree_signature": (1, 1),
+                }
+
+    return topology
 
 
 def compute_degree_signature_similarity(
