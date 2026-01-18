@@ -400,12 +400,26 @@ def eval_model(
         "--by-dataset/--overall",
         help="Show metrics broken down by dataset",
     ),
+    holdout: bool = typer.Option(
+        True,
+        "--holdout/--no-holdout",
+        help="Use 20%% holdout set for evaluation (default: True for unbiased metrics)",
+    ),
+    seed: int = typer.Option(
+        42,
+        "--seed",
+        help="Random seed for holdout split (use same seed for comparable results)",
+    ),
 ):
     """Evaluate ML model performance on labeled data.
 
+    By default, evaluates on a 20%% holdout set for unbiased metrics.
+    Use --no-holdout to evaluate on ALL data (may include training data).
+
     Examples:
         matcher eval-model data/models/matcher_model.joblib
-        matcher eval-model data/models/combined.joblib --labels data/labels
+        matcher eval-model data/models/combined.joblib --no-holdout
+        matcher eval-model data/models/combined.joblib --seed 123
     """
     from .matching.ml import evaluate_by_dataset
 
@@ -413,8 +427,16 @@ def eval_model(
         console.print(f"[red]Model not found: {model}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[blue]Evaluating {model.name}...[/blue]")
-    evaluate_by_dataset(str(model), str(labels_dir), show_by_dataset=by_dataset)
+    if holdout:
+        console.print(f"[blue]Evaluating {model.name} on 20% holdout (seed={seed})...[/blue]")
+    else:
+        console.print(
+            f"[yellow]Evaluating {model.name} on all data (may include training data)...[/yellow]"
+        )
+
+    evaluate_by_dataset(
+        str(model), str(labels_dir), show_by_dataset=by_dataset, holdout=holdout, seed=seed
+    )
 
     console.print("[green]Evaluation complete[/green]")
 

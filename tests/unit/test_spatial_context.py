@@ -105,37 +105,6 @@ class TestComputeAllTopology:
         assert result["seg1"]["from_degree"] == 1
         assert result["seg2"]["to_degree"] == 1
 
-    def test_t_junction(self):
-        """T-junction should have degree 3 at the junction point."""
-        gdf = gpd.GeoDataFrame(
-            {
-                "id": ["main", "side"],
-                "geometry": [
-                    LineString([(0, 0), (100, 0)]),  # Main road
-                    LineString([(50, 50), (50, 0)]),  # Side street ends at main road
-                ],
-            },
-            crs="EPSG:32610",
-        )
-        result = compute_all_topology(gdf, tolerance=5.0)
-
-        # The junction point (50, 0) should have degree 3
-        # For main road, both endpoints could be connected to side street's end
-        # Actually, only the endpoint closest to (50, 0) within tolerance
-        # Let's check the actual behavior
-        assert result["main"]["from_degree"] == 1  # (0, 0) - isolated
-        # The main road doesn't have its end at (50, 0), so neither endpoint connects
-        # to the side street directly. Let me reconsider this test.
-
-        # Actually the main road goes from (0,0) to (100,0)
-        # The side street end is at (50, 0) which is NOT at an endpoint of main
-        # So the degrees should be:
-        # - main: from=1, to=1 (both endpoints isolated from side street)
-        # - side: from=1 (at 50,50), to=1 (at 50,0 - no main endpoint nearby)
-
-        # This test needs to use segments that actually share endpoints
-        pass  # Skip the assertions for now and test with proper geometry below
-
     def test_t_junction_with_shared_endpoint(self):
         """T-junction with shared endpoint should have correct degrees."""
         # Main road split into two segments with a shared endpoint

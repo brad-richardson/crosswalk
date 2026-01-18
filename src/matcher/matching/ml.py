@@ -948,6 +948,8 @@ def evaluate_by_dataset(
     labels_dir: str = "labels",
     binary: bool = True,
     show_by_dataset: bool = True,
+    holdout: bool = True,
+    seed: int = 42,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate model performance broken down by dataset.
 
@@ -958,6 +960,8 @@ def evaluate_by_dataset(
         labels_dir: Directory containing Hive-partitioned label CSVs
         binary: Evaluate as binary (match vs no_match)
         show_by_dataset: If True, show per-dataset metrics; if False, only show overall
+        holdout: If True (default), use 20% holdout set for unbiased evaluation
+        seed: Random seed for holdout split (for reproducibility)
 
     Returns:
         Dictionary mapping dataset name to metrics dict
@@ -986,6 +990,17 @@ def evaluate_by_dataset(
     if "dataset" not in all_labels.columns:
         logger.warning("No 'dataset' column found - cannot evaluate by dataset")
         return {}
+
+    # If holdout requested, split the data first (stratified by label)
+    if holdout:
+        valid_labels = {"match", "no_match", "associated"}
+        eval_df = all_labels[all_labels["label"].isin(valid_labels)].copy()
+        _, all_labels = train_test_split(
+            eval_df, test_size=0.2, random_state=seed, stratify=eval_df["label"]
+        )
+        print(
+            f"\n[Holdout mode: evaluating on {len(all_labels)} samples (20% of data, seed={seed})]"
+        )
 
     datasets = all_labels["dataset"].unique()
 
