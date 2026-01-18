@@ -18,10 +18,9 @@ import pandas as pd
 from loguru import logger
 
 from matcher.features.spatial_context import (
-    SpatialContextIndex,
+    compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
-    compute_topology_features,
 )
 
 # Dataset name to target file mapping
@@ -51,10 +50,15 @@ TOPOLOGY_FEATURE_COLUMNS = [
 ]
 
 
-def load_and_index_geodataframe(
-    path: Path, id_column: str = "id", ids_to_compute: set | None = None
-) -> tuple[gpd.GeoDataFrame, SpatialContextIndex, dict]:
-    """Load a GeoDataFrame and build spatial index with pre-computed topology.
+def load_and_compute_topology(
+    path: Path,
+    id_column: str = "id",
+    ids_to_compute: set | None = None,
+) -> tuple[gpd.GeoDataFrame, dict]:
+    """Load a GeoDataFrame and compute topology features.
+
+    Uses the efficient Union-Find based compute_all_topology() function
+    with O(N log N) complexity.
 
     Args:
         path: Path to parquet file
@@ -62,37 +66,23 @@ def load_and_index_geodataframe(
         ids_to_compute: If provided, only compute topology for these IDs
 
     Returns:
-        Tuple of (GeoDataFrame, SpatialContextIndex, topology dict)
+        Tuple of (GeoDataFrame, topology dict)
     """
     gdf = gpd.read_parquet(path)
     gdf = gdf.set_index(id_column)
     gdf_reset = gdf.reset_index()
     gdf_reset[id_column] = gdf_reset[id_column].astype(str)
 
-    # Build spatial index with snap_tolerance=0 to skip expensive clustering
-    # For backfilling, exact endpoint matches are sufficient
-    index = SpatialContextIndex()
-    index.build_from_gdf(gdf_reset, id_column=id_column, snap_tolerance=0)
+    # Use the efficient Union-Find based batch computation
+    topology = compute_all_topology(
+        gdf_reset,
+        id_column=id_column,
+        tolerance=5.0,
+        ids_to_compute=ids_to_compute,
+    )
 
-    # Pre-compute topology only for requested segments
-    topology = {}
-    if ids_to_compute:
-        # Create a lookup for fast access
-        id_to_idx = {row[id_column]: idx for idx, row in gdf_reset.iterrows()}
-        for seg_id in ids_to_compute:
-            if seg_id in id_to_idx:
-                idx = id_to_idx[seg_id]
-                geom = gdf_reset.iloc[idx].geometry
-                if geom is not None and not geom.is_empty:
-                    topology[seg_id] = compute_topology_features(geom, index)
-    else:
-        # Compute for all segments
-        for _, row in gdf_reset.iterrows():
-            geom = row.geometry
-            if geom is not None and not geom.is_empty:
-                topology[row[id_column]] = compute_topology_features(geom, index)
-
-    return gdf_reset, index, topology
+    logger.debug(f"Computed topology for {len(topology)} segments")
+    return gdf_reset, topology
 
 
 def compute_topology_for_pair(ref_topo: dict, target_topo: dict) -> dict[str, float]:
@@ -150,7 +140,7 @@ def get_default_topology() -> dict:
         "to_degree": 1,
         "is_dead_end": True,
         "is_intersection": False,
-        "degree_signature": (1,),
+        "degree_signature": (1, 1),
     }
 
 
@@ -198,9 +188,9 @@ def backfill_dataset(
     target_ids = set(df["target_id"].astype(str).unique())
     logger.info(f"  Need topology for {len(target_ids)} unique target segments")
 
-    # Load and index target data (only compute for needed IDs)
+    # Load and compute topology for target data (only needed IDs)
     logger.info(f"  Loading target data: {target_file}")
-    _, _, target_topology = load_and_index_geodataframe(target_path, ids_to_compute=target_ids)
+    _, target_topology = load_and_compute_topology(target_path, ids_to_compute=target_ids)
     logger.info(f"  Computed topology for {len(target_topology)} target segments")
 
     # Compute topology features for each label
@@ -307,14 +297,20 @@ def main():
         logger.error(f"Reference file not found: {ref_path}")
         return 1
 
-    logger.info("Loading reference data and building spatial index...")
-    _, _, ref_topology = load_and_index_geodataframe(ref_path, ids_to_compute=all_ref_ids)
+    logger.info("Loading reference data and computing topology...")
+    _, ref_topology = load_and_compute_topology(ref_path, ids_to_compute=all_ref_ids)
     logger.info(f"Computed topology for {len(ref_topology)} reference segments")
 
     # Process datasets
     total_processed = 0
     for dataset_name in datasets:
-        count = backfill_dataset(dataset_name, labels_dir, data_dir, ref_topology, args.dry_run)
+        count = backfill_dataset(
+            dataset_name,
+            labels_dir,
+            data_dir,
+            ref_topology,
+            dry_run=args.dry_run,
+        )
         total_processed += count
 
     logger.info(f"\nBackfill complete: {total_processed} labels processed")

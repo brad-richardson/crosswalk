@@ -15,6 +15,7 @@ from .spatial_context import (
     AnchorMatch,
     AnchorRoadMatcher,
     SpatialContextIndex,
+    compute_all_topology,
     compute_endpoint_features,
 )
 from .topological import compute_topological_features
@@ -37,5 +38,6 @@ __all__ = [
     "AnchorRoadMatcher",
     "AnchorMatch",
     "SpatialContextIndex",
+    "compute_all_topology",
     "compute_endpoint_features",
 ]

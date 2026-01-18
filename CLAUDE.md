@@ -91,6 +91,27 @@ Each CSV contains: `gers_id`, `target_id`, `label` (match/no_match/unsure), and 
 - `confidence < 0.1` → NO_MATCH
 - 1:N groups: `avg_confidence >= settings.review_threshold` → MATCH
 
+### Model Evaluation
+
+**Always use holdout evaluation for unbiased metrics:**
+
+```bash
+# Default: 20% holdout with seed=42 (recommended)
+matcher eval-model data/models/matcher_model_combined.joblib
+
+# Custom seed for different split
+matcher eval-model data/models/matcher_model_combined.joblib --seed 123
+
+# Evaluate on ALL data (may include training data - use with caution)
+matcher eval-model data/models/matcher_model_combined.joblib --no-holdout
+```
+
+**Why holdout matters:**
+- Evaluating on training data gives artificially inflated accuracy (~99%)
+- Holdout evaluation gives realistic generalization metrics (~95-96%)
+- Use consistent seed (default: 42) for comparable results across experiments
+- When comparing models or feature sets, always use the same holdout split
+
 ## Testing
 
 ```bash
