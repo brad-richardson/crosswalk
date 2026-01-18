@@ -1,19 +1,58 @@
 # Agent Labeling - Future Work
 
+## Recommended Workflow: Gemini First-Pass with Human Review
+
+Based on testing (141 candidates), Gemini achieves **88% accuracy** and is recommended
+for bulk pre-labeling with human review of uncertain cases.
+
+### Workflow
+
+1. **Run Gemini on all unlabeled candidates**
+   ```bash
+   ./run_agent.sh gemini --batch batches/<batch_name>
+   ```
+
+2. **Auto-accept high-confidence predictions** (confidence ≥ 0.9)
+   - These are ~70-80% of predictions
+   - Expected accuracy: ~95%+ for high-confidence subset
+
+3. **Human reviews low-confidence predictions** (confidence < 0.9)
+   - Focus manual effort on uncertain cases (~20-30%)
+   - Also spot-check random sample of auto-accepted labels
+
+4. **Retrain ML model** as labels accumulate
+
+### Agent Accuracy Results (141 candidates)
+
+| Agent | With Satellite | Geometry-Only | Notes |
+|-------|---------------|---------------|-------|
+| Gemini | 88.7% | 88.0% | **Recommended** - satellite adds no value |
+| Claude Sonnet | 73.0% | 66.0% | Satellite helps ~7% |
+| Codex (gpt-5.2) | 63.1% | - | High quota usage |
+
+### Satellite Imagery: Skip It
+
+Testing showed Gemini gets nearly identical accuracy with geometry-only images:
+- Satellite + geometry: 88.7%
+- Geometry only: 88.0%
+- **Recommendation**: Use geometry-only to save fetch time and storage
+
+The current `run_agent.sh` is configured for geometry-only mode.
+
 ## Usage
 
 Unified script for all agents:
 ```bash
-./run_agent.sh <agent> [batch_dir] [--model <model>]
+./run_agent.sh <agent> [--batch <dir>] [--model <model>] [--limit <n>]
 
 # Examples:
-./run_agent.sh gemini --model flash
-./run_agent.sh claude --model haiku
-./run_agent.sh codex
-./run_agent.sh ollama --model llava  # Local GPU mode
+./run_agent.sh gemini                              # Default batch
+./run_agent.sh gemini --limit 50                   # First 50 candidates
+./run_agent.sh claude --model sonnet --limit 100
+./run_agent.sh ollama --model llava                # Local GPU mode
 ```
 
-## Batch Processing (Priority)
+## Batch Processing (Lower Priority)
 
 Current approach sends one candidate per API call, which burns through quotas quickly.
 
@@ -42,20 +81,24 @@ ref_id,target_id,label,confidence,reason
 - Could use geometry.png (smaller) instead of satellite.png for batching
 - Trade-off: less per-candidate reasoning vs fewer API calls
 
-## Model-Specific Issues Discovered
+## Model-Specific Notes
 
-### Gemini
-- Default model can't read images - must use `-m flash`
-- Slow initialization (~30s just for "Loaded cached credentials")
-- Works well with flash model (~8-15s per candidate)
+### Gemini (Recommended)
+- Best accuracy (88%) with reasonable quota usage
+- Runs in Docker sandbox for isolation
+- ~15-20s per candidate
+- Barely uses satellite imagery - geometry-only is fine
+
+### Claude Sonnet
+- Moderate accuracy (66-73%)
+- Benefits from satellite imagery (+7%)
+- ~10s per candidate
+- Claude Haiku too small for this task
 
 ### Codex
-- Works reliably at ~15-20s per candidate
-- Quota limits hit at ~82 candidates
-
-### Claude
-- Works well but expensive for Sonnet
-- Consider Haiku for bulk labeling
+- Lower accuracy (63%)
+- Burns through API quota very quickly
+- Not recommended for bulk labeling
 
 ## Local Multimodal Models (Implemented)
 

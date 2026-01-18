@@ -30,11 +30,20 @@ shift || true
 
 BATCH_DIR=""
 MODEL=""
+LIMIT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)
             MODEL="$2"
+            shift 2
+            ;;
+        --batch)
+            BATCH_DIR="$2"
+            shift 2
+            ;;
+        --limit)
+            LIMIT="$2"
             shift 2
             ;;
         *)
@@ -54,7 +63,7 @@ case "$AGENT" in
     claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [batch_dir] [--model <model>]"
+        echo "Usage: $0 <agent> [--batch <dir>] [--model <model>] [--limit <n>]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
@@ -63,10 +72,12 @@ case "$AGENT" in
         echo "  ollama    - Local Ollama (models: llava, llava:13b)"
         echo ""
         echo "Options:"
+        echo "  --batch      Batch directory (default: latest test_batch_*)"
         echo "  --model      Model variant to use"
+        echo "  --limit      Max candidates to process"
         echo ""
-        echo "Example: $0 gemini batches/test_batch_2026-01-18 --model flash"
-        echo "Example: $0 ollama --model llava"
+        echo "Example: $0 gemini --batch batches/test_batch_2026-01-18 --model flash"
+        echo "Example: $0 claude --model sonnet --limit 50"
         exit 1
         ;;
 esac
@@ -104,6 +115,10 @@ echo ""
 COUNT=0
 FAILED=0
 TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
+# Apply limit to total
+if [[ -n "$LIMIT" ]] && [[ "$LIMIT" -lt "$TOTAL" ]]; then
+    TOTAL="$LIMIT"
+fi
 
 # Build the prompt - static prefix first for caching, variable content last
 build_prompt() {
@@ -117,9 +132,8 @@ You are analyzing road segment matches. Do NOT explore files or the codebase.
 
 TASK: Do the blue and red road segments represent the same physical road?
 
-Images provided:
-- satellite.png: satellite view (blue=reference segment, red=target segment)
-- geometry.png: geometry view (same color coding)
+Image provided:
+- geometry.png: geometry view (blue=reference segment, red=target segment)
 
 Output format: ref_id,target_id,LABEL,CONFIDENCE,REASON
 - LABEL: match, no_match, or unsure
@@ -154,7 +168,7 @@ run_agent() {
             # Prepend instruction and run from candidate directory
             local candidate_dir
             candidate_dir=$(dirname "$img_sat")
-            local full_prompt="First read satellite.png and geometry.png, then answer:
+            local full_prompt="First read geometry.png, then answer:
 
 $prompt"
             (cd "$candidate_dir" && timeout 60 claude -p $model_arg "$full_prompt") 2>&1
@@ -162,7 +176,7 @@ $prompt"
         codex)
             local tmpout="$TEMP_DIR/codex_out.txt"
             # Codex supports -i flag for image attachments
-            timeout 60 codex exec -i "$img_sat" -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
+            timeout 60 codex exec -i "$img_geo" -o "$tmpout" -- "$prompt" 2>&1 || true
             cat "$tmpout" 2>/dev/null
             ;;
         gemini)
@@ -173,8 +187,7 @@ $prompt"
             local sandbox="$TEMP_DIR/gemini_sandbox"
             mkdir -p "$sandbox"
 
-            # Copy images with consistent names for prompt caching
-            cp "$img_sat" "$sandbox/satellite.png"
+            # Copy image with consistent name for prompt caching
             cp "$img_geo" "$sandbox/geometry.png"
 
             # Write prompt to file to avoid shell escaping issues
@@ -186,8 +199,8 @@ $prompt"
 
             # Run Gemini with --sandbox (requires Docker)
             gemini --sandbox --yolo -o text \
-                "Analyze satellite.png and geometry.png using instructions in prompt.txt" \
-                prompt.txt satellite.png geometry.png 2>&1
+                "Analyze geometry.png using instructions in prompt.txt" \
+                prompt.txt geometry.png 2>&1
             local exit_code=$?
 
             # Restore directory and cleanup
@@ -198,8 +211,7 @@ $prompt"
             ;;
         ollama)
             # Cross-platform base64 (macOS doesn't support -w0)
-            local sat_base64 geo_base64
-            sat_base64=$(base64 "$img_sat" | tr -d '\n')
+            local geo_base64
             geo_base64=$(base64 "$img_geo" | tr -d '\n')
             local model_name="${MODEL:-llava}"
 
@@ -208,9 +220,8 @@ $prompt"
             json_payload=$(jq -n \
                 --arg model "$model_name" \
                 --arg prompt "$prompt" \
-                --arg sat "$sat_base64" \
                 --arg geo "$geo_base64" \
-                '{model: $model, prompt: $prompt, images: [$sat, $geo], stream: false}')
+                '{model: $model, prompt: $prompt, images: [$geo], stream: false}')
 
             # Ollama vision models need more time than text-only (120s timeout)
             timeout 120 curl -s http://localhost:11434/api/generate \
@@ -220,7 +231,14 @@ $prompt"
 }
 
 # Process candidates
+PROCESSED=0
 for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
+    # Check limit
+    if [[ -n "$LIMIT" ]] && [[ "$PROCESSED" -ge "$LIMIT" ]]; then
+        echo "Reached limit of $LIMIT candidates"
+        break
+    fi
+
     DIR_NAME=$(basename "$CANDIDATE_DIR")
     REF_ID="${DIR_NAME%%__*}"
     TARGET_ID="${DIR_NAME##*__}"
@@ -272,6 +290,8 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
         echo "FAIL [$((COUNT+FAILED))/$TOTAL]" | tee -a "$LOG_FILE"
         echo "  Raw: ${RAW:0:200}" >> "$LOG_FILE"
     fi
+
+    PROCESSED=$((PROCESSED+1))
 done
 
 # Cleanup
