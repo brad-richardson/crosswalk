@@ -135,8 +135,8 @@ TASK: Do the blue and red segments represent the same physical road network segm
 IMPORTANT: Segments match if they overlap on the same physical road even if one is longer than the other (subsegment matches count as match). Only mark as no_match if they are clearly different roads (parallel lanes, perpendicular streets, or completely separate locations).
 
 Images provided:
-- satellite.png: aerial view with geometry overlay (blue dashed=reference, red solid=target)
-- geometry.png: clean geometry view on white background (same colors)
+- satellite.png: aerial view with geometry overlay (blue with diamonds=reference, red with circles=target)
+- geometry.png: clean geometry view on white background (same colors and markers)
 
 Output format: ref_id,target_id,LABEL,CONFIDENCE,REASON
 - LABEL: match, no_match, or unsure

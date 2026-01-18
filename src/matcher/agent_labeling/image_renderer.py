@@ -392,6 +392,41 @@ def _geo_to_pixel(
     return px, py
 
 
+def _draw_decoration(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    decoration: str,
+    color: tuple[int, int, int],
+    size: int = 6,
+):
+    """Draw a decoration marker at a point.
+
+    Args:
+        draw: PIL ImageDraw object
+        x, y: Center coordinates
+        decoration: Type of decoration ('diamond', 'circle', 'square', 'triangle')
+        color: RGB color tuple
+        size: Size of the decoration in pixels
+    """
+    half = size // 2
+
+    if decoration == "diamond":
+        # Diamond shape
+        points = [(x, y - half), (x + half, y), (x, y + half), (x - half, y)]
+        draw.polygon(points, fill=color, outline=color)
+    elif decoration == "circle":
+        # Circle/dot
+        draw.ellipse([(x - half, y - half), (x + half, y + half)], fill=color, outline=color)
+    elif decoration == "square":
+        # Square
+        draw.rectangle([(x - half, y - half), (x + half, y + half)], fill=color, outline=color)
+    elif decoration == "triangle":
+        # Triangle pointing up
+        points = [(x, y - half), (x + half, y + half), (x - half, y + half)]
+        draw.polygon(points, fill=color, outline=color)
+
+
 def _draw_linestring(
     draw: ImageDraw.ImageDraw,
     line: LineString,
@@ -399,9 +434,21 @@ def _draw_linestring(
     size: tuple[int, int],
     color: tuple[int, int, int],
     width: int,
-    dashed: bool = False,
+    decoration: str | None = None,
+    decoration_spacing: int = 30,
 ):
-    """Draw a LineString on an image."""
+    """Draw a LineString on an image with optional decorations.
+
+    Args:
+        draw: PIL ImageDraw object
+        line: Shapely LineString geometry
+        bbox: Bounding box for coordinate transformation
+        size: Image size (width, height)
+        color: RGB color tuple
+        width: Line width in pixels
+        decoration: Type of decoration ('diamond', 'circle', 'square', 'triangle', or None)
+        decoration_spacing: Pixels between decorations
+    """
     if line is None or line.is_empty:
         return
 
@@ -412,39 +459,44 @@ def _draw_linestring(
     # Convert to pixel coordinates
     pixel_coords = [_geo_to_pixel(lon, lat, bbox, size) for lon, lat in coords]
 
-    if dashed:
-        # Draw dashed line
-        dash_length = 10
-        gap_length = 5
+    # Draw the main line (solid)
+    draw.line(pixel_coords, fill=color, width=width)
+
+    # Draw decorations along the line if specified
+    if decoration:
+        # Calculate total line length and place decorations at intervals
+        total_dist = 0
+        next_decoration_at = decoration_spacing // 2  # Start offset from beginning
+
         for i in range(len(pixel_coords) - 1):
             x1, y1 = pixel_coords[i]
             x2, y2 = pixel_coords[i + 1]
 
-            # Calculate segment length
             dx = x2 - x1
             dy = y2 - y1
-            length = math.sqrt(dx * dx + dy * dy)
+            segment_length = math.sqrt(dx * dx + dy * dy)
 
-            if length == 0:
+            if segment_length == 0:
                 continue
 
             # Normalize direction
-            dx /= length
-            dy /= length
+            ndx = dx / segment_length
+            ndy = dy / segment_length
 
-            # Draw dashes
-            pos = 0
-            while pos < length:
-                dash_end = min(pos + dash_length, length)
-                sx = int(x1 + dx * pos)
-                sy = int(y1 + dy * pos)
-                ex = int(x1 + dx * dash_end)
-                ey = int(y1 + dy * dash_end)
-                draw.line([(sx, sy), (ex, ey)], fill=color, width=width)
-                pos += dash_length + gap_length
-    else:
-        # Draw solid line
-        draw.line(pixel_coords, fill=color, width=width)
+            # Place decorations along this segment
+            segment_start = total_dist
+            segment_end = total_dist + segment_length
+
+            while next_decoration_at < segment_end:
+                # Calculate position along this segment
+                pos_in_segment = next_decoration_at - segment_start
+                px = int(x1 + ndx * pos_in_segment)
+                py = int(y1 + ndy * pos_in_segment)
+
+                _draw_decoration(draw, px, py, decoration, color, size=width + 4)
+                next_decoration_at += decoration_spacing
+
+            total_dist += segment_length
 
 
 def render_with_overlay(
@@ -474,14 +526,29 @@ def render_with_overlay(
 
     size = satellite.size
 
-    # Draw reference first (underneath, dashed), then target (solid)
+    # Draw reference first (underneath, diamonds), then target (circles)
+    # Different decorations and spacing make both visible even when overlapping
     if ref_line:
         _draw_linestring(
-            draw, ref_line, bbox, size, REFERENCE_COLOR, OVERLAY_LINE_WIDTH, dashed=True
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            OVERLAY_LINE_WIDTH,
+            decoration="diamond",
+            decoration_spacing=25,
         )
     if target_line:
         _draw_linestring(
-            draw, target_line, bbox, size, TARGET_COLOR, OVERLAY_LINE_WIDTH, dashed=False
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            OVERLAY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
         )
 
     return result
@@ -523,14 +590,28 @@ def render_geometry_only(
     result = Image.new("RGB", size, BACKGROUND_COLOR)
     draw = ImageDraw.Draw(result)
 
-    # Draw reference first (underneath, dashed), then target (solid)
+    # Draw reference first (underneath, diamonds), then target (circles)
     if ref_line:
         _draw_linestring(
-            draw, ref_line, bbox, size, REFERENCE_COLOR, GEOMETRY_LINE_WIDTH, dashed=True
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="diamond",
+            decoration_spacing=25,
         )
     if target_line:
         _draw_linestring(
-            draw, target_line, bbox, size, TARGET_COLOR, GEOMETRY_LINE_WIDTH, dashed=False
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
         )
 
     return result
@@ -620,14 +701,28 @@ def _render_geometry_with_bbox(
     result = Image.new("RGB", size, BACKGROUND_COLOR)
     draw = ImageDraw.Draw(result)
 
-    # Draw reference first (underneath, dashed), then target (solid)
+    # Draw reference first (underneath, diamonds), then target (circles)
     if ref_line:
         _draw_linestring(
-            draw, ref_line, bbox, size, REFERENCE_COLOR, GEOMETRY_LINE_WIDTH, dashed=True
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="diamond",
+            decoration_spacing=25,
         )
     if target_line:
         _draw_linestring(
-            draw, target_line, bbox, size, TARGET_COLOR, GEOMETRY_LINE_WIDTH, dashed=False
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
         )
 
     return result
