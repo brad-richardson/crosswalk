@@ -28,11 +28,10 @@ import requests
 from loguru import logger
 
 # Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))  # scripts directory for dataset_configs
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # src directory for matcher
 
-from dataset_configs import (
-    ALL_DATASETS,
-)
+from dataset_configs import ALL_DATASETS
 
 from matcher.fetch.arcgis import fetch_arcgis_layer
 
@@ -48,6 +47,9 @@ def fetch_from_hub_portal(
     class_column: str | None = None,
     class_mapping: dict | None = None,
     source_name: str = "ArcGIS Hub",
+    subclass_column: str | None = None,
+    subclass_mapping: dict | None = None,
+    default_subclass: str | None = None,
 ) -> Path:
     """Fetch data from ArcGIS Hub/Open Data portal.
 
@@ -61,6 +63,9 @@ def fetch_from_hub_portal(
         class_column: Column name for classification
         class_mapping: Dict mapping source values to standard classes
         source_name: Name for the data source
+        subclass_column: Column name for subclass (optional)
+        subclass_mapping: Dict mapping source values to subclass values
+        default_subclass: Default subclass if no column provided
 
     Returns:
         Path to the output GeoParquet file
@@ -96,6 +101,8 @@ def fetch_from_hub_portal(
                         name_column=name_column,
                         class_column=class_column,
                         class_mapping=class_mapping,
+                        subclass_column=subclass_column,
+                        subclass_mapping=subclass_mapping,
                         source_name=source_name,
                     )
     except Exception as e:
@@ -127,6 +134,9 @@ def fetch_from_hub_portal(
             class_column=class_column,
             class_mapping=class_mapping,
             source_name=source_name,
+            subclass_column=subclass_column,
+            subclass_mapping=subclass_mapping,
+            default_subclass=default_subclass,
         )
 
         # Save to parquet
@@ -152,8 +162,23 @@ def _transform_hub_data(
     class_column: str | None,
     class_mapping: dict | None,
     source_name: str,
+    subclass_column: str | None = None,
+    subclass_mapping: dict | None = None,
+    default_subclass: str | None = None,
 ) -> gpd.GeoDataFrame:
-    """Transform Hub download data to Overture-compatible schema."""
+    """Transform Hub download data to Overture-compatible schema.
+
+    Args:
+        gdf: Input GeoDataFrame
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        subclass_column: Column name for subclass (optional)
+        subclass_mapping: Dict mapping source values to subclass values
+        default_subclass: Default subclass if no column provided
+    """
     import pandas as pd
 
     if len(gdf) == 0:
@@ -206,8 +231,20 @@ def _transform_hub_data(
     else:
         data["class"] = ["footway"] * len(gdf)  # Default for sidewalks
 
-    # Subclass
-    data["subclass"] = ["sidewalk"] * len(gdf)  # Default for sidewalk datasets
+    # Subclass - use explicit column/mapping if provided, otherwise use default
+    if subclass_column and subclass_column in gdf.columns:
+        if subclass_mapping:
+            data["subclass"] = gdf[subclass_column].map(subclass_mapping).values
+        else:
+            data["subclass"] = gdf[subclass_column].astype(str).values
+    elif default_subclass is not None:
+        data["subclass"] = [default_subclass] * len(gdf)
+    else:
+        # Only default to "sidewalk" if all features are footway class
+        if set(data["class"]) == {"footway"}:
+            data["subclass"] = ["sidewalk"] * len(gdf)
+        else:
+            data["subclass"] = [None] * len(gdf)
 
     return gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
@@ -239,6 +276,9 @@ def fetch_dataset(dataset_config: dict, output_dir: Path) -> Path | None:
                 name_column=dataset_config.get("name_column"),
                 class_column=dataset_config.get("class_column"),
                 class_mapping=dataset_config.get("class_mapping"),
+                subclass_column=dataset_config.get("subclass_column"),
+                subclass_mapping=dataset_config.get("subclass_mapping"),
+                default_subclass=dataset_config.get("default_subclass"),
                 source_name=dataset_config.get("source_name", "ArcGIS Hub"),
             )
         else:

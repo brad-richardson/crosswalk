@@ -18,7 +18,8 @@ from pathlib import Path
 from loguru import logger
 
 # Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))  # scripts directory for dataset_configs
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # src directory for matcher
 
 from dataset_configs import FRISCO_DATASETS
 
