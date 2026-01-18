@@ -524,8 +524,8 @@ def render_with_overlay(
 
     size = satellite.size
 
-    # Draw reference first (underneath, diamonds), then target (circles)
-    # Different decorations and spacing make both visible even when overlapping
+    # Draw reference first (underneath), then target
+    # Both use circles but different colors and spacing for visibility when overlapping
     if ref_line:
         _draw_linestring(
             draw,
@@ -534,7 +534,7 @@ def render_with_overlay(
             size,
             REFERENCE_COLOR,
             OVERLAY_LINE_WIDTH,
-            decoration="diamond",
+            decoration="circle",
             decoration_spacing=25,
         )
     if target_line:
@@ -588,7 +588,8 @@ def render_geometry_only(
     result = Image.new("RGB", size, BACKGROUND_COLOR)
     draw = ImageDraw.Draw(result)
 
-    # Draw reference first (underneath, diamonds), then target (circles)
+    # Draw reference first (underneath), then target
+    # Both use circles but different colors and spacing for visibility when overlapping
     if ref_line:
         _draw_linestring(
             draw,
@@ -597,7 +598,7 @@ def render_geometry_only(
             size,
             REFERENCE_COLOR,
             GEOMETRY_LINE_WIDTH,
-            decoration="diamond",
+            decoration="circle",
             decoration_spacing=25,
         )
     if target_line:
@@ -698,7 +699,8 @@ def _render_geometry_with_bbox(
     result = Image.new("RGB", size, BACKGROUND_COLOR)
     draw = ImageDraw.Draw(result)
 
-    # Draw reference first (underneath, diamonds), then target (circles)
+    # Draw reference first (underneath), then target
+    # Both use circles but different colors and spacing for visibility when overlapping
     if ref_line:
         _draw_linestring(
             draw,
@@ -707,7 +709,7 @@ def _render_geometry_with_bbox(
             size,
             REFERENCE_COLOR,
             GEOMETRY_LINE_WIDTH,
-            decoration="diamond",
+            decoration="circle",
             decoration_spacing=25,
         )
     if target_line:

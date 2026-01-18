@@ -1,0 +1,21 @@
+ref_id,target_id,label,confidence,reasoning
+2f3660c2-83e2-4802-89c1-5de5350c50d1,boston_streets_8473,no_match,0.9,Segments intersect at an angle and represent different functional classes road vs footway
+31405bb0-a59e-4e51-a775-911799bf02d7,boston_streets_1389,no_match,0.95,Segments are physically separated by a large distance and do not overlap.
+3767fba2-e17a-46e0-a08e-4a5edfe4c190,boston_streets_2456,no_match,0.9,Red segment is the road centerline and blue is a parallel footway or sidewalk
+39e1d219-5053-4d5f-bb62-cb688e719588,boston_streets_4940,match,1.0,Both segments align with Albano Street and the target segment covers the same path as the reference segment but extends further.
+3f2ec9f5-2df5-4ac8-bcca-fb9b5426a738,boston_streets_5543,no_match,0.95,Segments represent distinct features with different classifications and significant spatial offset
+463ef9bf-ddd4-4ff1-927b-e0b58954c757,boston_streets_4823,no_match,1.0,Segments represent perpendicular intersecting roads Massachusetts Ave and Boylston St.
+4b9aef75-4c66-4591-bef1-183fa8120cba,boston_streets_9077,no_match,0.95,Red segment is a primary road centerline while blue is a footway with significantly different geometry and position.
+4ce5a090-4cba-4942-a64c-397fbccdf0ca,boston_streets_7927,no_match,1.0,blue segment is a crosswalk crossing the red road segment
+542320ec-5919-4764-bb84-45e6865b931b,boston_streets_8187,no_match,0.95,Reference is a short footway segment offset from and much shorter than the residential road target.
+5ffb43ab-c927-4f3e-b5fd-103beda31c01,boston_streets_8442,no_match,1.0,Segments represent different road types on different named streets with no spatial overlap.
+7487ce89-b6f9-4584-8f1a-34a2690f3879,boston_streets_7714,no_match,0.95,Segments are contiguous but distinct parts of the same street with minimal overlap.
+80eff0ff-1f8a-44c9-a6df-c774a83b0f05,boston_streets_5674,match,0.95,The reference is a perfectly aligned subset of the target segment on George Street.
+83b3cf12-ce3c-4b4d-8e06-70881a693c79,boston_streets_10595,no_match,0.95,The blue dashed segment is a footway forming a partial loop while the red segment is a straight section of Tudor Street.
+a132c3c0-36b7-499f-baaa-f0b1b46b2bf9,boston_streets_4875,match,1.0,Both segments represent the same stretch of Fenwood Road between the same intersections with high geometric and semantic alignment.
+a7daeffb-43a8-47a9-8c40-18d204add769,boston_streets_1015,no_match,1.0,Segments intersect at an angle and represent different classes (footway vs tertiary road)
+a92ada51-9fc5-41cb-9dc9-bee212894b90,boston_streets_4758,no_match,1.0,Segments have different lengths and classes with no spatial overlap.
+b6addbc4-cdbf-4765-9026-374cf57b4f04,boston_streets_5916,match,1.0,Segments have identical names and nearly perfect geometric alignment and length.
+d43310d5-b8a7-4907-923d-8399725f7c45,boston_streets_971,no_match,1.0,The blue reference is a short service road branching off the main red target road.
+f7d0d286-4a54-4786-aa55-f70e8791b400,boston_streets_7152,no_match,1.0,Segments represent different intersecting streets with distinct names and orientations.
+ffd2a200-d538-4434-bd73-9da751a96c15,boston_streets_990,match,1.0,Geometries are nearly identical and align perfectly with the same physical road in satellite imagery.
