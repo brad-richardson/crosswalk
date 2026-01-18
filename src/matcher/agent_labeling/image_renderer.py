@@ -12,7 +12,7 @@ import mercantile
 import requests
 from loguru import logger
 from PIL import Image, ImageDraw
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString, MultiLineString, Polygon, box
 
 # Esri World Imagery (free, no API key required)
 ESRI_TILE_URL = (
@@ -34,7 +34,7 @@ DEFAULT_IMAGE_SIZE = (512, 512)
 # Dynamic image sizing constants
 MIN_IMAGE_SIZE = 128
 MAX_IMAGE_SIZE = 512
-TARGET_METERS_PER_PIXEL = 0.5  # Geometry resolution (reverted)
+TARGET_METERS_PER_PIXEL = 0.5  # Geometry resolution in meters per pixel
 MIN_REFERENCE_VISIBLE_M = 25  # Minimum meters of reference geometry to show
 SATELLITE_SIZE_MULTIPLIER = 2  # Satellite images are 2x geometry size
 
@@ -142,10 +142,8 @@ def _make_bbox_square(
     return (minx, miny, maxx, maxy)
 
 
-def _bbox_to_polygon(bbox: tuple[float, float, float, float]):
+def _bbox_to_polygon(bbox: tuple[float, float, float, float]) -> Polygon:
     """Convert bbox to a Shapely polygon for intersection calculations."""
-    from shapely.geometry import box
-
     minx, miny, maxx, maxy = bbox
     return box(minx, miny, maxx, maxy)
 
@@ -623,7 +621,7 @@ def render_candidate_images(
     size: tuple[int, int] | None = None,
     padding_ratio: float = 0.3,
     fetch_satellite: bool = True,
-) -> tuple[Image.Image | None, Image.Image, tuple[int, int]]:
+) -> tuple[Image.Image | None, Image.Image, dict[str, tuple[int, int]]]:
     """Render both satellite overlay and geometry-only images for a candidate.
 
     When size is None (default), calculates dynamic size based on the final bbox.
@@ -638,9 +636,9 @@ def render_candidate_images(
         fetch_satellite: Whether to fetch satellite imagery
 
     Returns:
-        Tuple of (satellite_with_overlay, geometry_only, actual_size).
+        Tuple of (satellite_with_overlay, geometry_only, sizes_dict).
         satellite_with_overlay may be None if fetch fails.
-        actual_size is the computed or provided size tuple.
+        sizes_dict contains {"geometry": (w, h), "satellite": (w, h)} sizes.
     """
     # Convert to LineString
     ref_line = _to_linestring(ref_geom)
@@ -671,7 +669,7 @@ def render_candidate_images(
     satellite_size = (sat_dim, sat_dim)
 
     # Render geometry-only (using target-based bbox)
-    geometry_img = _render_geometry_with_bbox(ref_geom, target_geom, bbox, size, padding_ratio)
+    geometry_img = _render_geometry_with_bbox(ref_geom, target_geom, bbox, size)
 
     # Fetch and render satellite overlay at higher resolution
     satellite_img = None
@@ -688,7 +686,6 @@ def _render_geometry_with_bbox(
     target_geom: LineString | MultiLineString,
     bbox: tuple[float, float, float, float],
     size: tuple[int, int],
-    padding_ratio: float = 0.3,
 ) -> Image.Image:
     """Render geometry-only image with explicit bbox.
 
