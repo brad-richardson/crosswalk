@@ -2,6 +2,7 @@
 
 import folium
 import geopandas as gpd
+from shapely.geometry import LineString
 
 # Color scheme for different edge sources
 SOURCE_COLORS = {
@@ -16,6 +17,54 @@ PRIORITY_COLORS = {
     "medium": "#fd7e14",  # Orange
     "low": "#ffc107",  # Yellow
 }
+
+# Selected edge highlight color
+SELECTED_COLOR = "#ff00ff"  # Magenta
+SELECTED_WEIGHT = 8  # Thick line for visibility
+
+
+def _add_circle_markers_along_line(
+    layer: folium.FeatureGroup,
+    geom: LineString,
+    color: str,
+    spacing_m: float = 20.0,
+    radius: int = 4,
+) -> None:
+    """Add circle markers along a LineString at regular intervals.
+
+    Args:
+        layer: Folium FeatureGroup to add markers to
+        geom: LineString geometry (in WGS84)
+        color: Marker color
+        spacing_m: Spacing between markers in meters (approximate)
+        radius: Marker radius in pixels
+    """
+    if geom is None or geom.is_empty:
+        return
+
+    # Convert spacing from meters to approximate degrees
+    # At typical latitudes, 1 degree ~ 111km, so spacing_m meters ~ spacing_m/111000 degrees
+    spacing_deg = spacing_m / 111000.0
+
+    # Get total length in degrees (approximate)
+    total_length = geom.length
+    if total_length == 0:
+        return
+
+    # Place markers at intervals
+    num_markers = max(2, int(total_length / spacing_deg))
+    for i in range(num_markers + 1):
+        fraction = i / num_markers
+        point = geom.interpolate(fraction, normalized=True)
+        folium.CircleMarker(
+            location=[point.y, point.x],
+            radius=radius,
+            color=color,
+            fill=True,
+            fillColor=color,
+            fillOpacity=1.0,
+            weight=1,
+        ).add_to(layer)
 
 
 def create_base_map(
@@ -40,8 +89,22 @@ def add_edges_layer(
     weight: float = 2,
     opacity: float = 0.8,
     show: bool = True,
+    add_markers: bool = False,
+    marker_spacing: float = 30.0,
 ) -> folium.Map:
-    """Add edges layer to map."""
+    """Add edges layer to map.
+
+    Args:
+        m: Folium map
+        edges: GeoDataFrame of edges
+        layer_name: Name for the layer
+        color: Line color
+        weight: Line weight
+        opacity: Line opacity
+        show: Whether layer is visible by default
+        add_markers: Whether to add circle markers along lines
+        marker_spacing: Spacing between markers in meters (if add_markers=True)
+    """
     if edges is None or len(edges) == 0:
         return m
 
@@ -80,6 +143,10 @@ def add_edges_layer(
                 popup=folium.Popup(popup_html, max_width=300),
             ).add_to(layer)
 
+            # Add circle markers along line if requested
+            if add_markers:
+                _add_circle_markers_along_line(layer, geom, color, marker_spacing, radius=3)
+
     layer.add_to(m)
     return m
 
@@ -89,7 +156,10 @@ def add_orphan_layers(
     orphan_edges: gpd.GeoDataFrame,
     by_priority: bool = True,
 ) -> folium.Map:
-    """Add orphan edges to map, optionally grouped by priority."""
+    """Add orphan edges to map, optionally grouped by priority.
+
+    Orphan edges get circle markers to distinguish them from reference edges.
+    """
     if orphan_edges is None or len(orphan_edges) == 0:
         return m
 
@@ -106,7 +176,9 @@ def add_orphan_layers(
                     priority_edges,
                     f"Orphans ({priority})",
                     PRIORITY_COLORS[priority],
-                    weight=3,
+                    weight=4,
+                    add_markers=True,
+                    marker_spacing=25.0,
                 )
     else:
         add_edges_layer(
@@ -114,7 +186,9 @@ def add_orphan_layers(
             orphan_edges,
             "Orphans",
             SOURCE_COLORS["orphan"],
-            weight=3,
+            weight=4,
+            add_markers=True,
+            marker_spacing=25.0,
         )
 
     return m
@@ -123,10 +197,14 @@ def add_orphan_layers(
 def highlight_edge(
     m: folium.Map,
     edge: gpd.GeoSeries,
-    color: str = "#ff00ff",
-    weight: float = 5,
+    color: str = SELECTED_COLOR,
+    weight: float = SELECTED_WEIGHT,
 ) -> folium.Map:
-    """Highlight a specific edge on the map."""
+    """Highlight a specific edge on the map with thick line and markers.
+
+    The highlighted edge is drawn on a separate layer that's added last
+    to ensure it appears on top of other layers.
+    """
     geom = edge.geometry
     if geom is None:
         return m
@@ -136,15 +214,56 @@ def highlight_edge(
         edge = edge.to_crs("EPSG:4326")
         geom = edge.geometry
 
+    # Create a dedicated layer for the highlighted edge (added last = on top)
+    highlight_layer = folium.FeatureGroup(name="Selected Edge", show=True)
+
     if geom.geom_type == "LineString":
         coords = [[p[1], p[0]] for p in geom.coords]
+
+        # Draw a white outline first for contrast
+        folium.PolyLine(
+            coords,
+            color="white",
+            weight=weight + 4,
+            opacity=1.0,
+        ).add_to(highlight_layer)
+
+        # Draw the colored line on top
         folium.PolyLine(
             coords,
             color=color,
             weight=weight,
             opacity=1.0,
-        ).add_to(m)
+        ).add_to(highlight_layer)
 
+        # Add circle markers along the line for extra visibility
+        _add_circle_markers_along_line(highlight_layer, geom, color, spacing_m=15.0, radius=6)
+
+        # Add start and end markers
+        start = geom.coords[0]
+        end = geom.coords[-1]
+        folium.CircleMarker(
+            location=[start[1], start[0]],
+            radius=10,
+            color="white",
+            fill=True,
+            fillColor=color,
+            fillOpacity=1.0,
+            weight=2,
+            popup="Start",
+        ).add_to(highlight_layer)
+        folium.CircleMarker(
+            location=[end[1], end[0]],
+            radius=10,
+            color="white",
+            fill=True,
+            fillColor=color,
+            fillOpacity=1.0,
+            weight=2,
+            popup="End",
+        ).add_to(highlight_layer)
+
+    highlight_layer.add_to(m)
     return m
 
 
@@ -212,7 +331,7 @@ def create_integration_map(
 
     m = create_base_map(center_lat, center_lon, zoom)
 
-    # Add layers by source type
+    # Add layers by source type (reference first, then targets, selected last)
     if edges is not None and len(edges) > 0 and "_source" in edges.columns:
         # Ensure WGS84 for filtering
         working_edges = edges
@@ -228,20 +347,37 @@ def create_integration_map(
             cx, cy = center_lon, center_lat
             bbox = box(cx - 0.01, cy - 0.01, cx + 0.01, cy + 0.01)
             ref_edges = ref_edges[ref_edges.geometry.intersects(bbox)]
+        # Reference edges: no markers (too many, would clutter)
         add_edges_layer(m, ref_edges, "Reference (Overture)", SOURCE_COLORS["reference"])
 
-        # Matched target edges
+        # Matched target edges: add markers to distinguish from reference
         matched_edges = working_edges[working_edges["_source"] == "target_matched"]
-        add_edges_layer(m, matched_edges, "Target (Matched)", SOURCE_COLORS["target_matched"])
+        add_edges_layer(
+            m,
+            matched_edges,
+            "Target (Matched)",
+            SOURCE_COLORS["target_matched"],
+            weight=3,
+            add_markers=True,
+            marker_spacing=35.0,
+        )
 
-        # Unmatched target edges (in main network) - always show all
+        # Unmatched target edges (in main network): add markers
         new_edges = working_edges[working_edges["_source"] == "target_new"]
-        add_edges_layer(m, new_edges, "Target (New)", SOURCE_COLORS["target_new"], weight=4)
+        add_edges_layer(
+            m,
+            new_edges,
+            "Target (New)",
+            SOURCE_COLORS["target_new"],
+            weight=4,
+            add_markers=True,
+            marker_spacing=30.0,
+        )
 
-    # Add orphan layers
+    # Add orphan layers (with markers)
     add_orphan_layers(m, orphan_edges)
 
-    # Highlight selected edge (already found above)
+    # Highlight selected edge LAST so it's on top
     if selected_edge is not None:
         highlight_edge(m, selected_edge)
 

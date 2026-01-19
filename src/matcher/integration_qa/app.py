@@ -28,6 +28,7 @@ def main():
         page_title="Integration QA",
         page_icon="🗺️",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
 
     st.title("Integration QA")
@@ -102,58 +103,6 @@ def main():
     # Main content area
     col_map, col_details = st.columns([3, 1])
 
-    with col_details:
-        # Filters
-        st.subheader("Filters")
-
-        show_reviewed = st.checkbox("Show reviewed", value=session.show_reviewed)
-        session.show_reviewed = show_reviewed
-
-        if session.current_view == "orphans":
-            # Filter by priority
-            priority_filter = st.selectbox(
-                "Priority",
-                ["All", "High", "Medium", "Low"],
-                index=0,
-            )
-            session.filter_by_priority = (
-                None if priority_filter == "All" else priority_filter.lower()
-            )
-
-            # Filter by component (if available)
-            if (
-                orphan_edges is not None
-                and len(orphan_edges) > 0
-                and "component_id" in orphan_edges.columns
-            ):
-                component_ids = sorted(orphan_edges["component_id"].dropna().unique())
-                component_filter = st.selectbox(
-                    "Component",
-                    ["All"] + [str(c) for c in component_ids],
-                    index=0,
-                )
-                session.filter_by_component = (
-                    None if component_filter == "All" else int(component_filter)
-                )
-            else:
-                session.filter_by_component = None
-
-        else:
-            # Filter by source dataset
-            if edges is not None and len(edges) > 0:
-                datasets = sorted(edges["_source_dataset"].dropna().unique())
-                dataset_filter = st.selectbox(
-                    "Source Dataset",
-                    ["All"] + list(datasets),
-                    index=0,
-                )
-                session.filter_by_source = None if dataset_filter == "All" else dataset_filter
-
-        st.divider()
-
-        # Statistics
-        render_stats(orphan_store.get_stats(), merged_store.get_stats())
-
     with col_map:
         # Apply filters and get current data
         if session.current_view == "orphans":
@@ -161,7 +110,11 @@ def main():
 
             # Use _original_id as edge identifier
             id_col = "edge_id" if "edge_id" in filtered_edges.columns else "_original_id"
-            if not show_reviewed and len(filtered_edges) > 0 and id_col in filtered_edges.columns:
+            if (
+                not session.show_reviewed
+                and len(filtered_edges) > 0
+                and id_col in filtered_edges.columns
+            ):
                 filtered_edges = filtered_edges[~filtered_edges[id_col].isin(reviewed_orphan_ids)]
 
             if (
@@ -193,7 +146,11 @@ def main():
 
             # Use _original_id as edge identifier
             id_col = "edge_id" if "edge_id" in filtered_edges.columns else "_original_id"
-            if not show_reviewed and len(filtered_edges) > 0 and id_col in filtered_edges.columns:
+            if (
+                not session.show_reviewed
+                and len(filtered_edges) > 0
+                and id_col in filtered_edges.columns
+            ):
                 filtered_edges = filtered_edges[~filtered_edges[id_col].isin(reviewed_merged_ids)]
 
             if session.filter_by_source and len(filtered_edges) > 0:
@@ -243,11 +200,9 @@ def main():
             )
             st_folium(m, width=None, height=500, returned_objects=[])
 
-            # Edge details and decision buttons in sidebar
+            # Decision buttons and edge details in right panel
             with col_details:
-                render_edge_details(current_edge_dict, is_orphan)
-
-                # Decision callback
+                # Decision callback (defined first so it can be used by buttons)
                 def on_decision(decision: str, reason: str):
                     # Use _original_id if edge_id not available
                     edge_id_val = current_edge.get("edge_id", current_edge.get("_original_id", 0))
@@ -319,6 +274,7 @@ def main():
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)
                     st.rerun()
 
+                # Decision buttons FIRST (most important)
                 render_decision_buttons(is_orphan, on_decision)
 
                 # Undo button
@@ -330,6 +286,66 @@ def main():
                         else:
                             merged_store.remove_last()
                         st.rerun()
+
+                # Edge details below decision
+                render_edge_details(current_edge_dict, is_orphan)
+
+                # Filters in expander
+                with st.expander("Filters", expanded=False):
+                    new_show_reviewed = st.checkbox(
+                        "Show reviewed", value=session.show_reviewed, key="filter_show_reviewed"
+                    )
+                    if new_show_reviewed != session.show_reviewed:
+                        session.show_reviewed = new_show_reviewed
+                        st.rerun()
+
+                    if is_orphan:
+                        priority_filter = st.selectbox(
+                            "Priority",
+                            ["All", "High", "Medium", "Low"],
+                            index=0,
+                            key="filter_priority",
+                        )
+                        new_priority = None if priority_filter == "All" else priority_filter.lower()
+                        if new_priority != session.filter_by_priority:
+                            session.filter_by_priority = new_priority
+                            st.rerun()
+
+                        if (
+                            orphan_edges is not None
+                            and len(orphan_edges) > 0
+                            and "component_id" in orphan_edges.columns
+                        ):
+                            component_ids = sorted(orphan_edges["component_id"].dropna().unique())
+                            component_filter = st.selectbox(
+                                "Component",
+                                ["All"] + [str(c) for c in component_ids],
+                                index=0,
+                                key="filter_component",
+                            )
+                            new_component = (
+                                None if component_filter == "All" else int(component_filter)
+                            )
+                            if new_component != session.filter_by_component:
+                                session.filter_by_component = new_component
+                                st.rerun()
+                    else:
+                        if edges is not None and len(edges) > 0:
+                            datasets = sorted(edges["_source_dataset"].dropna().unique())
+                            dataset_filter = st.selectbox(
+                                "Source Dataset",
+                                ["All"] + list(datasets),
+                                index=0,
+                                key="filter_dataset",
+                            )
+                            new_source = None if dataset_filter == "All" else dataset_filter
+                            if new_source != session.filter_by_source:
+                                session.filter_by_source = new_source
+                                st.rerun()
+
+                # Statistics in expander
+                with st.expander("Statistics", expanded=False):
+                    render_stats(orphan_store.get_stats(), merged_store.get_stats())
 
         else:
             st.info("No edges to review. All done or adjust filters.")
