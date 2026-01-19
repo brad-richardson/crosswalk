@@ -22,21 +22,43 @@ def render_edge_details(edge: dict[str, Any], is_orphan: bool = True) -> None:
     if geom and hasattr(geom, "length"):
         st.markdown(f"**Length:** {geom.length:.1f}m")
 
-    # Component info (for orphans)
+    # Orphan info
     if is_orphan:
         st.divider()
-        st.markdown("**Component Info**")
-        st.markdown(f"Component ID: {edge.get('component_id', 'N/A')}")
-        st.markdown(f"Component Size: {edge.get('component_size', 'N/A')} edges")
+        st.markdown("**Orphan Status**")
 
-        if "nearest_main_distance" in edge:
-            st.markdown(f"Distance to Main: {edge['nearest_main_distance']:.1f}m")
+        # Show why it's an orphan
+        if "unmatched_reason" in edge and edge["unmatched_reason"]:
+            reason = str(edge["unmatched_reason"]).replace("_", " ").title()
+            st.markdown(f"Reason: {reason}")
 
-        if "qa_priority" in edge:
+        if "component_status" in edge and edge["component_status"]:
+            st.markdown(f"Status: {edge['component_status']}")
+
+        # Distance to reference network
+        if "nearest_ref_distance" in edge and edge["nearest_ref_distance"]:
+            dist = edge["nearest_ref_distance"]
+            if dist is not None:
+                st.markdown(f"Distance to Reference: {dist:.1f}m")
+
+        # Distance to main network (connected edges)
+        if "nearest_main_distance" in edge and edge["nearest_main_distance"]:
+            dist = edge["nearest_main_distance"]
+            if dist is not None and dist > 0:
+                st.markdown(f"Distance to Main Network: {dist:.1f}m")
+
+        # Priority
+        if "qa_priority" in edge and edge["qa_priority"]:
             priority = edge["qa_priority"]
             priority_colors = {"high": "red", "medium": "orange", "low": "gray"}
             color = priority_colors.get(priority, "gray")
             st.markdown(f"Priority: :{color}[**{priority.upper()}**]")
+
+        # Component info (if available from older data)
+        if "component_id" in edge and edge.get("component_id"):
+            st.markdown(f"Component ID: {edge['component_id']}")
+        if "component_size" in edge and edge.get("component_size"):
+            st.markdown(f"Component Size: {edge['component_size']} edges")
 
     # Match info (for merged edges)
     if not is_orphan:
@@ -68,14 +90,14 @@ def render_decision_buttons(
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Keep (K)", type="primary", use_container_width=True):
+            if st.button("Correct (C)", type="primary", use_container_width=True):
                 if on_decision:
-                    on_decision("keep", "")
+                    on_decision("correct", "")
 
         with col2:
-            if st.button("Discard (D)", type="secondary", use_container_width=True):
+            if st.button("Incorrect (I)", type="secondary", use_container_width=True):
                 if on_decision:
-                    on_decision("discard", "")
+                    on_decision("incorrect", "")
 
         # Reason selection
         _reason = st.selectbox(  # noqa: F841 - UI element, value used by Streamlit
@@ -115,11 +137,38 @@ def render_stats(orphan_stats: dict, merged_stats: dict) -> None:
     with col1:
         st.markdown("**Orphan Decisions**")
         st.metric("Total", orphan_stats.get("total", 0))
-        st.metric("Keep", orphan_stats.get("keep", 0))
-        st.metric("Discard", orphan_stats.get("discard", 0))
+        st.metric("Correct", orphan_stats.get("correct", 0))
+        st.metric("Incorrect", orphan_stats.get("incorrect", 0))
 
     with col2:
         st.markdown("**Merged Decisions**")
         st.metric("Total", merged_stats.get("total", 0))
         st.metric("Correct", merged_stats.get("correct", 0))
         st.metric("Incorrect", merged_stats.get("incorrect", 0))
+
+
+def render_map_legend() -> None:
+    """Render map legend explaining layer colors."""
+    st.markdown(
+        """
+        **Map Legend**
+
+        🔵 **Reference** - Overture base road network
+
+        🟢 **Matched** - Your data matched to a reference edge
+
+        🟠 **To Merge** - Your data connected to network but no match (will be added)
+
+        🩵 **Net New** - Portions of merged edges that add new coverage
+
+        🔴 **Orphan** - Disconnected from network (needs review)
+
+        🟣 **Selected** - Currently reviewing this edge
+
+        ---
+
+        **What to do:**
+        - **Correct**: Orphan classification is correct (truly disconnected)
+        - **Incorrect**: Orphan classification is wrong (should be connected)
+        """
+    )

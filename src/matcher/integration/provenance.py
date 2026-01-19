@@ -124,6 +124,7 @@ class IntegrationResult:
         edges: GeoDataFrame of all edges with provenance and component annotations
         orphan_edges: GeoDataFrame of edges in orphan components (for QA)
         dropped_overlaps: GeoDataFrame of segments dropped due to priority conflicts
+        net_new_edges: GeoDataFrame of net-new geometry portions (for visualization)
         statistics: Integration statistics
         created_at: Timestamp of integration
     """
@@ -133,6 +134,7 @@ class IntegrationResult:
     orphan_edges: gpd.GeoDataFrame
     dropped_overlaps: gpd.GeoDataFrame
     statistics: IntegrationStatistics
+    net_new_edges: gpd.GeoDataFrame | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 

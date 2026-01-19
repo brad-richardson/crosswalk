@@ -31,6 +31,37 @@ class BoundingBox(BaseModel):
         """Convert to tuple (xmin, ymin, xmax, ymax) for overturemaps."""
         return (self.xmin, self.ymin, self.xmax, self.ymax)
 
+    def expand(self, buffer_m: float) -> "BoundingBox":
+        """Expand the bounding box by a buffer distance in meters.
+
+        Converts meters to approximate degrees at the center latitude.
+        This is useful for fetching extra data around the edges to avoid
+        fringe effects during integration.
+
+        Args:
+            buffer_m: Buffer distance in meters
+
+        Returns:
+            New BoundingBox expanded by the buffer distance
+        """
+        import math
+
+        # Approximate center latitude
+        center_lat = (self.ymin + self.ymax) / 2
+
+        # Convert meters to degrees (approximate)
+        # 1 degree latitude = ~111,320 meters
+        # 1 degree longitude = ~111,320 * cos(latitude) meters
+        lat_buffer = buffer_m / 111320.0
+        lon_buffer = buffer_m / (111320.0 * math.cos(math.radians(center_lat)))
+
+        return BoundingBox(
+            xmin=self.xmin - lon_buffer,
+            ymin=self.ymin - lat_buffer,
+            xmax=self.xmax + lon_buffer,
+            ymax=self.ymax + lat_buffer,
+        )
+
 
 def fetch_overture_segments(
     bbox: BoundingBox,
@@ -65,6 +96,10 @@ def fetch_overture_segments(
         gdf = gdf[gdf["subtype"] == "road"]
 
     logger.info(f"Fetched {len(gdf)} road segments")
+
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
 
     # Save to parquet
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,6 +138,10 @@ def fetch_overture_connectors(
 
     logger.info(f"Fetched {len(gdf)} connectors")
 
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+
     # Save to parquet
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path)
@@ -125,6 +164,10 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
     """
     logger.info(f"Loading Overture segments from {path}")
     gdf = gpd.read_parquet(path)
+
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
 
     # Extract name from names struct if not already flat
     if "name" not in gdf.columns and "names" in gdf.columns:

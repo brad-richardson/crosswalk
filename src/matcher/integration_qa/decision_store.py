@@ -21,7 +21,7 @@ ORPHAN_COLUMNS = [
     "original_id",
     "dataset_id",  # Changed from source_dataset for consistency
     "component_id",
-    "decision",  # "keep", "discard"
+    "decision",  # "correct", "incorrect"
     "reason",  # "legitimate_new", "data_error", "out_of_scope"
     "reviewer",
     "reviewed_at",  # ISO timestamp string
@@ -136,12 +136,12 @@ class OrphanDecisionStore:
         """Get decision statistics."""
         df = self.df
         if df is None or len(df) == 0:
-            return {"total": 0, "keep": 0, "discard": 0}
+            return {"total": 0, "correct": 0, "incorrect": 0}
 
         return {
             "total": len(df),
-            "keep": (df["decision"] == "keep").sum(),
-            "discard": (df["decision"] == "discard").sum(),
+            "correct": (df["decision"] == "correct").sum(),
+            "incorrect": (df["decision"] == "incorrect").sum(),
         }
 
     def remove_last(self) -> dict | None:

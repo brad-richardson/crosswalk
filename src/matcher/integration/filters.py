@@ -45,12 +45,19 @@ def filter_short_segments(
     if gdf is None or len(gdf) == 0:
         return gdf, gpd.GeoDataFrame()
 
-    # Compute lengths
-    lengths = gdf.geometry.length
+    # Project to UTM for accurate length calculation if in geographic CRS
+    working_gdf = gdf
+    if gdf.crs is not None and gdf.crs.is_geographic:
+        working_crs = gdf.estimate_utm_crs()
+        working_gdf = gdf.to_crs(working_crs)
+        logger.debug(f"Projected to {working_crs} for length calculation")
+
+    # Compute lengths in projected CRS (meters)
+    lengths = working_gdf.geometry.length
 
     # Filter
     keep_mask = lengths >= min_length
-    kept = gdf[keep_mask].copy()
+    kept = gdf[keep_mask].copy()  # Return in original CRS
     filtered = gdf[~keep_mask].copy()
 
     if len(filtered) > 0:

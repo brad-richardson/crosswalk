@@ -48,6 +48,11 @@ def fetch(
         "--keep-pbf",
         help="Keep extracted PBF file for debugging",
     ),
+    bbox_buffer: float = typer.Option(
+        0.0,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters) to avoid fringe effects in integration",
+    ),
 ):
     """Fetch road data for an area of interest.
 
@@ -55,6 +60,7 @@ def fetch(
         matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
+        matcher fetch --bbox -122.7,45.5,-122.6,45.55 --bbox-buffer 500  # Expand by 500m
 
     Note: OSM fetching requires osmium-tool to be installed:
         brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
@@ -80,6 +86,15 @@ def fetch(
     xmin, ymin, xmax, ymax = coords
     output_dir.mkdir(parents=True, exist_ok=True)
     bbox_obj = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+
+    # Expand bbox if buffer specified
+    if bbox_buffer > 0:
+        bbox_obj = bbox_obj.expand(bbox_buffer)
+        console.print(f"[blue]Expanded bbox by {bbox_buffer}m to avoid fringe effects[/blue]")
+        console.print(
+            f"[blue]  New bbox: {bbox_obj.xmin:.6f},{bbox_obj.ymin:.6f},"
+            f"{bbox_obj.xmax:.6f},{bbox_obj.ymax:.6f}[/blue]"
+        )
 
     if "overture" in datasets:
         console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
@@ -475,6 +490,46 @@ def integrate(
         "--min-length",
         help="Minimum segment length to include (meters)",
     ),
+    connection_tolerance: float = typer.Option(
+        3.0,
+        "--connection-tolerance",
+        help="Distance (meters) to consider segment connected to reference network",
+    ),
+    min_merge_length: float = typer.Option(
+        20.0,
+        "--min-merge-length",
+        help="Minimum net-new length (meters) to merge a connected segment",
+    ),
+    net_new_buffer: float = typer.Option(
+        5.0,
+        "--net-new-buffer",
+        help="Buffer around reference (meters) for net-new calculation",
+    ),
+    max_hops: int = typer.Option(
+        2,
+        "--max-hops",
+        help="Maximum transitive connectivity hops from reference network",
+    ),
+    fringe_buffer: float = typer.Option(
+        50.0,
+        "--fringe-buffer",
+        help="Buffer around reference coverage (meters) for fringe detection",
+    ),
+    no_fringe_filter: bool = typer.Option(
+        False,
+        "--no-fringe-filter",
+        help="Disable fringe detection (include all segments regardless of coverage)",
+    ),
+    transitive_tolerance: float = typer.Option(
+        None,
+        "--transitive-tolerance",
+        help="Tolerance (meters) for transitive connections between targets. Defaults to 2x connection-tolerance.",
+    ),
+    debug_connectivity: bool = typer.Option(
+        False,
+        "--debug-connectivity",
+        help="Enable debug logging for transitive connectivity analysis",
+    ),
 ):
     """Integrate unmatched segments into reference network.
 
@@ -551,6 +606,14 @@ def integrate(
                 output_dir=output_dir,
                 overlap_iou_threshold=overlap_threshold,
                 min_segment_length=min_length,
+                connection_tolerance=connection_tolerance,
+                min_merge_length=min_merge_length,
+                net_new_buffer=net_new_buffer,
+                max_hops=max_hops,
+                fringe_buffer=fringe_buffer,
+                enable_fringe_detection=not no_fringe_filter,
+                transitive_tolerance=transitive_tolerance,
+                debug_connectivity=debug_connectivity,
             )
             progress.update(task, completed=True)
 
@@ -585,6 +648,12 @@ def qa_integration(
         "-p",
         help="Streamlit server port",
     ),
+    host: str = typer.Option(
+        "localhost",
+        "--host",
+        "-H",
+        help="Server host (use 0.0.0.0 to expose on all interfaces)",
+    ),
 ):
     """Launch the integration QA app.
 
@@ -592,6 +661,7 @@ def qa_integration(
 
     Example:
         matcher qa-integration -o data/integrated
+        matcher qa-integration -o data/integrated --host 0.0.0.0
     """
     import os
     import subprocess
@@ -613,11 +683,22 @@ def qa_integration(
     console.print(f"[blue]Starting integration QA on port {port}...[/blue]")
     console.print(f"  Integration output: {output_dir}")
     console.print()
-    console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
+    display_host = "localhost" if host == "0.0.0.0" else host
+    console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
 
     # Launch Streamlit
     result = subprocess.run(
-        [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(app_path),
+            "--server.port",
+            str(port),
+            "--server.address",
+            host,
+        ],
         env=env,
     )
     if result.returncode != 0:

@@ -1,0 +1,116 @@
+ref_id,target_id,label,confidence,reasoning
+0277e6ae-7ddc-4500-98ec-fbdb18657c21,fc_street_5893,no_match,1.0,The segments are nearly perpendicular and do not overlap.
+02cc6f96-02e3-4d43-a269-f4e33e5c7943,fc_street_6430,no_match,0.95,Segments represent perpendicular intersecting roads rather than the same physical segment
+04a7a38a-b1ad-4d75-bb63-7f8189ed2b91,fc_street_914,match,1.0,Segments overlap significantly and names are identical.
+04d2c9b1-ba7b-44df-9c44-711d696ecd3c,fc_street_1181,no_match,1.0,Segments represent different streets meeting at an intersection with no spatial overlap.
+05e95073-9bad-4b0d-ae99-d41104c0ea0f,fc_street_10465,no_match,1.0,Segments have different headings and no spatial overlap.
+08193f55-e315-494c-b1e6-f6094d0cacc2,fc_street_9686,no_match,1.0,The blue segment is a short service road perpendicular to the red residential street.
+091a76e3-ee8e-41e3-a9b9-80e82e02016d,fc_street_1783,match,1.0,Segments overlap nearly perfectly and have matching street names.
+09793488-9b24-4a82-b9e1-f79d2c221c3d,fc_street_2867,match,0.95,Segments follow the same distinctive curved geometry with 1.0 overlap ratio.
+0b734360-9567-434b-8ebe-a48ff309702a,fc_street_7384,no_match,0.95,Segments are sequential and do not overlap representing different portions of the road.
+0bba69cf-82be-46e7-b2f2-fe1e744fff6c,fc_street_9256,no_match,1.0,Segments are spatially distant with no overlap and different classes
+126e5b03-039d-4a79-96b2-981003d43312,fc_street_10036,no_match,0.95,Segments are adjacent longitudinal parts of the same road with minimal overlap.
+18480585-b459-4a50-a7a5-702adee68389,fc_street_3510,no_match,0.95,Parallel segments with significant offset indicating separate physical road network elements.
+18ce3ae2-fd1d-4579-acbb-7ffcbd53603e,fc_street_4872,no_match,0.95,Segments are contiguous and collinear but represent distinct consecutive sections of the road network with no geometric overlap.
+1a802bb9-be4d-4c05-a713-f01308119c4c,fc_street_1192,no_match,0.95,Segments are end-to-end and do not overlap representing different sections of the road.
+1ce9bafc-4a79-492e-8ec7-5af173290bc1,fc_street_8711,no_match,1.0,Segments are perpendicular and represent different paths.
+1d584221-0b4f-4b49-b1d9-2bd2ee4fb281,fc_street_7275,no_match,1.0,Segments are perpendicular intersecting paths
+1ed3439f-ec06-4dc3-93b1-3c46fb367dda,fc_street_8353,no_match,1.0,Perpendicular streets intersecting at a common point with different names (Drive vs Court)
+206d0385-996b-4895-96b2-1a64e19f6e0b,fc_street_4912,no_match,0.95,Segments are disjoint with zero overlap and significant separation.
+28b54680-fa1f-403a-b5af-2c5c0ae8ac9a,fc_street_5246,no_match,0.9,Segments represent different roads with distinct names and no spatial overlap.
+2a41e06b-167f-44dd-ad86-dfb08d44e272,fc_street_5159,no_match,0.95,Segments are perpendicular and represent different intersecting roads.
+2bff29bb-4a67-43f5-a4fd-e263294ee158,fc_street_7720,match,1.0,Identical names and nearly perfect geometric alignment.
+2f07b52b-3806-4ee0-be3d-e9dce72c04b7,fc_street_3284,match,0.99,Identical names and nearly perfect geometric alignment
+2f277c1a-7383-4a47-82a8-e439751ceb8d,fc_street_8166,match,0.95,Exact name match and very high geometric similarity with minimal offset consistent with dataset variance.
+2f7b56df-b93a-4554-8e8b-735943496880,fc_street_7582,no_match,1.0,Segments are spatially distant with different orientations and zero overlap.
+30ad5873-adb5-4fd3-bab7-d6672d0e91d0,fc_street_1424,no_match,0.9,Collinear adjacent segments with minimal overlap representing different sections of the same road.
+30ad5873-adb5-4fd3-bab7-d6672d0e91d0,fc_street_1645,no_match,1.0,Perpendicular segments with no physical overlap.
+3707f97a-511f-4c77-b880-961519a40b5a,fc_street_3968,match,1.0,The segments have nearly identical geometry and length.
+3b449842-6279-496c-bc0a-d4f41e5bf434,fc_street_1233,match,1.0,Segments have identical names and nearly perfect geometric overlap.
+3dd65582-1764-4294-b7be-405c22dd64d6,fc_street_2304,no_match,1.0,Perpendicular segments with different names and no spatial overlap
+454251c1-0ee2-4bec-a81e-6f6ceacf76bb,fc_street_5189,no_match,1.0,Segments are perpendicular and represent different roads (College Ave vs Princeton Rd)
+456b8893-e519-41d5-941f-4c551bf21750,fc_street_3680,no_match,0.9,Parallel segments representing different features primary road and adjacent footway
+478052c8-1a53-4224-83fd-f73d7249703a,fc_street_4103,no_match,0.8,Segments are adjacent and collinear but represent distinct physical spans with no significant overlap.
+49aa888f-5e7d-4310-858a-02954d2db7b6,fc_street_7921,match,1.0,Segments have identical names and nearly identical geometries with 100% overlap.
+50941293-0bf7-4711-8639-42db1b7e05d6,fc_street_6180,no_match,0.9,Parallel segments with significant horizontal offset and different functional classes (footway vs primary) indicating distinct physical features.
+50b2f2e1-cda5-41f2-b765-db9915dc9064,fc_street_4557,no_match,0.95,Segments are perpendicular indicating an intersection between a service road and a residential street rather than the same road.
+538fe5f9-7ff9-4de3-8166-d697cb923773,fc_street_9948,no_match,0.9,Parallel segments represent distinct physical features footway and residential road
+5539cfcd-a61c-4406-b5be-01decb87b1c0,fc_street_9462,no_match,0.95,Different road names and segments represent distinct intersecting roads with no overlap
+5a3f7f06-2aa4-4494-974d-622315dd7158,fc_street_8533,no_match,0.95,Adjacent segments of the same road with negligible overlap at the endpoint.
+6038efad-528b-4ed2-b507-1d0bae18ffed,fc_street_10768,no_match,0.9,Disjoint segments along the same road line with no overlap.
+608edd11-f8be-4e66-8419-cd01062bedca,fc_street_8436,match,1.0,Identical names and lengths with high geometric overlap and minimal offset
+616d46dd-3c12-436d-adf2-2322cc9d9970,fc_street_4147,no_match,0.95,Segments follow the same trajectory but are disjoint and represent different physical sections of the road.
+62befe59-6eb4-46c2-a514-3f83b4fbd47f,fc_street_5130,no_match,1.0,Segments are perpendicular and represent different feature classes (footway vs residential)
+63976a11-2ae3-451c-852f-9b741bd3171a,fc_street_7060,no_match,0.9,Segments are parallel with significant offset and distinct geometries representing different physical features
+655759f3-8686-41cc-8a56-c16cbf3c862f,fc_street_8201,no_match,0.95,Segments are adjacent and do not overlap representing different sections of Hilburn Drive
+65afc309-4be5-4fe6-be49-81f0c3996c9e,fc_street_4289,no_match,0.95,Parallel segments with significant lateral offset and different functional classes (footway vs residential)
+6d7ce522-7499-4c02-bb2c-065b5fe0bc19,fc_street_4897,match,0.95,Segments are spatially coincident with high overlap and minimal heading delta.
+702fb513-0dbf-43d1-9f99-b59550dff9d6,fc_street_4953,no_match,0.9,Parallel segments with significant lateral offset indicating separate physical lanes or aisles.
+709cd47f-c652-4a64-9c29-cbb3cca5626e,fc_street_1672,no_match,0.95,Segments are adjacent and represent different parts of the same road without overlap
+710fb6a4-c0b5-4f13-b152-4df61ed5104a,fc_street_4855,no_match,0.95,Segments are parallel but clearly separated with zero overlap.
+72dff2a8-b3cd-45bd-a477-8a7615c5ff9d,fc_street_9131,match,0.8,Collinear segments with 80% overlap despite class mismatch
+745faf1e-7b55-4af2-9baf-6272e5745203,fc_street_8850,no_match,1.0,Parallel segments with different street names and significant spatial separation.
+78b33ea7-27d5-4e58-9023-1d7284b627bf,fc_street_8803,no_match,0.95,Segments meet at an intersection but represent different physical paths with no geometric overlap.
+793d4ac6-9180-44a1-9353-0568d6ef3c75,fc_street_7978,no_match,1.0,Segments represent different intersecting roads with distinct names and orientations
+7be83e08-7422-4b3d-9639-d26c1e12423f,fc_street_7548,match,1.0,Segments have identical names and nearly identical geometry and length.
+7c8b8a10-b8c5-48d9-a22c-49ca626dc0fe,fc_street_6260,no_match,1.0,Segments are perpendicular and represent different intersecting paths.
+7e25d9fc-74c6-4426-a157-593d3941e561,fc_street_2600,match,1.0,Segments overlap perfectly with matching road names and near-identical geometry
+81313795-21ea-493f-9b5d-8bb13ba49aa6,fc_street_440,no_match,1.0,Parallel segments with no overlap and different street names
+81851490-6f6f-4838-b8be-9f6ec547f96e,fc_street_8530,no_match,0.9,Segments are parallel and physically separated representing different features (footway vs residential road) with high Hausdorff distance and low buffer IoU.
+824b32ae-39e4-48bd-9067-db17ee9bc82c,fc_street_8721,no_match,1.0,Segments have perpendicular orientations and different street names indicating they are separate roads.
+840309e7-ec24-40b7-93e2-5c9174f24210,fc_street_6167,no_match,0.95,Segments are adjacent parts of the same road but do not overlap spatially.
+860de7bb-6000-4a81-9743-4d1430f710ff,fc_street_5296,no_match,0.95,Segments are adjacent parts of the same road but do not overlap.
+868129a2-d1ef-432e-99ab-12158f4a4847,fc_street_10729,match,1.0,Segments represent the same street with nearly identical geometry and high overlap.
+86ffc2af-4507-4456-bc50-95f1f8d2bbb9,fc_street_10815,match,1.0,Segments have identical names and nearly identical lengths with perfect geometric overlap.
+88087f60-b08a-45a4-a265-a34a7d7b8fab,fc_street_7562,match,1.0,Reference is a subsegment of the target with matching names
+8ab0dcd8-0a20-4523-9f2e-a8b620e812f2,fc_street_3137,no_match,1.0,Segments are perpendicular and represent different physical features (street vs crossing path)
+8bc3f97c-fe33-4574-981f-062fb8d708b4,fc_street_7607,no_match,0.9,Segments are adjacent end-to-end and do not overlap spatially.
+8e966549-a0a8-40dd-b836-9b418426c031,fc_street_6916,match,0.9,Identical names and highly similar geometry with nearly identical heading and length.
+913aca63-1afb-4328-8a86-2ce516686e7c,fc_street_8807,no_match,0.95,Segments are adjacent and meet at an endpoint but do not overlap.
+9153b91e-1d4f-4287-a3f0-0ed8bb0f61fc,fc_street_8801,no_match,0.9,Segments are disjoint with different headings and high Hausdorff distance.
+91611b7f-9b07-4e13-b38f-bb0bdc5e2593,fc_street_2826,match,1.0,Segments have identical names and nearly perfect geometric overlap and length.
+971350b6-817c-43e2-935e-6856754f7ddb,fc_street_1544,no_match,0.95,Segments are spatially separated and have no overlap
+98e5745c-2270-453c-a89e-df0a0e67d4b0,fc_street_8182,no_match,0.9,Parallel segments with significant offset and different road classes (footway vs primary)
+9a763cdb-85dd-4d59-b74d-8c67bdf33bd8,fc_street_4165,match,1.0,Segments perfectly overlap and have identical names.
+9aaf2428-3e22-470a-b310-76bae20ead4c,fc_street_2367,no_match,0.95,Segments are contiguous and represent different parts of the same road with minimal overlap.
+9e07d14e-a5dc-40b2-8871-89c5137d93ac,fc_street_1916,no_match,0.95,Blue footway segment crosses the red residential road segment at a significant angle.
+9f8d09e0-7df0-4c83-9abe-b6c11ea2897f,fc_street_5250,no_match,0.95,Segments are spatially disjoint and do not overlap in the provided geometry view.
+a1ca6ce2-c869-4beb-a0c2-4247f73cce17,fc_street_3267,no_match,0.95,Segments represent distinct adjacent sections of the same road with minimal overlap.
+a4c10910-30d8-49f3-88b4-93864e7a2c80,fc_street_5327,no_match,1.0,Segments are perpendicular and have no overlap.
+a8f22aa7-36f6-4f83-a37a-c269c586c95c,fc_street_1674,no_match,1.0,The segments represent different intersecting streets with perpendicular orientations and different names.
+aa4c37d2-3cbb-4867-9dfc-c064b7a8b6e3,fc_street_7831,no_match,1.0,Segments are perpendicular with a heading delta of approximately 90 degrees.
+aa781272-008e-41cf-b32b-bffe95ac8cef,fc_street_2773,no_match,1.0,Segments have different shapes and orientations with no overlap
+aafd6ce7-5333-4f0c-ac9c-119efc92bbac,fc_street_2233,no_match,0.98,The segments are sequential and do not overlap geographically despite sharing the same road name.
+b25bdce8-2720-4bd7-b1be-eb0819ee5c16,fc_street_6995,no_match,1.0,Segments are perpendicular and represent different road network features
+b3f7f5bd-76fd-43b1-b00b-9abb756d0d92,fc_street_10693,match,0.98,The blue and red segments overlap almost perfectly along the same physical path.
+b817cce0-4c93-4d2b-8e0e-e6fc6856b734,fc_street_6653,match,1.0,The segments are nearly identical in geometry and have the same name.
+bcda1727-6e69-40d9-b377-90225c5180e4,fc_street_5628,no_match,0.9,Segments are nearly perpendicular and represent different intersecting features
+c0656b07-d975-44ec-b243-769c64b705df,fc_street_10987,no_match,1.0,The segments are in different locations with different orientations and no overlap.
+c49acb81-bc34-449f-94b7-8e0da40f120b,fc_street_8599,no_match,1.0,Segments are physically separated with zero overlap and significant distance between them.
+c4b07091-7707-4b8f-aab7-a8a2351b16e4,fc_street_8388,no_match,0.95,Segments represent adjacent portions of the same road with minimal overlap
+c619724e-c006-4e40-889a-b3350738cef6,fc_street_7424,no_match,0.9,Parallel segments with different functional classes representing a footway and a residential road.
+c6c3e198-1874-4918-abde-9ccff37b0ac8,fc_street_6315,no_match,1.0,Segments are perpendicular intersecting roads with different names.
+c6e175f7-ce2e-43f8-936d-786458439515,fc_street_3648,no_match,0.9,Segments are disjoint adjacent parts of the same road and do not represent the same physical segment.
+c74a1a1b-b548-4184-b37a-c49a2e8ac893,fc_street_8745,match,1.0,Segments have identical names and nearly perfect geometric alignment with high overlap.
+c942c2eb-705e-4827-969f-6a5402fb62b2,fc_street_5124,no_match,1.0,Segments are spatially disjoint and represent different road types (footway vs residential).
+cbf80086-79ea-48a7-8eae-82ff0427dbd0,fc_street_1262,no_match,1.0,Segments are geographically distant and have no overlap.
+cd6544fb-3cc7-4fe5-905f-26b667d67fb3,fc_street_4741,no_match,1.0,Segments are perpendicular and represent different roads meeting at an intersection.
+cdcd3372-625b-4811-9627-1acf1fd509c4,fc_street_8722,no_match,1.0,Segments are perpendicular intersecting streets with different names.
+ce43d142-4bdd-4c1e-8a6d-fdff47c13b73,fc_street_2848,match,1.0,Nearly perfect geometric overlap and identical street names
+d24f8801-6b1d-4708-9200-32ba2856d917,fc_street_5230,no_match,1.0,Segments intersect at nearly 82 degrees representing a crossing footway and road.
+d70d701d-0300-496f-8eea-290ae5fc962e,fc_street_2537,no_match,1.0,Perpendicular segments with different street names
+d81bc264-dc11-4856-9ec9-c371d46cb4ac,fc_street_5456,match,1.0,Segments show near-perfect geometric alignment and overlap with high IoU.
+d94e0fa6-c677-437b-9fca-c7305634abaf,fc_street_8605,match,1.0,Reference is a subsegment of target with identical names and perfect geometric overlap.
+dba573d4-8d16-4521-94f9-e65a7141b8cd,fc_street_5047,match,1.0,segments nearly perfectly overlap with matching names and lengths
+dcf80d79-61d7-4ac0-ab4c-50bf7950f652,fc_street_9250,no_match,1.0,Segments are physically separated with no overlap and different orientations
+de5ea85d-05dd-4175-a587-53aa32e256e4,fc_street_8614,match,1.0,Segments overlap nearly perfectly with identical names and geometry
+e4026290-1177-4b80-97f6-6cef038f0abf,fc_street_6016,no_match,1.0,Segments are perpendicular and in different locations.
+e477e4b2-48b1-48c4-a4a7-08dff0b0b357,fc_street_3776,match,1.0,Segments are collinear and almost perfectly overlapping with high IoU and low distance.
+e98a4109-3dde-4e1a-9792-07f5f0dc72f5,fc_street_3718,match,0.95,Segments are geometrically identical and overlap almost perfectly.
+e9f7638c-38b6-483a-abcd-4b8ff7d69208,fc_street_9135,no_match,1.0,Segments are perpendicular and represent different road types (footway vs residential).
+ef9512b0-17f2-466f-9c84-f9524c113d93,fc_street_1140,no_match,0.9,Segments are nearly perpendicular and represent different road classes (footway vs residential street) with no significant overlap.
+efa3d18e-b887-4381-aba5-69b65bc026d4,fc_street_4370,no_match,1.0,Segments are perpendicular intersecting streets with different names.
+f1273050-058d-4724-b018-2f4330ed65d2,fc_street_10467,no_match,0.80,Short footway segment is parallel to and separate from the tertiary road centerline.
+f2ae27a8-efa8-4ae9-8362-8e3dc4e87ca5,fc_street_5448,match,1.0,Identical names and nearly perfect geometric overlap on the same physical road path.
+f343b81f-820c-4c55-8e34-5f2cee61df88,fc_street_7777,no_match,1.0,Segments are perpendicular and represent different intersecting roads.
+f428cd9b-2642-4346-bdf4-977fc87abd8f,fc_street_9140,no_match,0.95,Segments are disjoint and represent different non-overlapping sections of the same named road.

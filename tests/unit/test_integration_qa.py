@@ -19,7 +19,7 @@ class TestOrphanDecisionStore:
             original_id="t_1",
             dataset_id="boston_streets",
             component_id=5,
-            decision="keep",
+            decision="correct",
             reason="legitimate_new",
             reviewer="test_user",
             session_id="abc123",
@@ -31,7 +31,7 @@ class TestOrphanDecisionStore:
 
         assert len(store.df) == 1
         assert store.df.iloc[0]["edge_id"] == 123
-        assert store.df.iloc[0]["decision"] == "keep"
+        assert store.df.iloc[0]["decision"] == "correct"
 
     def test_get_reviewed_edges(self, tmp_path):
         """Can get set of reviewed edge IDs."""
@@ -42,7 +42,7 @@ class TestOrphanDecisionStore:
             original_id="t_1",
             dataset_id="test",
             component_id=1,
-            decision="keep",
+            decision="correct",
             reason="",
             reviewer="user1",
             session_id="abc",
@@ -52,7 +52,7 @@ class TestOrphanDecisionStore:
             original_id="t_2",
             dataset_id="test",
             component_id=1,
-            decision="discard",
+            decision="incorrect",
             reason="",
             reviewer="user2",
             session_id="abc",
@@ -75,7 +75,7 @@ class TestOrphanDecisionStore:
             original_id="t_1",
             dataset_id="test",
             component_id=1,
-            decision="keep",
+            decision="correct",
             reason="",
             reviewer="user",
             session_id="abc",
@@ -85,7 +85,7 @@ class TestOrphanDecisionStore:
             original_id="t_2",
             dataset_id="test",
             component_id=1,
-            decision="discard",
+            decision="incorrect",
             reason="",
             reviewer="user",
             session_id="abc",
@@ -106,7 +106,7 @@ class TestOrphanDecisionStore:
             original_id="t_1",
             dataset_id="test",
             component_id=1,
-            decision="keep",
+            decision="correct",
             reason="",
             reviewer="user",
             session_id="abc",
@@ -116,7 +116,7 @@ class TestOrphanDecisionStore:
             original_id="t_2",
             dataset_id="test",
             component_id=1,
-            decision="discard",
+            decision="incorrect",
             reason="",
             reviewer="user",
             session_id="abc",
@@ -124,8 +124,8 @@ class TestOrphanDecisionStore:
 
         stats = store.get_stats()
         assert stats["total"] == 2
-        assert stats["keep"] == 1
-        assert stats["discard"] == 1
+        assert stats["correct"] == 1
+        assert stats["incorrect"] == 1
 
 
 class TestMergedDecisionStore:
