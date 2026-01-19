@@ -10,7 +10,6 @@ and Fort Collins datasets, ensuring tests reflect real-world fuzzy data.
 
 import pytest
 
-
 # Real labeled examples from Brad's labeling sessions
 # These capture the fuzzy nature of real-world road matching
 
@@ -184,12 +183,16 @@ class TestScoreStability:
     def test_perfect_match_score_range(self, trained_matcher, perfect_match_features):
         """Near-perfect features should produce confidence in [0.85, 1.0]."""
         confidence = trained_matcher.predict([perfect_match_features])[0]
-        assert 0.85 <= confidence <= 1.0, f"Perfect match confidence {confidence:.3f} outside [0.85, 1.0]"
+        assert 0.85 <= confidence <= 1.0, (
+            f"Perfect match confidence {confidence:.3f} outside [0.85, 1.0]"
+        )
 
     def test_terrible_match_score_range(self, trained_matcher, terrible_match_features):
         """Terrible features should produce confidence in [0.0, 0.15]."""
         confidence = trained_matcher.predict([terrible_match_features])[0]
-        assert 0.0 <= confidence <= 0.15, f"Terrible match confidence {confidence:.3f} outside [0.0, 0.15]"
+        assert 0.0 <= confidence <= 0.15, (
+            f"Terrible match confidence {confidence:.3f} outside [0.0, 0.15]"
+        )
 
     def test_borderline_score_range(self, trained_matcher, borderline_match_features):
         """Borderline features should produce confidence in the uncertain range.
@@ -346,7 +349,11 @@ class TestBatchPrediction:
         assert batch_results[1] == pytest.approx(single_results[1], abs=0.001)
 
     def test_prediction_ordering(
-        self, trained_matcher, perfect_match_features, borderline_match_features, terrible_match_features
+        self,
+        trained_matcher,
+        perfect_match_features,
+        borderline_match_features,
+        terrible_match_features,
     ):
         """Predictions should maintain input order."""
         features_list = [
@@ -367,7 +374,6 @@ class TestMissingFeatures:
 
     def test_nan_features_handled(self, trained_matcher, borderline_match_features):
         """NaN feature values should be handled without crashing."""
-        import math
 
         features = borderline_match_features.copy()
         features["hausdorff_distance"] = float("nan")

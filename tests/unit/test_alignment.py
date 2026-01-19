@@ -182,26 +182,26 @@ class TestLinestringAlignment:
         result = linestring_alignment(ref, target)
 
         if "ref_coverage_min" in checks:
-            assert (
-                result.overture_coverage >= checks["ref_coverage_min"]
-            ), f"{scenario}: ref_coverage {result.overture_coverage} < {checks['ref_coverage_min']}"
+            assert result.overture_coverage >= checks["ref_coverage_min"], (
+                f"{scenario}: ref_coverage {result.overture_coverage} < {checks['ref_coverage_min']}"
+            )
 
         if "target_coverage_min" in checks:
-            assert (
-                result.dataset_coverage >= checks["target_coverage_min"]
-            ), f"{scenario}: target_coverage {result.dataset_coverage} < {checks['target_coverage_min']}"
+            assert result.dataset_coverage >= checks["target_coverage_min"], (
+                f"{scenario}: target_coverage {result.dataset_coverage} < {checks['target_coverage_min']}"
+            )
 
         if "ref_coverage_range" in checks:
             low, high = checks["ref_coverage_range"]
-            assert (
-                low <= result.overture_coverage <= high
-            ), f"{scenario}: ref_coverage {result.overture_coverage} not in [{low}, {high}]"
+            assert low <= result.overture_coverage <= high, (
+                f"{scenario}: ref_coverage {result.overture_coverage} not in [{low}, {high}]"
+            )
 
         if "target_coverage_range" in checks:
             low, high = checks["target_coverage_range"]
-            assert (
-                low <= result.dataset_coverage <= high
-            ), f"{scenario}: target_coverage {result.dataset_coverage} not in [{low}, {high}]"
+            assert low <= result.dataset_coverage <= high, (
+                f"{scenario}: target_coverage {result.dataset_coverage} not in [{low}, {high}]"
+            )
 
     def test_zero_length_reference(self):
         """Zero-length reference should return default alignment."""

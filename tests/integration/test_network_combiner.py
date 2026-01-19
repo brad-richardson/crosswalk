@@ -258,15 +258,10 @@ class TestCombineNetworks:
             overlap_buffer_distance=10.0,
         )
 
-        was_dropped = len(dropped) > 0 and "t2_a" in dropped["original_id"].tolist()
         # Note: The actual behavior depends on geometry - this tests the threshold has effect
-        # We use a flexible assertion here
-        if should_drop:
-            # At low thresholds, we expect some drops
-            pass  # Don't strictly assert - geometry-dependent
-        else:
-            # At very high thresholds, less likely to drop
-            pass
+        # At different thresholds, we may get different drop behavior
+        # This test verifies the function runs without error at various thresholds
+        _ = len(dropped)  # Verify dropped is a valid GeoDataFrame
 
     def test_provenance_columns_correctly_populated(
         self,

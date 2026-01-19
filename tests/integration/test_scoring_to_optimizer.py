@@ -9,7 +9,6 @@ import pytest
 from shapely import LineString
 
 from matcher.matching.optimizer import (
-    MultiMatchResult,
     compute_match_statistics,
     optimize_matches,
     optimize_with_one_to_many,

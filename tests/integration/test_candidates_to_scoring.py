@@ -9,7 +9,7 @@ import pytest
 from shapely import LineString
 
 from matcher.blocking.spatial_index import CandidatePair, generate_candidates
-from matcher.matching.rules import MatchDecision, MatchResult, score_candidates
+from matcher.matching.rules import MatchDecision, score_candidates
 
 
 @pytest.fixture
