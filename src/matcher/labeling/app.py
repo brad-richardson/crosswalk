@@ -84,6 +84,7 @@ from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.feature_panel import (
     get_subseg_state,
     render_feature_panel,
+    render_minimal_feature_panel,
     render_subsegment_controls,
     reset_subsegment_state,
 )
@@ -330,8 +331,9 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                 st.caption(f"Cache: {count_str} pairs, {age_str} {fresh_indicator}")
 
                 if st.button("🔄 Regenerate Cache", help="Force fresh computation"):
-                    delete_cache(dataset_id)
-                    st.session_state.use_cache = False
+                    with st.spinner("Regenerating cache..."):
+                        delete_cache(dataset_id)
+                        load_data(reference_path, target_path, dataset_id, use_cache=False)
                     st.rerun()
             else:
                 st.caption("No cache available - will compute fresh")
@@ -717,8 +719,6 @@ def render_quick_mode(pair, filtered, label_store, session):
     Provides a simplified single-column layout with large touch targets
     and minimal feature display for efficient labeling on mobile devices.
     """
-    from matcher.labeling.feature_panel import render_minimal_feature_panel
-
     # Add keyboard shortcut handler
     _add_keyboard_shortcuts()
 
@@ -768,18 +768,6 @@ def render_quick_mode(pair, filtered, label_store, session):
     render_minimal_feature_panel(pair)
 
     # Large action buttons - Match and No Match prominently displayed
-    st.markdown(
-        """
-        <style>
-        .quick-mode-btn button {
-            height: 60px !important;
-            font-size: 20px !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     col1, col2 = st.columns(2)
 
     with col1:
@@ -790,6 +778,7 @@ def render_quick_mode(pair, filtered, label_store, session):
             key="quick_match",
         ):
             record_label(pair, "match", label_store)
+            advance_to_next()
             reset_subsegment_state()
             st.rerun()
 
@@ -800,6 +789,7 @@ def render_quick_mode(pair, filtered, label_store, session):
             key="quick_no_match",
         ):
             record_label(pair, "no_match", label_store)
+            advance_to_next()
             reset_subsegment_state()
             st.rerun()
 
@@ -810,6 +800,7 @@ def render_quick_mode(pair, filtered, label_store, session):
         with more_col1:
             if st.button("🤔 Unsure (U)", use_container_width=True, key="quick_unsure"):
                 record_label(pair, "unsure", label_store)
+                advance_to_next()
                 reset_subsegment_state()
                 st.rerun()
 

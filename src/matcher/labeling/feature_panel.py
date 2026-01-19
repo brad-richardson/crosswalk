@@ -1,5 +1,7 @@
 """Feature display components for the labeling UI."""
 
+import html
+
 import streamlit as st
 
 from .data_loader import CandidatePairView
@@ -67,6 +69,14 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
     """Render side-by-side segment info comparison - compact."""
     ref_id_short = pair.ref_id[:16] + "..." if len(pair.ref_id) > 16 else pair.ref_id
 
+    # Escape user-provided data for XSS prevention
+    ref_id_escaped = html.escape(ref_id_short)
+    target_id_escaped = html.escape(str(pair.target_id))
+    ref_name_escaped = html.escape(pair.ref_name or "N/A")
+    target_name_escaped = html.escape(pair.target_name or "N/A")
+    ref_class_escaped = html.escape(pair.ref_class or "N/A")
+    target_class_escaped = html.escape(pair.target_class or "N/A")
+
     st.markdown(
         f"""
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -75,18 +85,18 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
                     <span style="display: inline-block; width: 16px; height: 3px; background: #2196F3; margin-right: 6px;"></span>
                     <strong style="font-size: 14px;">Reference</strong>
                 </div>
-                <div style="color: #888; font-size: 11px;">ID: {ref_id_short}</div>
-                <div style="font-size: 16px;">Name: {pair.ref_name or "N/A"}</div>
-                <div style="font-size: 15px;">Class: {pair.ref_class or "N/A"}</div>
+                <div style="color: #888; font-size: 11px;">ID: {ref_id_escaped}</div>
+                <div style="font-size: 16px;">Name: {ref_name_escaped}</div>
+                <div style="font-size: 15px;">Class: {ref_class_escaped}</div>
             </div>
             <div>
                 <div style="display: flex; align-items: center; margin-bottom: 6px;">
                     <span style="display: inline-block; width: 16px; height: 3px; background: #F44336; margin-right: 6px;"></span>
                     <strong style="font-size: 14px;">Target</strong>
                 </div>
-                <div style="color: #888; font-size: 11px;">ID: {pair.target_id}</div>
-                <div style="font-size: 16px;">Name: {pair.target_name or "N/A"}</div>
-                <div style="font-size: 15px;">Class: {pair.target_class or "N/A"}</div>
+                <div style="color: #888; font-size: 11px;">ID: {target_id_escaped}</div>
+                <div style="font-size: 16px;">Name: {target_name_escaped}</div>
+                <div style="font-size: 15px;">Class: {target_class_escaped}</div>
             </div>
         </div>
         """,
@@ -167,11 +177,11 @@ def render_minimal_feature_panel(pair: CandidatePairView) -> None:
     else:
         badge_bg = "#B71C1C"
 
-    # Single compact row with all key info
-    ref_name = pair.ref_name or "No name"
-    target_name = pair.target_name or "No name"
-    ref_class = pair.ref_class or "-"
-    target_class = pair.target_class or "-"
+    # Single compact row with all key info - escape for XSS prevention
+    ref_name = html.escape(pair.ref_name or "No name")
+    target_name = html.escape(pair.target_name or "No name")
+    ref_class = html.escape(pair.ref_class or "-")
+    target_class = html.escape(pair.target_class or "-")
 
     st.markdown(
         f"""

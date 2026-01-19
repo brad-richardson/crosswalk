@@ -9,6 +9,7 @@ These features work without requiring explicit topology in the target data,
 making them suitable for raw "spaghetti" line datasets.
 """
 
+import time
 from dataclasses import dataclass, field
 
 import geopandas as gpd
@@ -777,20 +778,26 @@ def compute_all_topology(
     if gdf.empty:
         return {}
 
+    t_start = time.perf_counter()
+    n_total = len(gdf)
+    logger.info(f"[topology] Starting compute_all_topology for {n_total} segments")
+
     # Project to local CRS if in geographic coordinates (EPSG:4326)
     # This ensures tolerance is interpreted as meters
     work_gdf = gdf
     if gdf.crs is not None and gdf.crs.is_geographic:
         # Estimate UTM zone from centroid
+        t0 = time.perf_counter()
         centroid = gdf.geometry.union_all().centroid
         utm_zone = int((centroid.x + 180) / 6) + 1
         hemisphere = "north" if centroid.y >= 0 else "south"
         epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
         work_gdf = gdf.to_crs(epsg=epsg)
-        logger.debug(f"Projected to EPSG:{epsg} for topology computation")
+        logger.debug(f"[topology] Projected to EPSG:{epsg} in {time.perf_counter() - t0:.2f}s")
 
     # Step 1: Extract endpoints from all geometries
     # Each entry: (endpoint_coords, segment_id, is_start)
+    t0 = time.perf_counter()
     endpoint_coords = []
     endpoint_segment_ids = []
     endpoint_is_start = []
@@ -827,12 +834,18 @@ def compute_all_topology(
         return {}
 
     n_endpoints = len(endpoint_coords)
+    logger.debug(
+        f"[topology] Step 1: Extracted {n_endpoints} endpoints in {time.perf_counter() - t0:.2f}s"
+    )
 
     # Step 2: Build STRtree from endpoint points
+    t0 = time.perf_counter()
     endpoint_points = [Point(c) for c in endpoint_coords]
     tree = STRtree(endpoint_points)
+    logger.debug(f"[topology] Step 2: Built STRtree in {time.perf_counter() - t0:.2f}s")
 
     # Step 3 & 4: For each endpoint, query nearby and union into clusters
+    t0 = time.perf_counter()
     uf = UnionFind(n_endpoints)
 
     for i, point in enumerate(endpoint_points):
@@ -844,6 +857,8 @@ def compute_all_topology(
             if i != j:
                 uf.union(i, j)
 
+    logger.debug(f"[topology] Step 3-4: Union-Find clustering in {time.perf_counter() - t0:.2f}s")
+
     # Step 5: Build cluster -> set of segment_ids mapping
     cluster_segments: dict[int, set[str]] = {}
     for ep_idx in range(n_endpoints):
@@ -852,7 +867,12 @@ def compute_all_topology(
             cluster_segments[root] = set()
         cluster_segments[root].add(endpoint_segment_ids[ep_idx])
 
+    logger.debug(
+        f"[topology] Step 5: Built {len(cluster_segments)} clusters in {time.perf_counter() - t0:.2f}s"
+    )
+
     # Step 6: Compute degrees for each segment
+    t0 = time.perf_counter()
     # For each segment, find the cluster its start and end belong to
     segment_from_degree: dict[str, int] = {}
     segment_to_degree: dict[str, int] = {}
@@ -900,6 +920,10 @@ def compute_all_topology(
                     "degree_signature": (1, 1),
                 }
 
+    logger.debug(f"[topology] Step 6: Computed degrees in {time.perf_counter() - t0:.2f}s")
+    logger.info(
+        f"[topology] Complete: {len(topology)} segments in {time.perf_counter() - t_start:.2f}s total"
+    )
     return topology
 
 

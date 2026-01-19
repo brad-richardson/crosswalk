@@ -4,6 +4,7 @@ This module provides a unified interface for computing all features for candidat
 including geometric, semantic, relational, and topology features.
 """
 
+import time
 from typing import Any
 
 import geopandas as gpd
@@ -262,11 +263,15 @@ def precompute_topology_and_endpoints(
         Each is a dict mapping index -> feature dict
     """
     # Build spatial index for endpoint proximity features (target only)
+    t_start = time.perf_counter()
+    t0 = time.perf_counter()
     logger.info("Building spatial index for endpoint features...")
     target_index = SpatialContextIndex()
     target_index.build_from_gdf(target, id_column=id_column)
+    logger.debug(f"[precompute] Built spatial index in {time.perf_counter() - t0:.2f}s")
 
     # Pre-compute endpoint features for target segments
+    t0 = time.perf_counter()
     target_endpoint_features = {}
     logger.info(f"Pre-computing endpoint features for {len(target_indices)} target segments...")
     for target_idx in target_indices:
@@ -283,6 +288,8 @@ def precompute_topology_and_endpoints(
                 "shared_endpoint_count": 0,
             }
 
+    logger.debug(f"[precompute] Endpoint features in {time.perf_counter() - t0:.2f}s")
+
     # Get unique segment IDs
     target_ids = target[id_column].to_numpy()
     ref_ids = reference[id_column].to_numpy()
@@ -295,12 +302,19 @@ def precompute_topology_and_endpoints(
     )
 
     # Compute topology for target and reference
+    t0 = time.perf_counter()
+    logger.debug("[precompute] Computing target topology...")
     target_topology_by_id = compute_all_topology(
         target, id_column=id_column, tolerance=tolerance, ids_to_compute=unique_target_ids
     )
+    logger.debug(f"[precompute] Target topology in {time.perf_counter() - t0:.2f}s")
+
+    t0 = time.perf_counter()
+    logger.debug("[precompute] Computing reference topology...")
     ref_topology_by_id = compute_all_topology(
         reference, id_column=id_column, tolerance=tolerance, ids_to_compute=unique_ref_ids
     )
+    logger.debug(f"[precompute] Reference topology in {time.perf_counter() - t0:.2f}s")
 
     # Map topology from segment IDs to DataFrame indices
     target_topology_features = {}
@@ -317,4 +331,5 @@ def precompute_topology_and_endpoints(
             seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
         )
 
+    logger.info(f"[precompute] Total precompute time: {time.perf_counter() - t_start:.2f}s")
     return target_endpoint_features, ref_topology_features, target_topology_features

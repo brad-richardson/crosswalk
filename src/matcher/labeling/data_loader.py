@@ -24,7 +24,8 @@ from .subsegment import estimate_overlap_range
 logger = logging.getLogger(__name__)
 
 # Cache directory relative to project root (data/cache/labeling/)
-CACHE_DIR = Path(__file__).parents[4] / "data" / "cache" / "labeling"
+# Path: src/matcher/labeling/data_loader.py -> parents[3] = project root
+CACHE_DIR = Path(__file__).parents[3] / "data" / "cache" / "labeling"
 
 
 @dataclass
@@ -67,6 +68,22 @@ class CandidatePairView:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CandidatePairView":
         """Deserialize from dictionary loaded from cache."""
+        # Validate required fields to catch cache corruption early
+        required_fields = [
+            "ref_id",
+            "target_id",
+            "ref_geometry_wkt",
+            "target_geometry_wkt",
+            "decision",
+            "confidence",
+        ]
+        missing = [key for key in required_fields if key not in data]
+        if missing:
+            raise ValueError(
+                f"Cached CandidatePairView missing required fields {missing}. "
+                f"Available keys: {list(data.keys())}"
+            )
+
         return cls(
             ref_id=data["ref_id"],
             target_id=data["target_id"],
@@ -153,8 +170,9 @@ def get_cache_info(
 
         metadata = pq.read_metadata(cache_path)
         info["candidate_count"] = metadata.num_rows
-    except Exception:
-        pass
+    except Exception as e:
+        # Failed to read metadata; leave candidate_count as None
+        logger.debug(f"Failed to read cache metadata from {cache_path}: {e}")
 
     return info
 
