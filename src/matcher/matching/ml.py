@@ -42,7 +42,7 @@ MAX_DISTANCE_METERS = 9999.0
 # Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
 # (both compute bidirectional mean of min distances). Including both would double-weight.
 FEATURE_COLUMNS = [
-    # Geometric (7)
+    # Geometric (8)
     "hausdorff_distance",
     "mean_hausdorff_distance",
     "buffer_iou",
@@ -50,6 +50,7 @@ FEATURE_COLUMNS = [
     "heading_delta",
     "length_ratio",
     "centroid_distance",
+    "collinear_gap_ratio",
     # Semantic - name (5)
     "name_levenshtein",
     "name_jaro_winkler",
@@ -191,6 +192,7 @@ def _compute_single_feature(args):
             "length_ratio": geom_features.length_ratio,
             "projection_distance": geom_features.projection_distance,
             "centroid_distance": geom_features.centroid_distance,
+            "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
             "name_token_sort": name_sim["token_sort_ratio"],
@@ -233,6 +235,7 @@ def _compute_single_feature(args):
             "length_ratio": 0.0,
             "projection_distance": MAX_DISTANCE_METERS,
             "centroid_distance": MAX_DISTANCE_METERS,
+            "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
             "name_levenshtein": 0.0,
             "name_jaro_winkler": 0.0,
             "name_token_sort": 0.0,

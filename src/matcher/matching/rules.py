@@ -73,16 +73,17 @@ class MatchResult:
 # Default feature weights - can be overridden via settings.matching_weights
 # All scores normalized 0-1, higher = better match
 DEFAULT_WEIGHTS = {
-    # Geometric features (60% total)
-    "hausdorff_norm": 0.10,  # Max deviation - sensitive to segmentation, catches outliers
+    # Geometric features (63% total)
+    "hausdorff_norm": 0.08,  # Max deviation - sensitive to segmentation, catches outliers
     "mean_hausdorff_norm": 0.10,  # Mean deviation - robust to partial overlaps
-    "buffer_iou": 0.15,  # Overlap quality - robust general-purpose metric
+    "buffer_iou": 0.12,  # Overlap quality - robust general-purpose metric
     "overlap_ratio": 0.15,  # Overlap quantity - "how much actually matches?"
     "heading_norm": 0.10,  # Direction alignment - distinguishes parallel roads
+    "collinear_gap_ratio": 0.08,  # Penalizes tip-to-tip collinear segments
     # Length/proximity (10% total)
     "length_ratio": 0.10,  # Similar lengths suggest same segment
-    # Alignment quality (10% total)
-    "projection_norm": 0.10,  # Average perpendicular distance
+    # Alignment quality (7% total)
+    "projection_norm": 0.07,  # Average perpendicular distance
     # Semantic features (20% total)
     "name_similarity": 0.15,  # Strong signal when present, often missing
     "class_similarity": 0.05,  # Weak signal - classes vary between datasets
@@ -146,6 +147,7 @@ def compute_match_score(
             "length_ratio": precomputed_features["length_ratio"],
             "projection_distance": precomputed_features["projection_distance"],
             "centroid_distance": precomputed_features["centroid_distance"],
+            "collinear_gap_ratio": precomputed_features.get("collinear_gap_ratio", 1.0),
             "name_levenshtein": precomputed_features["name_levenshtein"],
             "name_jaro_winkler": precomputed_features["name_jaro_winkler"],
             "name_token_sort": precomputed_features["name_token_sort"],
@@ -169,6 +171,7 @@ def compute_match_score(
             "length_ratio": geom_features.length_ratio,
             "projection_distance": geom_features.projection_distance,
             "centroid_distance": geom_features.centroid_distance,
+            "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
             "name_token_sort": name_sim["token_sort_ratio"],
@@ -184,6 +187,7 @@ def compute_match_score(
         "buffer_iou": raw_features["buffer_iou"],
         "overlap_ratio": raw_features["overlap_ratio"],  # Already 0-1
         "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
+        "collinear_gap_ratio": raw_features["collinear_gap_ratio"],  # Already 0-1
         "length_ratio": raw_features["length_ratio"],
         "projection_norm": max(0, 1 - raw_features["projection_distance"] / distance_threshold),
         "name_similarity": raw_features["name_token_sort"],
