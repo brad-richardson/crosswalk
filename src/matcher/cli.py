@@ -585,6 +585,12 @@ def qa_integration(
         "-p",
         help="Streamlit server port",
     ),
+    host: str = typer.Option(
+        "localhost",
+        "--host",
+        "-H",
+        help="Server host (use 0.0.0.0 to expose on all interfaces)",
+    ),
 ):
     """Launch the integration QA app.
 
@@ -592,6 +598,7 @@ def qa_integration(
 
     Example:
         matcher qa-integration -o data/integrated
+        matcher qa-integration -o data/integrated --host 0.0.0.0
     """
     import os
     import subprocess
@@ -613,11 +620,22 @@ def qa_integration(
     console.print(f"[blue]Starting integration QA on port {port}...[/blue]")
     console.print(f"  Integration output: {output_dir}")
     console.print()
-    console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
+    display_host = "localhost" if host == "0.0.0.0" else host
+    console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
 
     # Launch Streamlit
     result = subprocess.run(
-        [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(app_path),
+            "--server.port",
+            str(port),
+            "--server.address",
+            host,
+        ],
         env=env,
     )
     if result.returncode != 0:
