@@ -13,8 +13,12 @@ from shapely import wkt
 from shapely.geometry import LineString
 
 from ..blocking import generate_candidates
+from ..features.compute import (
+    compute_pair_features,
+    precompute_topology_and_endpoints,
+)
 from ..features.semantic import _extract_name_string
-from ..matching.rules import score_candidates
+from ..matching.rules import compute_match_score
 from .subsegment import estimate_overlap_range
 
 logger = logging.getLogger(__name__)
@@ -324,22 +328,13 @@ def generate_scored_candidates(
     if not candidates:
         return []
 
-    # Score candidates
-    results = score_candidates(
-        candidates=candidates,
-        reference=reference_proj,
-        target=target_proj,
-        ref_name_column=ref_name_column,
-        target_name_column=target_name_column,
-        ref_class_column=ref_class_column,
-        target_class_column=target_class_column,
-    )
-
     # Build view models (use original WGS84 geometries for map display)
     # Create index lookups for O(1) access (avoid O(n) DataFrame filtering per candidate)
     # Note: If IDs are not unique, .loc returns DataFrame; we take first row
     ref_lookup = reference.set_index(ref_id_column)
     target_lookup = target.set_index(target_id_column)
+    ref_proj_lookup = reference_proj.set_index(ref_id_column)
+    target_proj_lookup = target_proj.set_index(target_id_column)
 
     # Pre-check column existence
     has_ref_name = ref_name_column in reference.columns
@@ -356,11 +351,31 @@ def generate_scored_candidates(
             raise KeyError(f"ID {id_val} not found in lookup")
         return result.iloc[0]
 
+    # Pre-compute topology and endpoint features for all candidate pairs
+    # This is the same approach used by the ML pipeline for efficiency
+    logger.info("Pre-computing topology and endpoint features...")
+    unique_ref_indices = {cand.ref_idx for cand in candidates}
+    unique_target_indices = {cand.target_idx for cand in candidates}
+
+    target_endpoint_features, ref_topology_features, target_topology_features = (
+        precompute_topology_and_endpoints(
+            reference=reference_proj,
+            target=target_proj,
+            ref_indices=unique_ref_indices,
+            target_indices=unique_target_indices,
+            id_column=ref_id_column,
+            tolerance=5.0,
+        )
+    )
+
+    logger.info(f"Computing features for {len(candidates)} candidates...")
     views = []
-    for result in results:
-        # Get rows from indexed lookup (O(1) instead of O(n))
-        ref_row = get_row(ref_lookup, result.ref_id)
-        target_row = get_row(target_lookup, result.target_id)
+    for cand in candidates:
+        # Get rows from indexed lookups
+        ref_row = get_row(ref_lookup, cand.ref_id)
+        target_row = get_row(target_lookup, cand.target_id)
+        ref_proj_row = get_row(ref_proj_lookup, cand.ref_id)
+        target_proj_row = get_row(target_proj_lookup, cand.target_id)
 
         # Extract names
         ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
@@ -372,24 +387,51 @@ def generate_scored_candidates(
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
         target_class = target_row.get(target_class_column) if has_target_class else None
 
-        # Skip sub-segment estimation during bulk loading - compute on-demand
-        # when the pair is actually viewed in the UI
-        # estimated = estimate_overlap_range(ref_row.geometry, target_row.geometry)
+        # Compute all features using shared module (uses projected geometries)
+        features = compute_pair_features(
+            ref_geom=ref_proj_row.geometry,
+            target_geom=target_proj_row.geometry,
+            ref_name=ref_name,
+            target_name=target_name,
+            ref_class=ref_class,
+            target_class=target_class,
+            endpoint_features=target_endpoint_features.get(cand.target_idx),
+            ref_topology=ref_topology_features.get(cand.ref_idx),
+            target_topology=target_topology_features.get(cand.target_idx),
+        )
+
+        # Compute confidence and decision using rule-based scoring
+        confidence, score_breakdown, _ = compute_match_score(
+            ref_geom=ref_proj_row.geometry,
+            target_geom=target_proj_row.geometry,
+            ref_name=ref_name,
+            target_name=target_name,
+            ref_class=ref_class,
+            target_class=target_class,
+        )
+
+        # Determine decision based on confidence
+        if confidence >= 0.5:
+            decision = "match"
+        elif confidence >= 0.1:
+            decision = "review"
+        else:
+            decision = "no_match"
 
         views.append(
             CandidatePairView(
-                ref_id=str(result.ref_id),
-                target_id=str(result.target_id),
-                ref_geometry=ref_row.geometry,
+                ref_id=str(cand.ref_id),
+                target_id=str(cand.target_id),
+                ref_geometry=ref_row.geometry,  # Use WGS84 for map display
                 target_geometry=target_row.geometry,
                 ref_name=ref_name,
                 target_name=target_name,
                 ref_class=ref_class,
                 target_class=target_class,
-                decision=result.decision.value,
-                confidence=result.confidence,
-                score_breakdown=result.score_breakdown,
-                features=result.features,
+                decision=decision,
+                confidence=confidence,
+                score_breakdown=score_breakdown,
+                features=features,  # Now includes all features including topology
                 # Defer subsegment estimation - computed on-demand when viewing
                 estimated_subsegment=None,
             )
