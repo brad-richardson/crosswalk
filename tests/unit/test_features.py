@@ -261,83 +261,79 @@ class TestCollinearGapRatio:
     because they represent consecutive road segments, not the same segment.
     """
 
-    def test_identical_lines_no_penalty(self):
-        """Identical lines should have no penalty (perfect overlap)."""
-        line = LineString([(0, 0), (100, 0)])
-        result = compute_collinear_gap_ratio(line, line)
+    @pytest.mark.parametrize(
+        "coords_a,coords_b",
+        [
+            # Identical lines (perfect overlap)
+            ([(0, 0), (100, 0)], [(0, 0), (100, 0)]),
+            # Partial overlap (50%) - above 10% threshold
+            ([(0, 0), (100, 0)], [(50, 0), (150, 0)]),
+            # Perpendicular (not collinear, heading > 15°)
+            ([(0, 0), (100, 0)], [(50, -50), (50, 50)]),
+            # Parallel offset (good along-track overlap despite lateral offset)
+            ([(0, 0), (100, 0)], [(0, 10), (100, 10)]),
+            # Empty line (degenerate case)
+            ([(0, 0), (100, 0)], []),
+        ],
+        ids=[
+            "identical_lines",
+            "partial_overlap_50pct",
+            "perpendicular",
+            "parallel_offset",
+            "empty_line",
+        ],
+    )
+    def test_no_penalty_cases(self, coords_a, coords_b):
+        """Cases that should have no penalty (ratio = 1.0)."""
+        line_a = LineString(coords_a)
+        line_b = LineString(coords_b) if coords_b else LineString()
+        result = compute_collinear_gap_ratio(line_a, line_b)
         assert result == pytest.approx(1.0)
 
-    def test_tip_to_tip_collinear_penalty(self):
-        """Tip-to-tip collinear segments should receive strong penalty."""
-        # Two consecutive segments on the same line
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(100, 0), (200, 0)])
+    @pytest.mark.parametrize(
+        "coords_a,coords_b",
+        [
+            # Tip-to-tip horizontal
+            ([(0, 0), (100, 0)], [(100, 0), (200, 0)]),
+            # Opposite direction tip-to-tip
+            ([(0, 0), (100, 0)], [(200, 0), (100, 0)]),
+            # Diagonal tip-to-tip
+            ([(0, 0), (100, 100)], [(100, 100), (200, 200)]),
+        ],
+        ids=[
+            "tip_to_tip_horizontal",
+            "tip_to_tip_opposite_direction",
+            "tip_to_tip_diagonal",
+        ],
+    )
+    def test_strong_penalty_cases(self, coords_a, coords_b):
+        """Tip-to-tip collinear segments should receive strong penalty (ratio < 0.1)."""
+        line_a = LineString(coords_a)
+        line_b = LineString(coords_b)
         result = compute_collinear_gap_ratio(line_a, line_b)
-        # Should be 0.0 since they just touch (0% overlap)
         assert result < 0.1
 
-    def test_gap_between_collinear_penalty(self):
-        """Collinear segments with a gap should receive strong penalty."""
-        # Two segments on the same line with a gap
+    def test_gap_between_collinear_zero_penalty(self):
+        """Collinear segments with a gap should have zero overlap ratio."""
         line_a = LineString([(0, 0), (100, 0)])
         line_b = LineString([(110, 0), (200, 0)])  # 10m gap
         result = compute_collinear_gap_ratio(line_a, line_b)
-        # Should be 0.0 since there's no overlap
         assert result == pytest.approx(0.0)
 
-    def test_overlapping_collinear_no_penalty(self):
-        """Collinear segments with good overlap should have no penalty."""
+    def test_contained_segment_no_penalty(self):
+        """Segment fully contained within another should have no penalty."""
         line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(25, 0), (75, 0)])  # 50m fully contained within 100m
+        line_b = LineString([(25, 0), (75, 0)])  # 50m fully contained
         result = compute_collinear_gap_ratio(line_a, line_b)
         assert result > 0.9
 
-    def test_partial_overlap_collinear(self):
-        """Partial overlap above threshold should have no penalty."""
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(50, 0), (150, 0)])  # 50% overlap
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        assert result == pytest.approx(1.0)
-
-    def test_perpendicular_no_penalty(self):
-        """Perpendicular segments should have no penalty (not collinear)."""
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(50, -50), (50, 50)])
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        assert result == pytest.approx(1.0)
-
-    def test_parallel_offset_no_penalty(self):
-        """Parallel but offset segments should have no penalty (handled by other features)."""
-        # Parallel roads 10m apart - different roads, not tip-to-tip
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(0, 10), (100, 10)])
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        # heading delta is 0, so it's collinear check-wise, but they have 100% along-track overlap
-        assert result == pytest.approx(1.0)
-
-    def test_opposite_direction_collinear(self):
-        """Opposite direction collinear segments should still be detected."""
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(200, 0), (100, 0)])  # Opposite direction, tip-to-tip
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        # Should detect the tip-to-tip scenario
-        assert result < 0.1
-
     def test_small_overlap_scaled_penalty(self):
-        """Small overlap should produce scaled penalty (not full penalty)."""
-        # 5% overlap at threshold of 10%
+        """Small overlap should produce scaled penalty proportional to overlap."""
+        # 5% overlap at threshold of 10% -> ratio = 0.5
         line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString([(95, 0), (195, 0)])  # 5m overlap out of 100m smaller segment
+        line_b = LineString([(95, 0), (195, 0)])  # 5m overlap out of 100m
         result = compute_collinear_gap_ratio(line_a, line_b)
-        # 5% overlap / 10% threshold = 0.5
         assert 0.4 <= result <= 0.6
-
-    def test_diagonal_collinear_tip_to_tip(self):
-        """Tip-to-tip detection should work for diagonal lines."""
-        line_a = LineString([(0, 0), (100, 100)])
-        line_b = LineString([(100, 100), (200, 200)])
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        assert result < 0.1
 
     def test_included_in_geometric_features(self):
         """collinear_gap_ratio should be included in compute_geometric_features output."""
@@ -345,11 +341,4 @@ class TestCollinearGapRatio:
         line_b = LineString([(100, 0), (200, 0)])
         features = compute_geometric_features(line_a, line_b)
         assert hasattr(features, "collinear_gap_ratio")
-        assert features.collinear_gap_ratio < 0.1  # tip-to-tip should be penalized
-
-    def test_empty_line_no_penalty(self):
-        """Empty lines should have no penalty (degenerate case)."""
-        line_a = LineString([(0, 0), (100, 0)])
-        line_b = LineString()  # Empty
-        result = compute_collinear_gap_ratio(line_a, line_b)
-        assert result == pytest.approx(1.0)
+        assert features.collinear_gap_ratio < 0.1
