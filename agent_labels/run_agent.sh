@@ -31,7 +31,7 @@ shift || true
 BATCH_DIR=""
 MODEL=""
 LIMIT=""
-RESUME="false"
+OVERWRITE="false"
 BAIL_AFTER="2"
 
 while [[ $# -gt 0 ]]; do
@@ -48,8 +48,8 @@ while [[ $# -gt 0 ]]; do
             LIMIT="$2"
             shift 2
             ;;
-        --resume)
-            RESUME="true"
+        --overwrite)
+            OVERWRITE="true"
             shift
             ;;
         --bail-after)
@@ -77,7 +77,7 @@ case "$AGENT" in
     claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [--batch <dir>] [--model <model>] [--limit <n>] [--resume] [--bail-after <n>]"
+        echo "Usage: $0 <agent> [--batch <dir>] [--model <model>] [--limit <n>] [--overwrite] [--bail-after <n>]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
@@ -89,7 +89,7 @@ case "$AGENT" in
         echo "  --batch        Batch directory (default: latest test_batch_*)"
         echo "  --model        Model variant to use"
         echo "  --limit        Max candidates to process"
-        echo "  --resume       Continue from previous run, skip already-labeled candidates"
+        echo "  --overwrite    Start fresh, discard any existing labels (default: resume)"
         echo "  --bail-after   Stop after N consecutive failures (default: 2, 0=never bail)"
         echo ""
         echo "Example: $0 gemini --batch batches/test_batch_2026-01-18 --model flash"
@@ -119,31 +119,26 @@ TEMP_DIR=$(mktemp -d)
 
 mkdir -p "$OUTPUT_DIR"
 
-# Handle resume mode - load existing pairs or write fresh header
+# Handle overwrite vs resume (resume is default)
 EXISTING_PAIRS=""
+EXISTING_COUNT=0
 SKIPPED=0
-if [[ "$RESUME" == "true" ]] && [[ -f "$OUTPUT_FILE" ]]; then
-    # Load existing ref_id,target_id pairs (skip header)
+if [[ "$OVERWRITE" == "true" ]] || [[ ! -f "$OUTPUT_FILE" ]]; then
+    # Start fresh - write header
+    echo "ref_id,target_id,label,confidence,reasoning" > "$OUTPUT_FILE"
+    echo "" > "$RAW_OUTPUT"
+else
+    # Resume mode (default) - load existing pairs
     EXISTING_PAIRS=$(tail -n +2 "$OUTPUT_FILE" | cut -d',' -f1,2)
-    if [[ -z "$EXISTING_PAIRS" ]]; then
-        EXISTING_COUNT=0
-    else
+    if [[ -n "$EXISTING_PAIRS" ]]; then
         EXISTING_COUNT=$(printf '%s\n' "$EXISTING_PAIRS" | grep -c '^' 2>/dev/null || echo 0)
     fi
     echo "Resuming: found $EXISTING_COUNT existing labels"
-else
-    # Start fresh - write header
-    echo "ref_id,target_id,label,confidence,reasoning" > "$OUTPUT_FILE"
+    # Append to raw responses to preserve previous run data
+    echo "" >> "$RAW_OUTPUT"
 fi
 
 echo "=== $AGENT Run Started: $(date) ===" >> "$LOG_FILE"
-if [[ "$RESUME" == "true" ]]; then
-    # In resume mode, append to raw responses to preserve previous run data
-    echo "" >> "$RAW_OUTPUT"
-else
-    # In fresh runs, start with a clean raw responses file
-    echo "" > "$RAW_OUTPUT"
-fi
 
 echo "Agent: $AGENT"
 [[ -n "$MODEL" ]] && echo "Model: $MODEL"
