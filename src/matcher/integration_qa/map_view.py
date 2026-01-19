@@ -102,6 +102,7 @@ def create_base_map(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri",
         name="Satellite",
+        max_zoom=20,
         show=(default_tiles == "satellite"),
     ).add_to(m)
 
@@ -109,6 +110,7 @@ def create_base_map(
     folium.TileLayer(
         tiles="cartodbpositron",
         name="Light",
+        max_zoom=20,
         show=(default_tiles == "light"),
     ).add_to(m)
 
