@@ -68,6 +68,11 @@ LABEL_COLUMNS = [
     "is_intersection_ref",
     "is_intersection_target",
     "intersection_match",
+    # Alignment coverage features (4)
+    "ref_coverage",
+    "target_coverage",
+    "min_coverage",
+    "coverage_ratio",
 ]
 
 # Default values for sub-segment columns (for backward compatibility)
@@ -216,6 +221,11 @@ class LabelStore:
             "is_intersection_ref": features.get("is_intersection_ref", 0.0),
             "is_intersection_target": features.get("is_intersection_target", 0.0),
             "intersection_match": features.get("intersection_match", 0.0),
+            # Alignment coverage features (4)
+            "ref_coverage": features.get("ref_coverage", 0.0),
+            "target_coverage": features.get("target_coverage", 0.0),
+            "min_coverage": features.get("min_coverage", 0.0),
+            "coverage_ratio": features.get("coverage_ratio", 0.0),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)

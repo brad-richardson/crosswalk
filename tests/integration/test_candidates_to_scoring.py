@@ -312,3 +312,106 @@ class TestFeatureComputation:
 
         # Name similarity should be between 0 and 1
         assert 0 <= features["name_levenshtein"] <= 1
+
+
+class TestAlignmentIntegration:
+    """Tests for alignment integration in the pipeline."""
+
+    def test_alignment_coverage_features_computed(self, reference_gdf, target_gdf):
+        """Coverage features should be computed when alignment is enabled."""
+        from matcher.features.alignment import linestring_alignment
+        from matcher.features.compute import compute_pair_features
+
+        ref_geom = reference_gdf.iloc[0].geometry
+        target_geom = target_gdf.iloc[0].geometry
+
+        # Compute alignment
+        alignment = linestring_alignment(ref_geom, target_geom)
+
+        # Compute features with alignment
+        features = compute_pair_features(
+            ref_geom=ref_geom,
+            target_geom=target_geom,
+            ref_name="Main Street",
+            target_name="Main St",
+            ref_class="primary",
+            target_class="primary",
+            alignment=alignment,
+        )
+
+        # Verify coverage features are present and valid
+        assert "ref_coverage" in features
+        assert "target_coverage" in features
+        assert "min_coverage" in features
+        assert "coverage_ratio" in features
+
+        # Coverage values should be between 0 and 1
+        assert 0 <= features["ref_coverage"] <= 1
+        assert 0 <= features["target_coverage"] <= 1
+        assert 0 <= features["min_coverage"] <= 1
+        assert 0 <= features["coverage_ratio"] <= 1
+
+        # For parallel lines with similar length, coverage should be high
+        assert features["ref_coverage"] > 0.8
+        assert features["target_coverage"] > 0.8
+
+    def test_partial_overlap_produces_lower_coverage(self):
+        """Partial overlap should produce lower coverage than full overlap."""
+        from matcher.features.alignment import compute_coverage_features, linestring_alignment
+
+        # Full overlap case
+        ref_full = LineString([(0, 0), (100, 0)])
+        target_full = LineString([(0, 0), (100, 0)])
+        alignment_full = linestring_alignment(ref_full, target_full)
+        coverage_full = compute_coverage_features(alignment_full)
+
+        # Partial overlap case - target is half the length
+        ref_partial = LineString([(0, 0), (100, 0)])
+        target_partial = LineString([(50, 0), (100, 0)])
+        alignment_partial = linestring_alignment(ref_partial, target_partial)
+        coverage_partial = compute_coverage_features(alignment_partial)
+
+        # Full overlap should have higher ref_coverage
+        assert coverage_full["ref_coverage"] > coverage_partial["ref_coverage"]
+
+        # But target coverage for partial should still be high (target is fully used)
+        assert coverage_partial["target_coverage"] > 0.8
+
+    def test_aligned_features_differ_from_full_geometry_features(self):
+        """Aligned features should differ from full geometry features for partial overlap."""
+        from matcher.features.alignment import linestring_alignment
+        from matcher.features.compute import compute_pair_features
+
+        # Reference covers more area than target
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(50, 2), (100, 2)])  # Only overlaps second half
+
+        alignment = linestring_alignment(ref, target)
+
+        features_aligned = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=alignment,
+        )
+
+        features_unaligned = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=None,
+        )
+
+        # Aligned features should have better hausdorff (comparing matching portions)
+        # The unaligned version compares full 100m vs 50m, adding 50m mismatch
+        assert features_aligned["hausdorff_distance"] <= features_unaligned["hausdorff_distance"]
+
+        # Coverage features should only be present with alignment
+        assert features_aligned["ref_coverage"] > 0
+        assert features_unaligned["ref_coverage"] == 0

@@ -8,6 +8,7 @@ from matcher.features.alignment import (
     AlignmentResult,
     _interpolate_along_line,
     _prepare_line_data,
+    compute_coverage_features,
     create_subline,
     linestring_alignment,
     walk_distance,
@@ -480,3 +481,156 @@ class TestPrepareLineData:
         coords, distances, total_length = _prepare_line_data(line)
 
         assert total_length == pytest.approx(50.0)  # sqrt(30^2 + 40^2) = 50
+
+
+class TestComputeCoverageFeatures:
+    """Tests for compute_coverage_features function."""
+
+    def test_full_coverage(self):
+        """Full alignment should have coverage of 1.0."""
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == pytest.approx(1.0)
+        assert features["target_coverage"] == pytest.approx(1.0)
+        assert features["min_coverage"] == pytest.approx(1.0)
+        assert features["coverage_ratio"] == pytest.approx(1.0)
+
+    def test_partial_ref_coverage(self):
+        """Partial reference coverage should be computed correctly."""
+        alignment = AlignmentResult(
+            overture_start_frac=0.25,
+            overture_end_frac=0.75,
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == pytest.approx(0.5)
+        assert features["target_coverage"] == pytest.approx(1.0)
+        assert features["min_coverage"] == pytest.approx(0.5)
+        assert features["coverage_ratio"] == pytest.approx(0.5)
+
+    def test_partial_target_coverage(self):
+        """Partial target coverage should be computed correctly."""
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.1,
+            dataset_end_frac=0.9,
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == pytest.approx(1.0)
+        assert features["target_coverage"] == pytest.approx(0.8)
+        assert features["min_coverage"] == pytest.approx(0.8)
+        assert features["coverage_ratio"] == pytest.approx(0.8)
+
+    def test_both_partial_coverage(self):
+        """Both partial coverages should compute min correctly."""
+        alignment = AlignmentResult(
+            overture_start_frac=0.25,
+            overture_end_frac=0.75,  # 0.5 coverage
+            dataset_start_frac=0.1,
+            dataset_end_frac=0.7,  # 0.6 coverage
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == pytest.approx(0.5)
+        assert features["target_coverage"] == pytest.approx(0.6)
+        assert features["min_coverage"] == pytest.approx(0.5)
+        assert features["coverage_ratio"] == pytest.approx(0.5 / 0.6, rel=0.01)
+
+    def test_none_alignment(self):
+        """None alignment should return zeros."""
+        features = compute_coverage_features(None)
+
+        assert features["ref_coverage"] == 0.0
+        assert features["target_coverage"] == 0.0
+        assert features["min_coverage"] == 0.0
+        assert features["coverage_ratio"] == 0.0
+
+    def test_zero_coverage(self):
+        """Zero coverage alignment should handle division by zero."""
+        alignment = AlignmentResult(
+            overture_start_frac=0.5,
+            overture_end_frac=0.5,  # 0 coverage
+            dataset_start_frac=0.5,
+            dataset_end_frac=0.5,  # 0 coverage
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == 0.0
+        assert features["target_coverage"] == 0.0
+        assert features["min_coverage"] == 0.0
+        assert features["coverage_ratio"] == 0.0
+
+
+class TestAlignedFeatureComputation:
+    """Tests for feature computation on aligned sublines."""
+
+    def test_partial_overlap_alignment_improves_hausdorff(self):
+        """Aligned features should have better hausdorff for partial overlaps.
+
+        When two segments only partially overlap, computing Hausdorff on aligned
+        sublines should give a smaller distance than on full geometries.
+        """
+        from matcher.features.geometric import compute_geometric_features
+
+        # Reference: 100m line
+        ref = LineString([(0, 0), (100, 0)])
+        # Target: 50m line at same position as second half of reference
+        target = LineString([(50, 2), (100, 2)])  # 2m lateral offset
+
+        # Full geometry features
+        full_features = compute_geometric_features(ref, target)
+
+        # Compute alignment
+        alignment = linestring_alignment(ref, target)
+
+        # Extract sublines
+        ref_subline = create_subline(
+            ref, alignment.overture_start_frac, alignment.overture_end_frac
+        )
+        target_subline = create_subline(
+            target, alignment.dataset_start_frac, alignment.dataset_end_frac
+        )
+
+        # Aligned subline features
+        aligned_features = compute_geometric_features(ref_subline, target_subline)
+
+        # Hausdorff on aligned sublines should be smaller (or equal)
+        # because we're comparing comparable portions
+        assert aligned_features.hausdorff_distance <= full_features.hausdorff_distance + 1
+
+    def test_tip_to_tip_segments_low_coverage(self):
+        """Tip-to-tip (consecutive) segments should have low coverage."""
+        # Two consecutive segments on the same street
+        segment_a = LineString([(0, 0), (100, 0)])
+        segment_b = LineString([(100, 0), (200, 0)])
+
+        alignment = linestring_alignment(segment_a, segment_b)
+        coverage = compute_coverage_features(alignment)
+
+        # Consecutive segments have minimal overlap
+        assert coverage["min_coverage"] < 0.3
+
+    def test_contained_segment_high_coverage(self):
+        """Segment fully contained in another should have high coverage for shorter."""
+        # Reference is longer
+        ref = LineString([(0, 0), (100, 0)])
+        # Target is contained within reference
+        target = LineString([(25, 0), (75, 0)])
+
+        alignment = linestring_alignment(ref, target)
+        coverage = compute_coverage_features(alignment)
+
+        # Target should have high coverage (fully aligned)
+        assert coverage["target_coverage"] > 0.9
+        # Reference has partial coverage (only where target exists)
+        assert 0.4 < coverage["ref_coverage"] < 0.6

@@ -68,6 +68,12 @@ class MatchResult:
     confidence: float
     score_breakdown: dict[str, float]
     features: dict[str, float]
+    # Linear reference fields from alignment (optional)
+    # These indicate where on each geometry the match alignment starts/ends
+    gers_start_frac: float | None = None
+    gers_end_frac: float | None = None
+    local_start_frac: float | None = None
+    local_end_frac: float | None = None
 
 
 # Default feature weights - can be overridden via settings.matching_weights

@@ -83,6 +83,12 @@ FEATURE_COLUMNS = [
     "is_intersection_ref",  # Reference has endpoint with degree > 2 (0 or 1)
     "is_intersection_target",  # Target has endpoint with degree > 2 (0 or 1)
     "intersection_match",  # Both or neither touch an intersection (0 or 1)
+    # Alignment coverage features (4) - how much of each segment is covered by alignment
+    # These let the ML model learn appropriate overlap thresholds instead of hard filters
+    "ref_coverage",  # Fraction of reference covered by alignment (0-1)
+    "target_coverage",  # Fraction of target covered by alignment (0-1)
+    "min_coverage",  # min(ref_coverage, target_coverage)
+    "coverage_ratio",  # Symmetry of coverage: min/max
 ]
 
 # Additional relational features (kept for backward compatibility with old labels)
@@ -119,6 +125,10 @@ def _compute_single_feature(args):
 
     Returns a dict of features, or a dict with all None values if computation fails.
     """
+    from ..features.alignment import (
+        compute_coverage_features,
+        create_subline,
+    )
     from ..features.geometric import compute_geometric_features
     from ..features.relational import compute_perpendicular_offset
     from ..features.semantic import compute_class_similarity, compute_name_similarity
@@ -133,7 +143,27 @@ def _compute_single_feature(args):
         ref_geom = _worker_data["ref_geoms"][ref_idx]
         target_geom = _worker_data["target_geoms"][target_idx]
 
-        geom_features = compute_geometric_features(ref_geom, target_geom)
+        # Get pre-computed alignment if available
+        alignment = _worker_data.get("alignments", {}).get((ref_idx, target_idx))
+        use_aligned = _worker_data.get("use_aligned_features", False) and alignment is not None
+
+        # Determine geometries for similarity features
+        if use_aligned and alignment is not None:
+            ref_subline = create_subline(
+                ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+            )
+            target_subline = create_subline(
+                target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
+            )
+            geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
+            geom_for_similarity_target = target_subline if target_subline else target_geom
+        else:
+            geom_for_similarity_ref = ref_geom
+            geom_for_similarity_target = target_geom
+
+        geom_features = compute_geometric_features(
+            geom_for_similarity_ref, geom_for_similarity_target
+        )
         name_sim = compute_name_similarity(
             _worker_data["ref_names"][ref_idx],
             _worker_data["target_names"][target_idx],
@@ -183,6 +213,9 @@ def _compute_single_feature(args):
         is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
         intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
+        # Compute coverage features from alignment
+        coverage_feats = compute_coverage_features(alignment)
+
         return {
             "hausdorff_distance": geom_features.hausdorff_distance,
             "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
@@ -221,6 +254,11 @@ def _compute_single_feature(args):
             "is_intersection_ref": is_intersection_ref,
             "is_intersection_target": is_intersection_target,
             "intersection_match": intersection_match,
+            # Alignment coverage features
+            "ref_coverage": coverage_feats["ref_coverage"],
+            "target_coverage": coverage_feats["target_coverage"],
+            "min_coverage": coverage_feats["min_coverage"],
+            "coverage_ratio": coverage_feats["coverage_ratio"],
             "_error": None,
         }
     except Exception as e:
@@ -261,6 +299,11 @@ def _compute_single_feature(args):
             "is_intersection_ref": 0.5,
             "is_intersection_target": 0.5,
             "intersection_match": 0.5,
+            # Coverage features - neutral values for error case
+            "ref_coverage": 0.0,
+            "target_coverage": 0.0,
+            "min_coverage": 0.0,
+            "coverage_ratio": 0.0,
             "_error": str(e),
         }
 
@@ -768,6 +811,8 @@ class MLMatcher:
 
         # Pre-compute endpoint and topology features for both reference and target
         # These capture network connectivity without requiring explicit topology
+        from ..config import settings
+        from ..features.alignment import compute_alignment_batch
         from ..features.spatial_context import (
             SpatialContextIndex,
             compute_all_topology,
@@ -837,6 +882,16 @@ class MLMatcher:
                 seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
             )
 
+        # Pre-compute linestring alignments if enabled
+        # Alignments are used to compute similarity features on aligned sublines
+        alignments = {}
+        use_aligned_features = settings.alignment_enabled
+        if use_aligned_features:
+            logger.info("Computing linestring alignments...")
+            alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
+        else:
+            logger.info("Alignment disabled, computing features on full geometries")
+
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
             n_workers = max(1, mp.cpu_count() - 2)
@@ -861,6 +916,8 @@ class MLMatcher:
             "endpoint_features": target_endpoint_features,
             "ref_topology": ref_topology_features,
             "target_topology": target_topology_features,
+            "alignments": alignments,
+            "use_aligned_features": use_aligned_features,
         }
 
         # Prepare work items as simple tuples
@@ -909,6 +966,9 @@ class MLMatcher:
             else:
                 decision = MatchDecision.NO_MATCH
 
+            # Get alignment for linear reference fields
+            alignment = alignments.get((cand.ref_idx, cand.target_idx))
+
             results.append(
                 MatchResult(
                     ref_id=cand.ref_id,
@@ -917,6 +977,10 @@ class MLMatcher:
                     confidence=prob,
                     score_breakdown={},  # ML doesn't have component scores
                     features=features_list[i],
+                    gers_start_frac=alignment.overture_start_frac if alignment else None,
+                    gers_end_frac=alignment.overture_end_frac if alignment else None,
+                    local_start_frac=alignment.dataset_start_frac if alignment else None,
+                    local_end_frac=alignment.dataset_end_frac if alignment else None,
                 )
             )
 
