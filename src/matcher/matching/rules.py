@@ -73,7 +73,7 @@ class MatchResult:
 # Default feature weights - can be overridden via settings.matching_weights
 # All scores normalized 0-1, higher = better match
 DEFAULT_WEIGHTS = {
-    # Geometric features (68% total)
+    # Geometric features (63% total)
     "hausdorff_norm": 0.08,  # Max deviation - sensitive to segmentation, catches outliers
     "mean_hausdorff_norm": 0.10,  # Mean deviation - robust to partial overlaps
     "buffer_iou": 0.12,  # Overlap quality - robust general-purpose metric
