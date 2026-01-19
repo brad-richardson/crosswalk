@@ -66,6 +66,10 @@ def fetch_overture_segments(
 
     logger.info(f"Fetched {len(gdf)} road segments")
 
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+
     # Save to parquet
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path)
@@ -103,6 +107,10 @@ def fetch_overture_connectors(
 
     logger.info(f"Fetched {len(gdf)} connectors")
 
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+
     # Save to parquet
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path)
@@ -125,6 +133,10 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
     """
     logger.info(f"Loading Overture segments from {path}")
     gdf = gpd.read_parquet(path)
+
+    # Ensure CRS is set (Overture data is always WGS84)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
 
     # Extract name from names struct if not already flat
     if "name" not in gdf.columns and "names" in gdf.columns:
