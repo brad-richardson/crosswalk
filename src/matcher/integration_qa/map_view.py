@@ -20,7 +20,16 @@ PRIORITY_COLORS = {
 
 # Selected edge highlight color
 SELECTED_COLOR = "#ff00ff"  # Magenta
-SELECTED_WEIGHT = 8  # Thick line for visibility
+SELECTED_WEIGHT = 5  # Visible but not too thick
+
+# Layer descriptions for legend/help
+LAYER_DESCRIPTIONS = {
+    "reference": "Overture base network (blue) - the reference road data",
+    "target_matched": "Target edges matched to reference (green) - confirmed matches",
+    "target_new": "Target edges added to network (orange) - new roads not in reference",
+    "orphan": "Orphan edges (red) - disconnected segments needing review",
+    "selected": "Currently selected edge (magenta) - the one you're reviewing",
+}
 
 
 def _add_circle_markers_along_line(
@@ -201,9 +210,9 @@ def add_orphan_layers(
                     priority_edges,
                     f"Orphans ({priority})",
                     PRIORITY_COLORS[priority],
-                    weight=4,
+                    weight=3,
                     add_markers=True,
-                    marker_spacing=25.0,
+                    marker_spacing=30.0,
                 )
     else:
         add_edges_layer(
@@ -211,9 +220,9 @@ def add_orphan_layers(
             orphan_edges,
             "Orphans",
             SOURCE_COLORS["orphan"],
-            weight=4,
+            weight=3,
             add_markers=True,
-            marker_spacing=25.0,
+            marker_spacing=30.0,
         )
 
     return m
@@ -262,14 +271,14 @@ def highlight_edge(
         ).add_to(highlight_layer)
 
         # Add circle markers along the line for extra visibility
-        _add_circle_markers_along_line(highlight_layer, geom, color, spacing_m=15.0, radius=6)
+        _add_circle_markers_along_line(highlight_layer, geom, color, spacing_m=20.0, radius=4)
 
         # Add start and end markers
         start = geom.coords[0]
         end = geom.coords[-1]
         folium.CircleMarker(
             location=[start[1], start[0]],
-            radius=10,
+            radius=7,
             color="white",
             fill=True,
             fillColor=color,
@@ -279,7 +288,7 @@ def highlight_edge(
         ).add_to(highlight_layer)
         folium.CircleMarker(
             location=[end[1], end[0]],
-            radius=10,
+            radius=7,
             color="white",
             fill=True,
             fillColor=color,
@@ -382,9 +391,9 @@ def create_integration_map(
             matched_edges,
             "Target (Matched)",
             SOURCE_COLORS["target_matched"],
-            weight=3,
+            weight=2,
             add_markers=True,
-            marker_spacing=35.0,
+            marker_spacing=40.0,
         )
 
         # Unmatched target edges (in main network): add markers
@@ -394,9 +403,9 @@ def create_integration_map(
             new_edges,
             "Target (New)",
             SOURCE_COLORS["target_new"],
-            weight=4,
+            weight=3,
             add_markers=True,
-            marker_spacing=30.0,
+            marker_spacing=35.0,
         )
 
     # Add orphan layers (with markers)

@@ -16,6 +16,7 @@ from matcher.integration_qa.decision_store import MergedDecisionStore, OrphanDec
 from matcher.integration_qa.edge_panel import (
     render_decision_buttons,
     render_edge_details,
+    render_map_legend,
     render_stats,
 )
 from matcher.integration_qa.map_view import create_integration_map
@@ -346,6 +347,10 @@ def main():
                 # Statistics in expander
                 with st.expander("Statistics", expanded=False):
                     render_stats(orphan_store.get_stats(), merged_store.get_stats())
+
+                # Map legend / help
+                with st.expander("Help / Legend", expanded=False):
+                    render_map_legend()
 
         else:
             st.info("No edges to review. All done or adjust filters.")
