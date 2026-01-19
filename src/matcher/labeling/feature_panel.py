@@ -1,5 +1,7 @@
 """Feature display components for the labeling UI."""
 
+import html
+
 import streamlit as st
 
 from .data_loader import CandidatePairView
@@ -67,6 +69,14 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
     """Render side-by-side segment info comparison - compact."""
     ref_id_short = pair.ref_id[:16] + "..." if len(pair.ref_id) > 16 else pair.ref_id
 
+    # Escape user-provided data for XSS prevention
+    ref_id_escaped = html.escape(ref_id_short)
+    target_id_escaped = html.escape(str(pair.target_id))
+    ref_name_escaped = html.escape(pair.ref_name or "N/A")
+    target_name_escaped = html.escape(pair.target_name or "N/A")
+    ref_class_escaped = html.escape(pair.ref_class or "N/A")
+    target_class_escaped = html.escape(pair.target_class or "N/A")
+
     st.markdown(
         f"""
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -75,18 +85,18 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
                     <span style="display: inline-block; width: 16px; height: 3px; background: #2196F3; margin-right: 6px;"></span>
                     <strong style="font-size: 14px;">Reference</strong>
                 </div>
-                <div style="color: #888; font-size: 11px;">ID: {ref_id_short}</div>
-                <div style="font-size: 16px;">Name: {pair.ref_name or "N/A"}</div>
-                <div style="font-size: 15px;">Class: {pair.ref_class or "N/A"}</div>
+                <div style="color: #888; font-size: 11px;">ID: {ref_id_escaped}</div>
+                <div style="font-size: 16px;">Name: {ref_name_escaped}</div>
+                <div style="font-size: 15px;">Class: {ref_class_escaped}</div>
             </div>
             <div>
                 <div style="display: flex; align-items: center; margin-bottom: 6px;">
                     <span style="display: inline-block; width: 16px; height: 3px; background: #F44336; margin-right: 6px;"></span>
                     <strong style="font-size: 14px;">Target</strong>
                 </div>
-                <div style="color: #888; font-size: 11px;">ID: {pair.target_id}</div>
-                <div style="font-size: 16px;">Name: {pair.target_name or "N/A"}</div>
-                <div style="font-size: 15px;">Class: {pair.target_class or "N/A"}</div>
+                <div style="color: #888; font-size: 11px;">ID: {target_id_escaped}</div>
+                <div style="font-size: 16px;">Name: {target_name_escaped}</div>
+                <div style="font-size: 15px;">Class: {target_class_escaped}</div>
             </div>
         </div>
         """,
@@ -140,6 +150,65 @@ def render_feature_panel(pair: CandidatePairView) -> None:
     render_segment_comparison(pair)
     st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
     render_score_breakdown(pair)
+
+
+def render_minimal_feature_panel(pair: CandidatePairView) -> None:
+    """Render a minimal feature panel for quick/mobile mode.
+
+    Shows only the most essential information:
+    - Confidence score with decision badge
+    - Name comparison (reference vs target)
+    - Road class comparison
+    """
+    # Confidence and decision in a compact format
+    confidence_pct = pair.confidence * 100
+    if pair.confidence >= 0.75:
+        color = "#4CAF50"
+    elif pair.confidence >= 0.5:
+        color = "#FF9800"
+    else:
+        color = "#F44336"
+
+    decision = pair.decision.upper()
+    if decision == "MATCH":
+        badge_bg = "#1B5E20"
+    elif decision == "REVIEW":
+        badge_bg = "#E65100"
+    else:
+        badge_bg = "#B71C1C"
+
+    # Single compact row with all key info - escape for XSS prevention
+    ref_name = html.escape(pair.ref_name or "No name")
+    target_name = html.escape(pair.target_name or "No name")
+    ref_class = html.escape(pair.ref_class or "-")
+    target_class = html.escape(pair.target_class or "-")
+
+    st.markdown(
+        f"""
+        <div style="background: #1E1E1E; border-radius: 8px; padding: 12px; margin: 8px 0;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span style="font-size: 28px; font-weight: bold; color: {color};">{confidence_pct:.0f}%</span>
+                <span style="background: {badge_bg}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;">{decision}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 14px;">
+                <div style="flex: 1;">
+                    <div style="color: #2196F3; font-weight: bold;">Reference</div>
+                    <div style="color: #EEE;">{ref_name}</div>
+                    <div style="color: #888; font-size: 12px;">{ref_class}</div>
+                </div>
+                <div style="flex: 0 0 30px; display: flex; align-items: center; justify-content: center;">
+                    <span style="color: #666;">↔</span>
+                </div>
+                <div style="flex: 1; text-align: right;">
+                    <div style="color: #F44336; font-weight: bold;">Target</div>
+                    <div style="color: #EEE;">{target_name}</div>
+                    <div style="color: #888; font-size: 12px;">{target_class}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_subsegment_controls(

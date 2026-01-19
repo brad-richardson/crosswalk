@@ -30,7 +30,7 @@ LABEL_COLUMNS = [
     "target_start_pct",
     "target_end_pct",
     "is_subsegment",
-    # Geometric features
+    # Geometric features (8)
     "hausdorff_distance",
     "mean_hausdorff_distance",
     "buffer_iou",
@@ -39,11 +39,31 @@ LABEL_COLUMNS = [
     "length_ratio",
     "projection_distance",
     "centroid_distance",
-    # Semantic features
+    # Semantic features (4)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
     "class_similarity",
+    # Endpoint/connectivity features (3)
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
+    # Lateral offset features (2)
+    "lateral_offset",
+    "lateral_offset_consistency",
+    # Topology features (12)
+    "from_degree_ref",
+    "to_degree_ref",
+    "from_degree_target",
+    "to_degree_target",
+    "degree_match_score",
+    "degree_signature_similarity",
+    "is_dead_end_ref",
+    "is_dead_end_target",
+    "dead_end_match",
+    "is_intersection_ref",
+    "is_intersection_target",
+    "intersection_match",
 ]
 
 # Default values for sub-segment columns (for backward compatibility)
@@ -154,7 +174,7 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
-            # Geometric features
+            # Geometric features (8)
             "hausdorff_distance": features.get("hausdorff_distance", 0.0),
             "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
             "buffer_iou": features.get("buffer_iou", 0.0),
@@ -163,11 +183,31 @@ class LabelStore:
             "length_ratio": features.get("length_ratio", 0.0),
             "projection_distance": features.get("projection_distance", 0.0),
             "centroid_distance": features.get("centroid_distance", 0.0),
-            # Semantic features
+            # Semantic features (4)
             "name_levenshtein": features.get("name_levenshtein", 0.0),
             "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
             "name_token_sort": features.get("name_token_sort", 0.0),
             "class_similarity": features.get("class_similarity", 0.0),
+            # Endpoint/connectivity features (3)
+            "start_endpoint_proximity": features.get("start_endpoint_proximity", 0.0),
+            "end_endpoint_proximity": features.get("end_endpoint_proximity", 0.0),
+            "shared_endpoint_count": features.get("shared_endpoint_count", 0),
+            # Lateral offset features (2)
+            "lateral_offset": features.get("lateral_offset", 0.0),
+            "lateral_offset_consistency": features.get("lateral_offset_consistency", 0.0),
+            # Topology features (12)
+            "from_degree_ref": features.get("from_degree_ref", 0),
+            "to_degree_ref": features.get("to_degree_ref", 0),
+            "from_degree_target": features.get("from_degree_target", 0),
+            "to_degree_target": features.get("to_degree_target", 0),
+            "degree_match_score": features.get("degree_match_score", 0.0),
+            "degree_signature_similarity": features.get("degree_signature_similarity", 0.0),
+            "is_dead_end_ref": features.get("is_dead_end_ref", 0.0),
+            "is_dead_end_target": features.get("is_dead_end_target", 0.0),
+            "dead_end_match": features.get("dead_end_match", 0.0),
+            "is_intersection_ref": features.get("is_intersection_ref", 0.0),
+            "is_intersection_target": features.get("is_intersection_target", 0.0),
+            "intersection_match": features.get("intersection_match", 0.0),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
