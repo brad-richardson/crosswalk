@@ -71,13 +71,38 @@ def create_base_map(
     center_lat: float = 42.36,
     center_lon: float = -71.06,
     zoom: int = 14,
+    default_tiles: str = "satellite",
 ) -> folium.Map:
-    """Create base folium map."""
+    """Create base folium map with multiple tile layer options.
+
+    Args:
+        center_lat: Center latitude
+        center_lon: Center longitude
+        zoom: Initial zoom level
+        default_tiles: Default tile layer ("satellite" or "light")
+    """
+    # Create map without default tiles (we'll add them manually)
     m = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=zoom,
-        tiles="cartodbpositron",
+        tiles=None,
     )
+
+    # Add satellite imagery (Esri World Imagery)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Satellite",
+        show=(default_tiles == "satellite"),
+    ).add_to(m)
+
+    # Add light basemap (CartoDB Positron)
+    folium.TileLayer(
+        tiles="cartodbpositron",
+        name="Light",
+        show=(default_tiles == "light"),
+    ).add_to(m)
+
     return m
 
 
