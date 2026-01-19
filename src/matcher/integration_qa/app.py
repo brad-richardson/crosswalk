@@ -205,28 +205,32 @@ def main():
             if map_data and map_data.get("last_clicked"):
                 click_lat = map_data["last_clicked"]["lat"]
                 click_lon = map_data["last_clicked"]["lng"]
+                click_key = f"{click_lat:.6f},{click_lon:.6f}"
 
-                # Find nearest edge in display_edges
-                from shapely.geometry import Point
+                # Only process if this is a new click (not the same as last processed)
+                last_click = st.session_state.get("last_processed_click")
+                if click_key != last_click:
+                    st.session_state.last_processed_click = click_key
 
-                click_point = Point(click_lon, click_lat)
-                min_dist = float("inf")
-                nearest_idx = None
+                    # Find nearest edge in display_edges
+                    from shapely.geometry import Point
 
-                for idx, row in display_edges.iterrows():
-                    if row.geometry is not None:
-                        dist = row.geometry.distance(click_point)
-                        if dist < min_dist:
-                            min_dist = dist
-                            nearest_idx = idx
+                    click_point = Point(click_lon, click_lat)
+                    min_dist = float("inf")
+                    nearest_pos = None
 
-                # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
-                if nearest_idx is not None and min_dist < 0.001:
-                    # Find the position in display_edges
-                    clicked_pos = display_edges.index.get_loc(nearest_idx)
-                    if clicked_pos != session.current_index:
-                        session.current_index = clicked_pos
-                        st.rerun()
+                    for pos, (_idx, row) in enumerate(display_edges.iterrows()):
+                        if row.geometry is not None:
+                            dist = row.geometry.distance(click_point)
+                            if dist < min_dist:
+                                min_dist = dist
+                                nearest_pos = pos
+
+                    # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
+                    if nearest_pos is not None and min_dist < 0.001:
+                        if nearest_pos != session.current_index:
+                            session.current_index = nearest_pos
+                            st.rerun()
 
             # Decision buttons and edge details in right panel
             with col_details:
