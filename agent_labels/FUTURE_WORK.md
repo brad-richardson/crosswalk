@@ -158,9 +158,52 @@ cmake -B build -DGGML_SYCL=ON
 - 20-50% faster than Ollama
 - More setup work, vision model support is newer
 
+## Robustness: Failure Handling and Resume (High Priority)
+
+Current `run_agent.sh` doesn't handle API failures gracefully. When agents hit quota limits (e.g., Gemini mid-run), the batch stops but there's no easy way to resume.
+
+### Required Features
+
+1. **Early termination on consecutive failures**
+   - If 2 API calls fail in a row (quota, rate limit, etc.), stop immediately
+   - Don't waste time/quota on a doomed batch
+   - Log clear error: "Stopping: 2 consecutive failures (likely quota exhausted)"
+
+2. **Resume batch from where it left off**
+   - Skip candidates that already have labels in the output CSV
+   - Allow: `./run_agent.sh gemini --batch <dir> --resume`
+   - Check existing `labels/<agent>/data.csv` and skip those `target_id`s
+
+3. **Better failure logging**
+   - Log each failure with timestamp and error type
+   - Summary at end: "Completed: 100/124, Failed: 2, Skipped: 22 (already labeled)"
+
+### Implementation Notes
+
+```bash
+# In run_agent.sh, track consecutive failures:
+consecutive_failures=0
+for candidate in candidates; do
+    if ! process_candidate "$candidate"; then
+        ((consecutive_failures++))
+        if [ $consecutive_failures -ge 2 ]; then
+            echo "ERROR: 2 consecutive failures, stopping (likely quota exhausted)"
+            exit 1
+        fi
+    else
+        consecutive_failures=0  # Reset on success
+    fi
+done
+```
+
+For resume, load existing labels at start:
+```bash
+existing_labels=$(cut -d',' -f2 "$output_csv" 2>/dev/null | tail -n +2)
+# Skip if target_id already in existing_labels
+```
+
 ## Other Ideas
 
-- Resume from last processed candidate (currently restarts from beginning)
 - Parallel processing across multiple agent instances
 - Caching of LABELING_INSTRUCTIONS.md in prompts
 - Metadata-only mode for quick triage (skip images)

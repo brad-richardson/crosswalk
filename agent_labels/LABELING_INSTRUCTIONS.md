@@ -76,11 +76,20 @@ Road classes provide weak evidence:
 
 ## Common Edge Cases
 
-### 1. Segmentation Differences
+### 1. Segmentation Differences and Overlap Threshold
+
+**Core principle**: Do these two geometries cover the **same physical movement space** for at least **10% of either segment's length**?
 
 **Scenario**: Reference is 200m long, target is 80m long, but they overlap perfectly for 80m.
 
-**Decision**: `match` - Datasets segment roads differently. The overlap confirms they're the same road. The goal is "do these represent the same road?" not "do they have identical geometry?"
+**Decision**: `match` - Datasets segment roads differently. The overlap (80m = 40% of reference, 100% of target) far exceeds the 10% threshold. The goal is "do these represent the same physical space?" not "do they have identical geometry?"
+
+**Overlap threshold examples**:
+- 200m ref, 80m target, 80m overlap → `match` (80m is 40% of ref, 100% of target)
+- 200m ref, 200m target, 15m overlap → `no_match` (15m is only 7.5% of either)
+- 100m ref, 50m target, 10m overlap → `match` (10m is 10% of ref, 20% of target)
+
+**Adjacent but non-overlapping segments**: If two segments are end-to-end consecutive on the same road but don't actually overlap spatially, they are `no_match`. They represent different physical spans of the road.
 
 ### 2. Opposite Carriageways of Split Road
 
