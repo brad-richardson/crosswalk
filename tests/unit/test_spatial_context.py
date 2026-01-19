@@ -1,12 +1,15 @@
 """Tests for spatial context indexing and topology computation."""
 
 import geopandas as gpd
+import pytest
 from shapely import LineString
 
 from matcher.features.spatial_context import (
     SpatialContextIndex,
     UnionFind,
     compute_all_topology,
+    compute_degree_match_score,
+    compute_degree_signature_similarity,
     compute_topology_features,
 )
 
@@ -326,3 +329,226 @@ class TestTopologyFeaturesConsistency:
             assert batch_result[seg_id]["to_degree"] == per_segment["to_degree"]
             assert batch_result[seg_id]["is_dead_end"] == per_segment["is_dead_end"]
             assert batch_result[seg_id]["is_intersection"] == per_segment["is_intersection"]
+
+
+class TestComputeDegreeMatchScore:
+    """Parameterized tests for compute_degree_match_score function."""
+
+    @pytest.mark.parametrize(
+        "ref_from,ref_to,target_from,target_to,expected",
+        [
+            # All zeros -> max similarity
+            (0, 0, 0, 0, 1.0),
+            # Identical degrees
+            (4, 1, 4, 1, 1.0),
+            # Swapped endpoints (should still be perfect match)
+            (4, 1, 1, 4, 1.0),
+            # Dead ends (degree 1) vs intersections (degree 4)
+            (1, 1, 4, 4, 0.4),  # diff=6, max=10 -> 1-(6/10)=0.4
+            # Moderate difference: T-junction vs 4-way
+            (3, 1, 2, 2, 0.75),  # min(|3-2|+|1-2|, |3-2|+|1-2|)=2, max=8 -> 1-(2/8)=0.75
+            # Single dead end vs normal segment
+            (1, 2, 1, 1, 0.8),  # diff=1, max=5 -> 1-(1/5)=0.8
+            # Both are dead ends
+            (1, 1, 1, 1, 1.0),
+            # High degree intersections
+            (5, 5, 5, 5, 1.0),
+            # Mixed: one matching, one not
+            (3, 3, 3, 1, 0.8),  # diff=2, max=10 -> 1-(2/10)=0.8
+        ],
+        ids=[
+            "all_zeros",
+            "identical",
+            "swapped_endpoints",
+            "dead_ends_vs_intersections",
+            "t_junction_vs_4way",
+            "single_dead_end_diff",
+            "both_dead_ends",
+            "high_degree_match",
+            "mixed_partial_match",
+        ],
+    )
+    def test_degree_match_score(self, ref_from, ref_to, target_from, target_to, expected):
+        """Test degree match scoring with various topology combinations."""
+        score = compute_degree_match_score(ref_from, ref_to, target_from, target_to)
+        assert score == pytest.approx(expected, abs=0.01)
+
+    def test_score_symmetry(self):
+        """Score should be symmetric in ref/target swap."""
+        score1 = compute_degree_match_score(3, 2, 4, 1)
+        score2 = compute_degree_match_score(4, 1, 3, 2)
+        assert score1 == pytest.approx(score2)
+
+    def test_score_in_valid_range(self):
+        """Score should always be in [0, 1]."""
+        import random
+
+        random.seed(42)
+        for _ in range(100):
+            ref_from = random.randint(0, 10)
+            ref_to = random.randint(0, 10)
+            target_from = random.randint(0, 10)
+            target_to = random.randint(0, 10)
+
+            score = compute_degree_match_score(ref_from, ref_to, target_from, target_to)
+            assert 0.0 <= score <= 1.0
+
+
+class TestUnionFindParameterized:
+    """Parameterized tests for UnionFind clustering correctness."""
+
+    @pytest.mark.parametrize(
+        "n,unions,expected_groups",
+        [
+            # Chain -> single group
+            (4, [(0, 1), (1, 2), (2, 3)], [{0, 1, 2, 3}]),
+            # Three disjoint pairs
+            (6, [(0, 1), (2, 3), (4, 5)], [{0, 1}, {2, 3}, {4, 5}]),
+            # Disjoint sets that merge
+            (4, [(0, 1), (2, 3), (1, 2)], [{0, 1, 2, 3}]),
+            # Star pattern: all connect to center
+            (5, [(0, 1), (0, 2), (0, 3), (0, 4)], [{0, 1, 2, 3, 4}]),
+            # No unions -> all singletons
+            (3, [], [{0}, {1}, {2}]),
+            # Binary tree pattern
+            (7, [(0, 1), (0, 2), (1, 3), (1, 4), (2, 5), (2, 6)], [{0, 1, 2, 3, 4, 5, 6}]),
+        ],
+        ids=[
+            "chain_single_group",
+            "three_disjoint_pairs",
+            "disjoint_then_merge",
+            "star_pattern",
+            "no_unions",
+            "binary_tree",
+        ],
+    )
+    def test_union_find_clustering(self, n, unions, expected_groups):
+        """Test that Union-Find produces correct clustering."""
+        uf = UnionFind(n)
+
+        # Perform unions
+        for x, y in unions:
+            uf.union(x, y)
+
+        # Build actual groups from find results
+        actual_groups = {}
+        for i in range(n):
+            root = uf.find(i)
+            if root not in actual_groups:
+                actual_groups[root] = set()
+            actual_groups[root].add(i)
+
+        # Convert to list of sets for comparison
+        actual_group_list = list(actual_groups.values())
+
+        # Verify same number of groups
+        assert len(actual_group_list) == len(expected_groups)
+
+        # Verify each expected group exists in actual
+        for expected in expected_groups:
+            assert expected in actual_group_list
+
+    def test_path_compression(self):
+        """Test that path compression works (find returns consistent roots)."""
+        uf = UnionFind(10)
+
+        # Create a long chain
+        for i in range(9):
+            uf.union(i, i + 1)
+
+        # After finding root of first element, path should be compressed
+        root = uf.find(0)
+
+        # All elements should have same root
+        for i in range(10):
+            assert uf.find(i) == root
+
+    def test_union_by_rank(self):
+        """Test that union by rank keeps tree balanced."""
+        uf = UnionFind(8)
+
+        # Create two separate trees
+        uf.union(0, 1)
+        uf.union(2, 3)
+        uf.union(0, 2)  # Merge two size-2 trees
+
+        uf.union(4, 5)
+        uf.union(6, 7)
+        uf.union(4, 6)  # Merge two size-2 trees
+
+        # Merge the two size-4 trees
+        uf.union(0, 4)
+
+        # All should be in same set
+        root = uf.find(0)
+        for i in range(8):
+            assert uf.find(i) == root
+
+
+class TestComputeDegreeSignatureSimilarity:
+    """Parameterized tests for compute_degree_signature_similarity function."""
+
+    @pytest.mark.parametrize(
+        "sig_a,sig_b,expected",
+        [
+            # Identical signatures
+            ((1, 2), (1, 2), 1.0),
+            # Completely different
+            ((1, 1), (3, 3), 0.0),
+            # Same multiset (order doesn't matter in Jaccard)
+            ((1, 2, 3), (3, 2, 1), 1.0),
+            # Partial overlap
+            ((1, 2, 3), (1, 2, 4), 2 / 4),  # intersection=2, union=4
+            # Repeated elements
+            ((1, 1, 2), (1, 2, 2), 2 / 4),  # intersection=2 (one 1, one 2), union=4
+            # Empty signature a
+            ((), (1, 2), 0.0),
+            # Empty signature b
+            ((1, 2), (), 0.0),
+            # Both empty
+            ((), (), 0.0),
+            # Single element match
+            ((2,), (2,), 1.0),
+            # Single element mismatch
+            ((1,), (2,), 0.0),
+        ],
+        ids=[
+            "identical",
+            "completely_different",
+            "same_multiset_reordered",
+            "partial_overlap",
+            "repeated_elements",
+            "empty_a",
+            "empty_b",
+            "both_empty",
+            "single_match",
+            "single_mismatch",
+        ],
+    )
+    def test_degree_signature_similarity(self, sig_a, sig_b, expected):
+        """Test degree signature similarity with various inputs."""
+        score = compute_degree_signature_similarity(sig_a, sig_b)
+        assert score == pytest.approx(expected, abs=0.01)
+
+    def test_symmetry(self):
+        """Similarity should be symmetric."""
+        sig_a = (1, 2, 3, 4)
+        sig_b = (2, 3, 4, 5)
+
+        score1 = compute_degree_signature_similarity(sig_a, sig_b)
+        score2 = compute_degree_signature_similarity(sig_b, sig_a)
+        assert score1 == pytest.approx(score2)
+
+    def test_score_in_valid_range(self):
+        """Score should always be in [0, 1]."""
+        import random
+
+        random.seed(42)
+        for _ in range(50):
+            len_a = random.randint(0, 5)
+            len_b = random.randint(0, 5)
+            sig_a = tuple(random.randint(1, 5) for _ in range(len_a))
+            sig_b = tuple(random.randint(1, 5) for _ in range(len_b))
+
+            score = compute_degree_signature_similarity(sig_a, sig_b)
+            assert 0.0 <= score <= 1.0
