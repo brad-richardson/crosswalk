@@ -180,101 +180,114 @@ class TestGoldenNonMatchPredictions:
 class TestScoreStability:
     """Tests that confidence scores stay within expected ranges."""
 
-    def test_perfect_match_score_range(self, trained_matcher, perfect_match_features):
-        """Near-perfect features should produce confidence in [0.85, 1.0]."""
-        confidence = trained_matcher.predict([perfect_match_features])[0]
-        assert 0.85 <= confidence <= 1.0, (
-            f"Perfect match confidence {confidence:.3f} outside [0.85, 1.0]"
-        )
-
-    def test_terrible_match_score_range(self, trained_matcher, terrible_match_features):
-        """Terrible features should produce confidence in [0.0, 0.15]."""
-        confidence = trained_matcher.predict([terrible_match_features])[0]
-        assert 0.0 <= confidence <= 0.15, (
-            f"Terrible match confidence {confidence:.3f} outside [0.0, 0.15]"
-        )
-
-    def test_borderline_score_range(self, trained_matcher, borderline_match_features):
-        """Borderline features should produce confidence in the uncertain range.
-
-        The borderline features have mixed signals (moderate geometry, poor names,
-        different topology) which should place the confidence between the extreme
-        ranges of perfect match (>0.85) and terrible match (<0.15).
-        """
-        confidence = trained_matcher.predict([borderline_match_features])[0]
-        assert 0.15 <= confidence <= 0.85, (
-            f"Borderline match confidence {confidence:.3f} outside uncertain range [0.15, 0.85]"
+    @pytest.mark.parametrize(
+        "fixture_name,expected_min,expected_max",
+        [
+            ("perfect_match_features", 0.85, 1.0),
+            ("terrible_match_features", 0.0, 0.15),
+            ("borderline_match_features", 0.15, 0.85),
+        ],
+        ids=["perfect_match", "terrible_match", "borderline"],
+    )
+    def test_score_ranges(
+        self,
+        trained_matcher,
+        perfect_match_features,
+        terrible_match_features,
+        borderline_match_features,
+        fixture_name,
+        expected_min,
+        expected_max,
+    ):
+        """Confidence scores should stay within expected ranges for each feature set."""
+        fixtures = {
+            "perfect_match_features": perfect_match_features,
+            "terrible_match_features": terrible_match_features,
+            "borderline_match_features": borderline_match_features,
+        }
+        features = fixtures[fixture_name]
+        confidence = trained_matcher.predict([features])[0]
+        assert expected_min <= confidence <= expected_max, (
+            f"{fixture_name}: confidence {confidence:.3f} outside [{expected_min}, {expected_max}]"
         )
 
 
 class TestScoreMonotonicity:
     """Tests that feature changes affect confidence in expected directions."""
 
-    def test_higher_iou_higher_confidence(self, trained_matcher, borderline_match_features):
-        """Higher IoU should generally produce higher confidence."""
-        features_low = borderline_match_features.copy()
-        features_high = borderline_match_features.copy()
+    @pytest.mark.parametrize(
+        "feature_name,low_value,high_value,low_mods,high_mods",
+        [
+            # Higher IoU should increase confidence
+            (
+                "buffer_iou",
+                0.3,
+                0.8,
+                {},  # No additional modifications
+                {},
+            ),
+            # Smaller distance should increase confidence (need correlated IoU changes)
+            (
+                "hausdorff_distance",
+                200.0,
+                2.0,  # Note: lower is better for distance
+                {
+                    "mean_hausdorff_distance": 150.0,
+                    "centroid_distance": 200.0,
+                    "buffer_iou": 0.2,
+                },
+                {
+                    "mean_hausdorff_distance": 1.5,
+                    "centroid_distance": 2.0,
+                    "buffer_iou": 0.9,
+                },
+            ),
+            # Better name similarity should increase confidence
+            (
+                "name_levenshtein",
+                0.2,
+                1.0,
+                {"name_jaro_winkler": 0.3, "name_token_sort": 0.3},
+                {"name_jaro_winkler": 1.0, "name_token_sort": 1.0},
+            ),
+        ],
+        ids=["higher_iou", "smaller_distance", "better_name_similarity"],
+    )
+    def test_feature_monotonicity(
+        self,
+        trained_matcher,
+        borderline_match_features,
+        perfect_match_features,
+        feature_name,
+        low_value,
+        high_value,
+        low_mods,
+        high_mods,
+    ):
+        """Better feature values should increase confidence."""
+        # Use perfect match features for distance test (needs good baseline)
+        base = (
+            perfect_match_features.copy()
+            if feature_name == "hausdorff_distance"
+            else borderline_match_features.copy()
+        )
 
-        features_low["buffer_iou"] = 0.3
-        features_high["buffer_iou"] = 0.8
+        features_low = base.copy()
+        features_high = base.copy()
+
+        features_low[feature_name] = low_value
+        features_low.update(low_mods)
+
+        features_high[feature_name] = high_value
+        features_high.update(high_mods)
 
         conf_low = trained_matcher.predict([features_low])[0]
         conf_high = trained_matcher.predict([features_high])[0]
 
+        # For distance, "low_value" (200) is worse, "high_value" (2) is better
         assert conf_high > conf_low, (
-            f"Higher IoU should increase confidence: {conf_low:.3f} vs {conf_high:.3f}"
-        )
-
-    def test_smaller_distance_higher_confidence(self, trained_matcher, perfect_match_features):
-        """Smaller Hausdorff distance should generally produce higher confidence.
-
-        We test this with otherwise good features where distance is the varying factor.
-        Note: ML models may have complex interactions, so this tests the general trend
-        with a substantial distance difference.
-        """
-        features_far = perfect_match_features.copy()
-        features_close = perfect_match_features.copy()
-
-        # Large distance difference with otherwise good geometry
-        features_far["hausdorff_distance"] = 200.0
-        features_far["mean_hausdorff_distance"] = 150.0
-        features_far["centroid_distance"] = 200.0
-        features_far["buffer_iou"] = 0.2  # IoU affected by distance
-
-        features_close["hausdorff_distance"] = 2.0
-        features_close["mean_hausdorff_distance"] = 1.5
-        features_close["centroid_distance"] = 2.0
-        features_close["buffer_iou"] = 0.9  # Good IoU when close
-
-        conf_far = trained_matcher.predict([features_far])[0]
-        conf_close = trained_matcher.predict([features_close])[0]
-
-        assert conf_close > conf_far, (
-            f"Closer geometry should increase confidence: {conf_far:.3f} vs {conf_close:.3f}"
-        )
-
-    def test_better_name_similarity_higher_confidence(
-        self, trained_matcher, borderline_match_features
-    ):
-        """Better name similarity should generally produce higher confidence."""
-        features_diff = borderline_match_features.copy()
-        features_same = borderline_match_features.copy()
-
-        # Different names
-        features_diff["name_levenshtein"] = 0.2
-        features_diff["name_jaro_winkler"] = 0.3
-        features_diff["name_token_sort"] = 0.3
-
-        # Same names
-        features_same["name_levenshtein"] = 1.0
-        features_same["name_jaro_winkler"] = 1.0
-        features_same["name_token_sort"] = 1.0
-
-        conf_diff = trained_matcher.predict([features_diff])[0]
-        conf_same = trained_matcher.predict([features_same])[0]
-
-        assert conf_same > conf_diff, (
-            f"Same names should increase confidence: {conf_diff:.3f} vs {conf_same:.3f}"
+            f"{feature_name}: better value should increase confidence: "
+            f"{conf_low:.3f} vs {conf_high:.3f}"
         )
 
 

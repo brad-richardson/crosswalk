@@ -118,45 +118,60 @@ class TestEstimateOverlapRange:
 class TestHelperFunctions:
     """Tests for helper functions."""
 
-    def test_pct_to_distance(self):
-        """Convert percentage to distance."""
-        line = LineString([(0, 0), (100, 0)])
-        assert pct_to_distance(line, 0.5) == pytest.approx(50.0)
-        assert pct_to_distance(line, 0.0) == pytest.approx(0.0)
-        assert pct_to_distance(line, 1.0) == pytest.approx(100.0)
+    @pytest.fixture
+    def line(self):
+        """Standard 100-unit line for testing."""
+        return LineString([(0, 0), (100, 0)])
 
-    def test_distance_to_pct(self):
-        """Convert distance to percentage."""
-        line = LineString([(0, 0), (100, 0)])
-        assert distance_to_pct(line, 50.0) == pytest.approx(0.5)
-        assert distance_to_pct(line, 0.0) == pytest.approx(0.0)
-        assert distance_to_pct(line, 100.0) == pytest.approx(1.0)
+    @pytest.mark.parametrize(
+        "pct,expected_distance",
+        [(0.0, 0.0), (0.5, 50.0), (1.0, 100.0)],
+        ids=["start", "middle", "end"],
+    )
+    def test_pct_to_distance(self, line, pct, expected_distance):
+        """Convert percentage to distance along line."""
+        assert pct_to_distance(line, pct) == pytest.approx(expected_distance)
 
-    def test_get_point_pct(self):
+    @pytest.mark.parametrize(
+        "distance,expected_pct",
+        [(0.0, 0.0), (50.0, 0.5), (100.0, 1.0)],
+        ids=["start", "middle", "end"],
+    )
+    def test_distance_to_pct(self, line, distance, expected_pct):
+        """Convert distance to percentage along line."""
+        assert distance_to_pct(line, distance) == pytest.approx(expected_pct)
+
+    def test_get_point_pct(self, line):
         """Get percentage where point projects onto line."""
-        line = LineString([(0, 0), (100, 0)])
         point = Point(50, 10)  # Above the midpoint
         assert get_point_pct(line, point) == pytest.approx(0.5)
 
-    def test_get_point_at_pct(self):
+    def test_get_point_at_pct(self, line):
         """Get point at percentage along line."""
-        line = LineString([(0, 0), (100, 0)])
         point = get_point_at_pct(line, 0.5)
         assert point.x == pytest.approx(50.0)
         assert point.y == pytest.approx(0.0)
 
-    def test_compute_subsegment_length(self):
-        """Compute subsegment length."""
-        line = LineString([(0, 0), (100, 0)])
-        assert compute_subsegment_length(line, 0.0, 1.0) == pytest.approx(100.0)
-        assert compute_subsegment_length(line, 0.0, 0.5) == pytest.approx(50.0)
-        assert compute_subsegment_length(line, 0.25, 0.75) == pytest.approx(50.0)
+    @pytest.mark.parametrize(
+        "start_pct,end_pct,expected_length",
+        [(0.0, 1.0, 100.0), (0.0, 0.5, 50.0), (0.25, 0.75, 50.0)],
+        ids=["full", "first_half", "middle_half"],
+    )
+    def test_compute_subsegment_length(self, line, start_pct, end_pct, expected_length):
+        """Compute subsegment length between percentages."""
+        assert compute_subsegment_length(line, start_pct, end_pct) == pytest.approx(expected_length)
 
-    def test_is_subsegment_selection(self):
-        """Check if selection is a subsegment."""
-        # Full segment is not a subsegment
-        assert is_subsegment_selection(0.0, 1.0, 0.0, 1.0) is False
-        # Any deviation is a subsegment
-        assert is_subsegment_selection(0.0, 0.5, 0.0, 1.0) is True
-        assert is_subsegment_selection(0.0, 1.0, 0.5, 1.0) is True
-        assert is_subsegment_selection(0.2, 0.8, 0.3, 0.9) is True
+    @pytest.mark.parametrize(
+        "ref_start,ref_end,target_start,target_end,expected",
+        [
+            (0.0, 1.0, 0.0, 1.0, False),  # Full segment is not a subsegment
+            (0.0, 0.5, 0.0, 1.0, True),  # Ref partial
+            (0.0, 1.0, 0.5, 1.0, True),  # Target partial
+            (0.2, 0.8, 0.3, 0.9, True),  # Both partial
+        ],
+        ids=["full_segment", "ref_partial", "target_partial", "both_partial"],
+    )
+    def test_is_subsegment_selection(self, ref_start, ref_end, target_start, target_end, expected):
+        """Check if selection represents a subsegment."""
+        result = is_subsegment_selection(ref_start, ref_end, target_start, target_end)
+        assert result is expected
