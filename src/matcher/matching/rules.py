@@ -111,6 +111,7 @@ def compute_match_score(
     weights: dict[str, float] = None,
     buffer_radius: float = 10.0,
     distance_threshold: float = 50.0,
+    precomputed_features: dict[str, float] | None = None,
 ) -> tuple[float, dict[str, float], dict[str, float]]:
     """Compute weighted match score for a candidate pair.
 
@@ -126,48 +127,67 @@ def compute_match_score(
         weights: Feature weights (default if None)
         buffer_radius: Buffer radius for IoU calculation
         distance_threshold: Distance for normalization
+        precomputed_features: Pre-computed features dict from compute_pair_features()
+            If provided, skips recomputation for ~50% speedup
 
     Returns:
         Tuple of (confidence, scores dict, raw features dict)
     """
     weights = _get_weights(weights)
 
-    # Compute geometric features
-    geom_features = compute_geometric_features(ref_geom, target_geom, buffer_radius)
+    if precomputed_features:
+        # Use pre-computed features to avoid duplicate computation
+        raw_features = {
+            "hausdorff_distance": precomputed_features["hausdorff_distance"],
+            "mean_hausdorff_distance": precomputed_features["mean_hausdorff_distance"],
+            "buffer_iou": precomputed_features["buffer_iou"],
+            "overlap_ratio": precomputed_features["overlap_ratio"],
+            "heading_delta": precomputed_features["heading_delta"],
+            "length_ratio": precomputed_features["length_ratio"],
+            "projection_distance": precomputed_features["projection_distance"],
+            "centroid_distance": precomputed_features["centroid_distance"],
+            "name_levenshtein": precomputed_features["name_levenshtein"],
+            "name_jaro_winkler": precomputed_features["name_jaro_winkler"],
+            "name_token_sort": precomputed_features["name_token_sort"],
+            "class_similarity": precomputed_features["class_similarity"],
+        }
+    else:
+        # Compute geometric features
+        geom_features = compute_geometric_features(ref_geom, target_geom, buffer_radius)
 
-    # Compute semantic features
-    name_sim = compute_name_similarity(ref_name, target_name)
-    class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
+        # Compute semantic features
+        name_sim = compute_name_similarity(ref_name, target_name)
+        class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
+
+        # Raw features for debugging
+        raw_features = {
+            "hausdorff_distance": geom_features.hausdorff_distance,
+            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
+            "buffer_iou": geom_features.buffer_iou,
+            "overlap_ratio": geom_features.overlap_ratio,
+            "heading_delta": geom_features.heading_delta,
+            "length_ratio": geom_features.length_ratio,
+            "projection_distance": geom_features.projection_distance,
+            "centroid_distance": geom_features.centroid_distance,
+            "name_levenshtein": name_sim["levenshtein_ratio"],
+            "name_jaro_winkler": name_sim["jaro_winkler"],
+            "name_token_sort": name_sim["token_sort_ratio"],
+            "class_similarity": class_sim,
+        }
 
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
-        "hausdorff_norm": max(0, 1 - geom_features.hausdorff_distance / distance_threshold),
+        "hausdorff_norm": max(0, 1 - raw_features["hausdorff_distance"] / distance_threshold),
         "mean_hausdorff_norm": max(
-            0, 1 - geom_features.mean_hausdorff_distance / distance_threshold
+            0, 1 - raw_features["mean_hausdorff_distance"] / distance_threshold
         ),
-        "buffer_iou": geom_features.buffer_iou,
-        "overlap_ratio": geom_features.overlap_ratio,  # Already 0-1
-        "heading_norm": max(0, 1 - geom_features.heading_delta / 45.0),
-        "length_ratio": geom_features.length_ratio,
-        "projection_norm": max(0, 1 - geom_features.projection_distance / distance_threshold),
-        "name_similarity": name_sim["token_sort_ratio"],
-        "class_similarity": class_sim,
-    }
-
-    # Raw features for debugging
-    raw_features = {
-        "hausdorff_distance": geom_features.hausdorff_distance,
-        "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-        "buffer_iou": geom_features.buffer_iou,
-        "overlap_ratio": geom_features.overlap_ratio,
-        "heading_delta": geom_features.heading_delta,
-        "length_ratio": geom_features.length_ratio,
-        "projection_distance": geom_features.projection_distance,
-        "centroid_distance": geom_features.centroid_distance,
-        "name_levenshtein": name_sim["levenshtein_ratio"],
-        "name_jaro_winkler": name_sim["jaro_winkler"],
-        "name_token_sort": name_sim["token_sort_ratio"],
-        "class_similarity": class_sim,
+        "buffer_iou": raw_features["buffer_iou"],
+        "overlap_ratio": raw_features["overlap_ratio"],  # Already 0-1
+        "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
+        "length_ratio": raw_features["length_ratio"],
+        "projection_norm": max(0, 1 - raw_features["projection_distance"] / distance_threshold),
+        "name_similarity": raw_features["name_token_sort"],
+        "class_similarity": raw_features["class_similarity"],
     }
 
     # Weighted sum
