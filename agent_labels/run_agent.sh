@@ -31,6 +31,8 @@ shift || true
 BATCH_DIR=""
 MODEL=""
 LIMIT=""
+RESUME="false"
+BAIL_AFTER="2"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -44,6 +46,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --limit)
             LIMIT="$2"
+            shift 2
+            ;;
+        --resume)
+            RESUME="true"
+            shift
+            ;;
+        --bail-after)
+            BAIL_AFTER="$2"
             shift 2
             ;;
         *)
@@ -63,7 +73,7 @@ case "$AGENT" in
     claude|codex|gemini|ollama)
         ;;
     *)
-        echo "Usage: $0 <agent> [--batch <dir>] [--model <model>] [--limit <n>]"
+        echo "Usage: $0 <agent> [--batch <dir>] [--model <model>] [--limit <n>] [--resume] [--bail-after <n>]"
         echo ""
         echo "Agents:"
         echo "  claude    - Claude Code CLI (models: sonnet, opus, haiku)"
@@ -72,9 +82,11 @@ case "$AGENT" in
         echo "  ollama    - Local Ollama (models: llava, llava:13b)"
         echo ""
         echo "Options:"
-        echo "  --batch      Batch directory (default: latest test_batch_*)"
-        echo "  --model      Model variant to use"
-        echo "  --limit      Max candidates to process"
+        echo "  --batch        Batch directory (default: latest test_batch_*)"
+        echo "  --model        Model variant to use"
+        echo "  --limit        Max candidates to process"
+        echo "  --resume       Continue from previous run, skip already-labeled candidates"
+        echo "  --bail-after   Stop after N consecutive failures (default: 2, 0=never bail)"
         echo ""
         echo "Example: $0 gemini --batch batches/test_batch_2026-01-18 --model flash"
         echo "Example: $0 claude --model sonnet --limit 50"
@@ -102,8 +114,21 @@ RAW_OUTPUT="$OUTPUT_DIR/raw_responses.log"
 TEMP_DIR=$(mktemp -d)
 
 mkdir -p "$OUTPUT_DIR"
-echo "ref_id,target_id,label,confidence,reasoning" > "$OUTPUT_FILE"
-echo "=== $AGENT Run Started: $(date) ===" > "$LOG_FILE"
+
+# Handle resume mode - load existing pairs or write fresh header
+EXISTING_PAIRS=""
+SKIPPED=0
+if [[ "$RESUME" == "true" ]] && [[ -f "$OUTPUT_FILE" ]]; then
+    # Load existing ref_id,target_id pairs (skip header)
+    EXISTING_PAIRS=$(tail -n +2 "$OUTPUT_FILE" | cut -d',' -f1,2)
+    EXISTING_COUNT=$(echo "$EXISTING_PAIRS" | grep -c '^' 2>/dev/null || echo 0)
+    echo "Resuming: found $EXISTING_COUNT existing labels"
+else
+    # Start fresh - write header
+    echo "ref_id,target_id,label,confidence,reasoning" > "$OUTPUT_FILE"
+fi
+
+echo "=== $AGENT Run Started: $(date) ===" >> "$LOG_FILE"
 echo "" > "$RAW_OUTPUT"
 
 echo "Agent: $AGENT"
@@ -255,6 +280,8 @@ $prompt"
 
 # Process candidates
 PROCESSED=0
+CONSECUTIVE_FAILS=0
+LAST_ERROR=""
 for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
     # Check limit
     if [[ -n "$LIMIT" ]] && [[ "$PROCESSED" -ge "$LIMIT" ]]; then
@@ -265,6 +292,15 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
     DIR_NAME=$(basename "$CANDIDATE_DIR")
     REF_ID="${DIR_NAME%%__*}"
     TARGET_ID="${DIR_NAME##*__}"
+
+    # Skip if already labeled (resume mode)
+    KEY="${REF_ID},${TARGET_ID}"
+    if [[ -n "$EXISTING_PAIRS" ]] && echo "$EXISTING_PAIRS" | grep -qF "$KEY"; then
+        echo "Skipping $REF_ID (already labeled)"
+        SKIPPED=$((SKIPPED+1))
+        PROCESSED=$((PROCESSED+1))
+        continue
+    fi
 
     METADATA="${CANDIDATE_DIR}metadata.yaml"
     IMG_SAT="${CANDIDATE_DIR}satellite.png"
@@ -307,11 +343,25 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
     if [[ -n "$RESULT" ]]; then
         echo "$RESULT" >> "$OUTPUT_FILE"
         COUNT=$((COUNT+1))
+        CONSECUTIVE_FAILS=0
         echo "$(echo "$RESULT" | cut -d',' -f3) [$COUNT/$TOTAL]"
     else
         FAILED=$((FAILED+1))
+        CONSECUTIVE_FAILS=$((CONSECUTIVE_FAILS+1))
+        LAST_ERROR="${RAW:0:200}"
         echo "FAIL [$((COUNT+FAILED))/$TOTAL]" | tee -a "$LOG_FILE"
-        echo "  Raw: ${RAW:0:200}" >> "$LOG_FILE"
+        echo "  Raw: $LAST_ERROR" >> "$LOG_FILE"
+
+        # Check for bail-out condition
+        if [[ "$BAIL_AFTER" -gt 0 ]] && [[ "$CONSECUTIVE_FAILS" -ge "$BAIL_AFTER" ]]; then
+            echo ""
+            echo "BAILING OUT: $CONSECUTIVE_FAILS consecutive failures detected"
+            echo "  Likely cause: API quota exceeded or bad configuration"
+            echo "  Last error: $LAST_ERROR"
+            echo "  Completed: $COUNT success, $FAILED failed, $SKIPPED skipped"
+            echo "  Run with --resume to continue later"
+            break
+        fi
     fi
 
     PROCESSED=$((PROCESSED+1))
@@ -321,6 +371,6 @@ done
 rm -rf "$TEMP_DIR"
 
 echo ""
-echo "=== Complete: $COUNT success, $FAILED failed ==="
+echo "=== Complete: $COUNT success, $FAILED failed, $SKIPPED skipped ==="
 echo "Output: $OUTPUT_FILE"
 echo "Log: $LOG_FILE"
