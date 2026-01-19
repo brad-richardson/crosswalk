@@ -31,6 +31,37 @@ class BoundingBox(BaseModel):
         """Convert to tuple (xmin, ymin, xmax, ymax) for overturemaps."""
         return (self.xmin, self.ymin, self.xmax, self.ymax)
 
+    def expand(self, buffer_m: float) -> "BoundingBox":
+        """Expand the bounding box by a buffer distance in meters.
+
+        Converts meters to approximate degrees at the center latitude.
+        This is useful for fetching extra data around the edges to avoid
+        fringe effects during integration.
+
+        Args:
+            buffer_m: Buffer distance in meters
+
+        Returns:
+            New BoundingBox expanded by the buffer distance
+        """
+        import math
+
+        # Approximate center latitude
+        center_lat = (self.ymin + self.ymax) / 2
+
+        # Convert meters to degrees (approximate)
+        # 1 degree latitude = ~111,320 meters
+        # 1 degree longitude = ~111,320 * cos(latitude) meters
+        lat_buffer = buffer_m / 111320.0
+        lon_buffer = buffer_m / (111320.0 * math.cos(math.radians(center_lat)))
+
+        return BoundingBox(
+            xmin=self.xmin - lon_buffer,
+            ymin=self.ymin - lat_buffer,
+            xmax=self.xmax + lon_buffer,
+            ymax=self.ymax + lat_buffer,
+        )
+
 
 def fetch_overture_segments(
     bbox: BoundingBox,

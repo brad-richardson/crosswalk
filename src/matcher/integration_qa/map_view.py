@@ -10,6 +10,7 @@ SOURCE_COLORS = {
     "target_matched": "#28a745",  # Green
     "target_new": "#fd7e14",  # Orange - connected but unmatched
     "orphan": "#dc3545",  # Red - disconnected
+    "net_new": "#00ffff",  # Cyan - net new coverage portions
 }
 
 PRIORITY_COLORS = {
@@ -28,6 +29,7 @@ LAYER_NAMES = {
     "target_matched": "Matched",
     "target_new": "To Merge (Connected)",
     "orphan": "Orphan (Disconnected)",
+    "net_new": "Net New Coverage",
 }
 
 
@@ -324,6 +326,7 @@ def fit_bounds(m: folium.Map, gdf: gpd.GeoDataFrame) -> folium.Map:
 def create_integration_map(
     edges: gpd.GeoDataFrame,
     orphan_edges: gpd.GeoDataFrame,
+    net_new_edges: gpd.GeoDataFrame | None = None,
     selected_edge_id: int | None = None,
     focus_on_selected: bool = True,
     context_radius: float = 500.0,  # meters around selected edge
@@ -407,6 +410,19 @@ def create_integration_map(
             weight=3,
             add_markers=True,
             marker_spacing=35.0,
+        )
+
+    # Add net-new coverage layer (shows just the new portions)
+    if net_new_edges is not None and len(net_new_edges) > 0:
+        add_edges_layer(
+            m,
+            net_new_edges,
+            LAYER_NAMES["net_new"],
+            SOURCE_COLORS["net_new"],
+            weight=4,
+            opacity=0.9,
+            add_markers=True,
+            marker_spacing=15.0,
         )
 
     # Add orphan layers (with markers)

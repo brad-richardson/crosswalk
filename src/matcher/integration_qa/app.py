@@ -32,7 +32,20 @@ def main():
         initial_sidebar_state="collapsed",
     )
 
-    st.title("Integration QA")
+    # Reduce padding/margins for more map space
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 0rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Initialize session state
     if "session" not in st.session_state:
@@ -43,6 +56,7 @@ def main():
 
     # Sidebar configuration
     with st.sidebar:
+        st.title("Integration QA")
         st.header("Configuration")
 
         # Integration output directory
@@ -88,6 +102,7 @@ def main():
         result = load_integration_result(integration_path)
         edges = result.edges
         orphan_edges = result.orphan_edges
+        net_new_edges = result.net_new_edges
     except Exception as e:
         st.error(f"Error loading integration result: {e}")
         return
@@ -169,24 +184,8 @@ def main():
                 f"{'Orphan' if is_orphan else 'Merged'} Edges ({len(display_edges)} remaining)"
             )
 
-            col_prev, col_idx, col_next = st.columns([1, 2, 1])
-
-            with col_prev:
-                if st.button("← Previous"):
-                    session.current_index = max(0, session.current_index - 1)
-
-            with col_idx:
-                session.current_index = st.number_input(
-                    "Index",
-                    min_value=0,
-                    max_value=len(display_edges) - 1,
-                    value=min(session.current_index, len(display_edges) - 1),
-                    label_visibility="collapsed",
-                )
-
-            with col_next:
-                if st.button("Next →"):
-                    session.current_index = min(len(display_edges) - 1, session.current_index + 1)
+            # Clamp current_index to valid range first
+            session.current_index = min(session.current_index, len(display_edges) - 1)
 
             # Get current edge
             current_edge = display_edges.iloc[session.current_index]
@@ -197,6 +196,7 @@ def main():
             m = create_integration_map(
                 edges=edges,
                 orphan_edges=orphan_edges if is_orphan else None,
+                net_new_edges=net_new_edges,
                 selected_edge_id=selected_id,
             )
             map_data = st_folium(m, width=None, height=500, returned_objects=["last_clicked"])
@@ -232,6 +232,32 @@ def main():
                             session.current_index = nearest_pos
                             st.rerun()
 
+            # Navigation controls (below map)
+            col_prev, col_idx, col_next = st.columns([1, 2, 1])
+
+            with col_prev:
+                if st.button("← Previous"):
+                    session.current_index = max(0, session.current_index - 1)
+                    st.rerun()
+
+            with col_idx:
+                new_index = st.number_input(
+                    "Index",
+                    min_value=0,
+                    max_value=len(display_edges) - 1,
+                    value=session.current_index,
+                    label_visibility="collapsed",
+                    key="edge_index_input",
+                )
+                if new_index != session.current_index:
+                    session.current_index = new_index
+                    st.rerun()
+
+            with col_next:
+                if st.button("Next →"):
+                    session.current_index = min(len(display_edges) - 1, session.current_index + 1)
+                    st.rerun()
+
             # Decision buttons and edge details in right panel
             with col_details:
                 # Decision callback (defined first so it can be used by buttons)
@@ -249,7 +275,7 @@ def main():
                         orphan_store.add_decision(
                             edge_id=edge_id_int,
                             original_id=str(current_edge.get("_original_id", "")),
-                            source_dataset=str(current_edge.get("_source_dataset", "")),
+                            dataset_id=str(current_edge.get("_source_dataset", "")),
                             component_id=int(current_edge.get("component_id", 0))
                             if current_edge.get("component_id")
                             else 0,
@@ -278,7 +304,7 @@ def main():
                         merged_store.add_decision(
                             edge_id=edge_id_int,
                             original_id=str(current_edge.get("_original_id", "")),
-                            source_dataset=str(current_edge.get("_source_dataset", "")),
+                            dataset_id=str(current_edge.get("_source_dataset", "")),
                             source_type=str(current_edge.get("_source", "")),
                             match_ref_id=str(current_edge.get("_match_ref_id", ""))
                             if current_edge.get("_match_ref_id")

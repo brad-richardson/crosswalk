@@ -23,6 +23,7 @@ def write_integration_outputs(
     - nodes.parquet: All nodes with component annotations
     - edges.parquet: All edges with provenance and component annotations
     - orphans.parquet: Orphan edges for QA review
+    - net_new.parquet: Net-new geometry portions (for visualization)
     - dropped_overlaps.parquet: Segments dropped due to priority conflicts
     - statistics.json: Integration statistics
 
@@ -57,6 +58,12 @@ def write_integration_outputs(
     dropped_path = output_dir / "dropped_overlaps.parquet"
     _write_dropped_overlaps(result.dropped_overlaps, dropped_path)
     output_paths["dropped_overlaps"] = dropped_path
+
+    # Write net-new edges (geometry portions that add new coverage)
+    if result.net_new_edges is not None:
+        net_new_path = output_dir / "net_new.parquet"
+        _write_net_new(result.net_new_edges, net_new_path)
+        output_paths["net_new"] = net_new_path
 
     # Write statistics
     stats_path = output_dir / "statistics.json"
@@ -163,6 +170,16 @@ def _write_dropped_overlaps(dropped: gpd.GeoDataFrame, path: Path) -> None:
     logger.info(f"Wrote {len(dropped)} dropped overlaps to {path}")
 
 
+def _write_net_new(net_new: gpd.GeoDataFrame, path: Path) -> None:
+    """Write net-new geometry portions to parquet."""
+    if net_new is None or len(net_new) == 0:
+        logger.info("No net-new edges to write")
+        return
+
+    net_new.to_parquet(path)
+    logger.info(f"Wrote {len(net_new)} net-new edges to {path}")
+
+
 def _write_statistics(
     stats: IntegrationStatistics,
     created_at: datetime,
@@ -206,6 +223,10 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
     dropped_path = output_dir / "dropped_overlaps.parquet"
     dropped = gpd.read_parquet(dropped_path) if dropped_path.exists() else gpd.GeoDataFrame()
 
+    # Load net-new edges
+    net_new_path = output_dir / "net_new.parquet"
+    net_new = gpd.read_parquet(net_new_path) if net_new_path.exists() else None
+
     # Load statistics
     stats_path = output_dir / "statistics.json"
     if stats_path.exists():
@@ -225,6 +246,7 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
         edges=edges,
         orphan_edges=orphans,
         dropped_overlaps=dropped,
+        net_new_edges=net_new,
         statistics=statistics,
         created_at=created_at,
     )

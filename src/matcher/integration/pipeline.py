@@ -41,7 +41,14 @@ def run_integration_pipeline(
     overlap_iou_threshold: float = None,
     min_segment_length: float = None,
     filter_near_duplicates_flag: bool = True,
-    connection_tolerance: float = 75.0,
+    connection_tolerance: float = 3.0,
+    min_merge_length: float = 20.0,
+    net_new_buffer: float = 5.0,
+    max_hops: int = 2,
+    fringe_buffer: float = 50.0,
+    enable_fringe_detection: bool = True,
+    transitive_tolerance: float | None = None,
+    debug_connectivity: bool = False,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> IntegrationResult:
@@ -62,7 +69,20 @@ def run_integration_pipeline(
         min_segment_length: Filter segments shorter than this (meters)
         filter_near_duplicates_flag: Whether to detect and filter near-duplicates
         connection_tolerance: Distance to consider a segment "connected" to reference (meters).
-            Default 75m matches the buffer distance used in matching candidate generation.
+            Default 3m requires actual physical connection to infrastructure.
+        min_merge_length: Minimum net-new length (meters) to merge a segment.
+            Connected segments with less than this much new coverage are orphaned.
+        net_new_buffer: Buffer distance (meters) around reference for net-new calculation.
+            Segments within this buffer are considered "covered" by reference. Default 10m.
+        max_hops: Maximum transitive connectivity hops from reference (default 2).
+            Segments connected via other target segments are included up to this depth.
+        fringe_buffer: Buffer distance (meters) around reference coverage for fringe
+            detection. Segments outside this area are marked as fringe. Default 50m.
+        enable_fringe_detection: Whether to filter fringe segments. Default True.
+        transitive_tolerance: Tolerance (meters) for transitive connections between
+            target segments. Defaults to 2x connection_tolerance since trails often
+            don't share exact endpoints. Set to connection_tolerance for strict mode.
+        debug_connectivity: Enable debug logging for transitive connectivity analysis.
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
 
@@ -154,9 +174,16 @@ def run_integration_pipeline(
 
     # Step 4: Detect orphans by endpoint proximity (no planarization)
     logger.info("Step 4: Detecting orphans by endpoint proximity...")
-    main_edges, orphan_edges, orphan_stats = detect_orphans_by_proximity(
+    main_edges, orphan_edges, net_new_edges, orphan_stats = detect_orphans_by_proximity(
         combined_gdf,
         connection_tolerance=connection_tolerance,
+        min_merge_length=min_merge_length,
+        net_new_buffer=net_new_buffer,
+        max_hops=max_hops,
+        fringe_buffer=fringe_buffer,
+        enable_fringe_detection=enable_fringe_detection,
+        transitive_tolerance=transitive_tolerance,
+        debug_connectivity=debug_connectivity,
     )
     stats.main_component_edges = len(main_edges)
     stats.orphan_edges = len(orphan_edges)
@@ -169,6 +196,7 @@ def run_integration_pipeline(
         edges=main_edges,
         orphan_edges=orphan_edges,
         dropped_overlaps=dropped_overlaps,
+        net_new_edges=net_new_edges,
         statistics=stats,
         created_at=datetime.now(UTC),
     )
@@ -187,6 +215,38 @@ def run_integration_pipeline(
     logger.info(f"  Main (connected) edges: {stats.main_component_edges}")
     logger.info(f"  Orphan edges: {stats.orphan_edges}")
     logger.info("=" * 60)
+
+    # Log detailed layer summary with lengths
+    logger.info("")
+    logger.info("Layer Summary (segment count / total length):")
+
+    def _format_length(length_m: float) -> str:
+        if length_m >= 1000:
+            return f"{length_m / 1000:.1f} km"
+        return f"{length_m:.0f} m"
+
+    def _layer_stats(gdf: gpd.GeoDataFrame, name: str, source_filter: str | None = None):
+        if gdf is None or len(gdf) == 0:
+            logger.info(f"  {name}: 0 segments / 0 m")
+            return
+        if source_filter and "_source" in gdf.columns:
+            gdf = gdf[gdf["_source"] == source_filter]
+        if len(gdf) == 0:
+            logger.info(f"  {name}: 0 segments / 0 m")
+            return
+        # Project to UTM for accurate length calculation
+        working_gdf = gdf
+        if gdf.crs and gdf.crs.is_geographic:
+            working_gdf = gdf.to_crs(gdf.estimate_utm_crs())
+        total_length = working_gdf.geometry.length.sum()
+        logger.info(f"  {name}: {len(gdf)} segments / {_format_length(total_length)}")
+
+    _layer_stats(main_edges, "Reference", "reference")
+    _layer_stats(main_edges, "Matched (target)", "target_matched")
+    _layer_stats(main_edges, "To Merge (connected)", "target_new")
+    _layer_stats(net_new_edges, "Net New Coverage")
+    _layer_stats(orphan_edges, "Orphan")
+    logger.info("")
 
     return result
 

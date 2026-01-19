@@ -90,14 +90,14 @@ def render_decision_buttons(
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Keep (K)", type="primary", use_container_width=True):
+            if st.button("Correct (C)", type="primary", use_container_width=True):
                 if on_decision:
-                    on_decision("keep", "")
+                    on_decision("correct", "")
 
         with col2:
-            if st.button("Discard (D)", type="secondary", use_container_width=True):
+            if st.button("Incorrect (I)", type="secondary", use_container_width=True):
                 if on_decision:
-                    on_decision("discard", "")
+                    on_decision("incorrect", "")
 
         # Reason selection
         _reason = st.selectbox(  # noqa: F841 - UI element, value used by Streamlit
@@ -137,8 +137,8 @@ def render_stats(orphan_stats: dict, merged_stats: dict) -> None:
     with col1:
         st.markdown("**Orphan Decisions**")
         st.metric("Total", orphan_stats.get("total", 0))
-        st.metric("Keep", orphan_stats.get("keep", 0))
-        st.metric("Discard", orphan_stats.get("discard", 0))
+        st.metric("Correct", orphan_stats.get("correct", 0))
+        st.metric("Incorrect", orphan_stats.get("incorrect", 0))
 
     with col2:
         st.markdown("**Merged Decisions**")
@@ -159,6 +159,8 @@ def render_map_legend() -> None:
 
         🟠 **To Merge** - Your data connected to network but no match (will be added)
 
+        🩵 **Net New** - Portions of merged edges that add new coverage
+
         🔴 **Orphan** - Disconnected from network (needs review)
 
         🟣 **Selected** - Currently reviewing this edge
@@ -166,7 +168,7 @@ def render_map_legend() -> None:
         ---
 
         **What to do:**
-        - **Keep**: Edge is valid, should be in final network
-        - **Discard**: Edge is invalid (data error, duplicate, etc.)
+        - **Correct**: Orphan classification is correct (truly disconnected)
+        - **Incorrect**: Orphan classification is wrong (should be connected)
         """
     )
