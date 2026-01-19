@@ -153,15 +153,15 @@ def render_map_legend() -> None:
         """
         **Map Legend**
 
-        🔵 **Reference (Blue)** - Overture base road network
+        🔵 **Reference** - Overture base road network
 
-        🟢 **Target Matched (Green)** - Your data matched to reference
+        🟢 **Matched** - Your data matched to a reference edge
 
-        🟠 **Target New (Orange)** - Your data added to network (no match)
+        🟠 **To Merge** - Your data connected to network but no match (will be added)
 
-        🔴 **Orphan (Red)** - Disconnected segments for review
+        🔴 **Orphan** - Disconnected from network (needs review)
 
-        🟣 **Selected (Magenta)** - Currently reviewing this edge
+        🟣 **Selected** - Currently reviewing this edge
 
         ---
 

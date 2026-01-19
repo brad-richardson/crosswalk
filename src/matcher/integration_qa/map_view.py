@@ -8,8 +8,8 @@ from shapely.geometry import LineString
 SOURCE_COLORS = {
     "reference": "#3388ff",  # Blue
     "target_matched": "#28a745",  # Green
-    "target_new": "#fd7e14",  # Orange
-    "orphan": "#dc3545",  # Red
+    "target_new": "#fd7e14",  # Orange - connected but unmatched
+    "orphan": "#dc3545",  # Red - disconnected
 }
 
 PRIORITY_COLORS = {
@@ -22,13 +22,12 @@ PRIORITY_COLORS = {
 SELECTED_COLOR = "#ff00ff"  # Magenta
 SELECTED_WEIGHT = 5  # Visible but not too thick
 
-# Layer descriptions for legend/help
-LAYER_DESCRIPTIONS = {
-    "reference": "Overture base network (blue) - the reference road data",
-    "target_matched": "Target edges matched to reference (green) - confirmed matches",
-    "target_new": "Target edges added to network (orange) - new roads not in reference",
-    "orphan": "Orphan edges (red) - disconnected segments needing review",
-    "selected": "Currently selected edge (magenta) - the one you're reviewing",
+# Layer names for map display
+LAYER_NAMES = {
+    "reference": "Reference (Overture)",
+    "target_matched": "Matched",
+    "target_new": "To Merge (Connected)",
+    "orphan": "Orphan (Disconnected)",
 }
 
 
@@ -210,7 +209,7 @@ def add_orphan_layers(
                 add_edges_layer(
                     m,
                     priority_edges,
-                    f"Orphans ({priority})",
+                    f"Orphan ({priority.title()})",
                     PRIORITY_COLORS[priority],
                     weight=3,
                     add_markers=True,
@@ -220,7 +219,7 @@ def add_orphan_layers(
         add_edges_layer(
             m,
             orphan_edges,
-            "Orphans",
+            LAYER_NAMES["orphan"],
             SOURCE_COLORS["orphan"],
             weight=3,
             add_markers=True,
@@ -384,26 +383,26 @@ def create_integration_map(
             bbox = box(cx - 0.01, cy - 0.01, cx + 0.01, cy + 0.01)
             ref_edges = ref_edges[ref_edges.geometry.intersects(bbox)]
         # Reference edges: no markers (too many, would clutter)
-        add_edges_layer(m, ref_edges, "Reference (Overture)", SOURCE_COLORS["reference"])
+        add_edges_layer(m, ref_edges, LAYER_NAMES["reference"], SOURCE_COLORS["reference"])
 
         # Matched target edges: add markers to distinguish from reference
         matched_edges = working_edges[working_edges["_source"] == "target_matched"]
         add_edges_layer(
             m,
             matched_edges,
-            "Target (Matched)",
+            LAYER_NAMES["target_matched"],
             SOURCE_COLORS["target_matched"],
             weight=2,
             add_markers=True,
             marker_spacing=40.0,
         )
 
-        # Unmatched target edges (in main network): add markers
+        # Unmatched but connected target edges (to be merged into network)
         new_edges = working_edges[working_edges["_source"] == "target_new"]
         add_edges_layer(
             m,
             new_edges,
-            "Target (New)",
+            LAYER_NAMES["target_new"],
             SOURCE_COLORS["target_new"],
             weight=3,
             add_markers=True,
