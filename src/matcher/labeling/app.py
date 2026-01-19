@@ -805,7 +805,7 @@ def render_quick_mode(pair, filtered, label_store, session):
 
     # More options in an expander for secondary actions
     with st.expander("More Options"):
-        more_col1, more_col2, more_col3 = st.columns(3)
+        more_col1, more_col2 = st.columns(2)
 
         with more_col1:
             if st.button("🤔 Unsure (U)", use_container_width=True, key="quick_unsure"):
@@ -821,69 +821,6 @@ def render_quick_mode(pair, filtered, label_store, session):
                 key="quick_undo",
             ):
                 undo_last_label(label_store)
-                reset_subsegment_state()
-                st.rerun()
-
-        with more_col3:
-            # 1:N mode button
-            related_count = len(
-                [c for c in st.session_state.candidates if c.target_id == pair.target_id]
-            )
-            if related_count > 1:
-                if st.button(
-                    f"🔗 1:N ({related_count})",
-                    use_container_width=True,
-                    key="quick_1n",
-                ):
-                    st.session_state.one_to_n_mode = True
-                    st.session_state.selected_refs = {pair.ref_id}
-                    st.rerun()
-
-        # Subsegment presets (simplified)
-        st.markdown("**Quick Subsegment:**")
-        sub_col1, sub_col2, sub_col3 = st.columns(3)
-
-        estimated_subsegment = get_subsegment_estimate(pair)
-
-        with sub_col1:
-            if st.button("1st Half", use_container_width=True, key="quick_sub_first"):
-                record_label(
-                    pair,
-                    "match",
-                    label_store,
-                    ref_start_pct=0.0,
-                    ref_end_pct=0.5,
-                    target_start_pct=0.0,
-                    target_end_pct=0.5,
-                )
-                reset_subsegment_state()
-                st.rerun()
-
-        with sub_col2:
-            if st.button("2nd Half", use_container_width=True, key="quick_sub_second"):
-                record_label(
-                    pair,
-                    "match",
-                    label_store,
-                    ref_start_pct=0.5,
-                    ref_end_pct=1.0,
-                    target_start_pct=0.5,
-                    target_end_pct=1.0,
-                )
-                reset_subsegment_state()
-                st.rerun()
-
-        with sub_col3:
-            if st.button("Estimate", use_container_width=True, key="quick_sub_est"):
-                record_label(
-                    pair,
-                    "match",
-                    label_store,
-                    ref_start_pct=estimated_subsegment["ref_start_pct"],
-                    ref_end_pct=estimated_subsegment["ref_end_pct"],
-                    target_start_pct=estimated_subsegment["target_start_pct"],
-                    target_end_pct=estimated_subsegment["target_end_pct"],
-                )
                 reset_subsegment_state()
                 st.rerun()
 
