@@ -192,14 +192,41 @@ def main():
             current_edge = display_edges.iloc[session.current_index]
             current_edge_dict = current_edge.to_dict()
 
-            # Render map
+            # Render map with click handling
             selected_id = current_edge.get("edge_id", current_edge.get("_original_id"))
             m = create_integration_map(
                 edges=edges,
                 orphan_edges=orphan_edges if is_orphan else None,
                 selected_edge_id=selected_id,
             )
-            st_folium(m, width=None, height=500, returned_objects=[])
+            map_data = st_folium(m, width=None, height=500, returned_objects=["last_clicked"])
+
+            # Handle map clicks - find nearest edge and select it
+            if map_data and map_data.get("last_clicked"):
+                click_lat = map_data["last_clicked"]["lat"]
+                click_lon = map_data["last_clicked"]["lng"]
+
+                # Find nearest edge in display_edges
+                from shapely.geometry import Point
+
+                click_point = Point(click_lon, click_lat)
+                min_dist = float("inf")
+                nearest_idx = None
+
+                for idx, row in display_edges.iterrows():
+                    if row.geometry is not None:
+                        dist = row.geometry.distance(click_point)
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest_idx = idx
+
+                # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
+                if nearest_idx is not None and min_dist < 0.001:
+                    # Find the position in display_edges
+                    clicked_pos = display_edges.index.get_loc(nearest_idx)
+                    if clicked_pos != session.current_index:
+                        session.current_index = clicked_pos
+                        st.rerun()
 
             # Decision buttons and edge details in right panel
             with col_details:
