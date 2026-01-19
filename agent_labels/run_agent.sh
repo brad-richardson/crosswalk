@@ -53,6 +53,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --bail-after)
+            if [[ -z "$2" || ! "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --bail-after requires a non-negative integer argument." >&2
+                exit 1
+            fi
             BAIL_AFTER="$2"
             shift 2
             ;;
@@ -121,7 +125,11 @@ SKIPPED=0
 if [[ "$RESUME" == "true" ]] && [[ -f "$OUTPUT_FILE" ]]; then
     # Load existing ref_id,target_id pairs (skip header)
     EXISTING_PAIRS=$(tail -n +2 "$OUTPUT_FILE" | cut -d',' -f1,2)
-    EXISTING_COUNT=$(echo "$EXISTING_PAIRS" | grep -c '^' 2>/dev/null || echo 0)
+    if [[ -z "$EXISTING_PAIRS" ]]; then
+        EXISTING_COUNT=0
+    else
+        EXISTING_COUNT=$(printf '%s\n' "$EXISTING_PAIRS" | grep -c '^' 2>/dev/null || echo 0)
+    fi
     echo "Resuming: found $EXISTING_COUNT existing labels"
 else
     # Start fresh - write header
@@ -129,7 +137,13 @@ else
 fi
 
 echo "=== $AGENT Run Started: $(date) ===" >> "$LOG_FILE"
-echo "" > "$RAW_OUTPUT"
+if [[ "$RESUME" == "true" ]]; then
+    # In resume mode, append to raw responses to preserve previous run data
+    echo "" >> "$RAW_OUTPUT"
+else
+    # In fresh runs, start with a clean raw responses file
+    echo "" > "$RAW_OUTPUT"
+fi
 
 echo "Agent: $AGENT"
 [[ -n "$MODEL" ]] && echo "Model: $MODEL"
@@ -139,11 +153,17 @@ echo ""
 
 COUNT=0
 FAILED=0
-TOTAL=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
-# Apply limit to total
+TOTAL_CANDIDATES=$(ls -d "$CANDIDATES_DIR"/*/ 2>/dev/null | wc -l)
+# Calculate remaining candidates (excluding already labeled in resume mode)
+REMAINING=$((TOTAL_CANDIDATES - EXISTING_COUNT))
+[[ "$REMAINING" -lt 0 ]] && REMAINING=0
+# Apply limit to remaining
+TOTAL="$REMAINING"
 if [[ -n "$LIMIT" ]] && [[ "$LIMIT" -lt "$TOTAL" ]]; then
     TOTAL="$LIMIT"
 fi
+# Track actually processed (not skipped) for limit purposes
+ACTUALLY_PROCESSED=0
 
 # Build the prompt - static prefix first for caching, variable content last
 build_prompt() {
@@ -279,12 +299,11 @@ $prompt"
 }
 
 # Process candidates
-PROCESSED=0
 CONSECUTIVE_FAILS=0
 LAST_ERROR=""
 for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
-    # Check limit
-    if [[ -n "$LIMIT" ]] && [[ "$PROCESSED" -ge "$LIMIT" ]]; then
+    # Check limit (only count actually processed, not skipped)
+    if [[ -n "$LIMIT" ]] && [[ "$ACTUALLY_PROCESSED" -ge "$LIMIT" ]]; then
         echo "Reached limit of $LIMIT candidates"
         break
     fi
@@ -295,10 +314,9 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
 
     # Skip if already labeled (resume mode)
     KEY="${REF_ID},${TARGET_ID}"
-    if [[ -n "$EXISTING_PAIRS" ]] && echo "$EXISTING_PAIRS" | grep -qF "$KEY"; then
+    if [[ -n "$EXISTING_PAIRS" ]] && echo "$EXISTING_PAIRS" | grep -qxF "$KEY"; then
         echo "Skipping $REF_ID (already labeled)"
         SKIPPED=$((SKIPPED+1))
-        PROCESSED=$((PROCESSED+1))
         continue
     fi
 
@@ -364,7 +382,7 @@ for CANDIDATE_DIR in "$CANDIDATES_DIR"/*/; do
         fi
     fi
 
-    PROCESSED=$((PROCESSED+1))
+    ACTUALLY_PROCESSED=$((ACTUALLY_PROCESSED+1))
 done
 
 # Cleanup
