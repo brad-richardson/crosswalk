@@ -36,6 +36,70 @@ ROAD_CLASS_HIERARCHY = {
     "steps": 10,
 }
 
+# Traffic tier mapping - groups road classes by traffic type
+# This allows for stronger penalties between incompatible traffic types
+# (e.g., sidewalks should not match vehicular roads)
+TRAFFIC_TIERS = {
+    # Vehicular - motorized traffic
+    "motorway": "vehicle",
+    "motorway_link": "vehicle",
+    "trunk": "vehicle",
+    "trunk_link": "vehicle",
+    "primary": "vehicle",
+    "primary_link": "vehicle",
+    "secondary": "vehicle",
+    "secondary_link": "vehicle",
+    "tertiary": "vehicle",
+    "tertiary_link": "vehicle",
+    "residential": "vehicle",
+    "living_street": "vehicle",
+    "service": "vehicle",
+    "unclassified": "vehicle",
+    "track": "vehicle",
+    # Bicycle
+    "cycleway": "bicycle",
+    # Pedestrian
+    "footway": "pedestrian",
+    "sidewalk": "pedestrian",
+    "path": "pedestrian",
+    "pedestrian": "pedestrian",
+    "steps": "pedestrian",
+    # Neutral - uncommon, treat specially
+    "bridleway": "neutral",
+}
+
+# Cross-tier penalty matrix
+# These penalties apply when comparing road classes from different traffic tiers
+TIER_PENALTIES = {
+    ("vehicle", "pedestrian"): 0.1,  # Strong penalty - incompatible traffic types
+    ("pedestrian", "vehicle"): 0.1,
+    ("vehicle", "bicycle"): 0.7,  # Mild - bikes often share roads
+    ("bicycle", "vehicle"): 0.7,
+    ("bicycle", "pedestrian"): 0.5,  # Moderate - shared paths exist
+    ("pedestrian", "bicycle"): 0.5,
+}
+
+
+def get_traffic_tier(road_class: str | None) -> str | None:
+    """Get traffic tier for a road class.
+
+    Traffic tiers group road classes by traffic type:
+    - vehicle: motorized traffic (motorway, residential, etc.)
+    - bicycle: dedicated bike infrastructure (cycleway)
+    - pedestrian: foot traffic (footway, sidewalk, path, etc.)
+    - neutral: uncommon classes treated neutrally (bridleway)
+
+    Args:
+        road_class: Road class string (e.g., "residential", "footway")
+
+    Returns:
+        Traffic tier string or None if unknown
+    """
+    if not road_class:
+        return None
+    return TRAFFIC_TIERS.get(road_class.lower().strip())
+
+
 # Common street name abbreviations
 # Note: Keys must include trailing space to avoid matching inside words
 # (e.g., " st " won't match inside "street")
@@ -240,8 +304,20 @@ def compute_class_similarity(
 ) -> float:
     """Compute road class similarity (0-1).
 
-    Higher similarity for same or adjacent classes in the hierarchy.
-    When subclasses are provided, they affect the score for same-class pairs.
+    Uses a two-level scoring system:
+    1. Tier check: Are both segments for the same traffic type?
+    2. Rank check: Within the same tier, how close are the ranks?
+
+    Traffic tiers:
+    - vehicle: motorway, trunk, primary, secondary, tertiary, residential, etc.
+    - bicycle: cycleway
+    - pedestrian: footway, sidewalk, path, pedestrian, steps
+    - neutral: bridleway (uncommon, treated neutrally)
+
+    Cross-tier penalties:
+    - vehicle↔pedestrian: 0.1 (strong - cars don't belong on sidewalks)
+    - vehicle↔bicycle: 0.7 (mild - bike lanes often on roads)
+    - bicycle↔pedestrian: 0.5 (moderate - shared paths exist)
 
     Args:
         class_a: First road class
@@ -261,6 +337,20 @@ def compute_class_similarity(
     # Treat "unknown" as neutral - don't penalize or reward
     if class_a == "unknown" or class_b == "unknown":
         return 0.5
+
+    # Get traffic tiers for both classes
+    tier_a = get_traffic_tier(class_a)
+    tier_b = get_traffic_tier(class_b)
+
+    # Neutral tier (bridleway) or unknown tier -> return 0.5
+    if tier_a == "neutral" or tier_b == "neutral" or tier_a is None or tier_b is None:
+        return 0.5
+
+    # Cross-tier: lookup penalty from matrix
+    if tier_a != tier_b:
+        return TIER_PENALTIES.get((tier_a, tier_b), 0.5)
+
+    # Same tier: use rank-based similarity
 
     # Exact class match - check subclass for finer distinction
     if class_a == class_b:

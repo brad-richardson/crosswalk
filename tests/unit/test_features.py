@@ -12,6 +12,7 @@ from matcher.features.semantic import (
     compute_class_similarity,
     compute_name_similarity,
     get_class_info,
+    get_traffic_tier,
     names_likely_same_road,
 )
 
@@ -342,3 +343,141 @@ class TestCollinearGapRatio:
         features = compute_geometric_features(line_a, line_b)
         assert hasattr(features, "collinear_gap_ratio")
         assert features.collinear_gap_ratio < 0.1
+
+
+class TestTrafficTierClassSimilarity:
+    """Tests for traffic tier-based class similarity scoring.
+
+    Traffic tiers separate road types by traffic type:
+    - vehicle: motorway, trunk, primary, secondary, tertiary, residential, etc.
+    - bicycle: cycleway
+    - pedestrian: footway, sidewalk, path, pedestrian, steps
+    - neutral: bridleway (uncommon, treated neutrally)
+
+    Cross-tier penalties:
+    - vehicle↔pedestrian: 0.1 (strong - incompatible traffic types)
+    - vehicle↔bicycle: 0.7 (mild - bikes often share roads)
+    - bicycle↔pedestrian: 0.5 (moderate - shared paths exist)
+    """
+
+    @pytest.mark.parametrize(
+        "road_class,expected_tier",
+        [
+            # Vehicle tier
+            ("motorway", "vehicle"),
+            ("motorway_link", "vehicle"),
+            ("trunk", "vehicle"),
+            ("primary", "vehicle"),
+            ("secondary", "vehicle"),
+            ("tertiary", "vehicle"),
+            ("residential", "vehicle"),
+            ("living_street", "vehicle"),
+            ("service", "vehicle"),
+            ("unclassified", "vehicle"),
+            ("track", "vehicle"),
+            # Bicycle tier
+            ("cycleway", "bicycle"),
+            # Pedestrian tier
+            ("footway", "pedestrian"),
+            ("sidewalk", "pedestrian"),
+            ("path", "pedestrian"),
+            ("pedestrian", "pedestrian"),
+            ("steps", "pedestrian"),
+            # Neutral tier
+            ("bridleway", "neutral"),
+            # Unknown class -> None
+            ("unknown_class", None),
+            (None, None),
+        ],
+        ids=[
+            "motorway",
+            "motorway_link",
+            "trunk",
+            "primary",
+            "secondary",
+            "tertiary",
+            "residential",
+            "living_street",
+            "service",
+            "unclassified",
+            "track",
+            "cycleway",
+            "footway",
+            "sidewalk",
+            "path",
+            "pedestrian",
+            "steps",
+            "bridleway",
+            "unknown_class",
+            "none_input",
+        ],
+    )
+    def test_get_traffic_tier(self, road_class, expected_tier):
+        """get_traffic_tier should return correct tier for each road class."""
+        result = get_traffic_tier(road_class)
+        assert result == expected_tier
+
+    @pytest.mark.parametrize(
+        "class_a,class_b,expected",
+        [
+            # Cross-tier: vehicle vs pedestrian (strong penalty)
+            ("residential", "footway", 0.1),
+            ("primary", "sidewalk", 0.1),
+            ("service", "path", 0.1),
+            ("motorway", "pedestrian", 0.1),
+            ("tertiary", "steps", 0.1),
+            # Cross-tier: vehicle vs bicycle (mild penalty - bikes share roads)
+            ("residential", "cycleway", 0.7),
+            ("primary", "cycleway", 0.7),
+            ("motorway", "cycleway", 0.7),
+            # Cross-tier: pedestrian vs bicycle (moderate)
+            ("footway", "cycleway", 0.5),
+            ("sidewalk", "cycleway", 0.5),
+            ("path", "cycleway", 0.5),
+            # Same tier: pedestrian (all pedestrian classes have same rank 10)
+            ("footway", "sidewalk", 1.0),
+            ("footway", "path", 1.0),
+            ("sidewalk", "pedestrian", 1.0),
+            # Same tier: vehicle (existing rank logic)
+            ("residential", "service", 0.8),
+            ("primary", "secondary", 0.8),
+            ("motorway", "trunk", 0.8),
+            # Neutral tier: bridleway -> 0.5
+            ("bridleway", "residential", 0.5),
+            ("bridleway", "footway", 0.5),
+            ("bridleway", "cycleway", 0.5),
+            # Unknown -> neutral 0.5
+            ("residential", "unknown", 0.5),
+            (None, "footway", 0.5),
+            ("", "residential", 0.5),
+        ],
+        ids=[
+            "vehicle_pedestrian_residential_footway",
+            "vehicle_pedestrian_primary_sidewalk",
+            "vehicle_pedestrian_service_path",
+            "vehicle_pedestrian_motorway_pedestrian",
+            "vehicle_pedestrian_tertiary_steps",
+            "vehicle_bicycle_residential",
+            "vehicle_bicycle_primary",
+            "vehicle_bicycle_motorway",
+            "pedestrian_bicycle_footway",
+            "pedestrian_bicycle_sidewalk",
+            "pedestrian_bicycle_path",
+            "pedestrian_same_footway_sidewalk",
+            "pedestrian_same_footway_path",
+            "pedestrian_same_sidewalk_pedestrian",
+            "vehicle_same_residential_service",
+            "vehicle_same_primary_secondary",
+            "vehicle_same_motorway_trunk",
+            "neutral_bridleway_vehicle",
+            "neutral_bridleway_pedestrian",
+            "neutral_bridleway_bicycle",
+            "unknown_class",
+            "none_class",
+            "empty_class",
+        ],
+    )
+    def test_traffic_tier_class_similarity(self, class_a, class_b, expected):
+        """Class similarity should use traffic tier penalties for cross-tier comparisons."""
+        result = compute_class_similarity(class_a, class_b)
+        assert result == pytest.approx(expected, abs=0.05)
