@@ -45,10 +45,13 @@ ALL_FEATURE_COLUMNS = [
     "projection_distance",
     "centroid_distance",
     "collinear_gap_ratio",
-    # Semantic features (4)
+    # Semantic features - name (5)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    # Semantic features - class (1)
     "class_similarity",
     # Endpoint/connectivity (3)
     "start_endpoint_proximity",
@@ -168,10 +171,13 @@ def compute_pair_features(
             "projection_distance": geom_features.projection_distance,
             "centroid_distance": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
-            # Semantic
+            # Semantic - name
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
             "name_token_sort": name_sim["token_sort_ratio"],
+            "name_soundex": name_sim["soundex_match"],
+            "name_metaphone": name_sim["metaphone_similarity"],
+            # Semantic - class
             "class_similarity": class_sim,
             # Endpoint proximity
             "start_endpoint_proximity": endpoint_features.get(
@@ -222,6 +228,8 @@ def _get_error_features() -> dict[str, float]:
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
         "name_token_sort": 0.0,
+        "name_soundex": 0.5,  # Neutral for missing names
+        "name_metaphone": 0.5,  # Neutral for missing names
         "class_similarity": 0.0,
         "start_endpoint_proximity": MAX_DISTANCE_METERS,
         "end_endpoint_proximity": MAX_DISTANCE_METERS,

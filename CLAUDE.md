@@ -163,6 +163,35 @@ data/
 2. Retrain model: `matcher train`
 3. Evaluate: `matcher eval-model`
 
+### Adding a New Feature
+
+**CRITICAL: Features must be added to multiple files to work end-to-end.**
+
+When adding a new ML feature (e.g., a new similarity metric), update ALL of these:
+
+1. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
+
+2. **Wire it through compute.py**:
+   - Add to `ALL_FEATURE_COLUMNS` list
+   - Add to `compute_pair_features()` return dict
+   - Add to `_get_error_features()` with a sensible default
+
+3. **Save it in label_store.py**:
+   - Add to `LABEL_COLUMNS` list
+   - Add to `add()` method with `features.get("feature_name", default)`
+
+4. **Add to ML training** in `ml.py`:
+   - Add to `FEATURE_COLUMNS` list
+
+**Automated verification:**
+- Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
+- The test `test_all_computed_features_are_in_label_columns` will fail if you forget label_store.py
+
+**Why this matters:**
+- Features computed but not saved to labels → ML can't use them for training
+- Features in labels but not computed → labels have stale/missing values
+- The test catches these mismatches automatically
+
 ## Change Tracking
 
 ### Before/After Comparison for PRs

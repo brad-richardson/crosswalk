@@ -30,7 +30,7 @@ LABEL_COLUMNS = [
     "target_start_pct",
     "target_end_pct",
     "is_subsegment",
-    # Geometric features (8)
+    # Geometric features (9)
     "hausdorff_distance",
     "mean_hausdorff_distance",
     "buffer_iou",
@@ -39,10 +39,14 @@ LABEL_COLUMNS = [
     "length_ratio",
     "projection_distance",
     "centroid_distance",
-    # Semantic features (4)
+    "collinear_gap_ratio",
+    # Semantic features - name (5)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    # Semantic features - class (1)
     "class_similarity",
     # Endpoint/connectivity features (3)
     "start_endpoint_proximity",
@@ -174,7 +178,7 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
-            # Geometric features (8)
+            # Geometric features (9)
             "hausdorff_distance": features.get("hausdorff_distance", 0.0),
             "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
             "buffer_iou": features.get("buffer_iou", 0.0),
@@ -183,10 +187,14 @@ class LabelStore:
             "length_ratio": features.get("length_ratio", 0.0),
             "projection_distance": features.get("projection_distance", 0.0),
             "centroid_distance": features.get("centroid_distance", 0.0),
-            # Semantic features (4)
+            "collinear_gap_ratio": features.get("collinear_gap_ratio", 1.0),
+            # Semantic features - name (5)
             "name_levenshtein": features.get("name_levenshtein", 0.0),
             "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
             "name_token_sort": features.get("name_token_sort", 0.0),
+            "name_soundex": features.get("name_soundex", 0.5),
+            "name_metaphone": features.get("name_metaphone", 0.5),
+            # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
             # Endpoint/connectivity features (3)
             "start_endpoint_proximity": features.get("start_endpoint_proximity", 0.0),
