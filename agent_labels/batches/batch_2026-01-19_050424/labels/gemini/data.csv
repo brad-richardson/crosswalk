@@ -1,0 +1,5 @@
+ref_id,target_id,label,confidence,reasoning
+0277e6ae-7ddc-4500-98ec-fbdb18657c21,fc_street_5893,no_match,1.0,The segments are nearly perpendicular and do not overlap.
+02cc6f96-02e3-4d43-a269-f4e33e5c7943,fc_street_6430,no_match,0.95,Segments represent perpendicular intersecting roads rather than the same physical segment
+04a7a38a-b1ad-4d75-bb63-7f8189ed2b91,fc_street_914,match,1.0,Segments overlap significantly and names are identical.
+04d2c9b1-ba7b-44df-9c44-711d696ecd3c,fc_street_1181,no_match,1.0,Segments represent different streets meeting at an intersection with no spatial overlap.
