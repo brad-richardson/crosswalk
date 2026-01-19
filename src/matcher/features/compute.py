@@ -35,7 +35,7 @@ DEFAULT_TOPOLOGY_FEATURES = {
 
 # All feature columns computed by this module
 ALL_FEATURE_COLUMNS = [
-    # Geometric features (8)
+    # Geometric features (9)
     "hausdorff_distance",
     "mean_hausdorff_distance",
     "buffer_iou",
@@ -44,6 +44,7 @@ ALL_FEATURE_COLUMNS = [
     "length_ratio",
     "projection_distance",
     "centroid_distance",
+    "collinear_gap_ratio",
     # Semantic features (4)
     "name_levenshtein",
     "name_jaro_winkler",
@@ -166,6 +167,7 @@ def compute_pair_features(
             "length_ratio": geom_features.length_ratio,
             "projection_distance": geom_features.projection_distance,
             "centroid_distance": geom_features.centroid_distance,
+            "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             # Semantic
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
@@ -216,6 +218,7 @@ def _get_error_features() -> dict[str, float]:
         "length_ratio": 0.0,
         "projection_distance": MAX_DISTANCE_METERS,
         "centroid_distance": MAX_DISTANCE_METERS,
+        "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
         "name_token_sort": 0.0,

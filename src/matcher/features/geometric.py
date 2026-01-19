@@ -119,6 +119,13 @@ class GeometricFeatures(NamedTuple):
     Answers: 'how much of this segment has a corresponding segment?'
     Useful for detecting segmentation mismatches."""
 
+    collinear_gap_ratio: float
+    """Penalizes collinear segments with poor along-track overlap (0-1).
+    1.0 = not collinear OR collinear with good overlap (no penalty)
+    0.0-1.0 = collinear with poor overlap (tip-to-tip penalty)
+    Addresses false matches between consecutive road segments that are
+    end-to-end but have perfect name similarity and heading alignment."""
+
 
 def compute_geometric_features(
     line_a: LineString | MultiLineString,
@@ -170,6 +177,9 @@ def compute_geometric_features(
     # Overlap ratio
     overlap_ratio = _overlap_ratio(line_a, line_b, buffer_radius)
 
+    # Collinear gap ratio (penalty for tip-to-tip segments)
+    collinear_gap_ratio = compute_collinear_gap_ratio(line_a, line_b)
+
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
         mean_hausdorff_distance=mean_hausdorff,
@@ -179,6 +189,7 @@ def compute_geometric_features(
         projection_distance=projection_distance,
         centroid_distance=centroid_distance,
         overlap_ratio=overlap_ratio,
+        collinear_gap_ratio=collinear_gap_ratio,
     )
 
 
@@ -314,3 +325,106 @@ def compute_heading_consistency(line: LineString, sample_interval: float = 10.0)
 
     # Normalize to 0-1 (0 degrees diff = 1.0, 90 degrees diff = 0.0)
     return max(0.0, 1.0 - avg_diff / 90.0)
+
+
+def compute_collinear_gap_ratio(
+    line_a: LineString,
+    line_b: LineString,
+    heading_threshold: float = 15.0,
+    min_overlap_fraction: float = 0.1,
+) -> float:
+    """Detect collinear segments that barely touch (tip-to-tip penalty).
+
+    This feature addresses the problem where consecutive road segments
+    (same street, same direction, but end-to-end) score artificially high
+    because name similarity and heading alignment are perfect.
+
+    Algorithm:
+    1. Check if segments are collinear (heading_delta < threshold)
+    2. If not collinear → return 1.0 (no penalty, let other features decide)
+    3. Project both segments onto their common direction axis
+    4. Compute 1D overlap ratio along that axis
+    5. If good overlap (≥ min_overlap_fraction) → return 1.0 (no penalty)
+    6. If poor overlap or gap → return low value (0.0-1.0)
+
+    Args:
+        line_a: First geometry (LineString, projected CRS)
+        line_b: Second geometry (LineString, projected CRS)
+        heading_threshold: Max heading difference to consider collinear (degrees)
+        min_overlap_fraction: Minimum overlap to not penalize (fraction 0-1)
+
+    Returns:
+        1.0 = not collinear OR collinear with good overlap (no penalty)
+        0.0-1.0 = collinear with poor overlap (penalty scaled by overlap)
+
+    Example:
+        Segment A: (0,0) → (100,0)
+        Segment B: (100,0) → (200,0)  # tip-to-tip
+        → Returns ~0.0 (strong penalty)
+
+        Segment A: (0,0) → (100,0)
+        Segment B: (25,0) → (75,0)  # contained within
+        → Returns 1.0 (good overlap, no penalty)
+    """
+    # Handle degenerate cases
+    if line_a.is_empty or line_b.is_empty:
+        return 1.0
+    if line_a.length <= 0 or line_b.length <= 0:
+        return 1.0
+
+    coords_a = np.array(line_a.coords)
+    coords_b = np.array(line_b.coords)
+
+    # Step 1: Check collinearity via heading
+    heading_a = _compute_heading(coords_a[0], coords_a[-1])
+    heading_b = _compute_heading(coords_b[0], coords_b[-1])
+    heading_diff = _angle_diff(heading_a, heading_b)
+
+    if heading_diff > heading_threshold:
+        # Not collinear - no penalty
+        return 1.0
+
+    # Step 2: Project onto common direction
+    # Use the average of both headings as the reference direction
+    # Handle bidirectional case: if headings differ by ~180°, align them first
+    if abs(heading_a - heading_b) > 90 and abs(heading_a - heading_b) < 270:
+        # They're roughly opposite, flip one
+        heading_b_aligned = (heading_b + 180) % 360
+    else:
+        heading_b_aligned = heading_b
+
+    avg_heading = (heading_a + heading_b_aligned) / 2
+    ref_angle = np.radians(avg_heading)
+    ref_dir = np.array([np.cos(ref_angle), np.sin(ref_angle)])
+
+    # Project all endpoints onto the reference direction
+    a_start_proj = np.dot(coords_a[0], ref_dir)
+    a_end_proj = np.dot(coords_a[-1], ref_dir)
+    b_start_proj = np.dot(coords_b[0], ref_dir)
+    b_end_proj = np.dot(coords_b[-1], ref_dir)
+
+    # Step 3: Compute 1D overlap
+    a_min, a_max = min(a_start_proj, a_end_proj), max(a_start_proj, a_end_proj)
+    b_min, b_max = min(b_start_proj, b_end_proj), max(b_start_proj, b_end_proj)
+
+    overlap_start = max(a_min, b_min)
+    overlap_end = min(a_max, b_max)
+    overlap_length = max(0, overlap_end - overlap_start)
+
+    # Use the smaller segment's extent as the denominator
+    # This matches the labeling guideline: "10% of shorter segment"
+    smaller_extent = min(a_max - a_min, b_max - b_min)
+    if smaller_extent <= 0:
+        # Degenerate case (point-like segment)
+        return 1.0
+
+    along_track_overlap = overlap_length / smaller_extent
+
+    # Step 4: Return score
+    if along_track_overlap >= min_overlap_fraction:
+        # Good overlap - no penalty
+        return 1.0
+
+    # Poor overlap - scale penalty based on how bad
+    # 0% overlap → 0.0, min_overlap_fraction% → 1.0
+    return along_track_overlap / min_overlap_fraction
