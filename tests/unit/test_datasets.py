@@ -31,119 +31,103 @@ from matcher.datasets.discover import (
 class TestClassMappingRule:
     """Tests for ClassMappingRule.matches() method."""
 
-    def test_matches_simple_value(self):
-        """Rule matches when source value equals expected value."""
-        rule = ClassMappingRule(source_value=1, target_class="motorway")
-        assert rule.matches({"class": 1}, "class") is True
-        assert rule.matches({"class": 2}, "class") is False
+    @pytest.mark.parametrize(
+        "source_value,row_value,expected",
+        [
+            (1, 1, True),  # exact match
+            (1, 2, False),  # no match
+            ([1, 2, 3], 1, True),  # list match - first
+            ([1, 2, 3], 3, True),  # list match - last
+            ([1, 2, 3], 5, False),  # list no match
+        ],
+        ids=["exact_match", "no_match", "list_first", "list_last", "list_no_match"],
+    )
+    def test_source_value_matching(self, source_value, row_value, expected):
+        """Rule matches based on source value (single or list)."""
+        rule = ClassMappingRule(source_value=source_value, target_class="primary")
+        assert rule.matches({"class": row_value}, "class") is expected
 
-    def test_matches_list_of_values(self):
-        """Rule matches when source value is in list."""
-        rule = ClassMappingRule(source_value=[1, 2, 3], target_class="primary")
-        assert rule.matches({"class": 1}, "class") is True
-        assert rule.matches({"class": 3}, "class") is True
-        assert rule.matches({"class": 5}, "class") is False
-
-    def test_matches_greater_than_condition(self):
-        """Rule matches with > condition."""
+    @pytest.mark.parametrize(
+        "condition,test_value,expected",
+        [
+            # Greater than
+            (">10000", 15000, True),
+            (">10000", 10000, False),
+            (">10000", 5000, False),
+            # Greater or equal
+            (">=10000", 10000, True),
+            (">=10000", 9999, False),
+            # Less than
+            ("<3", 2, True),
+            ("<3", 3, False),
+            # Less or equal
+            ("<=2", 2, True),
+            ("<=2", 3, False),
+            # Equality (numeric)
+            ("==4", 4, True),
+            ("==4", 4.0, True),
+            ("==4", 3, False),
+            # Equality (string)
+            ("==HIGHWAY", "HIGHWAY", True),
+            ("==HIGHWAY", "LOCAL", False),
+        ],
+        ids=[
+            "gt_above",
+            "gt_equal",
+            "gt_below",
+            "gte_equal",
+            "gte_below",
+            "lt_below",
+            "lt_equal",
+            "lte_equal",
+            "lte_above",
+            "eq_int",
+            "eq_float",
+            "eq_no_match",
+            "eq_str_match",
+            "eq_str_no_match",
+        ],
+    )
+    def test_condition_operators(self, condition, test_value, expected):
+        """Condition operators should evaluate correctly."""
         rule = ClassMappingRule(
             source_value=1,
             target_class="primary",
-            conditions={"AADT": ">10000"},
+            conditions={"cond_col": condition},
         )
-        assert rule.matches({"class": 1, "AADT": 15000}, "class") is True
-        assert rule.matches({"class": 1, "AADT": 10000}, "class") is False
-        assert rule.matches({"class": 1, "AADT": 5000}, "class") is False
+        assert rule.matches({"class": 1, "cond_col": test_value}, "class") is expected
 
-    def test_matches_greater_equal_condition(self):
-        """Rule matches with >= condition."""
+    @pytest.mark.parametrize(
+        "conditions,row,expected",
+        [
+            # Direct string equality (no operator)
+            ({"status": "ACTIVE"}, {"class": 1, "status": "ACTIVE"}, True),
+            ({"status": "ACTIVE"}, {"class": 1, "status": "INACTIVE"}, False),
+            # Non-string direct value
+            ({"lanes": 4}, {"class": 1, "lanes": 4}, True),
+            ({"lanes": 4}, {"class": 1, "lanes": 3}, False),
+            # Missing condition column
+            ({"AADT": ">10000"}, {"class": 1}, False),
+            # Invalid numeric condition
+            ({"AADT": ">invalid"}, {"class": 1, "AADT": 10000}, False),
+        ],
+        ids=[
+            "direct_str_match",
+            "direct_str_no_match",
+            "direct_int_match",
+            "direct_int_no_match",
+            "missing_column",
+            "invalid_numeric",
+        ],
+    )
+    def test_condition_edge_cases(self, conditions, row, expected):
+        """Edge cases for condition matching."""
         rule = ClassMappingRule(
             source_value=1,
             target_class="primary",
-            conditions={"AADT": ">=10000"},
+            conditions=conditions,
         )
-        assert rule.matches({"class": 1, "AADT": 10000}, "class") is True
-        assert rule.matches({"class": 1, "AADT": 9999}, "class") is False
-
-    def test_matches_less_than_condition(self):
-        """Rule matches with < condition."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="residential",
-            conditions={"lanes": "<3"},
-        )
-        assert rule.matches({"class": 1, "lanes": 2}, "class") is True
-        assert rule.matches({"class": 1, "lanes": 3}, "class") is False
-
-    def test_matches_less_equal_condition(self):
-        """Rule matches with <= condition."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="residential",
-            conditions={"lanes": "<=2"},
-        )
-        assert rule.matches({"class": 1, "lanes": 2}, "class") is True
-        assert rule.matches({"class": 1, "lanes": 3}, "class") is False
-
-    def test_matches_equality_condition_string(self):
-        """Rule matches with == condition for strings."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="motorway",
-            conditions={"road_type": "==HIGHWAY"},
-        )
-        assert rule.matches({"class": 1, "road_type": "HIGHWAY"}, "class") is True
-        assert rule.matches({"class": 1, "road_type": "LOCAL"}, "class") is False
-
-    def test_matches_equality_condition_numeric(self):
-        """Rule matches with == condition for numeric values."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="primary",
-            conditions={"lanes": "==4"},
-        )
-        assert rule.matches({"class": 1, "lanes": 4}, "class") is True
-        assert rule.matches({"class": 1, "lanes": 4.0}, "class") is True
-        assert rule.matches({"class": 1, "lanes": 3}, "class") is False
-
-    def test_matches_direct_string_condition(self):
-        """Rule matches with direct string equality."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="primary",
-            conditions={"status": "ACTIVE"},
-        )
-        assert rule.matches({"class": 1, "status": "ACTIVE"}, "class") is True
-        assert rule.matches({"class": 1, "status": "INACTIVE"}, "class") is False
-
-    def test_matches_non_string_condition(self):
-        """Rule matches with non-string condition value."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="primary",
-            conditions={"lanes": 4},
-        )
-        assert rule.matches({"class": 1, "lanes": 4}, "class") is True
-        assert rule.matches({"class": 1, "lanes": 3}, "class") is False
-
-    def test_matches_missing_condition_value(self):
-        """Rule doesn't match when condition column is missing."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="primary",
-            conditions={"AADT": ">10000"},
-        )
-        assert rule.matches({"class": 1}, "class") is False
-
-    def test_matches_invalid_numeric_condition(self):
-        """Rule handles invalid numeric condition gracefully."""
-        rule = ClassMappingRule(
-            source_value=1,
-            target_class="primary",
-            conditions={"AADT": ">invalid"},
-        )
-        # Should return False and log warning for invalid condition
-        assert rule.matches({"class": 1, "AADT": 10000}, "class") is False
+        assert rule.matches(row, "class") is expected
 
 
 class TestDatasetConfig:

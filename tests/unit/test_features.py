@@ -119,41 +119,35 @@ class TestSemanticFeatures:
         assert result["levenshtein_ratio"] == 0.5
         assert result["names_missing"] is True
 
-    def test_class_similarity_same(self):
-        """Same road class should return 1.0."""
-        result = compute_class_similarity("primary", "primary")
+    @pytest.mark.parametrize(
+        "class_a,class_b,expected_min,expected_max",
+        [
+            ("primary", "primary", 1.0, 1.0),  # same class
+            ("primary", "secondary", 0.7, 1.0),  # adjacent classes
+            ("motorway", "residential", 0.0, 0.5),  # distant classes
+        ],
+        ids=["same_class", "adjacent_classes", "distant_classes"],
+    )
+    def test_class_similarity(self, class_a, class_b, expected_min, expected_max):
+        """Class similarity should vary based on road class distance."""
+        result = compute_class_similarity(class_a, class_b)
+        assert expected_min <= result <= expected_max
 
-        assert result == pytest.approx(1.0)
-
-    def test_class_similarity_adjacent(self):
-        """Adjacent road classes should have high similarity."""
-        result = compute_class_similarity("primary", "secondary")
-
-        assert result > 0.7
-
-    def test_class_similarity_distant(self):
-        """Distant road classes should have lower similarity."""
-        result = compute_class_similarity("motorway", "residential")
-
-        assert result < 0.5
-
-    def test_class_similarity_same_class_same_subclass(self):
-        """Same class and subclass should return 1.0."""
-        result = compute_class_similarity("footway", "footway", "sidewalk", "sidewalk")
-
-        assert result == pytest.approx(1.0)
-
-    def test_class_similarity_same_class_different_subclass(self):
-        """Same class but different subclass should have slightly lower similarity."""
-        result = compute_class_similarity("footway", "footway", "sidewalk", "crosswalk")
-
-        assert result == pytest.approx(0.85)
-
-    def test_class_similarity_same_class_one_subclass_missing(self):
-        """Same class with one subclass missing should have slight penalty."""
-        result = compute_class_similarity("footway", "footway", "sidewalk", None)
-
-        assert result == pytest.approx(0.9)
+    @pytest.mark.parametrize(
+        "class_a,class_b,subclass_a,subclass_b,expected",
+        [
+            ("footway", "footway", "sidewalk", "sidewalk", 1.0),  # same class+subclass
+            ("footway", "footway", "sidewalk", "crosswalk", 0.85),  # same class, diff subclass
+            ("footway", "footway", "sidewalk", None, 0.9),  # same class, one subclass missing
+        ],
+        ids=["same_subclass", "different_subclass", "one_subclass_missing"],
+    )
+    def test_class_similarity_with_subclass(
+        self, class_a, class_b, subclass_a, subclass_b, expected
+    ):
+        """Class+subclass similarity should account for subclass differences."""
+        result = compute_class_similarity(class_a, class_b, subclass_a, subclass_b)
+        assert result == pytest.approx(expected)
 
     def test_names_likely_same_road(self):
         """Test quick name matching heuristic."""
@@ -165,45 +159,33 @@ class TestSemanticFeatures:
 class TestClassInfo:
     """Tests for get_class_info diagnostic function."""
 
-    def test_known_class(self):
-        """Known classes should return correct info."""
-        result = get_class_info("motorway")
-        assert result["normalized"] == "motorway"
-        assert result["known"] is True
-        assert result["rank"] == 1
-
-    def test_known_class_case_insensitive(self):
-        """Class lookup should be case-insensitive."""
-        result = get_class_info("RESIDENTIAL")
-        assert result["normalized"] == "residential"
-        assert result["known"] is True
-        assert result["rank"] == 6
-
-    def test_unknown_class(self):
-        """Unknown classes should return default rank."""
-        result = get_class_info("some_unknown_class")
-        assert result["normalized"] == "some_unknown_class"
-        assert result["known"] is False
-        assert result["rank"] == 6  # Default residential rank
-
-    def test_none_class(self):
-        """None input should return None values."""
-        result = get_class_info(None)
-        assert result["normalized"] is None
-        assert result["known"] is False
-        assert result["rank"] is None
-
-    def test_link_road_class(self):
-        """Link roads should be in hierarchy."""
-        result = get_class_info("motorway_link")
-        assert result["known"] is True
-        assert result["rank"] == 1
-
-    def test_pedestrian_class(self):
-        """Pedestrian infrastructure should be in hierarchy."""
-        result = get_class_info("footway")
-        assert result["known"] is True
-        assert result["rank"] == 10
+    @pytest.mark.parametrize(
+        "input_class,expected_normalized,expected_known,expected_rank",
+        [
+            ("motorway", "motorway", True, 1),
+            ("RESIDENTIAL", "residential", True, 6),  # case-insensitive
+            ("some_unknown_class", "some_unknown_class", False, 6),  # unknown -> default rank
+            (None, None, False, None),  # None input
+            ("motorway_link", "motorway_link", True, 1),  # link roads
+            ("footway", "footway", True, 10),  # pedestrian
+        ],
+        ids=[
+            "known_class",
+            "case_insensitive",
+            "unknown_class",
+            "none_input",
+            "link_road",
+            "pedestrian",
+        ],
+    )
+    def test_class_info_lookup(
+        self, input_class, expected_normalized, expected_known, expected_rank
+    ):
+        """get_class_info should return correct info for various inputs."""
+        result = get_class_info(input_class)
+        assert result["normalized"] == expected_normalized
+        assert result["known"] is expected_known
+        assert result["rank"] == expected_rank
 
 
 class TestPhoneticFeatures:
@@ -253,23 +235,19 @@ class TestPhoneticFeatures:
 class TestComputeSegmentHeading:
     """Tests for segment heading calculation."""
 
-    def test_east_heading(self):
-        """East-pointing line should have ~90 degree heading."""
-        line = LineString([(0, 0), (100, 0)])
+    @pytest.mark.parametrize(
+        "end_point,expected_heading",
+        [
+            ((100, 0), 0.0),  # East
+            ((0, 100), 90.0),  # North
+            ((100, 100), 45.0),  # Northeast
+            ((-100, 0), 180.0),  # West
+            ((0, -100), 270.0),  # South
+        ],
+        ids=["east", "north", "northeast", "west", "south"],
+    )
+    def test_heading_by_direction(self, end_point, expected_heading):
+        """Segment heading should match expected angle (0-360) for various directions."""
+        line = LineString([(0, 0), end_point])
         heading = compute_segment_heading(line)
-
-        assert heading == pytest.approx(0.0, abs=1.0)
-
-    def test_north_heading(self):
-        """North-pointing line should have ~0 degree heading."""
-        line = LineString([(0, 0), (0, 100)])
-        heading = compute_segment_heading(line)
-
-        assert heading == pytest.approx(90.0, abs=1.0)
-
-    def test_northeast_heading(self):
-        """Northeast-pointing line should have ~45 degree heading."""
-        line = LineString([(0, 0), (100, 100)])
-        heading = compute_segment_heading(line)
-
-        assert heading == pytest.approx(45.0, abs=1.0)
+        assert heading == pytest.approx(expected_heading, abs=1.0)
