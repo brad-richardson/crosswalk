@@ -85,7 +85,9 @@ def find_best_region(bbox: BoundingBox, index: dict) -> dict:
                 region_geom = shape(geom)
                 if region_geom.contains(bbox_geom):
                     regions_with_geom.append((feature, region_geom))
-            except Exception:
+            except (ValueError, TypeError) as e:
+                # Skip regions with invalid geometry
+                logger.debug(f"Skipping region with invalid geometry: {e}")
                 continue
 
     if not regions_with_geom:

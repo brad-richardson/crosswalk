@@ -85,8 +85,9 @@ def compute_reference_coverage(
     points = MultiPoint([Point(c) for c in all_coords])
     try:
         hull = concave_hull(points, ratio=hull_ratio)
-    except Exception:
-        # Fall back to convex hull if concave hull fails
+    except (ValueError, RuntimeError) as e:
+        # Fall back to convex hull if concave hull fails (e.g., too few points, invalid geometry)
+        logger.debug(f"Concave hull failed, using convex hull: {e}")
         hull = points.convex_hull
 
     if hull is None or hull.is_empty:
@@ -133,7 +134,8 @@ def filter_fringe_segments(
                 inside_lengths.append(0.0)
             else:
                 inside_lengths.append(inside_portion.length)
-        except Exception:
+        except (ValueError, RuntimeError) as e:
+            logger.debug(f"Intersection failed for geometry: {e}")
             inside_lengths.append(0.0)
 
     target_edges = target_edges.copy()
