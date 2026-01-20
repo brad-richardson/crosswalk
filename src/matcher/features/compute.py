@@ -10,6 +10,7 @@ from typing import Any
 import geopandas as gpd
 from loguru import logger
 
+from ..config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import compute_geometric_features
 from .relational import compute_perpendicular_offset
@@ -22,9 +23,6 @@ from .spatial_context import (
     compute_endpoint_features,
 )
 
-# Maximum distance value for error cases (avoid infinity)
-MAX_DISTANCE_METERS = 10000.0
-
 # Default topology features for empty/missing geometries
 DEFAULT_TOPOLOGY_FEATURES = {
     "from_degree": 1,
@@ -34,52 +32,8 @@ DEFAULT_TOPOLOGY_FEATURES = {
     "degree_signature": (1,),
 }
 
-# All feature columns computed by this module
-ALL_FEATURE_COLUMNS = [
-    # Geometric features (9)
-    "hausdorff_distance",
-    "mean_hausdorff_distance",
-    "buffer_iou",
-    "overlap_ratio",
-    "heading_delta",
-    "length_ratio",
-    "projection_distance",
-    "centroid_distance",
-    "collinear_gap_ratio",
-    # Semantic features - name (5)
-    "name_levenshtein",
-    "name_jaro_winkler",
-    "name_token_sort",
-    "name_soundex",
-    "name_metaphone",
-    # Semantic features - class (1)
-    "class_similarity",
-    # Endpoint/connectivity (3)
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
-    "shared_endpoint_count",
-    # Lateral offset (2)
-    "lateral_offset",
-    "lateral_offset_consistency",
-    # Topology features (12)
-    "from_degree_ref",
-    "to_degree_ref",
-    "from_degree_target",
-    "to_degree_target",
-    "degree_match_score",
-    "degree_signature_similarity",
-    "is_dead_end_ref",
-    "is_dead_end_target",
-    "dead_end_match",
-    "is_intersection_ref",
-    "is_intersection_target",
-    "intersection_match",
-    # Alignment coverage features (4)
-    "ref_coverage",
-    "target_coverage",
-    "min_coverage",
-    "coverage_ratio",
-]
+# Alias for backward compatibility - the authoritative list is in config.py
+ALL_FEATURE_COLUMNS = FEATURE_COLUMNS
 
 
 def compute_pair_features(
@@ -95,6 +49,7 @@ def compute_pair_features(
     ref_topology: dict[str, Any] | None = None,
     target_topology: dict[str, Any] | None = None,
     alignment: AlignmentResult | None = None,
+    graphlet_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -114,6 +69,7 @@ def compute_pair_features(
         ref_topology: Pre-computed topology features for reference (optional)
         target_topology: Pre-computed topology features for target (optional)
         alignment: Pre-computed alignment result for using aligned sublines (optional)
+        graphlet_features: Pre-computed graphlet similarity features (optional)
 
     Returns:
         Dictionary of feature name -> value
@@ -241,10 +197,15 @@ def compute_pair_features(
             "target_coverage": coverage_feats["target_coverage"],
             "min_coverage": coverage_feats["min_coverage"],
             "coverage_ratio": coverage_feats["coverage_ratio"],
+            # Graphlet features
+            "graphlet_similarity": (graphlet_features or {}).get("graphlet_similarity", 0.5),
+            "endpoint_degree_similarity": (graphlet_features or {}).get(
+                "endpoint_degree_similarity", 0.5
+            ),
         }
 
     except Exception as e:
-        logger.warning(f"Feature computation failed: {e}")
+        logger.warning(f"Feature computation failed: {e}", exc_info=True)
         # Return error values
         return _get_error_features()
 
@@ -289,6 +250,9 @@ def _get_error_features() -> dict[str, float]:
         "target_coverage": 0.0,
         "min_coverage": 0.0,
         "coverage_ratio": 0.0,
+        # Graphlet features - neutral values for error case
+        "graphlet_similarity": 0.5,
+        "endpoint_degree_similarity": 0.5,
     }
 
 

@@ -32,64 +32,8 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import cross_val_score, train_test_split
 
+from ..config import FEATURE_COLUMNS, MAX_DISTANCE_METERS, SEMANTIC_FEATURES
 from .rules import MatchDecision, MatchResult
-
-# Maximum distance value for features (used instead of infinity to avoid XGBoost issues)
-# 9999.0 meters (10km) represents "very far" for road segment matching
-MAX_DISTANCE_METERS = 9999.0
-
-# Features used for ML model (must match what's stored in labels)
-# Note: projection_distance is excluded because it's now identical to mean_hausdorff_distance
-# (both compute bidirectional mean of min distances). Including both would double-weight.
-FEATURE_COLUMNS = [
-    # Geometric (8)
-    "hausdorff_distance",
-    "mean_hausdorff_distance",
-    "buffer_iou",
-    "overlap_ratio",
-    "heading_delta",
-    "length_ratio",
-    "centroid_distance",
-    "collinear_gap_ratio",
-    # Semantic - name (5)
-    "name_levenshtein",
-    "name_jaro_winkler",
-    "name_token_sort",
-    "name_soundex",
-    "name_metaphone",
-    # Semantic - class (1)
-    "class_similarity",
-    # Endpoint/connectivity (3)
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
-    "shared_endpoint_count",
-    # Lateral offset for parallel infrastructure disambiguation (2)
-    # Helps distinguish left vs right sidewalk by measuring perpendicular distance
-    "lateral_offset",
-    "lateral_offset_consistency",
-    # Topology features (12) - inferred from endpoint proximity
-    # Tier 1: Endpoint degree features
-    "from_degree_ref",  # Degree at reference segment's start
-    "to_degree_ref",  # Degree at reference segment's end
-    "from_degree_target",  # Degree at target segment's start
-    "to_degree_target",  # Degree at target segment's end
-    "degree_match_score",  # How well degrees match (0-1)
-    # Tier 2: Degree signature similarity
-    "degree_signature_similarity",  # Jaccard similarity of neighborhood degrees
-    # Tier 3: Topology flags
-    "is_dead_end_ref",  # Reference segment is dead end (0 or 1)
-    "is_dead_end_target",  # Target segment is dead end (0 or 1)
-    "dead_end_match",  # Both or neither are dead ends (0 or 1)
-    "is_intersection_ref",  # Reference has endpoint with degree > 2 (0 or 1)
-    "is_intersection_target",  # Target has endpoint with degree > 2 (0 or 1)
-    "intersection_match",  # Both or neither touch an intersection (0 or 1)
-    # Alignment coverage features (4) - how much of each segment is covered by alignment
-    # These let the ML model learn appropriate overlap thresholds instead of hard filters
-    "ref_coverage",  # Fraction of reference covered by alignment (0-1)
-    "target_coverage",  # Fraction of target covered by alignment (0-1)
-    "min_coverage",  # min(ref_coverage, target_coverage)
-    "coverage_ratio",  # Symmetry of coverage: min/max
-]
 
 # Additional relational features (kept for backward compatibility with old labels)
 # These are now part of FEATURE_COLUMNS
@@ -304,18 +248,80 @@ def _compute_single_feature(args):
             "target_coverage": 0.0,
             "min_coverage": 0.0,
             "coverage_ratio": 0.0,
+            # Graphlet features - neutral values for error case
+            "graphlet_similarity": 0.5,
+            "endpoint_degree_similarity": 0.5,
             "_error": str(e),
         }
+
+
+def select_model_for_dataset(
+    target_gdf,
+    full_model_path: str = "data/models/matcher_model_combined.joblib",
+    geom_only_model_path: str = "data/models/matcher_model_geom_only.joblib",
+    name_column: str = "names",
+    min_name_coverage: float = 0.5,
+) -> str:
+    """Select model based on dataset attributes.
+
+    Automatically chooses between full model (with semantic features) and
+    geometry-only model based on the target dataset's name coverage.
+
+    Args:
+        target_gdf: Target GeoDataFrame
+        full_model_path: Path to full model with semantic features
+        geom_only_model_path: Path to geometry-only model
+        name_column: Column name for segment names
+        min_name_coverage: Minimum fraction of rows with non-null names to use full model
+
+    Returns:
+        Path to selected model
+    """
+    # Check for name column variations
+    has_names = name_column in target_gdf.columns or "name" in target_gdf.columns
+    name_col = name_column if name_column in target_gdf.columns else "name"
+
+    if has_names and name_col in target_gdf.columns:
+        # Calculate effective name coverage (non-null AND non-empty strings)
+        non_empty_mask = target_gdf[name_col].notna() & (
+            target_gdf[name_col].astype(str).str.strip() != ""
+        )
+        effective_coverage = non_empty_mask.mean()
+    else:
+        effective_coverage = 0.0
+
+    logger.info(f"Target dataset name coverage: {effective_coverage:.1%}")
+
+    # Check if geometry-only model exists
+    geom_only_exists = Path(geom_only_model_path).exists()
+
+    if effective_coverage >= min_name_coverage:
+        logger.info(
+            f"Using full model (name coverage {effective_coverage:.1%} >= {min_name_coverage:.0%})"
+        )
+        return full_model_path
+    elif geom_only_exists:
+        logger.info(
+            f"Using geometry-only model (name coverage {effective_coverage:.1%} < {min_name_coverage:.0%})"
+        )
+        return geom_only_model_path
+    else:
+        logger.warning(
+            f"Geometry-only model not found at {geom_only_model_path}, falling back to full model"
+        )
+        return full_model_path
 
 
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
-    def __init__(self, model_path: str | None = None):
+    def __init__(self, model_path: str | None = None, auto_select: bool = False):
         """Initialize the ML matcher.
 
         Args:
             model_path: Path to trained model (optional)
+            auto_select: If True, defer model loading until score_candidates is called
+                        so that model can be selected based on target dataset
         """
         self.model = None
         self.model_path = model_path
@@ -324,8 +330,9 @@ class MLMatcher:
         self.label_encoder = {"match": 1, "no_match": 0, "associated": 2}
         self.label_decoder = {1: "match", 0: "no_match", 2: "associated"}
         self.is_binary = True  # Track if model is binary or multiclass
+        self._auto_select = auto_select
 
-        if model_path:
+        if model_path and not auto_select:
             self.load_model(model_path)
 
     def load_model(self, path: str) -> None:
@@ -375,6 +382,7 @@ class MLMatcher:
         labels_dir: str = "labels",
         binary: bool = True,
         test_size: float = 0.2,
+        exclude_semantic: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
@@ -384,6 +392,8 @@ class MLMatcher:
             binary: If True (default), train binary classifier (match vs non-match)
                    If False, train multiclass (legacy, includes associated)
             test_size: Fraction of data to hold out for testing
+            exclude_semantic: If True, exclude semantic features (name_*, class_similarity)
+                             for training a geometry-only model
             **kwargs: Additional XGBoost parameters
 
         Returns:
@@ -400,6 +410,15 @@ class MLMatcher:
         from ..labeling.label_store import LabelStore
 
         self.is_binary = binary
+
+        # Set feature columns based on exclude_semantic
+        if exclude_semantic:
+            self.feature_names = [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
+            logger.info(
+                f"Training geometry-only model with {len(self.feature_names)} features (excluding semantic)"
+            )
+        else:
+            self.feature_names = FEATURE_COLUMNS.copy()
 
         # Load all partitions using LabelStore
         df = LabelStore.load_all(Path(labels_dir))
@@ -758,6 +777,22 @@ class MLMatcher:
             spatial_context is not supported in parallel mode and will be ignored.
             Use n_jobs=1 for sequential processing with spatial_context support.
         """
+        # Handle auto model selection
+        if self.model is None and self._auto_select:
+            from ..config import settings
+
+            if settings.auto_select_model:
+                # Auto-select model based on target dataset
+                selected_model = select_model_for_dataset(
+                    target,
+                    full_model_path=self.model_path or "data/models/matcher_model_combined.joblib",
+                    geom_only_model_path="data/models/matcher_model_geom_only.joblib",
+                    name_column=target_name_column,
+                )
+                self.load_model(selected_model)
+            elif self.model_path:
+                self.load_model(self.model_path)
+
         if self.model is None:
             logger.warning("No ML model loaded, falling back to rules")
             from .rules import score_candidates

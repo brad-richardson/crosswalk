@@ -5,6 +5,76 @@ from pathlib import Path
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
+# Maximum distance value for features (used instead of infinity to avoid XGBoost issues)
+# 10km represents "very far" for road segment matching
+MAX_DISTANCE_METERS = 10000.0
+
+# ============================================================================
+# FEATURE COLUMNS - Single source of truth for ML pipeline
+# ============================================================================
+# These lists define all features computed during matching and used for ML.
+# Import these in ml.py, compute.py, and label_store.py to ensure consistency.
+
+# All feature columns computed by the matcher
+FEATURE_COLUMNS = [
+    # Geometric features (9)
+    "hausdorff_distance",
+    "mean_hausdorff_distance",
+    "buffer_iou",
+    "overlap_ratio",
+    "heading_delta",
+    "length_ratio",
+    "projection_distance",
+    "centroid_distance",
+    "collinear_gap_ratio",
+    # Semantic features - name (5)
+    "name_levenshtein",
+    "name_jaro_winkler",
+    "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    # Semantic features - class (1)
+    "class_similarity",
+    # Endpoint/connectivity (3)
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
+    # Lateral offset (2)
+    "lateral_offset",
+    "lateral_offset_consistency",
+    # Topology features (12)
+    "from_degree_ref",
+    "to_degree_ref",
+    "from_degree_target",
+    "to_degree_target",
+    "degree_match_score",
+    "degree_signature_similarity",
+    "is_dead_end_ref",
+    "is_dead_end_target",
+    "dead_end_match",
+    "is_intersection_ref",
+    "is_intersection_target",
+    "intersection_match",
+    # Alignment coverage features (4)
+    "ref_coverage",
+    "target_coverage",
+    "min_coverage",
+    "coverage_ratio",
+    # Graphlet features (2)
+    "graphlet_similarity",
+    "endpoint_degree_similarity",
+]
+
+# Semantic features - excluded when training geometry-only models
+SEMANTIC_FEATURES = [
+    "name_levenshtein",
+    "name_jaro_winkler",
+    "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    "class_similarity",
+]
+
 
 class MatcherSettings(BaseSettings):
     """Global settings for the matcher pipeline."""
@@ -78,6 +148,12 @@ class MatcherSettings(BaseSettings):
         "aligned sublines. When enabled, similarity features (hausdorff, buffer_iou, "
         "etc.) are computed on comparable portions of geometries rather than full "
         "geometries. Coverage features are always computed regardless of this setting.",
+    )
+    auto_select_model: bool = Field(
+        default=True,
+        description="Automatically select between full and geometry-only models based on "
+        "target dataset attributes. If target has >50% name coverage, uses full model. "
+        "Otherwise, uses geometry-only model if available.",
     )
     matching_weights: dict[str, float] = Field(
         default={

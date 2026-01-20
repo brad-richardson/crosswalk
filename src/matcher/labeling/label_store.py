@@ -9,13 +9,14 @@ import pandas as pd
 import pyarrow.dataset as pa_ds
 from loguru import logger
 
+from ..config import FEATURE_COLUMNS
 from .subsegment import is_subsegment_selection
 
 # Default paths
 DEFAULT_LABELS_DIR = Path("labels")
 
-# Column definitions for labels
-LABEL_COLUMNS = [
+# Metadata columns for labels (not features)
+LABEL_METADATA_COLUMNS = [
     "gers_id",  # Overture reference segment ID (renamed from ref_id)
     "target_id",
     "label",  # "match", "no_match", "unsure"
@@ -30,50 +31,11 @@ LABEL_COLUMNS = [
     "target_start_pct",
     "target_end_pct",
     "is_subsegment",
-    # Geometric features (9)
-    "hausdorff_distance",
-    "mean_hausdorff_distance",
-    "buffer_iou",
-    "overlap_ratio",
-    "heading_delta",
-    "length_ratio",
-    "projection_distance",
-    "centroid_distance",
-    "collinear_gap_ratio",
-    # Semantic features - name (5)
-    "name_levenshtein",
-    "name_jaro_winkler",
-    "name_token_sort",
-    "name_soundex",
-    "name_metaphone",
-    # Semantic features - class (1)
-    "class_similarity",
-    # Endpoint/connectivity features (3)
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
-    "shared_endpoint_count",
-    # Lateral offset features (2)
-    "lateral_offset",
-    "lateral_offset_consistency",
-    # Topology features (12)
-    "from_degree_ref",
-    "to_degree_ref",
-    "from_degree_target",
-    "to_degree_target",
-    "degree_match_score",
-    "degree_signature_similarity",
-    "is_dead_end_ref",
-    "is_dead_end_target",
-    "dead_end_match",
-    "is_intersection_ref",
-    "is_intersection_target",
-    "intersection_match",
-    # Alignment coverage features (4)
-    "ref_coverage",
-    "target_coverage",
-    "min_coverage",
-    "coverage_ratio",
 ]
+
+# Column definitions for labels: metadata + all feature columns
+# FEATURE_COLUMNS is imported from config.py - single source of truth
+LABEL_COLUMNS = LABEL_METADATA_COLUMNS + FEATURE_COLUMNS
 
 # Default values for sub-segment columns (for backward compatibility)
 SUBSEGMENT_DEFAULTS = {
@@ -226,6 +188,9 @@ class LabelStore:
             "target_coverage": features.get("target_coverage", 0.0),
             "min_coverage": features.get("min_coverage", 0.0),
             "coverage_ratio": features.get("coverage_ratio", 0.0),
+            # Graphlet features (2)
+            "graphlet_similarity": features.get("graphlet_similarity", 0.5),
+            "endpoint_degree_similarity": features.get("endpoint_degree_similarity", 0.5),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
