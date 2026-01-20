@@ -283,7 +283,7 @@ def select_model_for_dataset(
     has_names = name_column in target_gdf.columns or "name" in target_gdf.columns
     name_col = name_column if name_column in target_gdf.columns else "name"
 
-    if has_names and name_col in target_gdf.columns:
+    if has_names:
         # Calculate effective name coverage (non-null AND non-empty strings)
         non_empty_mask = target_gdf[name_col].notna() & (
             target_gdf[name_col].astype(str).str.strip() != ""
@@ -570,9 +570,17 @@ class MLMatcher:
         self, df: pd.DataFrame, binary: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract features from individual columns."""
+        # Use pre-set feature_names if already configured (e.g., by exclude_semantic)
+        # Otherwise, build list from all available FEATURE_COLUMNS
+        base_features = (
+            self.feature_names
+            if hasattr(self, "feature_names") and self.feature_names
+            else FEATURE_COLUMNS
+        )
+
         # Build list of actual feature columns to use (no duplicates)
         actual_features = []
-        for feat in FEATURE_COLUMNS:
+        for feat in base_features:
             if feat in df.columns:
                 actual_features.append(feat)
             elif feat == "mean_hausdorff_distance" and "hausdorff_distance" in df.columns:
@@ -584,10 +592,11 @@ class MLMatcher:
                 if "buffer_iou" not in actual_features:
                     actual_features.append("buffer_iou")
 
-        # Add relational features if present in the data
-        for feat in RELATIONAL_FEATURE_COLUMNS:
-            if feat in df.columns:
-                actual_features.append(feat)
+        # Add relational features if present in the data (only if not using pre-set list)
+        if not (hasattr(self, "feature_names") and self.feature_names):
+            for feat in RELATIONAL_FEATURE_COLUMNS:
+                if feat in df.columns:
+                    actual_features.append(feat)
 
         # Remove duplicates while preserving order
         seen = set()

@@ -309,7 +309,15 @@ def evaluate(
             local_id = str(row["local_id"])
             predicted_pairs.add((gers_id, local_id))
 
-        # Compute metrics
+        # Warn about predictions not in ground truth
+        predictions_not_in_gt = len(predicted_pairs - set(gt_lookup.keys()))
+        if predictions_not_in_gt > 0:
+            console.print(
+                f"  [yellow]Warning: {predictions_not_in_gt} predictions not in ground truth "
+                "(excluded from metrics)[/yellow]"
+            )
+
+        # Compute metrics (only over ground truth pairs)
         # True Positives: predicted as match AND ground truth is match
         true_positives = sum(
             1

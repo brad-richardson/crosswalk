@@ -1214,7 +1214,13 @@ def graphlet_segment_similarity(
         # Per-feature comparison with appropriate normalization
         # [degree, triangles, squares, clustering, two_hop, is_articulation]
         diff = np.abs(a - b)
-        # Normalize: degree by 10, counts by 50, clustering already 0-1, bool is 0/1
+        # Normalize each feature to [0, 1] range:
+        # - degree: by 10 (typical road intersections have degree 1-4)
+        # - triangles: by 10 (rare in roads, small values significant)
+        # - squares: by 50 (more common in grid cities)
+        # - clustering: already 0-1
+        # - two_hop: by 50 (varies by network density)
+        # - is_articulation: already 0/1
         norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
         normalized = 1.0 - np.clip(diff / norms, 0, 1)
         return float(normalized.mean())
@@ -1230,9 +1236,20 @@ def graphlet_segment_similarity(
     ) / 2
 
     # Also compare degree specifically (most discriminative for roads)
-    degree_fwd = 1.0 - abs(ref_start_f[0] - target_start_f[0]) / 10.0
+    # Average degree match at both endpoints for consistency with graphlet_similarity
+    degree_fwd = (
+        1.0
+        - abs(ref_start_f[0] - target_start_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_end_f[0]) / 10.0
+    ) / 2.0
     degree_fwd = max(0.0, min(1.0, degree_fwd))  # Clamp to [0, 1]
-    degree_rev = 1.0 - abs(ref_start_f[0] - target_end_f[0]) / 10.0
+    degree_rev = (
+        1.0
+        - abs(ref_start_f[0] - target_end_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_start_f[0]) / 10.0
+    ) / 2.0
     degree_rev = max(0.0, min(1.0, degree_rev))
 
     return {
