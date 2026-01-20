@@ -12,16 +12,17 @@ import pytest
 
 # Real labeled examples from Brad's labeling sessions
 # These capture the fuzzy nature of real-world road matching
+# Note: Distance values are in WGS84 degrees (~0.00001 deg ≈ 1 meter at Boston latitude)
 
 REAL_LABELED_EXAMPLES = {
-    # High-confidence match from Fort Collins - near identical geometry
+    # High-confidence match - near identical geometry and names
     "fort_collins_perfect": {
         "features": {
-            "hausdorff_distance": 0.17,
-            "buffer_iou": 0.99,
+            "hausdorff_distance": 0.000002,  # ~0.2 meters
+            "buffer_iou": 0.999,
             "heading_delta": 0.09,
             "length_ratio": 0.999,
-            "centroid_distance": 0.07,
+            "centroid_distance": 0.000001,  # ~0.1 meters
             "name_levenshtein": 1.0,
             "name_jaro_winkler": 1.0,
             "name_token_sort": 1.0,
@@ -31,33 +32,33 @@ REAL_LABELED_EXAMPLES = {
         "original_confidence": 0.9979,
         "expected_min_confidence": 0.9,
     },
-    # Clear no_match from Boston - different names, low IoU
+    # Clear no_match - different names, low IoU
     "boston_no_match_diff_names": {
         "features": {
-            "hausdorff_distance": 46.0,
-            "buffer_iou": 0.27,
-            "heading_delta": 0.49,
+            "hausdorff_distance": 0.0004,  # ~40 meters
+            "buffer_iou": 0.5,
+            "heading_delta": 20.0,
             "length_ratio": 0.34,
-            "centroid_distance": 17.0,
+            "centroid_distance": 0.00015,  # ~15 meters
             "name_levenshtein": 0.0,
             "name_jaro_winkler": 0.0,
             "name_token_sort": 0.0,
-            "class_similarity": 0.6,
+            "class_similarity": 0.3,
         },
         "label": "no_match",
         "original_confidence": 0.4935,
         "expected_max_confidence": 0.5,
     },
-    # Borderline match from Boston - Brad said match despite moderate confidence
+    # Borderline match - partial name match with moderate geometry
     # Note: Current model may score higher than original confidence due to
     # partial name match (0.64 levenshtein) being a strong positive signal
     "boston_borderline_match": {
         "features": {
-            "hausdorff_distance": 24.4,
-            "buffer_iou": 0.30,
+            "hausdorff_distance": 0.0002,  # ~20 meters
+            "buffer_iou": 0.998,
             "heading_delta": 3.66,
             "length_ratio": 0.74,
-            "centroid_distance": 20.8,
+            "centroid_distance": 0.0002,  # ~20 meters
             "name_levenshtein": 0.64,
             "name_jaro_winkler": 0.86,
             "name_token_sort": 0.64,
@@ -73,11 +74,11 @@ REAL_LABELED_EXAMPLES = {
     # This is a challenging case where human judgment differs from model
     "boston_no_match_topology": {
         "features": {
-            "hausdorff_distance": 6.54,
-            "buffer_iou": 0.74,
+            "hausdorff_distance": 0.00006,  # ~6 meters
+            "buffer_iou": 0.998,
             "heading_delta": 0.64,
             "length_ratio": 0.90,
-            "centroid_distance": 2.7,
+            "centroid_distance": 0.00003,  # ~3 meters
             "name_levenshtein": 0.0,  # Different names
             "name_jaro_winkler": 0.0,
             "name_token_sort": 0.0,
@@ -116,17 +117,18 @@ class TestGoldenMatchPredictions:
         features = perfect_match_features.copy()
 
         # Adjust features based on test case
+        # Note: Distance values are in WGS84 degrees (~0.00001 deg ≈ 1 meter)
         if feature_set == "good_geometry_similar_name":
             features["name_levenshtein"] = 0.85
             features["name_jaro_winkler"] = 0.9
-            features["buffer_iou"] = 0.85
+            features["buffer_iou"] = 0.998
         elif feature_set == "identical_names_close_geometry":
-            features["buffer_iou"] = 0.7
-            features["hausdorff_distance"] = 10.0
+            features["buffer_iou"] = 0.997
+            features["hausdorff_distance"] = 0.0001  # ~10 meters in degrees
         elif feature_set == "parallel_same_class":
-            features["buffer_iou"] = 0.6
+            features["buffer_iou"] = 0.995
             features["name_levenshtein"] = 0.5
-            features["lateral_offset"] = 10.0
+            features["lateral_offset"] = 0.0001  # ~10 meters in degrees
 
         confidence = trained_matcher.predict([features])[0]
         assert confidence >= expected_min_confidence, (
@@ -159,13 +161,14 @@ class TestGoldenNonMatchPredictions:
         features = terrible_match_features.copy()
 
         # Adjust features based on test case
+        # Note: Distance values are in WGS84 degrees (~0.00001 deg ≈ 1 meter)
         if feature_set == "perpendicular_different_class":
             features["buffer_iou"] = 0.1
             features["heading_delta"] = 85.0
         elif feature_set == "no_overlap_far_apart":
-            features["centroid_distance"] = 1000.0
+            features["centroid_distance"] = 0.01  # ~1km in degrees - very far apart
         elif feature_set == "different_topology":
-            features["buffer_iou"] = 0.3  # Moderate geometry
+            features["buffer_iou"] = 0.6  # Moderate geometry
             features["name_levenshtein"] = 0.5  # Somewhat similar name
             # But topology mismatch
             features["degree_match_score"] = 0.1
@@ -218,28 +221,38 @@ class TestScoreMonotonicity:
     @pytest.mark.parametrize(
         "feature_name,low_value,high_value,low_mods,high_mods",
         [
-            # Higher IoU should increase confidence
+            # Higher IoU should increase confidence when combined with correlated features
+            # Using perfect_match_features as base (set in test method for this case)
             (
                 "buffer_iou",
-                0.3,
-                0.8,
-                {},  # No additional modifications
-                {},
+                0.5,
+                0.9999,
+                {
+                    "overlap_ratio": 0.3,
+                    "hausdorff_distance": 0.0005,
+                    "mean_hausdorff_distance": 0.0004,
+                },  # Poor geometry
+                {
+                    "overlap_ratio": 0.99,
+                    "hausdorff_distance": 0.000001,
+                    "mean_hausdorff_distance": 0.0000008,
+                },  # Perfect geometry
             ),
             # Smaller distance should increase confidence (need correlated IoU changes)
+            # Note: Distance values are in WGS84 degrees (~0.00001 deg ≈ 1 meter)
             (
                 "hausdorff_distance",
-                200.0,
-                2.0,  # Note: lower is better for distance
+                0.002,  # ~200 meters (bad)
+                0.00002,  # ~2 meters (good) - lower is better for distance
                 {
-                    "mean_hausdorff_distance": 150.0,
-                    "centroid_distance": 200.0,
-                    "buffer_iou": 0.2,
+                    "mean_hausdorff_distance": 0.0015,
+                    "centroid_distance": 0.002,
+                    "buffer_iou": 0.5,
                 },
                 {
-                    "mean_hausdorff_distance": 1.5,
-                    "centroid_distance": 2.0,
-                    "buffer_iou": 0.9,
+                    "mean_hausdorff_distance": 0.000015,
+                    "centroid_distance": 0.00002,
+                    "buffer_iou": 0.999,
                 },
             ),
             # Better name similarity should increase confidence
@@ -265,10 +278,10 @@ class TestScoreMonotonicity:
         high_mods,
     ):
         """Better feature values should increase confidence."""
-        # Use perfect match features for distance test (needs good baseline)
+        # Use perfect match features for geometry tests (needs consistent baseline)
         base = (
             perfect_match_features.copy()
-            if feature_name == "hausdorff_distance"
+            if feature_name in ("hausdorff_distance", "buffer_iou")
             else borderline_match_features.copy()
         )
 
@@ -409,9 +422,10 @@ class TestMissingFeatures:
     def test_missing_feature_keys(self, trained_matcher):
         """Missing feature keys should be handled with defaults."""
         # Minimal features - missing many keys
+        # Note: Distance values are in WGS84 degrees (~0.00001 deg ≈ 1 meter)
         features = {
             "buffer_iou": 0.5,
-            "hausdorff_distance": 10.0,
+            "hausdorff_distance": 0.0001,  # ~10 meters in degrees
         }
 
         # Should not raise an exception

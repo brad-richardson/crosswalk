@@ -37,10 +37,17 @@ from matcher.features.alignment import (
     linestring_alignment,
 )
 from matcher.features.geometric import compute_geometric_features
+from matcher.features.relational import compute_perpendicular_offset
+from matcher.features.semantic import compute_name_similarity
 from matcher.features.spatial_context import (
+    SpatialContextIndex,
+    build_inferred_graph,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
+    compute_endpoint_features,
+    compute_road_graphlet_features,
+    graphlet_segment_similarity,
 )
 
 # Dataset name to (target file, reference file) mapping
@@ -99,6 +106,31 @@ TOPOLOGY_FEATURE_COLUMNS = [
     "is_intersection_ref",
     "is_intersection_target",
     "intersection_match",
+]
+
+# Semantic feature columns (name similarity)
+SEMANTIC_FEATURE_COLUMNS = [
+    "name_soundex",
+    "name_metaphone",
+]
+
+# Endpoint proximity feature columns
+ENDPOINT_FEATURE_COLUMNS = [
+    "start_endpoint_proximity",
+    "end_endpoint_proximity",
+    "shared_endpoint_count",
+]
+
+# Lateral offset feature columns
+LATERAL_FEATURE_COLUMNS = [
+    "lateral_offset",
+    "lateral_offset_consistency",
+]
+
+# Graphlet feature columns
+GRAPHLET_FEATURE_COLUMNS = [
+    "graphlet_similarity",
+    "endpoint_degree_similarity",
 ]
 
 
@@ -180,7 +212,8 @@ def compute_aligned_features(
         # Compute coverage features
         coverage_feats = compute_coverage_features(alignment)
 
-        # Extract aligned sublines (from original geometries)
+        # Extract aligned sublines from original WGS84 geometries
+        # (both backfill and scoring should use WGS84 for consistency)
         ref_subline = create_subline(
             ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
         )
@@ -192,7 +225,7 @@ def compute_aligned_features(
         geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
         geom_for_similarity_target = target_subline if target_subline else target_geom
 
-        # Recompute similarity features on aligned sublines
+        # Recompute similarity features on aligned sublines (in WGS84)
         geom_features = compute_geometric_features(
             geom_for_similarity_ref, geom_for_similarity_target
         )
@@ -309,8 +342,13 @@ def backfill_dataset(
     data_dir: Path,
     ref_gdf: gpd.GeoDataFrame | None = None,
     ref_topology: dict | None = None,
+    ref_graphlet_data: tuple | None = None,
     compute_alignment: bool = True,
     compute_topology: bool = True,
+    compute_semantic: bool = True,
+    compute_endpoint: bool = True,
+    compute_lateral: bool = True,
+    compute_graphlet: bool = True,
     recompute_similarity: bool = True,
     dry_run: bool = False,
 ) -> int:
@@ -322,8 +360,13 @@ def backfill_dataset(
         data_dir: Path to raw data directory
         ref_gdf: Pre-loaded reference GeoDataFrame (for alignment)
         ref_topology: Pre-computed reference topology dict
+        ref_graphlet_data: Pre-computed reference graphlet data (G, seg_to_start, seg_to_end, features)
         compute_alignment: Whether to compute alignment features
         compute_topology: Whether to compute topology features
+        compute_semantic: Whether to compute semantic features (name_soundex, name_metaphone)
+        compute_endpoint: Whether to compute endpoint proximity features
+        compute_lateral: Whether to compute lateral offset features
+        compute_graphlet: Whether to compute graphlet features
         recompute_similarity: If True, also recompute similarity features on aligned sublines
         dry_run: If True, don't write changes
 
@@ -445,6 +488,165 @@ def backfill_dataset(
         if missing_target_topo > 0:
             logger.warning(f"  {missing_target_topo} labels with missing target topology")
 
+    # Compute semantic features (name_soundex, name_metaphone)
+    semantic_features = []
+    if compute_semantic and ref_gdf is not None:
+        logger.info("  Computing semantic features...")
+        # Get name columns
+        ref_name_col = "name" if "name" in ref_gdf.columns else "names"
+        target_name_col = "name" if "name" in target_gdf.columns else "names"
+
+        ref_gdf_reset = ref_gdf.reset_index()
+        ref_name_lookup = {}
+        if ref_name_col in ref_gdf_reset.columns:
+            for _, row in ref_gdf_reset.iterrows():
+                ref_name_lookup[str(row["id"])] = row.get(ref_name_col)
+
+        target_gdf_reset = target_gdf.reset_index()
+        target_name_lookup = {}
+        if target_name_col in target_gdf_reset.columns:
+            for _, row in target_gdf_reset.iterrows():
+                target_name_lookup[str(row["id"])] = row.get(target_name_col)
+
+        for _, row in df.iterrows():
+            gers_id = str(row["gers_id"])
+            target_id = str(row["target_id"])
+
+            ref_name = ref_name_lookup.get(gers_id)
+            target_name = target_name_lookup.get(target_id)
+
+            name_sim = compute_name_similarity(ref_name, target_name)
+            semantic_features.append(
+                {
+                    "name_soundex": name_sim.get("soundex_match", 0.5),
+                    "name_metaphone": name_sim.get("metaphone_similarity", 0.5),
+                }
+            )
+
+        logger.info(f"  Computed semantic features for {len(semantic_features)} pairs")
+
+    # Compute endpoint proximity features
+    endpoint_features = []
+    if compute_endpoint:
+        logger.info("  Computing endpoint proximity features...")
+        # Build spatial index for target
+        target_gdf_reset = target_gdf.reset_index()
+        target_gdf_reset["id"] = target_gdf_reset["id"].astype(str)
+        target_index = SpatialContextIndex()
+        target_index.build_from_gdf(target_gdf_reset, id_column="id")
+
+        # Create index lookup for target
+        target_idx_lookup = {str(row["id"]): idx for idx, row in target_gdf_reset.iterrows()}
+
+        for _, row in df.iterrows():
+            target_id = str(row["target_id"])
+            target_idx = target_idx_lookup.get(target_id)
+
+            if target_idx is not None:
+                target_geom = target_gdf_reset.geometry.iloc[target_idx]
+                if target_geom is not None and not target_geom.is_empty:
+                    ep_feats = compute_endpoint_features(
+                        target_geom, target_index, exclude_segment_idx=target_idx
+                    )
+                    endpoint_features.append(ep_feats)
+                else:
+                    endpoint_features.append(
+                        {
+                            "start_endpoint_proximity": 10000.0,
+                            "end_endpoint_proximity": 10000.0,
+                            "shared_endpoint_count": 0,
+                        }
+                    )
+            else:
+                endpoint_features.append(
+                    {
+                        "start_endpoint_proximity": 10000.0,
+                        "end_endpoint_proximity": 10000.0,
+                        "shared_endpoint_count": 0,
+                    }
+                )
+
+        logger.info(f"  Computed endpoint features for {len(endpoint_features)} pairs")
+
+    # Compute lateral offset features
+    lateral_features = []
+    if compute_lateral and ref_gdf is not None:
+        logger.info("  Computing lateral offset features...")
+        ref_geom_lookup = {str(idx): row.geometry for idx, row in ref_gdf.iterrows()}
+
+        for _, row in df.iterrows():
+            gers_id = str(row["gers_id"])
+            target_id = str(row["target_id"])
+
+            ref_geom = ref_geom_lookup.get(gers_id)
+            target_geom = target_geom_lookup.get(target_id)
+
+            if ref_geom is not None and target_geom is not None:
+                try:
+                    lateral_offset, lateral_consistency = compute_perpendicular_offset(
+                        target_geom, ref_geom
+                    )
+                    lateral_features.append(
+                        {
+                            "lateral_offset": min(lateral_offset, 10000.0),
+                            "lateral_offset_consistency": min(lateral_consistency, 10000.0),
+                        }
+                    )
+                except Exception:
+                    lateral_features.append(
+                        {
+                            "lateral_offset": 10000.0,
+                            "lateral_offset_consistency": 10000.0,
+                        }
+                    )
+            else:
+                lateral_features.append(
+                    {
+                        "lateral_offset": 10000.0,
+                        "lateral_offset_consistency": 10000.0,
+                    }
+                )
+
+        logger.info(f"  Computed lateral features for {len(lateral_features)} pairs")
+
+    # Compute graphlet features
+    graphlet_features = []
+    if compute_graphlet and ref_graphlet_data is not None:
+        logger.info("  Computing graphlet features...")
+        ref_G, ref_seg_to_start, ref_seg_to_end, ref_node_features = ref_graphlet_data
+
+        # Build graphlet data for target
+        target_gdf_reset = target_gdf.reset_index()
+        target_gdf_reset["id"] = target_gdf_reset["id"].astype(str)
+        target_G, target_seg_to_start, target_seg_to_end = build_inferred_graph(
+            target_gdf_reset, id_column="id", tolerance=5.0
+        )
+        target_node_features = compute_road_graphlet_features(target_G)
+
+        for _, row in df.iterrows():
+            gers_id = str(row["gers_id"])
+            target_id = str(row["target_id"])
+
+            try:
+                graphlet_sim = graphlet_segment_similarity(
+                    gers_id,
+                    target_id,
+                    ref_node_features,
+                    target_node_features,
+                    (ref_seg_to_start, ref_seg_to_end),
+                    (target_seg_to_start, target_seg_to_end),
+                )
+                graphlet_features.append(graphlet_sim)
+            except Exception:
+                graphlet_features.append(
+                    {
+                        "graphlet_similarity": 0.5,
+                        "endpoint_degree_similarity": 0.5,
+                    }
+                )
+
+        logger.info(f"  Computed graphlet features for {len(graphlet_features)} pairs")
+
     # Update dataframe with new features
     columns_to_update = []
 
@@ -473,6 +675,46 @@ def backfill_dataset(
 
         df = pd.concat([df, topology_df], axis=1)
 
+    if semantic_features:
+        semantic_df = pd.DataFrame(semantic_features)
+
+        # Drop existing semantic columns
+        for col in SEMANTIC_FEATURE_COLUMNS:
+            if col in df.columns:
+                df = df.drop(columns=[col])
+
+        df = pd.concat([df, semantic_df], axis=1)
+
+    if endpoint_features:
+        endpoint_df = pd.DataFrame(endpoint_features)
+
+        # Drop existing endpoint columns
+        for col in ENDPOINT_FEATURE_COLUMNS:
+            if col in df.columns:
+                df = df.drop(columns=[col])
+
+        df = pd.concat([df, endpoint_df], axis=1)
+
+    if lateral_features:
+        lateral_df = pd.DataFrame(lateral_features)
+
+        # Drop existing lateral columns
+        for col in LATERAL_FEATURE_COLUMNS:
+            if col in df.columns:
+                df = df.drop(columns=[col])
+
+        df = pd.concat([df, lateral_df], axis=1)
+
+    if graphlet_features:
+        graphlet_df = pd.DataFrame(graphlet_features)
+
+        # Drop existing graphlet columns
+        for col in GRAPHLET_FEATURE_COLUMNS:
+            if col in df.columns:
+                df = df.drop(columns=[col])
+
+        df = pd.concat([df, graphlet_df], axis=1)
+
     if not dry_run:
         df.to_csv(label_path, index=False, float_format=lambda x: f"{x:.10g}")
         features_added = []
@@ -480,6 +722,14 @@ def backfill_dataset(
             features_added.append("alignment")
         if compute_topology:
             features_added.append("topology")
+        if compute_semantic:
+            features_added.append("semantic")
+        if compute_endpoint:
+            features_added.append("endpoint")
+        if compute_lateral:
+            features_added.append("lateral")
+        if compute_graphlet:
+            features_added.append("graphlet")
         logger.info(f"  Saved {len(df)} labels with {', '.join(features_added)} features")
     else:
         logger.info(f"  [DRY RUN] Would save {len(df)} labels")
@@ -608,6 +858,19 @@ def main():
             _, ref_topology = load_and_compute_topology(ref_path, ids_to_compute=ref_ids_for_file)
             logger.info(f"Computed topology for {len(ref_topology)} reference segments")
 
+        # Compute graphlet data for reference file
+        ref_graphlet_data = None
+        if ref_gdf is not None:
+            logger.info(f"Computing reference graphlet features from {ref_file}...")
+            ref_gdf_reset = ref_gdf.reset_index()
+            ref_gdf_reset["id"] = ref_gdf_reset["id"].astype(str)
+            ref_G, ref_seg_to_start, ref_seg_to_end = build_inferred_graph(
+                ref_gdf_reset, id_column="id", tolerance=5.0
+            )
+            ref_node_features = compute_road_graphlet_features(ref_G)
+            ref_graphlet_data = (ref_G, ref_seg_to_start, ref_seg_to_end, ref_node_features)
+            logger.info(f"Computed graphlet features for {len(ref_node_features)} reference nodes")
+
         for dataset_name in dataset_names:
             count = backfill_dataset(
                 dataset_name,
@@ -615,8 +878,13 @@ def main():
                 data_dir,
                 ref_gdf=ref_gdf,
                 ref_topology=ref_topology,
+                ref_graphlet_data=ref_graphlet_data,
                 compute_alignment=compute_alignment,
                 compute_topology=compute_topology,
+                compute_semantic=True,
+                compute_endpoint=True,
+                compute_lateral=True,
+                compute_graphlet=True,
                 recompute_similarity=not args.coverage_only,
                 dry_run=args.dry_run,
             )

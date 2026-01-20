@@ -1029,15 +1029,5 @@ def undo_last_label(label_store: LabelStore) -> None:
             st.session_state.session_label_count -= 1
 
 
-def handle_keyboard_shortcuts(
-    pair: CandidatePairView,
-    label_store: LabelStore,
-) -> None:
-    """Handle keyboard shortcuts using a hidden text input."""
-    # This is a workaround since Streamlit doesn't have native keyboard support
-    # Users can focus on this input and use keyboard shortcuts
-    pass  # TODO: Add keyboard shortcut support via custom component or JS
-
-
 if __name__ == "__main__":
     main()

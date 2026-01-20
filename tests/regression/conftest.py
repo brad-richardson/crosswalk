@@ -31,19 +31,20 @@ def trained_matcher(model_path):
 def perfect_match_features():
     """Features representing a near-perfect match.
 
-    Based on real labeled data from fort_collins_streets where
-    segments had near-identical geometry and names.
-    Original confidence: 0.9979
+    Values are in WGS84 degrees (model is trained on degree-based features).
+    Based on real labeled data from boston_streets where best matches have
+    hausdorff_distance ~0.00001 degrees (~1 meter).
     """
     return {
-        # Geometric features (from real labeled match)
-        "hausdorff_distance": 0.17,
-        "mean_hausdorff_distance": 0.1,
-        "buffer_iou": 0.99,
+        # Geometric features (in WGS84 degrees)
+        "hausdorff_distance": 0.000001,  # ~0.1 meter
+        "mean_hausdorff_distance": 0.0000008,
+        "buffer_iou": 0.9999,
         "overlap_ratio": 0.99,
         "heading_delta": 0.1,
         "length_ratio": 0.999,
-        "centroid_distance": 0.07,
+        "centroid_distance": 0.0000005,
+        "collinear_gap_ratio": 0.01,
         # Semantic features (exact name match)
         "name_levenshtein": 1.0,
         "name_jaro_winkler": 1.0,
@@ -51,12 +52,13 @@ def perfect_match_features():
         "name_soundex": 1.0,
         "name_metaphone": 1.0,
         "class_similarity": 1.0,
-        # Connectivity (reasonable defaults)
-        "start_endpoint_proximity": 1.0,
-        "end_endpoint_proximity": 1.0,
+        # Connectivity (in WGS84 degrees)
+        "start_endpoint_proximity": 0.00001,  # ~1 meter
+        "end_endpoint_proximity": 0.00001,
         "shared_endpoint_count": 2,
-        "lateral_offset": 0.5,
-        "lateral_offset_consistency": 0.3,
+        "lateral_offset": 0.00001,
+        "lateral_offset_consistency": 0.000005,
+        "projection_distance": 0.000001,
         # Topology: same pattern
         "from_degree_ref": 3,
         "to_degree_ref": 3,
@@ -70,6 +72,11 @@ def perfect_match_features():
         "is_intersection_ref": 1.0,
         "is_intersection_target": 1.0,
         "intersection_match": 1.0,
+        # Coverage features
+        "ref_coverage": 1.0,
+        "target_coverage": 1.0,
+        "min_coverage": 1.0,
+        "coverage_ratio": 1.0,
     }
 
 
@@ -77,46 +84,51 @@ def perfect_match_features():
 def terrible_match_features():
     """Features representing a clear non-match.
 
-    Based on real labeled data from boston_streets where Brad
-    labeled pairs as no_match. Features show low IoU and
-    completely different names.
-    Original confidence: 0.4935
+    Values are in WGS84 degrees (model is trained on degree-based features).
+    Large distances and poor overlap indicate a clear non-match.
     """
     return {
-        # Geometric features (from real labeled no_match)
-        "hausdorff_distance": 46.0,
-        "mean_hausdorff_distance": 30.0,
-        "buffer_iou": 0.27,
+        # Geometric features (in WGS84 degrees - large distances)
+        "hausdorff_distance": 0.001,  # ~100 meters - very far apart
+        "mean_hausdorff_distance": 0.0008,
+        "buffer_iou": 0.5,  # Low overlap
         "overlap_ratio": 0.3,
-        "heading_delta": 0.5,
+        "heading_delta": 45.0,  # Significantly different heading
         "length_ratio": 0.34,
-        "centroid_distance": 17.0,
+        "centroid_distance": 0.0005,  # ~50 meters apart
+        "collinear_gap_ratio": 0.8,
+        "projection_distance": 0.001,
         # Semantic features (completely different names)
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
         "name_token_sort": 0.0,
         "name_soundex": 0.0,
         "name_metaphone": 0.0,
-        "class_similarity": 0.6,
-        # Connectivity
-        "start_endpoint_proximity": 50.0,
-        "end_endpoint_proximity": 50.0,
+        "class_similarity": 0.3,
+        # Connectivity (far from other segments)
+        "start_endpoint_proximity": 100.0,  # Far from network
+        "end_endpoint_proximity": 100.0,
         "shared_endpoint_count": 0,
-        "lateral_offset": 20.0,
-        "lateral_offset_consistency": 15.0,
+        "lateral_offset": 0.001,  # ~100 meters offset
+        "lateral_offset_consistency": 0.0008,
         # Topology: different patterns
         "from_degree_ref": 3,
         "to_degree_ref": 3,
-        "from_degree_target": 2,
-        "to_degree_target": 4,
-        "degree_match_score": 0.8,
-        "degree_signature_similarity": 0.5,
+        "from_degree_target": 1,
+        "to_degree_target": 1,
+        "degree_match_score": 0.2,
+        "degree_signature_similarity": 0.2,
         "is_dead_end_ref": 0,
-        "is_dead_end_target": 0,
-        "dead_end_match": 1.0,
+        "is_dead_end_target": 1,
+        "dead_end_match": 0.0,
         "is_intersection_ref": 1,
-        "is_intersection_target": 1,
-        "intersection_match": 1.0,
+        "is_intersection_target": 0,
+        "intersection_match": 0.0,
+        # Coverage features
+        "ref_coverage": 0.3,
+        "target_coverage": 0.3,
+        "min_coverage": 0.3,
+        "coverage_ratio": 0.5,
     }
 
 
@@ -124,20 +136,20 @@ def terrible_match_features():
 def borderline_match_features():
     """Features representing a true borderline match case.
 
-    Based on real labeled data from boston_streets where Brad
-    labeled as match despite moderate confidence (0.59).
-    Features show mediocre geometry but partial name match.
-    Original confidence: 0.5908
+    Values are in WGS84 degrees (model is trained on degree-based features).
+    Moderate geometry quality with partial name match - should be in REVIEW range.
     """
     return {
-        # Moderate geometry (from real borderline case)
-        "hausdorff_distance": 24.4,
-        "mean_hausdorff_distance": 15.0,
-        "buffer_iou": 0.30,
-        "overlap_ratio": 0.35,
+        # Moderate geometry (in WGS84 degrees)
+        "hausdorff_distance": 0.0001,  # ~10 meters
+        "mean_hausdorff_distance": 0.00006,
+        "buffer_iou": 0.998,  # Reasonable overlap on aligned sublines
+        "overlap_ratio": 0.7,
         "heading_delta": 3.7,
         "length_ratio": 0.74,
-        "centroid_distance": 20.8,
+        "centroid_distance": 0.00008,
+        "collinear_gap_ratio": 0.3,
+        "projection_distance": 0.0001,
         # Partial name match (similar but not identical)
         "name_levenshtein": 0.64,
         "name_jaro_winkler": 0.86,
@@ -147,13 +159,13 @@ def borderline_match_features():
         # Similar class
         "class_similarity": 0.8,
         # Moderate connectivity
-        "start_endpoint_proximity": 25.0,
+        "start_endpoint_proximity": 25.0,  # Meters (not super close)
         "end_endpoint_proximity": 30.0,
         "shared_endpoint_count": 1,
         # Moderate lateral offset
-        "lateral_offset": 12.0,
-        "lateral_offset_consistency": 8.0,
-        # Mixed topology (from real data)
+        "lateral_offset": 0.0003,  # ~30 meters
+        "lateral_offset_consistency": 0.0002,
+        # Mixed topology
         "from_degree_ref": 3,
         "to_degree_ref": 4,
         "from_degree_target": 2,
@@ -166,4 +178,9 @@ def borderline_match_features():
         "is_intersection_ref": 1,
         "is_intersection_target": 1,
         "intersection_match": 1.0,
+        # Coverage features
+        "ref_coverage": 0.8,
+        "target_coverage": 0.7,
+        "min_coverage": 0.7,
+        "coverage_ratio": 0.85,
     }

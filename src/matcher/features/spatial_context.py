@@ -4,6 +4,7 @@ This module provides spatial indexes and utilities for:
 1. Finding anchor roads for parallel infrastructure (sidewalks, bike lanes)
 2. Inferring endpoint connectivity from proximity
 3. Supporting context propagation across nearby segments
+4. Building road network graphs from spaghetti geometry for graphlet analysis
 
 These features work without requiring explicit topology in the target data,
 making them suitable for raw "spaghetti" line datasets.
@@ -11,12 +12,16 @@ making them suitable for raw "spaghetti" line datasets.
 
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
 from loguru import logger
 from shapely import LineString, MultiLineString, Point
 from shapely.strtree import STRtree
+
+if TYPE_CHECKING:
+    import networkx as nx
 
 from .relational import (
     compute_parallel_alignment,
@@ -956,3 +961,298 @@ def compute_degree_signature_similarity(
     union = sum((counter_a | counter_b).values())
 
     return intersection / union if union > 0 else 0.0
+
+
+def build_inferred_graph(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    tolerance: float = 5.0,
+) -> tuple["nx.Graph", dict[str, int], dict[str, int]]:
+    """Build NetworkX graph from spaghetti geometry using endpoint clustering.
+
+    Uses Union-Find clustering to infer nodes from endpoint proximity.
+    Each endpoint cluster becomes a node in the graph, and each segment
+    becomes an edge connecting its endpoint clusters.
+
+    This is essential for computing graphlet features on road networks
+    where explicit topology is not available.
+
+    Args:
+        gdf: GeoDataFrame with LineString geometries
+        id_column: Column name for segment IDs
+        tolerance: Distance within which endpoints are considered connected (meters)
+
+    Returns:
+        G: NetworkX graph where nodes=endpoint clusters, edges=segments
+        seg_to_start_node: Maps segment ID -> start node cluster ID
+        seg_to_end_node: Maps segment ID -> end node cluster ID
+    """
+    import networkx as nx
+
+    if gdf.empty:
+        return nx.Graph(), {}, {}
+
+    t_start = time.perf_counter()
+    logger.info(f"[graphlet] Building inferred graph from {len(gdf)} segments")
+
+    # Project to local CRS if in geographic coordinates
+    work_gdf = gdf
+    if gdf.crs is not None and gdf.crs.is_geographic:
+        centroid = gdf.geometry.union_all().centroid
+        utm_zone = int((centroid.x + 180) / 6) + 1
+        hemisphere = "north" if centroid.y >= 0 else "south"
+        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+        work_gdf = gdf.to_crs(epsg=epsg)
+        logger.debug(f"[graphlet] Projected to EPSG:{epsg}")
+
+    # Step 1: Extract endpoints
+    endpoint_coords = []
+    endpoint_segment_ids = []
+    endpoint_is_start = []
+
+    for _, row in work_gdf.iterrows():
+        seg_id = str(row[id_column])
+        geom = row.geometry
+
+        if geom is None or geom.is_empty:
+            continue
+
+        if geom.geom_type == "MultiLineString":
+            if len(geom.geoms) == 0:
+                continue
+            start_coords = geom.geoms[0].coords[0]
+            end_coords = geom.geoms[-1].coords[-1]
+        else:
+            coords = list(geom.coords)
+            start_coords = coords[0]
+            end_coords = coords[-1]
+
+        endpoint_coords.append(start_coords)
+        endpoint_segment_ids.append(seg_id)
+        endpoint_is_start.append(True)
+
+        endpoint_coords.append(end_coords)
+        endpoint_segment_ids.append(seg_id)
+        endpoint_is_start.append(False)
+
+    if not endpoint_coords:
+        return nx.Graph(), {}, {}
+
+    n_endpoints = len(endpoint_coords)
+    logger.debug(f"[graphlet] Extracted {n_endpoints} endpoints")
+
+    # Step 2: Build STRtree and cluster with Union-Find
+    endpoint_points = [Point(c) for c in endpoint_coords]
+    tree = STRtree(endpoint_points)
+    uf = UnionFind(n_endpoints)
+
+    for i, point in enumerate(endpoint_points):
+        nearby = tree.query(point, predicate="dwithin", distance=tolerance)
+        for j in nearby:
+            if i != j:
+                uf.union(i, j)
+
+    # Step 3: Build graph
+    G = nx.Graph()
+    seg_to_start_node: dict[str, int] = {}
+    seg_to_end_node: dict[str, int] = {}
+
+    for ep_idx in range(n_endpoints):
+        seg_id = endpoint_segment_ids[ep_idx]
+        is_start = endpoint_is_start[ep_idx]
+        node_id = uf.find(ep_idx)
+
+        G.add_node(node_id)
+        if is_start:
+            seg_to_start_node[seg_id] = node_id
+        else:
+            seg_to_end_node[seg_id] = node_id
+
+    # Add edges (segments connect their endpoint clusters)
+    for seg_id in seg_to_start_node:
+        start_node = seg_to_start_node[seg_id]
+        end_node = seg_to_end_node.get(seg_id)
+        if end_node is not None and start_node != end_node:
+            G.add_edge(start_node, end_node, segment_id=seg_id)
+
+    logger.info(
+        f"[graphlet] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"in {time.perf_counter() - t_start:.2f}s"
+    )
+
+    return G, seg_to_start_node, seg_to_end_node
+
+
+def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
+    """Compute simplified graphlet features optimized for road networks.
+
+    Uses pure NetworkX - no external dependencies.
+    Returns a 6-dimensional feature vector per node:
+    - degree: Number of edges at node (1-4 typical for roads)
+    - triangles: Count of 3-cycles through node (rare in roads)
+    - squares: Count of 4-cycles through node (common in grid cities)
+    - clustering: Local clustering coefficient (low for roads)
+    - two_hop_count: Nodes reachable in 2 hops (distinguishes grid vs tree)
+    - is_articulation: Whether removal disconnects graph (bridge intersections)
+
+    Args:
+        G: NetworkX graph from build_inferred_graph()
+
+    Returns:
+        Dictionary mapping node_id -> 6-dimensional numpy array of features
+    """
+    import networkx as nx
+
+    if G.number_of_nodes() == 0:
+        return {}
+
+    t_start = time.perf_counter()
+    features: dict[int, np.ndarray] = {}
+
+    # Pre-compute graph-wide properties
+    triangles = nx.triangles(G)
+    clustering = nx.clustering(G)
+
+    # Articulation points only make sense for connected graphs
+    try:
+        if nx.is_connected(G):
+            articulation_points = set(nx.articulation_points(G))
+        else:
+            # For disconnected graphs, compute articulation points per component
+            articulation_points = set()
+            for component in nx.connected_components(G):
+                subgraph = G.subgraph(component)
+                if subgraph.number_of_nodes() > 2:
+                    articulation_points.update(nx.articulation_points(subgraph))
+    except nx.NetworkXError:
+        articulation_points = set()
+
+    for node in G.nodes():
+        degree = G.degree(node)
+        neighbors = set(G.neighbors(node))
+
+        # Count 4-cycles (squares) through this node
+        # A square exists if two neighbors share a common neighbor (not this node)
+        square_count = 0
+        neighbor_list = list(neighbors)
+        for i, n1 in enumerate(neighbor_list):
+            for n2 in neighbor_list[i + 1 :]:
+                # Check if n1 and n2 share a neighbor other than node
+                common = set(G.neighbors(n1)) & set(G.neighbors(n2)) - {node}
+                square_count += len(common)
+
+        # Two-hop neighbors (excluding direct neighbors and self)
+        two_hop = set()
+        for neighbor in neighbors:
+            two_hop.update(G.neighbors(neighbor))
+        two_hop -= neighbors
+        two_hop.discard(node)
+
+        features[node] = np.array(
+            [
+                degree,
+                triangles.get(node, 0),
+                square_count,
+                clustering.get(node, 0.0),
+                len(two_hop),
+                1.0 if node in articulation_points else 0.0,
+            ]
+        )
+
+    logger.debug(
+        f"[graphlet] Computed features for {len(features)} nodes in {time.perf_counter() - t_start:.2f}s"
+    )
+
+    return features
+
+
+def graphlet_segment_similarity(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_features: dict[int, np.ndarray],
+    target_features: dict[int, np.ndarray],
+    ref_seg_to_nodes: tuple[dict[str, int], dict[str, int]],
+    target_seg_to_nodes: tuple[dict[str, int], dict[str, int]],
+) -> dict[str, float]:
+    """Compare graphlet features at segment endpoints.
+
+    Computes similarity between the graphlet features at the endpoints
+    of a reference segment and a target segment. Handles segment orientation
+    by trying both forward and reverse alignments.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_features: Graphlet features for reference graph nodes
+        target_features: Graphlet features for target graph nodes
+        ref_seg_to_nodes: Tuple of (start_node_map, end_node_map) for reference
+        target_seg_to_nodes: Tuple of (start_node_map, end_node_map) for target
+
+    Returns:
+        Dictionary with:
+        - graphlet_similarity: Overall endpoint feature similarity (best orientation)
+        - endpoint_degree_similarity: Degree match at endpoints (most discriminative)
+    """
+    # Get node IDs for segment endpoints
+    ref_start = ref_seg_to_nodes[0].get(ref_seg_id)
+    ref_end = ref_seg_to_nodes[1].get(ref_seg_id)
+    target_start = target_seg_to_nodes[0].get(target_seg_id)
+    target_end = target_seg_to_nodes[1].get(target_seg_id)
+
+    # Default feature vector: [degree=1, triangles=0, squares=0, clustering=0, two_hop=0, is_articulation=0]
+    default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    ref_start_f = ref_features.get(ref_start, default) if ref_start is not None else default
+    ref_end_f = ref_features.get(ref_end, default) if ref_end is not None else default
+    target_start_f = (
+        target_features.get(target_start, default) if target_start is not None else default
+    )
+    target_end_f = target_features.get(target_end, default) if target_end is not None else default
+
+    def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
+        """Compute normalized similarity between two feature vectors."""
+        # Per-feature comparison with appropriate normalization
+        # [degree, triangles, squares, clustering, two_hop, is_articulation]
+        diff = np.abs(a - b)
+        # Normalize each feature to [0, 1] range:
+        # - degree: by 10 (typical road intersections have degree 1-4)
+        # - triangles: by 10 (rare in roads, small values significant)
+        # - squares: by 50 (more common in grid cities)
+        # - clustering: already 0-1
+        # - two_hop: by 50 (varies by network density)
+        # - is_articulation: already 0/1
+        norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
+        normalized = 1.0 - np.clip(diff / norms, 0, 1)
+        return float(normalized.mean())
+
+    # Try both orientations
+    fwd = (
+        feature_similarity(ref_start_f, target_start_f)
+        + feature_similarity(ref_end_f, target_end_f)
+    ) / 2
+    rev = (
+        feature_similarity(ref_start_f, target_end_f)
+        + feature_similarity(ref_end_f, target_start_f)
+    ) / 2
+
+    # Also compare degree specifically (most discriminative for roads)
+    # Average degree match at both endpoints for consistency with graphlet_similarity
+    degree_fwd = (
+        1.0
+        - abs(ref_start_f[0] - target_start_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_end_f[0]) / 10.0
+    ) / 2.0
+    degree_fwd = max(0.0, min(1.0, degree_fwd))  # Clamp to [0, 1]
+    degree_rev = (
+        1.0
+        - abs(ref_start_f[0] - target_end_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_start_f[0]) / 10.0
+    ) / 2.0
+    degree_rev = max(0.0, min(1.0, degree_rev))
+
+    return {
+        "graphlet_similarity": max(fwd, rev),
+        "endpoint_degree_similarity": max(degree_fwd, degree_rev),
+    }

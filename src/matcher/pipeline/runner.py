@@ -45,7 +45,7 @@ def run_pipeline(
     min_confidence: float = 0.1,  # Lower = more aggressive matching
     progress_callback: Callable[[int], None] | None = None,
     ref_id_column: str = "id",
-    target_id_column: str = "local_id",
+    target_id_column: str = "id",
     ref_name_column: str = "name",
     target_name_column: str = "name",
     ref_class_column: str = "class",
@@ -119,15 +119,8 @@ def run_pipeline(
         logger.info(f"  Reprojecting target from {target.crs} to {reference.crs}")
         target = target.to_crs(reference.crs)
 
-    # Convert to projected CRS if needed for accurate distance calculations
-    if reference.crs and reference.crs.is_geographic:
-        # Estimate UTM zone from centroid
-        centroid = reference.unary_union.centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        utm_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
-        logger.info(f"  Reprojecting to {utm_crs} for metric calculations")
-        reference = reference.to_crs(utm_crs)
-        target = target.to_crs(utm_crs)
+    # Note: We keep data in WGS84 for feature computation consistency with training labels.
+    # generate_candidates() handles projection internally for accurate buffer distances.
 
     if progress_callback:
         progress_callback(20)

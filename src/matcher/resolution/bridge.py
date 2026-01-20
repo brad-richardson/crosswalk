@@ -68,7 +68,7 @@ def generate_bridge_file(
                 "local_id": str(match.target_id),
                 "gers_id": str(match.ref_id),
                 "confidence": float(match.confidence),
-                "match_type": "1:1",  # TODO: Support 1:N matches
+                "match_type": match.features.get("match_type", "1:1"),
                 "match_method": match_method,
                 "match_decision": match.decision.value,
                 "matched_at": now,
