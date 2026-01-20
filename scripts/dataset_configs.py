@@ -81,6 +81,7 @@ BOSTON_DATASETS = [
     {
         "name": "boston_streets",
         "url": "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0",
+        "portal_url": "https://data.boston.gov/dataset/city-of-boston-managed-streets",
         "id_prefix": "boston_streets",
         "name_column": "STREETNAME",
         "class_column": "CLASS",
@@ -88,10 +89,13 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Managed Streets",
         "description": "Street centerlines with MassDOT functional classification",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",  # WGS84
     },
     {
         "name": "boston_sidewalks",
         "url": "https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5",
+        "portal_url": "https://data.boston.gov/dataset/sidewalk-centerline",
         "id_prefix": "boston_sidewalk",
         "name_column": None,  # Sidewalks unnamed
         "class_column": "TYPE",
@@ -101,10 +105,13 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Sidewalk Centerlines",
         "description": "Sidewalk and crosswalk centerlines",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",
     },
     {
         "name": "boston_bike_network",
         "url": "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/Boston_Bicycle_Network_2024/FeatureServer/0",
+        "portal_url": "https://data.boston.gov/dataset/existing-bike-network-2024",
         "id_prefix": "boston_bike",
         "name_column": "STREET_NAM",
         "class_column": "ExisFacil",
@@ -112,6 +119,8 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Bicycle Network 2024",
         "description": "Bike lanes, paths, and shared facilities",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",
     },
 ]
 
@@ -368,10 +377,266 @@ UTAH_SALT_LAKE_DATASETS = [
 
 
 # =============================================================================
+# Cape Town, South Africa
+# =============================================================================
+# Source: https://odp-cctegis.opendata.arcgis.com/
+# ArcGIS Hub portal with road centerlines
+
+CAPE_TOWN_DATASETS = [
+    {
+        "name": "cape_town_roads",
+        # City of Cape Town TCT Road Centerline dataset
+        # Portal: https://odp-cctegis.opendata.arcgis.com/datasets/cctegis::tct-road-centerline
+        # Note: Requires manual download - endpoint access issues from servers
+        "url": None,
+        "fetch_type": "manual",
+        "portal_url": "https://odp-cctegis.opendata.arcgis.com/datasets/cctegis::tct-road-centerline",
+        "id_prefix": "ct_road",
+        "name_column": "STR_NAME",
+        "class_column": None,  # Will use discover-classes
+        "class_mapping": None,
+        "source_name": "City of Cape Town Road Centrelines",
+        "description": "Road centerlines - requires manual download from portal",
+        "bbox": (18.30, -34.10, 18.65, -33.85),
+        "notes": "Download from portal and place in data/raw/",
+    },
+]
+
+
+# =============================================================================
+# Bogotá, Colombia
+# =============================================================================
+# Source: https://www.ideca.gov.co/ and https://serviciosgis.catastrobogota.gov.co/
+# ArcGIS MapServer with road network (Malla Vial)
+
+# MVITCLA classification mapping (numeric codes for road types)
+# Based on Bogotá road classification system
+BOGOTA_MALLA_VIAL_TYPE_MAPPING = {
+    1: "primary",  # Malla vial arterial principal
+    2: "secondary",  # Malla vial arterial complementaria
+    3: "tertiary",  # Malla vial intermedia
+    4: "residential",  # Malla vial local
+    5: "unclassified",  # Malla vial rural
+    6: "pedestrian",  # Malla vial peatonal
+    7: "unclassified",  # Other
+}
+
+BOGOTA_DATASETS = [
+    {
+        "name": "bogota_roads",
+        "url": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/13",
+        "id_prefix": "bog_road",
+        "name_column": "MVINPRINCI",  # Principal name (e.g., "006ABISA00")
+        "class_column": "MVITCLA",  # Numeric class code (1-7)
+        "class_mapping": BOGOTA_MALLA_VIAL_TYPE_MAPPING,
+        "source_name": "IDECA Bogotá Malla Vial",
+        "description": "Road network from Bogotá cadastre GIS (Malla Vial)",
+        "bbox": (-74.25, 4.45, -73.95, 4.85),  # Bogotá bbox
+    },
+    {
+        "name": "bogota_sidewalks",
+        "url": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/16",
+        "id_prefix": "bog_sidewalk",
+        "name_column": None,  # Sidewalks typically unnamed
+        "class_column": None,
+        "class_mapping": None,
+        "source_name": "IDECA Bogotá Andenes",
+        "description": "Sidewalks (andenes) from Bogotá cadastre GIS",
+        "bbox": (-74.25, 4.45, -73.95, 4.85),
+    },
+    {
+        "name": "bogota_bike_network",
+        "url": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/18",
+        "id_prefix": "bog_bike",
+        "name_column": None,
+        "class_column": None,
+        "class_mapping": None,
+        "source_name": "IDECA Bogotá Ciclorutas",
+        "description": "Bike paths (ciclorutas) from Bogotá cadastre GIS",
+        "bbox": (-74.25, 4.45, -73.95, 4.85),
+    },
+]
+
+
+# =============================================================================
+# Buenos Aires, Argentina
+# =============================================================================
+# Source: https://data.buenosaires.gob.ar/dataset/calles
+# GeoJSON download from city open data portal
+
+BUENOS_AIRES_DATASETS = [
+    {
+        "name": "buenos_aires_streets",
+        # Buenos Aires open data portal - requires manual download
+        # Portal: https://data.buenosaires.gob.ar/dataset/calles
+        # GeoJSON: https://data.buenosaires.gob.ar/dataset/calles/resource/2941f731-0a2e-4391-b8c9-a2912a80c081
+        "url": "https://data.buenosaires.gob.ar/dataset/calles",  # Portal URL for reference
+        "fetch_type": "manual",  # Requires manual download - portal blocks programmatic access
+        "id_prefix": "ba_street",
+        "name_column": "nombre",  # Street name in Spanish
+        "class_column": "tipo",  # Street type
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "Buenos Aires Calles",
+        "description": "Street centerlines - requires manual download from portal",
+        "bbox": (-58.55, -34.75, -58.30, -34.50),  # Buenos Aires bbox
+        "portal_url": "https://data.buenosaires.gob.ar/dataset/calles",  # Manual download portal
+        "notes": "Portal blocks programmatic access. Download GeoJSON manually.",
+    },
+]
+
+
+# =============================================================================
+# Amsterdam, Netherlands
+# =============================================================================
+# Source: https://maps.amsterdam.nl/open_geodata/
+# Also: https://geodata.nationaalgeoregister.nl/nwbwegen/wfs (national road database)
+
+AMSTERDAM_DATASETS = [
+    {
+        "name": "amsterdam_roads",
+        # PDOK NWB GeoPackage - full Dutch road network (1.3GB, 1.1M segments)
+        # Source: https://www.pdok.nl/atom-downloadservices/-/article/nationaal-wegen-bestand-nwb-wegen
+        "url": "https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg",
+        "fetch_type": "download",
+        "file_format": "gpkg",
+        "id_prefix": "ams_road",
+        "name_column": "stt_naam",  # Street name
+        "class_column": "wegbehsrt",  # Road manager type (R=national, P=province, G=municipality, W=water)
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "PDOK NWB Wegen",
+        "description": "Road segments from Dutch National Road Database (NWB) - filtered to Amsterdam",
+        "bbox": (4.75, 52.30, 5.00, 52.45),  # Amsterdam bbox (WGS84)
+        "bbox_filter": True,  # Apply bbox filter after loading
+    },
+]
+
+
+# =============================================================================
+# Helsinki, Finland
+# =============================================================================
+# Source: https://vayla.fi/en/transport-network/data/digiroad/data
+# Digiroad national road and street database - download as GeoPackage
+
+HELSINKI_DATASETS = [
+    {
+        "name": "helsinki_roads",
+        # Digiroad download - K format (pre-segmented for GIS use)
+        "url": "https://ava.vaylapilvi.fi/ava/Tie/Digiroad/Aineistojulkaisut/latest/DIGIROAD_K_KOKOMAA.gpkg.zip",
+        "fetch_type": "download",  # Signal to download and extract
+        "file_format": "gpkg",
+        "id_prefix": "hel_road",
+        "name_column": "TIENIMI_SU",  # Finnish road name
+        "class_column": "TOIMINN_LK",  # Functional class
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "Digiroad Finland",
+        "description": "Road network from Finnish national Digiroad database",
+        "bbox": (24.80, 60.10, 25.20, 60.30),  # Helsinki bbox
+        "bbox_filter": True,  # Apply bbox filter after loading
+    },
+]
+
+
+# =============================================================================
+# Singapore
+# =============================================================================
+# Source: https://datamall.lta.gov.sg/content/datamall/en/static-data.html
+# LTA DataMall static datasets (requires free API key registration)
+
+SINGAPORE_DATASETS = [
+    {
+        "name": "singapore_roads",
+        # LTA static data download URL (requires API key header)
+        "url": "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip",
+        "fetch_type": "download",
+        "file_format": "shp",
+        "id_prefix": "sg_road",
+        "name_column": "RD_NAME",  # Road name
+        "class_column": "RD_TYPE",  # Road type
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "LTA Singapore Roads",
+        "description": "Road section lines from Singapore LTA DataMall",
+        "bbox": (103.60, 1.20, 104.05, 1.50),  # Singapore bbox
+        "api_key_required": True,  # Note: needs LTA API key
+        "api_key_env_var": "LTA_API_KEY",  # Shared env var for all Singapore datasets
+        "api_key_header": "AccountKey",
+    },
+    {
+        "name": "singapore_footpaths",
+        "url": "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/Footpath.zip",
+        "fetch_type": "download",
+        "file_format": "shp",
+        "id_prefix": "sg_footpath",
+        "name_column": None,
+        "class_column": None,
+        "class_mapping": None,
+        "source_name": "LTA Singapore Footpaths",
+        "description": "Footpaths from Singapore LTA DataMall",
+        "bbox": (103.60, 1.20, 104.05, 1.50),
+        "api_key_required": True,
+        "api_key_env_var": "LTA_API_KEY",  # Shared env var for all Singapore datasets
+        "api_key_header": "AccountKey",
+    },
+]
+
+
+# =============================================================================
+# Seoul, South Korea
+# =============================================================================
+# Source: https://data.seoul.go.kr (Seoul Open Data Plaza)
+# Road centerlines - Korean portal
+
+SEOUL_DATASETS = [
+    {
+        "name": "seoul_roads",
+        # Seoul Open Data - road centerlines (도로중심선)
+        # Portal: https://data.seoul.go.kr/dataList/OA-164/S/1/datasetView.do
+        # Note: Portal is primarily in Korean; requires manual download
+        "url": None,
+        "fetch_type": "manual",
+        "portal_url": "https://data.seoul.go.kr/dataList/OA-164/S/1/datasetView.do",
+        "id_prefix": "seoul_road",
+        "name_column": "ROAD_NAME",  # May vary based on actual schema
+        "class_column": "ROAD_TYPE",  # May vary
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "Seoul Open Data Roads",
+        "description": "Road centerlines - requires manual download from Korean portal",
+        "bbox": (126.75, 37.40, 127.20, 37.70),  # Seoul bbox
+        "notes": "Korean portal - download shapefile manually and place in data/raw/",
+    },
+]
+
+
+# =============================================================================
+# Kenya
+# =============================================================================
+# Source: https://energydata.info/dataset/kenya-roads-1
+# Official Kenya Roads Board (KRB) data from 2023
+
+KENYA_DATASETS = [
+    {
+        "name": "kenya_roads",
+        # Kenya Roads Board (KRB) official data via energydata.info
+        # Source: https://energydata.info/dataset/kenya-roads-1
+        # License: CC-BY 4.0
+        "url": "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip",
+        "fetch_type": "download",
+        "file_format": "shp",
+        "id_prefix": "ken_road",
+        "name_column": "ROADNAME",  # Road name from KRB
+        "class_column": "CLASS",  # Road classification
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "Kenya Roads Board (KRB)",
+        "description": "Official Kenya road network from Kenya Roads Board (2023)",
+        "bbox": (33.90, -4.70, 41.90, 4.63),  # Kenya bbox
+    },
+]
+
+
+# =============================================================================
 # All datasets for bulk operations
 # =============================================================================
 ALL_DATASETS = {
-    # Active datasets with fetch scripts
+    # Active datasets with fetch scripts (US cities)
     "boston": BOSTON_DATASETS,
     "fort_collins": FORT_COLLINS_DATASETS,
     "frisco": FRISCO_DATASETS,
@@ -381,4 +646,35 @@ ALL_DATASETS = {
     # Future datasets (configurations only, no fetch scripts yet)
     "ada_county": ADA_COUNTY_DATASETS,
     "utah_trails": UTAH_TRAILS_DATASETS,
+    # International cities
+    "cape_town": CAPE_TOWN_DATASETS,
+    "bogota": BOGOTA_DATASETS,
+    "buenos_aires": BUENOS_AIRES_DATASETS,
+    "amsterdam": AMSTERDAM_DATASETS,
+    "helsinki": HELSINKI_DATASETS,
+    "singapore": SINGAPORE_DATASETS,
+    "seoul": SEOUL_DATASETS,
+    "kenya": KENYA_DATASETS,
+}
+
+
+# =============================================================================
+# City bounding boxes (for Overture reference data fetch)
+# =============================================================================
+CITY_BBOXES = {
+    # US cities
+    "boston": (-71.19, 42.21, -70.92, 42.40),
+    "fort_collins": (-105.15, 40.45, -104.95, 40.65),
+    "frisco": (-96.90, 33.10, -96.75, 33.20),
+    "salt_lake_city": (-112.05, 40.70, -111.80, 40.85),
+    "fresno": (-119.95, 36.65, -119.65, 36.90),
+    # International cities
+    "cape_town": (18.30, -34.10, 18.65, -33.85),
+    "bogota": (-74.25, 4.45, -73.95, 4.85),
+    "buenos_aires": (-58.55, -34.75, -58.30, -34.50),
+    "amsterdam": (4.75, 52.30, 5.00, 52.45),
+    "helsinki": (24.80, 60.10, 25.20, 60.30),
+    "singapore": (103.60, 1.20, 104.05, 1.50),
+    "seoul": (126.75, 37.40, 127.20, 37.70),
+    "kenya": (33.90, -4.70, 41.90, 4.63),
 }

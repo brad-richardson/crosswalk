@@ -4,8 +4,6 @@ Functions to create reduced reference datasets by dropping segments
 based on various strategies (random, bbox, source, class).
 """
 
-from typing import Optional
-
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -231,7 +229,7 @@ def drop_by_source(
 def drop_by_class(
     overture: gpd.GeoDataFrame,
     road_class: str,
-    source_dataset: Optional[str] = None,
+    source_dataset: str | None = None,
 ) -> tuple[gpd.GeoDataFrame, set[str]]:
     """Drop segments of a specific road class.
 

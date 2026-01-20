@@ -18,6 +18,7 @@ from loguru import logger
 from shapely.geometry import box, shape
 
 from ..config import settings
+from .osm_pbf import HIGHWAY_VALUES
 from .overture import BoundingBox
 
 GEOFABRIK_INDEX_URL = "https://download.geofabrik.de/index-v1.json"
@@ -266,35 +267,6 @@ def _extract_bbox_pyosmium(
 
     logger.info(f"Extracting bbox from {input_pbf.name} using pyosmium...")
     logger.warning("pyosmium extraction is slower than osmium CLI for large files")
-
-    # Highway values to include
-    HIGHWAY_VALUES = {
-        "motorway",
-        "trunk",
-        "primary",
-        "secondary",
-        "tertiary",
-        "motorway_link",
-        "trunk_link",
-        "primary_link",
-        "secondary_link",
-        "tertiary_link",
-        "residential",
-        "unclassified",
-        "service",
-        "living_street",
-        "road",
-        "footway",
-        "path",
-        "cycleway",
-        "steps",
-        "pedestrian",
-        "bridleway",
-        "track",
-        "construction",
-        "proposed",
-        "abandoned",
-    }
 
     class DirectExtractHandler(osmium.SimpleHandler):
         """Handler that extracts roads directly from PBF."""
