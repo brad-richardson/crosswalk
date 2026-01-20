@@ -57,8 +57,8 @@ logs/
 # Trained models (derived from labels)
 models/
 
-# Validation outputs
-validation/
+# Validation outputs (root level only, not src/matcher/validation/)
+/validation/
 
 # Agent labeling raw outputs (keep only processed CSVs)
 agent_labels/**/raw_output.txt
