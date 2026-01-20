@@ -7,7 +7,6 @@ run matcher, evaluate results.
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 import geopandas as gpd
 import pandas as pd
@@ -36,7 +35,7 @@ class ExperimentConfig:
     matcher_method: str = "rule"
     # Strategy-specific parameters
     fraction: float = 0.1  # For "random" strategy
-    drop_bbox: Optional[tuple[float, float, float, float]] = None  # For "bbox" strategy
+    drop_bbox: tuple[float, float, float, float] | None = None  # For "bbox" strategy
     source_dataset: str = "TomTom"  # For "source" strategy
     road_class: str = "residential"  # For "class" strategy
     seed: int = 42
@@ -66,7 +65,7 @@ def run_validation_experiment(
     strategy: str = "random",
     matcher_method: str = "rule",
     fraction: float = 0.1,
-    drop_bbox: Optional[tuple[float, float, float, float]] = None,
+    drop_bbox: tuple[float, float, float, float] | None = None,
     source_dataset: str = "TomTom",
     road_class: str = "residential",
     seed: int = 42,
