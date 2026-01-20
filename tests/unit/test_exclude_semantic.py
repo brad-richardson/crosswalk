@@ -43,9 +43,8 @@ class TestExcludeSemanticFlag:
         assert "from_degree_ref" in filtered
         assert "degree_match_score" in filtered
 
-        # Graphlet features should still be present
-        assert "graphlet_similarity" in filtered
-        assert "endpoint_degree_similarity" in filtered
+        # Note: Graphlet features are not in FEATURE_COLUMNS
+        # (computed in backfill only, not in real-time scoring)
 
     @pytest.mark.parametrize(
         "feature_category,expected_features",
@@ -111,10 +110,7 @@ class TestExcludeSemanticFlag:
                 "coverage",
                 ["ref_coverage", "target_coverage", "min_coverage", "coverage_ratio"],
             ),
-            (
-                "graphlet",
-                ["graphlet_similarity", "endpoint_degree_similarity"],
-            ),
+            # Note: Graphlet features are computed in backfill only, not in real-time scoring
         ],
     )
     def test_feature_category_presence(self, feature_category, expected_features):
@@ -177,14 +173,10 @@ class TestExcludeSemanticFlag:
         coverage_count = sum(1 for f in geom_only_features if "coverage" in f)
         assert coverage_count == 4, "Should have 4 coverage features"
 
-        graphlet_count = sum(
-            1
-            for f in geom_only_features
-            if f in ["graphlet_similarity", "endpoint_degree_similarity"]
-        )
-        assert graphlet_count == 2, "Should have 2 graphlet features"
+        # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
+        # are computed in backfill only, not in real-time scoring pipeline
 
-        # Total geometry-only features: 9 + 3 + 2 + 12 + 4 + 2 = 32
-        assert len(geom_only_features) == 32, (
-            f"Expected 32 geometry-only features, got {len(geom_only_features)}"
+        # Total geometry-only features: 9 + 3 + 2 + 12 + 4 = 30
+        assert len(geom_only_features) == 30, (
+            f"Expected 30 geometry-only features, got {len(geom_only_features)}"
         )

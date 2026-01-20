@@ -49,7 +49,6 @@ def compute_pair_features(
     ref_topology: dict[str, Any] | None = None,
     target_topology: dict[str, Any] | None = None,
     alignment: AlignmentResult | None = None,
-    graphlet_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -69,7 +68,6 @@ def compute_pair_features(
         ref_topology: Pre-computed topology features for reference (optional)
         target_topology: Pre-computed topology features for target (optional)
         alignment: Pre-computed alignment result for using aligned sublines (optional)
-        graphlet_features: Pre-computed graphlet similarity features (optional)
 
     Returns:
         Dictionary of feature name -> value
@@ -197,11 +195,9 @@ def compute_pair_features(
             "target_coverage": coverage_feats["target_coverage"],
             "min_coverage": coverage_feats["min_coverage"],
             "coverage_ratio": coverage_feats["coverage_ratio"],
-            # Graphlet features
-            "graphlet_similarity": (graphlet_features or {}).get("graphlet_similarity", 0.5),
-            "endpoint_degree_similarity": (graphlet_features or {}).get(
-                "endpoint_degree_similarity", 0.5
-            ),
+            # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
+            # are computed separately in backfill_features.py for training labels only.
+            # They are not used in real-time scoring pipeline.
         }
 
     except Exception as e:
@@ -250,9 +246,6 @@ def _get_error_features() -> dict[str, float]:
         "target_coverage": 0.0,
         "min_coverage": 0.0,
         "coverage_ratio": 0.0,
-        # Graphlet features - neutral values for error case
-        "graphlet_similarity": 0.5,
-        "endpoint_degree_similarity": 0.5,
     }
 
 

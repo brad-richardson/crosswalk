@@ -176,10 +176,12 @@ def _compute_single_feature(args):
             "name_soundex": name_sim.get("soundex_match", 0.5),
             "name_metaphone": name_sim.get("metaphone_similarity", 0.5),
             "class_similarity": class_sim,
-            "start_endpoint_proximity": target_ep.get(
-                "start_endpoint_proximity", MAX_DISTANCE_METERS
+            "start_endpoint_proximity": min(
+                target_ep.get("start_endpoint_proximity", MAX_DISTANCE_METERS), MAX_DISTANCE_METERS
             ),
-            "end_endpoint_proximity": target_ep.get("end_endpoint_proximity", MAX_DISTANCE_METERS),
+            "end_endpoint_proximity": min(
+                target_ep.get("end_endpoint_proximity", MAX_DISTANCE_METERS), MAX_DISTANCE_METERS
+            ),
             "shared_endpoint_count": target_ep.get("shared_endpoint_count", 0),
             "lateral_offset": min(lateral_offset, MAX_DISTANCE_METERS),
             "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
