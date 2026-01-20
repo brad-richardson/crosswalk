@@ -79,7 +79,7 @@ class DatasetRegistry:
     def _save(self) -> None:
         """Save registry to CSV."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.df.to_csv(self.path, index=False)
+        self.df.to_csv(self.path, index=False, float_format=lambda x: f"{x:.10g}")
 
     def get(self, dataset_id: str) -> Dataset | None:
         """Get dataset by ID."""
@@ -125,3 +125,33 @@ class DatasetRegistry:
         )
         self.add(dataset)
         return dataset
+
+    def get_crs(self, dataset_id: str) -> str | None:
+        """Get CRS for a dataset from its metadata.
+
+        Args:
+            dataset_id: Dataset identifier
+
+        Returns:
+            CRS string (e.g., "EPSG:4326") or None if not set
+        """
+        dataset = self.get(dataset_id)
+        if dataset is None:
+            return None
+        return dataset.metadata.get("crs")
+
+    def set_crs(self, dataset_id: str, crs: str) -> None:
+        """Set CRS for a dataset in its metadata.
+
+        Args:
+            dataset_id: Dataset identifier
+            crs: CRS string (e.g., "EPSG:4326")
+
+        Raises:
+            ValueError: If dataset doesn't exist
+        """
+        dataset = self.get(dataset_id)
+        if dataset is None:
+            raise ValueError(f"Dataset {dataset_id} does not exist")
+        dataset.metadata["crs"] = crs
+        self.update(dataset)

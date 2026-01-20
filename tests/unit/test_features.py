@@ -481,3 +481,125 @@ class TestTrafficTierClassSimilarity:
         """Class similarity should use traffic tier penalties for cross-tier comparisons."""
         result = compute_class_similarity(class_a, class_b)
         assert result == pytest.approx(expected, abs=0.05)
+
+
+class TestComputePairFeaturesWithAlignment:
+    """Tests for compute_pair_features with alignment parameter."""
+
+    def test_compute_pair_features_includes_coverage_features(self):
+        """compute_pair_features should include coverage features when alignment provided."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import compute_pair_features
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,
+        )
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name="Main Street",
+            target_name="Main Street",
+            ref_class="residential",
+            target_class="residential",
+            alignment=alignment,
+        )
+
+        # Should include coverage features
+        assert "ref_coverage" in features
+        assert "target_coverage" in features
+        assert "min_coverage" in features
+        assert "coverage_ratio" in features
+
+        # Full alignment should have full coverage
+        assert features["ref_coverage"] == pytest.approx(1.0)
+        assert features["target_coverage"] == pytest.approx(1.0)
+
+    def test_compute_pair_features_without_alignment(self):
+        """compute_pair_features should work without alignment (backward compatible)."""
+        from matcher.features.compute import compute_pair_features
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name="Main Street",
+            target_name="Main Street",
+            ref_class="residential",
+            target_class="residential",
+        )
+
+        # Should still include coverage features (zeros without alignment)
+        assert "ref_coverage" in features
+        assert features["ref_coverage"] == 0.0
+
+    def test_compute_pair_features_uses_sublines_with_alignment(self):
+        """With alignment, similarity features should be computed on sublines."""
+        from matcher.features.alignment import linestring_alignment
+        from matcher.features.compute import compute_pair_features
+
+        # Reference is longer than target, target matches second half
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(50, 2), (100, 2)])  # Small offset, second half
+
+        alignment = linestring_alignment(ref, target)
+
+        features_aligned = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=alignment,
+        )
+
+        features_unaligned = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=None,
+        )
+
+        # Aligned features should have better (lower) hausdorff because
+        # we compare the matching portions only
+        # (The full geometry hausdorff includes the non-overlapping 50m)
+        assert features_aligned["hausdorff_distance"] <= features_unaligned["hausdorff_distance"]
+
+    def test_all_feature_columns_present(self):
+        """compute_pair_features should return all expected feature columns."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,
+        )
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name="Main Street",
+            target_name="Main Street",
+            ref_class="residential",
+            target_class="residential",
+            alignment=alignment,
+        )
+
+        # All feature columns should be present
+        for col in ALL_FEATURE_COLUMNS:
+            assert col in features, f"Missing feature: {col}"

@@ -10,6 +10,7 @@ from typing import Any
 import geopandas as gpd
 from loguru import logger
 
+from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import compute_geometric_features
 from .relational import compute_perpendicular_offset
 from .semantic import compute_class_similarity, compute_name_similarity
@@ -73,6 +74,11 @@ ALL_FEATURE_COLUMNS = [
     "is_intersection_ref",
     "is_intersection_target",
     "intersection_match",
+    # Alignment coverage features (4)
+    "ref_coverage",
+    "target_coverage",
+    "min_coverage",
+    "coverage_ratio",
 ]
 
 
@@ -88,6 +94,7 @@ def compute_pair_features(
     endpoint_features: dict[str, float] | None = None,
     ref_topology: dict[str, Any] | None = None,
     target_topology: dict[str, Any] | None = None,
+    alignment: AlignmentResult | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -106,13 +113,34 @@ def compute_pair_features(
         endpoint_features: Pre-computed endpoint proximity features (optional)
         ref_topology: Pre-computed topology features for reference (optional)
         target_topology: Pre-computed topology features for target (optional)
+        alignment: Pre-computed alignment result for using aligned sublines (optional)
 
     Returns:
         Dictionary of feature name -> value
     """
     try:
-        # Compute geometric features
-        geom_features = compute_geometric_features(ref_geom, target_geom)
+        # Determine geometries for similarity features
+        # If alignment is provided, extract sublines for computing similarity features
+        # (hausdorff, buffer_iou, etc.) on comparable portions only.
+        # Topology/endpoint features still use full geometries.
+        if alignment is not None:
+            ref_subline = create_subline(
+                ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+            )
+            target_subline = create_subline(
+                target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
+            )
+            # Use sublines if valid, otherwise fall back to full geometry
+            geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
+            geom_for_similarity_target = target_subline if target_subline else target_geom
+        else:
+            geom_for_similarity_ref = ref_geom
+            geom_for_similarity_target = target_geom
+
+        # Compute geometric features on aligned sublines (or full geom if no alignment)
+        geom_features = compute_geometric_features(
+            geom_for_similarity_ref, geom_for_similarity_target
+        )
 
         # Compute semantic features
         name_sim = compute_name_similarity(ref_name, target_name)
@@ -160,6 +188,9 @@ def compute_pair_features(
         is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
         intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
+        # Compute coverage features from alignment
+        coverage_feats = compute_coverage_features(alignment)
+
         return {
             # Geometric
             "hausdorff_distance": geom_features.hausdorff_distance,
@@ -205,6 +236,11 @@ def compute_pair_features(
             "is_intersection_ref": is_intersection_ref,
             "is_intersection_target": is_intersection_target,
             "intersection_match": intersection_match,
+            # Alignment coverage features
+            "ref_coverage": coverage_feats["ref_coverage"],
+            "target_coverage": coverage_feats["target_coverage"],
+            "min_coverage": coverage_feats["min_coverage"],
+            "coverage_ratio": coverage_feats["coverage_ratio"],
         }
 
     except Exception as e:
@@ -248,6 +284,11 @@ def _get_error_features() -> dict[str, float]:
         "is_intersection_ref": 0.5,
         "is_intersection_target": 0.5,
         "intersection_match": 0.5,
+        # Coverage features - neutral values for error case
+        "ref_coverage": 0.0,
+        "target_coverage": 0.0,
+        "min_coverage": 0.0,
+        "coverage_ratio": 0.0,
     }
 
 

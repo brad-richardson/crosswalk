@@ -1110,6 +1110,7 @@ dependencies = [
     { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "shapely" },
     { name = "typer" },
+    { name = "xgboost" },
 ]
 
 [package.optional-dependencies]
@@ -1168,6 +1169,7 @@ requires-dist = [
     { name = "streamlit", marker = "extra == 'label'", specifier = ">=1.28" },
     { name = "streamlit-folium", marker = "extra == 'label'", specifier = ">=0.15" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "xgboost", specifier = ">=3.1.3" },
     { name = "xgboost", marker = "extra == 'ml'", specifier = ">=2.0" },
 ]
 provides-extras = ["spark", "ml", "label", "dev"]

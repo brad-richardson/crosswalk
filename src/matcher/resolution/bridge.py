@@ -26,6 +26,12 @@ BRIDGE_SCHEMA = pa.schema(
         ("match_decision", pa.string()),  # "match", "review", "no_match"
         ("matched_at", pa.timestamp("us", tz="UTC")),
         ("pipeline_version", pa.string()),
+        # Linear reference fields from alignment (0-1 fractions)
+        # These indicate where on each geometry the match alignment starts/ends
+        ("gers_start_frac", pa.float64()),  # Where match starts on GERS segment
+        ("gers_end_frac", pa.float64()),  # Where match ends on GERS segment
+        ("local_start_frac", pa.float64()),  # Where match starts on local segment
+        ("local_end_frac", pa.float64()),  # Where match ends on local segment
     ]
 )
 
@@ -67,6 +73,11 @@ def generate_bridge_file(
                 "match_decision": match.decision.value,
                 "matched_at": now,
                 "pipeline_version": pipeline_version,
+                # Linear reference fields (may be None if alignment not computed)
+                "gers_start_frac": match.gers_start_frac,
+                "gers_end_frac": match.gers_end_frac,
+                "local_start_frac": match.local_start_frac,
+                "local_end_frac": match.local_end_frac,
             }
         )
 

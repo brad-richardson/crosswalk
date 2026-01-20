@@ -7,14 +7,41 @@ Key functions:
 - create_subline: Extract a portion of a linestring given start/end fractions
 - walk_distance: Integrated Euclidean distance between two aligned lines
 - walk_parallelness: How parallel two aligned lines are (squared dot product)
+- compute_alignment_batch: Parallel batch processing for multiple pairs
+- geodetic_length: Compute geodetic length in meters (consistent with Overture)
 """
 
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
+from loguru import logger
 from numba import jit
+from pyproj import CRS, Geod, Transformer
 from shapely.geometry import LineString
-from shapely.ops import substring
+from shapely.ops import substring, transform
+
+# WGS84 ellipsoid for geodetic calculations (consistent with Overture)
+_GEOD = Geod(ellps="WGS84")
+
+
+def geodetic_length(line: LineString) -> float:
+    """Compute geodetic length in meters on the WGS84 ellipsoid.
+
+    This is consistent with how Overture computes linear references
+    and is more accurate than planar/Euclidean calculations for
+    geographic coordinates.
+
+    Args:
+        line: LineString geometry in WGS84 (EPSG:4326)
+
+    Returns:
+        Length in meters, or 0.0 if line is None/empty
+    """
+    if line is None or line.is_empty:
+        return 0.0
+    return abs(_GEOD.geometry_length(line))
 
 
 @dataclass
@@ -491,3 +518,277 @@ def walk_parallelness(L1: LineString, L2: LineString, samples: int = 16) -> floa
             samples,
         )
     )
+
+
+# Module-level globals for multiprocessing worker data
+_alignment_worker_data = None
+
+
+def _compute_centroid(geoms: np.ndarray) -> tuple[float, float] | None:
+    """Compute average centroid from a collection of geometries.
+
+    Args:
+        geoms: Array of Shapely geometries
+
+    Returns:
+        (lon, lat) tuple or None if no valid geometries
+    """
+    lons, lats = [], []
+    for g in geoms[:100]:  # Sample first 100 for efficiency
+        if g is not None and not g.is_empty:
+            c = g.centroid
+            lons.append(c.x)
+            lats.append(c.y)
+
+    if not lons:
+        return None
+
+    return np.mean(lons), np.mean(lats)
+
+
+def _is_geographic(geoms: np.ndarray) -> bool:
+    """Check if geometries appear to be in geographic CRS (lat/lon).
+
+    Args:
+        geoms: Array of Shapely geometries
+
+    Returns:
+        True if coordinates look like WGS84 lat/lon
+    """
+    centroid = _compute_centroid(geoms)
+    if centroid is None:
+        return False
+
+    lon, lat = centroid
+
+    # Check if coordinates look like geographic (lat/lon in typical ranges)
+    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        return False
+
+    # If longitude is in a small range that's plausible for projected coords,
+    # assume it's already projected (e.g., UTM coordinates)
+    return not (lon > 1000 or lon < -1000)
+
+
+def _create_local_equidistant_crs(center_lon: float, center_lat: float) -> CRS:
+    """Create local Azimuthal Equidistant CRS centered on given point.
+
+    This projection has no zone boundaries (unlike UTM) and provides
+    accurate distance measurements near the center point.
+
+    Args:
+        center_lon: Center longitude in degrees
+        center_lat: Center latitude in degrees
+
+    Returns:
+        CRS object for local azimuthal equidistant projection
+    """
+    proj_string = f"+proj=aeqd +lat_0={center_lat} +lon_0={center_lon} +datum=WGS84 +units=m"
+    return CRS.from_proj4(proj_string)
+
+
+def _project_geometry(geom, transformer):
+    """Project a single geometry using a Transformer."""
+    if geom is None or geom.is_empty:
+        return geom
+    return transform(transformer.transform, geom)
+
+
+def _project_geometries(geoms: np.ndarray, target_crs: CRS) -> np.ndarray:
+    """Project an array of geometries to a target CRS.
+
+    Args:
+        geoms: Array of Shapely geometries (assumed to be in WGS84/EPSG:4326)
+        target_crs: Target CRS to project to
+
+    Returns:
+        Array of projected geometries
+    """
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), target_crs, always_xy=True)
+    projected = np.empty(len(geoms), dtype=object)
+    for i, geom in enumerate(geoms):
+        projected[i] = _project_geometry(geom, transformer)
+    return projected
+
+
+def _init_alignment_worker(data):
+    """Initialize worker process with shared geometry data."""
+    global _alignment_worker_data
+    _alignment_worker_data = data
+
+
+def _compute_single_alignment(args):
+    """Compute alignment for a single pair (worker function).
+
+    Args:
+        args: Tuple of (ref_idx, target_idx)
+
+    Returns:
+        AlignmentResult or None if computation fails
+    """
+    ref_idx, target_idx = args
+
+    try:
+        ref_geom = _alignment_worker_data["ref_geoms"][ref_idx]
+        target_geom = _alignment_worker_data["target_geoms"][target_idx]
+
+        if ref_geom is None or target_geom is None:
+            return None
+        if ref_geom.is_empty or target_geom.is_empty:
+            return None
+
+        return linestring_alignment(ref_geom, target_geom)
+    except Exception:
+        return None
+
+
+def compute_alignment_batch(
+    candidates: list,
+    ref_geoms: np.ndarray,
+    target_geoms: np.ndarray,
+    n_jobs: int = -1,
+) -> dict[tuple[int, int], AlignmentResult]:
+    """Compute alignments for multiple candidate pairs in parallel.
+
+    This function is designed to be called after blocking but before feature
+    computation. It processes alignment for all candidate pairs using parallel
+    workers, then returns results as a dictionary keyed by (ref_idx, target_idx).
+
+    Uses local Azimuthal Equidistant projection centered on data centroid for
+    accurate distance calculations without UTM zone boundary issues.
+
+    Args:
+        candidates: List of CandidatePair objects with ref_idx and target_idx
+        ref_geoms: NumPy array of reference geometries (assumed WGS84 if geographic)
+        target_geoms: NumPy array of target geometries (assumed WGS84 if geographic)
+        n_jobs: Number of parallel jobs (-1 for all cores minus 2)
+
+    Returns:
+        Dict mapping (ref_idx, target_idx) -> AlignmentResult
+        Pairs that fail alignment computation are omitted from the result.
+    """
+    if not candidates:
+        return {}
+
+    # Determine number of workers
+    if n_jobs == -1:
+        n_workers = max(1, mp.cpu_count() - 2)
+    else:
+        n_workers = max(1, n_jobs)
+
+    n_candidates = len(candidates)
+    logger.info(f"Computing alignments for {n_candidates} candidates using {n_workers} workers...")
+
+    # Check if geometries are in geographic CRS and need projection
+    if _is_geographic(ref_geoms):
+        # Compute centroid from all candidate geometries for projection center
+        centroid = _compute_centroid(ref_geoms)
+        if centroid is not None:
+            center_lon, center_lat = centroid
+            local_crs = _create_local_equidistant_crs(center_lon, center_lat)
+            logger.info(
+                f"Projecting geometries to local AEQD (center: {center_lon:.3f}, {center_lat:.3f})"
+            )
+            ref_geoms_for_alignment = _project_geometries(ref_geoms, local_crs)
+            target_geoms_for_alignment = _project_geometries(target_geoms, local_crs)
+        else:
+            ref_geoms_for_alignment = ref_geoms
+            target_geoms_for_alignment = target_geoms
+    else:
+        ref_geoms_for_alignment = ref_geoms
+        target_geoms_for_alignment = target_geoms
+
+    # Prepare worker data
+    worker_data = {
+        "ref_geoms": ref_geoms_for_alignment,
+        "target_geoms": target_geoms_for_alignment,
+    }
+
+    # Prepare work items as simple tuples
+    work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+
+    # Process with ProcessPoolExecutor
+    chunk_size = max(1000, n_candidates // (n_workers * 4))
+    results_list = []
+
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+        initializer=_init_alignment_worker,
+        initargs=(worker_data,),
+    ) as executor:
+        # Process in chunks for progress reporting
+        for i in range(0, len(work_items), chunk_size * n_workers):
+            batch = work_items[i : i + chunk_size * n_workers]
+            batch_results = list(
+                executor.map(_compute_single_alignment, batch, chunksize=chunk_size)
+            )
+            results_list.extend(batch_results)
+            logger.debug(
+                f"Alignment progress: {min(i + len(batch), len(work_items))}/{len(work_items)}"
+            )
+
+    # Build result dictionary
+    alignments = {}
+    successful = 0
+    for i, result in enumerate(results_list):
+        if result is not None:
+            ref_idx, target_idx = work_items[i]
+            alignments[(ref_idx, target_idx)] = result
+            successful += 1
+
+    logger.info(f"Computed {successful}/{n_candidates} alignments successfully")
+    return alignments
+
+
+def compute_coverage_features(
+    alignment: AlignmentResult | None, return_none_on_failure: bool = False
+) -> dict[str, float | None]:
+    """Compute coverage features from an alignment result.
+
+    These features are used by the ML model to learn appropriate overlap
+    thresholds rather than applying hard filters.
+
+    Args:
+        alignment: AlignmentResult from linestring_alignment, or None
+        return_none_on_failure: If True, return None values when alignment is None
+                                (for explicit failure handling). If False (default),
+                                return 0.0 values for backward compatibility.
+
+    Returns:
+        Dict with coverage features:
+        - ref_coverage: Fraction of reference covered (0-1) or None
+        - target_coverage: Fraction of target covered (0-1) or None
+        - min_coverage: Minimum of the two coverages or None
+        - coverage_ratio: Symmetry of coverage (min/max) or None
+    """
+    if alignment is None:
+        if return_none_on_failure:
+            # Explicit failure - return None values for ML pipeline (handled by imputation)
+            return {
+                "ref_coverage": None,
+                "target_coverage": None,
+                "min_coverage": None,
+                "coverage_ratio": None,
+            }
+        else:
+            # Backward compatible - return 0.0 values
+            return {
+                "ref_coverage": 0.0,
+                "target_coverage": 0.0,
+                "min_coverage": 0.0,
+                "coverage_ratio": 0.0,
+            }
+
+    ref_cov = alignment.overture_coverage
+    target_cov = alignment.dataset_coverage
+
+    min_cov = min(ref_cov, target_cov)
+    max_cov = max(ref_cov, target_cov)
+    coverage_ratio = min_cov / max_cov if max_cov > 0 else 0.0
+
+    return {
+        "ref_coverage": ref_cov,
+        "target_coverage": target_cov,
+        "min_coverage": min_cov,
+        "coverage_ratio": coverage_ratio,
+    }

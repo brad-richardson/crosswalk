@@ -66,7 +66,7 @@ class AgentLabelStore:
     def save(self) -> None:
         """Save labels to CSV."""
         self.labels_dir.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.csv_path, index=False)
+        self._df.to_csv(self.csv_path, index=False, float_format=lambda x: f"{x:.10g}")
         logger.info(f"Saved {len(self._df)} labels to {self.csv_path}")
 
     def add_label(
@@ -132,7 +132,7 @@ class AgentLabelStore:
         df = self.df
         if len(df) == 0:
             return set()
-        return set(zip(df["ref_id"], df["target_id"]))
+        return set(zip(df["ref_id"], df["target_id"], strict=True))
 
     def get_stats(self) -> dict:
         """Get labeling statistics."""
@@ -205,7 +205,7 @@ class AgentLabelStore:
         disagreements = []
         for (ref_id, target_id), group in all_labels.groupby(["ref_id", "target_id"]):
             agents = group["agent_id"].tolist()
-            labels_dict = dict(zip(group["agent_id"], group["label"]))
+            labels_dict = dict(zip(group["agent_id"], group["label"], strict=True))
 
             if len(agents) < 2:
                 continue  # Need at least 2 agents to have disagreement
@@ -262,7 +262,7 @@ class AgentLabelStore:
         results = []
         for (ref_id, target_id), group in all_labels.groupby(["ref_id", "target_id"]):
             agents = group["agent_id"].tolist()
-            labels_dict = dict(zip(group["agent_id"], group["label"]))
+            labels_dict = dict(zip(group["agent_id"], group["label"], strict=True))
             num_agents = len(agents)
 
             if num_agents < min_agents:

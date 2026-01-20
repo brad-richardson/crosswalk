@@ -72,6 +72,13 @@ class MatcherSettings(BaseSettings):
         default=0.5,
         description="Confidence threshold for review (below this = no match)",
     )
+    alignment_enabled: bool = Field(
+        default=True,
+        description="Enable pre-match linestring alignment for computing features on "
+        "aligned sublines. When enabled, similarity features (hausdorff, buffer_iou, "
+        "etc.) are computed on comparable portions of geometries rather than full "
+        "geometries. Coverage features are always computed regardless of this setting.",
+    )
     matching_weights: dict[str, float] = Field(
         default={
             "hausdorff_norm": 0.10,
