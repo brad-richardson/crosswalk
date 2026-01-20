@@ -361,9 +361,10 @@ def fetch_wfs(
     }
 
     # Add bbox filter if provided
+    # bbox convention is (xmin, ymin, xmax, ymax) in lon/lat order
     if bbox:
         xmin, ymin, xmax, ymax = bbox
-        params["bbox"] = f"{ymin},{xmin},{ymax},{xmax},EPSG:4326"
+        params["bbox"] = f"{xmin},{ymin},{xmax},{ymax},EPSG:4326"
 
     try:
         resp = requests.get(url, params=params, timeout=600)
@@ -539,6 +540,7 @@ def fetch_dataset(dataset_config: dict, output_dir: Path) -> Path | None:
     - GeoJSON direct download (fetch_type: geojson)
     - WFS (fetch_type: wfs)
     - File downloads (fetch_type: download)
+    - Manual download (fetch_type: manual)
 
     Args:
         dataset_config: Dataset configuration dict
@@ -615,17 +617,18 @@ def fetch_dataset(dataset_config: dict, output_dir: Path) -> Path | None:
             api_key = None
             api_key_header = dataset_config.get("api_key_header")
             if dataset_config.get("api_key_required"):
-                # Try to get API key from environment
-                env_var = f"{name.upper().replace('_', '')}_API_KEY"
+                # Use custom env var name if provided, otherwise generate from dataset name
+                env_var = (
+                    dataset_config.get("api_key_env_var")
+                    or f"{name.upper().replace('_', '')}_API_KEY"
+                )
                 api_key = os.environ.get(env_var)
                 if not api_key:
                     logger.warning(
                         f"API key required but not found. Set {env_var} environment variable."
                     )
-                    logger.info(
-                        "For Singapore LTA: Register at https://datamall.lta.gov.sg "
-                        "and set SINGAPOREROADS_API_KEY"
-                    )
+                    if "singapore" in name.lower():
+                        logger.info("For Singapore LTA: Register at https://datamall.lta.gov.sg")
 
             return fetch_download(
                 url=dataset_config["url"],
@@ -694,9 +697,14 @@ def list_datasets():
     for city, datasets in ALL_DATASETS.items():
         print(f"\n{city.replace('_', ' ').title()}:")
         for ds in datasets:
-            fetch_type = ds.get("fetch_type", "arcgis")
-            if ds.get("portal_url"):
+            # Use explicit fetch_type first, only infer "hub" if not set
+            explicit_fetch_type = ds.get("fetch_type")
+            if explicit_fetch_type:
+                fetch_type = explicit_fetch_type
+            elif ds.get("portal_url"):
                 fetch_type = "hub"
+            else:
+                fetch_type = "arcgis"
             api_note = " (API key required)" if ds.get("api_key_required") else ""
             print(f"  - {ds['name']} [{fetch_type}]{api_note}")
             if ds.get("description"):

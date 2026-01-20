@@ -548,6 +548,7 @@ SINGAPORE_DATASETS = [
         "description": "Road section lines from Singapore LTA DataMall",
         "bbox": (103.60, 1.20, 104.05, 1.50),  # Singapore bbox
         "api_key_required": True,  # Note: needs LTA API key
+        "api_key_env_var": "LTA_API_KEY",  # Shared env var for all Singapore datasets
         "api_key_header": "AccountKey",
     },
     {
@@ -563,6 +564,7 @@ SINGAPORE_DATASETS = [
         "description": "Footpaths from Singapore LTA DataMall",
         "bbox": (103.60, 1.20, 104.05, 1.50),
         "api_key_required": True,
+        "api_key_env_var": "LTA_API_KEY",  # Shared env var for all Singapore datasets
         "api_key_header": "AccountKey",
     },
 ]
@@ -578,46 +580,45 @@ SEOUL_DATASETS = [
     {
         "name": "seoul_roads",
         # Seoul Open Data - road centerlines (도로중심선)
-        # Note: Portal is primarily in Korean; URL subject to change
-        "url": "https://data.seoul.go.kr/dataList/OA-164/S/1/datasetView.do",
-        "fetch_type": "download",
-        "file_format": "shp",
+        # Portal: https://data.seoul.go.kr/dataList/OA-164/S/1/datasetView.do
+        # Note: Portal is primarily in Korean; requires manual download
+        "url": None,
+        "fetch_type": "manual",
+        "portal_url": "https://data.seoul.go.kr/dataList/OA-164/S/1/datasetView.do",
         "id_prefix": "seoul_road",
         "name_column": "ROAD_NAME",  # May vary based on actual schema
         "class_column": "ROAD_TYPE",  # May vary
         "class_mapping": None,  # Use discover-classes
         "source_name": "Seoul Open Data Roads",
-        "description": "Road centerlines from Seoul Open Data Plaza (도로중심선)",
+        "description": "Road centerlines - requires manual download from Korean portal",
         "bbox": (126.75, 37.40, 127.20, 37.70),  # Seoul bbox
-        "notes": "Korean portal - may require manual download and schema inspection",
+        "notes": "Korean portal - download shapefile manually and place in data/raw/",
     },
 ]
 
 
 # =============================================================================
-# Nairobi, Kenya
+# Kenya
 # =============================================================================
-# Sources:
-# - https://maps.krb.go.ke/ (Kenya Roads Board - official, newer data)
-# - https://data.humdata.org/dataset/kenya-roads (HDX - humanitarian)
+# Source: https://energydata.info/dataset/kenya-roads-1
+# Official Kenya Roads Board (KRB) data from 2023
 
-NAIROBI_DATASETS = [
+KENYA_DATASETS = [
     {
-        "name": "nairobi_roads",
-        # HDX HOT OSM Export - comprehensive Kenya roads (187MB, 427K km of roads)
-        # Source: https://data.humdata.org/dataset/hotosm_ken_roads
-        # Note: This is OSM-derived data, but provides good coverage for labeling
-        "url": "https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/ISO3/KEN/roads/lines/hotosm_ken_roads_lines_shp.zip",
+        "name": "kenya_roads",
+        # Kenya Roads Board (KRB) official data via energydata.info
+        # Source: https://energydata.info/dataset/kenya-roads-1
+        # License: CC-BY 4.0
+        "url": "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip",
         "fetch_type": "download",
         "file_format": "shp",
-        "id_prefix": "nrb_road",
-        "name_column": "name",  # OSM name tag
-        "class_column": "highway",  # OSM highway tag
-        "class_mapping": None,  # Use discover-classes (OSM highway values)
-        "source_name": "HDX HOT OSM Kenya Roads",
-        "description": "Kenya roads from HOT OSM export (clip to Nairobi bbox)",
-        "bbox": (36.70, -1.40, 37.00, -1.15),  # Nairobi bbox
-        "bbox_filter": True,  # Apply bbox filter after loading
+        "id_prefix": "ken_road",
+        "name_column": "ROADNAME",  # Road name from KRB
+        "class_column": "CLASS",  # Road classification
+        "class_mapping": None,  # Use discover-classes
+        "source_name": "Kenya Roads Board (KRB)",
+        "description": "Official Kenya road network from Kenya Roads Board (2023)",
+        "bbox": (33.90, -4.70, 41.90, 4.63),  # Kenya bbox
     },
 ]
 
@@ -644,7 +645,7 @@ ALL_DATASETS = {
     "helsinki": HELSINKI_DATASETS,
     "singapore": SINGAPORE_DATASETS,
     "seoul": SEOUL_DATASETS,
-    "nairobi": NAIROBI_DATASETS,
+    "kenya": KENYA_DATASETS,
 }
 
 
@@ -666,5 +667,5 @@ CITY_BBOXES = {
     "helsinki": (24.80, 60.10, 25.20, 60.30),
     "singapore": (103.60, 1.20, 104.05, 1.50),
     "seoul": (126.75, 37.40, 127.20, 37.70),
-    "nairobi": (36.70, -1.40, 37.00, -1.15),
+    "kenya": (33.90, -4.70, 41.90, 4.63),
 }
