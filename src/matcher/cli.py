@@ -240,10 +240,21 @@ def evaluate(
         None,
         "--ground-truth",
         "-g",
-        help="Ground truth matches for precision/recall",
+        help="Ground truth labels CSV (columns: gers_id, target_id, label)",
     ),
 ):
-    """Evaluate match quality."""
+    """Evaluate match quality.
+
+    If ground truth is provided, computes precision/recall/F1 metrics.
+
+    Examples:
+        # Basic bridge file stats
+        matcher evaluate data/output/boston_streets_bridge.parquet
+
+        # With ground truth evaluation
+        matcher evaluate data/output/boston_streets_bridge.parquet \\
+            --ground-truth labels/dataset=boston_streets/data.csv
+    """
     import pandas as pd
 
     console.print(f"[blue]Evaluating {bridge_file}...[/blue]")
@@ -262,9 +273,86 @@ def evaluate(
     console.print(f"  < 0.5: {(bridge['confidence'] < 0.5).sum()}")
 
     if ground_truth:
-        _gt = pd.read_parquet(ground_truth)  # noqa: F841 - reserved for future use
-        # TODO: Compute precision/recall against ground truth
-        console.print("[yellow]Ground truth evaluation not yet implemented[/yellow]")
+        if not ground_truth.exists():
+            console.print(f"[red]Error: Ground truth file not found: {ground_truth}[/red]")
+            raise typer.Exit(1)
+
+        # Load ground truth - support both CSV and parquet
+        if ground_truth.suffix == ".csv":
+            gt_df = pd.read_csv(ground_truth)
+        else:
+            gt_df = pd.read_parquet(ground_truth)
+
+        console.print()
+        console.print("[blue]Ground Truth Evaluation[/blue]")
+        console.print(f"  Ground truth file: {ground_truth}")
+        console.print(f"  Total labeled pairs: {len(gt_df)}")
+
+        # Build lookup: (gers_id, target_id) -> label
+        gt_lookup: dict[tuple[str, str], str] = {}
+        for _, row in gt_df.iterrows():
+            gers_id = str(row["gers_id"])
+            target_id = str(row["target_id"])
+            label = row["label"]
+            gt_lookup[(gers_id, target_id)] = label
+
+        # Count ground truth labels
+        gt_match_count = sum(1 for label in gt_lookup.values() if label == "match")
+        gt_no_match_count = sum(1 for label in gt_lookup.values() if label == "no_match")
+        console.print(f"  Ground truth matches: {gt_match_count}")
+        console.print(f"  Ground truth no_match: {gt_no_match_count}")
+
+        # Build set of predicted pairs from bridge file
+        predicted_pairs: set[tuple[str, str]] = set()
+        for _, row in bridge.iterrows():
+            gers_id = str(row["gers_id"])
+            local_id = str(row["local_id"])
+            predicted_pairs.add((gers_id, local_id))
+
+        # Compute metrics
+        # True Positives: predicted as match AND ground truth is match
+        true_positives = sum(
+            1
+            for (gers_id, target_id), label in gt_lookup.items()
+            if label == "match" and (gers_id, target_id) in predicted_pairs
+        )
+
+        # False Positives: predicted as match BUT ground truth is no_match
+        false_positives = sum(
+            1
+            for (gers_id, target_id), label in gt_lookup.items()
+            if label == "no_match" and (gers_id, target_id) in predicted_pairs
+        )
+
+        # False Negatives: ground truth is match BUT not in predictions
+        false_negatives = sum(
+            1
+            for (gers_id, target_id), label in gt_lookup.items()
+            if label == "match" and (gers_id, target_id) not in predicted_pairs
+        )
+
+        # Calculate precision, recall, F1
+        precision = (
+            true_positives / (true_positives + false_positives)
+            if (true_positives + false_positives) > 0
+            else 0.0
+        )
+        recall = (
+            true_positives / (true_positives + false_negatives)
+            if (true_positives + false_negatives) > 0
+            else 0.0
+        )
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+        console.print()
+        console.print("[green]Metrics:[/green]")
+        console.print(f"  True Positives: {true_positives}")
+        console.print(f"  False Positives: {false_positives}")
+        console.print(f"  False Negatives: {false_negatives}")
+        console.print()
+        console.print(f"  [bold]Precision: {precision:.3f}[/bold]")
+        console.print(f"  [bold]Recall: {recall:.3f}[/bold]")
+        console.print(f"  [bold]F1 Score: {f1:.3f}[/bold]")
 
 
 @app.command()
@@ -345,6 +433,11 @@ def train(
         "-o",
         help="Output path for trained model",
     ),
+    exclude_semantic: bool = typer.Option(
+        False,
+        "--exclude-semantic",
+        help="Exclude semantic features (name_*, class_similarity) for geometry-only model",
+    ),
 ):
     """Train an ML model on labeled data.
 
@@ -353,6 +446,9 @@ def train(
     Examples:
         matcher train
         matcher train --labels labels -o data/models/my_model.joblib
+
+        # Train geometry-only model (no name/class features)
+        matcher train --exclude-semantic -o data/models/matcher_model_geom_only.joblib
     """
     from .labeling.label_store import LabelStore
     from .matching.ml import MLMatcher
@@ -373,9 +469,12 @@ def train(
     console.print(f"  Found {len(df)} labels from {df['dataset'].nunique()} datasets")
 
     # Train model
-    console.print("[blue]Training model...[/blue]")
+    model_type = "geometry-only" if exclude_semantic else "full"
+    console.print(f"[blue]Training {model_type} model...[/blue]")
     matcher = MLMatcher()
-    metrics = matcher.train(labels_dir=labels_dir, test_size=0.2, binary=True)
+    metrics = matcher.train(
+        labels_dir=labels_dir, test_size=0.2, binary=True, exclude_semantic=exclude_semantic
+    )
 
     # Save model
     output.parent.mkdir(parents=True, exist_ok=True)
