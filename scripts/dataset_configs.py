@@ -376,15 +376,20 @@ UTAH_SALT_LAKE_DATASETS = [
 CAPE_TOWN_DATASETS = [
     {
         "name": "cape_town_roads",
-        "url": None,  # Using portal_url for Hub discovery
-        "portal_url": "https://odp-cctegis.opendata.arcgis.com/datasets/road-centrelines",
+        # City of Cape Town TCT Road Centerline dataset
+        # Portal: https://odp-cctegis.opendata.arcgis.com/datasets/cctegis::tct-road-centerline
+        # Note: Requires manual download - endpoint access issues from servers
+        "url": None,
+        "fetch_type": "manual",
+        "portal_url": "https://odp-cctegis.opendata.arcgis.com/datasets/cctegis::tct-road-centerline",
         "id_prefix": "ct_road",
-        "name_column": "STR_NAME",  # Common column name for street name
+        "name_column": "STR_NAME",
         "class_column": None,  # Will use discover-classes
         "class_mapping": None,
         "source_name": "City of Cape Town Road Centrelines",
-        "description": "Road centerlines from City of Cape Town Open Data Portal",
-        "bbox": (18.30, -34.10, 18.65, -33.85),  # Cape Town bbox
+        "description": "Road centerlines - requires manual download from portal",
+        "bbox": (18.30, -34.10, 18.65, -33.85),
+        "notes": "Download from portal and place in data/raw/",
     },
 ]
 
