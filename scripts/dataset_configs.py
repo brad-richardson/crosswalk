@@ -81,6 +81,7 @@ BOSTON_DATASETS = [
     {
         "name": "boston_streets",
         "url": "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0",
+        "portal_url": "https://data.boston.gov/dataset/city-of-boston-managed-streets",
         "id_prefix": "boston_streets",
         "name_column": "STREETNAME",
         "class_column": "CLASS",
@@ -88,10 +89,13 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Managed Streets",
         "description": "Street centerlines with MassDOT functional classification",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",  # WGS84
     },
     {
         "name": "boston_sidewalks",
         "url": "https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5",
+        "portal_url": "https://data.boston.gov/dataset/sidewalk-centerline",
         "id_prefix": "boston_sidewalk",
         "name_column": None,  # Sidewalks unnamed
         "class_column": "TYPE",
@@ -101,10 +105,13 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Sidewalk Centerlines",
         "description": "Sidewalk and crosswalk centerlines",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",
     },
     {
         "name": "boston_bike_network",
         "url": "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/Boston_Bicycle_Network_2024/FeatureServer/0",
+        "portal_url": "https://data.boston.gov/dataset/existing-bike-network-2024",
         "id_prefix": "boston_bike",
         "name_column": "STREET_NAM",
         "class_column": "ExisFacil",
@@ -112,6 +119,8 @@ BOSTON_DATASETS = [
         "level_column": None,
         "source_name": "Boston Bicycle Network 2024",
         "description": "Bike lanes, paths, and shared facilities",
+        "bbox": (-71.19, 42.21, -70.92, 42.40),
+        "crs": "EPSG:4326",
     },
 ]
 

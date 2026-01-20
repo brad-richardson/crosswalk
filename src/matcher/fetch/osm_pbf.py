@@ -13,7 +13,8 @@ import osmium
 from loguru import logger
 from shapely.geometry import LineString, Point
 
-# Highway values to include (from tf-data-platform/overture_transportation)
+# Highway values to include (aligned with Overture Maps classes)
+# See: https://docs.overturemaps.org/schema/reference/transportation/segment
 HIGHWAY_VALUES = {
     # Major roads
     "motorway",
@@ -21,7 +22,7 @@ HIGHWAY_VALUES = {
     "primary",
     "secondary",
     "tertiary",
-    # Link roads
+    # Link roads (connect major roads, e.g., on-ramps)
     "motorway_link",
     "trunk_link",
     "primary_link",
@@ -29,19 +30,20 @@ HIGHWAY_VALUES = {
     "tertiary_link",
     # Minor roads
     "residential",
+    "living_street",
     "unclassified",
     "service",
-    "living_street",
-    "road",
     # Paths
-    "footway",
-    "path",
-    "cycleway",
-    "steps",
     "pedestrian",
-    "bridleway",
+    "footway",
+    "steps",
+    "path",
     "track",
-    # Special
+    "cycleway",
+    "bridleway",
+    # Unknown (OSM "road" maps to Overture "unknown")
+    "road",
+    # Lifecycle states
     "construction",
     "proposed",
     "abandoned",
