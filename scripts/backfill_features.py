@@ -474,7 +474,7 @@ def backfill_dataset(
         df = pd.concat([df, topology_df], axis=1)
 
     if not dry_run:
-        df.to_csv(label_path, index=False, float_format="%.10f")
+        df.to_csv(label_path, index=False, float_format=lambda x: f"{x:.10g}")
         features_added = []
         if compute_alignment:
             features_added.append("alignment")

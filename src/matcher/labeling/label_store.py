@@ -130,7 +130,7 @@ class LabelStore:
     def save(self) -> None:
         """Save labels to CSV."""
         self.partition_path.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.csv_path, index=False, float_format="%.10f")
+        self._df.to_csv(self.csv_path, index=False, float_format=lambda x: f"{x:.10g}")
 
     def add(
         self,
@@ -246,7 +246,7 @@ class LabelStore:
 
         if len(df) == 0:
             return set()
-        return set(zip(df["gers_id"], df["target_id"]))
+        return set(zip(df["gers_id"], df["target_id"], strict=True))
 
     def get_stats(self) -> dict[str, Any]:
         """Get labeling statistics."""
@@ -345,4 +345,4 @@ def save_labels(df: pd.DataFrame, path: Path) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False, float_format="%.10f")
+    df.to_csv(path, index=False, float_format=lambda x: f"{x:.10g}")

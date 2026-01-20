@@ -85,7 +85,7 @@ class OrphanDecisionStore:
     def _save(self) -> None:
         """Save decisions to CSV."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.path, index=False, float_format="%.10f")
+        self._df.to_csv(self.path, index=False, float_format=lambda x: f"{x:.10g}")
 
     def add_decision(
         self,
@@ -190,7 +190,7 @@ class MergedDecisionStore:
     def _save(self) -> None:
         """Save decisions to CSV."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.path, index=False, float_format="%.10f")
+        self._df.to_csv(self.path, index=False, float_format=lambda x: f"{x:.10g}")
 
     def add_decision(
         self,

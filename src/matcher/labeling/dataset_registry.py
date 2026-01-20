@@ -79,7 +79,7 @@ class DatasetRegistry:
     def _save(self) -> None:
         """Save registry to CSV."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.df.to_csv(self.path, index=False, float_format="%.10f")
+        self.df.to_csv(self.path, index=False, float_format=lambda x: f"{x:.10g}")
 
     def get(self, dataset_id: str) -> Dataset | None:
         """Get dataset by ID."""
