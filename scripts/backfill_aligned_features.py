@@ -25,6 +25,8 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 from loguru import logger
+from pyproj import CRS, Transformer
+from shapely.ops import transform as shapely_transform
 
 from matcher.features.alignment import (
     AlignmentResult,
@@ -74,6 +76,41 @@ SIMILARITY_FEATURE_COLUMNS = [
 ]
 
 
+def _get_utm_crs_for_geometry(geom) -> CRS | None:
+    """Get appropriate UTM CRS for a geometry based on its centroid.
+
+    Args:
+        geom: Shapely geometry (assumed in WGS84)
+
+    Returns:
+        CRS for appropriate UTM zone, or None if not needed
+    """
+    centroid = geom.centroid
+    lon, lat = centroid.x, centroid.y
+
+    # Check if looks like geographic coordinates
+    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        return None  # Already projected
+
+    # Check for coordinates that look too large for lat/lon
+    if lon > 1000 or lon < -1000:
+        return None
+
+    # Calculate UTM zone
+    zone = int((lon + 180) / 6) + 1
+    hemisphere = "north" if lat >= 0 else "south"
+    epsg = 32600 + zone if hemisphere == "north" else 32700 + zone
+
+    return CRS.from_epsg(epsg)
+
+
+def _project_geometry(geom, transformer):
+    """Project a geometry using a transformer."""
+    if geom is None or geom.is_empty:
+        return geom
+    return shapely_transform(transformer.transform, geom)
+
+
 def compute_aligned_features(
     ref_geom, target_geom
 ) -> tuple[AlignmentResult | None, dict[str, float]]:
@@ -93,8 +130,18 @@ def compute_aligned_features(
         return None, {}
 
     try:
-        # Compute alignment
-        alignment = linestring_alignment(ref_geom, target_geom)
+        # Project to UTM for accurate alignment (if in geographic CRS)
+        utm_crs = _get_utm_crs_for_geometry(ref_geom)
+        if utm_crs is not None:
+            transformer = Transformer.from_crs(CRS.from_epsg(4326), utm_crs, always_xy=True)
+            ref_proj = _project_geometry(ref_geom, transformer)
+            target_proj = _project_geometry(target_geom, transformer)
+        else:
+            ref_proj = ref_geom
+            target_proj = target_geom
+
+        # Compute alignment on projected geometries
+        alignment = linestring_alignment(ref_proj, target_proj)
 
         # Compute coverage features
         coverage_feats = compute_coverage_features(alignment)

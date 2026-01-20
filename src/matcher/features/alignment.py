@@ -17,8 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 from loguru import logger
 from numba import jit
+from pyproj import CRS, Transformer
 from shapely.geometry import LineString
-from shapely.ops import substring
+from shapely.ops import substring, transform
 
 
 @dataclass
@@ -501,6 +502,73 @@ def walk_parallelness(L1: LineString, L2: LineString, samples: int = 16) -> floa
 _alignment_worker_data = None
 
 
+def _estimate_utm_crs(geoms: np.ndarray) -> CRS | None:
+    """Estimate an appropriate UTM CRS from a collection of geometries.
+
+    Determines the UTM zone from the centroid of the first valid geometry.
+    Returns None if geometries don't appear to be in geographic CRS.
+
+    Args:
+        geoms: Array of Shapely geometries
+
+    Returns:
+        CRS object for UTM zone, or None if projection not needed
+    """
+    # Find first valid geometry
+    sample_geom = None
+    for g in geoms[:100]:  # Check first 100 for efficiency
+        if g is not None and not g.is_empty:
+            sample_geom = g
+            break
+
+    if sample_geom is None:
+        return None
+
+    # Get centroid coordinates
+    centroid = sample_geom.centroid
+    lon, lat = centroid.x, centroid.y
+
+    # Check if coordinates look like geographic (lat/lon in typical ranges)
+    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        return None  # Already in projected CRS
+
+    # If longitude is in a small range that's plausible for projected coords,
+    # assume it's already projected (e.g., UTM coordinates)
+    if lon > 1000 or lon < -1000:
+        return None
+
+    # Calculate UTM zone
+    zone = int((lon + 180) / 6) + 1
+    hemisphere = "north" if lat >= 0 else "south"
+    epsg = 32600 + zone if hemisphere == "north" else 32700 + zone
+
+    return CRS.from_epsg(epsg)
+
+
+def _project_geometry(geom, transformer):
+    """Project a single geometry using a Transformer."""
+    if geom is None or geom.is_empty:
+        return geom
+    return transform(transformer.transform, geom)
+
+
+def _project_geometries(geoms: np.ndarray, target_crs: CRS) -> np.ndarray:
+    """Project an array of geometries to a target CRS.
+
+    Args:
+        geoms: Array of Shapely geometries (assumed to be in WGS84/EPSG:4326)
+        target_crs: Target CRS to project to
+
+    Returns:
+        Array of projected geometries
+    """
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), target_crs, always_xy=True)
+    projected = np.empty(len(geoms), dtype=object)
+    for i, geom in enumerate(geoms):
+        projected[i] = _project_geometry(geom, transformer)
+    return projected
+
+
 def _init_alignment_worker(data):
     """Initialize worker process with shared geometry data."""
     global _alignment_worker_data
@@ -566,10 +634,20 @@ def compute_alignment_batch(
     n_candidates = len(candidates)
     logger.info(f"Computing alignments for {n_candidates} candidates using {n_workers} workers...")
 
+    # Check if geometries are in geographic CRS and need projection
+    utm_crs = _estimate_utm_crs(ref_geoms)
+    if utm_crs is not None:
+        logger.info(f"Projecting geometries to {utm_crs} for alignment computation...")
+        ref_geoms_for_alignment = _project_geometries(ref_geoms, utm_crs)
+        target_geoms_for_alignment = _project_geometries(target_geoms, utm_crs)
+    else:
+        ref_geoms_for_alignment = ref_geoms
+        target_geoms_for_alignment = target_geoms
+
     # Prepare worker data
     worker_data = {
-        "ref_geoms": ref_geoms,
-        "target_geoms": target_geoms,
+        "ref_geoms": ref_geoms_for_alignment,
+        "target_geoms": target_geoms_for_alignment,
     }
 
     # Prepare work items as simple tuples
