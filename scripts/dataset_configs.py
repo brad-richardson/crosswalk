@@ -480,17 +480,19 @@ BUENOS_AIRES_DATASETS = [
 AMSTERDAM_DATASETS = [
     {
         "name": "amsterdam_roads",
-        # WFS endpoint for Dutch national road database (NWB)
-        "url": "https://service.pdok.nl/rws/nwbwegen/wfs/v1_0",
-        "fetch_type": "wfs",  # Signal to use WFS fetcher
-        "wfs_typename": "nwbwegen:wegvakken",  # Road segments layer
+        # PDOK NWB GeoPackage - full Dutch road network (1.3GB, 1.1M segments)
+        # Source: https://www.pdok.nl/atom-downloadservices/-/article/nationaal-wegen-bestand-nwb-wegen
+        "url": "https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg",
+        "fetch_type": "download",
+        "file_format": "gpkg",
         "id_prefix": "ams_road",
         "name_column": "stt_naam",  # Street name
-        "class_column": "wegbehsrt",  # Road manager type (proxy for class)
+        "class_column": "wegbehsrt",  # Road manager type (R=national, P=province, G=municipality, W=water)
         "class_mapping": None,  # Use discover-classes
         "source_name": "PDOK NWB Wegen",
-        "description": "Road segments from Dutch National Road Database (NWB)",
-        "bbox": (4.75, 52.30, 5.00, 52.45),  # Amsterdam bbox
+        "description": "Road segments from Dutch National Road Database (NWB) - filtered to Amsterdam",
+        "bbox": (4.75, 52.30, 5.00, 52.45),  # Amsterdam bbox (WGS84)
+        "bbox_filter": True,  # Apply bbox filter after loading
     },
 ]
 
@@ -597,17 +599,18 @@ SEOUL_DATASETS = [
 NAIROBI_DATASETS = [
     {
         "name": "nairobi_roads",
-        # HDX dataset - Kenya roads shapefile (covers Nairobi region)
-        # Source: World Food Programme / Humanitarian Data Exchange
-        "url": "https://data.humdata.org/dataset/3d10cb5f-f56e-4924-b1fd-32931e0ddb41/resource/0170d6b6-7ad3-439a-ae1e-e84060886502/download/kenroads.zip",
+        # HDX HOT OSM Export - comprehensive Kenya roads (187MB, 427K km of roads)
+        # Source: https://data.humdata.org/dataset/hotosm_ken_roads
+        # Note: This is OSM-derived data, but provides good coverage for labeling
+        "url": "https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/ISO3/KEN/roads/lines/hotosm_ken_roads_lines_shp.zip",
         "fetch_type": "download",
         "file_format": "shp",
         "id_prefix": "nrb_road",
-        "name_column": "NAME",
-        "class_column": "CLASS",
-        "class_mapping": None,  # Use discover-classes
-        "source_name": "HDX Kenya Roads",
-        "description": "Kenya roads from Humanitarian Data Exchange (clip to Nairobi bbox)",
+        "name_column": "name",  # OSM name tag
+        "class_column": "highway",  # OSM highway tag
+        "class_mapping": None,  # Use discover-classes (OSM highway values)
+        "source_name": "HDX HOT OSM Kenya Roads",
+        "description": "Kenya roads from HOT OSM export (clip to Nairobi bbox)",
         "bbox": (36.70, -1.40, 37.00, -1.15),  # Nairobi bbox
         "bbox_filter": True,  # Apply bbox filter after loading
     },
