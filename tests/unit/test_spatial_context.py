@@ -7,6 +7,7 @@ from shapely import LineString
 from matcher.features.spatial_context import (
     SpatialContextIndex,
     UnionFind,
+    _cluster_endpoints_fast,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
@@ -552,3 +553,207 @@ class TestComputeDegreeSignatureSimilarity:
 
             score = compute_degree_signature_similarity(sig_a, sig_b)
             assert 0.0 <= score <= 1.0
+
+
+class TestEndpointClusteringPerformance:
+    """Performance regression tests for endpoint clustering.
+
+    These tests ensure the clustering algorithm remains fast on dense datasets.
+    The thresholds are based on expected performance with scipy's cKDTree.
+    """
+
+    def test_build_from_gdf_10k_segments_under_5_seconds(self):
+        """Building spatial index from 10k segments should complete in under 5 seconds.
+
+        This tests the full build_from_gdf pipeline including:
+        - Endpoint extraction from geometries
+        - Clustering with Union-Find
+        - Building the STRtree index
+
+        The Boston dataset has ~10k segments.
+        """
+        import time
+
+        import numpy as np
+
+        # Generate 10k random line segments
+        np.random.seed(42)
+        n_segments = 10_000
+
+        # Create line segments as pairs of points
+        starts = np.random.uniform(0, 1000, size=(n_segments, 2))
+        # End points are 50-100m away from start
+        angles = np.random.uniform(0, 2 * np.pi, size=n_segments)
+        lengths = np.random.uniform(50, 100, size=n_segments)
+        ends = starts + np.column_stack([lengths * np.cos(angles), lengths * np.sin(angles)])
+
+        geometries = [LineString([starts[i], ends[i]]) for i in range(n_segments)]
+        gdf = gpd.GeoDataFrame(
+            {"id": [f"seg_{i}" for i in range(n_segments)], "geometry": geometries},
+            crs="EPSG:32610",
+        )
+
+        start = time.perf_counter()
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 5.0, f"build_from_gdf took {elapsed:.2f}s, expected < 5.0s"
+        assert len(ctx.endpoint_coords) == 2 * n_segments
+
+    def test_compute_all_topology_10k_segments_under_5_seconds(self):
+        """Computing topology for 10k segments should complete in under 5 seconds."""
+        import time
+
+        import numpy as np
+
+        np.random.seed(42)
+        n_segments = 10_000
+
+        starts = np.random.uniform(0, 1000, size=(n_segments, 2))
+        angles = np.random.uniform(0, 2 * np.pi, size=n_segments)
+        lengths = np.random.uniform(50, 100, size=n_segments)
+        ends = starts + np.column_stack([lengths * np.cos(angles), lengths * np.sin(angles)])
+
+        geometries = [LineString([starts[i], ends[i]]) for i in range(n_segments)]
+        gdf = gpd.GeoDataFrame(
+            {"id": [f"seg_{i}" for i in range(n_segments)], "geometry": geometries},
+            crs="EPSG:32610",
+        )
+
+        start = time.perf_counter()
+        topology = compute_all_topology(gdf, id_column="id", tolerance=5.0)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 5.0, f"compute_all_topology took {elapsed:.2f}s, expected < 5.0s"
+        assert len(topology) == n_segments
+
+    def test_clustering_20k_endpoints_under_1_second(self):
+        """Clustering 20k endpoints should complete in under 1 second.
+
+        This simulates a dense urban dataset like Boston streets.
+        With cKDTree.query_pairs(), this should take ~0.1-0.2 seconds.
+        We use 1 second as the threshold to allow for CI variability.
+        """
+        import time
+
+        import numpy as np
+
+        # Generate 20k endpoints in a 1km x 1km area (dense urban)
+        # This is similar to the Boston streets dataset
+        np.random.seed(42)
+        n_endpoints = 20_000
+        endpoint_coords = np.random.uniform(0, 1000, size=(n_endpoints, 2))
+
+        tolerance = 5.0  # 5 meter snap tolerance
+
+        start = time.perf_counter()
+        uf = _cluster_endpoints_fast(endpoint_coords, tolerance)
+        elapsed = time.perf_counter() - start
+
+        # Should complete in under 1 second
+        assert elapsed < 1.0, f"Clustering took {elapsed:.2f}s, expected < 1.0s"
+
+        # Verify it actually did work (should have some clusters)
+        roots = {uf.find(i) for i in range(n_endpoints)}
+        assert len(roots) < n_endpoints, "Should have formed some clusters"
+
+    def test_clustering_50k_endpoints_under_3_seconds(self):
+        """Clustering 50k endpoints should complete in under 3 seconds.
+
+        This tests scaling behavior for larger datasets.
+        """
+        import time
+
+        import numpy as np
+
+        np.random.seed(42)
+        n_endpoints = 50_000
+        endpoint_coords = np.random.uniform(0, 2000, size=(n_endpoints, 2))
+
+        tolerance = 5.0
+
+        start = time.perf_counter()
+        uf = _cluster_endpoints_fast(endpoint_coords, tolerance)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 3.0, f"Clustering took {elapsed:.2f}s, expected < 3.0s"
+
+        # Verify it actually did work
+        roots = {uf.find(i) for i in range(n_endpoints)}
+        assert len(roots) < n_endpoints, "Should have formed some clusters"
+
+    def test_clustering_correctness_with_known_clusters(self):
+        """Verify clustering produces correct results on known data."""
+        import numpy as np
+
+        # Create 4 tight clusters at corners of a 100x100 grid
+        # Points within each cluster are 1m apart, clusters are 50m apart
+        cluster_centers = [(0, 0), (0, 100), (100, 0), (100, 100)]
+        points_per_cluster = 10
+
+        all_points = []
+        for cx, cy in cluster_centers:
+            for i in range(points_per_cluster):
+                # Points within 2m of cluster center
+                all_points.append([cx + (i % 3) * 0.5, cy + (i // 3) * 0.5])
+
+        endpoint_coords = np.array(all_points)
+        tolerance = 5.0  # Should cluster points within same corner
+
+        uf = _cluster_endpoints_fast(endpoint_coords, tolerance)
+
+        # Count distinct clusters
+        roots = {uf.find(i) for i in range(len(endpoint_coords))}
+        assert len(roots) == 4, f"Expected 4 clusters, got {len(roots)}"
+
+        # Verify points in same cluster have same root
+        for cluster_idx, (_cx, _cy) in enumerate(cluster_centers):
+            start_idx = cluster_idx * points_per_cluster
+            end_idx = start_idx + points_per_cluster
+            cluster_roots = {uf.find(i) for i in range(start_idx, end_idx)}
+            assert len(cluster_roots) == 1, f"Cluster {cluster_idx} should have 1 root"
+
+    def test_build_from_gdf_with_geographic_crs(self):
+        """Verify build_from_gdf handles geographic CRS correctly.
+
+        This test catches a critical bug where meter-based tolerance was
+        interpreted as degrees when data is in EPSG:4326, causing
+        O(N²) pair generation and massive slowdowns.
+        """
+        import time
+
+        import numpy as np
+
+        # Create segments in geographic coordinates (EPSG:4326)
+        # Boston area: ~42.36°N, ~-71.06°E
+        np.random.seed(42)
+        n_segments = 1000
+
+        # Create line segments ~100m long in geographic coords
+        # 0.001 degrees ≈ 111m at this latitude
+        base_lon, base_lat = -71.06, 42.36
+        starts_lon = base_lon + np.random.uniform(-0.01, 0.01, n_segments)
+        starts_lat = base_lat + np.random.uniform(-0.01, 0.01, n_segments)
+        ends_lon = starts_lon + np.random.uniform(-0.001, 0.001, n_segments)
+        ends_lat = starts_lat + np.random.uniform(-0.001, 0.001, n_segments)
+
+        geometries = [
+            LineString([(starts_lon[i], starts_lat[i]), (ends_lon[i], ends_lat[i])])
+            for i in range(n_segments)
+        ]
+        gdf = gpd.GeoDataFrame(
+            {"id": [f"seg_{i}" for i in range(n_segments)], "geometry": geometries},
+            crs="EPSG:4326",  # Geographic CRS!
+        )
+
+        # This should complete quickly (< 2 seconds) because it projects to UTM
+        # Before the fix, 5m tolerance was interpreted as 5 degrees, causing
+        # N² pairs and taking minutes
+        start = time.perf_counter()
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)  # 5 meters
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2.0, f"build_from_gdf with geographic CRS took {elapsed:.2f}s"
+        assert len(ctx.endpoint_coords) == 2 * n_segments

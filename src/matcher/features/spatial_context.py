@@ -227,7 +227,7 @@ class SpatialContextIndex:
         Args:
             gdf: GeoDataFrame with LineString geometries
             id_column: Column name for segment IDs
-            snap_tolerance: Distance within which endpoints are considered the same
+            snap_tolerance: Distance within which endpoints are considered the same (meters)
         """
         logger.debug(f"Building SpatialContextIndex from {len(gdf)} segments")
 
@@ -241,40 +241,81 @@ class SpatialContextIndex:
         # Build segment tree
         self._segment_tree = STRtree(gdf.geometry.values)
 
-        # Extract all endpoints
-        all_endpoints = []
-        segment_to_endpoints = {}
+        # Project to local CRS if in geographic coordinates (for accurate distance)
+        work_gdf = gdf
+        if gdf.crs is not None and gdf.crs.is_geographic:
+            centroid = gdf.geometry.union_all().centroid
+            utm_zone = int((centroid.x + 180) / 6) + 1
+            hemisphere = "north" if centroid.y >= 0 else "south"
+            epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+            work_gdf = gdf.to_crs(epsg=epsg)
 
-        for seg_idx in range(len(gdf)):
-            geom = gdf.iloc[seg_idx].geometry
-            if geom is None or geom.is_empty:
-                continue
+        # Extract all endpoints using vectorized shapely operations
+        geometries = work_gdf.geometry.values
 
-            # Handle MultiLineString by getting endpoints of first/last component
-            if geom.geom_type == "MultiLineString":
-                if len(geom.geoms) == 0:
+        # Get start and end points vectorized
+        # For LineStrings: get_point(geom, 0) = first, get_point(geom, -1) = last
+        # For MultiLineStrings: we need to handle specially
+        import shapely
+
+        # Check for MultiLineStrings and handle them
+        geom_types = shapely.get_type_id(geometries)
+        has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
+
+        if has_multi:
+            # Fall back to per-geometry extraction for mixed types
+            all_endpoints = []
+            segment_to_endpoints = {}
+            for seg_idx, geom in enumerate(geometries):
+                if geom is None or geom.is_empty:
                     continue
-                start = np.array(geom.geoms[0].coords[0])
-                end = np.array(geom.geoms[-1].coords[-1])
-            else:
-                coords = np.array(geom.coords)
-                start = coords[0]
-                end = coords[-1]
+                if geom.geom_type == "MultiLineString":
+                    if len(geom.geoms) == 0:
+                        continue
+                    start = np.array(geom.geoms[0].coords[0])
+                    end = np.array(geom.geoms[-1].coords[-1])
+                else:
+                    coords = np.array(geom.coords)
+                    start = coords[0]
+                    end = coords[-1]
+                all_endpoints.append(start)
+                all_endpoints.append(end)
+                segment_to_endpoints[seg_idx] = (len(all_endpoints) - 2, len(all_endpoints) - 1)
 
-            all_endpoints.append(start)
-            all_endpoints.append(end)
+            if not all_endpoints:
+                logger.warning("No endpoints found in GeoDataFrame")
+                return
+            self.endpoint_coords = np.array(all_endpoints)
+            self.segment_endpoints = segment_to_endpoints
+        else:
+            # Fast vectorized path for pure LineStrings
+            # Filter out empty/null geometries
+            valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+            valid_indices = np.where(valid_mask)[0]
+            valid_geoms = geometries[valid_mask]
 
-            start_ep_idx = len(all_endpoints) - 2
-            end_ep_idx = len(all_endpoints) - 1
+            if len(valid_geoms) == 0:
+                logger.warning("No endpoints found in GeoDataFrame")
+                return
 
-            segment_to_endpoints[seg_idx] = (start_ep_idx, end_ep_idx)
+            # Get first and last points vectorized
+            start_points = shapely.get_point(valid_geoms, 0)
+            end_points = shapely.get_point(valid_geoms, -1)
 
-        if not all_endpoints:
-            logger.warning("No endpoints found in GeoDataFrame")
-            return
+            # Extract coordinates
+            start_coords = shapely.get_coordinates(start_points)
+            end_coords = shapely.get_coordinates(end_points)
 
-        self.endpoint_coords = np.array(all_endpoints)
-        self.segment_endpoints = segment_to_endpoints
+            # Interleave start and end coordinates
+            n_valid = len(valid_geoms)
+            all_endpoints = np.empty((n_valid * 2, 2), dtype=np.float64)
+            all_endpoints[0::2] = start_coords
+            all_endpoints[1::2] = end_coords
+
+            self.endpoint_coords = all_endpoints
+            self.segment_endpoints = {
+                seg_idx: (i * 2, i * 2 + 1) for i, seg_idx in enumerate(valid_indices)
+            }
 
         # Cluster nearby endpoints (snap tolerance)
         self._cluster_endpoints(snap_tolerance)
@@ -311,21 +352,8 @@ class SpatialContextIndex:
 
         # Step 2: Use Union-Find to cluster nearby endpoints
         if tolerance > 0:
-            # Build STRtree for spatial queries
-            endpoint_points = [Point(c) for c in self.endpoint_coords]
-            tree = STRtree(endpoint_points)
-
-            # Initialize Union-Find
-            uf = UnionFind(n_endpoints)
-
-            # Union nearby endpoints using dwithin predicate (faster than buffer)
-            for ep_idx in range(n_endpoints):
-                point = endpoint_points[ep_idx]
-                nearby = tree.query(point, predicate="dwithin", distance=tolerance)
-
-                for other_idx in nearby:
-                    if ep_idx != other_idx:
-                        uf.union(ep_idx, other_idx)
+            # Use tile-based spatial hashing for O(N × k) clustering
+            uf = _cluster_endpoints_fast(self.endpoint_coords, tolerance)
 
             # Step 3: Build cluster -> segments mapping
             cluster_segments: dict[int, set[int]] = {}
@@ -740,6 +768,41 @@ class UnionFind:
             self.rank[root_x] += 1
 
 
+def _cluster_endpoints_fast(
+    endpoint_coords: np.ndarray,
+    tolerance: float,
+) -> UnionFind:
+    """Cluster endpoints using scipy's cKDTree for fast neighbor queries.
+
+    Uses cKDTree.query_pairs() which efficiently finds all pairs of points
+    within a given distance using a single optimized call.
+
+    Args:
+        endpoint_coords: Nx2 array of endpoint coordinates
+        tolerance: Distance within which endpoints are considered same
+
+    Returns:
+        UnionFind structure with clustered endpoints
+    """
+    from scipy.spatial import cKDTree
+
+    n_endpoints = len(endpoint_coords)
+    if n_endpoints == 0:
+        return UnionFind(0)
+
+    uf = UnionFind(n_endpoints)
+
+    # Build KD-tree and find all pairs within tolerance
+    tree = cKDTree(endpoint_coords)
+    pairs = tree.query_pairs(r=tolerance, output_type="ndarray")
+
+    # Union all nearby pairs
+    for i, j in pairs:
+        uf.union(i, j)
+
+    return uf
+
+
 def compute_all_topology(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
@@ -800,69 +863,82 @@ def compute_all_topology(
         work_gdf = gdf.to_crs(epsg=epsg)
         logger.debug(f"[topology] Projected to EPSG:{epsg} in {time.perf_counter() - t0:.2f}s")
 
-    # Step 1: Extract endpoints from all geometries
-    # Each entry: (endpoint_coords, segment_id, is_start)
+    # Step 1: Extract endpoints from all geometries using vectorized shapely
     t0 = time.perf_counter()
-    endpoint_coords = []
-    endpoint_segment_ids = []
-    endpoint_is_start = []
+    import shapely
 
-    for _, row in work_gdf.iterrows():
-        seg_id = str(row[id_column])
-        geom = row.geometry
+    geometries = work_gdf.geometry.values
+    segment_ids_arr = work_gdf[id_column].astype(str).values
 
-        if geom is None or geom.is_empty:
-            continue
+    # Check for MultiLineStrings
+    geom_types = shapely.get_type_id(geometries)
+    has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
 
-        # Handle both LineString and MultiLineString
-        if geom.geom_type == "MultiLineString":
-            if len(geom.geoms) == 0:
+    if has_multi:
+        # Fall back to per-geometry extraction for mixed types
+        endpoint_coords = []
+        endpoint_segment_ids = []
+        endpoint_is_start = []
+        for seg_idx, geom in enumerate(geometries):
+            if geom is None or geom.is_empty:
                 continue
-            start_coords = geom.geoms[0].coords[0]
-            end_coords = geom.geoms[-1].coords[-1]
-        else:
-            coords = list(geom.coords)
-            start_coords = coords[0]
-            end_coords = coords[-1]
+            seg_id = segment_ids_arr[seg_idx]
+            if geom.geom_type == "MultiLineString":
+                if len(geom.geoms) == 0:
+                    continue
+                start_coords = geom.geoms[0].coords[0]
+                end_coords = geom.geoms[-1].coords[-1]
+            else:
+                coords = list(geom.coords)
+                start_coords = coords[0]
+                end_coords = coords[-1]
+            endpoint_coords.append(start_coords)
+            endpoint_segment_ids.append(seg_id)
+            endpoint_is_start.append(True)
+            endpoint_coords.append(end_coords)
+            endpoint_segment_ids.append(seg_id)
+            endpoint_is_start.append(False)
 
-        # Add start endpoint
-        endpoint_coords.append(start_coords)
-        endpoint_segment_ids.append(seg_id)
-        endpoint_is_start.append(True)
+        if not endpoint_coords:
+            return {}
+        n_endpoints = len(endpoint_coords)
+    else:
+        # Fast vectorized path for pure LineStrings
+        valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+        valid_geoms = geometries[valid_mask]
+        valid_seg_ids = segment_ids_arr[valid_mask]
 
-        # Add end endpoint
-        endpoint_coords.append(end_coords)
-        endpoint_segment_ids.append(seg_id)
-        endpoint_is_start.append(False)
+        if len(valid_geoms) == 0:
+            return {}
 
-    if not endpoint_coords:
-        return {}
+        # Get first and last points vectorized
+        start_points = shapely.get_point(valid_geoms, 0)
+        end_points = shapely.get_point(valid_geoms, -1)
 
-    n_endpoints = len(endpoint_coords)
+        # Extract coordinates
+        start_coords = shapely.get_coordinates(start_points)
+        end_coords = shapely.get_coordinates(end_points)
+
+        # Interleave into endpoint arrays
+        n_valid = len(valid_geoms)
+        n_endpoints = n_valid * 2
+
+        endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
+        endpoint_coords[0::2] = start_coords
+        endpoint_coords[1::2] = end_coords
+
+        # Build segment ID and is_start arrays
+        endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
+        endpoint_is_start = np.tile([True, False], n_valid)
     logger.debug(
         f"[topology] Step 1: Extracted {n_endpoints} endpoints in {time.perf_counter() - t0:.2f}s"
     )
 
-    # Step 2: Build STRtree from endpoint points
+    # Step 2-4: Cluster endpoints using tile-based spatial hashing
     t0 = time.perf_counter()
-    endpoint_points = [Point(c) for c in endpoint_coords]
-    tree = STRtree(endpoint_points)
-    logger.debug(f"[topology] Step 2: Built STRtree in {time.perf_counter() - t0:.2f}s")
-
-    # Step 3 & 4: For each endpoint, query nearby and union into clusters
-    t0 = time.perf_counter()
-    uf = UnionFind(n_endpoints)
-
-    for i, point in enumerate(endpoint_points):
-        # Query all endpoints within tolerance using dwithin predicate (faster than buffer)
-        nearby_indices = tree.query(point, predicate="dwithin", distance=tolerance)
-
-        # Union this endpoint with all nearby endpoints
-        for j in nearby_indices:
-            if i != j:
-                uf.union(i, j)
-
-    logger.debug(f"[topology] Step 3-4: Union-Find clustering in {time.perf_counter() - t0:.2f}s")
+    endpoint_coords_arr = np.array(endpoint_coords)
+    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance)
+    logger.debug(f"[topology] Step 2-4: Tile-based clustering in {time.perf_counter() - t0:.2f}s")
 
     # Step 5: Build cluster -> set of segment_ids mapping
     cluster_segments: dict[int, set[str]] = {}
@@ -1005,52 +1081,70 @@ def build_inferred_graph(
         work_gdf = gdf.to_crs(epsg=epsg)
         logger.debug(f"[graphlet] Projected to EPSG:{epsg}")
 
-    # Step 1: Extract endpoints
-    endpoint_coords = []
-    endpoint_segment_ids = []
-    endpoint_is_start = []
+    # Step 1: Extract endpoints using vectorized shapely
+    import shapely
 
-    for _, row in work_gdf.iterrows():
-        seg_id = str(row[id_column])
-        geom = row.geometry
+    geometries = work_gdf.geometry.values
+    segment_ids_arr = work_gdf[id_column].astype(str).values
 
-        if geom is None or geom.is_empty:
-            continue
+    geom_types = shapely.get_type_id(geometries)
+    has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
 
-        if geom.geom_type == "MultiLineString":
-            if len(geom.geoms) == 0:
+    if has_multi:
+        # Fall back for mixed types
+        endpoint_coords = []
+        endpoint_segment_ids = []
+        endpoint_is_start = []
+        for seg_idx, geom in enumerate(geometries):
+            if geom is None or geom.is_empty:
                 continue
-            start_coords = geom.geoms[0].coords[0]
-            end_coords = geom.geoms[-1].coords[-1]
-        else:
-            coords = list(geom.coords)
-            start_coords = coords[0]
-            end_coords = coords[-1]
+            seg_id = segment_ids_arr[seg_idx]
+            if geom.geom_type == "MultiLineString":
+                if len(geom.geoms) == 0:
+                    continue
+                start_coords = geom.geoms[0].coords[0]
+                end_coords = geom.geoms[-1].coords[-1]
+            else:
+                coords = list(geom.coords)
+                start_coords = coords[0]
+                end_coords = coords[-1]
+            endpoint_coords.append(start_coords)
+            endpoint_segment_ids.append(seg_id)
+            endpoint_is_start.append(True)
+            endpoint_coords.append(end_coords)
+            endpoint_segment_ids.append(seg_id)
+            endpoint_is_start.append(False)
 
-        endpoint_coords.append(start_coords)
-        endpoint_segment_ids.append(seg_id)
-        endpoint_is_start.append(True)
+        if not endpoint_coords:
+            return nx.Graph(), {}, {}
+        n_endpoints = len(endpoint_coords)
+    else:
+        # Fast vectorized path
+        valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+        valid_geoms = geometries[valid_mask]
+        valid_seg_ids = segment_ids_arr[valid_mask]
 
-        endpoint_coords.append(end_coords)
-        endpoint_segment_ids.append(seg_id)
-        endpoint_is_start.append(False)
+        if len(valid_geoms) == 0:
+            return nx.Graph(), {}, {}
 
-    if not endpoint_coords:
-        return nx.Graph(), {}, {}
+        start_points = shapely.get_point(valid_geoms, 0)
+        end_points = shapely.get_point(valid_geoms, -1)
+        start_coords = shapely.get_coordinates(start_points)
+        end_coords = shapely.get_coordinates(end_points)
 
-    n_endpoints = len(endpoint_coords)
+        n_valid = len(valid_geoms)
+        n_endpoints = n_valid * 2
+        endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
+        endpoint_coords[0::2] = start_coords
+        endpoint_coords[1::2] = end_coords
+        endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
+        endpoint_is_start = np.tile([True, False], n_valid)
+
     logger.debug(f"[graphlet] Extracted {n_endpoints} endpoints")
 
-    # Step 2: Build STRtree and cluster with Union-Find
-    endpoint_points = [Point(c) for c in endpoint_coords]
-    tree = STRtree(endpoint_points)
-    uf = UnionFind(n_endpoints)
-
-    for i, point in enumerate(endpoint_points):
-        nearby = tree.query(point, predicate="dwithin", distance=tolerance)
-        for j in nearby:
-            if i != j:
-                uf.union(i, j)
+    # Step 2: Cluster endpoints using tile-based spatial hashing
+    endpoint_coords_arr = np.array(endpoint_coords)
+    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance)
 
     # Step 3: Build graph
     G = nx.Graph()
