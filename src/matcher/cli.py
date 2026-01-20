@@ -333,11 +333,11 @@ def label(
 
 @app.command()
 def train(
-    labels: Path = typer.Option(
-        Path("data/labels"),
+    labels_dir: Path = typer.Option(
+        Path("labels"),
         "--labels",
         "-l",
-        help="Labels directory or parquet file",
+        help="Labels directory (Hive-partitioned CSV format)",
     ),
     output: Path = typer.Option(
         Path("data/models/matcher_model_combined.joblib"),
@@ -345,70 +345,54 @@ def train(
         "-o",
         help="Output path for trained model",
     ),
-    combined: bool = typer.Option(
-        False,
-        "--combined",
-        "-c",
-        help="Combine all label files in directory for training",
-    ),
 ):
     """Train an ML model on labeled data.
 
+    Loads labels from Hive-partitioned CSV format (labels/dataset=*/data.csv).
+
     Examples:
-        matcher train --labels data/labels/labels_boston_streets.parquet
-        matcher train --labels data/labels --combined -o data/models/combined.joblib
+        matcher train
+        matcher train --labels labels -o data/models/my_model.joblib
     """
-    import pandas as pd
+    from .labeling.label_store import LabelStore
+    from .matching.ml import MLMatcher
 
-    from .matching.ml import train_model
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
 
-    labels_path = Path(labels)
+    # Check for dataset partitions
+    partitions = list(labels_dir.glob("dataset=*/data.csv"))
+    if not partitions:
+        console.print(f"[red]No label partitions found in {labels_dir}[/red]")
+        console.print("[yellow]Expected format: labels/dataset=*/data.csv[/yellow]")
+        raise typer.Exit(1)
 
-    if labels_path.is_dir() and combined:
-        # Combine all label files
-        console.print(f"[blue]Loading labels from {labels_path}...[/blue]")
-        label_files = list(labels_path.glob("labels_*.parquet"))
-        if not label_files:
-            console.print("[red]No label files found[/red]")
-            raise typer.Exit(1)
+    console.print(f"[blue]Loading labels from {labels_dir}...[/blue]")
+    df = LabelStore.load_all(labels_dir)
+    console.print(f"  Found {len(df)} labels from {df['dataset'].nunique()} datasets")
 
-        dfs = []
-        for f in label_files:
-            df = pd.read_parquet(f)
-            df["_source"] = f.stem
-            dfs.append(df)
-            console.print(f"  {f.name}: {len(df)} labels")
+    # Train model
+    console.print("[blue]Training model...[/blue]")
+    matcher = MLMatcher()
+    metrics = matcher.train(labels_dir=labels_dir, test_size=0.2, binary=True)
 
-        combined_df = pd.concat(dfs, ignore_index=True)
-        console.print(f"[green]Combined: {len(combined_df)} total labels[/green]")
-
-        # Save combined temporarily
-        temp_path = labels_path / "_combined_temp.parquet"
-        combined_df.to_parquet(temp_path)
-
-        try:
-            train_model(str(temp_path), str(output))
-        finally:
-            temp_path.unlink()  # Clean up temp file
-    else:
-        if labels_path.is_dir():
-            console.print("[red]Specify a parquet file or use --combined[/red]")
-            raise typer.Exit(1)
-
-        console.print(f"[blue]Training on {labels_path}...[/blue]")
-        train_model(str(labels_path), str(output))
+    # Save model
+    output.parent.mkdir(parents=True, exist_ok=True)
+    matcher.save_model(str(output))
 
     console.print(f"\n[green]Model saved to {output}[/green]")
+    console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
 
 
 @app.command("eval-model")
 def eval_model(
     model: Path = typer.Argument(..., help="Path to trained model"),
     labels_dir: Path = typer.Option(
-        Path("data/labels"),
+        Path("labels"),
         "--labels",
         "-l",
-        help="Labels directory for evaluation",
+        help="Labels directory (Hive-partitioned CSV format)",
     ),
     by_dataset: bool = typer.Option(
         True,
