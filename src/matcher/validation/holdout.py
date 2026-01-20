@@ -4,7 +4,6 @@ Functions to create reduced reference datasets by dropping segments
 based on various strategies (random, bbox, source, class).
 """
 
-
 import geopandas as gpd
 import numpy as np
 import pandas as pd
