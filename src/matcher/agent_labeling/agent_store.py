@@ -66,7 +66,7 @@ class AgentLabelStore:
     def save(self) -> None:
         """Save labels to CSV."""
         self.labels_dir.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.csv_path, index=False)
+        self._df.to_csv(self.csv_path, index=False, float_format="%.10f")
         logger.info(f"Saved {len(self._df)} labels to {self.csv_path}")
 
     def add_label(

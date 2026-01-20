@@ -130,7 +130,7 @@ class LabelStore:
     def save(self) -> None:
         """Save labels to CSV."""
         self.partition_path.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.csv_path, index=False)
+        self._df.to_csv(self.csv_path, index=False, float_format="%.10f")
 
     def add(
         self,
@@ -345,4 +345,4 @@ def save_labels(df: pd.DataFrame, path: Path) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
+    df.to_csv(path, index=False, float_format="%.10f")

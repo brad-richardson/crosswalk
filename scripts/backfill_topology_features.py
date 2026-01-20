@@ -228,7 +228,7 @@ def backfill_dataset(
     df = pd.concat([df, features_df], axis=1)
 
     if not dry_run:
-        df.to_csv(label_path, index=False)
+        df.to_csv(label_path, index=False, float_format="%.10f")
         logger.info(f"  Saved {len(df)} labels with topology features")
     else:
         logger.info(f"  [DRY RUN] Would save {len(df)} labels with topology features")

@@ -45,8 +45,14 @@ DATASET_CONFIG = {
     "boston_sidewalks_relational": ("boston_sidewalks.parquet", "overture_segments.parquet"),
     "boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
     "osm": ("osm_segments.parquet", "overture_segments.parquet"),
-    "fort_collins_streets": ("fort_collins_streets.parquet", "overture_fort_collins_segments.parquet"),
-    "fort_collins_sidewalks": ("fort_collins_sidewalks.parquet", "overture_fort_collins_segments.parquet"),
+    "fort_collins_streets": (
+        "fort_collins_streets.parquet",
+        "overture_fort_collins_segments.parquet",
+    ),
+    "fort_collins_sidewalks": (
+        "fort_collins_sidewalks.parquet",
+        "overture_fort_collins_segments.parquet",
+    ),
     "frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
     "frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
 }
@@ -76,14 +82,17 @@ SIMILARITY_FEATURE_COLUMNS = [
 ]
 
 
-def _get_utm_crs_for_geometry(geom) -> CRS | None:
-    """Get appropriate UTM CRS for a geometry based on its centroid.
+def _get_local_equidistant_crs(geom) -> CRS | None:
+    """Get local azimuthal equidistant CRS centered on geometry.
+
+    This projection has no zone boundaries (unlike UTM) and provides
+    accurate distance measurements near the center point.
 
     Args:
         geom: Shapely geometry (assumed in WGS84)
 
     Returns:
-        CRS for appropriate UTM zone, or None if not needed
+        CRS for local projection, or None if not needed
     """
     centroid = geom.centroid
     lon, lat = centroid.x, centroid.y
@@ -96,12 +105,9 @@ def _get_utm_crs_for_geometry(geom) -> CRS | None:
     if lon > 1000 or lon < -1000:
         return None
 
-    # Calculate UTM zone
-    zone = int((lon + 180) / 6) + 1
-    hemisphere = "north" if lat >= 0 else "south"
-    epsg = 32600 + zone if hemisphere == "north" else 32700 + zone
-
-    return CRS.from_epsg(epsg)
+    # Create local azimuthal equidistant CRS
+    proj_string = f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m"
+    return CRS.from_proj4(proj_string)
 
 
 def _project_geometry(geom, transformer):
@@ -130,10 +136,10 @@ def compute_aligned_features(
         return None, {}
 
     try:
-        # Project to UTM for accurate alignment (if in geographic CRS)
-        utm_crs = _get_utm_crs_for_geometry(ref_geom)
-        if utm_crs is not None:
-            transformer = Transformer.from_crs(CRS.from_epsg(4326), utm_crs, always_xy=True)
+        # Project to local equidistant CRS for accurate alignment (if in geographic CRS)
+        local_crs = _get_local_equidistant_crs(ref_geom)
+        if local_crs is not None:
+            transformer = Transformer.from_crs(CRS.from_epsg(4326), local_crs, always_xy=True)
             ref_proj = _project_geometry(ref_geom, transformer)
             target_proj = _project_geometry(target_geom, transformer)
         else:
@@ -245,6 +251,7 @@ def backfill_dataset(
     missing_ref = 0
     missing_target = 0
     successful_alignments = 0
+    failed_alignments = []
 
     for _, row in df.iterrows():
         gers_id = str(row["gers_id"])
@@ -263,7 +270,9 @@ def backfill_dataset(
         if alignment is not None:
             successful_alignments += 1
         else:
-            # Use default values for failed alignments
+            # Log failed alignment with explicit warning
+            failed_alignments.append((gers_id, target_id))
+            # Use explicit None/0.0 values for failed alignments
             features = {
                 "ref_coverage": 0.0,
                 "target_coverage": 0.0,
@@ -277,6 +286,16 @@ def backfill_dataset(
                         features[col] = row[col]
 
         new_features.append(features)
+
+    # Log summary of failed alignments
+    if failed_alignments:
+        logger.warning(
+            f"  {len(failed_alignments)} pairs had failed alignments "
+            "(missing geometry or computation error)"
+        )
+        # Log first few failed pairs for debugging
+        for gers_id, target_id in failed_alignments[:5]:
+            logger.debug(f"    Failed: gers_id={gers_id}, target_id={target_id}")
 
     logger.info(f"  Successful alignments: {successful_alignments}/{len(df)}")
     if missing_ref > 0:
@@ -302,7 +321,7 @@ def backfill_dataset(
     df = pd.concat([df, features_df[cols_to_add]], axis=1)
 
     if not dry_run:
-        df.to_csv(label_path, index=False)
+        df.to_csv(label_path, index=False, float_format="%.10f")
         logger.info(f"  Saved {len(df)} labels with alignment features")
     else:
         logger.info(f"  [DRY RUN] Would save {len(df)} labels with alignment features")
@@ -378,7 +397,9 @@ def main():
     for ref_file, dataset_names in ref_file_to_datasets.items():
         ref_path = data_dir / ref_file
         if not ref_path.exists():
-            logger.warning(f"Reference file not found: {ref_path}, skipping datasets: {dataset_names}")
+            logger.warning(
+                f"Reference file not found: {ref_path}, skipping datasets: {dataset_names}"
+            )
             continue
 
         logger.info(f"Loading reference data from {ref_file}...")

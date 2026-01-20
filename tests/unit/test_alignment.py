@@ -6,10 +6,14 @@ from shapely.geometry import LineString
 
 from matcher.features.alignment import (
     AlignmentResult,
+    _compute_centroid,
+    _create_local_equidistant_crs,
     _interpolate_along_line,
+    _is_geographic,
     _prepare_line_data,
     compute_coverage_features,
     create_subline,
+    geodetic_length,
     linestring_alignment,
     walk_distance,
     walk_parallelness,
@@ -546,14 +550,23 @@ class TestComputeCoverageFeatures:
         assert features["min_coverage"] == pytest.approx(0.5)
         assert features["coverage_ratio"] == pytest.approx(0.5 / 0.6, rel=0.01)
 
-    def test_none_alignment(self):
-        """None alignment should return zeros."""
+    def test_none_alignment_backward_compatible(self):
+        """None alignment should return zeros by default (backward compatible)."""
         features = compute_coverage_features(None)
 
         assert features["ref_coverage"] == 0.0
         assert features["target_coverage"] == 0.0
         assert features["min_coverage"] == 0.0
         assert features["coverage_ratio"] == 0.0
+
+    def test_none_alignment_explicit_failure(self):
+        """None alignment with return_none_on_failure=True should return Nones."""
+        features = compute_coverage_features(None, return_none_on_failure=True)
+
+        assert features["ref_coverage"] is None
+        assert features["target_coverage"] is None
+        assert features["min_coverage"] is None
+        assert features["coverage_ratio"] is None
 
     def test_zero_coverage(self):
         """Zero coverage alignment should handle division by zero."""
@@ -634,3 +647,166 @@ class TestAlignedFeatureComputation:
         assert coverage["target_coverage"] > 0.9
         # Reference has partial coverage (only where target exists)
         assert 0.4 < coverage["ref_coverage"] < 0.6
+
+
+class TestGeodeticLength:
+    """Tests for geodetic_length function using WGS84 ellipsoid."""
+
+    def test_none_input(self):
+        """None input should return 0.0."""
+        assert geodetic_length(None) == 0.0
+
+    def test_empty_geometry(self):
+        """Empty geometry should return 0.0."""
+        empty = LineString()
+        assert geodetic_length(empty) == 0.0
+
+    def test_point_geometry(self):
+        """Zero-length line (point) should return 0.0."""
+        point_line = LineString([(0, 0), (0, 0)])
+        assert geodetic_length(point_line) == pytest.approx(0.0, abs=0.01)
+
+    def test_known_distance_equator(self):
+        """Test a known distance along the equator.
+
+        1 degree of longitude at the equator is approximately 111,320 meters.
+        """
+        # Line along equator: 1 degree of longitude
+        line = LineString([(0, 0), (1, 0)])
+        length = geodetic_length(line)
+        # Expected: ~111,320 meters (varies slightly due to ellipsoid)
+        assert 111000 < length < 112000
+
+    def test_known_distance_latitude(self):
+        """Test a known distance along a meridian.
+
+        1 degree of latitude is approximately 111,000-111,300 meters.
+        """
+        # Line along meridian: 1 degree of latitude
+        line = LineString([(0, 0), (0, 1)])
+        length = geodetic_length(line)
+        # Expected: ~111,000 meters
+        assert 110000 < length < 112000
+
+    def test_multi_segment_line(self):
+        """Test multi-segment line computes total length."""
+        # L-shaped line: 0.01 degrees east, then 0.01 degrees north
+        # At equator, this is approximately 1.1km each segment
+        line = LineString([(0, 0), (0.01, 0), (0.01, 0.01)])
+        length = geodetic_length(line)
+        # Should be approximately 2.2km total
+        assert 2000 < length < 2400
+
+    def test_boston_street_segment(self):
+        """Test realistic street segment in Boston area.
+
+        A typical city block is 100-200 meters.
+        """
+        # Small street segment in Boston (approximate coordinates)
+        # ~0.001 degrees longitude at 42N is about 80-90 meters
+        line = LineString([(-71.05, 42.35), (-71.049, 42.35)])
+        length = geodetic_length(line)
+        # Expected: ~80-90 meters
+        assert 70 < length < 100
+
+    def test_always_positive(self):
+        """Length should always be positive regardless of direction."""
+        line1 = LineString([(0, 0), (1, 0)])
+        line2 = LineString([(1, 0), (0, 0)])  # Reversed
+
+        assert geodetic_length(line1) > 0
+        assert geodetic_length(line2) > 0
+        assert geodetic_length(line1) == pytest.approx(geodetic_length(line2), rel=0.001)
+
+
+class TestLocalEquidistantProjection:
+    """Tests for local azimuthal equidistant projection functions."""
+
+    def test_compute_centroid_empty_array(self):
+        """Empty array should return None."""
+        result = _compute_centroid(np.array([], dtype=object))
+        assert result is None
+
+    def test_compute_centroid_all_none(self):
+        """Array of None values should return None."""
+        geoms = np.array([None, None, None], dtype=object)
+        result = _compute_centroid(geoms)
+        assert result is None
+
+    def test_compute_centroid_single_geometry(self):
+        """Single geometry should return its centroid."""
+        line = LineString([(0, 0), (10, 0)])
+        geoms = np.array([line], dtype=object)
+        result = _compute_centroid(geoms)
+
+        assert result is not None
+        lon, lat = result
+        assert lon == pytest.approx(5.0)
+        assert lat == pytest.approx(0.0)
+
+    def test_compute_centroid_multiple_geometries(self):
+        """Multiple geometries should return average centroid."""
+        line1 = LineString([(0, 0), (10, 0)])  # Centroid: (5, 0)
+        line2 = LineString([(0, 10), (10, 10)])  # Centroid: (5, 10)
+        geoms = np.array([line1, line2], dtype=object)
+        result = _compute_centroid(geoms)
+
+        assert result is not None
+        lon, lat = result
+        assert lon == pytest.approx(5.0)
+        assert lat == pytest.approx(5.0)
+
+    def test_is_geographic_true_for_wgs84(self):
+        """WGS84 coordinates should be detected as geographic."""
+        # Boston area coordinates
+        line = LineString([(-71.05, 42.35), (-71.04, 42.35)])
+        geoms = np.array([line], dtype=object)
+        assert _is_geographic(geoms) is True
+
+    def test_is_geographic_false_for_projected(self):
+        """Projected coordinates (large values) should not be detected as geographic."""
+        # UTM coordinates (meters)
+        line = LineString([(500000, 4700000), (500100, 4700000)])
+        geoms = np.array([line], dtype=object)
+        assert _is_geographic(geoms) is False
+
+    def test_is_geographic_false_for_empty(self):
+        """Empty array should return False."""
+        geoms = np.array([], dtype=object)
+        assert _is_geographic(geoms) is False
+
+    def test_create_local_equidistant_crs(self):
+        """Local AEQD CRS should be created with correct parameters."""
+        crs = _create_local_equidistant_crs(-71.05, 42.35)
+
+        assert crs is not None
+        assert crs.is_projected
+        # Check that the projection is azimuthal equidistant
+        assert "aeqd" in crs.to_proj4().lower()
+        # Check center coordinates are in the proj string
+        assert "42.35" in crs.to_proj4()
+        assert "-71.05" in crs.to_proj4()
+
+    def test_projection_preserves_distance_at_center(self):
+        """Distances near the center should be accurate."""
+        from pyproj import Transformer
+        from shapely.ops import transform
+
+        center_lon, center_lat = -71.05, 42.35
+        crs = _create_local_equidistant_crs(center_lon, center_lat)
+
+        # Create transformer
+        from pyproj import CRS
+
+        transformer = Transformer.from_crs(CRS.from_epsg(4326), crs, always_xy=True)
+
+        # Project a small line near the center
+        line_wgs84 = LineString([(center_lon, center_lat), (center_lon + 0.001, center_lat)])
+        line_projected = transform(transformer.transform, line_wgs84)
+
+        # Compare with geodetic length
+        geodetic = geodetic_length(line_wgs84)
+        euclidean = line_projected.length
+
+        # Should be within 1% for small distances near center
+        assert euclidean == pytest.approx(geodetic, rel=0.01)

@@ -18,11 +18,17 @@ from shapely.strtree import STRtree
 from ..config import settings
 
 
-def _estimate_utm_epsg(gdf: gpd.GeoDataFrame) -> int | None:
-    """Estimate appropriate UTM EPSG code from a GeoDataFrame.
+def _create_local_projection_crs(gdf: gpd.GeoDataFrame) -> CRS | None:
+    """Create local Azimuthal Equidistant CRS centered on data centroid.
 
-    Returns EPSG code for appropriate UTM zone, or None if data doesn't
-    appear to be in geographic CRS.
+    This projection has no zone boundaries (unlike UTM) and provides
+    accurate distance measurements near the center point.
+
+    Args:
+        gdf: GeoDataFrame to compute centroid from
+
+    Returns:
+        CRS for local projection, or None if data is already projected
     """
     if gdf.crs is None:
         return None
@@ -37,19 +43,16 @@ def _estimate_utm_epsg(gdf: gpd.GeoDataFrame) -> int | None:
 
     # Get centroid of bounds
     bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
-    lon = (bounds[0] + bounds[2]) / 2
-    lat = (bounds[1] + bounds[3]) / 2
+    center_lon = (bounds[0] + bounds[2]) / 2
+    center_lat = (bounds[1] + bounds[3]) / 2
 
     # Check if coordinates look like geographic
-    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+    if not (-180 <= center_lon <= 180 and -90 <= center_lat <= 90):
         return None
 
-    # Calculate UTM zone
-    zone = int((lon + 180) / 6) + 1
-    hemisphere = "north" if lat >= 0 else "south"
-    epsg = 32600 + zone if hemisphere == "north" else 32700 + zone
-
-    return epsg
+    # Create local azimuthal equidistant CRS
+    proj_string = f"+proj=aeqd +lat_0={center_lat} +lon_0={center_lon} +datum=WGS84 +units=m"
+    return CRS.from_proj4(proj_string)
 
 
 def _compute_headings_vectorized(geometries: gpd.GeoSeries) -> np.ndarray:
@@ -142,11 +145,11 @@ def generate_candidates(
     logger.info("  Note: heading/length filters disabled - ML model handles scoring")
 
     # Check if data is in geographic CRS and needs projection for accurate buffering
-    utm_epsg = _estimate_utm_epsg(target)
-    if utm_epsg is not None:
-        logger.info(f"  Projecting to EPSG:{utm_epsg} for accurate spatial operations")
-        target_proj = target.to_crs(epsg=utm_epsg)
-        reference_proj = reference.to_crs(epsg=utm_epsg)
+    local_crs = _create_local_projection_crs(target)
+    if local_crs is not None:
+        logger.info("  Projecting to local AEQD CRS for accurate spatial operations")
+        target_proj = target.to_crs(local_crs)
+        reference_proj = reference.to_crs(local_crs)
     else:
         target_proj = target
         reference_proj = reference

@@ -8,6 +8,7 @@ Key functions:
 - walk_distance: Integrated Euclidean distance between two aligned lines
 - walk_parallelness: How parallel two aligned lines are (squared dot product)
 - compute_alignment_batch: Parallel batch processing for multiple pairs
+- geodetic_length: Compute geodetic length in meters (consistent with Overture)
 """
 
 import multiprocessing as mp
@@ -17,9 +18,30 @@ from dataclasses import dataclass
 import numpy as np
 from loguru import logger
 from numba import jit
-from pyproj import CRS, Transformer
+from pyproj import CRS, Geod, Transformer
 from shapely.geometry import LineString
 from shapely.ops import substring, transform
+
+# WGS84 ellipsoid for geodetic calculations (consistent with Overture)
+_GEOD = Geod(ellps="WGS84")
+
+
+def geodetic_length(line: LineString) -> float:
+    """Compute geodetic length in meters on the WGS84 ellipsoid.
+
+    This is consistent with how Overture computes linear references
+    and is more accurate than planar/Euclidean calculations for
+    geographic coordinates.
+
+    Args:
+        line: LineString geometry in WGS84 (EPSG:4326)
+
+    Returns:
+        Length in meters, or 0.0 if line is None/empty
+    """
+    if line is None or line.is_empty:
+        return 0.0
+    return abs(_GEOD.geometry_length(line))
 
 
 @dataclass
@@ -502,47 +524,67 @@ def walk_parallelness(L1: LineString, L2: LineString, samples: int = 16) -> floa
 _alignment_worker_data = None
 
 
-def _estimate_utm_crs(geoms: np.ndarray) -> CRS | None:
-    """Estimate an appropriate UTM CRS from a collection of geometries.
-
-    Determines the UTM zone from the centroid of the first valid geometry.
-    Returns None if geometries don't appear to be in geographic CRS.
+def _compute_centroid(geoms: np.ndarray) -> tuple[float, float] | None:
+    """Compute average centroid from a collection of geometries.
 
     Args:
         geoms: Array of Shapely geometries
 
     Returns:
-        CRS object for UTM zone, or None if projection not needed
+        (lon, lat) tuple or None if no valid geometries
     """
-    # Find first valid geometry
-    sample_geom = None
-    for g in geoms[:100]:  # Check first 100 for efficiency
+    lons, lats = [], []
+    for g in geoms[:100]:  # Sample first 100 for efficiency
         if g is not None and not g.is_empty:
-            sample_geom = g
-            break
+            c = g.centroid
+            lons.append(c.x)
+            lats.append(c.y)
 
-    if sample_geom is None:
+    if not lons:
         return None
 
-    # Get centroid coordinates
-    centroid = sample_geom.centroid
-    lon, lat = centroid.x, centroid.y
+    return np.mean(lons), np.mean(lats)
+
+
+def _is_geographic(geoms: np.ndarray) -> bool:
+    """Check if geometries appear to be in geographic CRS (lat/lon).
+
+    Args:
+        geoms: Array of Shapely geometries
+
+    Returns:
+        True if coordinates look like WGS84 lat/lon
+    """
+    centroid = _compute_centroid(geoms)
+    if centroid is None:
+        return False
+
+    lon, lat = centroid
 
     # Check if coordinates look like geographic (lat/lon in typical ranges)
     if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-        return None  # Already in projected CRS
+        return False
 
     # If longitude is in a small range that's plausible for projected coords,
     # assume it's already projected (e.g., UTM coordinates)
-    if lon > 1000 or lon < -1000:
-        return None
+    return not (lon > 1000 or lon < -1000)
 
-    # Calculate UTM zone
-    zone = int((lon + 180) / 6) + 1
-    hemisphere = "north" if lat >= 0 else "south"
-    epsg = 32600 + zone if hemisphere == "north" else 32700 + zone
 
-    return CRS.from_epsg(epsg)
+def _create_local_equidistant_crs(center_lon: float, center_lat: float) -> CRS:
+    """Create local Azimuthal Equidistant CRS centered on given point.
+
+    This projection has no zone boundaries (unlike UTM) and provides
+    accurate distance measurements near the center point.
+
+    Args:
+        center_lon: Center longitude in degrees
+        center_lat: Center latitude in degrees
+
+    Returns:
+        CRS object for local azimuthal equidistant projection
+    """
+    proj_string = f"+proj=aeqd +lat_0={center_lat} +lon_0={center_lon} +datum=WGS84 +units=m"
+    return CRS.from_proj4(proj_string)
 
 
 def _project_geometry(geom, transformer):
@@ -612,10 +654,13 @@ def compute_alignment_batch(
     computation. It processes alignment for all candidate pairs using parallel
     workers, then returns results as a dictionary keyed by (ref_idx, target_idx).
 
+    Uses local Azimuthal Equidistant projection centered on data centroid for
+    accurate distance calculations without UTM zone boundary issues.
+
     Args:
         candidates: List of CandidatePair objects with ref_idx and target_idx
-        ref_geoms: NumPy array of reference geometries
-        target_geoms: NumPy array of target geometries
+        ref_geoms: NumPy array of reference geometries (assumed WGS84 if geographic)
+        target_geoms: NumPy array of target geometries (assumed WGS84 if geographic)
         n_jobs: Number of parallel jobs (-1 for all cores minus 2)
 
     Returns:
@@ -635,11 +680,20 @@ def compute_alignment_batch(
     logger.info(f"Computing alignments for {n_candidates} candidates using {n_workers} workers...")
 
     # Check if geometries are in geographic CRS and need projection
-    utm_crs = _estimate_utm_crs(ref_geoms)
-    if utm_crs is not None:
-        logger.info(f"Projecting geometries to {utm_crs} for alignment computation...")
-        ref_geoms_for_alignment = _project_geometries(ref_geoms, utm_crs)
-        target_geoms_for_alignment = _project_geometries(target_geoms, utm_crs)
+    if _is_geographic(ref_geoms):
+        # Compute centroid from all candidate geometries for projection center
+        centroid = _compute_centroid(ref_geoms)
+        if centroid is not None:
+            center_lon, center_lat = centroid
+            local_crs = _create_local_equidistant_crs(center_lon, center_lat)
+            logger.info(
+                f"Projecting geometries to local AEQD (center: {center_lon:.3f}, {center_lat:.3f})"
+            )
+            ref_geoms_for_alignment = _project_geometries(ref_geoms, local_crs)
+            target_geoms_for_alignment = _project_geometries(target_geoms, local_crs)
+        else:
+            ref_geoms_for_alignment = ref_geoms
+            target_geoms_for_alignment = target_geoms
     else:
         ref_geoms_for_alignment = ref_geoms
         target_geoms_for_alignment = target_geoms
@@ -686,7 +740,9 @@ def compute_alignment_batch(
     return alignments
 
 
-def compute_coverage_features(alignment: AlignmentResult | None) -> dict[str, float]:
+def compute_coverage_features(
+    alignment: AlignmentResult | None, return_none_on_failure: bool = False
+) -> dict[str, float | None]:
     """Compute coverage features from an alignment result.
 
     These features are used by the ML model to learn appropriate overlap
@@ -694,22 +750,34 @@ def compute_coverage_features(alignment: AlignmentResult | None) -> dict[str, fl
 
     Args:
         alignment: AlignmentResult from linestring_alignment, or None
+        return_none_on_failure: If True, return None values when alignment is None
+                                (for explicit failure handling). If False (default),
+                                return 0.0 values for backward compatibility.
 
     Returns:
         Dict with coverage features:
-        - ref_coverage: Fraction of reference covered (0-1)
-        - target_coverage: Fraction of target covered (0-1)
-        - min_coverage: Minimum of the two coverages
-        - coverage_ratio: Symmetry of coverage (min/max)
+        - ref_coverage: Fraction of reference covered (0-1) or None
+        - target_coverage: Fraction of target covered (0-1) or None
+        - min_coverage: Minimum of the two coverages or None
+        - coverage_ratio: Symmetry of coverage (min/max) or None
     """
     if alignment is None:
-        # No alignment available - return neutral values
-        return {
-            "ref_coverage": 0.0,
-            "target_coverage": 0.0,
-            "min_coverage": 0.0,
-            "coverage_ratio": 0.0,
-        }
+        if return_none_on_failure:
+            # Explicit failure - return None values for ML pipeline (handled by imputation)
+            return {
+                "ref_coverage": None,
+                "target_coverage": None,
+                "min_coverage": None,
+                "coverage_ratio": None,
+            }
+        else:
+            # Backward compatible - return 0.0 values
+            return {
+                "ref_coverage": 0.0,
+                "target_coverage": 0.0,
+                "min_coverage": 0.0,
+                "coverage_ratio": 0.0,
+            }
 
     ref_cov = alignment.overture_coverage
     target_cov = alignment.dataset_coverage
