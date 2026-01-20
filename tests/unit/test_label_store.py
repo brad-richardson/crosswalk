@@ -2,6 +2,7 @@
 
 from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
 from matcher.labeling.label_store import LABEL_COLUMNS
+from matcher.matching.ml import FEATURE_COLUMNS
 
 
 class TestFeatureParity:
@@ -99,3 +100,25 @@ class TestFeatureParity:
                 f"LABEL_COLUMNS has '{col}' but it's not in ALL_FEATURE_COLUMNS.\n"
                 f"Either add it to ALL_FEATURE_COLUMNS or remove from LABEL_COLUMNS."
             )
+
+    def test_ml_feature_columns_match_computed_features(self):
+        """ML FEATURE_COLUMNS must match ALL_FEATURE_COLUMNS.
+
+        This ensures the ML model uses the same features that are computed
+        and saved to labels. A mismatch would cause training failures or
+        incorrect predictions.
+        """
+        ml_features = set(FEATURE_COLUMNS)
+        computed_features = set(ALL_FEATURE_COLUMNS)
+
+        missing_from_ml = computed_features - ml_features
+        assert not missing_from_ml, (
+            f"Features computed but not used by ML model: {sorted(missing_from_ml)}\n"
+            f"Add these to FEATURE_COLUMNS in ml.py."
+        )
+
+        extra_in_ml = ml_features - computed_features
+        assert not extra_in_ml, (
+            f"ML model uses features that are not computed: {sorted(extra_in_ml)}\n"
+            f"Either add these to ALL_FEATURE_COLUMNS in compute.py or remove from ml.py."
+        )
