@@ -2,10 +2,14 @@ name: fi_helsinki_roads
 display_name: Digiroad Finland
 type: road
 description: Road network from Finnish national Digiroad database
+# NOTE: URL broken as of Jan 2026 - Väylävirasto changed their download portal structure.
+# Data is available at https://aineistot.vayla.fi/digiroad but requires manual download.
+# WFS alternative: https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/wfs
 source:
   type: download
   url: https://ava.vaylapilvi.fi/ava/Tie/Digiroad/Aineistojulkaisut/latest/DIGIROAD_K_KOKOMAA.gpkg.zip
   file_format: gpkg
+  status: unavailable
 fetch:
   crs: EPSG:4326
   id_prefix: hel_road
