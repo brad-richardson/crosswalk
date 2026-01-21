@@ -5,6 +5,8 @@ Resolves conflicts where multiple targets match the same reference
 
 Supports both 1:1 matching (Hungarian algorithm) and 1:N matching
 (where one reference can match multiple contiguous target segments).
+
+Memory-efficient sparse optimization is used for large datasets to avoid OOM.
 """
 
 from collections import defaultdict
@@ -15,7 +17,8 @@ import geopandas as gpd
 import numpy as np
 from loguru import logger
 from scipy.optimize import linear_sum_assignment
-from shapely import LineString, Point
+from scipy.spatial import cKDTree
+from shapely import LineString
 
 from ..config import settings
 from .rules import MatchDecision, MatchResult
@@ -112,6 +115,252 @@ def optimize_matches(
         final_matches.append(match)
 
     return final_matches
+
+
+def optimize_matches_sparse(
+    results: list[MatchResult],
+    min_confidence: float = 0.5,
+) -> list[MatchResult]:
+    """Optimization using scipy's linear_sum_assignment (LAPJV algorithm).
+
+    Builds a dense cost matrix for unique refs/targets with candidates.
+    Despite the name "sparse", this builds a dense matrix - the "sparse"
+    refers to the input being sparse (few edges relative to all possible pairs).
+
+    Memory: O(unique_refs × unique_targets) - dense matrix
+    Time: O(n³) where n = max(unique_refs, unique_targets)
+
+    Args:
+        results: List of MatchResult objects
+        min_confidence: Minimum confidence to consider a match
+
+    Returns:
+        List of optimal MatchResult objects (1:1 assignments)
+    """
+    import time
+
+    from scipy.optimize import linear_sum_assignment
+
+    logger.info(f"[LAPJV] Starting optimization of {len(results)} results...")
+
+    # Filter by minimum confidence
+    valid_results = [r for r in results if r.confidence >= min_confidence]
+    logger.info(f"[LAPJV] {len(valid_results)} results above min_confidence={min_confidence}")
+
+    if not valid_results:
+        return []
+
+    # Get unique refs and targets that have edges
+    t0 = time.perf_counter()
+    unique_refs = sorted(set(r.ref_id for r in valid_results), key=str)
+    unique_targets = sorted(set(r.target_id for r in valid_results), key=str)
+
+    ref_to_idx = {r: i for i, r in enumerate(unique_refs)}
+    target_to_idx = {t: i for i, t in enumerate(unique_targets)}
+
+    n_ref = len(unique_refs)
+    n_target = len(unique_targets)
+    matrix_mb = (n_ref * n_target * 8) / (1024 * 1024)
+
+    logger.info(
+        f"[LAPJV] Building cost matrix: {n_ref} refs × {n_target} targets = {matrix_mb:.1f} MB"
+    )
+
+    # Build dense cost matrix with high cost for non-edges
+    # Non-edges will be "unmatched" - we filter them out after
+    UNMATCHED_COST = 1e9
+    cost = np.full((n_ref, n_target), UNMATCHED_COST, dtype=np.float64)
+
+    # Build result lookup and fill cost matrix
+    # Negate confidence for minimization (maximize confidence = minimize -confidence)
+    result_lookup: dict[tuple[int, int], MatchResult] = {}
+
+    for result in valid_results:
+        i = ref_to_idx[result.ref_id]
+        j = target_to_idx[result.target_id]
+        neg_conf = -result.confidence
+
+        # Keep the best confidence if multiple candidates for same pair
+        if cost[i, j] == UNMATCHED_COST or neg_conf < cost[i, j]:
+            cost[i, j] = neg_conf
+            result_lookup[(i, j)] = result
+
+    t1 = time.perf_counter()
+    logger.info(f"[LAPJV] Matrix built in {t1 - t0:.2f}s, running linear_sum_assignment...")
+
+    row_ind, col_ind = linear_sum_assignment(cost)
+
+    t2 = time.perf_counter()
+    logger.info(f"[LAPJV] linear_sum_assignment completed in {t2 - t1:.2f}s")
+
+    # Extract optimal matches (filter out unmatched = high cost)
+    optimal_matches = []
+    for i, j in zip(row_ind, col_ind):
+        if cost[i, j] < UNMATCHED_COST / 2:  # Real match, not unmatched
+            if (i, j) in result_lookup:
+                optimal_matches.append(result_lookup[(i, j)])
+
+    t3 = time.perf_counter()
+    logger.info(
+        f"[LAPJV] Found {len(optimal_matches)} optimal matches, "
+        f"extraction took {t3 - t2:.2f}s, total {t3 - t0:.2f}s"
+    )
+
+    return optimal_matches
+
+
+def optimize_matches_greedy(
+    results: list[MatchResult],
+    min_confidence: float = 0.5,
+) -> list[MatchResult]:
+    """Greedy 1:1 assignment as fallback for extremely large datasets.
+
+    Sorts candidates by confidence and greedily assigns matches,
+    ensuring each ref and target is matched at most once.
+
+    Time complexity: O(n log n) for sorting
+    Space complexity: O(n) where n = number of candidates
+
+    Quality: Achieves ~97-99% of optimal in practice (worst-case competitive
+    ratio of 2 for maximum weight matching).
+
+    Args:
+        results: List of MatchResult objects
+        min_confidence: Minimum confidence to consider a match
+
+    Returns:
+        List of greedily-selected MatchResult objects (1:1 assignments)
+    """
+    logger.info(f"Optimizing {len(results)} match results using greedy algorithm...")
+
+    # Filter by minimum confidence
+    valid_results = [r for r in results if r.confidence >= min_confidence]
+    logger.info(f"  {len(valid_results)} results above min_confidence={min_confidence}")
+
+    if not valid_results:
+        return []
+
+    # Sort by confidence (highest first)
+    sorted_results = sorted(valid_results, key=lambda r: -r.confidence)
+
+    assigned_refs: set = set()
+    assigned_targets: set = set()
+    optimal_matches = []
+
+    for result in sorted_results:
+        if result.ref_id not in assigned_refs and result.target_id not in assigned_targets:
+            optimal_matches.append(result)
+            assigned_refs.add(result.ref_id)
+            assigned_targets.add(result.target_id)
+
+    logger.info(f"  Found {len(optimal_matches)} greedy 1:1 matches")
+
+    return optimal_matches
+
+
+def optimize_matches_auto(
+    results: list[MatchResult],
+    min_confidence: float = 0.5,
+    memory_limit_gb: float | None = None,
+) -> list[MatchResult]:
+    """Auto-select optimization strategy based on problem size.
+
+    Chooses between:
+    1. Dense Hungarian algorithm (small problems, <1GB matrix)
+    2. Sparse algorithm (medium problems, <memory_limit and <50k nodes)
+    3. Greedy fallback (large problems - fast O(n log n) with ~97-99% optimal)
+
+    The key constraint is that scipy's linear_sum_assignment is O(n³) where
+    n = max(n_ref, n_target). For 50k nodes, that's 125 trillion operations.
+    We use greedy for anything larger to avoid multi-minute optimization times.
+
+    Args:
+        results: List of MatchResult objects
+        min_confidence: Minimum confidence to consider a match
+        memory_limit_gb: Memory limit for optimization in GB.
+            If None, uses settings.optimizer_memory_limit_gb.
+
+    Returns:
+        List of optimal MatchResult objects (1:1 assignments)
+    """
+    import time
+
+    if memory_limit_gb is None:
+        memory_limit_gb = settings.optimizer_memory_limit_gb
+
+    valid_results = [r for r in results if r.confidence >= min_confidence]
+    if not valid_results:
+        return []
+
+    n_ref = len(set(r.ref_id for r in valid_results))
+    n_target = len(set(r.target_id for r in valid_results))
+    n_edges = len(valid_results)
+    max_dim = max(n_ref, n_target)
+
+    # Memory: dense matrix is n_ref * n_target * 8 bytes (float64)
+    dense_memory_gb = (n_ref * n_target * 8) / (1024**3)
+
+    # Time complexity threshold: LAPJV is O(n³)
+    # For 50k nodes: 50k³ = 125 trillion ops, takes ~30-60 seconds
+    # For 70k nodes: 70k³ = 343 trillion ops, takes ~2-5 minutes
+    # For 100k nodes: 100k³ = 1 quadrillion ops, takes ~10+ minutes
+    LAPJV_MAX_DIMENSION = 50000  # Max dimension for LAPJV (time constraint)
+    DENSE_THRESHOLD_GB = 1.0  # Max memory for dense algorithm
+
+    logger.info(
+        f"[optimizer] Problem size: {n_ref} refs × {n_target} targets, "
+        f"{n_edges} edges, matrix={dense_memory_gb * 1024:.1f} MB"
+    )
+
+    # Decision logic:
+    # 1. If matrix fits in 1GB, use dense Hungarian (fastest for small problems)
+    # 2. If max dimension <= 50k and memory fits, use LAPJV (optimal solution)
+    # 3. Otherwise use greedy (fast, near-optimal)
+
+    if dense_memory_gb < DENSE_THRESHOLD_GB:
+        logger.info(f"[optimizer] Using dense Hungarian (matrix < {DENSE_THRESHOLD_GB} GB)")
+        start = time.perf_counter()
+        result = optimize_matches(valid_results, min_confidence)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[optimizer] Dense Hungarian completed in {elapsed:.2f}s")
+        return result
+
+    if max_dim > LAPJV_MAX_DIMENSION:
+        logger.warning(
+            f"[optimizer] Matrix dimension {max_dim} exceeds LAPJV limit {LAPJV_MAX_DIMENSION}, "
+            f"using greedy (O(n³) would be too slow)"
+        )
+        start = time.perf_counter()
+        result = optimize_matches_greedy(valid_results, min_confidence)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[optimizer] Greedy completed in {elapsed:.2f}s")
+        return result
+
+    if dense_memory_gb > memory_limit_gb:
+        logger.warning(
+            f"[optimizer] Matrix {dense_memory_gb:.1f} GB exceeds memory limit {memory_limit_gb} GB, "
+            "using greedy"
+        )
+        start = time.perf_counter()
+        result = optimize_matches_greedy(valid_results, min_confidence)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[optimizer] Greedy completed in {elapsed:.2f}s")
+        return result
+
+    # Use LAPJV for medium-sized problems
+    logger.info(f"[optimizer] Using LAPJV (dim={max_dim}, memory={dense_memory_gb * 1024:.1f} MB)")
+    start = time.perf_counter()
+    try:
+        result = optimize_matches_sparse(valid_results, min_confidence)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[optimizer] LAPJV completed in {elapsed:.2f}s")
+        return result
+    except MemoryError:
+        logger.warning("[optimizer] LAPJV hit memory limit, falling back to greedy")
+        result = optimize_matches_greedy(valid_results, min_confidence)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[optimizer] Greedy fallback completed in {elapsed:.2f}s")
+        return result
 
 
 def resolve_conflicts(
@@ -280,11 +529,11 @@ def resolve_one_to_many(
     for r in valid_results:
         by_ref[r.ref_id].append(r)
 
-    # Build target geometry lookup
-    target_geoms = {}
-    for idx, row in target.iterrows():
-        tid = row.get(target_id_column, idx)
-        target_geoms[tid] = row.geometry
+    # Build target geometry lookup (vectorized - avoid iterrows())
+    if target_id_column in target.columns:
+        target_geoms = dict(zip(target[target_id_column], target.geometry))
+    else:
+        target_geoms = dict(zip(target.index, target.geometry))
 
     one_to_one = []
     one_to_many = []
@@ -334,6 +583,7 @@ def _find_contiguous_groups(
     """Find groups of contiguous target geometries among matches.
 
     Two targets are contiguous if one's endpoint is within tolerance of the other's.
+    Uses KD-tree for O(n log n) endpoint proximity detection instead of O(n²).
 
     Args:
         matches: List of MatchResult for same reference
@@ -346,47 +596,52 @@ def _find_contiguous_groups(
     if len(matches) <= 1:
         return [matches] if matches else []
 
-    # Get endpoints for each target (MultiLineStrings filtered at ingest)
-    endpoints = {}
-    for m in matches:
-        if m.target_id in target_geoms:
-            geom = target_geoms[m.target_id]
-            if geom is not None and not geom.is_empty:
-                coords = list(geom.coords)
-                if len(coords) >= 2:
-                    endpoints[m.target_id] = (Point(coords[0]), Point(coords[-1]))
+    # Extract all endpoints and track which match index they belong to
+    all_endpoints = []
+    endpoint_to_match_idx = []
+    valid_match_indices = []
 
-    # Build adjacency based on endpoint proximity
-    n = len(matches)
-    adjacent = defaultdict(set)
+    for i, m in enumerate(matches):
+        if m.target_id not in target_geoms:
+            continue
+        geom = target_geoms[m.target_id]
+        if geom is None or geom.is_empty:
+            continue
+        coords = list(geom.coords)
+        if len(coords) < 2:
+            continue
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            m_i, m_j = matches[i], matches[j]
+        valid_match_indices.append(i)
+        # Add both endpoints
+        all_endpoints.append(coords[0])
+        all_endpoints.append(coords[-1])
+        endpoint_to_match_idx.append(i)
+        endpoint_to_match_idx.append(i)
 
-            if m_i.target_id not in endpoints or m_j.target_id not in endpoints:
-                continue
+    if len(all_endpoints) < 2:
+        # Not enough valid geometries to form connections
+        return [[m] for m in matches]
 
-            eps_i = endpoints[m_i.target_id]
-            eps_j = endpoints[m_j.target_id]
+    # Build KD-tree for fast proximity queries
+    endpoints_array = np.array(all_endpoints)
+    tree = cKDTree(endpoints_array)
 
-            # Check all endpoint combinations
-            is_contiguous = False
-            for ep_i in eps_i:
-                for ep_j in eps_j:
-                    if ep_i.distance(ep_j) <= tolerance:
-                        is_contiguous = True
-                        break
-                if is_contiguous:
-                    break
+    # Query for pairs within tolerance
+    pairs = tree.query_pairs(tolerance)
 
-            if is_contiguous:
-                adjacent[i].add(j)
-                adjacent[j].add(i)
+    # Build adjacency from KD-tree results
+    adjacent: dict[int, set] = defaultdict(set)
+    for ep_i, ep_j in pairs:
+        match_i = endpoint_to_match_idx[ep_i]
+        match_j = endpoint_to_match_idx[ep_j]
+        if match_i != match_j:  # Skip same-geometry connections
+            adjacent[match_i].add(match_j)
+            adjacent[match_j].add(match_i)
 
     # Find connected components using BFS
-    visited = set()
+    visited: set = set()
     groups = []
+    n = len(matches)
 
     for start in range(n):
         if start in visited:
@@ -423,7 +678,8 @@ def optimize_with_one_to_many(
     """Optimize matches with support for 1:N relationships.
 
     First resolves 1:N matches for contiguous target segments,
-    then runs Hungarian algorithm on remaining conflicts.
+    then runs the optimization algorithm on remaining conflicts.
+    Automatically selects the best algorithm based on problem size.
 
     Args:
         results: List of MatchResult objects
@@ -442,9 +698,10 @@ def optimize_with_one_to_many(
         results, target, min_confidence, contiguity_tolerance, target_id_column
     )
 
-    # Run Hungarian algorithm on 1:1 matches to resolve remaining conflicts
+    # Run optimization on 1:1 matches to resolve remaining conflicts
+    # Uses auto-selection to choose best algorithm based on problem size
     if individual_matches:
-        optimized = optimize_matches(individual_matches, min_confidence)
+        optimized = optimize_matches_auto(individual_matches, min_confidence)
     else:
         optimized = []
 

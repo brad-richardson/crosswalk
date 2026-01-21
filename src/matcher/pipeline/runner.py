@@ -103,6 +103,12 @@ def run_pipeline(
         logger.warning(f"Target has {n_null} null geometries - these will be skipped")
         target = target[~target.geometry.isna()]
 
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    from matcher.utils.geometry import filter_to_linestrings
+
+    reference = filter_to_linestrings(reference, source_name="reference")
+    target = filter_to_linestrings(target, source_name="target")
+
     if len(reference) == 0:
         raise PipelineError("Reference dataset is empty after removing null geometries")
     if len(target) == 0:

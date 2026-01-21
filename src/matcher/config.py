@@ -157,6 +157,11 @@ class MatcherSettings(BaseSettings):
         default=0.5,
         description="Confidence threshold for review (below this = no match)",
     )
+    optimizer_memory_limit_gb: float = Field(
+        default=8.0,
+        description="Memory limit for sparse match optimization in GB. "
+        "If estimated memory exceeds this, greedy algorithm is used instead.",
+    )
     alignment_enabled: bool = Field(
         default=True,
         description="Enable pre-match linestring alignment for computing features on "

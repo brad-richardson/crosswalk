@@ -69,9 +69,23 @@ def _transform_download_data(
         default_subclass: Default subclass if no column provided
     """
     import pandas as pd
+    import shapely
 
     if len(gdf) == 0:
         return gdf
+
+    # Filter to LineStrings only (drop MultiLineStrings, Points, etc.)
+    linestring_mask = gdf.geometry.geom_type == "LineString"
+    if not linestring_mask.all():
+        n_filtered = (~linestring_mask).sum()
+        logger.warning(f"Filtering {n_filtered} non-LineString geometries from {source_name}")
+        gdf = gdf[linestring_mask].copy()
+
+    # Strip Z coordinates if present (force 2D)
+    if gdf.geometry.has_z.any():
+        n_3d = gdf.geometry.has_z.sum()
+        logger.info(f"Stripping Z coordinates from {n_3d} geometries")
+        gdf.geometry = shapely.force_2d(gdf.geometry)
 
     # Find ID column
     id_col = None
