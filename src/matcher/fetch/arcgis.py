@@ -108,12 +108,15 @@ def fetch_arcgis_layer(
     if class_mapping:
         filters_dict["class_mapping_applied"] = True
 
+    # Filter out None from geometry types (null geometries)
+    geom_types = [g for g in gdf.geometry.geom_type.unique() if g is not None] if len(gdf) > 0 else []
+
     metadata = FetchMetadata(
         source="arcgis",
         source_url=url,
         bbox=data_bbox,
         feature_count=len(gdf),
-        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
+        geometry_types=geom_types,
         filters=filters_dict if filters_dict else {},
         notes=f"Fetched from {source_name}",
     )
