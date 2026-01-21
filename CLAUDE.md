@@ -28,9 +28,15 @@ matcher --help
 ```
 src/matcher/
 ├── cli.py              # Typer CLI application
-├── config.py           # Pydantic settings
+├── config.py           # Pydantic settings, FEATURE_COLUMNS (source of truth)
 ├── fetch/              # Data fetching (Overture, OSM, ArcGIS)
-├── features/           # Feature computation (geometric, semantic)
+├── features/           # Feature computation
+│   ├── compute.py     # Main feature computation interface
+│   ├── geometric.py   # Hausdorff, IoU, heading, length features
+│   ├── semantic.py    # Name similarity, class matching
+│   ├── spatial_context.py  # Topology and endpoint features
+│   ├── alignment.py   # Segment alignment and coverage
+│   └── relational.py  # Lateral offset features
 ├── blocking/           # Candidate generation via spatial indexing
 ├── matching/           # Matching algorithms (rules, ML)
 │   ├── ml.py          # XGBoost-based ML matcher (parallelized)
@@ -40,8 +46,12 @@ src/matcher/
 ├── resolution/         # Bridge file generation
 ├── topology/           # Network topology reconstruction
 ├── labeling/           # Streamlit labeling UI
+├── datasets/           # Dataset configuration discovery
 ├── integration/        # Unmatched segment integration
-└── integration_qa/     # QA app for integration review
+├── integration_qa/     # QA app for integration review
+├── validation/         # Ground-truth validation experiments
+├── agent_labeling/     # AI agent labeling batch generation
+└── utils/              # Shared utilities
 ```
 
 ## Key Commands
@@ -50,7 +60,7 @@ src/matcher/
 # Fetch data
 matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture -d osm
 
-# Fetch Boston ArcGIS data
+# Fetch local data (see scripts/fetch_*.py for examples)
 python scripts/fetch_boston.py
 
 # Run matching with ML model
@@ -59,8 +69,26 @@ matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet
 # Train ML model on labels
 matcher train
 
+# Evaluate model on holdout set
+matcher eval-model data/models/matcher_model_combined.joblib
+
 # Launch labeling UI
-matcher label
+matcher label data/raw/overture_segments.parquet data/raw/boston_streets.parquet
+
+# Integrate unmatched segments into network
+matcher integrate data/raw/overture_segments.parquet \
+    -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1
+
+# QA integration results
+matcher qa-integration -o data/integrated
+
+# Discover class mappings for new datasets
+matcher discover-classes data/raw/new_dataset.parquet \
+    --reference data/raw/overture_segments.parquet \
+    --bridge data/output/new_dataset_bridge.parquet
+
+# Run validation experiments (ground-truth from Overture provenance)
+matcher validate data/raw/overture.parquet --bbox "-71.19,42.21,-70.92,42.40" --strategy random
 ```
 
 ## Labels Directory
@@ -80,8 +108,16 @@ Each CSV contains: `gers_id`, `target_id`, `label` (match/no_match/unsure), and 
 
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 12 geometric/semantic features (hausdorff_distance, buffer_iou, name_levenshtein, etc.)
+- **Features**: 42 features across 6 categories (defined in `src/matcher/config.py`)
+  - Geometric (11): hausdorff_distance_m, buffer_iou_5m/15m, heading_delta, length_ratio, etc.
+  - Semantic - Name (8): levenshtein, jaro_winkler, token_sort, soundex, metaphone, presence flags
+  - Semantic - Class (1): class_similarity
+  - Endpoint/Connectivity (3): min/max_endpoint_proximity_m, shared_endpoint_count
+  - Lateral Offset (3): lateral_offset_m, iqr, p95 (robust to outliers)
+  - Topology (12): degree features, dead_end/intersection flags
+  - Alignment Coverage (4): ref/target/min coverage, coverage_ratio
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
+- **Auto Model Selection**: When `settings.auto_select_model=True`, automatically uses geometry-only model for datasets with low name coverage
 
 **Note**: The trained model is not committed to git. After cloning, run `matcher train` before using `-m xgboost`.
 
@@ -152,16 +188,40 @@ data/
 
 ## Common Workflows
 
+### End-to-End Workflow
+
+```
+1. DATA ACQUISITION
+   └── Identify source → Create fetch script → Fetch local + Overture data
+
+2. INITIAL MATCHING
+   └── Generate candidates → Compute features → Score with ML → Optimize 1:N
+
+3. LABELING LOOP (iterate until quality acceptable)
+   └── Launch labeling UI → Label pairs → Retrain model → Re-evaluate
+
+4. INTEGRATION & QA
+   └── Generate bridge file → Integrate unmatched → QA review orphans
+```
+
 ### Adding a new dataset
-1. Create fetch script in `scripts/` (see `fetch_boston.py`)
-2. Run matching: `matcher match ... -m xgboost`
-3. Label samples: `matcher label`
-4. Retrain model: `matcher train`
+1. **Find data source**: State DOTs, county GIS portals, open data portals
+2. **Create fetch script** in `scripts/` (see `fetch_boston.py` as template)
+3. **Fetch reference data**: `matcher fetch --bbox <bbox> -d overture`
+4. **Run initial matching**: `matcher match ... -m xgboost`
+5. **Analyze class mappings**: `matcher discover-classes <dataset> --reference <overture> --bridge <bridge>`
+6. **Create YAML config** in `src/matcher/datasets/` if needed
+7. **Label samples** to improve model: `matcher label`
+8. **Retrain and iterate**: `matcher train && matcher eval-model`
+
+See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions.
 
 ### Improving match quality
-1. Label more examples in the labeling UI
-2. Retrain model: `matcher train`
-3. Evaluate: `matcher eval-model`
+1. Identify weak spots: run `matcher eval-model` and check per-dataset metrics
+2. Label more examples in the labeling UI: `matcher label`
+3. Retrain model: `matcher train`
+4. Evaluate improvement: `matcher eval-model`
+5. Repeat until F1 is acceptable (typically >0.95)
 
 ### Adding a New Feature
 
@@ -169,19 +229,19 @@ data/
 
 When adding a new ML feature (e.g., a new similarity metric), update ALL of these:
 
-1. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
+1. **Add to config.py** (single source of truth):
+   - Add to `FEATURE_COLUMNS` list
+   - Add to `SEMANTIC_FEATURES` if it's a name/class feature
 
-2. **Wire it through compute.py**:
-   - Add to `ALL_FEATURE_COLUMNS` list
+2. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
+
+3. **Wire it through compute.py**:
    - Add to `compute_pair_features()` return dict
    - Add to `_get_error_features()` with a sensible default
 
-3. **Save it in label_store.py**:
+4. **Save it in label_store.py**:
    - Add to `LABEL_COLUMNS` list
    - Add to `add()` method with `features.get("feature_name", default)`
-
-4. **Add to ML training** in `ml.py`:
-   - Add to `FEATURE_COLUMNS` list
 
 **Automated verification:**
 - Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
@@ -191,6 +251,8 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
 - Features computed but not saved to labels → ML can't use them for training
 - Features in labels but not computed → labels have stale/missing values
 - The test catches these mismatches automatically
+
+**Note:** `ml.py` imports `FEATURE_COLUMNS` from `config.py`, so no separate update needed there.
 
 ## Change Tracking
 
