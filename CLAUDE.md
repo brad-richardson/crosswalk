@@ -314,7 +314,7 @@ Understanding the feature computation paths is critical for preventing training/
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (42 features)
+config.py::FEATURE_COLUMNS (44 features)
          │
          ├─► compute.py::compute_pair_features()  ◄── AUTHORITATIVE computation
          │           │
