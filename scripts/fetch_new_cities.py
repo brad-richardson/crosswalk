@@ -134,6 +134,76 @@ def _transform_download_data(
     return gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
 
+def fetch_lta_geospatial(
+    layer_id: str,
+    output_path: Path,
+    id_prefix: str,
+    api_key: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "LTA DataMall",
+    bbox: tuple | None = None,
+    bbox_filter: bool = False,
+) -> Path:
+    """Fetch geospatial data from Singapore LTA DataMall API.
+
+    The LTA API returns a presigned S3 URL for downloading shapefiles.
+    API endpoint: https://datamall2.mytransport.sg/ltaodataservice/GeospatialWholeIsland
+
+    Args:
+        layer_id: Geospatial layer ID (e.g., 'RoadSectionLine', 'Footpath')
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        api_key: LTA DataMall API key
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        bbox_filter: Whether to apply bbox filter after loading
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+    api_url = "https://datamall2.mytransport.sg/ltaodataservice/GeospatialWholeIsland"
+
+    logger.info(f"Fetching LTA geospatial layer: {layer_id}")
+
+    # Get presigned download URL from API
+    resp = requests.get(
+        api_url,
+        params={"ID": layer_id},
+        headers={"AccountKey": api_key, "Accept": "application/json"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+    if "value" not in data or not data["value"]:
+        raise ValueError(f"No download link returned for layer {layer_id}")
+
+    download_url = data["value"][0].get("Link")
+    if not download_url:
+        raise ValueError(f"Empty download link for layer {layer_id}")
+
+    logger.info("Got presigned S3 URL, downloading shapefile...")
+
+    # Download the actual file using the presigned URL
+    return fetch_download(
+        url=download_url,
+        output_path=output_path,
+        file_format="shp",
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+        bbox=bbox,
+        bbox_filter=bbox_filter,
+    )
+
+
 def fetch_download(
     url: str,
     output_path: Path,
@@ -326,6 +396,25 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
                     if "singapore" in dataset_name.lower():
                         logger.info("Register at https://datamall.lta.gov.sg to get an API key")
                     return None  # Gracefully skip instead of attempting fetch
+
+            # Special handling for Singapore LTA DataMall
+            # The static download URLs are blocked; must use their API instead
+            if api_key_env_var == "LTA_API_KEY" and api_key:
+                # Extract layer ID from URL (e.g., RoadSectionLine.zip -> RoadSectionLine)
+                layer_id = url.split("/")[-1].replace(".zip", "").split("_")[0]
+                logger.info(f"Using LTA DataMall API for layer: {layer_id}")
+                return fetch_lta_geospatial(
+                    layer_id=layer_id,
+                    output_path=output_path,
+                    id_prefix=id_prefix,
+                    api_key=api_key,
+                    name_column=name_column,
+                    class_column=class_column,
+                    class_mapping=class_mapping,
+                    source_name=config.display_name or dataset_name,
+                    bbox=bbox,
+                    bbox_filter=bool(bbox),
+                )
 
             return fetch_download(
                 url=url,
