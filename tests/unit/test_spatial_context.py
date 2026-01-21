@@ -885,23 +885,17 @@ class TestConnectorGraphAndAlignment:
         )
 
         # Full segment (0.0 to 1.0) should return start and end connectors
-        start_node, end_node = get_alignment_connectors(
-            "seg_1", seg_to_connectors, 0.0, 1.0
-        )
+        start_node, end_node = get_alignment_connectors("seg_1", seg_to_connectors, 0.0, 1.0)
         assert start_node is not None
         assert end_node is not None
         assert start_node != end_node
 
         # Partial alignment (0.3 to 0.7) should find nearest connectors
         # 0.3 is closer to 0.5, and 0.7 is also closer to 0.5
-        start_node2, end_node2 = get_alignment_connectors(
-            "seg_1", seg_to_connectors, 0.3, 0.7
-        )
+        start_node2, end_node2 = get_alignment_connectors("seg_1", seg_to_connectors, 0.3, 0.7)
         assert start_node2 == end_node2  # Both map to the 0.5 connector
 
-    def test_graphlet_similarity_with_alignment_full_segment(
-        self, sample_segment_with_connectors
-    ):
+    def test_graphlet_similarity_with_alignment_full_segment(self, sample_segment_with_connectors):
         """graphlet_similarity_with_alignment should work for full segments."""
         from matcher.features.spatial_context import (
             build_connector_graph,
@@ -933,9 +927,7 @@ class TestConnectorGraphAndAlignment:
         assert 0.0 <= sim["graphlet_similarity"] <= 1.0
         assert 0.0 <= sim["endpoint_degree_similarity"] <= 1.0
 
-    def test_graphlet_similarity_with_alignment_partial_match(
-        self, sample_segment_with_connectors
-    ):
+    def test_graphlet_similarity_with_alignment_partial_match(self, sample_segment_with_connectors):
         """graphlet_similarity_with_alignment should handle partial alignment."""
         from matcher.features.spatial_context import (
             build_connector_graph,

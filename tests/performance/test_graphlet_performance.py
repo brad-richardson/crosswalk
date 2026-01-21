@@ -82,11 +82,14 @@ class TestGraphletPrecomputePerformance:
         gdf = grid_network_factory(n_segments=n_segments)
 
         start = time.perf_counter()
-        G, _, _, node_features = precompute_graphlet_features(gdf, id_column="id", tolerance_m=5.0)
+        G, seg_to_connectors, node_features, _ = precompute_graphlet_features(
+            gdf, id_column="id", tolerance_m=5.0
+        )
         elapsed = time.perf_counter() - start
 
         assert G.number_of_nodes() > 0
         assert len(node_features) > 0
+        assert len(seg_to_connectors) > 0
         assert elapsed < max_seconds, (
             f"{n_segments} segments took {elapsed:.2f}s, expected < {max_seconds}s"
         )
