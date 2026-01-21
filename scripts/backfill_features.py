@@ -52,23 +52,22 @@ from matcher.features.spatial_context import (
 
 # Dataset name to (target file, reference file) mapping
 # Reference file is the Overture segments file to use for this dataset
+# Note: Dataset names have us_ prefix but data files use shorter names
 DATASET_CONFIG = {
-    "boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
-    "boston_sidewalks": ("boston_sidewalks.parquet", "overture_segments.parquet"),
-    "boston_sidewalks_full": ("boston_sidewalks.parquet", "overture_segments.parquet"),
-    "boston_sidewalks_relational": ("boston_sidewalks.parquet", "overture_segments.parquet"),
-    "boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
-    "osm": ("osm_segments.parquet", "overture_segments.parquet"),
-    "fort_collins_streets": (
+    "us_boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
+    "us_boston_sidewalks": ("boston_sidewalks.parquet", "overture_segments.parquet"),
+    "us_boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
+    "us_boston_osm": ("osm_segments.parquet", "overture_segments.parquet"),
+    "us_fort_collins_streets": (
         "fort_collins_streets.parquet",
         "overture_fort_collins_segments.parquet",
     ),
-    "fort_collins_sidewalks": (
+    "us_fort_collins_sidewalks": (
         "fort_collins_sidewalks.parquet",
         "overture_fort_collins_segments.parquet",
     ),
-    "frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
-    "frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
+    "us_frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
+    "us_frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
 }
 
 # Alignment coverage feature columns
@@ -339,7 +338,7 @@ def load_and_compute_topology(
     topology = compute_all_topology(
         gdf_reset,
         id_column=id_column,
-        tolerance=5.0,
+        tolerance_m=5.0,
         ids_to_compute=ids_to_compute,
     )
 
@@ -636,7 +635,7 @@ def backfill_dataset(
         target_gdf_reset = target_gdf.reset_index()
         target_gdf_reset["id"] = target_gdf_reset["id"].astype(str)
         target_G, target_seg_to_start, target_seg_to_end = build_inferred_graph(
-            target_gdf_reset, id_column="id", tolerance=5.0
+            target_gdf_reset, id_column="id", tolerance_m=5.0
         )
         target_node_features = compute_road_graphlet_features(target_G)
 
@@ -882,7 +881,7 @@ def main():
             ref_gdf_reset = ref_gdf.reset_index()
             ref_gdf_reset["id"] = ref_gdf_reset["id"].astype(str)
             ref_G, ref_seg_to_start, ref_seg_to_end = build_inferred_graph(
-                ref_gdf_reset, id_column="id", tolerance=5.0
+                ref_gdf_reset, id_column="id", tolerance_m=5.0
             )
             ref_node_features = compute_road_graphlet_features(ref_G)
             ref_graphlet_data = (ref_G, ref_seg_to_start, ref_seg_to_end, ref_node_features)
