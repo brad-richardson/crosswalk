@@ -94,7 +94,7 @@ SEMANTIC_FEATURES = [
 class MatcherSettings(BaseSettings):
     """Global settings for the matcher pipeline."""
 
-    model_config = ConfigDict(env_prefix="MATCHER_", env_file=".env")
+    model_config = ConfigDict(env_prefix="MATCHER_", env_file=".env", extra="ignore")
 
     # Paths
     data_dir: Path = Field(default=Path("data"), description="Base data directory")

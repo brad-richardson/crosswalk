@@ -31,7 +31,11 @@ from pathlib import Path
 
 import geopandas as gpd
 import requests
+from dotenv import load_dotenv
 from loguru import logger
+
+# Load environment variables from .env file (if present)
+load_dotenv()
 
 from matcher.datasets.schema import get_dataset_config, list_dataset_configs
 from matcher.fetch.arcgis import fetch_arcgis_layer
@@ -318,11 +322,10 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
             if api_key_env_var:
                 api_key = os.environ.get(api_key_env_var)
                 if not api_key:
-                    logger.warning(
-                        f"API key required but not found. Set {api_key_env_var} environment variable."
-                    )
+                    logger.warning(f"Skipping {dataset_name}: API key required ({api_key_env_var})")
                     if "singapore" in dataset_name.lower():
-                        logger.info("For Singapore LTA: Register at https://datamall.lta.gov.sg")
+                        logger.info("Register at https://datamall.lta.gov.sg to get an API key")
+                    return None  # Gracefully skip instead of attempting fetch
 
             return fetch_download(
                 url=url,
