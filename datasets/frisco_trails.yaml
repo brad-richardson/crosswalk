@@ -1,0 +1,40 @@
+name: frisco_trails
+display_name: Frisco Trails
+type: trail
+description: Trail network including pedestrian paths and bike routes
+source:
+  type: arcgis
+  url: https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/10
+fetch:
+  crs: EPSG:4326
+  id_prefix: frisco_trail
+  name_column: Name
+  class_column: TrailType
+  class_mapping:
+    Bike Only: cycleway
+    Parkway: path
+    Regional: path
+    Local: footway
+    Nature: path
+    Golf Course: path
+  bbox:
+  - -96.9
+  - 33.1
+  - -96.75
+  - 33.2
+classification:
+  source_classification:
+    column: TrailType
+  class_mapping_rules:
+  - source_value: Bike Only
+    target_class: cycleway
+  - source_value: Parkway
+    target_class: path
+  - source_value: Regional
+    target_class: path
+  - source_value: Local
+    target_class: footway
+  - source_value: Nature
+    target_class: path
+  - source_value: Golf Course
+    target_class: path

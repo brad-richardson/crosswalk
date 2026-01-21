@@ -1,5 +1,19 @@
 """Shared dataset configurations for ArcGIS fetch scripts.
 
+DEPRECATED: This module is deprecated. Dataset configs have been migrated to YAML
+files in the `datasets/` directory at the repo root. Use the new schema:
+
+    from matcher.datasets.schema import get_dataset_config, list_dataset_configs
+
+    config = get_dataset_config("boston_streets")
+    if config and config.fetch:
+        fetch_arcgis_layer(output_path=..., url=config.source.url, ...)
+
+This module is kept for backward compatibility with existing fetch scripts.
+New code should use the YAML configs in datasets/*.yaml.
+
+---
+
 This module contains standardized configurations for fetching road and sidewalk
 data from various municipal GIS portals. Each configuration follows the schema
 expected by matcher.fetch.arcgis.fetch_arcgis_layer().

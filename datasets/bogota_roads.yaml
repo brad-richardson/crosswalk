@@ -1,0 +1,43 @@
+name: bogota_roads
+display_name: IDECA Bogotá Malla Vial
+type: road
+description: Road network from Bogotá cadastre GIS (Malla Vial)
+source:
+  type: arcgis
+  url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/13
+fetch:
+  crs: EPSG:4326
+  id_prefix: bog_road
+  name_column: MVINPRINCI
+  class_column: MVITCLA
+  class_mapping:
+    1: primary
+    2: secondary
+    3: tertiary
+    4: residential
+    5: unclassified
+    6: pedestrian
+    7: unclassified
+  bbox:
+  - -74.25
+  - 4.45
+  - -73.95
+  - 4.85
+classification:
+  source_classification:
+    column: MVITCLA
+  class_mapping_rules:
+  - source_value: 1
+    target_class: primary
+  - source_value: 2
+    target_class: secondary
+  - source_value: 3
+    target_class: tertiary
+  - source_value: 4
+    target_class: residential
+  - source_value: 5
+    target_class: unclassified
+  - source_value: 6
+    target_class: pedestrian
+  - source_value: 7
+    target_class: unclassified

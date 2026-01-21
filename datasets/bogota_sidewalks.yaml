@@ -1,0 +1,15 @@
+name: bogota_sidewalks
+display_name: IDECA Bogotá Andenes
+type: road
+description: Sidewalks (andenes) from Bogotá cadastre GIS
+source:
+  type: arcgis
+  url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/16
+fetch:
+  crs: EPSG:4326
+  id_prefix: bog_sidewalk
+  bbox:
+  - -74.25
+  - 4.45
+  - -73.95
+  - 4.85

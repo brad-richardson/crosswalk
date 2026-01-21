@@ -1,0 +1,7 @@
+name: boston_bikes
+display_name: Boston Bikes
+type: bike
+source:
+  type: unknown
+fetch:
+  crs: EPSG:4326

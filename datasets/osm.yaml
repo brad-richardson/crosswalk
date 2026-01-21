@@ -1,0 +1,7 @@
+name: osm
+display_name: Osm
+type: road
+source:
+  type: unknown
+fetch:
+  crs: EPSG:4326

@@ -1,0 +1,21 @@
+name: kenya_roads
+display_name: Kenya Roads Board (KRB)
+type: road
+description: Official Kenya road network from Kenya Roads Board (2023)
+source:
+  type: download
+  url: https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip
+  file_format: shp
+fetch:
+  crs: EPSG:4326
+  id_prefix: ken_road
+  name_column: ROADNAME
+  class_column: CLASS
+  bbox:
+  - 33.9
+  - -4.7
+  - 41.9
+  - 4.63
+classification:
+  source_classification:
+    column: CLASS

@@ -57,8 +57,11 @@ src/matcher/
 ## Key Commands
 
 ```bash
-# Fetch data
+# Fetch data by explicit bbox
 matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture -d osm
+
+# Fetch reference data for a configured dataset (auto-uses bbox from config)
+matcher fetch --for-dataset boston_streets -d osm -d overture
 
 # Fetch local data (see scripts/fetch_*.py for examples)
 python scripts/fetch_boston.py
@@ -178,6 +181,54 @@ data/
 │   └── ...
 └── models/                 # Trained ML models
     └── matcher_model_combined.joblib
+```
+
+## Dataset Configurations
+
+Dataset configs are stored as YAML files in `datasets/` at the repo root:
+
+```
+datasets/
+├── boston_streets.yaml
+├── boston_sidewalks.yaml
+├── fort_collins_streets.yaml
+└── ...
+```
+
+Each YAML file contains:
+- **Display info**: name, type (road/bike/sidewalk), description
+- **Source config**: URL, portal URL, fetch type
+- **Fetch config**: bbox, class_column, class_mapping, name_column
+- **Last fetch**: timestamp, feature count, output path (auto-updated)
+- **Classification**: mapping rules discovered by `matcher discover-classes`
+
+### Using Dataset Configs
+
+```bash
+# Fetch reference data for a configured dataset
+matcher fetch --for-dataset boston_streets -d osm -d overture
+
+# List available dataset configs
+matcher list-datasets
+
+# Discover classification for a new dataset
+matcher discover-classes data/raw/new_dataset.parquet
+```
+
+### Programmatic Access
+
+```python
+from matcher.datasets.schema import get_dataset_config, list_dataset_configs
+
+# Get a specific config
+config = get_dataset_config("boston_streets")
+if config and config.fetch:
+    print(f"Bbox: {config.fetch.bbox}")
+    print(f"Class column: {config.fetch.class_column}")
+
+# List all configs
+for name in list_dataset_configs():
+    print(name)
 ```
 
 ## System Dependencies

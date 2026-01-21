@@ -1,0 +1,41 @@
+name: boston_streets
+display_name: Boston Streets
+type: road
+description: Street centerlines with MassDOT functional classification
+source:
+  type: arcgis
+  url: https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0
+  portal_url: https://data.boston.gov/dataset/city-of-boston-managed-streets
+fetch:
+  crs: EPSG:4326
+  id_prefix: boston_streets
+  name_column: STREETNAME
+  class_column: CLASS
+  class_mapping:
+    1: motorway
+    2: primary
+    3: primary
+    4: tertiary
+    5: residential
+    6: service
+  bbox:
+  - -71.19
+  - 42.21
+  - -70.92
+  - 42.4
+classification:
+  source_classification:
+    column: CLASS
+  class_mapping_rules:
+  - source_value: 1
+    target_class: motorway
+  - source_value: 2
+    target_class: primary
+  - source_value: 3
+    target_class: primary
+  - source_value: 4
+    target_class: tertiary
+  - source_value: 5
+    target_class: residential
+  - source_value: 6
+    target_class: service

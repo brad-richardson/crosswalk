@@ -1,0 +1,21 @@
+name: amsterdam_roads
+display_name: PDOK NWB Wegen
+type: road
+description: Road segments from Dutch National Road Database (NWB) - filtered to Amsterdam
+source:
+  type: download
+  url: https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg
+  file_format: gpkg
+fetch:
+  crs: EPSG:4326
+  id_prefix: ams_road
+  name_column: stt_naam
+  class_column: wegbehsrt
+  bbox:
+  - 4.75
+  - 52.3
+  - 5.0
+  - 52.45
+classification:
+  source_classification:
+    column: wegbehsrt

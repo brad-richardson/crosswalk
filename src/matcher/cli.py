@@ -92,46 +92,27 @@ def fetch(
     dataset_name: str | None = None
 
     if for_dataset:
-        # Look up bbox from dataset configs
-        try:
-            import sys
+        # Look up bbox from dataset YAML configs
+        from .datasets.schema import get_dataset_config, list_dataset_configs
 
-            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
-            from dataset_configs import ALL_DATASETS, CITY_BBOXES
+        config = get_dataset_config(for_dataset)
+        if config is None:
+            console.print(f"[red]Error: Could not find dataset config for '{for_dataset}'[/red]")
+            available = list_dataset_configs()
+            if available:
+                console.print("[yellow]Available datasets: " + ", ".join(sorted(available)[:10]))
+                if len(available) > 10:
+                    console.print(f"  ... and {len(available) - 10} more[/yellow]")
+            raise typer.Exit(1)
 
-            # Try to find dataset config
-            found_bbox = None
-            for _city, city_datasets in ALL_DATASETS.items():
-                for ds in city_datasets:
-                    if ds.get("name") == for_dataset:
-                        found_bbox = ds.get("bbox")
-                        break
-                if found_bbox:
-                    break
+        if config.fetch is None or config.fetch.bbox is None:
+            console.print(f"[red]Error: Dataset '{for_dataset}' has no bbox configured[/red]")
+            raise typer.Exit(1)
 
-            # Also check CITY_BBOXES
-            if not found_bbox:
-                # Try to infer city from dataset name (e.g., boston_streets -> boston)
-                for city, city_bbox in CITY_BBOXES.items():
-                    if for_dataset.startswith(city):
-                        found_bbox = city_bbox
-                        break
-
-            if not found_bbox:
-                console.print(f"[red]Error: Could not find bbox for dataset '{for_dataset}'[/red]")
-                console.print(
-                    "[yellow]Available cities: " + ", ".join(CITY_BBOXES.keys()) + "[/yellow]"
-                )
-                raise typer.Exit(1)
-
-            xmin, ymin, xmax, ymax = found_bbox
-            dataset_name = for_dataset
-            console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
-            console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
-
-        except ImportError as e:
-            console.print(f"[red]Error: Could not load dataset configs: {e}[/red]")
-            raise typer.Exit(1) from e
+        xmin, ymin, xmax, ymax = config.fetch.bbox
+        dataset_name = for_dataset
+        console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
+        console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
 
     elif bbox:
         coords = [float(x.strip()) for x in bbox.split(",")]
@@ -232,6 +213,62 @@ def fetch(
         )
         console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
         console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
+
+    # Update last_fetch in dataset config if using --for-dataset
+    if dataset_name:
+        from datetime import UTC, datetime
+
+        from .datasets.schema import (
+            LastFetch,
+            get_dataset_config,
+            get_datasets_dir,
+            save_dataset_config,
+        )
+
+        config = get_dataset_config(dataset_name)
+        if config:
+            # Determine which buffer was used
+            buffer_m = overture_buffer if "overture" in datasets else osm_buffer
+
+            # Get feature count from metadata if available
+            feature_count = 0
+            geometry_types: list[str] = []
+
+            # Try to read metadata from fetched file
+            if "overture" in datasets:
+                meta_path = output_dir / f"{overture_prefix}_segments.parquet.meta.yaml"
+                if meta_path.exists():
+                    from .fetch.metadata import load_metadata
+
+                    meta = load_metadata(output_dir / f"{overture_prefix}_segments.parquet")
+                    if meta:
+                        feature_count = meta.feature_count
+                        geometry_types = meta.geometry_types
+            elif "osm" in datasets:
+                meta_path = output_dir / f"{osm_name}_segments.parquet.meta.yaml"
+                if meta_path.exists():
+                    from .fetch.metadata import load_metadata
+
+                    meta = load_metadata(output_dir / f"{osm_name}_segments.parquet")
+                    if meta:
+                        feature_count = meta.feature_count
+                        geometry_types = meta.geometry_types
+
+            config.last_fetch = LastFetch(
+                fetched_at=datetime.now(UTC),
+                bbox=original_bbox.to_tuple(),
+                bbox_buffered=(overture_bbox if "overture" in datasets else osm_bbox).to_tuple()
+                if buffer_m
+                else None,
+                bbox_buffer_m=buffer_m,
+                feature_count=feature_count,
+                geometry_types=geometry_types,
+                output_path=str(output_dir),
+            )
+
+            config_path = get_datasets_dir() / f"{dataset_name}.yaml"
+            save_dataset_config(config, config_path)
+            console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
 
 
 @app.command()
@@ -1079,7 +1116,7 @@ def discover_classes(
         None,
         "--output",
         "-o",
-        help="Output YAML path (default: src/matcher/datasets/{name}.yaml)",
+        help="Output YAML path (default: datasets/{name}.yaml). Merges with existing config if present.",
     ),
     print_only: bool = typer.Option(
         False,
@@ -1135,7 +1172,70 @@ def discover_classes(
     print_discovery_report(report)
 
     if not print_only and report.suggested_config:
-        saved_path = save_dataset_config(report.suggested_config, output)
+        from .datasets.schema import (
+            ClassificationConfig,
+            get_dataset_config,
+            get_datasets_dir,
+        )
+        from .datasets.schema import (
+            ClassMappingRule as NewClassMappingRule,
+        )
+        from .datasets.schema import (
+            SourceClassification as NewSourceClassification,
+        )
+        from .datasets.schema import (
+            save_dataset_config as save_new_config,
+        )
+
+        dataset_name = dataset.stem
+        if output:
+            saved_path = output
+        else:
+            saved_path = get_datasets_dir() / f"{dataset_name}.yaml"
+
+        # Check if config already exists and merge
+        existing_config = get_dataset_config(dataset_name)
+        if existing_config:
+            console.print(f"[blue]Merging with existing config: {dataset_name}.yaml[/blue]")
+
+            # Build new classification from discovered rules
+            old_config = report.suggested_config
+            new_rules = []
+            for rule in old_config.class_mapping_rules:
+                new_rules.append(
+                    NewClassMappingRule(
+                        source_value=rule.source_value,
+                        target_class=rule.target_class,
+                        conditions=rule.conditions,
+                        priority=rule.priority,
+                    )
+                )
+
+            new_source_class = None
+            if old_config.source_classification:
+                new_source_class = NewSourceClassification(
+                    column=old_config.source_classification.column,
+                    description=old_config.source_classification.description,
+                    values=old_config.source_classification.values,
+                    documentation_url=old_config.source_classification.documentation_url,
+                )
+
+            existing_config.classification = ClassificationConfig(
+                source_classification=new_source_class,
+                class_mapping_rules=new_rules,
+                default_class=old_config.default_class,
+                confidence=old_config.confidence,
+            )
+
+            if old_config.notes:
+                existing_config.notes = old_config.notes
+
+            save_new_config(existing_config, saved_path)
+        else:
+            # No existing config - save using old format for now
+            # TODO: Create new format config from scratch
+            saved_path = save_dataset_config(report.suggested_config, output)
+
         console.print()
         console.print(f"[green]Configuration saved to: {saved_path}[/green]")
         console.print("[yellow]Review and adjust the mapping rules as needed.[/yellow]")
@@ -1144,9 +1244,10 @@ def discover_classes(
 @app.command("list-datasets")
 def list_datasets():
     """List available dataset configurations."""
-    from .datasets import list_dataset_configs
+    from .datasets.schema import get_datasets_dir, list_dataset_configs
 
     configs = list_dataset_configs()
+    console.print(f"[blue]Dataset configs directory: {get_datasets_dir()}[/blue]")
     if not configs:
         console.print("[yellow]No dataset configurations found.[/yellow]")
         console.print("Use 'matcher discover-classes' to create one.")

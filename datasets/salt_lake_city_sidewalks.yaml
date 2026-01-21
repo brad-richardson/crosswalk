@@ -1,0 +1,15 @@
+name: salt_lake_city_sidewalks
+display_name: Salt Lake City Sidewalks
+type: sidewalk
+description: Sidewalk centerlines from Salt Lake City GIS
+source:
+  type: arcgis
+  portal_url: https://gis-slcgov.opendata.arcgis.com/datasets/sidewalk-1
+fetch:
+  crs: EPSG:4326
+  id_prefix: slc_sidewalk
+  bbox:
+  - -112.05
+  - 40.7
+  - -111.8
+  - 40.85

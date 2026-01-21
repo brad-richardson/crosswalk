@@ -1,0 +1,66 @@
+name: utah_roads
+display_name: Utah Salt Lake County Roads
+type: road
+description: Salt Lake County roads from Utah SGID
+source:
+  type: arcgis
+  url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0
+  where_clause: COUNTY_L = '49035'
+fetch:
+  crs: EPSG:4326
+  id_prefix: utah_roads
+  name_column: FULLNAME
+  class_column: CARTOCODE
+  class_mapping:
+    '1': motorway
+    '2': trunk
+    '3': trunk
+    '4': primary
+    '5': primary
+    '6': secondary
+    '7': motorway_link
+    '8': secondary
+    '9': tertiary
+    '10': tertiary
+    '11': residential
+    '12': track
+    '14': service
+    '15': service
+    '16': path
+    '17': unclassified
+classification:
+  source_classification:
+    column: CARTOCODE
+  class_mapping_rules:
+  - source_value: '1'
+    target_class: motorway
+  - source_value: '2'
+    target_class: trunk
+  - source_value: '3'
+    target_class: trunk
+  - source_value: '4'
+    target_class: primary
+  - source_value: '5'
+    target_class: primary
+  - source_value: '6'
+    target_class: secondary
+  - source_value: '7'
+    target_class: motorway_link
+  - source_value: '8'
+    target_class: secondary
+  - source_value: '9'
+    target_class: tertiary
+  - source_value: '10'
+    target_class: tertiary
+  - source_value: '11'
+    target_class: residential
+  - source_value: '12'
+    target_class: track
+  - source_value: '14'
+    target_class: service
+  - source_value: '15'
+    target_class: service
+  - source_value: '16'
+    target_class: path
+  - source_value: '17'
+    target_class: unclassified
