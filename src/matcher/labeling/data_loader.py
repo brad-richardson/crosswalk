@@ -9,8 +9,10 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
+from pyproj import Transformer
 from shapely import wkt
 from shapely.geometry import LineString
+from shapely.ops import transform
 
 from ..blocking import generate_candidates
 from ..features.alignment import create_subline, linestring_alignment
@@ -353,15 +355,25 @@ def generate_scored_candidates(
         return []
 
     # Project to metric CRS for accurate distances
+    # Track original CRS and projected CRS for transforming aligned geometries back
+    original_crs = reference.crs
+    projected_crs = None
     if reference.crs and reference.crs.is_geographic:
         centroid = reference.unary_union.centroid
         utm_zone = int((centroid.x + 180) / 6) + 1
-        utm_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
-        reference_proj = reference.to_crs(utm_crs)
-        target_proj = target.to_crs(utm_crs)
+        projected_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
+        reference_proj = reference.to_crs(projected_crs)
+        target_proj = target.to_crs(projected_crs)
     else:
         reference_proj = reference
         target_proj = target
+
+    # Create transformer for converting aligned geometries back to WGS84
+    # Alignment fractions are computed on projected coords, so sublines must be
+    # extracted from projected coords and transformed back
+    proj_to_wgs84 = None
+    if projected_crs and original_crs:
+        proj_to_wgs84 = Transformer.from_crs(projected_crs, original_crs, always_xy=True).transform
 
     # Generate candidates
     candidates = generate_candidates(
@@ -475,14 +487,23 @@ def generate_scored_candidates(
         else:
             decision = "no_match"
 
-        # Create aligned geometries in WGS84 for map display
-        # These show just the overlapping portions of each line
-        ref_aligned = create_subline(
-            ref_row.geometry, alignment.overture_start_frac, alignment.overture_end_frac
+        # Create aligned geometries for map display
+        # IMPORTANT: Alignment fractions are computed on projected (UTM) geometries,
+        # so we must extract sublines from projected coords and transform back to WGS84
+        ref_aligned_proj = create_subline(
+            ref_proj_row.geometry, alignment.overture_start_frac, alignment.overture_end_frac
         )
-        target_aligned = create_subline(
-            target_row.geometry, alignment.dataset_start_frac, alignment.dataset_end_frac
+        target_aligned_proj = create_subline(
+            target_proj_row.geometry, alignment.dataset_start_frac, alignment.dataset_end_frac
         )
+
+        # Transform aligned geometries back to WGS84 for map display
+        if proj_to_wgs84:
+            ref_aligned = transform(proj_to_wgs84, ref_aligned_proj)
+            target_aligned = transform(proj_to_wgs84, target_aligned_proj)
+        else:
+            ref_aligned = ref_aligned_proj
+            target_aligned = target_aligned_proj
 
         views.append(
             CandidatePairView(

@@ -3,6 +3,7 @@
 import folium
 from shapely.geometry import LineString, MultiLineString, mapping
 
+from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
 
 # Colors for visualization - aligned portions are bright, full geometries are faded
@@ -37,7 +38,6 @@ def _add_tile_layer(m: folium.Map, layer_name: str = "Light") -> None:
 
 def create_comparison_map(
     pair: CandidatePairView,
-    height: int = 500,
     tile_layer: str = "Light",
 ) -> folium.Map:
     """Create a folium map showing reference and target geometries with alignment.
@@ -48,7 +48,6 @@ def create_comparison_map(
 
     Args:
         pair: The candidate pair to display
-        height: Map height in pixels
         tile_layer: Map tile layer name
 
     Returns:
@@ -98,11 +97,13 @@ def create_comparison_map(
     )
 
     # Check if alignment is partial (not the full segment)
+    # Use centralized tolerance for consistency with label metadata
+    tol = ALIGNMENT_FULL_TOLERANCE
     is_partial_alignment = has_alignment and (
-        pair.ref_start_frac > 0.01
-        or pair.ref_end_frac < 0.99
-        or pair.target_start_frac > 0.01
-        or pair.target_end_frac < 0.99
+        pair.ref_start_frac > tol
+        or pair.ref_end_frac < (1.0 - tol)
+        or pair.target_start_frac > tol
+        or pair.target_end_frac < (1.0 - tol)
     )
 
     if has_alignment and is_partial_alignment:

@@ -4,6 +4,7 @@ import html
 
 import streamlit as st
 
+from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
 
 # Feature display configuration
@@ -220,12 +221,13 @@ def render_alignment_info(pair: CandidatePairView) -> None:
     Args:
         pair: The candidate pair being displayed
     """
-    # Check if alignment is partial
+    # Check if alignment is partial (use centralized tolerance)
+    tol = ALIGNMENT_FULL_TOLERANCE
     is_partial = (
-        pair.ref_start_frac > 0.01
-        or pair.ref_end_frac < 0.99
-        or pair.target_start_frac > 0.01
-        or pair.target_end_frac < 0.99
+        pair.ref_start_frac > tol
+        or pair.ref_end_frac < (1.0 - tol)
+        or pair.target_start_frac > tol
+        or pair.target_end_frac < (1.0 - tol)
     )
 
     if not is_partial:

@@ -9,7 +9,7 @@ import pandas as pd
 import pyarrow.dataset as pa_ds
 from loguru import logger
 
-from ..config import FEATURE_COLUMNS
+from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS
 
 
 def is_subsegment_selection(
@@ -17,7 +17,7 @@ def is_subsegment_selection(
     ref_end: float,
     target_start: float,
     target_end: float,
-    tolerance: float = 0.001,
+    tolerance: float | None = None,
 ) -> bool:
     """Check if the selection represents a sub-segment (not whole segment).
 
@@ -26,11 +26,13 @@ def is_subsegment_selection(
         ref_end: Reference end percentage
         target_start: Target start percentage
         target_end: Target end percentage
-        tolerance: Tolerance for floating point comparison
+        tolerance: Tolerance for floating point comparison (defaults to ALIGNMENT_FULL_TOLERANCE)
 
     Returns:
         True if this is a sub-segment selection (not 0-100% for both)
     """
+    if tolerance is None:
+        tolerance = ALIGNMENT_FULL_TOLERANCE
     ref_is_full = abs(ref_start) < tolerance and abs(ref_end - 1.0) < tolerance
     target_is_full = abs(target_start) < tolerance and abs(target_end - 1.0) < tolerance
     return not (ref_is_full and target_is_full)
