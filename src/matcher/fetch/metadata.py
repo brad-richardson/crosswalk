@@ -64,6 +64,13 @@ def save_metadata(output_path: Path, metadata: FetchMetadata) -> Path:
     data = metadata.model_dump()
     data["fetched_at"] = data["fetched_at"].isoformat()
 
+    # Convert tuples to lists for safe YAML serialization
+    # (yaml.dump writes tuples with !!python/tuple tag which safe_load can't parse)
+    if data.get("bbox"):
+        data["bbox"] = list(data["bbox"])
+    if data.get("bbox_buffered"):
+        data["bbox_buffered"] = list(data["bbox_buffered"])
+
     with open(meta_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
