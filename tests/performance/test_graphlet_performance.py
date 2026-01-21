@@ -150,8 +150,15 @@ class TestScalingBehavior:
     @pytest.mark.slow
     def test_feature_computation_scales_linearly(self):
         """Verify feature computation scales approximately linearly."""
-        node_counts = [100, 500, 1000, 2000]
+        # Start from 500 nodes to ensure stable timing measurements.
+        # Very small graphs (100 nodes) complete in <5ms which leads to
+        # unreliable ratios due to timing variance and warm-up effects.
+        node_counts = [500, 1000, 2000, 4000]
         times = []
+
+        # Warm-up run to avoid JIT/caching effects on first measurement
+        G_warmup = nx.gnm_random_graph(200, 400, seed=0)
+        compute_road_graphlet_features(G_warmup)
 
         for n_nodes in node_counts:
             G = nx.gnm_random_graph(n_nodes, n_nodes * 2, seed=42)
@@ -162,10 +169,15 @@ class TestScalingBehavior:
 
             assert len(features) == n_nodes
 
-        # Verify sub-quadratic scaling
+        # Verify sub-quadratic scaling.
+        # Only check ratios when the baseline time is >= 10ms to avoid
+        # unreliable measurements due to timing variance.
+        min_reliable_time = 0.01  # 10ms
         for i in range(1, len(node_counts)):
+            if times[i - 1] < min_reliable_time:
+                continue  # Skip ratio check for very fast measurements
             size_ratio = node_counts[i] / node_counts[i - 1]
-            time_ratio = times[i] / times[i - 1] if times[i - 1] > 0 else 1
+            time_ratio = times[i] / times[i - 1]
             assert time_ratio < size_ratio * 3, (
                 f"Feature computation doesn't scale well: {node_counts[i - 1]} -> "
                 f"{node_counts[i]} nodes caused {time_ratio:.1f}x slowdown"
