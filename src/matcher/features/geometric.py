@@ -46,28 +46,7 @@ Metric Selection Rationale:
 from typing import NamedTuple
 
 import numpy as np
-from shapely import LineString, MultiLineString, Point, hausdorff_distance
-from shapely.ops import linemerge
-
-
-def _to_linestring(geom: LineString | MultiLineString) -> LineString:
-    """Convert geometry to LineString.
-
-    For MultiLineString, tries to merge first, then falls back to longest component.
-    """
-    if isinstance(geom, LineString):
-        return geom
-    if isinstance(geom, MultiLineString):
-        # Handle empty MultiLineString
-        if geom.is_empty or len(geom.geoms) == 0:
-            return LineString()
-        # Try to merge connected components
-        merged = linemerge(geom)
-        if isinstance(merged, LineString):
-            return merged
-        # Fall back to longest component
-        return max(geom.geoms, key=lambda g: g.length)
-    raise TypeError(f"Expected LineString or MultiLineString, got {type(geom)}")
+from shapely import LineString, Point, hausdorff_distance
 
 
 class GeometricFeatures(NamedTuple):
@@ -137,21 +116,18 @@ class GeometricFeatures(NamedTuple):
 
 
 def compute_geometric_features(
-    line_a: LineString | MultiLineString,
-    line_b: LineString | MultiLineString,
+    line_a: LineString,
+    line_b: LineString,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
     Args:
-        line_a: First geometry (LineString or MultiLineString, projected CRS)
-        line_b: Second geometry (LineString or MultiLineString, projected CRS)
+        line_a: First geometry (LineString, projected CRS)
+        line_b: Second geometry (LineString, projected CRS)
 
     Returns:
         GeometricFeatures tuple
     """
-    # Convert MultiLineString to LineString if needed
-    line_a = _to_linestring(line_a)
-    line_b = _to_linestring(line_b)
 
     coords_a = np.array(line_a.coords)
     coords_b = np.array(line_b.coords)

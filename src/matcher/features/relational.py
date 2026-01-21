@@ -28,8 +28,7 @@ Key Features:
 from typing import NamedTuple
 
 import numpy as np
-from shapely import LineString, MultiLineString, Point
-from shapely.ops import linemerge
+from shapely import LineString, Point
 
 
 class RelationalFeatures(NamedTuple):
@@ -64,23 +63,9 @@ class RelationalFeatures(NamedTuple):
     Low when segment crosses back and forth across anchor."""
 
 
-def _to_linestring(geom: LineString | MultiLineString) -> LineString:
-    """Convert geometry to LineString."""
-    if isinstance(geom, LineString):
-        return geom
-    if isinstance(geom, MultiLineString):
-        if geom.is_empty or len(geom.geoms) == 0:
-            return LineString()
-        merged = linemerge(geom)
-        if isinstance(merged, LineString):
-            return merged
-        return max(geom.geoms, key=lambda g: g.length)
-    raise TypeError(f"Expected LineString or MultiLineString, got {type(geom)}")
-
-
 def compute_perpendicular_offset(
-    target_geom: LineString | MultiLineString,
-    anchor_geom: LineString | MultiLineString,
+    target_geom: LineString,
+    anchor_geom: LineString,
     sample_interval: float = 5.0,
 ) -> tuple[float, float, float]:
     """Compute perpendicular offset from target to anchor line.
@@ -106,21 +91,18 @@ def compute_perpendicular_offset(
         >>> print(f"Offset: {offset:.1f}m, IQR: {iqr:.2f}m, P95: {p95:.2f}m")
         Offset: 3.0m, IQR: 0.20m, P95: 3.5m
     """
-    target = _to_linestring(target_geom)
-    anchor = _to_linestring(anchor_geom)
-
-    if target.is_empty or anchor.is_empty:
+    if target_geom.is_empty or anchor_geom.is_empty:
         return float("inf"), float("inf"), float("inf")
 
     # Sample points along target
-    n_samples = max(3, int(target.length / sample_interval))
-    distances_along = np.linspace(0, target.length, n_samples)
+    n_samples = max(3, int(target_geom.length / sample_interval))
+    distances_along = np.linspace(0, target_geom.length, n_samples)
 
     # Compute perpendicular distance at each sample point
     offsets = []
     for d in distances_along:
-        point = target.interpolate(d)
-        offset = anchor.distance(point)
+        point = target_geom.interpolate(d)
+        offset = anchor_geom.distance(point)
         offsets.append(offset)
 
     offsets = np.array(offsets)
@@ -138,8 +120,8 @@ def compute_perpendicular_offset(
 
 
 def compute_side_of_street(
-    target_geom: LineString | MultiLineString,
-    anchor_geom: LineString | MultiLineString,
+    target_geom: LineString,
+    anchor_geom: LineString,
     sample_interval: float = 10.0,
 ) -> tuple[str, float]:
     """Determine which side of the anchor road the target is on.
@@ -163,29 +145,26 @@ def compute_side_of_street(
         >>> print(f"Side: {side}, Confidence: {conf:.2f}")
         Side: left, Confidence: 0.95
     """
-    target = _to_linestring(target_geom)
-    anchor = _to_linestring(anchor_geom)
-
-    if target.is_empty or anchor.is_empty:
+    if target_geom.is_empty or anchor_geom.is_empty:
         return "unknown", 0.0
 
     # Get anchor direction vector (overall direction)
-    anchor_coords = np.array(anchor.coords)
+    anchor_coords = np.array(anchor_geom.coords)
     anchor_dir = anchor_coords[-1] - anchor_coords[0]
     anchor_dir_norm = anchor_dir / (np.linalg.norm(anchor_dir) + 1e-10)
 
     # Sample points along target
-    n_samples = max(3, int(target.length / sample_interval))
-    distances_along = np.linspace(0, target.length, n_samples)
+    n_samples = max(3, int(target_geom.length / sample_interval))
+    distances_along = np.linspace(0, target_geom.length, n_samples)
 
     # For each sample point, determine which side it's on
     sides = []
     for d in distances_along:
-        target_point = np.array(target.interpolate(d).coords[0])
+        target_point = np.array(target_geom.interpolate(d).coords[0])
 
         # Find nearest point on anchor
-        nearest_dist = anchor.project(Point(target_point))
-        anchor_point = np.array(anchor.interpolate(nearest_dist).coords[0])
+        nearest_dist = anchor_geom.project(Point(target_point))
+        anchor_point = np.array(anchor_geom.interpolate(nearest_dist).coords[0])
 
         # Vector from anchor to target
         to_target = target_point - anchor_point
@@ -226,8 +205,8 @@ def compute_side_of_street(
 
 
 def compute_parallel_alignment(
-    line_a: LineString | MultiLineString,
-    line_b: LineString | MultiLineString,
+    line_a: LineString,
+    line_b: LineString,
 ) -> float:
     """Compute how parallel two lines are (0-1).
 
@@ -242,15 +221,12 @@ def compute_parallel_alignment(
     Returns:
         Alignment score (0-1) where 1 = parallel
     """
-    a = _to_linestring(line_a)
-    b = _to_linestring(line_b)
-
-    if a.is_empty or b.is_empty:
+    if line_a.is_empty or line_b.is_empty:
         return 0.0
 
     # Compute overall headings
-    coords_a = np.array(a.coords)
-    coords_b = np.array(b.coords)
+    coords_a = np.array(line_a.coords)
+    coords_b = np.array(line_b.coords)
 
     heading_a = _compute_heading(coords_a[0], coords_a[-1])
     heading_b = _compute_heading(coords_b[0], coords_b[-1])
@@ -279,8 +255,8 @@ def _compute_heading(start: np.ndarray, end: np.ndarray) -> float:
 
 
 def compute_relational_features(
-    target_geom: LineString | MultiLineString,
-    anchor_geom: LineString | MultiLineString,
+    target_geom: LineString,
+    anchor_geom: LineString,
     sample_interval: float = 5.0,
 ) -> RelationalFeatures:
     """Compute all relational features for a target/anchor pair.
@@ -315,7 +291,7 @@ def compute_relational_features(
 
 
 def compute_endpoint_proximity(
-    target_geom: LineString | MultiLineString,
+    target_geom: LineString,
     endpoint_coords: np.ndarray,
     tolerance_m: float = 5.0,
 ) -> tuple[float, float, int]:
@@ -335,12 +311,10 @@ def compute_endpoint_proximity(
         - end_proximity: Distance to nearest endpoint from end
         - shared_count: Number of endpoints within tolerance
     """
-    target = _to_linestring(target_geom)
-
-    if target.is_empty or len(endpoint_coords) == 0:
+    if target_geom.is_empty or len(endpoint_coords) == 0:
         return float("inf"), float("inf"), 0
 
-    target_coords = np.array(target.coords)
+    target_coords = np.array(target_geom.coords)
     start = target_coords[0]
     end = target_coords[-1]
 

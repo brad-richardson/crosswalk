@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import geopandas as gpd
 import numpy as np
 from loguru import logger
-from shapely import LineString, MultiLineString, Point
+from shapely import LineString, Point
 from shapely.strtree import STRtree
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ class AnchorRoadMatcher:
 
     def find_anchor_road(
         self,
-        target_geom: LineString | MultiLineString,
+        target_geom: LineString,
     ) -> AnchorMatch | None:
         """Find the most likely anchor road for a target segment.
 
@@ -257,69 +257,37 @@ class SpatialContextIndex:
         # Extract all endpoints using vectorized shapely operations
         geometries = work_gdf.geometry.values
 
-        # Get start and end points vectorized
-        # For LineStrings: get_point(geom, 0) = first, get_point(geom, -1) = last
-        # For MultiLineStrings: we need to handle specially
+        # Get start and end points vectorized (all geometries should be LineString after filtering)
         import shapely
 
-        # Check for MultiLineStrings and handle them
-        geom_types = shapely.get_type_id(geometries)
-        has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
+        # Fast vectorized path for LineStrings
+        # Filter out empty/null geometries
+        valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+        valid_indices = np.where(valid_mask)[0]
+        valid_geoms = geometries[valid_mask]
 
-        if has_multi:
-            # Fall back to per-geometry extraction for mixed types
-            all_endpoints = []
-            segment_to_endpoints = {}
-            for seg_idx, geom in enumerate(geometries):
-                if geom is None or geom.is_empty:
-                    continue
-                if geom.geom_type == "MultiLineString":
-                    if len(geom.geoms) == 0:
-                        continue
-                    start = np.array(geom.geoms[0].coords[0])
-                    end = np.array(geom.geoms[-1].coords[-1])
-                else:
-                    coords = np.array(geom.coords)
-                    start = coords[0]
-                    end = coords[-1]
-                all_endpoints.append(start)
-                all_endpoints.append(end)
-                segment_to_endpoints[seg_idx] = (len(all_endpoints) - 2, len(all_endpoints) - 1)
+        if len(valid_geoms) == 0:
+            logger.warning("No endpoints found in GeoDataFrame")
+            return
 
-            if not all_endpoints:
-                logger.warning("No endpoints found in GeoDataFrame")
-                return
-            self.endpoint_coords = np.array(all_endpoints)
-            self.segment_endpoints = segment_to_endpoints
-        else:
-            # Fast vectorized path for pure LineStrings
-            # Filter out empty/null geometries
-            valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
-            valid_indices = np.where(valid_mask)[0]
-            valid_geoms = geometries[valid_mask]
+        # Get first and last points vectorized
+        start_points = shapely.get_point(valid_geoms, 0)
+        end_points = shapely.get_point(valid_geoms, -1)
 
-            if len(valid_geoms) == 0:
-                logger.warning("No endpoints found in GeoDataFrame")
-                return
+        # Extract coordinates
+        start_coords = shapely.get_coordinates(start_points)
+        end_coords = shapely.get_coordinates(end_points)
 
-            # Get first and last points vectorized
-            start_points = shapely.get_point(valid_geoms, 0)
-            end_points = shapely.get_point(valid_geoms, -1)
+        # Interleave start and end coordinates
+        n_valid = len(valid_geoms)
+        all_endpoints = np.empty((n_valid * 2, 2), dtype=np.float64)
+        all_endpoints[0::2] = start_coords
+        all_endpoints[1::2] = end_coords
 
-            # Extract coordinates
-            start_coords = shapely.get_coordinates(start_points)
-            end_coords = shapely.get_coordinates(end_points)
-
-            # Interleave start and end coordinates
-            n_valid = len(valid_geoms)
-            all_endpoints = np.empty((n_valid * 2, 2), dtype=np.float64)
-            all_endpoints[0::2] = start_coords
-            all_endpoints[1::2] = end_coords
-
-            self.endpoint_coords = all_endpoints
-            self.segment_endpoints = {
-                seg_idx: (i * 2, i * 2 + 1) for i, seg_idx in enumerate(valid_indices)
-            }
+        self.endpoint_coords = all_endpoints
+        self.segment_endpoints = {
+            seg_idx: (i * 2, i * 2 + 1) for i, seg_idx in enumerate(valid_indices)
+        }
 
         # Cluster nearby endpoints (snap tolerance)
         self._cluster_endpoints(snap_tolerance_m)
@@ -410,7 +378,7 @@ class SpatialContextIndex:
 
     def query_nearby_segments(
         self,
-        geom: LineString | MultiLineString | Point,
+        geom: LineString | Point,
         radius: float,
     ) -> list[int]:
         """Find segment indices within radius of a geometry.
@@ -482,7 +450,7 @@ class SpatialContextIndex:
 
 
 def infer_endpoint_degree(
-    geom: LineString | MultiLineString,
+    geom: LineString,
     context: SpatialContextIndex,
     tolerance_m: float = 5.0,
 ) -> tuple[int, int]:
@@ -504,15 +472,9 @@ def infer_endpoint_degree(
         return (1, 1)
 
     # Extract endpoints
-    if geom.geom_type == "MultiLineString":
-        if len(geom.geoms) == 0:
-            return (1, 1)
-        start_point = Point(geom.geoms[0].coords[0])
-        end_point = Point(geom.geoms[-1].coords[-1])
-    else:
-        coords = np.array(geom.coords)
-        start_point = Point(coords[0])
-        end_point = Point(coords[-1])
+    coords = np.array(geom.coords)
+    start_point = Point(coords[0])
+    end_point = Point(coords[-1])
 
     # Query nearby endpoints at start
     # Note: start_segments will include the segment itself since its own endpoint
@@ -537,7 +499,7 @@ def infer_endpoint_degree(
 
 
 def compute_endpoint_features(
-    target_geom: LineString | MultiLineString,
+    target_geom: LineString,
     context: SpatialContextIndex,
     exclude_segment_idx: int | None = None,
     tolerance_m: float = 5.0,
@@ -566,20 +528,9 @@ def compute_endpoint_features(
             "shared_endpoint_count": 0,
         }
 
-    # Handle both LineString and MultiLineString
-    if target_geom.geom_type == "MultiLineString":
-        if len(target_geom.geoms) == 0:
-            return {
-                "min_endpoint_proximity_m": float("inf"),
-                "max_endpoint_proximity_m": float("inf"),
-                "shared_endpoint_count": 0,
-            }
-        start_point = Point(target_geom.geoms[0].coords[0])
-        end_point = Point(target_geom.geoms[-1].coords[-1])
-    else:
-        coords = np.array(target_geom.coords)
-        start_point = Point(coords[0])
-        end_point = Point(coords[-1])
+    coords = np.array(target_geom.coords)
+    start_point = Point(coords[0])
+    end_point = Point(coords[-1])
 
     # Query nearby endpoints
     start_nearby = context.query_nearby_endpoints(start_point, tolerance_m * 2)
@@ -621,7 +572,7 @@ def compute_endpoint_features(
 
 
 def compute_topology_features(
-    geom: LineString | MultiLineString,
+    geom: LineString,
     context: SpatialContextIndex,
     tolerance_m: float = 5.0,
 ) -> dict[str, float]:
@@ -881,66 +832,33 @@ def compute_all_topology(
     geometries = work_gdf.geometry.values
     segment_ids_arr = work_gdf[id_column].astype(str).values
 
-    # Check for MultiLineStrings
-    geom_types = shapely.get_type_id(geometries)
-    has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
+    # Fast vectorized path for LineStrings (MultiLineStrings filtered at ingest)
+    valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+    valid_geoms = geometries[valid_mask]
+    valid_seg_ids = segment_ids_arr[valid_mask]
 
-    if has_multi:
-        # Fall back to per-geometry extraction for mixed types
-        endpoint_coords = []
-        endpoint_segment_ids = []
-        endpoint_is_start = []
-        for seg_idx, geom in enumerate(geometries):
-            if geom is None or geom.is_empty:
-                continue
-            seg_id = segment_ids_arr[seg_idx]
-            if geom.geom_type == "MultiLineString":
-                if len(geom.geoms) == 0:
-                    continue
-                start_coords = geom.geoms[0].coords[0]
-                end_coords = geom.geoms[-1].coords[-1]
-            else:
-                coords = list(geom.coords)
-                start_coords = coords[0]
-                end_coords = coords[-1]
-            endpoint_coords.append(start_coords)
-            endpoint_segment_ids.append(seg_id)
-            endpoint_is_start.append(True)
-            endpoint_coords.append(end_coords)
-            endpoint_segment_ids.append(seg_id)
-            endpoint_is_start.append(False)
+    if len(valid_geoms) == 0:
+        return {}
 
-        if not endpoint_coords:
-            return {}
-        n_endpoints = len(endpoint_coords)
-    else:
-        # Fast vectorized path for pure LineStrings
-        valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
-        valid_geoms = geometries[valid_mask]
-        valid_seg_ids = segment_ids_arr[valid_mask]
+    # Get first and last points vectorized
+    start_points = shapely.get_point(valid_geoms, 0)
+    end_points = shapely.get_point(valid_geoms, -1)
 
-        if len(valid_geoms) == 0:
-            return {}
+    # Extract coordinates
+    start_coords = shapely.get_coordinates(start_points)
+    end_coords = shapely.get_coordinates(end_points)
 
-        # Get first and last points vectorized
-        start_points = shapely.get_point(valid_geoms, 0)
-        end_points = shapely.get_point(valid_geoms, -1)
+    # Interleave into endpoint arrays
+    n_valid = len(valid_geoms)
+    n_endpoints = n_valid * 2
 
-        # Extract coordinates
-        start_coords = shapely.get_coordinates(start_points)
-        end_coords = shapely.get_coordinates(end_points)
+    endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
+    endpoint_coords[0::2] = start_coords
+    endpoint_coords[1::2] = end_coords
 
-        # Interleave into endpoint arrays
-        n_valid = len(valid_geoms)
-        n_endpoints = n_valid * 2
-
-        endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
-        endpoint_coords[0::2] = start_coords
-        endpoint_coords[1::2] = end_coords
-
-        # Build segment ID and is_start arrays
-        endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
-        endpoint_is_start = np.tile([True, False], n_valid)
+    # Build segment ID and is_start arrays
+    endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
+    endpoint_is_start = np.tile([True, False], n_valid)
     logger.debug(
         f"[topology] Step 1: Extracted {n_endpoints} endpoints in {time.perf_counter() - t0:.2f}s"
     )
@@ -1092,64 +1010,32 @@ def build_inferred_graph(
         work_gdf = gdf.to_crs(epsg=epsg)
         logger.debug(f"[graphlet] Projected to EPSG:{epsg}")
 
-    # Step 1: Extract endpoints using vectorized shapely
+    # Step 1: Extract endpoints using vectorized shapely (LineStrings only, filtered at ingest)
     import shapely
 
     geometries = work_gdf.geometry.values
     segment_ids_arr = work_gdf[id_column].astype(str).values
 
-    geom_types = shapely.get_type_id(geometries)
-    has_multi = np.any(geom_types == 5)  # 5 = MultiLineString
+    # Fast vectorized path for LineStrings
+    valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
+    valid_geoms = geometries[valid_mask]
+    valid_seg_ids = segment_ids_arr[valid_mask]
 
-    if has_multi:
-        # Fall back for mixed types
-        endpoint_coords = []
-        endpoint_segment_ids = []
-        endpoint_is_start = []
-        for seg_idx, geom in enumerate(geometries):
-            if geom is None or geom.is_empty:
-                continue
-            seg_id = segment_ids_arr[seg_idx]
-            if geom.geom_type == "MultiLineString":
-                if len(geom.geoms) == 0:
-                    continue
-                start_coords = geom.geoms[0].coords[0]
-                end_coords = geom.geoms[-1].coords[-1]
-            else:
-                coords = list(geom.coords)
-                start_coords = coords[0]
-                end_coords = coords[-1]
-            endpoint_coords.append(start_coords)
-            endpoint_segment_ids.append(seg_id)
-            endpoint_is_start.append(True)
-            endpoint_coords.append(end_coords)
-            endpoint_segment_ids.append(seg_id)
-            endpoint_is_start.append(False)
+    if len(valid_geoms) == 0:
+        return nx.Graph(), {}, {}
 
-        if not endpoint_coords:
-            return nx.Graph(), {}, {}
-        n_endpoints = len(endpoint_coords)
-    else:
-        # Fast vectorized path
-        valid_mask = ~shapely.is_empty(geometries) & ~shapely.is_missing(geometries)
-        valid_geoms = geometries[valid_mask]
-        valid_seg_ids = segment_ids_arr[valid_mask]
+    start_points = shapely.get_point(valid_geoms, 0)
+    end_points = shapely.get_point(valid_geoms, -1)
+    start_coords = shapely.get_coordinates(start_points)
+    end_coords = shapely.get_coordinates(end_points)
 
-        if len(valid_geoms) == 0:
-            return nx.Graph(), {}, {}
-
-        start_points = shapely.get_point(valid_geoms, 0)
-        end_points = shapely.get_point(valid_geoms, -1)
-        start_coords = shapely.get_coordinates(start_points)
-        end_coords = shapely.get_coordinates(end_points)
-
-        n_valid = len(valid_geoms)
-        n_endpoints = n_valid * 2
-        endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
-        endpoint_coords[0::2] = start_coords
-        endpoint_coords[1::2] = end_coords
-        endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
-        endpoint_is_start = np.tile([True, False], n_valid)
+    n_valid = len(valid_geoms)
+    n_endpoints = n_valid * 2
+    endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)
+    endpoint_coords[0::2] = start_coords
+    endpoint_coords[1::2] = end_coords
+    endpoint_segment_ids = np.repeat(valid_seg_ids, 2)
+    endpoint_is_start = np.tile([True, False], n_valid)
 
     logger.debug(f"[graphlet] Extracted {n_endpoints} endpoints")
 
@@ -1444,22 +1330,15 @@ def build_inferred_connector_graph(
     # Collect all connection points: (seg_id, seg_idx, at_position, x, y)
     connection_points = []
 
-    # Step 1: Add endpoints for all segments
+    # Step 1: Add endpoints for all segments (LineStrings only, MultiLineStrings filtered at ingest)
     for seg_idx, geom in enumerate(geometries):
         if geom is None or geom.is_empty:
             continue
         seg_id = segment_ids[seg_idx]
 
-        # Handle MultiLineString by using first/last parts
-        if geom.geom_type == "MultiLineString":
-            if len(geom.geoms) == 0:
-                continue
-            start_coords = geom.geoms[0].coords[0]
-            end_coords = geom.geoms[-1].coords[-1]
-        else:
-            coords = list(geom.coords)
-            start_coords = coords[0]
-            end_coords = coords[-1]
+        coords = list(geom.coords)
+        start_coords = coords[0]
+        end_coords = coords[-1]
 
         # Start point
         connection_points.append((seg_id, seg_idx, 0.0, start_coords[0], start_coords[1]))

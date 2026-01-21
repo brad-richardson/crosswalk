@@ -5,6 +5,8 @@ from pathlib import Path
 import geopandas as gpd
 from loguru import logger
 
+from ..utils import filter_to_linestrings
+
 
 def load_local_roads(
     path: Path,
@@ -60,6 +62,9 @@ def load_local_roads(
 
     logger.info(f"Loaded {len(gdf)} features")
     logger.info(f"Columns: {list(gdf.columns)}")
+
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    gdf = filter_to_linestrings(gdf, source_name=str(path.name))
 
     # Normalize schema
     gdf = _normalize_local_schema(

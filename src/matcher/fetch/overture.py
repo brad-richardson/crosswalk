@@ -11,6 +11,7 @@ from loguru import logger
 from overturemaps.core import geodataframe, get_latest_release
 from pydantic import BaseModel
 
+from ..utils import filter_to_linestrings
 from .metadata import FetchMetadata, save_metadata
 
 # Overture segment classes to exclude (non-road transport)
@@ -139,6 +140,9 @@ def fetch_overture_segments(
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
 
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    gdf = filter_to_linestrings(gdf, source_name="overture_segments")
+
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
@@ -237,6 +241,9 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
     # Ensure CRS is set (Overture data is always WGS84)
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
+
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    gdf = filter_to_linestrings(gdf, source_name=str(path.name))
 
     # Extract name from names struct if not already flat
     if "name" not in gdf.columns and "names" in gdf.columns:
