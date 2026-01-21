@@ -145,15 +145,15 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
-            # Geometric features (9)
-            "hausdorff_distance": features.get("hausdorff_distance", 0.0),
-            "mean_hausdorff_distance": features.get("mean_hausdorff_distance", 0.0),
+            # Geometric features (9) - distance features use _m suffix for meters
+            "hausdorff_distance_m": features.get("hausdorff_distance_m", 0.0),
+            "mean_hausdorff_distance_m": features.get("mean_hausdorff_distance_m", 0.0),
             "buffer_iou": features.get("buffer_iou", 0.0),
             "overlap_ratio": features.get("overlap_ratio", 0.0),
             "heading_delta": features.get("heading_delta", 0.0),
             "length_ratio": features.get("length_ratio", 0.0),
-            "projection_distance": features.get("projection_distance", 0.0),
-            "centroid_distance": features.get("centroid_distance", 0.0),
+            "projection_distance_m": features.get("projection_distance_m", 0.0),
+            "centroid_distance_m": features.get("centroid_distance_m", 0.0),
             "collinear_gap_ratio": features.get("collinear_gap_ratio", 1.0),
             # Semantic features - name (5)
             "name_levenshtein": features.get("name_levenshtein", 0.0),
@@ -163,12 +163,12 @@ class LabelStore:
             "name_metaphone": features.get("name_metaphone", 0.5),
             # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
-            # Endpoint/connectivity features (3)
-            "start_endpoint_proximity": features.get("start_endpoint_proximity", 0.0),
-            "end_endpoint_proximity": features.get("end_endpoint_proximity", 0.0),
+            # Endpoint/connectivity features (3) - distance features use _m suffix
+            "start_endpoint_proximity_m": features.get("start_endpoint_proximity_m", 0.0),
+            "end_endpoint_proximity_m": features.get("end_endpoint_proximity_m", 0.0),
             "shared_endpoint_count": features.get("shared_endpoint_count", 0),
-            # Lateral offset features (2)
-            "lateral_offset": features.get("lateral_offset", 0.0),
+            # Lateral offset features (2) - distance features use _m suffix
+            "lateral_offset_m": features.get("lateral_offset_m", 0.0),
             "lateral_offset_consistency": features.get("lateral_offset_consistency", 0.0),
             # Topology features (12)
             "from_degree_ref": features.get("from_degree_ref", 0),

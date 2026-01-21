@@ -24,9 +24,9 @@ def _compute_buffer_iou(line_a, line_b, radius: float) -> float:
 
 def filter_short_segments(
     gdf: gpd.GeoDataFrame,
-    min_length: float = None,
+    min_length_m: float = None,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """Filter out segments shorter than min_length meters.
+    """Filter out segments shorter than min_length_m meters.
 
     Short segments are often:
     - GPS noise artifacts
@@ -35,12 +35,12 @@ def filter_short_segments(
 
     Args:
         gdf: GeoDataFrame with LineString geometries
-        min_length: Minimum segment length in meters
+        min_length_m: Minimum segment length in meters
 
     Returns:
         Tuple of (kept_segments, filtered_segments)
     """
-    min_length = min_length or settings.min_segment_length
+    min_length_m = min_length_m or settings.min_segment_length_m
 
     if gdf is None or len(gdf) == 0:
         return gdf, gpd.GeoDataFrame()
@@ -56,12 +56,12 @@ def filter_short_segments(
     lengths = working_gdf.geometry.length
 
     # Filter
-    keep_mask = lengths >= min_length
+    keep_mask = lengths >= min_length_m
     kept = gdf[keep_mask].copy()  # Return in original CRS
     filtered = gdf[~keep_mask].copy()
 
     if len(filtered) > 0:
-        logger.info(f"Filtered {len(filtered)} short segments (<{min_length}m)")
+        logger.info(f"Filtered {len(filtered)} short segments (<{min_length_m}m)")
 
     return kept, filtered
 
@@ -69,14 +69,14 @@ def filter_short_segments(
 def detect_near_duplicates(
     unmatched: gpd.GeoDataFrame,
     matched: gpd.GeoDataFrame,
-    distance_tolerance: float = None,
+    distance_tolerance_m: float = None,
     overlap_threshold: float = None,
     id_column: str = "local_id",
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Detect near-duplicates that may be matching false negatives.
 
     A near-duplicate is an unmatched target that:
-    1. Is within distance_tolerance of a matched target
+    1. Is within distance_tolerance_m of a matched target
     2. Has overlap_ratio >= overlap_threshold with matched target
     3. Could represent the same physical feature
 
@@ -85,14 +85,14 @@ def detect_near_duplicates(
     Args:
         unmatched: Unmatched segments GeoDataFrame
         matched: Matched segments GeoDataFrame
-        distance_tolerance: Distance tolerance for candidate detection (meters)
+        distance_tolerance_m: Distance tolerance for candidate detection (meters)
         overlap_threshold: Minimum overlap ratio to consider as near-duplicate
         id_column: ID column name
 
     Returns:
         Tuple of (clean_unmatched, potential_duplicates)
     """
-    distance_tolerance = distance_tolerance or settings.near_duplicate_tolerance
+    distance_tolerance_m = distance_tolerance_m or settings.near_duplicate_tolerance_m
     overlap_threshold = overlap_threshold or settings.near_duplicate_overlap
 
     if unmatched is None or len(unmatched) == 0:
@@ -115,7 +115,7 @@ def detect_near_duplicates(
         _original_id = row.get(id_column, idx)  # noqa: F841 - reserved for debugging
 
         # Find nearby matched segments
-        buffered = geom.buffer(distance_tolerance)
+        buffered = geom.buffer(distance_tolerance_m)
         candidate_indices = tree.query(buffered)
 
         is_duplicate = False
@@ -126,7 +126,7 @@ def detect_near_duplicates(
             matched_geom = matched_geoms[matched_idx]
 
             # Compute overlap
-            iou = _compute_buffer_iou(geom, matched_geom, distance_tolerance)
+            iou = _compute_buffer_iou(geom, matched_geom, distance_tolerance_m)
 
             if iou > best_overlap:
                 best_overlap = iou

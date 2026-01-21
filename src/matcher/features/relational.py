@@ -300,7 +300,7 @@ def compute_relational_features(
 def compute_endpoint_proximity(
     target_geom: LineString | MultiLineString,
     endpoint_coords: np.ndarray,
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> tuple[float, float, int]:
     """Compute endpoint proximity features.
 
@@ -310,7 +310,7 @@ def compute_endpoint_proximity(
     Args:
         target_geom: Target geometry
         endpoint_coords: Array of shape (N, 2) with other endpoint coordinates
-        tolerance: Distance threshold for counting "shared" endpoints (meters)
+        tolerance_m: Distance threshold for counting "shared" endpoints (meters)
 
     Returns:
         Tuple of (start_proximity, end_proximity, shared_count) where:
@@ -336,8 +336,8 @@ def compute_endpoint_proximity(
     end_proximity = float(np.min(end_dists)) if len(end_dists) > 0 else float("inf")
 
     # Count endpoints within tolerance of either end
-    within_start = np.sum(start_dists <= tolerance)
-    within_end = np.sum(end_dists <= tolerance)
+    within_start = np.sum(start_dists <= tolerance_m)
+    within_end = np.sum(end_dists <= tolerance_m)
     shared_count = int(within_start + within_end)
 
     return start_proximity, end_proximity, shared_count

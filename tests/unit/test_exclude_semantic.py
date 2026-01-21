@@ -35,7 +35,7 @@ class TestExcludeSemanticFlag:
             assert semantic_feature not in filtered
 
         # Geometric features should still be present
-        assert "hausdorff_distance" in filtered
+        assert "hausdorff_distance_m" in filtered
         assert "buffer_iou" in filtered
         assert "length_ratio" in filtered
 
@@ -52,14 +52,14 @@ class TestExcludeSemanticFlag:
             (
                 "geometric",
                 [
-                    "hausdorff_distance",
-                    "mean_hausdorff_distance",
+                    "hausdorff_distance_m",
+                    "mean_hausdorff_distance_m",
                     "buffer_iou",
                     "overlap_ratio",
                     "heading_delta",
                     "length_ratio",
-                    "projection_distance",
-                    "centroid_distance",
+                    "projection_distance_m",
+                    "centroid_distance_m",
                     "collinear_gap_ratio",
                 ],
             ),
@@ -80,14 +80,14 @@ class TestExcludeSemanticFlag:
             (
                 "endpoint",
                 [
-                    "start_endpoint_proximity",
-                    "end_endpoint_proximity",
+                    "start_endpoint_proximity_m",
+                    "end_endpoint_proximity_m",
                     "shared_endpoint_count",
                 ],
             ),
             (
                 "lateral",
-                ["lateral_offset", "lateral_offset_consistency"],
+                ["lateral_offset_m", "lateral_offset_consistency"],
             ),
             (
                 "topology",
@@ -128,14 +128,14 @@ class TestExcludeSemanticFlag:
             for f in geom_only_features
             if f
             in [
-                "hausdorff_distance",
-                "mean_hausdorff_distance",
+                "hausdorff_distance_m",
+                "mean_hausdorff_distance_m",
                 "buffer_iou",
                 "overlap_ratio",
                 "heading_delta",
                 "length_ratio",
-                "projection_distance",
-                "centroid_distance",
+                "projection_distance_m",
+                "centroid_distance_m",
                 "collinear_gap_ratio",
             ]
         )
@@ -144,12 +144,13 @@ class TestExcludeSemanticFlag:
         endpoint_count = sum(
             1
             for f in geom_only_features
-            if f in ["start_endpoint_proximity", "end_endpoint_proximity", "shared_endpoint_count"]
+            if f
+            in ["start_endpoint_proximity_m", "end_endpoint_proximity_m", "shared_endpoint_count"]
         )
         assert endpoint_count == 3, "Should have 3 endpoint features"
 
         lateral_count = sum(
-            1 for f in geom_only_features if f in ["lateral_offset", "lateral_offset_consistency"]
+            1 for f in geom_only_features if f in ["lateral_offset_m", "lateral_offset_consistency"]
         )
         assert lateral_count == 2, "Should have 2 lateral features"
 

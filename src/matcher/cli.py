@@ -133,9 +133,9 @@ def topology(
         "-o",
         help="Output directory",
     ),
-    snap_tolerance: float = typer.Option(
+    snap_tolerance_m: float = typer.Option(
         2.0,
-        "--snap-tolerance",
+        "--snap-tolerance-m",
         "-s",
         help="Snap tolerance for undershoots/overshoots in meters",
     ),
@@ -158,13 +158,13 @@ def topology(
 
     console.print(f"[blue]Loaded {len(gdf)} features[/blue]")
     console.print(
-        f"[blue]Planarizing with snap_tolerance={snap_tolerance}m, "
+        f"[blue]Planarizing with snap_tolerance_m={snap_tolerance_m}m, "
         f"respect_z_levels={respect_z_levels}...[/blue]"
     )
 
     network = planarize(
         gdf,
-        snap_tolerance=snap_tolerance,
+        snap_tolerance_m=snap_tolerance_m,
         respect_z_levels=respect_z_levels,
     )
 
@@ -192,9 +192,9 @@ def match(
         "-m",
         help="Matching method: rule, xgboost",
     ),
-    buffer_distance: float = typer.Option(
+    buffer_distance_m: float = typer.Option(
         50.0,
-        "--buffer",
+        "--buffer-m",
         "-b",
         help="Candidate search radius in meters",
     ),
@@ -208,7 +208,7 @@ def match(
     console.print(f"  Reference: {reference}")
     console.print(f"  Target: {target}")
     console.print(f"  Method: {method}")
-    console.print(f"  Buffer: {buffer_distance}m")
+    console.print(f"  Buffer: {buffer_distance_m}m")
 
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -224,7 +224,7 @@ def match(
             target_path=target,
             output_path=output,
             method=method,
-            buffer_distance=buffer_distance,
+            buffer_distance_m=buffer_distance_m,
         )
 
         progress.update(task, completed=True)
@@ -576,24 +576,24 @@ def integrate(
         "--overlap-threshold",
         help="IoU threshold for overlap detection",
     ),
-    min_length: float = typer.Option(
+    min_length_m: float = typer.Option(
         3.0,
-        "--min-length",
+        "--min-length-m",
         help="Minimum segment length to include (meters)",
     ),
-    connection_tolerance: float = typer.Option(
+    connection_tolerance_m: float = typer.Option(
         3.0,
-        "--connection-tolerance",
+        "--connection-tolerance-m",
         help="Distance (meters) to consider segment connected to reference network",
     ),
-    min_merge_length: float = typer.Option(
+    min_merge_length_m: float = typer.Option(
         20.0,
-        "--min-merge-length",
+        "--min-merge-length-m",
         help="Minimum net-new length (meters) to merge a connected segment",
     ),
-    net_new_buffer: float = typer.Option(
+    net_new_buffer_m: float = typer.Option(
         5.0,
-        "--net-new-buffer",
+        "--net-new-buffer-m",
         help="Buffer around reference (meters) for net-new calculation",
     ),
     max_hops: int = typer.Option(
@@ -601,9 +601,9 @@ def integrate(
         "--max-hops",
         help="Maximum transitive connectivity hops from reference network",
     ),
-    fringe_buffer: float = typer.Option(
+    fringe_buffer_m: float = typer.Option(
         50.0,
-        "--fringe-buffer",
+        "--fringe-buffer-m",
         help="Buffer around reference coverage (meters) for fringe detection",
     ),
     no_fringe_filter: bool = typer.Option(
@@ -611,10 +611,10 @@ def integrate(
         "--no-fringe-filter",
         help="Disable fringe detection (include all segments regardless of coverage)",
     ),
-    transitive_tolerance: float = typer.Option(
+    transitive_tolerance_m: float = typer.Option(
         None,
-        "--transitive-tolerance",
-        help="Tolerance (meters) for transitive connections between targets. Defaults to 2x connection-tolerance.",
+        "--transitive-tolerance-m",
+        help="Tolerance (meters) for transitive connections between targets. Defaults to 2x connection-tolerance-m.",
     ),
     debug_connectivity: bool = typer.Option(
         False,
@@ -696,14 +696,14 @@ def integrate(
                 target_configs=target_configs,
                 output_dir=output_dir,
                 overlap_iou_threshold=overlap_threshold,
-                min_segment_length=min_length,
-                connection_tolerance=connection_tolerance,
-                min_merge_length=min_merge_length,
-                net_new_buffer=net_new_buffer,
+                min_segment_length_m=min_length_m,
+                connection_tolerance_m=connection_tolerance_m,
+                min_merge_length_m=min_merge_length_m,
+                net_new_buffer_m=net_new_buffer_m,
                 max_hops=max_hops,
-                fringe_buffer=fringe_buffer,
+                fringe_buffer_m=fringe_buffer_m,
                 enable_fringe_detection=not no_fringe_filter,
-                transitive_tolerance=transitive_tolerance,
+                transitive_tolerance_m=transitive_tolerance_m,
                 debug_connectivity=debug_connectivity,
             )
             progress.update(task, completed=True)

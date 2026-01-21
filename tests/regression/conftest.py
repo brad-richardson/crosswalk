@@ -31,19 +31,18 @@ def trained_matcher(model_path):
 def perfect_match_features():
     """Features representing a near-perfect match.
 
-    Values are in WGS84 degrees (model is trained on degree-based features).
-    Based on real labeled data from boston_streets where best matches have
-    hausdorff_distance ~0.00001 degrees (~1 meter).
+    All distance values are in meters (features are computed after projecting
+    to a meter-based CRS like UTM).
     """
     return {
-        # Geometric features (in WGS84 degrees)
-        "hausdorff_distance": 0.000001,  # ~0.1 meter
-        "mean_hausdorff_distance": 0.0000008,
+        # Geometric features (in meters)
+        "hausdorff_distance_m": 0.1,  # 0.1 meter - nearly identical
+        "mean_hausdorff_distance_m": 0.08,
         "buffer_iou": 0.9999,
         "overlap_ratio": 0.99,
         "heading_delta": 0.1,
         "length_ratio": 0.999,
-        "centroid_distance": 0.0000005,
+        "centroid_distance_m": 0.05,
         "collinear_gap_ratio": 0.01,
         # Semantic features (exact name match)
         "name_levenshtein": 1.0,
@@ -52,13 +51,13 @@ def perfect_match_features():
         "name_soundex": 1.0,
         "name_metaphone": 1.0,
         "class_similarity": 1.0,
-        # Connectivity (in WGS84 degrees)
-        "start_endpoint_proximity": 0.00001,  # ~1 meter
-        "end_endpoint_proximity": 0.00001,
+        # Connectivity (in meters)
+        "start_endpoint_proximity_m": 1.0,  # 1 meter
+        "end_endpoint_proximity_m": 1.0,
         "shared_endpoint_count": 2,
-        "lateral_offset": 0.00001,
-        "lateral_offset_consistency": 0.000005,
-        "projection_distance": 0.000001,
+        "lateral_offset_m": 1.0,
+        "lateral_offset_consistency": 0.5,
+        "projection_distance_m": 0.1,
         # Topology: same pattern
         "from_degree_ref": 3,
         "to_degree_ref": 3,
@@ -84,20 +83,20 @@ def perfect_match_features():
 def terrible_match_features():
     """Features representing a clear non-match.
 
-    Values are in WGS84 degrees (model is trained on degree-based features).
-    Large distances and poor overlap indicate a clear non-match.
+    All distance values are in meters. Large distances and poor overlap
+    indicate a clear non-match.
     """
     return {
-        # Geometric features (in WGS84 degrees - large distances)
-        "hausdorff_distance": 0.001,  # ~100 meters - very far apart
-        "mean_hausdorff_distance": 0.0008,
+        # Geometric features (in meters - large distances)
+        "hausdorff_distance_m": 100.0,  # 100 meters - very far apart
+        "mean_hausdorff_distance_m": 80.0,
         "buffer_iou": 0.5,  # Low overlap
         "overlap_ratio": 0.3,
         "heading_delta": 45.0,  # Significantly different heading
         "length_ratio": 0.34,
-        "centroid_distance": 0.0005,  # ~50 meters apart
+        "centroid_distance_m": 50.0,  # 50 meters apart
         "collinear_gap_ratio": 0.8,
-        "projection_distance": 0.001,
+        "projection_distance_m": 100.0,
         # Semantic features (completely different names)
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
@@ -106,11 +105,11 @@ def terrible_match_features():
         "name_metaphone": 0.0,
         "class_similarity": 0.3,
         # Connectivity (far from other segments)
-        "start_endpoint_proximity": 100.0,  # Far from network
-        "end_endpoint_proximity": 100.0,
+        "start_endpoint_proximity_m": 100.0,  # Far from network
+        "end_endpoint_proximity_m": 100.0,
         "shared_endpoint_count": 0,
-        "lateral_offset": 0.001,  # ~100 meters offset
-        "lateral_offset_consistency": 0.0008,
+        "lateral_offset_m": 100.0,  # 100 meters offset
+        "lateral_offset_consistency": 80.0,
         # Topology: different patterns
         "from_degree_ref": 3,
         "to_degree_ref": 3,
@@ -136,20 +135,20 @@ def terrible_match_features():
 def borderline_match_features():
     """Features representing a true borderline match case.
 
-    Values are in WGS84 degrees (model is trained on degree-based features).
-    Moderate geometry quality with partial name match - should be in REVIEW range.
+    All distance values are in meters. Moderate geometry quality with
+    partial name match - should be in REVIEW range.
     """
     return {
-        # Moderate geometry (in WGS84 degrees)
-        "hausdorff_distance": 0.0001,  # ~10 meters
-        "mean_hausdorff_distance": 0.00006,
+        # Moderate geometry (in meters)
+        "hausdorff_distance_m": 10.0,  # 10 meters
+        "mean_hausdorff_distance_m": 6.0,
         "buffer_iou": 0.998,  # Reasonable overlap on aligned sublines
         "overlap_ratio": 0.7,
         "heading_delta": 3.7,
         "length_ratio": 0.74,
-        "centroid_distance": 0.00008,
+        "centroid_distance_m": 8.0,
         "collinear_gap_ratio": 0.3,
-        "projection_distance": 0.0001,
+        "projection_distance_m": 10.0,
         # Partial name match (similar but not identical)
         "name_levenshtein": 0.64,
         "name_jaro_winkler": 0.86,
@@ -158,13 +157,13 @@ def borderline_match_features():
         "name_metaphone": 0.8,
         # Similar class
         "class_similarity": 0.8,
-        # Moderate connectivity
-        "start_endpoint_proximity": 25.0,  # Meters (not super close)
-        "end_endpoint_proximity": 30.0,
+        # Moderate connectivity (in meters)
+        "start_endpoint_proximity_m": 25.0,  # Not super close
+        "end_endpoint_proximity_m": 30.0,
         "shared_endpoint_count": 1,
         # Moderate lateral offset
-        "lateral_offset": 0.0003,  # ~30 meters
-        "lateral_offset_consistency": 0.0002,
+        "lateral_offset_m": 30.0,  # 30 meters
+        "lateral_offset_consistency": 20.0,
         # Mixed topology
         "from_degree_ref": 3,
         "to_degree_ref": 4,

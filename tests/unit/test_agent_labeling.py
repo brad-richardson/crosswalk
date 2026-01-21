@@ -27,7 +27,7 @@ class TestSamplingConfig:
         config = SamplingConfig()
         assert config.n_candidates == 100
         assert config.seed == 42
-        assert config.buffer_distance == 50.0
+        assert config.buffer_distance_m == 50.0
         assert "low" in config.confidence_buckets
         assert "medium" in config.confidence_buckets
         assert "high" in config.confidence_buckets
@@ -108,7 +108,7 @@ class TestContextGenerator:
             ml_confidence=0.85,
             ml_decision="match",
             features={
-                "hausdorff_distance": 5.5,
+                "hausdorff_distance_m": 5.5,
                 "buffer_iou": 0.92,
                 "name_levenshtein": 0.8,
             },

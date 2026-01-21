@@ -87,7 +87,7 @@ def bridge_over_road() -> gpd.GeoDataFrame:
 def undershoot_lines() -> gpd.GeoDataFrame:
     """Lines with an undershoot that should be snapped.
 
-    The side street ends 1.5m from the main road. With snap_tolerance=2.0,
+    The side street ends 1.5m from the main road. With snap_tolerance_m=2.0,
     it should be snapped to create a connected network.
     """
     return gpd.GeoDataFrame(

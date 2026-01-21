@@ -57,7 +57,7 @@ class TestCandidateGeneration:
         candidates = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=30.0,
+            buffer_distance_m=30.0,
         )
 
         for cand in candidates:
@@ -78,7 +78,7 @@ class TestCandidateGeneration:
         candidates = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=30.0,
+            buffer_distance_m=30.0,
         )
 
         # Should find at least some candidates
@@ -98,13 +98,13 @@ class TestCandidateGeneration:
         candidates_narrow = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=3.0,
+            buffer_distance_m=3.0,
         )
 
         candidates_wide = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=50.0,
+            buffer_distance_m=50.0,
         )
 
         # Wider buffer should produce more candidates
@@ -119,7 +119,7 @@ class TestScoringPreservesIds:
         candidates = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=30.0,
+            buffer_distance_m=30.0,
         )
 
         results = score_candidates(
@@ -167,8 +167,8 @@ class TestScoringPreservesIds:
         assert result.target_id == "t_1"
 
         # Check that features were computed (indicates geometries were accessed)
-        assert "hausdorff_distance" in result.features
-        assert result.features["hausdorff_distance"] >= 0
+        assert "hausdorff_distance_m" in result.features
+        assert result.features["hausdorff_distance_m"] >= 0
 
 
 class TestScoringDecisions:
@@ -243,7 +243,7 @@ class TestFeatureComputation:
         candidates = generate_candidates(
             reference_gdf,
             target_gdf,
-            buffer_distance=30.0,
+            buffer_distance_m=30.0,
         )
 
         if not candidates:
@@ -261,7 +261,7 @@ class TestFeatureComputation:
 
         # Check for geometric features
         expected_geometric = [
-            "hausdorff_distance",
+            "hausdorff_distance_m",
             "buffer_iou",
             "heading_delta",
             "length_ratio",
@@ -299,7 +299,7 @@ class TestFeatureComputation:
         features = results[0].features
 
         # Hausdorff distance should be positive
-        assert features["hausdorff_distance"] >= 0
+        assert features["hausdorff_distance_m"] >= 0
 
         # IoU should be between 0 and 1
         assert 0 <= features["buffer_iou"] <= 1
@@ -410,7 +410,9 @@ class TestAlignmentIntegration:
 
         # Aligned features should have better hausdorff (comparing matching portions)
         # The unaligned version compares full 100m vs 50m, adding 50m mismatch
-        assert features_aligned["hausdorff_distance"] <= features_unaligned["hausdorff_distance"]
+        assert (
+            features_aligned["hausdorff_distance_m"] <= features_unaligned["hausdorff_distance_m"]
+        )
 
         # Coverage features should only be present with alignment
         assert features_aligned["ref_coverage"] > 0

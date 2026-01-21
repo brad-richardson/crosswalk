@@ -30,7 +30,7 @@ def combine_networks(
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
     overlap_iou_threshold: float = None,
-    overlap_buffer_distance: float = None,
+    overlap_buffer_m: float = None,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Combine reference and target networks with provenance tracking.
 
@@ -44,7 +44,7 @@ def combine_networks(
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
         overlap_iou_threshold: IoU threshold for detecting overlaps
-        overlap_buffer_distance: Buffer distance for overlap detection (meters)
+        overlap_buffer_m: Buffer distance for overlap detection (meters)
 
     Returns:
         Tuple of:
@@ -52,11 +52,11 @@ def combine_networks(
         - dropped_overlaps_gdf: Segments dropped due to priority conflicts
     """
     overlap_iou_threshold = overlap_iou_threshold or settings.overlap_iou_threshold
-    overlap_buffer_distance = overlap_buffer_distance or settings.overlap_buffer_distance
+    overlap_buffer_m = overlap_buffer_m or settings.overlap_buffer_m
 
     logger.info(f"Combining reference with {len(target_inputs)} target datasets")
     logger.info(f"  overlap_iou_threshold: {overlap_iou_threshold}")
-    logger.info(f"  overlap_buffer_distance: {overlap_buffer_distance}m")
+    logger.info(f"  overlap_buffer_m: {overlap_buffer_m}m")
 
     # Store original CRS for final output
     original_crs = reference.crs
@@ -120,7 +120,7 @@ def combine_networks(
             included_geoms,
             included_tree,
             overlap_iou_threshold,
-            overlap_buffer_distance,
+            overlap_buffer_m,
         )
         all_segments.extend(matched_added)
         dropped_segments.extend(matched_dropped)
@@ -141,7 +141,7 @@ def combine_networks(
             included_geoms,
             included_tree,
             overlap_iou_threshold,
-            overlap_buffer_distance,
+            overlap_buffer_m,
         )
         all_segments.extend(unmatched_added)
         dropped_segments.extend(unmatched_dropped)
@@ -212,7 +212,7 @@ def _add_target_segments(
     existing_geoms: list,
     existing_tree: STRtree | None,
     overlap_iou_threshold: float,
-    overlap_buffer_distance: float,
+    overlap_buffer_m: float,
 ) -> tuple[list[dict], list[DroppedSegment]]:
     """Add target segments, detecting and handling overlaps."""
     added = []
@@ -231,7 +231,7 @@ def _add_target_segments(
                 geom,
                 existing_geoms,
                 existing_tree,
-                overlap_buffer_distance,
+                overlap_buffer_m,
                 overlap_iou_threshold,
             )
 
@@ -278,7 +278,7 @@ def _find_overlapping_segment(
     geom: LineString,
     existing_geoms: list,
     tree: STRtree,
-    buffer_distance: float,
+    buffer_m: float,
     iou_threshold: float,
 ) -> tuple[int | None, float | None]:
     """Find an overlapping segment in existing geometries.
@@ -287,7 +287,7 @@ def _find_overlapping_segment(
         Tuple of (overlapping_index, overlap_iou) or (None, None) if no overlap
     """
     # Query spatial index for nearby segments
-    buffered = geom.buffer(buffer_distance)
+    buffered = geom.buffer(buffer_m)
     candidate_indices = tree.query(buffered)
 
     best_iou = 0.0
@@ -297,7 +297,7 @@ def _find_overlapping_segment(
         existing_geom = existing_geoms[idx]
 
         # Compute buffer IoU
-        iou = _compute_buffer_iou(geom, existing_geom, buffer_distance)
+        iou = _compute_buffer_iou(geom, existing_geom, buffer_m)
 
         if iou > best_iou:
             best_iou = iou

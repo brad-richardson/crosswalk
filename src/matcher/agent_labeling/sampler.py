@@ -28,7 +28,7 @@ class SamplingConfig:
         confidence_buckets: Mapping of bucket names to (min, max) confidence ranges
         bucket_proportions: Mapping of bucket names to sampling proportions
         seed: Random seed for reproducibility
-        buffer_distance: Search radius for candidate generation (meters)
+        buffer_distance_m: Search radius for candidate generation (meters)
     """
 
     n_candidates: int = 100
@@ -47,7 +47,7 @@ class SamplingConfig:
         }
     )
     seed: int = 42
-    buffer_distance: float = 50.0
+    buffer_distance_m: float = 50.0
 
 
 @dataclass
@@ -162,7 +162,7 @@ def sample_candidates(
     candidates = generate_candidates(
         reference=reference_proj,
         target=target_proj,
-        buffer_distance=config.buffer_distance,
+        buffer_distance_m=config.buffer_distance_m,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )

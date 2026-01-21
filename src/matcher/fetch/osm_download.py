@@ -378,19 +378,19 @@ def _extract_bbox_pyosmium(
 
     if handler.roads:
         roads_gdf = gpd.GeoDataFrame(handler.roads, crs="EPSG:4326")
-        roads_gdf.to_parquet(roads_path)
+        roads_gdf.to_parquet(roads_path, write_covering_bbox=True)
     else:
         roads_gdf = gpd.GeoDataFrame(
             columns=["id", "geometry", "tags", "name", "node_ids"], crs="EPSG:4326"
         )
-        roads_gdf.to_parquet(roads_path)
+        roads_gdf.to_parquet(roads_path, write_covering_bbox=True)
 
     if connectors:
         connectors_gdf = gpd.GeoDataFrame(connectors, crs="EPSG:4326")
-        connectors_gdf.to_parquet(connectors_path)
+        connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
     else:
         connectors_gdf = gpd.GeoDataFrame(columns=["id", "geometry"], crs="EPSG:4326")
-        connectors_gdf.to_parquet(connectors_path)
+        connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
 
     # Return a marker path - the caller will check for parquet files
     marker = output_dir / ".pyosmium_extracted"

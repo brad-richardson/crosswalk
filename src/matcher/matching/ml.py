@@ -821,9 +821,19 @@ class MLMatcher:
                 "computed automatically from target data."
             )
 
+        # Project to meter-based CRS for accurate distance computations
+        # All distance features will be in meters after this projection
+        working_ref = reference
+        working_target = target
+        if reference.crs is not None and reference.crs.is_geographic:
+            utm_crs = reference.estimate_utm_crs()
+            logger.debug(f"Projecting to {utm_crs} for meter-based feature computation")
+            working_ref = reference.to_crs(utm_crs)
+            working_target = target.to_crs(utm_crs)
+
         # Pre-extract data into NumPy arrays for memory efficiency
-        ref_geoms = reference.geometry.to_numpy()
-        target_geoms = target.geometry.to_numpy()
+        ref_geoms = working_ref.geometry.to_numpy()
+        target_geoms = working_target.geometry.to_numpy()
         ref_names = (
             reference[ref_name_column].to_numpy()
             if ref_name_column in reference.columns
@@ -869,10 +879,23 @@ class MLMatcher:
         unique_target_indices = set(cand.target_idx for cand in candidates)
         unique_ref_indices = set(cand.ref_idx for cand in candidates)
 
-        # Build spatial index for endpoint proximity features (target only)
+        # Filter target to only segments that appear in candidates
+        # This dramatically speeds up spatial index building (e.g., 11k -> ~1k segments)
+        sorted_target_indices = sorted(unique_target_indices)
+        target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
+        logger.info(
+            f"Filtered target to {len(target_candidates_only)} candidate segments "
+            f"(from {len(target)} total)"
+        )
+
+        # Create mapping from original index to filtered index
+        # SpatialContextIndex uses 0-indexed positions within the GDF passed to build_from_gdf()
+        original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
+
+        # Build spatial index for endpoint proximity features (filtered target only)
         logger.info("Building spatial index for endpoint features...")
         target_index = SpatialContextIndex()
-        target_index.build_from_gdf(target, id_column="id")
+        target_index.build_from_gdf(target_candidates_only, id_column="id")
 
         # Pre-compute endpoint features for target segments
         target_endpoint_features = {}
@@ -882,8 +905,10 @@ class MLMatcher:
         for target_idx in unique_target_indices:
             target_geom = target_geoms[target_idx]
             if target_geom is not None and not target_geom.is_empty:
+                # Map original index to filtered index for spatial context lookup
+                filtered_idx = original_to_filtered[target_idx]
                 ep_feats = compute_endpoint_features(
-                    target_geom, target_index, exclude_segment_idx=target_idx
+                    target_geom, target_index, exclude_segment_idx=filtered_idx
                 )
                 target_endpoint_features[target_idx] = ep_feats
             else:

@@ -91,9 +91,9 @@ def fetch_arcgis_layer(
         source_name=source_name,
     )
 
-    # Save to parquet
+    # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_parquet(output_path)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
 
     logger.info(f"Saved {len(gdf)} features to {output_path}")
     return output_path

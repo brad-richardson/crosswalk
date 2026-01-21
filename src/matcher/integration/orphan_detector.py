@@ -46,7 +46,7 @@ def _get_endpoints(geom) -> list[Point]:
 
 def compute_reference_coverage(
     reference_edges: gpd.GeoDataFrame,
-    buffer_distance: float = 50.0,
+    buffer_distance_m: float = 50.0,
     hull_ratio: float = 0.3,
 ) -> Any:
     """Compute a coverage polygon from the reference network.
@@ -58,7 +58,7 @@ def compute_reference_coverage(
 
     Args:
         reference_edges: GeoDataFrame of reference network edges
-        buffer_distance: Buffer distance (meters) to expand the hull
+        buffer_distance_m: Buffer distance (meters) to expand the hull
         hull_ratio: Concave hull ratio (0=convex, 1=very tight). Default 0.3.
 
     Returns:
@@ -94,7 +94,7 @@ def compute_reference_coverage(
         return None
 
     # Buffer the hull to account for gaps at the edges
-    coverage = hull.buffer(buffer_distance)
+    coverage = hull.buffer(buffer_distance_m)
 
     return coverage
 
@@ -102,17 +102,17 @@ def compute_reference_coverage(
 def filter_fringe_segments(
     target_edges: gpd.GeoDataFrame,
     coverage_polygon: Any,
-    min_inside_length: float = 10.0,
+    min_inside_length_m: float = 10.0,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Filter target segments that are outside the reference coverage area.
 
-    Segments with less than min_inside_length within the coverage polygon
+    Segments with less than min_inside_length_m within the coverage polygon
     are considered "fringe" segments at the boundary of reference coverage.
 
     Args:
         target_edges: GeoDataFrame of target edges to filter
         coverage_polygon: Shapely Polygon representing reference coverage
-        min_inside_length: Minimum length (meters) inside coverage to be valid
+        min_inside_length_m: Minimum length (meters) inside coverage to be valid
 
     Returns:
         Tuple of:
@@ -142,7 +142,7 @@ def filter_fringe_segments(
     target_edges["_inside_coverage_length"] = inside_lengths
 
     # Split into valid and fringe
-    valid_mask = target_edges["_inside_coverage_length"] >= min_inside_length
+    valid_mask = target_edges["_inside_coverage_length"] >= min_inside_length_m
     valid_targets = target_edges[valid_mask].copy()
     fringe_targets = target_edges[~valid_mask].copy()
 
@@ -156,7 +156,7 @@ def filter_fringe_segments(
 def propagate_transitive_connectivity(
     connected_targets: gpd.GeoDataFrame,
     orphan_targets: gpd.GeoDataFrame,
-    connection_tolerance: float,
+    connection_tolerance_m: float,
     max_hops: int = 2,
     debug: bool = False,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
@@ -169,7 +169,7 @@ def propagate_transitive_connectivity(
     Args:
         connected_targets: GeoDataFrame of targets directly connected to reference (hop 0)
         orphan_targets: GeoDataFrame of targets not connected to reference
-        connection_tolerance: Distance in meters to consider segments connected
+        connection_tolerance_m: Distance in meters to consider segments connected
         max_hops: Maximum number of hops from reference (default 2)
 
     Returns:
@@ -223,7 +223,7 @@ def propagate_transitive_connectivity(
                 nearest_idx = connected_tree.nearest(pt)
                 dist = pt.distance(connected_geoms[nearest_idx])
                 min_dist = min(min_dist, dist)
-                if dist <= connection_tolerance:
+                if dist <= connection_tolerance_m:
                     newly_connected_indices.append(idx)
                     break
 
@@ -238,7 +238,7 @@ def propagate_transitive_connectivity(
             # No new connections at this hop level
             if debug:
                 logger.debug(
-                    f"    Hop {hop}: no connections within tolerance {connection_tolerance}m"
+                    f"    Hop {hop}: no connections within tolerance {connection_tolerance_m}m"
                 )
             break
 
@@ -264,20 +264,20 @@ def propagate_transitive_connectivity(
 
 def detect_orphans_by_proximity(
     combined_gdf: gpd.GeoDataFrame,
-    connection_tolerance: float = 3.0,  # Tight tolerance - must actually connect to infrastructure
-    min_merge_length: float = 20.0,  # Minimum length to merge (adds meaningful new coverage)
-    net_new_buffer: float = 5.0,  # Buffer around reference for net-new calculation
+    connection_tolerance_m: float = 3.0,  # Tight tolerance - must actually connect to infrastructure
+    min_merge_length_m: float = 20.0,  # Minimum length to merge (adds meaningful new coverage)
+    net_new_buffer_m: float = 5.0,  # Buffer around reference for net-new calculation
     max_hops: int = 2,  # Maximum transitive connectivity hops
-    fringe_buffer: float = 50.0,  # Buffer around reference coverage for fringe detection
+    fringe_buffer_m: float = 50.0,  # Buffer around reference coverage for fringe detection
     enable_fringe_detection: bool = True,  # Whether to filter fringe segments
-    transitive_tolerance: float
-    | None = None,  # Tolerance for transitive connections (default: 2x connection_tolerance)
+    transitive_tolerance_m: float
+    | None = None,  # Tolerance for transitive connections (default: 2x connection_tolerance_m)
     debug_connectivity: bool = False,  # Enable debug logging for transitive connectivity
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame | None, dict[str, Any]]:
     """Identify orphan segments based on endpoint proximity to reference network.
 
     A segment is considered connected if at least one of its endpoints is within
-    connection_tolerance of any reference segment. Target segments not connected
+    connection_tolerance_m of any reference segment. Target segments not connected
     to the reference network are flagged as orphans.
 
     Fringe detection: Segments at the boundary of reference coverage (outside the
@@ -288,7 +288,7 @@ def detect_orphans_by_proximity(
     to trail A (but not the road), trail B is also considered connected via
     transitive connectivity (up to max_hops).
 
-    Additionally, connected segments shorter than min_merge_length are treated
+    Additionally, connected segments shorter than min_merge_length_m are treated
     as orphans since they don't add meaningful new coverage.
 
     This is a simpler approach that doesn't require planarization - it just checks
@@ -296,14 +296,14 @@ def detect_orphans_by_proximity(
 
     Args:
         combined_gdf: Combined GeoDataFrame with _source column
-        connection_tolerance: Distance in meters to consider "connected"
-        min_merge_length: Minimum segment length (meters) to merge into network.
+        connection_tolerance_m: Distance in meters to consider "connected"
+        min_merge_length_m: Minimum segment length (meters) to merge into network.
             Connected segments shorter than this are treated as orphans.
-        net_new_buffer: Buffer distance (meters) around reference for net-new calculation.
+        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation.
             Segments within this buffer are considered "covered" by reference.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             0 = only direct connections, 1 = direct + 1 hop, 2 = direct + 2 hops.
-        fringe_buffer: Buffer distance (meters) around reference coverage for fringe
+        fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
             detection. Segments outside this area are considered fringe. Default 50m.
         enable_fringe_detection: Whether to filter fringe segments. Default True.
 
@@ -316,18 +316,18 @@ def detect_orphans_by_proximity(
     """
     # Set default transitive tolerance to 2x connection tolerance
     # This accounts for trails that don't share exact endpoints
-    if transitive_tolerance is None:
-        transitive_tolerance = connection_tolerance * 2
+    if transitive_tolerance_m is None:
+        transitive_tolerance_m = connection_tolerance_m * 2
 
     logger.info("Detecting orphans by endpoint proximity...")
-    logger.info(f"  Connection tolerance: {connection_tolerance}m")
-    logger.info(f"  Transitive tolerance: {transitive_tolerance}m")
-    logger.info(f"  Min merge length: {min_merge_length}m")
-    logger.info(f"  Net-new buffer: {net_new_buffer}m")
+    logger.info(f"  Connection tolerance: {connection_tolerance_m}m")
+    logger.info(f"  Transitive tolerance: {transitive_tolerance_m}m")
+    logger.info(f"  Min merge length: {min_merge_length_m}m")
+    logger.info(f"  Net-new buffer: {net_new_buffer_m}m")
     logger.info(f"  Max transitive hops: {max_hops}")
     logger.info(f"  Fringe detection: {'enabled' if enable_fringe_detection else 'disabled'}")
     if enable_fringe_detection:
-        logger.info(f"  Fringe buffer: {fringe_buffer}m")
+        logger.info(f"  Fringe buffer: {fringe_buffer_m}m")
 
     # Work in a projected CRS for accurate distance calculations
     original_crs = combined_gdf.crs
@@ -351,11 +351,11 @@ def detect_orphans_by_proximity(
     if enable_fringe_detection and len(target_edges) > 0 and len(reference_edges) > 0:
         logger.info("  Computing reference coverage polygon...")
         coverage_polygon = compute_reference_coverage(
-            reference_edges, buffer_distance=fringe_buffer
+            reference_edges, buffer_distance_m=fringe_buffer_m
         )
         if coverage_polygon is not None:
             target_edges, fringe_targets = filter_fringe_segments(
-                target_edges, coverage_polygon, min_inside_length=10.0
+                target_edges, coverage_polygon, min_inside_length_m=10.0
             )
             fringe_count = len(fringe_targets)
             if fringe_count > 0:
@@ -418,7 +418,7 @@ def detect_orphans_by_proximity(
         min_distances.append(min_dist)
 
         # Connected if either endpoint is within tolerance
-        is_connected = min_dist <= connection_tolerance
+        is_connected = min_dist <= connection_tolerance_m
         connected_mask.append(is_connected)
 
     target_edges["is_connected"] = connected_mask
@@ -440,7 +440,7 @@ def detect_orphans_by_proximity(
         connected_targets, orphan_targets = propagate_transitive_connectivity(
             connected_targets=connected_targets,
             orphan_targets=orphan_targets,
-            connection_tolerance=transitive_tolerance,  # Use larger tolerance for transitive connections
+            connection_tolerance_m=transitive_tolerance_m,  # Use larger tolerance for transitive connections
             max_hops=max_hops,
             debug=debug_connectivity,
         )
@@ -451,13 +451,13 @@ def detect_orphans_by_proximity(
     # Filter connected targets by minimum NET NEW length
     # Only merge if segment adds meaningful new coverage beyond existing reference
     net_new_edges = None
-    if min_merge_length > 0 and len(connected_targets) > 0:
+    if min_merge_length_m > 0 and len(connected_targets) > 0:
         # Create a buffer around reference network to define "existing coverage"
         # Segments within this buffer are considered duplicating reference
-        logger.info(f"  Computing net-new lengths (coverage buffer: {net_new_buffer}m)...")
+        logger.info(f"  Computing net-new lengths (coverage buffer: {net_new_buffer_m}m)...")
 
         ref_union = unary_union(reference_edges.geometry.values)
-        ref_buffered = ref_union.buffer(net_new_buffer)
+        ref_buffered = ref_union.buffer(net_new_buffer_m)
 
         # Compute net-new length and geometry for each connected target
         net_new_lengths = []
@@ -482,7 +482,7 @@ def detect_orphans_by_proximity(
         connected_targets["_total_length_m"] = connected_targets.geometry.length
         connected_targets["_net_new_geometry"] = net_new_geoms
 
-        long_enough = connected_targets["_net_new_length_m"] >= min_merge_length
+        long_enough = connected_targets["_net_new_length_m"] >= min_merge_length_m
         too_short = connected_targets[~long_enough].copy()
 
         if len(too_short) > 0:
@@ -493,7 +493,7 @@ def detect_orphans_by_proximity(
             )
             avg_net_new = too_short["_net_new_length_m"].mean()
             logger.info(
-                f"  Insufficient net-new length (<{min_merge_length}m): {len(too_short)} "
+                f"  Insufficient net-new length (<{min_merge_length_m}m): {len(too_short)} "
                 f"(avg net-new: {avg_net_new:.1f}m)"
             )
 

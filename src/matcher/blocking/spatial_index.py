@@ -2,10 +2,14 @@
 
 Uses STRtree for efficient spatial queries to find potential matches
 without O(N*M) comparisons.
+
+Also provides DuckDB-based candidate generation for improved performance
+by filtering datasets before loading into memory.
 """
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -113,7 +117,7 @@ class CandidatePair:
 def generate_candidates(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    buffer_distance: float = None,
+    buffer_distance_m: float = None,
     max_heading_diff: float = None,  # Kept for API compatibility, not used for filtering
     max_length_ratio: float = None,  # Kept for API compatibility, not used for filtering
     ref_id_column: str = "id",
@@ -128,7 +132,7 @@ def generate_candidates(
     Args:
         reference: Reference edges (Overture) GeoDataFrame
         target: Target edges (local data) GeoDataFrame
-        buffer_distance: Search radius in meters
+        buffer_distance_m: Search radius in meters
         max_heading_diff: Deprecated - not used for filtering (ML model handles scoring)
         max_length_ratio: Deprecated - not used for filtering (ML model handles scoring)
         ref_id_column: Column name for reference IDs
@@ -137,11 +141,11 @@ def generate_candidates(
     Returns:
         List of CandidatePair objects
     """
-    buffer_distance = buffer_distance or settings.buffer_distance
+    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
     # Note: heading/length params kept for API compatibility but not used
 
     logger.info(f"Generating candidates: {len(reference)} reference x {len(target)} target")
-    logger.info(f"  buffer_distance: {buffer_distance}m")
+    logger.info(f"  buffer_distance_m: {buffer_distance_m}m")
     logger.info("  Note: heading/length filters disabled - ML model handles scoring")
 
     # Check if data is in geographic CRS and needs projection for accurate buffering
@@ -166,7 +170,7 @@ def generate_candidates(
     target_prep["_target_geom"] = target_prep.geometry
 
     # Buffer target geometries for spatial join (now in meters for projected CRS)
-    target_prep = target_prep.set_geometry(target_prep.geometry.buffer(buffer_distance))
+    target_prep = target_prep.set_geometry(target_prep.geometry.buffer(buffer_distance_m))
 
     # Prepare reference with pre-computed attributes
     reference_prep = reference_proj.copy()
@@ -242,7 +246,7 @@ def generate_candidates(
 def generate_candidates_iter(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    buffer_distance: float = None,
+    buffer_distance_m: float = None,
     max_heading_diff: float = None,  # Kept for API compatibility, not used
     max_length_ratio: float = None,  # Kept for API compatibility, not used
     ref_id_column: str = "id",
@@ -253,7 +257,7 @@ def generate_candidates_iter(
     Yields candidate pairs one at a time instead of building full list.
     Like generate_candidates, only uses spatial proximity for filtering.
     """
-    buffer_distance = buffer_distance or settings.buffer_distance
+    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
 
     # Build spatial index on reference
     ref_tree = STRtree(reference.geometry.values)
@@ -273,7 +277,7 @@ def generate_candidates_iter(
             target_id = target_idx
 
         # Buffer query - only spatial filtering
-        buffered = target_geom.buffer(buffer_distance)
+        buffered = target_geom.buffer(buffer_distance_m)
         candidate_indices = ref_tree.query(buffered)
 
         for ref_idx in candidate_indices:
@@ -375,13 +379,13 @@ def filter_candidates_by_name(
 def estimate_candidate_count(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    buffer_distance: float = None,
+    buffer_distance_m: float = None,
 ) -> int:
     """Estimate the number of candidates without generating them.
 
     Useful for progress bars and memory planning.
     """
-    buffer_distance = buffer_distance or settings.buffer_distance
+    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
 
     # Sample-based estimation
     sample_size = min(100, len(target))
@@ -392,10 +396,91 @@ def estimate_candidate_count(
 
     for idx in sample_indices:
         geom = target.iloc[idx].geometry
-        buffered = geom.buffer(buffer_distance)
+        buffered = geom.buffer(buffer_distance_m)
         candidates = ref_tree.query(buffered)
         total_candidates += len(candidates)
 
     # Extrapolate to full dataset
     estimated = int(total_candidates / sample_size * len(target))
     return estimated
+
+
+def generate_candidates_duckdb(
+    reference_path: Path,
+    target_path: Path,
+    buffer_distance_m: float = None,
+    ref_id_column: str = "id",
+    target_id_column: str = "id",
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, list[CandidatePair]]:
+    """Generate candidates using DuckDB spatial join for improved performance.
+
+    This function performs a two-phase candidate generation:
+    1. Use DuckDB to find candidate pairs via spatial join (IDs only)
+    2. Load only segments that appear in candidates into memory
+    3. Generate CandidatePair objects with heading/distance using existing logic
+
+    This approach significantly reduces memory usage and loading time by only
+    loading segments that have potential matches.
+
+    Args:
+        reference_path: Path to reference GeoParquet file
+        target_path: Path to target GeoParquet file
+        buffer_distance_m: Search radius in meters
+        ref_id_column: Column name for reference IDs
+        target_id_column: Column name for target IDs
+
+    Returns:
+        Tuple of:
+        - reference GeoDataFrame (filtered to only candidates)
+        - target GeoDataFrame (filtered to only candidates)
+        - list of CandidatePair objects
+    """
+    from ..data.duckdb_loader import load_filtered_by_ids, spatial_join_parquet
+
+    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
+
+    logger.info(f"Generating candidates with DuckDB: {reference_path} x {target_path}")
+    logger.info(f"  buffer_distance_m: {buffer_distance_m}m")
+
+    # Step 1: Use DuckDB spatial join to find candidate pairs
+    pairs_df, ref_ids, target_ids = spatial_join_parquet(
+        reference_path=reference_path,
+        target_path=target_path,
+        buffer_distance_m=buffer_distance_m,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+    )
+
+    if len(pairs_df) == 0:
+        logger.warning("DuckDB spatial join found no candidates")
+        return (
+            gpd.GeoDataFrame(crs="EPSG:4326"),
+            gpd.GeoDataFrame(crs="EPSG:4326"),
+            [],
+        )
+
+    logger.info(f"  Found {len(ref_ids)} reference segments with candidates")
+    logger.info(f"  Found {len(target_ids)} target segments with candidates")
+
+    # Step 2: Load only segments that appear in candidates
+    reference = load_filtered_by_ids(reference_path, ref_id_column, ref_ids)
+    target = load_filtered_by_ids(target_path, target_id_column, target_ids)
+
+    logger.info(f"  Loaded {len(reference)} reference segments")
+    logger.info(f"  Loaded {len(target)} target segments")
+
+    if len(reference) == 0 or len(target) == 0:
+        logger.warning("No segments loaded after filtering - check ID columns")
+        return reference, target, []
+
+    # Step 3: Generate CandidatePair objects using existing logic
+    # This computes heading diff, length ratio, and distance for ML features
+    candidates = generate_candidates(
+        reference=reference,
+        target=target,
+        buffer_distance_m=buffer_distance_m,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+    )
+
+    return reference, target, candidates
