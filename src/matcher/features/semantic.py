@@ -508,8 +508,6 @@ def extract_numeric_suffix(name: str | None) -> int | None:
     if not name:
         return None
 
-    import re
-
     # Find all numbers in the name
     numbers = re.findall(r"\d+", name)
 

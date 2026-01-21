@@ -80,17 +80,18 @@ ALIGNMENT_FEATURE_COLUMNS = [
 ]
 
 # Geometric features recomputed on aligned sublines
+# Distance features use _m suffix to indicate meters (matching config.py)
 SIMILARITY_FEATURE_COLUMNS = [
-    "hausdorff_distance",
-    "mean_hausdorff_distance",
-    "hausdorff_p95",
+    "hausdorff_distance_m",
+    "mean_hausdorff_distance_m",
+    "hausdorff_p95_m",
     "buffer_iou_5m",
     "buffer_iou_15m",
     "overlap_ratio",
     "heading_delta",
     "length_ratio",
-    "projection_distance",
-    "centroid_distance",
+    "projection_distance_m",
+    "centroid_distance_m",
     "collinear_gap_ratio",
 ]
 
@@ -120,17 +121,19 @@ SEMANTIC_FEATURE_COLUMNS = [
 ]
 
 # Endpoint proximity feature columns (direction-invariant)
+# Distance features use _m suffix to indicate meters (matching config.py)
 ENDPOINT_FEATURE_COLUMNS = [
-    "min_endpoint_proximity",
-    "max_endpoint_proximity",
+    "min_endpoint_proximity_m",
+    "max_endpoint_proximity_m",
     "shared_endpoint_count",
 ]
 
 # Lateral offset feature columns (IQR and P95 instead of consistency)
+# Distance features use _m suffix to indicate meters (matching config.py)
 LATERAL_FEATURE_COLUMNS = [
-    "lateral_offset",
-    "lateral_offset_iqr",
-    "lateral_offset_p95",
+    "lateral_offset_m",
+    "lateral_offset_iqr_m",
+    "lateral_offset_p95_m",
 ]
 
 # Graphlet feature columns
@@ -236,7 +239,7 @@ def compute_aligned_features(
             geom_for_similarity_ref, geom_for_similarity_target
         )
 
-        # Build feature dict
+        # Build feature dict (using _m suffix for distance features to match config.py)
         features = {
             # Coverage features
             "ref_coverage": coverage_feats["ref_coverage"],
@@ -244,16 +247,16 @@ def compute_aligned_features(
             "min_coverage": coverage_feats["min_coverage"],
             "coverage_ratio": coverage_feats["coverage_ratio"],
             # Similarity features (recomputed on aligned sublines)
-            "hausdorff_distance": geom_features.hausdorff_distance,
-            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-            "hausdorff_p95": geom_features.hausdorff_p95_distance,
+            "hausdorff_distance_m": geom_features.hausdorff_distance,
+            "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
+            "hausdorff_p95_m": geom_features.hausdorff_p95_distance,
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
-            "projection_distance": geom_features.projection_distance,
-            "centroid_distance": geom_features.centroid_distance,
+            "projection_distance_m": geom_features.projection_distance,
+            "centroid_distance_m": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
         }
 
@@ -563,16 +566,16 @@ def backfill_dataset(
                 else:
                     endpoint_features.append(
                         {
-                            "min_endpoint_proximity": 10000.0,
-                            "max_endpoint_proximity": 10000.0,
+                            "min_endpoint_proximity_m": 10000.0,
+                            "max_endpoint_proximity_m": 10000.0,
                             "shared_endpoint_count": 0,
                         }
                     )
             else:
                 endpoint_features.append(
                     {
-                        "min_endpoint_proximity": 10000.0,
-                        "max_endpoint_proximity": 10000.0,
+                        "min_endpoint_proximity_m": 10000.0,
+                        "max_endpoint_proximity_m": 10000.0,
                         "shared_endpoint_count": 0,
                     }
                 )
@@ -599,25 +602,25 @@ def backfill_dataset(
                     )
                     lateral_features.append(
                         {
-                            "lateral_offset": min(lateral_offset, 10000.0),
-                            "lateral_offset_iqr": min(lateral_iqr, 10000.0),
-                            "lateral_offset_p95": min(lateral_p95, 10000.0),
+                            "lateral_offset_m": min(lateral_offset, 10000.0),
+                            "lateral_offset_iqr_m": min(lateral_iqr, 10000.0),
+                            "lateral_offset_p95_m": min(lateral_p95, 10000.0),
                         }
                     )
                 except Exception:
                     lateral_features.append(
                         {
-                            "lateral_offset": 10000.0,
-                            "lateral_offset_iqr": 10000.0,
-                            "lateral_offset_p95": 10000.0,
+                            "lateral_offset_m": 10000.0,
+                            "lateral_offset_iqr_m": 10000.0,
+                            "lateral_offset_p95_m": 10000.0,
                         }
                     )
             else:
                 lateral_features.append(
                     {
-                        "lateral_offset": 10000.0,
-                        "lateral_offset_iqr": 10000.0,
-                        "lateral_offset_p95": 10000.0,
+                        "lateral_offset_m": 10000.0,
+                        "lateral_offset_iqr_m": 10000.0,
+                        "lateral_offset_p95_m": 10000.0,
                     }
                 )
 
