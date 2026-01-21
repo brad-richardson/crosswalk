@@ -187,10 +187,12 @@ class TestExcludeSemanticFlag:
         coverage_count = sum(1 for f in geom_only_features if "coverage" in f)
         assert coverage_count == 4, "Should have 4 coverage features"
 
-        # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
-        # are computed in backfill only, not in real-time scoring pipeline
+        # Graphlet features are now included in real-time scoring pipeline
+        graphlet_features = ["graphlet_similarity", "endpoint_degree_similarity"]
+        graphlet_count = sum(1 for f in geom_only_features if f in graphlet_features)
+        assert graphlet_count == 2, "Should have 2 graphlet features"
 
-        # Total geometry-only features: 11 + 3 + 3 + 12 + 4 = 33
-        assert len(geom_only_features) == 33, (
-            f"Expected 33 geometry-only features, got {len(geom_only_features)}"
+        # Total geometry-only features: 11 + 3 + 3 + 12 + 4 + 2 = 35
+        assert len(geom_only_features) == 35, (
+            f"Expected 35 geometry-only features, got {len(geom_only_features)}"
         )

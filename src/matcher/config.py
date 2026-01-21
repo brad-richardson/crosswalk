@@ -72,9 +72,9 @@ FEATURE_COLUMNS = [
     "target_coverage",
     "min_coverage",
     "coverage_ratio",
-    # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
-    # are computed in backfill but not yet in real-time scoring pipeline.
-    # Add here once scoring pipeline supports them.
+    # Graphlet features (2) - network topology similarity
+    "graphlet_similarity",
+    "endpoint_degree_similarity",
 ]
 
 # Semantic features - excluded when training geometry-only models

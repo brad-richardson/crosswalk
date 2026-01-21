@@ -757,3 +757,203 @@ class TestEndpointClusteringPerformance:
 
         assert elapsed < 2.0, f"build_from_gdf with geographic CRS took {elapsed:.2f}s"
         assert len(ctx.endpoint_coords) == 2 * n_segments
+
+
+class TestConnectorGraphAndAlignment:
+    """Tests for connector-based graph building and alignment-aware graphlet similarity."""
+
+    @pytest.fixture
+    def sample_segment_with_connectors(self):
+        """Create a sample GeoDataFrame with Overture-style connectors."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg_1", "seg_2", "seg_3"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),  # Horizontal segment
+                    LineString([(100, 0), (200, 0)]),  # Connected horizontally
+                    LineString([(100, 0), (100, 100)]),  # T-junction at (100, 0)
+                ],
+                "connectors": [
+                    # seg_1: connectors at start, middle, and end
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 0.5, "connector_id": "conn_b"},
+                        {"at": 1.0, "connector_id": "conn_c"},
+                    ],
+                    # seg_2: connectors at start and end, sharing conn_c with seg_1
+                    [
+                        {"at": 0.0, "connector_id": "conn_c"},
+                        {"at": 1.0, "connector_id": "conn_d"},
+                    ],
+                    # seg_3: T-junction, shares conn_c at start
+                    [
+                        {"at": 0.0, "connector_id": "conn_c"},
+                        {"at": 1.0, "connector_id": "conn_e"},
+                    ],
+                ],
+            },
+            crs="EPSG:32618",
+        )
+        return gdf
+
+    def test_build_connector_graph_creates_correct_nodes(self, sample_segment_with_connectors):
+        """build_connector_graph should create a node for each unique connector."""
+        from matcher.features.spatial_context import build_connector_graph
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        # Should have 5 unique connectors (conn_a, conn_b, conn_c, conn_d, conn_e)
+        assert G.number_of_nodes() == 5
+
+    def test_build_connector_graph_creates_correct_edges(self, sample_segment_with_connectors):
+        """build_connector_graph should create edges between consecutive connectors."""
+        from matcher.features.spatial_context import build_connector_graph
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        # seg_1: conn_a--conn_b--conn_c (2 edges)
+        # seg_2: conn_c--conn_d (1 edge)
+        # seg_3: conn_c--conn_e (1 edge)
+        # Total: 4 edges
+        assert G.number_of_edges() == 4
+
+    def test_seg_to_connectors_mapping(self, sample_segment_with_connectors):
+        """seg_to_connectors should map segment IDs to connector positions."""
+        from matcher.features.spatial_context import build_connector_graph
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        assert "seg_1" in seg_to_connectors
+        assert len(seg_to_connectors["seg_1"]) == 3  # Three connectors
+
+        # Connectors should be sorted by position
+        positions = [pos for pos, _ in seg_to_connectors["seg_1"]]
+        assert positions == [0.0, 0.5, 1.0]
+
+    def test_find_nearest_connector_exact_match(self):
+        """find_nearest_connector should find exact matches."""
+        from matcher.features.spatial_context import find_nearest_connector
+
+        connectors = [(0.0, 10), (0.5, 20), (1.0, 30)]
+
+        assert find_nearest_connector(connectors, 0.0) == 10
+        assert find_nearest_connector(connectors, 0.5) == 20
+        assert find_nearest_connector(connectors, 1.0) == 30
+
+    def test_find_nearest_connector_interpolation(self):
+        """find_nearest_connector should find nearest for intermediate positions."""
+        from matcher.features.spatial_context import find_nearest_connector
+
+        connectors = [(0.0, 10), (0.5, 20), (1.0, 30)]
+
+        # Position 0.3 is closer to 0.5 (distance 0.2) than to 0.0 (distance 0.3)
+        assert find_nearest_connector(connectors, 0.3) == 20
+        # Position 0.2 is closer to 0.0 (distance 0.2) than to 0.5 (distance 0.3)
+        assert find_nearest_connector(connectors, 0.2) == 10
+        # Position 0.8 is closer to 1.0 (distance 0.2) than to 0.5 (distance 0.3)
+        assert find_nearest_connector(connectors, 0.8) == 30
+
+    def test_find_nearest_connector_empty_list(self):
+        """find_nearest_connector should return None for empty list."""
+        from matcher.features.spatial_context import find_nearest_connector
+
+        assert find_nearest_connector([], 0.5) is None
+
+    def test_get_alignment_connectors(self, sample_segment_with_connectors):
+        """get_alignment_connectors should return correct nodes for alignment positions."""
+        from matcher.features.spatial_context import (
+            build_connector_graph,
+            get_alignment_connectors,
+        )
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        # Full segment (0.0 to 1.0) should return start and end connectors
+        start_node, end_node = get_alignment_connectors("seg_1", seg_to_connectors, 0.0, 1.0)
+        assert start_node is not None
+        assert end_node is not None
+        assert start_node != end_node
+
+        # Partial alignment (0.3 to 0.7) should find nearest connectors
+        # 0.3 is closer to 0.5, and 0.7 is also closer to 0.5
+        start_node2, end_node2 = get_alignment_connectors("seg_1", seg_to_connectors, 0.3, 0.7)
+        assert start_node2 == end_node2  # Both map to the 0.5 connector
+
+    def test_graphlet_similarity_with_alignment_full_segment(self, sample_segment_with_connectors):
+        """graphlet_similarity_with_alignment should work for full segments."""
+        from matcher.features.spatial_context import (
+            build_connector_graph,
+            graphlet_similarity_with_alignment,
+        )
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        # Compare seg_1 with seg_2 (they share connector conn_c)
+        sim = graphlet_similarity_with_alignment(
+            "seg_1",
+            "seg_2",
+            features,
+            features,
+            seg_to_connectors,
+            seg_to_connectors,
+            ref_start_frac=0.0,
+            ref_end_frac=1.0,
+            target_start_frac=0.0,
+            target_end_frac=1.0,
+        )
+
+        assert "graphlet_similarity" in sim
+        assert "endpoint_degree_similarity" in sim
+        assert 0.0 <= sim["graphlet_similarity"] <= 1.0
+        assert 0.0 <= sim["endpoint_degree_similarity"] <= 1.0
+
+    def test_graphlet_similarity_with_alignment_partial_match(self, sample_segment_with_connectors):
+        """graphlet_similarity_with_alignment should handle partial alignment."""
+        from matcher.features.spatial_context import (
+            build_connector_graph,
+            graphlet_similarity_with_alignment,
+        )
+
+        G, seg_to_connectors, features = build_connector_graph(
+            sample_segment_with_connectors,
+            id_column="id",
+            connectors_column="connectors",
+        )
+
+        # Compare partial seg_1 (0.4 to 0.6, around the middle connector)
+        # with full seg_2
+        sim = graphlet_similarity_with_alignment(
+            "seg_1",
+            "seg_2",
+            features,
+            features,
+            seg_to_connectors,
+            seg_to_connectors,
+            ref_start_frac=0.4,
+            ref_end_frac=0.6,
+            target_start_frac=0.0,
+            target_end_frac=1.0,
+        )
+
+        assert "graphlet_similarity" in sim
+        assert 0.0 <= sim["graphlet_similarity"] <= 1.0
