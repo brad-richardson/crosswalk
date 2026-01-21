@@ -8,25 +8,25 @@ Usage:
     python scripts/fetch_fort_collins.py
 
 Output files will be saved to:
-    - data/raw/fort_collins_sidewalks.parquet
-    - data/raw/fort_collins_streets.parquet
+    - data/raw/us_fort_collins_sidewalks.parquet
+    - data/raw/us_fort_collins_streets.parquet
 """
 
-import sys
 from pathlib import Path
 
 from loguru import logger
 
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent))  # scripts directory for dataset_configs
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # src directory for matcher
-
-from dataset_configs import FORT_COLLINS_DATASETS
-
+from matcher.datasets.schema import get_dataset_config
 from matcher.fetch.arcgis import fetch_arcgis_layer
 
 # Output directory
 DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
+
+# Fort Collins datasets to fetch (using new country-prefixed names)
+FORT_COLLINS_DATASET_NAMES = [
+    "us_fort_collins_streets",
+    "us_fort_collins_sidewalks",
+]
 
 
 def main():
@@ -37,25 +37,40 @@ def main():
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    for dataset in FORT_COLLINS_DATASETS:
-        name = dataset.pop("name")
-        description = dataset.pop("description", None)
-        output_path = DATA_DIR / f"{name}.parquet"
+    for dataset_name in FORT_COLLINS_DATASET_NAMES:
+        config = get_dataset_config(dataset_name)
+        if config is None:
+            logger.warning(f"No config found for {dataset_name}, skipping")
+            continue
 
-        logger.info(f"\nFetching {name}...")
-        if description:
-            logger.info(f"  {description}")
+        output_path = DATA_DIR / f"{dataset_name}.parquet"
+
+        logger.info(f"\nFetching {dataset_name}...")
+        if config.description:
+            logger.info(f"  {config.description}")
 
         try:
-            fetch_arcgis_layer(output_path=output_path, **dataset)
-            logger.success(f"Saved {name} to {output_path}")
-        except Exception as e:
-            logger.error(f"Failed to fetch {name}: {e}")
+            # Extract parameters from config
+            url = config.source.url if config.source else None
+            if not url:
+                logger.warning(f"No URL in config for {dataset_name}, skipping")
+                continue
 
-        # Restore popped keys for next iteration
-        dataset["name"] = name
-        if description:
-            dataset["description"] = description
+            fetch_params = {
+                "url": url,
+                "output_path": output_path,
+                "id_prefix": config.fetch.id_prefix if config.fetch else dataset_name,
+                "name_column": config.fetch.name_column if config.fetch else None,
+                "class_column": config.fetch.class_column if config.fetch else None,
+                "class_mapping": config.fetch.class_mapping if config.fetch else None,
+                "subclass_column": config.fetch.subclass_column if config.fetch else None,
+                "subclass_mapping": config.fetch.subclass_mapping if config.fetch else None,
+            }
+
+            fetch_arcgis_layer(**fetch_params)
+            logger.success(f"Saved {dataset_name} to {output_path}")
+        except Exception as e:
+            logger.error(f"Failed to fetch {dataset_name}: {e}")
 
     logger.info("\nDone fetching Fort Collins datasets!")
 

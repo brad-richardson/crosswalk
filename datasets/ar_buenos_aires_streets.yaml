@@ -1,0 +1,22 @@
+name: ar_buenos_aires_streets
+display_name: Buenos Aires Calles
+type: road
+description: Street centerlines - requires manual download from portal
+source:
+  type: manual
+  url: https://data.buenosaires.gob.ar/dataset/calles
+  portal_url: https://data.buenosaires.gob.ar/dataset/calles
+fetch:
+  crs: EPSG:4326
+  id_prefix: ba_street
+  name_column: nombre
+  class_column: tipo
+  bbox:
+  - -58.55
+  - -34.75
+  - -58.3
+  - -34.5
+classification:
+  source_classification:
+    column: tipo
+notes: Portal blocks programmatic access. Download GeoJSON manually.

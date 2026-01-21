@@ -1,0 +1,15 @@
+name: us_utah_trails
+display_name: Utah Trails and Pathways
+type: road
+description: Statewide trails with ADA accessibility data
+source:
+  type: arcgis
+  url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/TrailsAndPathways/FeatureServer/0
+fetch:
+  crs: EPSG:4326
+  id_prefix: utah_trail
+  name_column: PrimaryName
+  class_column: DesignatedUses
+classification:
+  source_classification:
+    column: DesignatedUses

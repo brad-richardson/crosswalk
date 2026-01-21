@@ -1,0 +1,44 @@
+name: us_fresno_roads
+display_name: Fresno County Roads
+type: road
+description: Fresno County roads from Caltrans (FHWA classification)
+source:
+  type: arcgis
+  url: https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
+  where_clause: County_label = 'FRESNO'
+fetch:
+  crs: EPSG:4326
+  id_prefix: us_fresno_roads
+  name_column: RouteID
+  class_column: F_System
+  class_mapping:
+    1: motorway
+    2: motorway
+    3: primary
+    4: secondary
+    5: tertiary
+    6: tertiary
+    7: residential
+  bbox:
+  - -119.95
+  - 36.65
+  - -119.65
+  - 36.9
+classification:
+  source_classification:
+    column: F_System
+  class_mapping_rules:
+  - source_value: 1
+    target_class: motorway
+  - source_value: 2
+    target_class: motorway
+  - source_value: 3
+    target_class: primary
+  - source_value: 4
+    target_class: secondary
+  - source_value: 5
+    target_class: tertiary
+  - source_value: 6
+    target_class: tertiary
+  - source_value: 7
+    target_class: residential

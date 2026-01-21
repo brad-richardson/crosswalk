@@ -1,0 +1,21 @@
+name: fi_helsinki_roads
+display_name: Digiroad Finland
+type: road
+description: Road network from Finnish national Digiroad database
+source:
+  type: download
+  url: https://ava.vaylapilvi.fi/ava/Tie/Digiroad/Aineistojulkaisut/latest/DIGIROAD_K_KOKOMAA.gpkg.zip
+  file_format: gpkg
+fetch:
+  crs: EPSG:4326
+  id_prefix: hel_road
+  name_column: TIENIMI_SU
+  class_column: TOIMINN_LK
+  bbox:
+  - 24.8
+  - 60.1
+  - 25.2
+  - 60.3
+classification:
+  source_classification:
+    column: TOIMINN_LK

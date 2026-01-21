@@ -1,0 +1,52 @@
+name: us_boston_sidewalks
+display_name: Boston Sidewalks
+type: sidewalk
+description: Sidewalk and crosswalk centerlines
+source:
+  type: arcgis
+  url: https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5
+  portal_url: https://data.boston.gov/dataset/sidewalk-centerline
+fetch:
+  crs: EPSG:4326
+  id_prefix: boston_sidewalk
+  class_column: TYPE
+  class_mapping:
+    SWALK-CL: footway
+    CWALK-CL: footway
+    CWALK-CL-UM: footway
+    PWALK-CL: footway
+    Sidewalk centerline: footway
+    Crosswalk centerline: footway
+    Privatewalk centerline: footway
+  subclass_column: TYPE
+  subclass_mapping:
+    SWALK-CL: sidewalk
+    CWALK-CL: crosswalk
+    CWALK-CL-UM: crosswalk
+    PWALK-CL: sidewalk
+    Sidewalk centerline: sidewalk
+    Crosswalk centerline: crosswalk
+    Privatewalk centerline: sidewalk
+  bbox:
+  - -71.19
+  - 42.21
+  - -70.92
+  - 42.4
+classification:
+  source_classification:
+    column: TYPE
+  class_mapping_rules:
+  - source_value: SWALK-CL
+    target_class: footway
+  - source_value: CWALK-CL
+    target_class: footway
+  - source_value: CWALK-CL-UM
+    target_class: footway
+  - source_value: PWALK-CL
+    target_class: footway
+  - source_value: Sidewalk centerline
+    target_class: footway
+  - source_value: Crosswalk centerline
+    target_class: footway
+  - source_value: Privatewalk centerline
+    target_class: footway

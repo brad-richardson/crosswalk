@@ -57,8 +57,11 @@ src/matcher/
 ## Key Commands
 
 ```bash
-# Fetch data
+# Fetch data by explicit bbox
 matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture -d osm
+
+# Fetch reference data for a configured dataset (auto-uses bbox from config)
+matcher fetch --for-dataset us_boston_streets -d osm -d overture
 
 # Fetch local data (see scripts/fetch_*.py for examples)
 python scripts/fetch_boston.py
@@ -96,9 +99,9 @@ matcher validate data/raw/overture.parquet --bbox "-71.19,42.21,-70.92,42.40" --
 Labels are stored in Hive-partitioned format:
 ```
 labels/
-├── dataset=boston_streets/data.csv
-├── dataset=boston_sidewalks/data.csv
-├── dataset=boston_bikes/data.csv
+├── dataset=us_boston_streets/data.csv
+├── dataset=us_boston_sidewalks/data.csv
+├── dataset=us_boston_bikes/data.csv
 └── ...
 ```
 
@@ -170,14 +173,64 @@ data/
 │   ├── overture_segments.parquet
 │   ├── overture_connectors.parquet
 │   ├── osm_segments.parquet
-│   ├── boston_streets.parquet
-│   ├── boston_sidewalks.parquet
-│   └── boston_bike_network.parquet
+│   ├── us_boston_streets.parquet
+│   ├── us_boston_sidewalks.parquet
+│   └── us_boston_bike_network.parquet
 ├── output/                 # Matching results
-│   ├── boston_streets_bridge.parquet
+│   ├── us_boston_streets_bridge.parquet
 │   └── ...
 └── models/                 # Trained ML models
     └── matcher_model_combined.joblib
+```
+
+## Dataset Configurations
+
+Dataset configs are stored as YAML files in `datasets/` at the repo root.
+Names use ISO 3166-1 alpha-2 country code prefix (e.g., `us_`, `co_`, `nl_`):
+
+```
+datasets/
+├── us_boston_streets.yaml
+├── us_boston_sidewalks.yaml
+├── us_fort_collins_streets.yaml
+├── co_bogota_roads.yaml
+└── ...
+```
+
+Each YAML file contains:
+- **Display info**: name, type (road/bike/sidewalk), description
+- **Source config**: URL, portal URL, fetch type
+- **Fetch config**: bbox, class_column, class_mapping, name_column
+- **Last fetch**: timestamp, feature count, output path (auto-updated)
+- **Classification**: mapping rules discovered by `matcher discover-classes`
+
+### Using Dataset Configs
+
+```bash
+# Fetch reference data for a configured dataset
+matcher fetch --for-dataset us_boston_streets -d osm -d overture
+
+# List available dataset configs
+matcher list-datasets
+
+# Discover classification for a new dataset
+matcher discover-classes data/raw/new_dataset.parquet
+```
+
+### Programmatic Access
+
+```python
+from matcher.datasets.schema import get_dataset_config, list_dataset_configs
+
+# Get a specific config
+config = get_dataset_config("us_boston_streets")
+if config and config.fetch:
+    print(f"Bbox: {config.fetch.bbox}")
+    print(f"Class column: {config.fetch.class_column}")
+
+# List all configs
+for name in list_dataset_configs():
+    print(name)
 ```
 
 ## System Dependencies
@@ -263,23 +316,23 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet \
-    -m xgboost -o data/output/before_boston_streets_bridge.parquet
+matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+    -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet \
-    -m xgboost -o data/output/after_boston_streets_bridge.parquet
+matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+    -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
 
 Include comparison in PR description:
 
 | Dataset | Metric | Before | After | Delta |
 |---------|--------|--------|-------|-------|
-| boston_streets | Matched | 10025 | 10025 | 0 |
-| boston_streets | Review | 1099 | 1099 | 0 |
-| boston_streets | Unmatched | 19 | 19 | 0 |
-| boston_streets | 1:N groups | 150 | 150 | 0 |
+| us_boston_streets | Matched | 10025 | 10025 | 0 |
+| us_boston_streets | Review | 1099 | 1099 | 0 |
+| us_boston_streets | Unmatched | 19 | 19 | 0 |
+| us_boston_streets | 1:N groups | 150 | 150 | 0 |
 
 Note: Numbers may not change for code cleanup/edge case fixes - include comparison for transparency.
 

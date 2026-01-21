@@ -15,11 +15,17 @@ console = Console()
 
 @app.command()
 def fetch(
-    bbox: str = typer.Option(
-        ...,
+    bbox: str | None = typer.Option(
+        None,
         "--bbox",
         "-b",
-        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326)",
+        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326). Required unless --for-dataset is used.",
+    ),
+    for_dataset: str | None = typer.Option(
+        None,
+        "--for-dataset",
+        "-f",
+        help="Fetch reference data for a target dataset (uses bbox from dataset config, names outputs accordingly)",
     ),
     output_dir: Path = typer.Option(
         Path("data/raw"),
@@ -48,19 +54,23 @@ def fetch(
         "--keep-pbf",
         help="Keep extracted PBF file for debugging",
     ),
-    bbox_buffer: float = typer.Option(
-        0.0,
+    bbox_buffer: float | None = typer.Option(
+        None,
         "--bbox-buffer",
-        help="Expand bbox by this distance (meters) to avoid fringe effects in integration",
+        help="Expand bbox by this distance (meters). Defaults to 1km for complete network coverage.",
     ),
 ):
     """Fetch road data for an area of interest.
 
     Examples:
+        # Fetch by explicit bbox
         matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
-        matcher fetch --bbox -122.7,45.5,-122.6,45.55 --bbox-buffer 500  # Expand by 500m
+
+        # Fetch for a configured dataset (auto-uses bbox, auto-names outputs)
+        matcher fetch --for-dataset boston_streets -d osm              # boston_streets_osm_segments.parquet
+        matcher fetch -f boston_streets -d overture -d osm             # Both, named for boston_streets
 
     Note: OSM fetching requires osmium-tool to be installed:
         brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
@@ -78,50 +88,187 @@ def fetch(
         )
         raise typer.Exit(1)
 
-    coords = [float(x.strip()) for x in bbox.split(",")]
-    if len(coords) != 4:
-        console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
+    # Determine bbox and dataset name
+    dataset_name: str | None = None
+
+    if for_dataset:
+        # Look up bbox from dataset YAML configs
+        from .datasets.schema import get_dataset_config, list_dataset_configs
+
+        config = get_dataset_config(for_dataset)
+        if config is None:
+            console.print(f"[red]Error: Could not find dataset config for '{for_dataset}'[/red]")
+            available = list_dataset_configs()
+            if available:
+                console.print("[yellow]Available datasets: " + ", ".join(sorted(available)[:10]))
+                if len(available) > 10:
+                    console.print(f"  ... and {len(available) - 10} more[/yellow]")
+            raise typer.Exit(1)
+
+        if config.fetch is None or config.fetch.bbox is None:
+            console.print(f"[red]Error: Dataset '{for_dataset}' has no bbox configured[/red]")
+            raise typer.Exit(1)
+
+        xmin, ymin, xmax, ymax = config.fetch.bbox
+        dataset_name = for_dataset
+        console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
+        console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
+
+    elif bbox:
+        coords = [float(x.strip()) for x in bbox.split(",")]
+        if len(coords) != 4:
+            console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
+            raise typer.Exit(1)
+        xmin, ymin, xmax, ymax = coords
+
+    else:
+        console.print("[red]Error: Either --bbox or --for-dataset is required[/red]")
         raise typer.Exit(1)
 
-    xmin, ymin, xmax, ymax = coords
     output_dir.mkdir(parents=True, exist_ok=True)
-    bbox_obj = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+    original_bbox = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
-    # Expand bbox if buffer specified
-    if bbox_buffer > 0:
-        bbox_obj = bbox_obj.expand(bbox_buffer)
-        console.print(f"[blue]Expanded bbox by {bbox_buffer}m to avoid fringe effects[/blue]")
+    # For Overture fetches, use a default buffer to avoid fringe effects
+    # User can override with --bbox-buffer
+    overture_buffer = bbox_buffer
+    if overture_buffer is None and "overture" in datasets:
+        overture_buffer = ov_module.DEFAULT_OVERTURE_BUFFER_M
         console.print(
-            f"[blue]  New bbox: {bbox_obj.xmin:.6f},{bbox_obj.ymin:.6f},"
-            f"{bbox_obj.xmax:.6f},{bbox_obj.ymax:.6f}[/blue]"
+            f"[blue]Using default {overture_buffer}m buffer for Overture data "
+            f"(override with --bbox-buffer)[/blue]"
         )
 
+    # Create bbox for Overture (potentially buffered)
+    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
+    if overture_buffer is not None and overture_buffer > 0:
+        overture_bbox = original_bbox.expand(overture_buffer)
+        console.print(
+            f"[blue]  Buffered bbox: {overture_bbox.xmin:.6f},{overture_bbox.ymin:.6f},"
+            f"{overture_bbox.xmax:.6f},{overture_bbox.ymax:.6f}[/blue]"
+        )
+    else:
+        overture_bbox = original_bbox
+        if overture_buffer == 0 and "overture" in datasets:
+            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
+        overture_buffer = None
+
+    # For OSM, also use a default buffer to avoid fringe effects
+    osm_buffer = bbox_buffer
+    if osm_buffer is None and "osm" in datasets:
+        osm_buffer = osm_module.DEFAULT_OSM_BUFFER_M
+        console.print(
+            f"[blue]Using default {osm_buffer}m buffer for OSM data "
+            f"(override with --bbox-buffer)[/blue]"
+        )
+
+    # Create bbox for OSM (potentially buffered)
+    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
+    if osm_buffer is not None and osm_buffer > 0:
+        osm_bbox = original_bbox.expand(osm_buffer)
+        if "osm" in datasets:
+            console.print(
+                f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
+                f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
+            )
+    else:
+        osm_bbox = original_bbox
+        if osm_buffer == 0 and "osm" in datasets:
+            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
+        osm_buffer = None
+
     if "overture" in datasets:
-        console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
+        # Name outputs based on dataset if provided
+        overture_prefix = f"{dataset_name}_overture" if dataset_name else "overture"
+        console.print("[blue]Fetching Overture segments...[/blue]")
         segments_path = ov_module.fetch_overture_segments(
-            bbox=bbox_obj,
-            output_path=output_dir / "overture_segments.parquet",
+            bbox=overture_bbox,
+            output_path=output_dir / f"{overture_prefix}_segments.parquet",
+            original_bbox=original_bbox,
+            buffer_m=overture_buffer,
         )
         console.print(f"[green]Saved Overture segments to {segments_path}[/green]")
 
         console.print("[blue]Fetching Overture connectors...[/blue]")
         connectors_path = ov_module.fetch_overture_connectors(
-            bbox=bbox_obj,
-            output_path=output_dir / "overture_connectors.parquet",
+            bbox=overture_bbox,
+            output_path=output_dir / f"{overture_prefix}_connectors.parquet",
+            original_bbox=original_bbox,
+            buffer_m=overture_buffer,
         )
         console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
 
     if "osm" in datasets:
-        console.print(f"[blue]Fetching OSM data for bbox {bbox}...[/blue]")
+        # Name outputs based on dataset if provided
+        osm_name = f"{dataset_name}_osm" if dataset_name else "osm"
+        console.print("[blue]Fetching OSM data...[/blue]")
         segments_path, connectors_path = osm_module.fetch_osm_data(
-            bbox=bbox_obj,
+            bbox=osm_bbox,
             output_dir=output_dir,
             cache_dir=cache_dir,
             force_download=no_cache,
             keep_pbf=keep_pbf,
+            original_bbox=original_bbox,
+            buffer_m=osm_buffer,
+            name=osm_name,
         )
-        console.print(f"[green]Saved OSM segments to {segments_path}[/green]")
-        console.print(f"[green]Saved OSM connectors to {connectors_path}[/green]")
+        console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
+        console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
+
+    # Update last_fetch in dataset config if using --for-dataset
+    if dataset_name:
+        from datetime import UTC, datetime
+
+        from .datasets.schema import (
+            LastFetch,
+            get_dataset_config,
+            get_datasets_dir,
+            save_dataset_config,
+        )
+
+        config = get_dataset_config(dataset_name)
+        if config:
+            # Determine which buffer was used
+            buffer_m = overture_buffer if "overture" in datasets else osm_buffer
+
+            # Get feature count from metadata if available
+            feature_count = 0
+            geometry_types: list[str] = []
+
+            # Try to read metadata from fetched file
+            if "overture" in datasets:
+                meta_path = output_dir / f"{overture_prefix}_segments.parquet.meta.yaml"
+                if meta_path.exists():
+                    from .fetch.metadata import load_metadata
+
+                    meta = load_metadata(output_dir / f"{overture_prefix}_segments.parquet")
+                    if meta:
+                        feature_count = meta.feature_count
+                        geometry_types = meta.geometry_types
+            elif "osm" in datasets:
+                meta_path = output_dir / f"{osm_name}_segments.parquet.meta.yaml"
+                if meta_path.exists():
+                    from .fetch.metadata import load_metadata
+
+                    meta = load_metadata(output_dir / f"{osm_name}_segments.parquet")
+                    if meta:
+                        feature_count = meta.feature_count
+                        geometry_types = meta.geometry_types
+
+            config.last_fetch = LastFetch(
+                fetched_at=datetime.now(UTC),
+                bbox=original_bbox.to_tuple(),
+                bbox_buffered=(overture_bbox if "overture" in datasets else osm_bbox).to_tuple()
+                if buffer_m
+                else None,
+                bbox_buffer_m=buffer_m,
+                feature_count=feature_count,
+                geometry_types=geometry_types,
+                output_path=str(output_dir),
+            )
+
+            config_path = get_datasets_dir() / f"{dataset_name}.yaml"
+            save_dataset_config(config, config_path)
+            console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
 
 
 @app.command()
@@ -969,7 +1116,7 @@ def discover_classes(
         None,
         "--output",
         "-o",
-        help="Output YAML path (default: src/matcher/datasets/{name}.yaml)",
+        help="Output YAML path (default: datasets/{name}.yaml). Merges with existing config if present.",
     ),
     print_only: bool = typer.Option(
         False,
@@ -1025,7 +1172,70 @@ def discover_classes(
     print_discovery_report(report)
 
     if not print_only and report.suggested_config:
-        saved_path = save_dataset_config(report.suggested_config, output)
+        from .datasets.schema import (
+            ClassificationConfig,
+            get_dataset_config,
+            get_datasets_dir,
+        )
+        from .datasets.schema import (
+            ClassMappingRule as NewClassMappingRule,
+        )
+        from .datasets.schema import (
+            SourceClassification as NewSourceClassification,
+        )
+        from .datasets.schema import (
+            save_dataset_config as save_new_config,
+        )
+
+        dataset_name = dataset.stem
+        if output:
+            saved_path = output
+        else:
+            saved_path = get_datasets_dir() / f"{dataset_name}.yaml"
+
+        # Check if config already exists and merge
+        existing_config = get_dataset_config(dataset_name)
+        if existing_config:
+            console.print(f"[blue]Merging with existing config: {dataset_name}.yaml[/blue]")
+
+            # Build new classification from discovered rules
+            old_config = report.suggested_config
+            new_rules = []
+            for rule in old_config.class_mapping_rules:
+                new_rules.append(
+                    NewClassMappingRule(
+                        source_value=rule.source_value,
+                        target_class=rule.target_class,
+                        conditions=rule.conditions,
+                        priority=rule.priority,
+                    )
+                )
+
+            new_source_class = None
+            if old_config.source_classification:
+                new_source_class = NewSourceClassification(
+                    column=old_config.source_classification.column,
+                    description=old_config.source_classification.description,
+                    values=old_config.source_classification.values,
+                    documentation_url=old_config.source_classification.documentation_url,
+                )
+
+            existing_config.classification = ClassificationConfig(
+                source_classification=new_source_class,
+                class_mapping_rules=new_rules,
+                default_class=old_config.default_class,
+                confidence=old_config.confidence,
+            )
+
+            if old_config.notes:
+                existing_config.notes = old_config.notes
+
+            save_new_config(existing_config, saved_path)
+        else:
+            # No existing config - save using old format for now
+            # TODO: Create new format config from scratch
+            saved_path = save_dataset_config(report.suggested_config, output)
+
         console.print()
         console.print(f"[green]Configuration saved to: {saved_path}[/green]")
         console.print("[yellow]Review and adjust the mapping rules as needed.[/yellow]")
@@ -1034,9 +1244,10 @@ def discover_classes(
 @app.command("list-datasets")
 def list_datasets():
     """List available dataset configurations."""
-    from .datasets import list_dataset_configs
+    from .datasets.schema import get_datasets_dir, list_dataset_configs
 
     configs = list_dataset_configs()
+    console.print(f"[blue]Dataset configs directory: {get_datasets_dir()}[/blue]")
     if not configs:
         console.print("[yellow]No dataset configurations found.[/yellow]")
         console.print("Use 'matcher discover-classes' to create one.")

@@ -1,0 +1,74 @@
+name: us_boston_bike_network
+display_name: Boston Bicycle Network 2024
+type: road
+description: Bike lanes, paths, and shared facilities
+source:
+  type: arcgis
+  url: https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/Boston_Bicycle_Network_2024/FeatureServer/0
+  portal_url: https://data.boston.gov/dataset/existing-bike-network-2024
+fetch:
+  crs: EPSG:4326
+  id_prefix: boston_bike
+  name_column: STREET_NAM
+  class_column: ExisFacil
+  class_mapping:
+    SBL: cycleway
+    SBLBL: cycleway
+    SBLSL: cycleway
+    CFSBL: cycleway
+    BL: unknown
+    BL-PEAKBUS: unknown
+    BFBL: unknown
+    BLSL: unknown
+    CFBL: unknown
+    CFBS: unknown
+    SUP: path
+    SUPN: path
+    SUPM: path
+    SLM: unknown
+    SLMTC: unknown
+    PED: pedestrian
+    WALK: footway
+  bbox:
+  - -71.19
+  - 42.21
+  - -70.92
+  - 42.4
+classification:
+  source_classification:
+    column: ExisFacil
+  class_mapping_rules:
+  - source_value: SBL
+    target_class: cycleway
+  - source_value: SBLBL
+    target_class: cycleway
+  - source_value: SBLSL
+    target_class: cycleway
+  - source_value: CFSBL
+    target_class: cycleway
+  - source_value: BL
+    target_class: unknown
+  - source_value: BL-PEAKBUS
+    target_class: unknown
+  - source_value: BFBL
+    target_class: unknown
+  - source_value: BLSL
+    target_class: unknown
+  - source_value: CFBL
+    target_class: unknown
+  - source_value: CFBS
+    target_class: unknown
+  - source_value: SUP
+    target_class: path
+  - source_value: SUPN
+    target_class: path
+  - source_value: SUPM
+    target_class: path
+  - source_value: SLM
+    target_class: unknown
+  - source_value: SLMTC
+    target_class: unknown
+  - source_value: PED
+    target_class: pedestrian
+  - source_value: WALK
+    target_class: footway

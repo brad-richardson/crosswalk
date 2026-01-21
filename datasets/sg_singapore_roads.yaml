@@ -1,0 +1,23 @@
+name: sg_singapore_roads
+display_name: LTA Singapore Roads
+type: road
+description: Road section lines from Singapore LTA DataMall
+source:
+  type: download
+  url: https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip
+  file_format: shp
+  api_key_env_var: LTA_API_KEY
+  api_key_header: AccountKey
+fetch:
+  crs: EPSG:4326
+  id_prefix: sg_road
+  name_column: RD_NAME
+  class_column: RD_TYPE
+  bbox:
+  - 103.6
+  - 1.2
+  - 104.05
+  - 1.5
+classification:
+  source_classification:
+    column: RD_TYPE

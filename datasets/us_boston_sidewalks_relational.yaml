@@ -1,0 +1,7 @@
+name: us_boston_sidewalks_relational
+display_name: Boston Sidewalks Relational
+type: sidewalk
+source:
+  type: unknown
+fetch:
+  crs: EPSG:4326

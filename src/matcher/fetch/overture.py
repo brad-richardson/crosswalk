@@ -11,6 +11,25 @@ from loguru import logger
 from overturemaps.core import geodataframe, get_latest_release
 from pydantic import BaseModel
 
+from .metadata import FetchMetadata, save_metadata
+
+# Overture segment classes to exclude (non-road transport)
+# These are valid Overture transportation classes but not roads
+EXCLUDED_CLASSES = {
+    "railway",  # Rail lines
+    "ferry",  # Ferry routes
+    "aerialway",  # Ski lifts, cable cars, etc.
+}
+
+# Default buffer distance (meters) for fetching Overture data
+# This ensures we get complete network topology at edges by including:
+# - Roads running parallel just outside the boundary
+# - Road connections/intersections just outside the target area
+# - Complete network for integration purposes
+# Note: Partial overlaps ARE included (features intersecting bbox), but
+# the buffer ensures we capture nearby parallel roads and complete connectivity.
+DEFAULT_OVERTURE_BUFFER_M = 1000.0
+
 
 class BoundingBox(BaseModel):
     """Bounding box in EPSG:4326 (WGS84), matching Overture schema."""
@@ -67,16 +86,22 @@ def fetch_overture_segments(
     bbox: BoundingBox,
     output_path: Path,
     release: str | None = None,
+    original_bbox: BoundingBox | None = None,
+    buffer_m: float | None = None,
 ) -> Path:
     """Download Overture road segments for a bounding box.
 
     Uses the overturemaps-py library which automatically detects
     the latest release if not specified.
 
+    Filters out non-road transport types (railways, ferries, aerialways).
+
     Args:
-        bbox: Bounding box in WGS84 coordinates
+        bbox: Bounding box in WGS84 coordinates (may be buffered)
         output_path: Path for output GeoParquet file
         release: Overture release version (default: latest)
+        original_bbox: Original unbuffered bbox (for metadata tracking)
+        buffer_m: Buffer distance in meters that was applied to bbox
 
     Returns:
         Path to the output file
@@ -91,9 +116,22 @@ def fetch_overture_segments(
     # The library handles S3 access and bbox filtering efficiently
     gdf = geodataframe("segment", bbox=bbox.to_tuple(), release=release)
 
+    initial_count = len(gdf)
+
     # Filter to road subtype only
     if "subtype" in gdf.columns:
         gdf = gdf[gdf["subtype"] == "road"]
+        logger.debug(f"Filtered to road subtype: {initial_count} -> {len(gdf)} segments")
+
+    # Filter out excluded classes (railways, ferries, etc.)
+    if "class" in gdf.columns:
+        pre_filter_count = len(gdf)
+        gdf = gdf[~gdf["class"].isin(EXCLUDED_CLASSES)]
+        excluded_count = pre_filter_count - len(gdf)
+        if excluded_count > 0:
+            logger.info(
+                f"Filtered out {excluded_count} non-road segments (railways, ferries, etc.)"
+            )
 
     logger.info(f"Fetched {len(gdf)} road segments")
 
@@ -105,6 +143,20 @@ def fetch_overture_segments(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
 
+    # Save fetch metadata
+    metadata = FetchMetadata(
+        source="overture",
+        release=release,
+        bbox=original_bbox.to_tuple() if original_bbox else bbox.to_tuple(),
+        bbox_buffered=bbox.to_tuple() if buffer_m else None,
+        bbox_buffer_m=buffer_m,
+        feature_count=len(gdf),
+        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
+        filters={"subtype": "road", "excluded_classes": list(EXCLUDED_CLASSES)},
+    )
+    meta_path = save_metadata(output_path, metadata)
+    logger.debug(f"Saved fetch metadata to {meta_path}")
+
     logger.info(f"Saved Overture segments to {output_path}")
     return output_path
 
@@ -113,6 +165,8 @@ def fetch_overture_connectors(
     bbox: BoundingBox,
     output_path: Path,
     release: str | None = None,
+    original_bbox: BoundingBox | None = None,
+    buffer_m: float | None = None,
 ) -> Path:
     """Download Overture connectors (intersections) for a bounding box.
 
@@ -120,9 +174,11 @@ def fetch_overture_connectors(
     the latest release if not specified.
 
     Args:
-        bbox: Bounding box in WGS84 coordinates
+        bbox: Bounding box in WGS84 coordinates (may be buffered)
         output_path: Path for output GeoParquet file
         release: Overture release version (default: latest)
+        original_bbox: Original unbuffered bbox (for metadata tracking)
+        buffer_m: Buffer distance in meters that was applied to bbox
 
     Returns:
         Path to the output file
@@ -145,6 +201,19 @@ def fetch_overture_connectors(
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    # Save fetch metadata
+    metadata = FetchMetadata(
+        source="overture",
+        release=release,
+        bbox=original_bbox.to_tuple() if original_bbox else bbox.to_tuple(),
+        bbox_buffered=bbox.to_tuple() if buffer_m else None,
+        bbox_buffer_m=buffer_m,
+        feature_count=len(gdf),
+        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
+    )
+    meta_path = save_metadata(output_path, metadata)
+    logger.debug(f"Saved fetch metadata to {meta_path}")
 
     logger.info(f"Saved Overture connectors to {output_path}")
     return output_path

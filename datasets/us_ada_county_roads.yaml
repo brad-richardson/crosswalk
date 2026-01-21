@@ -1,0 +1,15 @@
+name: us_ada_county_roads
+display_name: Ada County Road Centerlines
+type: road
+description: Road centerlines for Boise metro area
+source:
+  type: arcgis
+  url: https://maps.achdidaho.org/server/rest/services/Assessor/roadcenterline/MapServer/0
+fetch:
+  crs: EPSG:4326
+  id_prefix: ada_road
+  name_column: StName
+  class_column: FuncClass
+classification:
+  source_classification:
+    column: FuncClass

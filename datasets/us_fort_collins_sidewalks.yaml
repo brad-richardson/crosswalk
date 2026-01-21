@@ -1,0 +1,43 @@
+name: us_fort_collins_sidewalks
+display_name: Fort Collins Sidewalks
+type: sidewalk
+description: 540 miles of sidewalk inventory with attachment type
+source:
+  type: arcgis
+  url: https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Sidewalks/FeatureServer/0
+fetch:
+  crs: EPSG:4326
+  id_prefix: fc_sidewalk
+  class_column: TYPE
+  class_mapping:
+    1: footway
+    2: footway
+    3: footway
+    4: footway
+    5: footway
+  subclass_column: TYPE
+  subclass_mapping:
+    1: sidewalk
+    2: sidewalk
+    3: sidewalk
+    4: sidewalk
+    5: crossing
+  bbox:
+  - -105.15
+  - 40.45
+  - -104.95
+  - 40.65
+classification:
+  source_classification:
+    column: TYPE
+  class_mapping_rules:
+  - source_value: 1
+    target_class: footway
+  - source_value: 2
+    target_class: footway
+  - source_value: 3
+    target_class: footway
+  - source_value: 4
+    target_class: footway
+  - source_value: 5
+    target_class: footway

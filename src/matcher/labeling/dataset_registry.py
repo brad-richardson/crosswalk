@@ -1,17 +1,27 @@
-"""Dataset registry for managing labeled dataset metadata."""
+"""Dataset registry for managing dataset metadata.
 
-import json
+Reads from YAML configs in the datasets/ directory at repo root.
+Provides backward-compatible interface for code that used the old CSV-based registry.
+"""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pandas as pd
-
-DEFAULT_REGISTRY_PATH = Path("datasets.csv")
+from ..datasets.schema import (
+    DatasetConfig,
+    get_dataset_config,
+    get_datasets_dir,
+    list_dataset_configs,
+    save_dataset_config,
+)
 
 
 @dataclass
 class Dataset:
-    """Metadata for a labeled dataset."""
+    """Metadata for a labeled dataset.
+
+    This is a compatibility wrapper around the new DatasetConfig schema.
+    """
 
     dataset_id: str  # Primary key, used in paths (e.g., "boston_streets")
     name: str  # Human-readable name (e.g., "Boston Streets")
@@ -20,103 +30,137 @@ class Dataset:
     info_url: str = ""  # Documentation URL
     metadata: dict = field(default_factory=dict)  # Extensible JSON properties
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for CSV storage."""
-        return {
-            "dataset_id": self.dataset_id,
-            "name": self.name,
-            "type": self.type,
-            "fetch_url": self.fetch_url,
-            "info_url": self.info_url,
-            "metadata": json.dumps(self.metadata) if self.metadata else "{}",
-        }
-
     @classmethod
-    def from_dict(cls, d: dict) -> "Dataset":
-        """Create from dictionary (CSV row)."""
-        metadata = d.get("metadata", "{}")
-        if isinstance(metadata, str):
-            try:
-                metadata = json.loads(metadata)
-            except json.JSONDecodeError:
-                metadata = {}
+    def from_config(cls, config: DatasetConfig) -> "Dataset":
+        """Create from DatasetConfig."""
+        metadata = {}
+        if config.fetch and config.fetch.crs:
+            metadata["crs"] = config.fetch.crs
+        if config.fetch and config.fetch.class_column:
+            metadata["classification_column"] = config.fetch.class_column
+
         return cls(
-            dataset_id=d["dataset_id"],
-            name=d["name"],
-            type=d["type"],
-            fetch_url=d.get("fetch_url", ""),
-            info_url=d.get("info_url", ""),
-            metadata=metadata or {},
+            dataset_id=config.name,
+            name=config.display_name or config.name.replace("_", " ").title(),
+            type=config.type,
+            fetch_url=config.source.url if config.source else "",
+            info_url=config.source.portal_url if config.source else "",
+            metadata=metadata,
         )
 
 
 class DatasetRegistry:
-    """Manages dataset metadata stored in datasets.csv."""
+    """Manages dataset metadata from YAML configs in datasets/ directory.
 
-    def __init__(self, path: Path = None):
-        self.path = Path(path) if path else DEFAULT_REGISTRY_PATH
-        self._df: pd.DataFrame | None = None
+    This is a compatibility wrapper that reads from the new YAML-based
+    configuration system while maintaining the same interface as the
+    old CSV-based registry.
+    """
 
-    @property
-    def df(self) -> pd.DataFrame:
-        """Lazy load dataframe."""
-        if self._df is None:
-            self._df = self._load()
-        return self._df
+    def __init__(self, path: Path | None = None):
+        """Initialize the registry.
 
-    def _load(self) -> pd.DataFrame:
-        """Load registry from CSV."""
-        if self.path.exists():
-            try:
-                return pd.read_csv(self.path)
-            except Exception:
-                pass
-        # Return empty DataFrame with correct columns
-        return pd.DataFrame(
-            columns=["dataset_id", "name", "type", "fetch_url", "info_url", "metadata"]
-        )
+        Args:
+            path: Ignored (kept for backward compatibility).
+                  Always reads from datasets/ directory.
+        """
+        self._configs_dir = get_datasets_dir()
+        self._cache: dict[str, DatasetConfig] = {}
 
-    def _save(self) -> None:
-        """Save registry to CSV."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.df.to_csv(self.path, index=False, float_format=lambda x: f"{x:.10g}")
+    def _load_config(self, dataset_id: str) -> DatasetConfig | None:
+        """Load a dataset config, using cache."""
+        if dataset_id not in self._cache:
+            config = get_dataset_config(dataset_id)
+            if config:
+                self._cache[dataset_id] = config
+        return self._cache.get(dataset_id)
 
     def get(self, dataset_id: str) -> Dataset | None:
         """Get dataset by ID."""
-        matches = self.df[self.df["dataset_id"] == dataset_id]
-        if len(matches) == 0:
+        config = self._load_config(dataset_id)
+        if config is None:
             return None
-        return Dataset.from_dict(matches.iloc[0].to_dict())
+        return Dataset.from_config(config)
 
     def list_all(self) -> list[Dataset]:
         """List all datasets."""
-        return [Dataset.from_dict(row.to_dict()) for _, row in self.df.iterrows()]
+        datasets = []
+        for name in list_dataset_configs():
+            config = self._load_config(name)
+            if config:
+                datasets.append(Dataset.from_config(config))
+        return datasets
 
     def add(self, dataset: Dataset) -> None:
-        """Add a new dataset to the registry."""
+        """Add a new dataset to the registry.
+
+        Creates a new YAML config file.
+        """
         if self.exists(dataset.dataset_id):
             raise ValueError(f"Dataset {dataset.dataset_id} already exists")
-        new_row = pd.DataFrame([dataset.to_dict()])
-        self._df = pd.concat([self.df, new_row], ignore_index=True)
-        self._save()
+
+        from ..datasets.schema import FetchConfig, SourceConfig
+
+        config = DatasetConfig(
+            name=dataset.dataset_id,
+            display_name=dataset.name,
+            type=dataset.type,
+            source=SourceConfig(
+                type="arcgis" if dataset.fetch_url else "unknown",
+                url=dataset.fetch_url or None,
+                portal_url=dataset.info_url or None,
+            ),
+            fetch=FetchConfig(
+                crs=dataset.metadata.get("crs", "EPSG:4326"),
+                class_column=dataset.metadata.get("classification_column"),
+            ),
+        )
+
+        config_path = self._configs_dir / f"{dataset.dataset_id}.yaml"
+        save_dataset_config(config, config_path)
+        self._cache[dataset.dataset_id] = config
 
     def update(self, dataset: Dataset) -> None:
         """Update an existing dataset."""
         if not self.exists(dataset.dataset_id):
             raise ValueError(f"Dataset {dataset.dataset_id} does not exist")
-        mask = self.df["dataset_id"] == dataset.dataset_id
-        for key, value in dataset.to_dict().items():
-            self._df.loc[mask, key] = value
-        self._save()
+
+        config = self._load_config(dataset.dataset_id)
+        if config is None:
+            raise ValueError(f"Dataset {dataset.dataset_id} does not exist")
+
+        # Update config with new values
+        config.display_name = dataset.name
+        config.type = dataset.type
+
+        if config.source:
+            config.source.url = dataset.fetch_url or None
+            config.source.portal_url = dataset.info_url or None
+
+        if config.fetch:
+            if dataset.metadata.get("crs"):
+                config.fetch.crs = dataset.metadata["crs"]
+            if dataset.metadata.get("classification_column"):
+                config.fetch.class_column = dataset.metadata["classification_column"]
+
+        config_path = self._configs_dir / f"{dataset.dataset_id}.yaml"
+        save_dataset_config(config, config_path)
+        self._cache[dataset.dataset_id] = config
 
     def exists(self, dataset_id: str) -> bool:
         """Check if dataset exists."""
-        return dataset_id in self.df["dataset_id"].values
+        config_path = self._configs_dir / f"{dataset_id}.yaml"
+        return config_path.exists()
 
-    def ensure_exists(self, dataset_id: str, name: str = None, type: str = "road") -> Dataset:
+    def ensure_exists(
+        self, dataset_id: str, name: str | None = None, type: str = "road"
+    ) -> Dataset:
         """Get or create a dataset entry."""
         if self.exists(dataset_id):
-            return self.get(dataset_id)
+            dataset = self.get(dataset_id)
+            if dataset:
+                return dataset
+
         # Create new dataset with defaults
         dataset = Dataset(
             dataset_id=dataset_id,
@@ -127,7 +171,7 @@ class DatasetRegistry:
         return dataset
 
     def get_crs(self, dataset_id: str) -> str | None:
-        """Get CRS for a dataset from its metadata.
+        """Get CRS for a dataset from its config.
 
         Args:
             dataset_id: Dataset identifier
@@ -135,13 +179,15 @@ class DatasetRegistry:
         Returns:
             CRS string (e.g., "EPSG:4326") or None if not set
         """
-        dataset = self.get(dataset_id)
-        if dataset is None:
+        config = self._load_config(dataset_id)
+        if config is None:
             return None
-        return dataset.metadata.get("crs")
+        if config.fetch:
+            return config.fetch.crs
+        return None
 
     def set_crs(self, dataset_id: str, crs: str) -> None:
-        """Set CRS for a dataset in its metadata.
+        """Set CRS for a dataset in its config.
 
         Args:
             dataset_id: Dataset identifier
@@ -150,8 +196,40 @@ class DatasetRegistry:
         Raises:
             ValueError: If dataset doesn't exist
         """
-        dataset = self.get(dataset_id)
-        if dataset is None:
+        config = self._load_config(dataset_id)
+        if config is None:
             raise ValueError(f"Dataset {dataset_id} does not exist")
-        dataset.metadata["crs"] = crs
-        self.update(dataset)
+
+        from ..datasets.schema import FetchConfig
+
+        if config.fetch is None:
+            config.fetch = FetchConfig(crs=crs)
+        else:
+            config.fetch.crs = crs
+
+        config_path = self._configs_dir / f"{dataset_id}.yaml"
+        save_dataset_config(config, config_path)
+        self._cache[dataset_id] = config
+
+    def get_config(self, dataset_id: str) -> DatasetConfig | None:
+        """Get the full DatasetConfig for a dataset.
+
+        This provides access to the new unified config format.
+        """
+        return self._load_config(dataset_id)
+
+    def get_bbox(self, dataset_id: str) -> tuple[float, float, float, float] | None:
+        """Get bounding box for a dataset.
+
+        Args:
+            dataset_id: Dataset identifier
+
+        Returns:
+            Bounding box tuple (xmin, ymin, xmax, ymax) or None
+        """
+        config = self._load_config(dataset_id)
+        if config is None:
+            return None
+        if config.fetch:
+            return config.fetch.bbox
+        return None

@@ -1,0 +1,15 @@
+name: co_bogota_bike_network
+display_name: IDECA Bogotá Ciclorutas
+type: road
+description: Bike paths (ciclorutas) from Bogotá cadastre GIS
+source:
+  type: arcgis
+  url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/18
+fetch:
+  crs: EPSG:4326
+  id_prefix: bog_bike
+  bbox:
+  - -74.25
+  - 4.45
+  - -73.95
+  - 4.85

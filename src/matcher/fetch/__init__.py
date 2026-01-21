@@ -2,10 +2,12 @@
 
 from .arcgis import fetch_arcgis_layer
 from .local import load_local_roads
-from .osm import fetch_osm_data, fetch_osm_segments, load_osm_roads
+from .metadata import FetchMetadata, load_metadata, save_metadata
+from .osm import DEFAULT_OSM_BUFFER_M, fetch_osm_data, fetch_osm_segments, load_osm_roads
 from .osm_download import download_and_extract
 from .osm_pbf import parse_pbf
 from .overture import (
+    DEFAULT_OVERTURE_BUFFER_M,
     BoundingBox,
     fetch_overture_connectors,
     fetch_overture_segments,
@@ -14,6 +16,8 @@ from .overture import (
 
 __all__ = [
     "BoundingBox",
+    "DEFAULT_OVERTURE_BUFFER_M",
+    "DEFAULT_OSM_BUFFER_M",
     "fetch_overture_segments",
     "fetch_overture_connectors",
     "load_overture_segments",
@@ -24,4 +28,7 @@ __all__ = [
     "parse_pbf",
     "load_local_roads",
     "fetch_arcgis_layer",
+    "FetchMetadata",
+    "load_metadata",
+    "save_metadata",
 ]

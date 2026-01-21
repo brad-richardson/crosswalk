@@ -1,0 +1,52 @@
+name: us_fort_collins_streets
+display_name: Fort Collins Streets
+type: road
+description: Street centerlines with 10 road type classifications
+source:
+  type: arcgis
+  url: https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Street_Centerlines/FeatureServer/0
+fetch:
+  crs: EPSG:4326
+  id_prefix: fc_street
+  name_column: STRNAME
+  class_column: STREETTYPE
+  class_mapping:
+    INTERSTATE: motorway
+    ARTERIAL: primary
+    ARTERIAL MAJOR: primary
+    HIGHWAY: primary
+    HIGHWAY DIVIDED: primary
+    COLLECTOR: tertiary
+    LOCAL: residential
+    RAMP: motorway_link
+    ROUNDABOUT: tertiary
+    ALLEY: service
+  bbox:
+  - -105.15
+  - 40.45
+  - -104.95
+  - 40.65
+classification:
+  source_classification:
+    column: STREETTYPE
+  class_mapping_rules:
+  - source_value: INTERSTATE
+    target_class: motorway
+  - source_value: ARTERIAL
+    target_class: primary
+  - source_value: ARTERIAL MAJOR
+    target_class: primary
+  - source_value: HIGHWAY
+    target_class: primary
+  - source_value: HIGHWAY DIVIDED
+    target_class: primary
+  - source_value: COLLECTOR
+    target_class: tertiary
+  - source_value: LOCAL
+    target_class: residential
+  - source_value: RAMP
+    target_class: motorway_link
+  - source_value: ROUNDABOUT
+    target_class: tertiary
+  - source_value: ALLEY
+    target_class: service
