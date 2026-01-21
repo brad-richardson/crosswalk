@@ -1,4 +1,4 @@
-name: amsterdam_roads
+name: nl_amsterdam_roads
 display_name: PDOK NWB Wegen
 type: road
 description: Road segments from Dutch National Road Database (NWB) - filtered to Amsterdam

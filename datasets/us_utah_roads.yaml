@@ -1,4 +1,4 @@
-name: utah_roads
+name: us_utah_roads
 display_name: Utah Salt Lake County Roads
 type: road
 description: Salt Lake County roads from Utah SGID
@@ -8,7 +8,7 @@ source:
   where_clause: COUNTY_L = '49035'
 fetch:
   crs: EPSG:4326
-  id_prefix: utah_roads
+  id_prefix: us_utah_roads
   name_column: FULLNAME
   class_column: CARTOCODE
   class_mapping:

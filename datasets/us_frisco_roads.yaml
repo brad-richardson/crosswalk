@@ -1,37 +1,38 @@
-name: fresno_roads
-display_name: Fresno County Roads
+name: us_frisco_roads
+display_name: Frisco Roads
 type: road
-description: Fresno County roads from Caltrans (FHWA classification)
+description: Road centerlines with 9 classifications and lifecycle status
 source:
   type: arcgis
-  url: https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
-  where_clause: County_label = 'FRESNO'
+  url: https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/8
 fetch:
   crs: EPSG:4326
-  id_prefix: fresno_roads
-  name_column: RouteID
-  class_column: F_System
+  id_prefix: frisco_road
+  name_column: ROAD_NAME
+  class_column: SUBTYPE
   class_mapping:
     1: motorway
-    2: motorway
+    2: primary
     3: primary
     4: secondary
     5: tertiary
     6: tertiary
     7: residential
+    8: motorway_link
+    9: service
   bbox:
-  - -119.95
-  - 36.65
-  - -119.65
-  - 36.9
+  - -96.9
+  - 33.1
+  - -96.75
+  - 33.2
 classification:
   source_classification:
-    column: F_System
+    column: SUBTYPE
   class_mapping_rules:
   - source_value: 1
     target_class: motorway
   - source_value: 2
-    target_class: motorway
+    target_class: primary
   - source_value: 3
     target_class: primary
   - source_value: 4
@@ -42,3 +43,7 @@ classification:
     target_class: tertiary
   - source_value: 7
     target_class: residential
+  - source_value: 8
+    target_class: motorway_link
+  - source_value: 9
+    target_class: service

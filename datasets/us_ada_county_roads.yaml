@@ -1,4 +1,4 @@
-name: ada_county_roads
+name: us_ada_county_roads
 display_name: Ada County Road Centerlines
 type: road
 description: Road centerlines for Boise metro area

@@ -1,4 +1,4 @@
-name: boston_streets
+name: us_boston_streets
 display_name: Boston Streets
 type: road
 description: Street centerlines with MassDOT functional classification
@@ -8,7 +8,7 @@ source:
   portal_url: https://data.boston.gov/dataset/city-of-boston-managed-streets
 fetch:
   crs: EPSG:4326
-  id_prefix: boston_streets
+  id_prefix: us_boston_streets
   name_column: STREETNAME
   class_column: CLASS
   class_mapping:
