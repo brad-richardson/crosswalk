@@ -47,12 +47,6 @@ class FetchMetadata(BaseModel):
     # Additional notes
     notes: str | None = None
 
-    class Config:
-        """Pydantic config."""
-
-        # Allow arbitrary types for compatibility
-        arbitrary_types_allowed = True
-
 
 def save_metadata(output_path: Path, metadata: FetchMetadata) -> Path:
     """Save fetch metadata to a sidecar YAML file.
@@ -92,6 +86,10 @@ def load_metadata(output_path: Path) -> FetchMetadata | None:
 
     with open(meta_path) as f:
         data = yaml.safe_load(f)
+
+    # Handle empty or invalid YAML files
+    if not data or not isinstance(data, dict):
+        return None
 
     # Parse datetime
     if isinstance(data.get("fetched_at"), str):

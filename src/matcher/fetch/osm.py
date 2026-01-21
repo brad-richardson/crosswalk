@@ -33,6 +33,7 @@ def fetch_osm_data(
     keep_pbf: bool = False,
     original_bbox: BoundingBox | None = None,
     buffer_m: float | None = None,
+    name: str = "osm",
 ) -> tuple[Path, Path]:
     """Download and parse OSM road data (ways/nodes) for a bounding box.
 
@@ -51,6 +52,7 @@ def fetch_osm_data(
         keep_pbf: Keep the extracted bbox PBF file
         original_bbox: Original unbuffered bbox (for metadata tracking)
         buffer_m: Buffer distance in meters that was applied to bbox
+        name: Dataset name for output files (e.g., "osm" -> "osm_segments.parquet")
 
     Returns:
         Tuple of (segments_path, connectors_path)
@@ -102,8 +104,8 @@ def fetch_osm_data(
     connectors_gdf = _transform_connectors_schema(connectors_gdf)
 
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
-    segments_path = output_dir / "osm_segments.parquet"
-    connectors_path = output_dir / "osm_connectors.parquet"
+    segments_path = output_dir / f"{name}_segments.parquet"
+    connectors_path = output_dir / f"{name}_connectors.parquet"
 
     roads_gdf.to_parquet(segments_path, write_covering_bbox=True)
     connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
@@ -117,7 +119,7 @@ def fetch_osm_data(
         bbox_buffer_m=buffer_m,
         feature_count=len(roads_gdf),
         geometry_types=list(roads_gdf.geometry.geom_type.unique()) if len(roads_gdf) > 0 else [],
-        notes="OSM ways fetched from Geofabrik regional PBF extract",
+        notes=f"OSM ways for dataset '{name}' fetched from Geofabrik regional PBF extract",
     )
     save_metadata(segments_path, segments_metadata)
 
@@ -132,12 +134,12 @@ def fetch_osm_data(
         geometry_types=list(connectors_gdf.geometry.geom_type.unique())
         if len(connectors_gdf) > 0
         else [],
-        notes="OSM nodes (intersections) fetched from Geofabrik regional PBF extract",
+        notes=f"OSM nodes for dataset '{name}' fetched from Geofabrik regional PBF extract",
     )
     save_metadata(connectors_path, connectors_metadata)
 
-    logger.info(f"Saved {len(roads_gdf)} OSM segments to {segments_path}")
-    logger.info(f"Saved {len(connectors_gdf)} OSM connectors to {connectors_path}")
+    logger.info(f"Saved {len(roads_gdf)} {name} segments to {segments_path}")
+    logger.info(f"Saved {len(connectors_gdf)} {name} connectors to {connectors_path}")
 
     return segments_path, connectors_path
 
@@ -150,6 +152,7 @@ def fetch_osm_segments(
     keep_pbf: bool = False,
     original_bbox: BoundingBox | None = None,
     buffer_m: float | None = None,
+    name: str = "osm",
 ) -> Path:
     """Download and parse OSM road segments (ways) for a bounding box.
 
@@ -163,6 +166,7 @@ def fetch_osm_segments(
         keep_pbf: Keep the extracted bbox PBF file
         original_bbox: Original unbuffered bbox (for metadata tracking)
         buffer_m: Buffer distance in meters that was applied to bbox
+        name: Dataset name for output files
 
     Returns:
         Path to the output GeoParquet file
@@ -175,6 +179,7 @@ def fetch_osm_segments(
         keep_pbf=keep_pbf,
         original_bbox=original_bbox,
         buffer_m=buffer_m,
+        name=name,
     )
 
     # Move to requested path if different

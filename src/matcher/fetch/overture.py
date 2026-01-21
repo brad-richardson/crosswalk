@@ -151,7 +151,7 @@ def fetch_overture_segments(
         bbox_buffered=bbox.to_tuple() if buffer_m else None,
         bbox_buffer_m=buffer_m,
         feature_count=len(gdf),
-        geometry_types=list(gdf.geometry.geom_type.unique()),
+        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
         filters={"subtype": "road", "excluded_classes": list(EXCLUDED_CLASSES)},
     )
     meta_path = save_metadata(output_path, metadata)
@@ -210,7 +210,7 @@ def fetch_overture_connectors(
         bbox_buffered=bbox.to_tuple() if buffer_m else None,
         bbox_buffer_m=buffer_m,
         feature_count=len(gdf),
-        geometry_types=list(gdf.geometry.geom_type.unique()),
+        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
     )
     meta_path = save_metadata(output_path, metadata)
     logger.debug(f"Saved fetch metadata to {meta_path}")

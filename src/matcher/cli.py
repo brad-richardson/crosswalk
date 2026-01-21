@@ -15,11 +15,17 @@ console = Console()
 
 @app.command()
 def fetch(
-    bbox: str = typer.Option(
-        ...,
+    bbox: str | None = typer.Option(
+        None,
         "--bbox",
         "-b",
-        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326)",
+        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326). Required unless --for-dataset is used.",
+    ),
+    for_dataset: str | None = typer.Option(
+        None,
+        "--for-dataset",
+        "-f",
+        help="Fetch reference data for a target dataset (uses bbox from dataset config, names outputs accordingly)",
     ),
     output_dir: Path = typer.Option(
         Path("data/raw"),
@@ -51,16 +57,20 @@ def fetch(
     bbox_buffer: float | None = typer.Option(
         None,
         "--bbox-buffer",
-        help="Expand bbox by this distance (meters). Defaults to 100m for Overture data.",
+        help="Expand bbox by this distance (meters). Defaults to 1km for complete network coverage.",
     ),
 ):
     """Fetch road data for an area of interest.
 
     Examples:
+        # Fetch by explicit bbox
         matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
-        matcher fetch --bbox -122.7,45.5,-122.6,45.55 --bbox-buffer 500  # Expand by 500m
+
+        # Fetch for a configured dataset (auto-uses bbox, auto-names outputs)
+        matcher fetch --for-dataset boston_streets -d osm              # boston_streets_osm_segments.parquet
+        matcher fetch -f boston_streets -d overture -d osm             # Both, named for boston_streets
 
     Note: OSM fetching requires osmium-tool to be installed:
         brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
@@ -78,12 +88,62 @@ def fetch(
         )
         raise typer.Exit(1)
 
-    coords = [float(x.strip()) for x in bbox.split(",")]
-    if len(coords) != 4:
-        console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
+    # Determine bbox and dataset name
+    dataset_name: str | None = None
+
+    if for_dataset:
+        # Look up bbox from dataset configs
+        try:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+            from dataset_configs import ALL_DATASETS, CITY_BBOXES
+
+            # Try to find dataset config
+            found_bbox = None
+            for _city, city_datasets in ALL_DATASETS.items():
+                for ds in city_datasets:
+                    if ds.get("name") == for_dataset:
+                        found_bbox = ds.get("bbox")
+                        break
+                if found_bbox:
+                    break
+
+            # Also check CITY_BBOXES
+            if not found_bbox:
+                # Try to infer city from dataset name (e.g., boston_streets -> boston)
+                for city, city_bbox in CITY_BBOXES.items():
+                    if for_dataset.startswith(city):
+                        found_bbox = city_bbox
+                        break
+
+            if not found_bbox:
+                console.print(f"[red]Error: Could not find bbox for dataset '{for_dataset}'[/red]")
+                console.print(
+                    "[yellow]Available cities: " + ", ".join(CITY_BBOXES.keys()) + "[/yellow]"
+                )
+                raise typer.Exit(1)
+
+            xmin, ymin, xmax, ymax = found_bbox
+            dataset_name = for_dataset
+            console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
+            console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
+
+        except ImportError as e:
+            console.print(f"[red]Error: Could not load dataset configs: {e}[/red]")
+            raise typer.Exit(1) from e
+
+    elif bbox:
+        coords = [float(x.strip()) for x in bbox.split(",")]
+        if len(coords) != 4:
+            console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
+            raise typer.Exit(1)
+        xmin, ymin, xmax, ymax = coords
+
+    else:
+        console.print("[red]Error: Either --bbox or --for-dataset is required[/red]")
         raise typer.Exit(1)
 
-    xmin, ymin, xmax, ymax = coords
     output_dir.mkdir(parents=True, exist_ok=True)
     original_bbox = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
@@ -98,7 +158,8 @@ def fetch(
         )
 
     # Create bbox for Overture (potentially buffered)
-    if overture_buffer and overture_buffer > 0:
+    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
+    if overture_buffer is not None and overture_buffer > 0:
         overture_bbox = original_bbox.expand(overture_buffer)
         console.print(
             f"[blue]  Buffered bbox: {overture_bbox.xmin:.6f},{overture_bbox.ymin:.6f},"
@@ -106,6 +167,8 @@ def fetch(
         )
     else:
         overture_bbox = original_bbox
+        if overture_buffer == 0 and "overture" in datasets:
+            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
         overture_buffer = None
 
     # For OSM, also use a default buffer to avoid fringe effects
@@ -118,7 +181,8 @@ def fetch(
         )
 
     # Create bbox for OSM (potentially buffered)
-    if osm_buffer and osm_buffer > 0:
+    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
+    if osm_buffer is not None and osm_buffer > 0:
         osm_bbox = original_bbox.expand(osm_buffer)
         if "osm" in datasets:
             console.print(
@@ -127,13 +191,17 @@ def fetch(
             )
     else:
         osm_bbox = original_bbox
+        if osm_buffer == 0 and "osm" in datasets:
+            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
         osm_buffer = None
 
     if "overture" in datasets:
-        console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
+        # Name outputs based on dataset if provided
+        overture_prefix = f"{dataset_name}_overture" if dataset_name else "overture"
+        console.print("[blue]Fetching Overture segments...[/blue]")
         segments_path = ov_module.fetch_overture_segments(
             bbox=overture_bbox,
-            output_path=output_dir / "overture_segments.parquet",
+            output_path=output_dir / f"{overture_prefix}_segments.parquet",
             original_bbox=original_bbox,
             buffer_m=overture_buffer,
         )
@@ -142,14 +210,16 @@ def fetch(
         console.print("[blue]Fetching Overture connectors...[/blue]")
         connectors_path = ov_module.fetch_overture_connectors(
             bbox=overture_bbox,
-            output_path=output_dir / "overture_connectors.parquet",
+            output_path=output_dir / f"{overture_prefix}_connectors.parquet",
             original_bbox=original_bbox,
             buffer_m=overture_buffer,
         )
         console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
 
     if "osm" in datasets:
-        console.print(f"[blue]Fetching OSM data for bbox {bbox}...[/blue]")
+        # Name outputs based on dataset if provided
+        osm_name = f"{dataset_name}_osm" if dataset_name else "osm"
+        console.print("[blue]Fetching OSM data...[/blue]")
         segments_path, connectors_path = osm_module.fetch_osm_data(
             bbox=osm_bbox,
             output_dir=output_dir,
@@ -158,6 +228,7 @@ def fetch(
             keep_pbf=keep_pbf,
             original_bbox=original_bbox,
             buffer_m=osm_buffer,
+            name=osm_name,
         )
         console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
         console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
