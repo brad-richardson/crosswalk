@@ -108,9 +108,26 @@ def fetch(
         overture_bbox = original_bbox
         overture_buffer = None
 
-    # For OSM, use buffer if specified, otherwise use original bbox
-    osm_buffer = bbox_buffer if bbox_buffer and bbox_buffer > 0 else None
-    osm_bbox = original_bbox.expand(osm_buffer) if osm_buffer else original_bbox
+    # For OSM, also use a default buffer to avoid fringe effects
+    osm_buffer = bbox_buffer
+    if osm_buffer is None and "osm" in datasets:
+        osm_buffer = osm_module.DEFAULT_OSM_BUFFER_M
+        console.print(
+            f"[blue]Using default {osm_buffer}m buffer for OSM data "
+            f"(override with --bbox-buffer)[/blue]"
+        )
+
+    # Create bbox for OSM (potentially buffered)
+    if osm_buffer and osm_buffer > 0:
+        osm_bbox = original_bbox.expand(osm_buffer)
+        if "osm" in datasets:
+            console.print(
+                f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
+                f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
+            )
+    else:
+        osm_bbox = original_bbox
+        osm_buffer = None
 
     if "overture" in datasets:
         console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
@@ -133,17 +150,17 @@ def fetch(
 
     if "osm" in datasets:
         console.print(f"[blue]Fetching OSM data for bbox {bbox}...[/blue]")
-        if osm_buffer:
-            console.print(f"[blue]  Using {osm_buffer}m buffer for OSM data[/blue]")
         segments_path, connectors_path = osm_module.fetch_osm_data(
             bbox=osm_bbox,
             output_dir=output_dir,
             cache_dir=cache_dir,
             force_download=no_cache,
             keep_pbf=keep_pbf,
+            original_bbox=original_bbox,
+            buffer_m=osm_buffer,
         )
-        console.print(f"[green]Saved OSM segments to {segments_path}[/green]")
-        console.print(f"[green]Saved OSM connectors to {connectors_path}[/green]")
+        console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
+        console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
 
 
 @app.command()
