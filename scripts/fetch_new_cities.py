@@ -226,6 +226,102 @@ def fetch_ogc_features(
     return output_path
 
 
+def fetch_wfs(
+    url: str,
+    type_name: str,
+    output_path: Path,
+    id_prefix: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "WFS",
+    bbox: tuple | None = None,
+    max_features: int = 300000,
+) -> Path:
+    """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
+
+    Args:
+        url: WFS service base URL
+        type_name: Layer/type name to fetch (e.g., 'geoportal:segmento_logradouro')
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        max_features: Maximum features to fetch (pagination limit)
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+    import pandas as pd
+
+    logger.info(f"Fetching WFS: {url} / {type_name}")
+
+    all_features = []
+    start_index = 0
+    page_size = 5000
+
+    while True:
+        params = {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeName": type_name,
+            "outputFormat": "application/json",
+            "srsName": "EPSG:4326",
+            "count": page_size,
+            "startIndex": start_index,
+        }
+        # Note: bbox filtering disabled due to GeoServer coordinate order issues
+        # The full dataset will be downloaded and filtered locally if needed
+
+        resp = requests.get(url, params=params, timeout=120)
+        resp.raise_for_status()
+
+        data = resp.json()
+        features = data.get("features", [])
+
+        if not features:
+            break
+
+        all_features.extend(features)
+        logger.debug(f"Fetched {len(all_features)} features so far...")
+
+        # Check if we got all features or hit the limit
+        if len(features) < page_size or len(all_features) >= max_features:
+            break
+
+        start_index += len(features)
+
+    if not all_features:
+        logger.warning(f"No features returned from {url}")
+        return output_path
+
+    logger.info(f"Fetched {len(all_features)} total features")
+
+    # Convert to GeoDataFrame
+    gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
+
+    # Transform to Overture schema
+    gdf = _transform_download_data(
+        gdf,
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+    )
+
+    # Save to parquet
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    logger.success(f"Saved {len(gdf)} features to {output_path}")
+    return output_path
+
+
 def fetch_lta_geospatial(
     layer_id: str,
     output_path: Path,
@@ -527,6 +623,25 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
             # OGC API Features (modern REST API for geospatial data)
             return fetch_ogc_features(
                 url=url,
+                output_path=output_path,
+                id_prefix=id_prefix,
+                name_column=name_column,
+                class_column=class_column,
+                class_mapping=class_mapping,
+                source_name=config.display_name or dataset_name,
+                bbox=bbox,
+            )
+
+        elif source_type == "wfs":
+            # WFS (Web Feature Service)
+            # URL should be base WFS URL, type_name from where_clause field
+            type_name = config.source.where_clause if config.source else None
+            if not type_name:
+                logger.error(f"WFS source requires type_name in where_clause field")
+                return None
+            return fetch_wfs(
+                url=url,
+                type_name=type_name,
                 output_path=output_path,
                 id_prefix=id_prefix,
                 name_column=name_column,
