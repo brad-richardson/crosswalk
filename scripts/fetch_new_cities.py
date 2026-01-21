@@ -134,6 +134,98 @@ def _transform_download_data(
     return gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
 
+def fetch_ogc_features(
+    url: str,
+    output_path: Path,
+    id_prefix: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "OGC API Features",
+    bbox: tuple | None = None,
+    limit_per_page: int = 5000,
+) -> Path:
+    """Fetch geospatial data from an OGC API Features endpoint.
+
+    OGC API Features is a modern REST API standard for geospatial data that
+    returns GeoJSON. Supports pagination and bbox filtering.
+
+    Args:
+        url: OGC API Features items endpoint URL
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        limit_per_page: Number of features per API request
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+    import pandas as pd
+
+    logger.info(f"Fetching OGC API Features: {url}")
+
+    all_features = []
+    offset = 0
+
+    # Build base params
+    params = {"f": "json", "limit": limit_per_page}
+    if bbox:
+        params["bbox"] = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+
+    while True:
+        params["offset"] = offset
+
+        resp = requests.get(url, params=params, timeout=120)
+        resp.raise_for_status()
+
+        data = resp.json()
+        features = data.get("features", [])
+
+        if not features:
+            break
+
+        all_features.extend(features)
+        logger.debug(f"Fetched {len(all_features)} features so far...")
+
+        # Check for more results
+        # numberMatched tells us total, numberReturned tells us this batch
+        number_matched = data.get("numberMatched", 0)
+        if len(all_features) >= number_matched or len(features) < limit_per_page:
+            break
+
+        offset += len(features)
+
+    if not all_features:
+        logger.warning(f"No features returned from {url}")
+        return output_path
+
+    logger.info(f"Fetched {len(all_features)} total features")
+
+    # Convert to GeoDataFrame
+    gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
+
+    # Transform to Overture schema
+    gdf = _transform_download_data(
+        gdf,
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+    )
+
+    # Save to parquet
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    logger.success(f"Saved {len(gdf)} features to {output_path}")
+    return output_path
+
+
 def fetch_lta_geospatial(
     layer_id: str,
     output_path: Path,
@@ -429,6 +521,19 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
                 bbox_filter=bool(bbox),
                 api_key=api_key,
                 api_key_header=api_key_header,
+            )
+
+        elif source_type == "ogc_features":
+            # OGC API Features (modern REST API for geospatial data)
+            return fetch_ogc_features(
+                url=url,
+                output_path=output_path,
+                id_prefix=id_prefix,
+                name_column=name_column,
+                class_column=class_column,
+                class_mapping=class_mapping,
+                source_name=config.display_name or dataset_name,
+                bbox=bbox,
             )
 
         else:

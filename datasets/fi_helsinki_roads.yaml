@@ -1,20 +1,16 @@
 name: fi_helsinki_roads
-display_name: Digiroad Finland
+display_name: Digiroad Finland (Helsinki)
 type: road
-description: Road network from Finnish national Digiroad database
-# NOTE: URL broken as of Jan 2026 - Väylävirasto changed their download portal structure.
-# Data is available at https://aineistot.vayla.fi/digiroad but requires manual download.
-# WFS alternative: https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/wfs
+description: Road network from Finnish national Digiroad database (Helsinki area)
 source:
-  type: download
-  url: https://ava.vaylapilvi.fi/ava/Tie/Digiroad/Aineistojulkaisut/latest/DIGIROAD_K_KOKOMAA.gpkg.zip
-  file_format: gpkg
-  status: unavailable
+  type: ogc_features
+  url: https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1/collections/dr_tielinkki_toim_lk/items
+  portal_url: https://vayla.fi/en/transport-network/data/digiroad
 fetch:
   crs: EPSG:4326
   id_prefix: hel_road
-  name_column: TIENIMI_SU
-  class_column: TOIMINN_LK
+  name_column: tienimi_su
+  class_column: toiminn_lk
   bbox:
   - 24.8
   - 60.1
@@ -22,4 +18,4 @@ fetch:
   - 60.3
 classification:
   source_classification:
-    column: TOIMINN_LK
+    column: toiminn_lk
