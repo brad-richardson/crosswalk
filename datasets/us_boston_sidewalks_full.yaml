@@ -1,7 +1,0 @@
-name: us_boston_sidewalks_full
-display_name: Boston Sidewalks Full
-type: sidewalk
-source:
-  type: unknown
-fetch:
-  crs: EPSG:4326
