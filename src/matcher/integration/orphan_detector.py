@@ -21,10 +21,10 @@ from .provenance import ComponentStatus, EdgeSource
 
 
 def _get_endpoints(geom) -> list[Point]:
-    """Extract start and end points from a geometry.
+    """Extract start and end points from a LineString geometry.
 
     Args:
-        geom: LineString or MultiLineString geometry
+        geom: LineString geometry (MultiLineStrings filtered at ingest)
 
     Returns:
         List of Point objects for the endpoints
@@ -33,13 +33,8 @@ def _get_endpoints(geom) -> list[Point]:
         return []
 
     try:
-        if geom.geom_type == "MultiLineString":
-            first_part = geom.geoms[0]
-            last_part = geom.geoms[-1]
-            return [Point(first_part.coords[0]), Point(last_part.coords[-1])]
-        else:
-            coords = list(geom.coords)
-            return [Point(coords[0]), Point(coords[-1])]
+        coords = list(geom.coords)
+        return [Point(coords[0]), Point(coords[-1])]
     except Exception:
         return []
 
@@ -67,16 +62,12 @@ def compute_reference_coverage(
     if len(reference_edges) == 0:
         return None
 
-    # Extract all coordinates from the reference network
+    # Extract all coordinates from the reference network (LineStrings only)
     all_coords = []
     for geom in reference_edges.geometry:
         if geom is None or geom.is_empty:
             continue
-        if geom.geom_type == "MultiLineString":
-            for part in geom.geoms:
-                all_coords.extend(list(part.coords))
-        else:
-            all_coords.extend(list(geom.coords))
+        all_coords.extend(list(geom.coords))
 
     if len(all_coords) < 3:
         return None
@@ -390,18 +381,11 @@ def detect_orphans_by_proximity(
             min_distances.append(np.nan)
             continue
 
-        # Get endpoints (handle both LineString and MultiLineString)
+        # Get endpoints (LineStrings only, MultiLineStrings filtered at ingest)
         try:
-            if geom.geom_type == "MultiLineString":
-                # For MultiLineString, get first point of first part and last point of last part
-                first_part = geom.geoms[0]
-                last_part = geom.geoms[-1]
-                start_pt = Point(first_part.coords[0])
-                end_pt = Point(last_part.coords[-1])
-            else:
-                coords = list(geom.coords)
-                start_pt = Point(coords[0])
-                end_pt = Point(coords[-1])
+            coords = list(geom.coords)
+            start_pt = Point(coords[0])
+            end_pt = Point(coords[-1])
         except Exception:
             connected_mask.append(False)
             min_distances.append(np.nan)

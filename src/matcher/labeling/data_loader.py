@@ -22,6 +22,7 @@ from ..features.compute import (
 )
 from ..features.semantic import _extract_name_string
 from ..matching.rules import compute_match_score
+from ..utils import filter_to_linestrings
 
 logger = logging.getLogger(__name__)
 
@@ -279,31 +280,6 @@ def delete_cache(dataset_id: str) -> bool:
     return False
 
 
-def _filter_linestrings(gdf: gpd.GeoDataFrame, source_name: str) -> gpd.GeoDataFrame:
-    """Filter GeoDataFrame to only LineString geometries.
-
-    Args:
-        gdf: Input GeoDataFrame
-        source_name: Name for logging (e.g., "reference" or "target")
-
-    Returns:
-        Filtered GeoDataFrame with only LineString geometries
-    """
-    original_count = len(gdf)
-    mask = gdf.geometry.apply(lambda g: isinstance(g, LineString))
-    filtered = gdf[mask].copy()
-    excluded_count = original_count - len(filtered)
-
-    if excluded_count > 0:
-        logger.warning(
-            f"Excluded {excluded_count} non-LineString geometries from {source_name} "
-            f"({excluded_count}/{original_count} features). "
-            f"Sub-segment selection only supports LineString geometries."
-        )
-
-    return filtered
-
-
 def load_geodataframe(path: Path) -> gpd.GeoDataFrame:
     """Load a GeoDataFrame from parquet or other formats."""
     if path.suffix == ".parquet":
@@ -314,6 +290,9 @@ def load_geodataframe(path: Path) -> gpd.GeoDataFrame:
     # Ensure CRS is set (default to WGS84 if missing)
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
+
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    gdf = filter_to_linestrings(gdf, source_name=str(path.name))
 
     return gdf
 
@@ -345,13 +324,9 @@ def generate_scored_candidates(
     Returns:
         List of CandidatePairView objects sorted by confidence (REVIEW first)
     """
-    # Filter out non-LineString geometries (MultiLineString, etc.)
-    # Sub-segment selection only supports LineString
-    reference = _filter_linestrings(reference, "reference")
-    target = _filter_linestrings(target, "target")
-
+    # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
-        logger.warning("No valid LineString geometries after filtering")
+        logger.warning("No geometries in reference or target")
         return []
 
     # Project to metric CRS for accurate distances

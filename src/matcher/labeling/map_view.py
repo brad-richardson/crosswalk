@@ -1,7 +1,7 @@
 """Map visualization component using folium."""
 
 import folium
-from shapely.geometry import LineString, MultiLineString, mapping
+from shapely.geometry import LineString, mapping
 
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
@@ -231,7 +231,7 @@ def _add_geometry_layer(
     if dash_array:
         style["dashArray"] = dash_array
 
-    if isinstance(geometry, (LineString, MultiLineString)):
+    if isinstance(geometry, LineString):
         geojson = mapping(geometry)
         folium.GeoJson(
             geojson,
