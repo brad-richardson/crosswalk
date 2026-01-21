@@ -13,13 +13,13 @@ from shapely import wkt
 from shapely.geometry import LineString
 
 from ..blocking import generate_candidates
+from ..features.alignment import create_subline, linestring_alignment
 from ..features.compute import (
     compute_pair_features,
     precompute_topology_and_endpoints,
 )
 from ..features.semantic import _extract_name_string
 from ..matching.rules import compute_match_score
-from .subsegment import estimate_overlap_range
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ class CandidatePairView:
 
     ref_id: str
     target_id: str
-    ref_geometry: LineString
-    target_geometry: LineString
+    ref_geometry: LineString  # Full reference geometry (for context)
+    target_geometry: LineString  # Full target geometry (for context)
     ref_name: str | None
     target_name: str | None
     ref_class: str | None
@@ -44,9 +44,15 @@ class CandidatePairView:
     confidence: float
     score_breakdown: dict[str, float] = field(default_factory=dict)
     features: dict[str, float] = field(default_factory=dict)
-    # Sub-segment estimate - computed on-demand when viewing the pair
-    # None means not yet computed, dict contains the estimated ranges
-    estimated_subsegment: dict[str, float] | None = None
+    # Aligned/chopped geometries from the alignment algorithm
+    # These represent the portions of each line that actually overlap
+    ref_aligned_geometry: LineString | None = None
+    target_aligned_geometry: LineString | None = None
+    # Alignment fractions (0.0-1.0) showing where the overlap occurs on each line
+    ref_start_frac: float = 0.0
+    ref_end_frac: float = 1.0
+    target_start_frac: float = 0.0
+    target_end_frac: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for cache storage."""
@@ -63,6 +69,18 @@ class CandidatePairView:
             "confidence": self.confidence,
             "score_breakdown_json": json.dumps(self.score_breakdown),
             "features_json": json.dumps(self.features),
+            # Aligned geometries (may be None)
+            "ref_aligned_geometry_wkt": self.ref_aligned_geometry.wkt
+            if self.ref_aligned_geometry
+            else None,
+            "target_aligned_geometry_wkt": self.target_aligned_geometry.wkt
+            if self.target_aligned_geometry
+            else None,
+            # Alignment fractions
+            "ref_start_frac": self.ref_start_frac,
+            "ref_end_frac": self.ref_end_frac,
+            "target_start_frac": self.target_start_frac,
+            "target_end_frac": self.target_end_frac,
         }
 
     @classmethod
@@ -84,6 +102,10 @@ class CandidatePairView:
                 f"Available keys: {list(data.keys())}"
             )
 
+        # Parse aligned geometries (may be None in older caches)
+        ref_aligned_wkt = data.get("ref_aligned_geometry_wkt")
+        target_aligned_wkt = data.get("target_aligned_geometry_wkt")
+
         return cls(
             ref_id=data["ref_id"],
             target_id=data["target_id"],
@@ -97,8 +119,14 @@ class CandidatePairView:
             confidence=data["confidence"],
             score_breakdown=json.loads(data.get("score_breakdown_json", "{}")),
             features=json.loads(data.get("features_json", "{}")),
-            # Subsegment estimate is always computed on-demand, not cached
-            estimated_subsegment=None,
+            # Aligned geometries from cache
+            ref_aligned_geometry=wkt.loads(ref_aligned_wkt) if ref_aligned_wkt else None,
+            target_aligned_geometry=wkt.loads(target_aligned_wkt) if target_aligned_wkt else None,
+            # Alignment fractions (default to full segment for backward compatibility)
+            ref_start_frac=data.get("ref_start_frac", 0.0),
+            ref_end_frac=data.get("ref_end_frac", 1.0),
+            target_start_frac=data.get("target_start_frac", 0.0),
+            target_end_frac=data.get("target_end_frac", 1.0),
         )
 
 
@@ -387,7 +415,7 @@ def generate_scored_candidates(
         )
     )
 
-    logger.info(f"Computing features for {len(candidates)} candidates...")
+    logger.info(f"Computing alignment and features for {len(candidates)} candidates...")
     views = []
     for i, cand in enumerate(candidates):
         if i > 0 and i % 1000 == 0:
@@ -408,7 +436,12 @@ def generate_scored_candidates(
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
         target_class = target_row.get(target_class_column) if has_target_class else None
 
+        # Compute alignment between the two geometries (on projected coords)
+        # This finds where the two lines overlap
+        alignment = linestring_alignment(ref_proj_row.geometry, target_proj_row.geometry)
+
         # Compute all features using shared module (uses projected geometries)
+        # Pass alignment so features are computed on aligned sublines
         features = compute_pair_features(
             ref_geom=ref_proj_row.geometry,
             target_geom=target_proj_row.geometry,
@@ -419,6 +452,7 @@ def generate_scored_candidates(
             endpoint_features=target_endpoint_features.get(cand.target_idx),
             ref_topology=ref_topology_features.get(cand.ref_idx),
             target_topology=target_topology_features.get(cand.target_idx),
+            alignment=alignment,
         )
 
         # Compute confidence and decision using rule-based scoring
@@ -441,11 +475,20 @@ def generate_scored_candidates(
         else:
             decision = "no_match"
 
+        # Create aligned geometries in WGS84 for map display
+        # These show just the overlapping portions of each line
+        ref_aligned = create_subline(
+            ref_row.geometry, alignment.overture_start_frac, alignment.overture_end_frac
+        )
+        target_aligned = create_subline(
+            target_row.geometry, alignment.dataset_start_frac, alignment.dataset_end_frac
+        )
+
         views.append(
             CandidatePairView(
                 ref_id=str(cand.ref_id),
                 target_id=str(cand.target_id),
-                ref_geometry=ref_row.geometry,  # Use WGS84 for map display
+                ref_geometry=ref_row.geometry,  # Full geometry in WGS84 for context
                 target_geometry=target_row.geometry,
                 ref_name=ref_name,
                 target_name=target_name,
@@ -454,9 +497,15 @@ def generate_scored_candidates(
                 decision=decision,
                 confidence=confidence,
                 score_breakdown=score_breakdown,
-                features=features,  # Now includes all features including topology
-                # Defer subsegment estimation - computed on-demand when viewing
-                estimated_subsegment=None,
+                features=features,  # Now computed on aligned sublines
+                # Aligned geometries in WGS84 for display
+                ref_aligned_geometry=ref_aligned,
+                target_aligned_geometry=target_aligned,
+                # Alignment fractions
+                ref_start_frac=alignment.overture_start_frac,
+                ref_end_frac=alignment.overture_end_frac,
+                target_start_frac=alignment.dataset_start_frac,
+                target_end_frac=alignment.dataset_end_frac,
             )
         )
 
@@ -468,26 +517,6 @@ def generate_scored_candidates(
     views.sort(key=sort_key)
 
     return views
-
-
-def get_subsegment_estimate(pair: CandidatePairView) -> dict[str, float]:
-    """Get or compute subsegment estimate for a candidate pair.
-
-    Computes on-demand if not already cached.
-
-    Args:
-        pair: The candidate pair
-
-    Returns:
-        Dict with ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
-    """
-    if pair.estimated_subsegment is not None:
-        return pair.estimated_subsegment
-
-    # Compute and cache
-    estimated = estimate_overlap_range(pair.ref_geometry, pair.target_geometry)
-    pair.estimated_subsegment = estimated
-    return estimated
 
 
 def filter_candidates(

@@ -129,19 +129,16 @@ If you can't determine from the data or satellite whether a bike facility is pai
 
 ---
 
-## Future Enhancements
+## Automatic Alignment
 
-### Sub-segment Matching
+The labeling UI automatically computes alignment between segments using the matching pipeline's alignment algorithm. When segments only partially overlap:
 
-**Problem:** Whole-segment labeling can't capture cases where only a portion of each segment actually matches (e.g., segmentation mismatch, partial overlaps).
+- **Full geometry** (faded/dashed): Shown for context - the complete extent of each segment
+- **Aligned portion** (bright/solid): The overlapping portion that was actually matched
 
-**Solution:** The labeling UI now supports sub-segment selection:
-- Enable "Subsegment" checkbox to activate sub-segment mode
-- Estimate is auto-applied based on endpoint projection
-- Use sliders to fine-tune the matching portions (0-100% for each segment)
-- Labels store `ref_start_pct`, `ref_end_pct`, `target_start_pct`, `target_end_pct`
+This alignment is computed automatically when loading candidates - no manual adjustment needed. The map will show both visualizations when the alignment is partial (not 0-100% of both segments).
 
-**When to use:** When segments clearly represent the same road but have different extents. Specify which portion of each segment actually overlaps.
+Labels automatically store the alignment fractions (`ref_start_pct`, `ref_end_pct`, `target_start_pct`, `target_end_pct`) from the pipeline, ensuring consistency between feature computation and labeling.
 
 ---
 

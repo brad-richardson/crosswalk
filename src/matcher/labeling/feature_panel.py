@@ -211,181 +211,38 @@ def render_minimal_feature_panel(pair: CandidatePairView) -> None:
     )
 
 
-def render_subsegment_controls(
-    pair: CandidatePairView,
-    estimated_subsegment: dict[str, float] | None = None,
-) -> tuple[float, float, float, float, bool]:
-    """Render compact horizontal sub-segment selection bar.
+def render_alignment_info(pair: CandidatePairView) -> None:
+    """Render alignment coverage information for the pair.
+
+    Shows what percentage of each segment is aligned/matched. This is computed
+    automatically by the alignment algorithm - no manual adjustment needed.
 
     Args:
-        pair: The candidate pair being labeled
-        estimated_subsegment: Precomputed overlap estimate (optional)
-
-    Returns:
-        Tuple of (ref_start, ref_end, target_start, target_end, is_active)
-        where is_active indicates if sub-segment mode is enabled
+        pair: The candidate pair being displayed
     """
-    _init_subseg_state()
-    slider_key_suffix = f"_v{st.session_state.subseg_version}"
-
-    # Single row: checkbox + presets + sliders
-    cols = st.columns([1, 1, 1, 1, 1, 3, 3])
-
-    with cols[0]:
-        is_active = st.checkbox(
-            "Subsegment",
-            value=st.session_state.subseg_active,
-            key=f"subseg_toggle{slider_key_suffix}",
-            help="Label only portions of each segment",
-        )
-        st.session_state.subseg_active = is_active
-
-    if not is_active:
-        return (0.0, 1.0, 0.0, 1.0, False)
-
-    # Preset buttons
-    with cols[1]:
-        if estimated_subsegment and st.button("Estimate", help="Use estimated overlap"):
-            _set_subseg_values(
-                round(estimated_subsegment["ref_start_pct"] * 100),
-                round(estimated_subsegment["ref_end_pct"] * 100),
-                round(estimated_subsegment["target_start_pct"] * 100),
-                round(estimated_subsegment["target_end_pct"] * 100),
-            )
-            st.rerun()
-
-    with cols[2]:
-        if st.button("Full", help="Reset to 0-100%"):
-            _set_subseg_values(0, 100, 0, 100)
-            st.rerun()
-
-    with cols[3]:
-        if st.button("1st½", help="First 50%"):
-            _set_subseg_values(0, 50, 0, 50)
-            st.rerun()
-
-    with cols[4]:
-        if st.button("2nd½", help="Second 50%"):
-            _set_subseg_values(50, 100, 50, 100)
-            st.rerun()
-
-    # Reference slider
-    with cols[5]:
-        ref_start, ref_end = st.slider(
-            "Ref",
-            min_value=0,
-            max_value=100,
-            value=(st.session_state.subseg_ref_start, st.session_state.subseg_ref_end),
-            step=1,
-            format="%d%%",
-            key=f"ref_range_slider{slider_key_suffix}",
-        )
-        st.session_state.subseg_ref_start = ref_start
-        st.session_state.subseg_ref_end = ref_end
-
-    # Target slider
-    with cols[6]:
-        target_start, target_end = st.slider(
-            "Target",
-            min_value=0,
-            max_value=100,
-            value=(st.session_state.subseg_target_start, st.session_state.subseg_target_end),
-            step=1,
-            format="%d%%",
-            key=f"target_range_slider{slider_key_suffix}",
-        )
-        st.session_state.subseg_target_start = target_start
-        st.session_state.subseg_target_end = target_end
-
-    return (
-        ref_start / 100.0,
-        ref_end / 100.0,
-        target_start / 100.0,
-        target_end / 100.0,
-        True,
+    # Check if alignment is partial
+    is_partial = (
+        pair.ref_start_frac > 0.01
+        or pair.ref_end_frac < 0.99
+        or pair.target_start_frac > 0.01
+        or pair.target_end_frac < 0.99
     )
 
+    if not is_partial:
+        return  # Full alignment - nothing special to show
 
-def get_subseg_state(
-    estimated_subsegment: dict[str, float] | None = None,
-) -> tuple[float, float, float, float, bool]:
-    """Get current subsegment state values, auto-applying estimate if needed.
+    ref_coverage = pair.ref_end_frac - pair.ref_start_frac
+    target_coverage = pair.target_end_frac - pair.target_start_frac
 
-    This should be called before the map renders. It handles auto-apply logic
-    so the map shows correct values on the first render.
-
-    Args:
-        estimated_subsegment: Precomputed overlap estimate for auto-apply
-
-    Returns:
-        Tuple of (ref_start, ref_end, target_start, target_end, is_active)
-    """
-    _init_subseg_state()
-    is_active = st.session_state.subseg_active
-    if not is_active:
-        return (0.0, 1.0, 0.0, 1.0, False)
-
-    # Auto-apply estimate if active and values are at defaults (new pair)
-    values_at_defaults = (
-        st.session_state.subseg_ref_start == 0
-        and st.session_state.subseg_ref_end == 100
-        and st.session_state.subseg_target_start == 0
-        and st.session_state.subseg_target_end == 100
+    st.markdown(
+        f"""
+        <div style="background: #1E1E1E; border-radius: 4px; padding: 8px; margin: 4px 0; font-size: 12px;">
+            <div style="font-weight: bold; color: #888; margin-bottom: 4px;">Alignment Coverage</div>
+            <div style="display: flex; justify-content: space-between;">
+                <span style="color: #2196F3;">Reference: {ref_coverage * 100:.0f}% ({pair.ref_start_frac * 100:.0f}%-{pair.ref_end_frac * 100:.0f}%)</span>
+                <span style="color: #F44336;">Target: {target_coverage * 100:.0f}% ({pair.target_start_frac * 100:.0f}%-{pair.target_end_frac * 100:.0f}%)</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    if estimated_subsegment and values_at_defaults:
-        # Apply estimate immediately (no rerun needed, just update state)
-        st.session_state.subseg_ref_start = round(estimated_subsegment["ref_start_pct"] * 100)
-        st.session_state.subseg_ref_end = round(estimated_subsegment["ref_end_pct"] * 100)
-        st.session_state.subseg_target_start = round(estimated_subsegment["target_start_pct"] * 100)
-        st.session_state.subseg_target_end = round(estimated_subsegment["target_end_pct"] * 100)
-        st.session_state.subseg_version += 1
-
-    return (
-        st.session_state.subseg_ref_start / 100.0,
-        st.session_state.subseg_ref_end / 100.0,
-        st.session_state.subseg_target_start / 100.0,
-        st.session_state.subseg_target_end / 100.0,
-        True,
-    )
-
-
-def _init_subseg_state() -> None:
-    """Initialize session state for sub-segment selection."""
-    if "subseg_active" not in st.session_state:
-        st.session_state.subseg_active = False
-    if "subseg_version" not in st.session_state:
-        st.session_state.subseg_version = 0
-    if "subseg_ref_start" not in st.session_state:
-        st.session_state.subseg_ref_start = 0
-    if "subseg_ref_end" not in st.session_state:
-        st.session_state.subseg_ref_end = 100
-    if "subseg_target_start" not in st.session_state:
-        st.session_state.subseg_target_start = 0
-    if "subseg_target_end" not in st.session_state:
-        st.session_state.subseg_target_end = 100
-
-
-def _set_subseg_values(ref_start: int, ref_end: int, target_start: int, target_end: int) -> None:
-    """Set subsegment values and increment version to force slider update."""
-    st.session_state.subseg_ref_start = ref_start
-    st.session_state.subseg_ref_end = ref_end
-    st.session_state.subseg_target_start = target_start
-    st.session_state.subseg_target_end = target_end
-    st.session_state.subseg_version += 1
-
-
-def reset_subsegment_state() -> None:
-    """Reset sub-segment slider values for a new pair.
-
-    Preserves the toggle state so users can keep labeling in subsegment mode.
-    The slider values reset to defaults - if subsegment mode is active,
-    the estimate will be auto-applied on the next render.
-    """
-    # Ensure state is initialized before modifying
-    _init_subseg_state()
-    # Preserve subseg_active - don't reset it
-    st.session_state.subseg_ref_start = 0
-    st.session_state.subseg_ref_end = 100
-    st.session_state.subseg_target_start = 0
-    st.session_state.subseg_target_end = 100
-    st.session_state.subseg_version = st.session_state.get("subseg_version", 0) + 1

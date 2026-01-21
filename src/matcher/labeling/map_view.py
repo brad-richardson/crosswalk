@@ -4,11 +4,12 @@ import folium
 from shapely.geometry import LineString, MultiLineString, mapping
 
 from .data_loader import CandidatePairView
-from .subsegment import extract_subsegment
 
-# Colors for visualization
-REFERENCE_COLOR = "#2196F3"  # Blue
-TARGET_COLOR = "#F44336"  # Red
+# Colors for visualization - aligned portions are bright, full geometries are faded
+REFERENCE_COLOR = "#2196F3"  # Blue (aligned/matched portion)
+REFERENCE_FADED_COLOR = "#90CAF9"  # Light blue (full geometry context)
+TARGET_COLOR = "#F44336"  # Red (aligned/matched portion)
+TARGET_FADED_COLOR = "#FFCDD2"  # Light red (full geometry context)
 REFERENCE_WEIGHT = 5
 TARGET_WEIGHT = 4
 
@@ -39,11 +40,16 @@ def create_comparison_map(
     height: int = 500,
     tile_layer: str = "Light",
 ) -> folium.Map:
-    """Create a folium map showing reference and target geometries.
+    """Create a folium map showing reference and target geometries with alignment.
+
+    Shows both the full geometries (faded, for context) and the aligned/matched
+    portions (bright, solid) to help labelers understand which parts of each
+    segment correspond to each other.
 
     Args:
         pair: The candidate pair to display
         height: Map height in pixels
+        tile_layer: Map tile layer name
 
     Returns:
         Configured folium Map object
@@ -83,42 +89,125 @@ def create_comparison_map(
         ]
     )
 
-    # Add reference geometry (blue, solid)
-    ref_popup = _create_popup(
-        "Reference (Overture)",
-        pair.ref_id,
-        pair.ref_name,
-        pair.ref_class,
+    # Check if we have aligned geometries (non-trivial alignment)
+    has_alignment = (
+        pair.ref_aligned_geometry is not None
+        and pair.target_aligned_geometry is not None
+        and not pair.ref_aligned_geometry.is_empty
+        and not pair.target_aligned_geometry.is_empty
     )
 
-    _add_geometry_layer(
-        m,
-        pair.ref_geometry,
-        color=REFERENCE_COLOR,
-        weight=REFERENCE_WEIGHT,
-        dash_array=None,
-        popup=ref_popup,
+    # Check if alignment is partial (not the full segment)
+    is_partial_alignment = has_alignment and (
+        pair.ref_start_frac > 0.01
+        or pair.ref_end_frac < 0.99
+        or pair.target_start_frac > 0.01
+        or pair.target_end_frac < 0.99
     )
 
-    # Add target geometry (red, dashed)
-    target_popup = _create_popup(
-        "Target (Local)",
-        pair.target_id,
-        pair.target_name,
-        pair.target_class,
-    )
+    if has_alignment and is_partial_alignment:
+        # Show full geometries faded (for context)
+        ref_full_popup = _create_popup(
+            "Reference - Full (context)",
+            pair.ref_id,
+            pair.ref_name,
+            pair.ref_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.ref_geometry,
+            color=REFERENCE_FADED_COLOR,
+            weight=REFERENCE_WEIGHT - 2,
+            dash_array="5, 5",
+            popup=ref_full_popup,
+            opacity=0.5,
+        )
 
-    _add_geometry_layer(
-        m,
-        pair.target_geometry,
-        color=TARGET_COLOR,
-        weight=TARGET_WEIGHT,
-        dash_array="10, 5",
-        popup=target_popup,
-    )
+        target_full_popup = _create_popup(
+            "Target - Full (context)",
+            pair.target_id,
+            pair.target_name,
+            pair.target_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.target_geometry,
+            color=TARGET_FADED_COLOR,
+            weight=TARGET_WEIGHT - 2,
+            dash_array="5, 5",
+            popup=target_full_popup,
+            opacity=0.5,
+        )
 
-    # Add legend
-    _add_legend(m)
+        # Show aligned portions bright (the actual match)
+        ref_pct = f"{pair.ref_start_frac * 100:.0f}%-{pair.ref_end_frac * 100:.0f}%"
+        ref_aligned_popup = _create_popup(
+            f"Reference - Aligned ({ref_pct})",
+            pair.ref_id,
+            pair.ref_name,
+            pair.ref_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.ref_aligned_geometry,
+            color=REFERENCE_COLOR,
+            weight=REFERENCE_WEIGHT,
+            dash_array=None,
+            popup=ref_aligned_popup,
+        )
+
+        target_pct = f"{pair.target_start_frac * 100:.0f}%-{pair.target_end_frac * 100:.0f}%"
+        target_aligned_popup = _create_popup(
+            f"Target - Aligned ({target_pct})",
+            pair.target_id,
+            pair.target_name,
+            pair.target_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.target_aligned_geometry,
+            color=TARGET_COLOR,
+            weight=TARGET_WEIGHT,
+            dash_array=None,
+            popup=target_aligned_popup,
+        )
+
+        # Add alignment legend
+        _add_alignment_legend(m)
+    else:
+        # No partial alignment - show full geometries normally
+        ref_popup = _create_popup(
+            "Reference (Overture)",
+            pair.ref_id,
+            pair.ref_name,
+            pair.ref_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.ref_geometry,
+            color=REFERENCE_COLOR,
+            weight=REFERENCE_WEIGHT,
+            dash_array=None,
+            popup=ref_popup,
+        )
+
+        target_popup = _create_popup(
+            "Target (Local)",
+            pair.target_id,
+            pair.target_name,
+            pair.target_class,
+        )
+        _add_geometry_layer(
+            m,
+            pair.target_geometry,
+            color=TARGET_COLOR,
+            weight=TARGET_WEIGHT,
+            dash_array="10, 5",
+            popup=target_popup,
+        )
+
+        # Add simple legend
+        _add_legend(m)
 
     return m
 
@@ -130,12 +219,13 @@ def _add_geometry_layer(
     weight: int,
     dash_array: str | None,
     popup: str,
+    opacity: float = 0.9,
 ) -> None:
     """Add a geometry to the map."""
     style = {
         "color": color,
         "weight": weight,
-        "opacity": 0.9,
+        "opacity": opacity,
     }
     if dash_array:
         style["dashArray"] = dash_array
@@ -200,6 +290,43 @@ def _add_legend(m: folium.Map) -> None:
                 vertical-align: middle;
             "></span>
             <span style="vertical-align: middle; margin-left: 5px;">Target (Local)</span>
+        </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+
+def _add_alignment_legend(m: folium.Map) -> None:
+    """Add a legend showing aligned vs full geometry styles."""
+    legend_html = """
+    <div style="
+        position: fixed;
+        bottom: 30px;
+        left: 10px;
+        z-index: 1000;
+        background-color: white;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #ccc;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+    ">
+        <div style="font-weight: bold; margin-bottom: 5px;">Alignment View</div>
+        <div style="margin-bottom: 3px;">
+            <span style="display: inline-block; width: 30px; height: 4px; background: #2196F3; vertical-align: middle;"></span>
+            <span style="vertical-align: middle; margin-left: 5px;">Reference (aligned)</span>
+        </div>
+        <div style="margin-bottom: 3px;">
+            <span style="display: inline-block; width: 30px; height: 2px; background: #90CAF9; border-style: dashed; vertical-align: middle;"></span>
+            <span style="vertical-align: middle; margin-left: 5px;">Reference (full)</span>
+        </div>
+        <div style="margin-bottom: 3px;">
+            <span style="display: inline-block; width: 30px; height: 4px; background: #F44336; vertical-align: middle;"></span>
+            <span style="vertical-align: middle; margin-left: 5px;">Target (aligned)</span>
+        </div>
+        <div>
+            <span style="display: inline-block; width: 30px; height: 2px; background: #FFCDD2; border-style: dashed; vertical-align: middle;"></span>
+            <span style="vertical-align: middle; margin-left: 5px;">Target (full)</span>
         </div>
     </div>
     """
@@ -329,223 +456,3 @@ def create_multi_reference_map(
     m.get_root().html.add_child(folium.Element(legend_html))
 
     return m
-
-
-# Colors for sub-segment visualization
-SELECTED_REF_COLOR = "#2196F3"  # Bright blue for selected reference
-UNSELECTED_REF_COLOR = "#90CAF9"  # Light blue for unselected
-SELECTED_TARGET_COLOR = "#F44336"  # Bright red for selected target
-UNSELECTED_TARGET_COLOR = "#FFCDD2"  # Light red for unselected
-
-
-def create_subsegment_map(
-    pair: CandidatePairView,
-    ref_range: tuple[float, float],
-    target_range: tuple[float, float],
-    tile_layer: str = "Light",
-) -> folium.Map:
-    """Create a map showing reference and target with sub-segment highlighting.
-
-    Args:
-        pair: The candidate pair to display
-        ref_range: (start_pct, end_pct) for reference segment
-        target_range: (start_pct, end_pct) for target segment
-        tile_layer: Map tile layer name
-
-    Returns:
-        Configured folium Map object with sub-segment visualization
-    """
-    # Calculate bounds for auto-zoom
-    ref_bounds = pair.ref_geometry.bounds
-    target_bounds = pair.target_geometry.bounds
-
-    minx = min(ref_bounds[0], target_bounds[0])
-    miny = min(ref_bounds[1], target_bounds[1])
-    maxx = max(ref_bounds[2], target_bounds[2])
-    maxy = max(ref_bounds[3], target_bounds[3])
-
-    # Add padding (10%)
-    padx = (maxx - minx) * 0.1
-    pady = (maxy - miny) * 0.1
-
-    # Create map centered on the bounds
-    center_lat = (miny + maxy) / 2
-    center_lon = (minx + maxx) / 2
-
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        tiles=None,
-        zoom_start=16,
-        max_zoom=21,
-    )
-
-    # Add selected tile layer
-    _add_tile_layer(m, tile_layer)
-
-    # Fit bounds
-    m.fit_bounds(
-        [
-            [miny - pady, minx - padx],
-            [maxy + pady, maxx + padx],
-        ]
-    )
-
-    ref_start, ref_end = ref_range
-    target_start, target_end = target_range
-
-    # Add reference geometry portions
-    _add_subsegment_layers(
-        m,
-        pair.ref_geometry,
-        ref_start,
-        ref_end,
-        selected_color=SELECTED_REF_COLOR,
-        unselected_color=UNSELECTED_REF_COLOR,
-        weight=REFERENCE_WEIGHT,
-        label="Reference",
-        segment_id=pair.ref_id,
-        name=pair.ref_name,
-        road_class=pair.ref_class,
-    )
-
-    # Add target geometry portions
-    _add_subsegment_layers(
-        m,
-        pair.target_geometry,
-        target_start,
-        target_end,
-        selected_color=SELECTED_TARGET_COLOR,
-        unselected_color=UNSELECTED_TARGET_COLOR,
-        weight=TARGET_WEIGHT,
-        label="Target",
-        segment_id=pair.target_id,
-        name=pair.target_name,
-        road_class=pair.target_class,
-    )
-
-    # Add legend for sub-segment mode
-    _add_subsegment_legend(m)
-
-    return m
-
-
-def _add_subsegment_layers(
-    m: folium.Map,
-    geometry: LineString,
-    start_pct: float,
-    end_pct: float,
-    selected_color: str,
-    unselected_color: str,
-    weight: int,
-    label: str,
-    segment_id: str,
-    name: str | None,
-    road_class: str | None,
-) -> None:
-    """Add geometry layers split into selected and unselected portions.
-
-    Args:
-        m: Folium map to add layers to
-        geometry: Full LineString geometry
-        start_pct: Start of selected portion (0.0-1.0)
-        end_pct: End of selected portion (0.0-1.0)
-        selected_color: Color for selected portion
-        unselected_color: Color for unselected portions
-        weight: Line weight
-        label: Layer label (Reference or Target)
-        segment_id: Segment ID for popup
-        name: Segment name for popup
-        road_class: Road class for popup
-    """
-    # Handle edge cases
-    start_pct = max(0.0, min(1.0, start_pct))
-    end_pct = max(0.0, min(1.0, end_pct))
-    if start_pct >= end_pct:
-        start_pct, end_pct = 0.0, 1.0
-
-    # Extract and add portions
-    # Note: extract_subsegment raises TypeError if geometry is not LineString,
-    # but non-LineStrings should be filtered out during data loading
-
-    # Before selected portion (if any)
-    if start_pct > 0.001:
-        before = extract_subsegment(geometry, 0.0, start_pct)
-        if before.length > 0:
-            popup = _create_popup(f"{label} (unselected)", segment_id, name, road_class)
-            _add_geometry_layer(
-                m,
-                before,
-                color=unselected_color,
-                weight=weight - 1,
-                dash_array="5, 5",
-                popup=popup,
-            )
-
-    # Selected portion
-    selected = extract_subsegment(geometry, start_pct, end_pct)
-    if selected.length > 0:
-        popup = _create_popup(
-            f"{label} (SELECTED: {start_pct * 100:.0f}%-{end_pct * 100:.0f}%)",
-            segment_id,
-            name,
-            road_class,
-        )
-        _add_geometry_layer(
-            m,
-            selected,
-            color=selected_color,
-            weight=weight + 1,
-            dash_array=None,
-            popup=popup,
-        )
-
-    # After selected portion (if any)
-    if end_pct < 0.999:
-        after = extract_subsegment(geometry, end_pct, 1.0)
-        if after.length > 0:
-            popup = _create_popup(f"{label} (unselected)", segment_id, name, road_class)
-            _add_geometry_layer(
-                m,
-                after,
-                color=unselected_color,
-                weight=weight - 1,
-                dash_array="5, 5",
-                popup=popup,
-            )
-
-
-def _add_subsegment_legend(m: folium.Map) -> None:
-    """Add a legend for sub-segment mode."""
-    legend_html = """
-    <div style="
-        position: fixed;
-        bottom: 30px;
-        left: 10px;
-        z-index: 1000;
-        background-color: white;
-        padding: 10px;
-        border-radius: 5px;
-        border: 1px solid #ccc;
-        font-family: Arial, sans-serif;
-        font-size: 12px;
-    ">
-        <div style="font-weight: bold; margin-bottom: 5px;">Sub-segment Mode</div>
-        <div style="margin-bottom: 3px;">
-            <span style="display: inline-block; width: 30px; height: 4px; background: #2196F3; vertical-align: middle;"></span>
-            <span style="vertical-align: middle; margin-left: 5px;">Reference (selected)</span>
-        </div>
-        <div style="margin-bottom: 3px;">
-            <span style="display: inline-block; width: 30px; height: 2px; background: #90CAF9; border-style: dashed; vertical-align: middle;"></span>
-            <span style="vertical-align: middle; margin-left: 5px;">Reference (excluded)</span>
-        </div>
-        <div style="margin-bottom: 3px;">
-            <span style="display: inline-block; width: 30px; height: 4px; background: #F44336; vertical-align: middle;"></span>
-            <span style="vertical-align: middle; margin-left: 5px;">Target (selected)</span>
-        </div>
-        <div>
-            <span style="display: inline-block; width: 30px; height: 2px; background: #FFCDD2; border-style: dashed; vertical-align: middle;"></span>
-            <span style="vertical-align: middle; margin-left: 5px;">Target (excluded)</span>
-        </div>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
