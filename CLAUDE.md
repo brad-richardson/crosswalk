@@ -307,6 +307,96 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
 
 **Note:** `ml.py` imports `FEATURE_COLUMNS` from `config.py`, so no separate update needed there.
 
+## Feature Computation Architecture
+
+Understanding the feature computation paths is critical for preventing training/inference skew.
+
+### Single Source of Truth
+
+```
+config.py::FEATURE_COLUMNS (44 features)
+         │
+         ├─► compute.py::compute_pair_features()  ◄── AUTHORITATIVE computation
+         │           │
+         │           ├─► ml.py::_compute_single_feature() (inference)
+         │           │
+         │           └─► labeling UI (training data generation)
+         │
+         └─► label_store.py::LABEL_COLUMNS (storage schema)
+```
+
+### Computation Paths
+
+**Path 1: ML Inference (scoring candidates)**
+```
+ml.py::score_candidates()
+    │
+    ├─► Pre-compute endpoint features: compute_endpoint_features()
+    ├─► Pre-compute topology features: compute_all_topology()
+    ├─► Pre-compute graphlet features: precompute_graphlet_features()
+    ├─► Pre-compute alignments: compute_alignment_batch()
+    │
+    └─► Parallel workers call _compute_single_feature()
+            │
+            └─► compute_pair_features(..., endpoint_features=pre_computed, ...)
+```
+
+**Path 2: Labeling UI (training data generation)**
+```
+labeling UI
+    │
+    └─► compute_pair_features() directly
+            │
+            └─► LabelStore.add(features=computed_features)
+```
+
+**Path 3: Training (loading labels)**
+```
+ml.py::train()
+    │
+    └─► LabelStore.load_all()
+            │
+            └─► Features already stored in CSV (from labeling)
+```
+
+### Why Pre-computation Matters
+
+The ML scorer pre-computes certain features **before** parallelization for efficiency:
+
+| Feature Type | Pre-computed? | Why |
+|--------------|---------------|-----|
+| Endpoint proximity | Yes | Requires spatial index over all segments |
+| Topology (degrees) | Yes | Requires Union-Find over full network |
+| Graphlet features | Yes | Requires building road graph |
+| Alignments | Yes | Expensive geometry operations |
+| Geometric/semantic | No | Computed per-pair in workers |
+
+**Critical invariant**: Pre-computed features must produce the same values as direct computation. This is tested in `tests/unit/test_ml_pipeline_consistency.py`.
+
+### Imputation Consistency
+
+Missing feature values are imputed using medians computed from **training data only**:
+
+```python
+# During training (ml.py::train)
+for feat in features:
+    median = np.nanmedian(X_train[:, feat_idx])  # Training data only!
+    self.feature_medians[feat] = median
+
+# During inference (ml.py::_impute_missing)
+fill_value = self.feature_medians.get(feat_name, 0.0)  # Uses stored median
+```
+
+**Risk**: If a new feature is added but not in `feature_medians`, inference falls back to 0.0, which may not be appropriate. This is tested in `tests/unit/test_ml_pipeline_consistency.py`.
+
+### Test Coverage for Consistency
+
+| Test File | What It Catches |
+|-----------|----------------|
+| `test_label_store.py` | Features computed but not saved to labels |
+| `test_feature_consistency.py` | Error defaults, naming conventions |
+| `test_ml_pipeline_consistency.py` | Pre-computation vs direct computation, imputation consistency |
+
 ## Change Tracking
 
 ### Before/After Comparison for PRs
