@@ -88,7 +88,12 @@ def main():
             ["Orphans", "Merged Edges"],
             index=0 if session.current_view == "orphans" else 1,
         )
-        session.current_view = "orphans" if view == "Orphans" else "merged"
+        new_view = "orphans" if view == "Orphans" else "merged"
+        if new_view != session.current_view:
+            session.current_view = new_view
+            # Reset index and clear click state when view changes
+            session.current_index = 0
+            st.session_state.pop("last_processed_click", None)
 
     # Load data
     integration_path = Path(integration_dir)
@@ -199,7 +204,12 @@ def main():
                 net_new_edges=net_new_edges,
                 selected_edge_id=selected_id,
             )
-            map_data = st_folium(m, width=None, height=500, returned_objects=["last_clicked"])
+            # Use a stable key based on view type to reduce unnecessary map recreation
+            # The key changes when we switch views, but stays stable during navigation
+            map_key = f"qa_map_{session.current_view}"
+            map_data = st_folium(
+                m, width=None, height=500, returned_objects=["last_clicked"], key=map_key
+            )
 
             # Handle map clicks - find nearest edge and select it
             if map_data and map_data.get("last_clicked"):
@@ -210,8 +220,6 @@ def main():
                 # Only process if this is a new click (not the same as last processed)
                 last_click = st.session_state.get("last_processed_click")
                 if click_key != last_click:
-                    st.session_state.last_processed_click = click_key
-
                     # Find nearest edge in display_edges
                     from shapely.geometry import Point
 
@@ -228,19 +236,30 @@ def main():
 
                     # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
                     if nearest_pos is not None and min_dist < 0.001:
+                        # Always update the processed click to prevent re-processing
+                        st.session_state.last_processed_click = click_key
                         if nearest_pos != session.current_index:
                             session.current_index = nearest_pos
                             st.rerun()
+                    else:
+                        # Click was not near any edge - still update to prevent re-processing
+                        st.session_state.last_processed_click = click_key
 
             # Navigation controls (below map)
             col_prev, col_idx, col_next = st.columns([1, 2, 1])
 
+            # Check if at boundaries for navigation feedback
+            at_start = session.current_index == 0
+            at_end = session.current_index >= len(display_edges) - 1
+
             with col_prev:
-                if st.button("← Previous"):
+                if st.button("← Previous", disabled=at_start):
                     session.current_index = max(0, session.current_index - 1)
                     st.rerun()
 
             with col_idx:
+                # Show position indicator with total count
+                st.caption(f"Edge {session.current_index + 1} of {len(display_edges)}")
                 new_index = st.number_input(
                     "Index",
                     min_value=0,
@@ -254,9 +273,13 @@ def main():
                     st.rerun()
 
             with col_next:
-                if st.button("Next →"):
+                if st.button("Next →", disabled=at_end):
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)
                     st.rerun()
+
+            # Show end of list indicator
+            if at_end:
+                st.info("📍 Last edge in filtered list. Apply different filters to see more.")
 
             # Decision buttons and edge details in right panel
             with col_details:
@@ -355,6 +378,9 @@ def main():
                     )
                     if new_show_reviewed != session.show_reviewed:
                         session.show_reviewed = new_show_reviewed
+                        # Reset index and clear click state when filter changes
+                        session.current_index = 0
+                        st.session_state.pop("last_processed_click", None)
                         st.rerun()
 
                     if is_orphan:
@@ -367,6 +393,9 @@ def main():
                         new_priority = None if priority_filter == "All" else priority_filter.lower()
                         if new_priority != session.filter_by_priority:
                             session.filter_by_priority = new_priority
+                            # Reset index and clear click state when filter changes
+                            session.current_index = 0
+                            st.session_state.pop("last_processed_click", None)
                             st.rerun()
 
                         if (
@@ -386,6 +415,9 @@ def main():
                             )
                             if new_component != session.filter_by_component:
                                 session.filter_by_component = new_component
+                                # Reset index and clear click state when filter changes
+                                session.current_index = 0
+                                st.session_state.pop("last_processed_click", None)
                                 st.rerun()
                     else:
                         if edges is not None and len(edges) > 0:
@@ -399,6 +431,9 @@ def main():
                             new_source = None if dataset_filter == "All" else dataset_filter
                             if new_source != session.filter_by_source:
                                 session.filter_by_source = new_source
+                                # Reset index and clear click state when filter changes
+                                session.current_index = 0
+                                st.session_state.pop("last_processed_click", None)
                                 st.rerun()
 
                 # Statistics in expander
