@@ -1271,6 +1271,478 @@ def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
     return features
 
 
+def build_connector_graph(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    connectors_column: str = "connectors",
+    tolerance_m: float = 5.0,
+) -> tuple["nx.Graph", dict[str, list[tuple[float, int]]], dict[int, np.ndarray]]:
+    """Build NetworkX graph from Overture segments using explicit connector data.
+
+    Unlike build_inferred_graph() which clusters endpoints, this function uses
+    explicit connector positions from Overture data. Each connector becomes a
+    node, and segments connect their connectors.
+
+    This enables alignment-aware graphlet similarity: we can lookup the nearest
+    connector to any position along a segment.
+
+    Args:
+        gdf: GeoDataFrame with Overture segments containing connectors column
+        id_column: Column name for segment IDs
+        connectors_column: Column name for connectors array (each element has 'at' and 'connector_id')
+        tolerance_m: Distance for clustering connectors at same physical location (meters)
+
+    Returns:
+        G: NetworkX graph where nodes=connectors, edges=segment connections
+        seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
+        node_features: Dict mapping node_id -> graphlet feature vector
+    """
+    import networkx as nx
+
+    if gdf.empty:
+        return nx.Graph(), {}, {}
+
+    t_start = time.perf_counter()
+    logger.info(f"[graphlet-connector] Building connector graph from {len(gdf)} segments")
+
+    # Check if connectors column exists
+    if connectors_column not in gdf.columns:
+        logger.info(
+            f"[graphlet-connector] No '{connectors_column}' column found, "
+            "inferring connectivity from spatial proximity"
+        )
+        # Use the new inference function that detects mid-segment crossings
+        return build_inferred_connector_graph(gdf, id_column, tolerance_m)
+
+    # Build mapping from connector_id -> node_id
+    # First pass: collect all unique connector IDs
+    connector_to_node: dict[str, int] = {}
+    node_counter = 0
+
+    segment_ids_arr = gdf[id_column].astype(str).values
+
+    for connectors in gdf[connectors_column].values:
+        if connectors is None:
+            continue
+        for conn in connectors:
+            if isinstance(conn, dict):
+                conn_id = conn.get("connector_id")
+                if conn_id and conn_id not in connector_to_node:
+                    connector_to_node[conn_id] = node_counter
+                    node_counter += 1
+
+    logger.debug(f"[graphlet-connector] Found {node_counter} unique connectors")
+
+    # Build graph and segment->connectors mapping
+    G = nx.Graph()
+    seg_to_connectors: dict[str, list[tuple[float, int]]] = {}
+
+    for seg_idx, connectors in enumerate(gdf[connectors_column].values):
+        seg_id = segment_ids_arr[seg_idx]
+        if connectors is None or len(connectors) == 0:
+            seg_to_connectors[seg_id] = []
+            continue
+
+        # Extract connector positions for this segment
+        segment_connectors = []
+        for conn in connectors:
+            if isinstance(conn, dict):
+                at_pos = conn.get("at", 0.0)
+                conn_id = conn.get("connector_id")
+                if conn_id and conn_id in connector_to_node:
+                    node_id = connector_to_node[conn_id]
+                    G.add_node(node_id)
+                    segment_connectors.append((at_pos, node_id))
+
+        # Sort by position along segment
+        segment_connectors.sort(key=lambda x: x[0])
+        seg_to_connectors[seg_id] = segment_connectors
+
+        # Add edges between consecutive connectors on this segment
+        for i in range(len(segment_connectors) - 1):
+            _, node_a = segment_connectors[i]
+            _, node_b = segment_connectors[i + 1]
+            if node_a != node_b:
+                G.add_edge(node_a, node_b, segment_id=seg_id)
+
+    # Compute graphlet features for all nodes
+    t0 = time.perf_counter()
+    node_features = compute_road_graphlet_features(G)
+    logger.debug(f"[graphlet-connector] Computed features in {time.perf_counter() - t0:.2f}s")
+
+    logger.info(
+        f"[graphlet-connector] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"in {time.perf_counter() - t_start:.2f}s"
+    )
+
+    return G, seg_to_connectors, node_features
+
+
+def _build_inferred_graph_with_features(
+    gdf: gpd.GeoDataFrame,
+    id_column: str,
+    tolerance_m: float,
+) -> tuple["nx.Graph", dict[str, int], dict[str, int], dict[int, np.ndarray]]:
+    """Helper: build inferred graph and compute features in one step."""
+    G, seg_to_start, seg_to_end = build_inferred_graph(gdf, id_column, tolerance_m)
+    node_features = compute_road_graphlet_features(G)
+    return G, seg_to_start, seg_to_end, node_features
+
+
+def build_inferred_connector_graph(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    tolerance_m: float = 5.0,
+) -> tuple["nx.Graph", dict[str, list[tuple[float, int]]], dict[int, np.ndarray]]:
+    """Build connector graph by inferring connectivity from spatial proximity.
+
+    Unlike build_inferred_graph() which only uses endpoints, this function
+    detects mid-segment crossings where two segments pass close to each other.
+    This creates "virtual connectors" at those positions, enabling alignment-aware
+    graphlet comparison for spaghetti geometry.
+
+    Algorithm:
+    1. Extract all segment endpoints
+    2. Find segment pairs that are spatially close (using STRtree)
+    3. For each close pair, find where they're closest and create virtual connectors
+    4. Cluster all connection points (endpoints + virtual) using Union-Find
+    5. Build graph with all connectors
+
+    Args:
+        gdf: GeoDataFrame with LineString geometries
+        id_column: Column name for segment IDs
+        tolerance_m: Distance within which segments are considered connected (meters)
+
+    Returns:
+        G: NetworkX graph where nodes=connection points, edges=segment portions
+        seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
+        node_features: Dict mapping node_id -> graphlet feature vector
+    """
+    import networkx as nx
+    from shapely import STRtree
+    from shapely.ops import nearest_points
+
+    if gdf.empty:
+        return nx.Graph(), {}, {}
+
+    t_start = time.perf_counter()
+    logger.info(f"[graphlet-infer] Inferring connector graph from {len(gdf)} segments")
+
+    # Project to local CRS if in geographic coordinates
+    work_gdf = gdf
+    if gdf.crs is not None and gdf.crs.is_geographic:
+        centroid = gdf.geometry.union_all().centroid
+        utm_zone = int((centroid.x + 180) / 6) + 1
+        hemisphere = "north" if centroid.y >= 0 else "south"
+        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+        work_gdf = gdf.to_crs(epsg=epsg)
+        logger.debug(f"[graphlet-infer] Projected to EPSG:{epsg}")
+
+    geometries = work_gdf.geometry.values
+    segment_ids = work_gdf[id_column].astype(str).values
+
+    # Collect all connection points: (seg_id, seg_idx, at_position, x, y)
+    connection_points = []
+
+    # Step 1: Add endpoints for all segments
+    for seg_idx, geom in enumerate(geometries):
+        if geom is None or geom.is_empty:
+            continue
+        seg_id = segment_ids[seg_idx]
+
+        # Handle MultiLineString by using first/last parts
+        if geom.geom_type == "MultiLineString":
+            if len(geom.geoms) == 0:
+                continue
+            start_coords = geom.geoms[0].coords[0]
+            end_coords = geom.geoms[-1].coords[-1]
+        else:
+            coords = list(geom.coords)
+            start_coords = coords[0]
+            end_coords = coords[-1]
+
+        # Start point
+        connection_points.append((seg_id, seg_idx, 0.0, start_coords[0], start_coords[1]))
+        # End point
+        connection_points.append((seg_id, seg_idx, 1.0, end_coords[0], end_coords[1]))
+
+    logger.debug(f"[graphlet-infer] Added {len(connection_points)} endpoints")
+
+    # Step 2: Find mid-segment crossings using spatial index
+    tree = STRtree(geometries)
+    mid_crossings_added = 0
+
+    for seg_idx, geom in enumerate(geometries):
+        if geom is None or geom.is_empty:
+            continue
+        seg_id = segment_ids[seg_idx]
+
+        # Query for nearby segments using buffered geometry
+        buffered = geom.buffer(tolerance_m)
+        nearby_indices = tree.query(buffered)
+
+        for other_idx in nearby_indices:
+            if other_idx <= seg_idx:  # Avoid duplicates and self
+                continue
+
+            other_geom = geometries[other_idx]
+            if other_geom is None or other_geom.is_empty:
+                continue
+
+            # Check actual distance between segments
+            distance = geom.distance(other_geom)
+            if distance > tolerance_m:
+                continue
+
+            # Find closest points between the two segments
+            p1, p2 = nearest_points(geom, other_geom)
+
+            # Calculate position along each segment (normalized 0-1)
+            frac1 = geom.project(p1, normalized=True)
+            frac2 = other_geom.project(p2, normalized=True)
+
+            # Only add if NOT at endpoints (those are already covered)
+            # Use small threshold to avoid duplicates with endpoints
+            if 0.02 < frac1 < 0.98:
+                connection_points.append((seg_id, seg_idx, frac1, p1.x, p1.y))
+                mid_crossings_added += 1
+
+            if 0.02 < frac2 < 0.98:
+                other_seg_id = segment_ids[other_idx]
+                connection_points.append((other_seg_id, other_idx, frac2, p2.x, p2.y))
+                mid_crossings_added += 1
+
+    logger.debug(f"[graphlet-infer] Added {mid_crossings_added} mid-segment crossings")
+
+    # Step 3: Cluster all connection points using Union-Find
+    coords = np.array([(p[3], p[4]) for p in connection_points])
+    uf = _cluster_endpoints_fast(coords, tolerance_m)
+
+    # Step 4: Build seg_to_connectors mapping
+    # Group connection points by segment
+    from collections import defaultdict
+
+    seg_connectors_raw: dict[str, list[tuple[float, int]]] = defaultdict(list)
+
+    for i, (seg_id, _seg_idx, frac, _x, _y) in enumerate(connection_points):
+        node_id = uf.find(i)
+        seg_connectors_raw[seg_id].append((frac, node_id))
+
+    # Deduplicate and sort connectors for each segment
+    seg_to_connectors: dict[str, list[tuple[float, int]]] = {}
+
+    for seg_id, connectors in seg_connectors_raw.items():
+        # Sort by position
+        connectors.sort(key=lambda x: x[0])
+
+        # Deduplicate: keep only one connector per cluster at similar positions
+        unique = []
+        for frac, node_id in connectors:
+            # Check if we already have this node or a very close position
+            if not unique:
+                unique.append((frac, node_id))
+            else:
+                last_frac, last_node = unique[-1]
+                # If same node or very close position, skip
+                if node_id == last_node or abs(frac - last_frac) < 0.01:
+                    continue
+                unique.append((frac, node_id))
+
+        seg_to_connectors[seg_id] = unique
+
+    # Step 5: Build graph
+    G = nx.Graph()
+
+    # Add all unique nodes
+    all_nodes = set()
+    for connectors in seg_to_connectors.values():
+        for _, node_id in connectors:
+            all_nodes.add(node_id)
+
+    for node_id in all_nodes:
+        G.add_node(node_id)
+
+    # Add edges between consecutive connectors on each segment
+    for seg_id, connectors in seg_to_connectors.items():
+        for i in range(len(connectors) - 1):
+            _, node_a = connectors[i]
+            _, node_b = connectors[i + 1]
+            if node_a != node_b:
+                G.add_edge(node_a, node_b, segment_id=seg_id)
+
+    # Compute graphlet features
+    t0 = time.perf_counter()
+    node_features = compute_road_graphlet_features(G)
+    logger.debug(f"[graphlet-infer] Computed features in {time.perf_counter() - t0:.2f}s")
+
+    logger.info(
+        f"[graphlet-infer] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"({mid_crossings_added} mid-segment crossings) in {time.perf_counter() - t_start:.2f}s"
+    )
+
+    return G, seg_to_connectors, node_features
+
+
+def find_nearest_connector(
+    seg_connectors: list[tuple[float, int]],
+    position: float,
+) -> int | None:
+    """Find the connector node nearest to a given position along a segment.
+
+    Args:
+        seg_connectors: List of (at_position, node_id) tuples, sorted by position
+        position: Linear position along segment (0.0 to 1.0)
+
+    Returns:
+        Node ID of nearest connector, or None if no connectors
+    """
+    if not seg_connectors:
+        return None
+
+    # Binary search for nearest connector
+    best_node = None
+    best_dist = float("inf")
+
+    for at_pos, node_id in seg_connectors:
+        dist = abs(at_pos - position)
+        if dist < best_dist:
+            best_dist = dist
+            best_node = node_id
+
+    return best_node
+
+
+def get_alignment_connectors(
+    seg_id: str,
+    seg_to_connectors: dict[str, list[tuple[float, int]]],
+    start_frac: float = 0.0,
+    end_frac: float = 1.0,
+) -> tuple[int | None, int | None]:
+    """Get connector nodes at the endpoints of an aligned subline.
+
+    For partial matches (when alignment trims the segment), this finds the
+    connectors nearest to where the alignment starts and ends.
+
+    Args:
+        seg_id: Segment ID
+        seg_to_connectors: Mapping from segment ID to connector list
+        start_frac: Start position of alignment (0.0 to 1.0)
+        end_frac: End position of alignment (0.0 to 1.0)
+
+    Returns:
+        Tuple of (start_node, end_node) - nearest connectors to alignment endpoints
+    """
+    connectors = seg_to_connectors.get(seg_id, [])
+    if not connectors:
+        return None, None
+
+    start_node = find_nearest_connector(connectors, start_frac)
+    end_node = find_nearest_connector(connectors, end_frac)
+
+    return start_node, end_node
+
+
+def graphlet_similarity_with_alignment(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_features: dict[int, np.ndarray],
+    target_features: dict[int, np.ndarray],
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    target_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    ref_start_frac: float = 0.0,
+    ref_end_frac: float = 1.0,
+    target_start_frac: float = 0.0,
+    target_end_frac: float = 1.0,
+) -> dict[str, float]:
+    """Compare graphlet features at aligned subline endpoints using connector positions.
+
+    This function accounts for alignment by finding the nearest connectors to
+    the aligned portion endpoints, rather than always using segment endpoints.
+
+    For example, if alignment indicates the match covers ref[0.3:0.8], we find
+    the nearest connectors to positions 0.3 and 0.8, then compare their graphlet
+    features to the corresponding target positions.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_features: Graphlet features for reference graph nodes
+        target_features: Graphlet features for target graph nodes
+        ref_seg_to_connectors: Maps ref segment ID -> [(at, node_id), ...] sorted by at
+        target_seg_to_connectors: Maps target segment ID -> [(at, node_id), ...] sorted by at
+        ref_start_frac: Start position of alignment on reference (0.0 to 1.0)
+        ref_end_frac: End position of alignment on reference (0.0 to 1.0)
+        target_start_frac: Start position of alignment on target (0.0 to 1.0)
+        target_end_frac: End position of alignment on target (0.0 to 1.0)
+
+    Returns:
+        Dictionary with:
+        - graphlet_similarity: Overall endpoint feature similarity (best orientation)
+        - endpoint_degree_similarity: Degree match at endpoints (most discriminative)
+    """
+    # Find nearest connectors to alignment positions
+    ref_start_node, ref_end_node = get_alignment_connectors(
+        ref_seg_id, ref_seg_to_connectors, ref_start_frac, ref_end_frac
+    )
+    target_start_node, target_end_node = get_alignment_connectors(
+        target_seg_id, target_seg_to_connectors, target_start_frac, target_end_frac
+    )
+
+    # Default feature vector: [degree=1, triangles=0, squares=0, clustering=0, two_hop=0, is_articulation=0]
+    default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    ref_start_f = (
+        ref_features.get(ref_start_node, default) if ref_start_node is not None else default
+    )
+    ref_end_f = ref_features.get(ref_end_node, default) if ref_end_node is not None else default
+    target_start_f = (
+        target_features.get(target_start_node, default)
+        if target_start_node is not None
+        else default
+    )
+    target_end_f = (
+        target_features.get(target_end_node, default) if target_end_node is not None else default
+    )
+
+    def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
+        """Compute normalized similarity between two feature vectors."""
+        diff = np.abs(a - b)
+        norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
+        normalized = 1.0 - np.clip(diff / norms, 0, 1)
+        return float(normalized.mean())
+
+    # Try both orientations
+    fwd = (
+        feature_similarity(ref_start_f, target_start_f)
+        + feature_similarity(ref_end_f, target_end_f)
+    ) / 2
+    rev = (
+        feature_similarity(ref_start_f, target_end_f)
+        + feature_similarity(ref_end_f, target_start_f)
+    ) / 2
+
+    # Also compare degree specifically (most discriminative for roads)
+    degree_fwd = (
+        1.0
+        - abs(ref_start_f[0] - target_start_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_end_f[0]) / 10.0
+    ) / 2.0
+    degree_fwd = max(0.0, min(1.0, degree_fwd))
+    degree_rev = (
+        1.0
+        - abs(ref_start_f[0] - target_end_f[0]) / 10.0
+        + 1.0
+        - abs(ref_end_f[0] - target_start_f[0]) / 10.0
+    ) / 2.0
+    degree_rev = max(0.0, min(1.0, degree_rev))
+
+    return {
+        "graphlet_similarity": max(fwd, rev),
+        "endpoint_degree_similarity": max(degree_fwd, degree_rev),
+    }
+
+
 def graphlet_segment_similarity(
     ref_seg_id: str,
     target_seg_id: str,
@@ -1284,6 +1756,9 @@ def graphlet_segment_similarity(
     Computes similarity between the graphlet features at the endpoints
     of a reference segment and a target segment. Handles segment orientation
     by trying both forward and reverse alignments.
+
+    NOTE: For alignment-aware comparison using connector positions, use
+    graphlet_similarity_with_alignment() instead.
 
     Args:
         ref_seg_id: Reference segment ID

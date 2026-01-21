@@ -96,12 +96,13 @@ def _compute_single_feature(args):
         target_topology = _worker_data.get("target_topology", {}).get(target_idx)
 
         # Compute graphlet similarity using precomputed graph data
+        # Pass alignment for alignment-aware connector lookup
         ref_graphlet_data = _worker_data.get("ref_graphlet_data")
         target_graphlet_data = _worker_data.get("target_graphlet_data")
         ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
         target_seg_id = str(_worker_data["target_ids"][target_idx])
         graphlet_features = compute_graphlet_similarity(
-            ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data
+            ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
         )
 
         # Delegate to shared compute_pair_features function
@@ -829,10 +830,16 @@ class MLMatcher:
             )
 
         # Pre-compute graphlet features for network topology similarity
+        # For Overture reference data, use explicit connector positions for alignment-aware comparison
         logger.info("Computing graphlet features for reference and target...")
+        ref_has_connectors = "connectors" in reference.columns
         ref_graphlet_data = precompute_graphlet_features(
-            working_ref, id_column="id", tolerance_m=5.0
+            working_ref,
+            id_column="id",
+            tolerance_m=5.0,
+            connectors_column="connectors" if ref_has_connectors else None,
         )
+        # Target data typically doesn't have explicit connectors, use endpoint-based inference
         target_graphlet_data = precompute_graphlet_features(
             working_target, id_column="id", tolerance_m=5.0
         )

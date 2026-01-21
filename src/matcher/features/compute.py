@@ -17,13 +17,12 @@ from .relational import compute_perpendicular_offset
 from .semantic import compute_class_similarity, compute_name_similarity
 from .spatial_context import (
     SpatialContextIndex,
-    build_inferred_graph,
+    build_connector_graph,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
     compute_endpoint_features,
-    compute_road_graphlet_features,
-    graphlet_segment_similarity,
+    graphlet_similarity_with_alignment,
 )
 
 # Default topology features for empty/missing geometries
@@ -387,6 +386,7 @@ def precompute_graphlet_features(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
+    connectors_column: str | None = None,
 ) -> tuple:
     """Pre-compute graphlet data for efficient per-pair lookups.
 
@@ -394,20 +394,26 @@ def precompute_graphlet_features(
     graphlet features for each node. This data can then be used to
     efficiently compute graphlet similarity for candidate pairs.
 
+    If connectors_column is specified and present, uses explicit connector
+    positions from Overture data for more accurate alignment-aware comparisons.
+    Otherwise, falls back to endpoint-based graph inference.
+
     Args:
         gdf: GeoDataFrame with road segments
         id_column: Column name for segment IDs
         tolerance_m: Distance tolerance for endpoint snapping (meters)
+        connectors_column: Column name for connectors array (Overture format).
+                          If provided and column exists, builds connector-based graph.
 
     Returns:
-        Tuple of (G, seg_to_start, seg_to_end, node_features) where:
+        Tuple of (G, seg_to_connectors, node_features, use_connectors) where:
         - G: NetworkX graph of the road network
-        - seg_to_start: Dict mapping segment ID -> start node
-        - seg_to_end: Dict mapping segment ID -> end node
+        - seg_to_connectors: Dict mapping segment ID -> list of (at, node_id) tuples
+                            OR tuple of (seg_to_start, seg_to_end) for legacy format
         - node_features: Dict mapping node ID -> feature vector
+        - use_connectors: Boolean indicating if connector-based graph was built
     """
     t0 = time.perf_counter()
-    logger.info("Building inferred graph for graphlet features...")
 
     # Ensure ID column is string type for consistent lookups
     gdf_reset = gdf.reset_index(drop=True) if id_column not in gdf.columns else gdf
@@ -415,18 +421,42 @@ def precompute_graphlet_features(
         gdf_reset = gdf_reset.copy()
         gdf_reset[id_column] = gdf_reset[id_column].astype(str)
 
-    G, seg_to_start, seg_to_end = build_inferred_graph(
-        gdf_reset, id_column=id_column, tolerance_m=tolerance_m
-    )
-    logger.debug(
-        f"[precompute] Built graph with {G.number_of_nodes()} nodes in {time.perf_counter() - t0:.2f}s"
+    # Check if we should use connector-based graph (Overture data)
+    use_connectors = (
+        connectors_column is not None
+        and connectors_column in gdf_reset.columns
+        # Check that at least some segments have connectors
+        and gdf_reset[connectors_column].notna().any()
     )
 
-    t0 = time.perf_counter()
-    node_features = compute_road_graphlet_features(G)
-    logger.debug(f"[precompute] Computed graphlet features in {time.perf_counter() - t0:.2f}s")
+    if use_connectors:
+        logger.info("Building connector-based graph for graphlet features (explicit connectors)...")
+        G, seg_to_connectors, node_features = build_connector_graph(
+            gdf_reset,
+            id_column=id_column,
+            connectors_column=connectors_column,
+            tolerance_m=tolerance_m,
+        )
+        logger.debug(
+            f"[precompute] Built connector graph with {G.number_of_nodes()} nodes "
+            f"in {time.perf_counter() - t0:.2f}s"
+        )
+        return G, seg_to_connectors, node_features, True
+    else:
+        # Use inferred connector graph that detects mid-segment crossings
+        # This provides richer topology than endpoint-only inference
+        from .spatial_context import build_inferred_connector_graph
 
-    return G, seg_to_start, seg_to_end, node_features
+        logger.info("Building inferred connector graph for graphlet features...")
+        G, seg_to_connectors, node_features = build_inferred_connector_graph(
+            gdf_reset, id_column=id_column, tolerance_m=tolerance_m
+        )
+        logger.debug(
+            f"[precompute] Built inferred connector graph with {G.number_of_nodes()} nodes "
+            f"in {time.perf_counter() - t0:.2f}s"
+        )
+        # Return True for use_connectors since we now have connector format
+        return G, seg_to_connectors, node_features, True
 
 
 def compute_graphlet_similarity(
@@ -434,14 +464,21 @@ def compute_graphlet_similarity(
     target_seg_id: str,
     ref_graphlet_data: tuple | None,
     target_graphlet_data: tuple | None,
+    alignment: AlignmentResult | None = None,
 ) -> dict[str, float]:
     """Compute graphlet similarity features for a segment pair.
+
+    Uses alignment-aware comparison that finds the nearest connectors to the
+    aligned subline endpoints. For Overture data, uses explicit connectors.
+    For spaghetti geometry, uses inferred connectors from spatial proximity
+    (including mid-segment crossings).
 
     Args:
         ref_seg_id: Reference segment ID
         target_seg_id: Target segment ID
-        ref_graphlet_data: Precomputed (G, seg_to_start, seg_to_end, node_features) for reference
-        target_graphlet_data: Precomputed (G, seg_to_start, seg_to_end, node_features) for target
+        ref_graphlet_data: Precomputed (G, seg_to_connectors, node_features, True)
+        target_graphlet_data: Precomputed (G, seg_to_connectors, node_features, True)
+        alignment: Optional alignment result for alignment-aware comparison
 
     Returns:
         Dict with 'graphlet_similarity' and 'endpoint_degree_similarity' keys
@@ -449,17 +486,32 @@ def compute_graphlet_similarity(
     if ref_graphlet_data is None or target_graphlet_data is None:
         return {"graphlet_similarity": 0.5, "endpoint_degree_similarity": 0.5}
 
-    _, ref_seg_to_start, ref_seg_to_end, ref_node_features = ref_graphlet_data
-    _, target_seg_to_start, target_seg_to_end, target_node_features = target_graphlet_data
-
     try:
-        return graphlet_segment_similarity(
+        # Unpack graphlet data - always connector format now
+        _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
+        _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
+
+        # Get alignment fractions (use full segment if no alignment)
+        if alignment is not None:
+            ref_start_frac = alignment.overture_start_frac
+            ref_end_frac = alignment.overture_end_frac
+            target_start_frac = alignment.dataset_start_frac
+            target_end_frac = alignment.dataset_end_frac
+        else:
+            ref_start_frac, ref_end_frac = 0.0, 1.0
+            target_start_frac, target_end_frac = 0.0, 1.0
+
+        return graphlet_similarity_with_alignment(
             ref_seg_id,
             target_seg_id,
             ref_node_features,
             target_node_features,
-            (ref_seg_to_start, ref_seg_to_end),
-            (target_seg_to_start, target_seg_to_end),
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+            ref_start_frac,
+            ref_end_frac,
+            target_start_frac,
+            target_end_frac,
         )
     except Exception as exc:
         logger.debug(
