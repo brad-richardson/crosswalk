@@ -139,8 +139,6 @@ def optimize_matches_sparse(
     """
     import time
 
-    from scipy.optimize import linear_sum_assignment
-
     logger.info(f"[LAPJV] Starting optimization of {len(results)} results...")
 
     # Filter by minimum confidence
@@ -317,8 +315,11 @@ def optimize_matches_auto(
     # 2. If max dimension <= 50k and memory fits, use LAPJV (optimal solution)
     # 3. Otherwise use greedy (fast, near-optimal)
 
-    if dense_memory_gb < DENSE_THRESHOLD_GB:
-        logger.info(f"[optimizer] Using dense Hungarian (matrix < {DENSE_THRESHOLD_GB} GB)")
+    # Respect both hard-coded threshold and user's memory limit for dense algorithm
+    effective_dense_threshold = min(DENSE_THRESHOLD_GB, memory_limit_gb)
+
+    if dense_memory_gb < effective_dense_threshold:
+        logger.info(f"[optimizer] Using dense Hungarian (matrix < {effective_dense_threshold} GB)")
         start = time.perf_counter()
         result = optimize_matches(valid_results, min_confidence)
         elapsed = time.perf_counter() - start
@@ -612,9 +613,9 @@ def _find_contiguous_groups(
             continue
 
         valid_match_indices.append(i)
-        # Add both endpoints
-        all_endpoints.append(coords[0])
-        all_endpoints.append(coords[-1])
+        # Add both endpoints (slice to 2D in case of 3D geometries)
+        all_endpoints.append(coords[0][:2])
+        all_endpoints.append(coords[-1][:2])
         endpoint_to_match_idx.append(i)
         endpoint_to_match_idx.append(i)
 

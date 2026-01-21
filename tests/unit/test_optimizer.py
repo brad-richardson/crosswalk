@@ -56,7 +56,7 @@ def large_conflict_results():
 
 
 class TestOptimizeMatchesSparse:
-    """Tests for sparse optimization using LAPJVsp."""
+    """Tests for sparse optimization using LAPJV (scipy linear_sum_assignment)."""
 
     def test_empty_input(self):
         """Empty input should return empty output."""
