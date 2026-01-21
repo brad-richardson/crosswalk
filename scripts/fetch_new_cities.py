@@ -164,7 +164,6 @@ def fetch_ogc_features(
     Returns:
         Path to the output GeoParquet file
     """
-    import pandas as pd
 
     logger.info(f"Fetching OGC API Features: {url}")
 
@@ -255,7 +254,6 @@ def fetch_wfs(
     Returns:
         Path to the output GeoParquet file
     """
-    import pandas as pd
 
     logger.info(f"Fetching WFS: {url} / {type_name}")
 
@@ -637,7 +635,7 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
             # URL should be base WFS URL, type_name from where_clause field
             type_name = config.source.where_clause if config.source else None
             if not type_name:
-                logger.error(f"WFS source requires type_name in where_clause field")
+                logger.error("WFS source requires type_name in where_clause field")
                 return None
             return fetch_wfs(
                 url=url,
