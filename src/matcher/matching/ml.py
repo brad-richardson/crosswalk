@@ -67,194 +67,68 @@ def _init_worker(data):
 def _compute_single_feature(args):
     """Compute features for a single candidate pair (worker function).
 
-    Returns a dict of features, or a dict with all None values if computation fails.
+    This function delegates to compute_pair_features() to ensure consistency
+    between the ML scoring pipeline and the backfill pipeline (training data).
+
+    Returns a dict of features, or a dict with error defaults if computation fails.
     """
-    from ..features.alignment import (
-        compute_coverage_features,
-        create_subline,
-    )
-    from ..features.geometric import compute_geometric_features
-    from ..features.relational import compute_perpendicular_offset
-    from ..features.semantic import compute_class_similarity, compute_name_similarity
-    from ..features.spatial_context import (
-        compute_degree_match_score,
-        compute_degree_signature_similarity,
+    from ..features.compute import (
+        _get_error_features,
+        compute_graphlet_similarity,
+        compute_pair_features,
     )
 
     ref_idx, target_idx = args
 
     try:
+        # Extract data from worker globals
         ref_geom = _worker_data["ref_geoms"][ref_idx]
         target_geom = _worker_data["target_geoms"][target_idx]
 
         # Get pre-computed alignment if available
         alignment = _worker_data.get("alignments", {}).get((ref_idx, target_idx))
-        use_aligned = _worker_data.get("use_aligned_features", False) and alignment is not None
 
-        # Determine geometries for similarity features
-        if use_aligned and alignment is not None:
-            ref_subline = create_subline(
-                ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
-            )
-            target_subline = create_subline(
-                target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
-            )
-            geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
-            geom_for_similarity_target = target_subline if target_subline else target_geom
-        else:
-            geom_for_similarity_ref = ref_geom
-            geom_for_similarity_target = target_geom
+        # Get pre-computed endpoint features for target segment
+        endpoint_features = _worker_data.get("endpoint_features", {}).get(target_idx)
 
-        geom_features = compute_geometric_features(
-            geom_for_similarity_ref, geom_for_similarity_target
+        # Get pre-computed topology features
+        ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
+        target_topology = _worker_data.get("target_topology", {}).get(target_idx)
+
+        # Compute graphlet similarity using precomputed graph data
+        ref_graphlet_data = _worker_data.get("ref_graphlet_data")
+        target_graphlet_data = _worker_data.get("target_graphlet_data")
+        ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
+        target_seg_id = str(_worker_data["target_ids"][target_idx])
+        graphlet_features = compute_graphlet_similarity(
+            ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data
         )
-        name_sim = compute_name_similarity(
+
+        # Delegate to shared compute_pair_features function
+        # This ensures consistency with backfill pipeline (training data generation)
+        features = compute_pair_features(
+            ref_geom,
+            target_geom,
             _worker_data["ref_names"][ref_idx],
             _worker_data["target_names"][target_idx],
-        )
-        class_sim = compute_class_similarity(
             _worker_data["ref_classes"][ref_idx],
             _worker_data["target_classes"][target_idx],
             _worker_data["ref_subclasses"][ref_idx],
             _worker_data["target_subclasses"][target_idx],
+            endpoint_features=endpoint_features,
+            ref_topology=ref_topology,
+            target_topology=target_topology,
+            alignment=alignment,
+            graphlet_features=graphlet_features,
         )
+        features["_error"] = None
+        return features
 
-        # Compute lateral offset for parallel infrastructure disambiguation
-        # This measures perpendicular distance between target and reference geometries
-        # Helps distinguish left vs right sidewalk (same side = low offset, opposite = high)
-        lateral_offset, lateral_consistency = compute_perpendicular_offset(target_geom, ref_geom)
-
-        # Get pre-computed endpoint features for target segment
-        endpoint_features = _worker_data.get("endpoint_features", {})
-        target_ep = endpoint_features.get(target_idx, {})
-
-        # Get pre-computed topology features
-        ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx, {})
-        target_topology = _worker_data.get("target_topology", {}).get(target_idx, {})
-
-        # Extract degree values
-        from_degree_ref = ref_topology.get("from_degree", 1)
-        to_degree_ref = ref_topology.get("to_degree", 1)
-        from_degree_target = target_topology.get("from_degree", 1)
-        to_degree_target = target_topology.get("to_degree", 1)
-
-        # Compute degree match score
-        degree_match = compute_degree_match_score(
-            from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
-        )
-
-        # Compute degree signature similarity
-        ref_sig = ref_topology.get("degree_signature", (1,))
-        target_sig = target_topology.get("degree_signature", (1,))
-        sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
-
-        # Topology flags
-        is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
-        is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
-        dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
-
-        is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
-        is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
-        intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
-
-        # Compute coverage features from alignment
-        coverage_feats = compute_coverage_features(alignment)
-
-        return {
-            "hausdorff_distance": geom_features.hausdorff_distance,
-            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-            "buffer_iou": geom_features.buffer_iou,
-            "overlap_ratio": geom_features.overlap_ratio,
-            "heading_delta": geom_features.heading_delta,
-            "length_ratio": geom_features.length_ratio,
-            "projection_distance": geom_features.projection_distance,
-            "centroid_distance": geom_features.centroid_distance,
-            "collinear_gap_ratio": geom_features.collinear_gap_ratio,
-            "name_levenshtein": name_sim["levenshtein_ratio"],
-            "name_jaro_winkler": name_sim["jaro_winkler"],
-            "name_token_sort": name_sim["token_sort_ratio"],
-            "name_soundex": name_sim.get("soundex_match", 0.5),
-            "name_metaphone": name_sim.get("metaphone_similarity", 0.5),
-            "class_similarity": class_sim,
-            "start_endpoint_proximity": min(
-                target_ep.get("start_endpoint_proximity", MAX_DISTANCE_METERS), MAX_DISTANCE_METERS
-            ),
-            "end_endpoint_proximity": min(
-                target_ep.get("end_endpoint_proximity", MAX_DISTANCE_METERS), MAX_DISTANCE_METERS
-            ),
-            "shared_endpoint_count": target_ep.get("shared_endpoint_count", 0),
-            "lateral_offset": min(lateral_offset, MAX_DISTANCE_METERS),
-            "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
-            # Topology features - Tier 1: Degree features
-            "from_degree_ref": from_degree_ref,
-            "to_degree_ref": to_degree_ref,
-            "from_degree_target": from_degree_target,
-            "to_degree_target": to_degree_target,
-            "degree_match_score": degree_match,
-            # Tier 2: Degree signature similarity
-            "degree_signature_similarity": sig_similarity,
-            # Tier 3: Topology flags
-            "is_dead_end_ref": is_dead_end_ref,
-            "is_dead_end_target": is_dead_end_target,
-            "dead_end_match": dead_end_match,
-            "is_intersection_ref": is_intersection_ref,
-            "is_intersection_target": is_intersection_target,
-            "intersection_match": intersection_match,
-            # Alignment coverage features
-            "ref_coverage": coverage_feats["ref_coverage"],
-            "target_coverage": coverage_feats["target_coverage"],
-            "min_coverage": coverage_feats["min_coverage"],
-            "coverage_ratio": coverage_feats["coverage_ratio"],
-            "_error": None,
-        }
     except Exception as e:
         # Return error marker with default values (will result in low confidence)
-        # Use MAX_DISTANCE_METERS instead of infinity to avoid XGBoost issues
-        return {
-            "hausdorff_distance": MAX_DISTANCE_METERS,
-            "mean_hausdorff_distance": MAX_DISTANCE_METERS,
-            "buffer_iou": 0.0,
-            "overlap_ratio": 0.0,
-            "heading_delta": 180.0,
-            "length_ratio": 0.0,
-            "projection_distance": MAX_DISTANCE_METERS,
-            "centroid_distance": MAX_DISTANCE_METERS,
-            "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
-            "name_levenshtein": 0.0,
-            "name_jaro_winkler": 0.0,
-            "name_token_sort": 0.0,
-            "name_soundex": 0.5,
-            "name_metaphone": 0.5,
-            "class_similarity": 0.0,
-            "start_endpoint_proximity": MAX_DISTANCE_METERS,
-            "end_endpoint_proximity": MAX_DISTANCE_METERS,
-            "shared_endpoint_count": 0,
-            "lateral_offset": MAX_DISTANCE_METERS,
-            "lateral_offset_consistency": MAX_DISTANCE_METERS,
-            # Topology features - use neutral/unknown values for error case
-            # to avoid artificially inflating match scores
-            "from_degree_ref": 0,
-            "to_degree_ref": 0,
-            "from_degree_target": 0,
-            "to_degree_target": 0,
-            "degree_match_score": 0.5,
-            "degree_signature_similarity": 0.5,
-            "is_dead_end_ref": 0.5,
-            "is_dead_end_target": 0.5,
-            "dead_end_match": 0.5,
-            "is_intersection_ref": 0.5,
-            "is_intersection_target": 0.5,
-            "intersection_match": 0.5,
-            # Coverage features - neutral values for error case
-            "ref_coverage": 0.0,
-            "target_coverage": 0.0,
-            "min_coverage": 0.0,
-            "coverage_ratio": 0.0,
-            # Graphlet features - neutral values for error case
-            "graphlet_similarity": 0.5,
-            "endpoint_degree_similarity": 0.5,
-            "_error": str(e),
-        }
+        error_features = _get_error_features()
+        error_features["_error"] = str(e)
+        return error_features
 
 
 def select_model_for_dataset(
@@ -865,10 +739,11 @@ class MLMatcher:
             else np.full(len(target), None, dtype=object)
         )
 
-        # Pre-compute endpoint and topology features for both reference and target
+        # Pre-compute endpoint, topology, and graphlet features for both reference and target
         # These capture network connectivity without requiring explicit topology
         from ..config import settings
         from ..features.alignment import compute_alignment_batch
+        from ..features.compute import precompute_graphlet_features
         from ..features.spatial_context import (
             SpatialContextIndex,
             compute_all_topology,
@@ -932,10 +807,10 @@ class MLMatcher:
 
         # Compute topology for target and reference using efficient batch algorithm
         target_topology_by_id = compute_all_topology(
-            target, id_column="id", tolerance=5.0, ids_to_compute=unique_target_ids
+            target, id_column="id", tolerance_m=5.0, ids_to_compute=unique_target_ids
         )
         ref_topology_by_id = compute_all_topology(
-            reference, id_column="id", tolerance=5.0, ids_to_compute=unique_ref_ids
+            reference, id_column="id", tolerance_m=5.0, ids_to_compute=unique_ref_ids
         )
 
         # Map topology from segment IDs to DataFrame indices
@@ -952,6 +827,15 @@ class MLMatcher:
             ref_topology_features[ref_idx] = ref_topology_by_id.get(
                 seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
             )
+
+        # Pre-compute graphlet features for network topology similarity
+        logger.info("Computing graphlet features for reference and target...")
+        ref_graphlet_data = precompute_graphlet_features(
+            working_ref, id_column="id", tolerance_m=5.0
+        )
+        target_graphlet_data = precompute_graphlet_features(
+            working_target, id_column="id", tolerance_m=5.0
+        )
 
         # Pre-compute linestring alignments if enabled
         # Alignments are used to compute similarity features on aligned sublines
@@ -984,9 +868,13 @@ class MLMatcher:
             "target_classes": target_classes,
             "ref_subclasses": ref_subclasses,
             "target_subclasses": target_subclasses,
+            "ref_ids": ref_ids,
+            "target_ids": target_ids,
             "endpoint_features": target_endpoint_features,
             "ref_topology": ref_topology_features,
             "target_topology": target_topology_features,
+            "ref_graphlet_data": ref_graphlet_data,
+            "target_graphlet_data": target_graphlet_data,
             "alignments": alignments,
             "use_aligned_features": use_aligned_features,
         }

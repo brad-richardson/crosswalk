@@ -17,10 +17,13 @@ from .relational import compute_perpendicular_offset
 from .semantic import compute_class_similarity, compute_name_similarity
 from .spatial_context import (
     SpatialContextIndex,
+    build_inferred_graph,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
     compute_endpoint_features,
+    compute_road_graphlet_features,
+    graphlet_segment_similarity,
 )
 
 # Default topology features for empty/missing geometries
@@ -49,11 +52,13 @@ def compute_pair_features(
     ref_topology: dict[str, Any] | None = None,
     target_topology: dict[str, Any] | None = None,
     alignment: AlignmentResult | None = None,
+    graphlet_features: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
-    This is the core feature computation function used by both the ML pipeline
-    and the labeling UI.
+    This is the AUTHORITATIVE source for feature computation. All consumers
+    (ml.py scoring, backfill, labeling UI) MUST call this function to ensure
+    consistency between training and inference.
 
     Args:
         ref_geom: Reference geometry (LineString)
@@ -68,9 +73,10 @@ def compute_pair_features(
         ref_topology: Pre-computed topology features for reference (optional)
         target_topology: Pre-computed topology features for target (optional)
         alignment: Pre-computed alignment result for using aligned sublines (optional)
+        graphlet_features: Pre-computed graphlet similarity features (optional)
 
     Returns:
-        Dictionary of feature name -> value
+        Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
     """
     try:
         # Determine geometries for similarity features
@@ -203,9 +209,15 @@ def compute_pair_features(
             "target_coverage": coverage_feats["target_coverage"],
             "min_coverage": coverage_feats["min_coverage"],
             "coverage_ratio": coverage_feats["coverage_ratio"],
-            # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
-            # are computed separately in backfill_features.py for training labels only.
-            # They are not used in real-time scoring pipeline.
+            # Graphlet features (network topology similarity)
+            "graphlet_similarity": (
+                graphlet_features.get("graphlet_similarity", 0.5) if graphlet_features else 0.5
+            ),
+            "endpoint_degree_similarity": (
+                graphlet_features.get("endpoint_degree_similarity", 0.5)
+                if graphlet_features
+                else 0.5
+            ),
         }
 
     except Exception as e:
@@ -215,8 +227,13 @@ def compute_pair_features(
 
 
 def _get_error_features() -> dict[str, float]:
-    """Return default feature values for error cases."""
+    """Return default feature values for error cases.
+
+    Returns a dict with all features from FEATURE_COLUMNS, using neutral/default
+    values that won't artificially inflate or deflate match scores.
+    """
     return {
+        # Geometric features
         "hausdorff_distance_m": MAX_DISTANCE_METERS,
         "mean_hausdorff_distance_m": MAX_DISTANCE_METERS,
         "hausdorff_p95_m": MAX_DISTANCE_METERS,
@@ -228,6 +245,7 @@ def _get_error_features() -> dict[str, float]:
         "projection_distance_m": MAX_DISTANCE_METERS,
         "centroid_distance_m": MAX_DISTANCE_METERS,
         "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
+        # Semantic features - name
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
         "name_token_sort": 0.0,
@@ -236,13 +254,17 @@ def _get_error_features() -> dict[str, float]:
         "has_name_ref": 0.0,
         "has_name_target": 0.0,
         "name_is_generic": 0.0,
+        # Semantic features - class
         "class_similarity": 0.0,
+        # Endpoint proximity
         "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
         "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
         "shared_endpoint_count": 0,
+        # Lateral offset
         "lateral_offset_m": MAX_DISTANCE_METERS,
         "lateral_offset_iqr_m": MAX_DISTANCE_METERS,
         "lateral_offset_p95_m": MAX_DISTANCE_METERS,
+        # Topology features
         "from_degree_ref": 0,
         "to_degree_ref": 0,
         "from_degree_target": 0,
@@ -255,11 +277,14 @@ def _get_error_features() -> dict[str, float]:
         "is_intersection_ref": 0.5,
         "is_intersection_target": 0.5,
         "intersection_match": 0.5,
-        # Coverage features - neutral values for error case
+        # Coverage features
         "ref_coverage": 0.0,
         "target_coverage": 0.0,
         "min_coverage": 0.0,
         "coverage_ratio": 0.0,
+        # Graphlet features - neutral values for error case
+        "graphlet_similarity": 0.5,
+        "endpoint_degree_similarity": 0.5,
     }
 
 
@@ -356,3 +381,88 @@ def precompute_topology_and_endpoints(
 
     logger.info(f"[precompute] Total precompute time: {time.perf_counter() - t_start:.2f}s")
     return target_endpoint_features, ref_topology_features, target_topology_features
+
+
+def precompute_graphlet_features(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    tolerance_m: float = 5.0,
+) -> tuple:
+    """Pre-compute graphlet data for efficient per-pair lookups.
+
+    Builds an inferred road graph from the GeoDataFrame and computes
+    graphlet features for each node. This data can then be used to
+    efficiently compute graphlet similarity for candidate pairs.
+
+    Args:
+        gdf: GeoDataFrame with road segments
+        id_column: Column name for segment IDs
+        tolerance_m: Distance tolerance for endpoint snapping (meters)
+
+    Returns:
+        Tuple of (G, seg_to_start, seg_to_end, node_features) where:
+        - G: NetworkX graph of the road network
+        - seg_to_start: Dict mapping segment ID -> start node
+        - seg_to_end: Dict mapping segment ID -> end node
+        - node_features: Dict mapping node ID -> feature vector
+    """
+    t0 = time.perf_counter()
+    logger.info("Building inferred graph for graphlet features...")
+
+    # Ensure ID column is string type for consistent lookups
+    gdf_reset = gdf.reset_index(drop=True) if id_column not in gdf.columns else gdf
+    if id_column in gdf_reset.columns:
+        gdf_reset = gdf_reset.copy()
+        gdf_reset[id_column] = gdf_reset[id_column].astype(str)
+
+    G, seg_to_start, seg_to_end = build_inferred_graph(
+        gdf_reset, id_column=id_column, tolerance_m=tolerance_m
+    )
+    logger.debug(
+        f"[precompute] Built graph with {G.number_of_nodes()} nodes in {time.perf_counter() - t0:.2f}s"
+    )
+
+    t0 = time.perf_counter()
+    node_features = compute_road_graphlet_features(G)
+    logger.debug(f"[precompute] Computed graphlet features in {time.perf_counter() - t0:.2f}s")
+
+    return G, seg_to_start, seg_to_end, node_features
+
+
+def compute_graphlet_similarity(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_graphlet_data: tuple | None,
+    target_graphlet_data: tuple | None,
+) -> dict[str, float]:
+    """Compute graphlet similarity features for a segment pair.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_graphlet_data: Precomputed (G, seg_to_start, seg_to_end, node_features) for reference
+        target_graphlet_data: Precomputed (G, seg_to_start, seg_to_end, node_features) for target
+
+    Returns:
+        Dict with 'graphlet_similarity' and 'endpoint_degree_similarity' keys
+    """
+    if ref_graphlet_data is None or target_graphlet_data is None:
+        return {"graphlet_similarity": 0.5, "endpoint_degree_similarity": 0.5}
+
+    _, ref_seg_to_start, ref_seg_to_end, ref_node_features = ref_graphlet_data
+    _, target_seg_to_start, target_seg_to_end, target_node_features = target_graphlet_data
+
+    try:
+        return graphlet_segment_similarity(
+            ref_seg_id,
+            target_seg_id,
+            ref_node_features,
+            target_node_features,
+            (ref_seg_to_start, ref_seg_to_end),
+            (target_seg_to_start, target_seg_to_end),
+        )
+    except Exception as exc:
+        logger.debug(
+            f"Graphlet similarity failed for ref={ref_seg_id}, target={target_seg_id}: {exc}"
+        )
+        return {"graphlet_similarity": 0.5, "endpoint_degree_similarity": 0.5}
