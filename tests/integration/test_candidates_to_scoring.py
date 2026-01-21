@@ -259,10 +259,11 @@ class TestFeatureComputation:
 
         result = results[0]
 
-        # Check for geometric features
+        # Check for geometric features (buffer_iou replaced with buffer_iou_5m and buffer_iou_15m)
         expected_geometric = [
             "hausdorff_distance_m",
-            "buffer_iou",
+            "buffer_iou_5m",
+            "buffer_iou_15m",
             "heading_delta",
             "length_ratio",
         ]
@@ -301,8 +302,9 @@ class TestFeatureComputation:
         # Hausdorff distance should be positive
         assert features["hausdorff_distance_m"] >= 0
 
-        # IoU should be between 0 and 1
-        assert 0 <= features["buffer_iou"] <= 1
+        # IoU should be between 0 and 1 (both 5m and 15m variants)
+        assert 0 <= features["buffer_iou_5m"] <= 1
+        assert 0 <= features["buffer_iou_15m"] <= 1
 
         # Heading delta should be between 0 and 180
         assert 0 <= features["heading_delta"] <= 180

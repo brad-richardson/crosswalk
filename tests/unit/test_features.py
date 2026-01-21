@@ -28,7 +28,9 @@ class TestGeometricFeatures:
 
         assert features.hausdorff_distance == pytest.approx(0.0)
         assert features.mean_hausdorff_distance == pytest.approx(0.0)
-        assert features.buffer_iou == pytest.approx(1.0, abs=0.01)
+        assert features.hausdorff_p95_distance == pytest.approx(0.0)
+        assert features.buffer_iou_5m == pytest.approx(1.0, abs=0.01)
+        assert features.buffer_iou_15m == pytest.approx(1.0, abs=0.01)
         assert features.heading_delta == pytest.approx(0.0)
         assert features.length_ratio == pytest.approx(1.0)
 
@@ -76,10 +78,11 @@ class TestGeometricFeatures:
         line_a = LineString([(0, 0), (100, 0)])
         line_b = LineString([(0, 100), (100, 100)])  # 100m apart
 
-        features = compute_geometric_features(line_a, line_b, buffer_radius=10.0)
+        features = compute_geometric_features(line_a, line_b)
 
-        # With 10m buffer, 100m apart lines should not overlap
-        assert features.buffer_iou < 0.1
+        # With 5m/15m buffers, 100m apart lines should not overlap
+        assert features.buffer_iou_5m < 0.1
+        assert features.buffer_iou_15m < 0.1
 
 
 class TestSemanticFeatures:

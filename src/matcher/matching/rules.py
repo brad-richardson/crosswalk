@@ -147,7 +147,8 @@ def compute_match_score(
         raw_features = {
             "hausdorff_distance_m": precomputed_features["hausdorff_distance_m"],
             "mean_hausdorff_distance_m": precomputed_features["mean_hausdorff_distance_m"],
-            "buffer_iou": precomputed_features["buffer_iou"],
+            "buffer_iou_5m": precomputed_features.get("buffer_iou_5m", 0.0),
+            "buffer_iou_15m": precomputed_features.get("buffer_iou_15m", 0.0),
             "overlap_ratio": precomputed_features["overlap_ratio"],
             "heading_delta": precomputed_features["heading_delta"],
             "length_ratio": precomputed_features["length_ratio"],
@@ -161,7 +162,7 @@ def compute_match_score(
         }
     else:
         # Compute geometric features
-        geom_features = compute_geometric_features(ref_geom, target_geom, buffer_radius)
+        geom_features = compute_geometric_features(ref_geom, target_geom)
 
         # Compute semantic features
         name_sim = compute_name_similarity(ref_name, target_name)
@@ -171,7 +172,8 @@ def compute_match_score(
         raw_features = {
             "hausdorff_distance_m": geom_features.hausdorff_distance,
             "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
-            "buffer_iou": geom_features.buffer_iou,
+            "buffer_iou_5m": geom_features.buffer_iou_5m,
+            "buffer_iou_15m": geom_features.buffer_iou_15m,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
@@ -185,12 +187,13 @@ def compute_match_score(
         }
 
     # Normalize geometric features to 0-1 (higher is better)
+    # Use buffer_iou_5m for tight alignment scoring (backward compatible with old buffer_iou)
     scores = {
         "hausdorff_norm": max(0, 1 - raw_features["hausdorff_distance_m"] / distance_threshold),
         "mean_hausdorff_norm": max(
             0, 1 - raw_features["mean_hausdorff_distance_m"] / distance_threshold
         ),
-        "buffer_iou": raw_features["buffer_iou"],
+        "buffer_iou": raw_features["buffer_iou_5m"],  # Use 5m buffer for scoring
         "overlap_ratio": raw_features["overlap_ratio"],  # Already 0-1
         "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
         "collinear_gap_ratio": raw_features["collinear_gap_ratio"],  # Already 0-1

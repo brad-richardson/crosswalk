@@ -52,9 +52,10 @@ class TestRelationalFeatures:
     def test_perpendicular_offset(self):
         road = LineString([(0, 0), (100, 0)])
         sidewalk = LineString([(0, 3), (100, 3)])
-        offset, std = compute_perpendicular_offset(sidewalk, road)
+        offset, iqr, p95 = compute_perpendicular_offset(sidewalk, road)
         assert offset == pytest.approx(3.0, abs=0.1)
-        assert std < 0.5  # Consistent parallel offset
+        assert iqr < 0.5  # Consistent parallel offset (low IQR)
+        assert p95 < 4.0  # P95 should be close to mean for consistent offset
 
     def test_endpoint_proximity(self):
         target = LineString([(0, 0), (100, 0)])
@@ -97,7 +98,8 @@ class TestSpatialContextIndex:
         features = compute_endpoint_features(
             segments.iloc[0].geometry, ctx, exclude_segment_idx=0, tolerance_m=5.0
         )
-        assert features["end_endpoint_proximity_m"] < 5.0
+        # Now uses direction-invariant min/max instead of start/end
+        assert features["min_endpoint_proximity_m"] < 5.0
         assert features["shared_endpoint_count"] >= 1
 
 

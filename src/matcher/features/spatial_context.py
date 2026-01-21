@@ -43,8 +43,11 @@ class AnchorMatch:
     perpendicular_offset: float
     """Mean perpendicular distance to anchor (meters)."""
 
-    offset_consistency: float
-    """Standard deviation of perpendicular offset (meters)."""
+    offset_iqr: float
+    """Interquartile range of perpendicular offset (meters)."""
+
+    offset_p95: float
+    """95th percentile of perpendicular offset (meters)."""
 
     parallel_alignment: float
     """How parallel the segment is to anchor (0-1)."""
@@ -133,8 +136,8 @@ class AnchorRoadMatcher:
         for road_idx in candidate_indices:
             road_geom = self.roads_gdf.iloc[road_idx].geometry
 
-            # Compute features
-            offset, offset_std = compute_perpendicular_offset(target_geom, road_geom)
+            # Compute features (now returns mean, iqr, p95)
+            offset, offset_iqr, offset_p95 = compute_perpendicular_offset(target_geom, road_geom)
             alignment = compute_parallel_alignment(target_geom, road_geom)
             side, side_conf = compute_side_of_street(target_geom, road_geom)
 
@@ -153,7 +156,8 @@ class AnchorRoadMatcher:
                     anchor_idx=road_idx,
                     anchor_id=self.road_ids[road_idx],
                     perpendicular_offset=offset,
-                    offset_consistency=offset_std,
+                    offset_iqr=offset_iqr,
+                    offset_p95=offset_p95,
                     parallel_alignment=alignment,
                     side_of_street=side,
                     side_confidence=side_conf,
@@ -540,6 +544,9 @@ def compute_endpoint_features(
 ) -> dict[str, float]:
     """Compute endpoint connectivity features for a target segment.
 
+    Uses direction-invariant min/max proximities to avoid sensitivity
+    to line digitization direction.
+
     Args:
         target_geom: Target geometry
         context: SpatialContextIndex with other segments
@@ -548,14 +555,14 @@ def compute_endpoint_features(
 
     Returns:
         Dictionary with:
-        - start_endpoint_proximity_m: Distance to nearest other endpoint from start (meters)
-        - end_endpoint_proximity_m: Distance to nearest other endpoint from end (meters)
+        - min_endpoint_proximity_m: Minimum of start/end proximities (meters)
+        - max_endpoint_proximity_m: Maximum of start/end proximities (meters)
         - shared_endpoint_count: Number of segments with shared endpoints
     """
     if target_geom.is_empty or context.endpoint_coords.size == 0:
         return {
-            "start_endpoint_proximity_m": float("inf"),
-            "end_endpoint_proximity_m": float("inf"),
+            "min_endpoint_proximity_m": float("inf"),
+            "max_endpoint_proximity_m": float("inf"),
             "shared_endpoint_count": 0,
         }
 
@@ -563,8 +570,8 @@ def compute_endpoint_features(
     if target_geom.geom_type == "MultiLineString":
         if len(target_geom.geoms) == 0:
             return {
-                "start_endpoint_proximity_m": float("inf"),
-                "end_endpoint_proximity_m": float("inf"),
+                "min_endpoint_proximity_m": float("inf"),
+                "max_endpoint_proximity_m": float("inf"),
                 "shared_endpoint_count": 0,
             }
         start_point = Point(target_geom.geoms[0].coords[0])
@@ -584,9 +591,13 @@ def compute_endpoint_features(
         start_nearby = [(ep, d) for ep, d in start_nearby if ep not in excluded_eps]
         end_nearby = [(ep, d) for ep, d in end_nearby if ep not in excluded_eps]
 
-    # Get minimum distances
+    # Get minimum distances for start and end
     start_proximity = start_nearby[0][1] if start_nearby else float("inf")
     end_proximity = end_nearby[0][1] if end_nearby else float("inf")
+
+    # Direction-invariant: use min/max instead of start/end
+    min_proximity = min(start_proximity, end_proximity)
+    max_proximity = max(start_proximity, end_proximity)
 
     # Count shared endpoints (within tolerance)
     shared_segments = set()
@@ -603,8 +614,8 @@ def compute_endpoint_features(
         shared_segments.discard(exclude_segment_idx)
 
     return {
-        "start_endpoint_proximity_m": start_proximity,
-        "end_endpoint_proximity_m": end_proximity,
+        "min_endpoint_proximity_m": min_proximity,
+        "max_endpoint_proximity_m": max_proximity,
         "shared_endpoint_count": len(shared_segments),
     }
 

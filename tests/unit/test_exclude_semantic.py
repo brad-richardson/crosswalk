@@ -10,12 +10,15 @@ class TestExcludeSemanticFlag:
 
     def test_semantic_features_defined_in_config(self):
         """SEMANTIC_FEATURES should be defined in config."""
-        assert len(SEMANTIC_FEATURES) == 6
+        assert len(SEMANTIC_FEATURES) == 9
         assert "name_levenshtein" in SEMANTIC_FEATURES
         assert "name_jaro_winkler" in SEMANTIC_FEATURES
         assert "name_token_sort" in SEMANTIC_FEATURES
         assert "name_soundex" in SEMANTIC_FEATURES
         assert "name_metaphone" in SEMANTIC_FEATURES
+        assert "has_name_ref" in SEMANTIC_FEATURES
+        assert "has_name_target" in SEMANTIC_FEATURES
+        assert "name_is_generic" in SEMANTIC_FEATURES
         assert "class_similarity" in SEMANTIC_FEATURES
 
     def test_all_semantic_features_are_in_feature_columns(self):
@@ -36,7 +39,8 @@ class TestExcludeSemanticFlag:
 
         # Geometric features should still be present
         assert "hausdorff_distance_m" in filtered
-        assert "buffer_iou" in filtered
+        assert "buffer_iou_5m" in filtered
+        assert "buffer_iou_15m" in filtered
         assert "length_ratio" in filtered
 
         # Topology features should still be present
@@ -54,7 +58,9 @@ class TestExcludeSemanticFlag:
                 [
                     "hausdorff_distance_m",
                     "mean_hausdorff_distance_m",
-                    "buffer_iou",
+                    "hausdorff_p95_m",
+                    "buffer_iou_5m",
+                    "buffer_iou_15m",
                     "overlap_ratio",
                     "heading_delta",
                     "length_ratio",
@@ -71,6 +77,9 @@ class TestExcludeSemanticFlag:
                     "name_token_sort",
                     "name_soundex",
                     "name_metaphone",
+                    "has_name_ref",
+                    "has_name_target",
+                    "name_is_generic",
                 ],
             ),
             (
@@ -80,14 +89,14 @@ class TestExcludeSemanticFlag:
             (
                 "endpoint",
                 [
-                    "start_endpoint_proximity_m",
-                    "end_endpoint_proximity_m",
+                    "min_endpoint_proximity_m",
+                    "max_endpoint_proximity_m",
                     "shared_endpoint_count",
                 ],
             ),
             (
                 "lateral",
-                ["lateral_offset_m", "lateral_offset_consistency"],
+                ["lateral_offset_m", "lateral_offset_iqr_m", "lateral_offset_p95_m"],
             ),
             (
                 "topology",
@@ -130,7 +139,9 @@ class TestExcludeSemanticFlag:
             in [
                 "hausdorff_distance_m",
                 "mean_hausdorff_distance_m",
-                "buffer_iou",
+                "hausdorff_p95_m",
+                "buffer_iou_5m",
+                "buffer_iou_15m",
                 "overlap_ratio",
                 "heading_delta",
                 "length_ratio",
@@ -139,20 +150,22 @@ class TestExcludeSemanticFlag:
                 "collinear_gap_ratio",
             ]
         )
-        assert geometric_count == 9, "Should have 9 geometric features"
+        assert geometric_count == 11, "Should have 11 geometric features"
 
         endpoint_count = sum(
             1
             for f in geom_only_features
             if f
-            in ["start_endpoint_proximity_m", "end_endpoint_proximity_m", "shared_endpoint_count"]
+            in ["min_endpoint_proximity_m", "max_endpoint_proximity_m", "shared_endpoint_count"]
         )
         assert endpoint_count == 3, "Should have 3 endpoint features"
 
         lateral_count = sum(
-            1 for f in geom_only_features if f in ["lateral_offset_m", "lateral_offset_consistency"]
+            1
+            for f in geom_only_features
+            if f in ["lateral_offset_m", "lateral_offset_iqr_m", "lateral_offset_p95_m"]
         )
-        assert lateral_count == 2, "Should have 2 lateral features"
+        assert lateral_count == 3, "Should have 3 lateral features"
 
         topology_features = [
             "from_degree_ref",
@@ -177,7 +190,7 @@ class TestExcludeSemanticFlag:
         # Note: Graphlet features (graphlet_similarity, endpoint_degree_similarity)
         # are computed in backfill only, not in real-time scoring pipeline
 
-        # Total geometry-only features: 9 + 3 + 2 + 12 + 4 = 30
-        assert len(geom_only_features) == 30, (
-            f"Expected 30 geometry-only features, got {len(geom_only_features)}"
+        # Total geometry-only features: 11 + 3 + 3 + 12 + 4 = 33
+        assert len(geom_only_features) == 33, (
+            f"Expected 33 geometry-only features, got {len(geom_only_features)}"
         )

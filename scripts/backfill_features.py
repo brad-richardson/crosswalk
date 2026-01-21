@@ -83,7 +83,9 @@ ALIGNMENT_FEATURE_COLUMNS = [
 SIMILARITY_FEATURE_COLUMNS = [
     "hausdorff_distance",
     "mean_hausdorff_distance",
-    "buffer_iou",
+    "hausdorff_p95",
+    "buffer_iou_5m",
+    "buffer_iou_15m",
     "overlap_ratio",
     "heading_delta",
     "length_ratio",
@@ -112,19 +114,23 @@ TOPOLOGY_FEATURE_COLUMNS = [
 SEMANTIC_FEATURE_COLUMNS = [
     "name_soundex",
     "name_metaphone",
+    "has_name_ref",
+    "has_name_target",
+    "name_is_generic",
 ]
 
-# Endpoint proximity feature columns
+# Endpoint proximity feature columns (direction-invariant)
 ENDPOINT_FEATURE_COLUMNS = [
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
+    "min_endpoint_proximity",
+    "max_endpoint_proximity",
     "shared_endpoint_count",
 ]
 
-# Lateral offset feature columns
+# Lateral offset feature columns (IQR and P95 instead of consistency)
 LATERAL_FEATURE_COLUMNS = [
     "lateral_offset",
-    "lateral_offset_consistency",
+    "lateral_offset_iqr",
+    "lateral_offset_p95",
 ]
 
 # Graphlet feature columns
@@ -240,7 +246,9 @@ def compute_aligned_features(
             # Similarity features (recomputed on aligned sublines)
             "hausdorff_distance": geom_features.hausdorff_distance,
             "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
-            "buffer_iou": geom_features.buffer_iou,
+            "hausdorff_p95": geom_features.hausdorff_p95_distance,
+            "buffer_iou_5m": geom_features.buffer_iou_5m,
+            "buffer_iou_15m": geom_features.buffer_iou_15m,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
@@ -520,6 +528,9 @@ def backfill_dataset(
                 {
                     "name_soundex": name_sim.get("soundex_match", 0.5),
                     "name_metaphone": name_sim.get("metaphone_similarity", 0.5),
+                    "has_name_ref": name_sim.get("has_name_ref", 0.0),
+                    "has_name_target": name_sim.get("has_name_target", 0.0),
+                    "name_is_generic": name_sim.get("name_is_generic", 0.0),
                 }
             )
 
@@ -552,16 +563,16 @@ def backfill_dataset(
                 else:
                     endpoint_features.append(
                         {
-                            "start_endpoint_proximity": 10000.0,
-                            "end_endpoint_proximity": 10000.0,
+                            "min_endpoint_proximity": 10000.0,
+                            "max_endpoint_proximity": 10000.0,
                             "shared_endpoint_count": 0,
                         }
                     )
             else:
                 endpoint_features.append(
                     {
-                        "start_endpoint_proximity": 10000.0,
-                        "end_endpoint_proximity": 10000.0,
+                        "min_endpoint_proximity": 10000.0,
+                        "max_endpoint_proximity": 10000.0,
                         "shared_endpoint_count": 0,
                     }
                 )
@@ -583,27 +594,30 @@ def backfill_dataset(
 
             if ref_geom is not None and target_geom is not None:
                 try:
-                    lateral_offset, lateral_consistency = compute_perpendicular_offset(
+                    lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
                         target_geom, ref_geom
                     )
                     lateral_features.append(
                         {
                             "lateral_offset": min(lateral_offset, 10000.0),
-                            "lateral_offset_consistency": min(lateral_consistency, 10000.0),
+                            "lateral_offset_iqr": min(lateral_iqr, 10000.0),
+                            "lateral_offset_p95": min(lateral_p95, 10000.0),
                         }
                     )
                 except Exception:
                     lateral_features.append(
                         {
                             "lateral_offset": 10000.0,
-                            "lateral_offset_consistency": 10000.0,
+                            "lateral_offset_iqr": 10000.0,
+                            "lateral_offset_p95": 10000.0,
                         }
                     )
             else:
                 lateral_features.append(
                     {
                         "lateral_offset": 10000.0,
-                        "lateral_offset_consistency": 10000.0,
+                        "lateral_offset_iqr": 10000.0,
+                        "lateral_offset_p95": 10000.0,
                     }
                 )
 

@@ -43,9 +43,13 @@ class RelationalFeatures(NamedTuple):
     """Mean perpendicular distance from target to anchor line (meters).
     Low values indicate the segment runs parallel and close to the anchor."""
 
-    offset_consistency: float
-    """Standard deviation of perpendicular distances (meters).
-    Low values indicate consistent parallel offset along the entire length."""
+    offset_iqr: float
+    """Interquartile range (p75 - p25) of perpendicular distances (meters).
+    Robust to outliers. Low values indicate consistent parallel offset."""
+
+    offset_p95: float
+    """95th percentile of perpendicular distances (meters).
+    Captures worst-case offset while ignoring extreme outliers."""
 
     parallel_alignment: float
     """How parallel the segment is to anchor (0-1).
@@ -78,12 +82,12 @@ def compute_perpendicular_offset(
     target_geom: LineString | MultiLineString,
     anchor_geom: LineString | MultiLineString,
     sample_interval: float = 5.0,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Compute perpendicular offset from target to anchor line.
 
     Samples points along the target line and measures perpendicular
-    distance to the anchor. Returns both mean offset and consistency
-    (standard deviation).
+    distance to the anchor. Returns mean offset, IQR (interquartile range),
+    and 95th percentile for robust outlier handling.
 
     Args:
         target_geom: Target geometry (sidewalk, bike lane)
@@ -91,19 +95,22 @@ def compute_perpendicular_offset(
         sample_interval: Distance between sample points (meters)
 
     Returns:
-        Tuple of (mean_offset, offset_std)
+        Tuple of (mean_offset, offset_iqr, offset_p95)
+        - mean_offset: Mean perpendicular distance (meters)
+        - offset_iqr: Interquartile range (p75 - p25), robust to outliers
+        - offset_p95: 95th percentile of offsets
 
     Example:
         A sidewalk 3m from a road with consistent offset:
-        >>> offset, std = compute_perpendicular_offset(sidewalk, road)
-        >>> print(f"Offset: {offset:.1f}m, Std: {std:.2f}m")
-        Offset: 3.0m, Std: 0.15m
+        >>> offset, iqr, p95 = compute_perpendicular_offset(sidewalk, road)
+        >>> print(f"Offset: {offset:.1f}m, IQR: {iqr:.2f}m, P95: {p95:.2f}m")
+        Offset: 3.0m, IQR: 0.20m, P95: 3.5m
     """
     target = _to_linestring(target_geom)
     anchor = _to_linestring(anchor_geom)
 
     if target.is_empty or anchor.is_empty:
-        return float("inf"), float("inf")
+        return float("inf"), float("inf"), float("inf")
 
     # Sample points along target
     n_samples = max(3, int(target.length / sample_interval))
@@ -118,9 +125,16 @@ def compute_perpendicular_offset(
 
     offsets = np.array(offsets)
     mean_offset = float(np.mean(offsets))
-    offset_std = float(np.std(offsets))
 
-    return mean_offset, offset_std
+    # IQR (interquartile range) - robust to outliers
+    p25 = float(np.percentile(offsets, 25))
+    p75 = float(np.percentile(offsets, 75))
+    offset_iqr = p75 - p25
+
+    # P95 - captures worst-case while ignoring extreme outliers
+    offset_p95 = float(np.percentile(offsets, 95))
+
+    return mean_offset, offset_iqr, offset_p95
 
 
 def compute_side_of_street(
@@ -279,8 +293,10 @@ def compute_relational_features(
     Returns:
         RelationalFeatures named tuple
     """
-    # Perpendicular offset
-    offset, offset_std = compute_perpendicular_offset(target_geom, anchor_geom, sample_interval)
+    # Perpendicular offset (now returns mean, iqr, p95)
+    offset, offset_iqr, offset_p95 = compute_perpendicular_offset(
+        target_geom, anchor_geom, sample_interval
+    )
 
     # Side of street
     side, side_conf = compute_side_of_street(target_geom, anchor_geom, sample_interval * 2)
@@ -290,7 +306,8 @@ def compute_relational_features(
 
     return RelationalFeatures(
         perpendicular_offset=offset,
-        offset_consistency=offset_std,
+        offset_iqr=offset_iqr,
+        offset_p95=offset_p95,
         parallel_alignment=alignment,
         side_of_street=side,
         side_confidence=side_conf,
