@@ -1,0 +1,16 @@
+name: us_seattle_sidewalks
+display_name: Seattle Sidewalks
+type: sidewalk
+description: Sidewalk centerlines from Seattle DOT
+source:
+  type: arcgis
+  url: https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Sidewalks_(Active)/FeatureServer/0
+  portal_url: https://data-seattlecitygis.opendata.arcgis.com/
+fetch:
+  crs: EPSG:4326
+  id_prefix: sea_sidewalk
+  bbox:
+  - -122.45
+  - 47.48
+  - -122.22
+  - 47.78

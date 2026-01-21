@@ -1,0 +1,17 @@
+name: in_mumbai_streets
+display_name: Mumbai BMC Streets
+type: road
+description: Street network from Brihanmumbai Municipal Corporation (BMC) open data
+source:
+  type: arcgis
+  url: https://services8.arcgis.com/r6MmJtuWAzMawmJ8/ArcGIS/rest/services/Streets/FeatureServer/0
+  portal_url: https://www.mcgm.gov.in
+fetch:
+  crs: EPSG:4326
+  id_prefix: mum_street
+  name_column: NAME
+  bbox:
+  - 72.75
+  - 18.87
+  - 73.05
+  - 19.28

@@ -134,6 +134,262 @@ def _transform_download_data(
     return gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
 
+def fetch_ogc_features(
+    url: str,
+    output_path: Path,
+    id_prefix: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "OGC API Features",
+    bbox: tuple | None = None,
+    limit_per_page: int = 5000,
+) -> Path:
+    """Fetch geospatial data from an OGC API Features endpoint.
+
+    OGC API Features is a modern REST API standard for geospatial data that
+    returns GeoJSON. Supports pagination and bbox filtering.
+
+    Args:
+        url: OGC API Features items endpoint URL
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        limit_per_page: Number of features per API request
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+
+    logger.info(f"Fetching OGC API Features: {url}")
+
+    all_features = []
+    offset = 0
+
+    # Build base params
+    params = {"f": "json", "limit": limit_per_page}
+    if bbox:
+        params["bbox"] = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+
+    while True:
+        params["offset"] = offset
+
+        resp = requests.get(url, params=params, timeout=120)
+        resp.raise_for_status()
+
+        data = resp.json()
+        features = data.get("features", [])
+
+        if not features:
+            break
+
+        all_features.extend(features)
+        logger.debug(f"Fetched {len(all_features)} features so far...")
+
+        # Check for more results
+        # numberMatched tells us total, numberReturned tells us this batch
+        number_matched = data.get("numberMatched", 0)
+        if len(all_features) >= number_matched or len(features) < limit_per_page:
+            break
+
+        offset += len(features)
+
+    if not all_features:
+        logger.warning(f"No features returned from {url}")
+        return output_path
+
+    logger.info(f"Fetched {len(all_features)} total features")
+
+    # Convert to GeoDataFrame
+    gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
+
+    # Transform to Overture schema
+    gdf = _transform_download_data(
+        gdf,
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+    )
+
+    # Save to parquet
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    logger.success(f"Saved {len(gdf)} features to {output_path}")
+    return output_path
+
+
+def fetch_wfs(
+    url: str,
+    type_name: str,
+    output_path: Path,
+    id_prefix: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "WFS",
+    bbox: tuple | None = None,
+    max_features: int = 300000,
+) -> Path:
+    """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
+
+    Args:
+        url: WFS service base URL
+        type_name: Layer/type name to fetch (e.g., 'geoportal:segmento_logradouro')
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        max_features: Maximum features to fetch (pagination limit)
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+
+    logger.info(f"Fetching WFS: {url} / {type_name}")
+
+    all_features = []
+    start_index = 0
+    page_size = 5000
+
+    while True:
+        params = {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeName": type_name,
+            "outputFormat": "application/json",
+            "srsName": "EPSG:4326",
+            "count": page_size,
+            "startIndex": start_index,
+        }
+        # Note: bbox filtering disabled due to GeoServer coordinate order issues
+        # The full dataset will be downloaded and filtered locally if needed
+
+        resp = requests.get(url, params=params, timeout=120)
+        resp.raise_for_status()
+
+        data = resp.json()
+        features = data.get("features", [])
+
+        if not features:
+            break
+
+        all_features.extend(features)
+        logger.debug(f"Fetched {len(all_features)} features so far...")
+
+        # Check if we got all features or hit the limit
+        if len(features) < page_size or len(all_features) >= max_features:
+            break
+
+        start_index += len(features)
+
+    if not all_features:
+        logger.warning(f"No features returned from {url}")
+        return output_path
+
+    logger.info(f"Fetched {len(all_features)} total features")
+
+    # Convert to GeoDataFrame
+    gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
+
+    # Transform to Overture schema
+    gdf = _transform_download_data(
+        gdf,
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+    )
+
+    # Save to parquet
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    logger.success(f"Saved {len(gdf)} features to {output_path}")
+    return output_path
+
+
+def fetch_lta_geospatial(
+    layer_id: str,
+    output_path: Path,
+    id_prefix: str,
+    api_key: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "LTA DataMall",
+    bbox: tuple | None = None,
+    bbox_filter: bool = False,
+) -> Path:
+    """Fetch geospatial data from Singapore LTA DataMall API.
+
+    The LTA API returns a presigned S3 URL for downloading shapefiles.
+    API endpoint: https://datamall2.mytransport.sg/ltaodataservice/GeospatialWholeIsland
+
+    Args:
+        layer_id: Geospatial layer ID (e.g., 'RoadSectionLine', 'Footpath')
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        api_key: LTA DataMall API key
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
+        bbox_filter: Whether to apply bbox filter after loading
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+    api_url = "https://datamall2.mytransport.sg/ltaodataservice/GeospatialWholeIsland"
+
+    logger.info(f"Fetching LTA geospatial layer: {layer_id}")
+
+    # Get presigned download URL from API
+    resp = requests.get(
+        api_url,
+        params={"ID": layer_id},
+        headers={"AccountKey": api_key, "Accept": "application/json"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+    data = resp.json()
+    if "value" not in data or not data["value"]:
+        raise ValueError(f"No download link returned for layer {layer_id}")
+
+    download_url = data["value"][0].get("Link")
+    if not download_url:
+        raise ValueError(f"Empty download link for layer {layer_id}")
+
+    logger.info("Got presigned S3 URL, downloading shapefile...")
+
+    # Download the actual file using the presigned URL
+    return fetch_download(
+        url=download_url,
+        output_path=output_path,
+        file_format="shp",
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+        bbox=bbox,
+        bbox_filter=bbox_filter,
+    )
+
+
 def fetch_download(
     url: str,
     output_path: Path,
@@ -327,6 +583,25 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
                         logger.info("Register at https://datamall.lta.gov.sg to get an API key")
                     return None  # Gracefully skip instead of attempting fetch
 
+            # Special handling for Singapore LTA DataMall
+            # The static download URLs are blocked; must use their API instead
+            if api_key_env_var == "LTA_API_KEY" and api_key:
+                # Extract layer ID from URL (e.g., RoadSectionLine.zip -> RoadSectionLine)
+                layer_id = url.split("/")[-1].replace(".zip", "").split("_")[0]
+                logger.info(f"Using LTA DataMall API for layer: {layer_id}")
+                return fetch_lta_geospatial(
+                    layer_id=layer_id,
+                    output_path=output_path,
+                    id_prefix=id_prefix,
+                    api_key=api_key,
+                    name_column=name_column,
+                    class_column=class_column,
+                    class_mapping=class_mapping,
+                    source_name=config.display_name or dataset_name,
+                    bbox=bbox,
+                    bbox_filter=bool(bbox),
+                )
+
             return fetch_download(
                 url=url,
                 output_path=output_path,
@@ -340,6 +615,38 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
                 bbox_filter=bool(bbox),
                 api_key=api_key,
                 api_key_header=api_key_header,
+            )
+
+        elif source_type == "ogc_features":
+            # OGC API Features (modern REST API for geospatial data)
+            return fetch_ogc_features(
+                url=url,
+                output_path=output_path,
+                id_prefix=id_prefix,
+                name_column=name_column,
+                class_column=class_column,
+                class_mapping=class_mapping,
+                source_name=config.display_name or dataset_name,
+                bbox=bbox,
+            )
+
+        elif source_type == "wfs":
+            # WFS (Web Feature Service)
+            # URL should be base WFS URL, type_name from where_clause field
+            type_name = config.source.where_clause if config.source else None
+            if not type_name:
+                logger.error("WFS source requires type_name in where_clause field")
+                return None
+            return fetch_wfs(
+                url=url,
+                type_name=type_name,
+                output_path=output_path,
+                id_prefix=id_prefix,
+                name_column=name_column,
+                class_column=class_column,
+                class_mapping=class_mapping,
+                source_name=config.display_name or dataset_name,
+                bbox=bbox,
             )
 
         else:

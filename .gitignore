@@ -43,6 +43,9 @@ ENV/
 htmlcov/
 .tox/
 
+# Cache files
+*.sqlite
+
 # Data directories
 data/
 

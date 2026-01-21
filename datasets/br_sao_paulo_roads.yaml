@@ -1,0 +1,22 @@
+name: br_sao_paulo_roads
+display_name: São Paulo Road Classification
+type: road
+description: Road network with classification from São Paulo GeoSampa (CET data)
+source:
+  type: wfs
+  url: http://wfs.geosampa.prefeitura.sp.gov.br/geoserver/wfs
+  portal_url: http://geosampa.prefeitura.sp.gov.br
+  where_clause: geoportal:classificacao_viaria_cet
+fetch:
+  crs: EPSG:4326
+  id_prefix: sp_road
+  name_column: nm_logradouro_completo
+  class_column: dc_tipo_classificacao_viaria
+  bbox:
+  - -46.83
+  - -24.00
+  - -46.36
+  - -23.35
+classification:
+  source_classification:
+    column: dc_tipo_classificacao_viaria

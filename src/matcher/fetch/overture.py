@@ -143,6 +143,11 @@ def fetch_overture_segments(
     # Filter to LineString geometries only (drop MultiLineStrings)
     gdf = filter_to_linestrings(gdf, source_name="overture_segments")
 
+    # Drop existing bbox column if present (newer Overture releases include it)
+    # to avoid conflict with write_covering_bbox
+    if "bbox" in gdf.columns:
+        gdf = gdf.drop(columns=["bbox"])
+
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
@@ -201,6 +206,11 @@ def fetch_overture_connectors(
     # Ensure CRS is set (Overture data is always WGS84)
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
+
+    # Drop existing bbox column if present (newer Overture releases include it)
+    # to avoid conflict with write_covering_bbox
+    if "bbox" in gdf.columns:
+        gdf = gdf.drop(columns=["bbox"])
 
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)

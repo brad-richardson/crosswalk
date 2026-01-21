@@ -10,6 +10,11 @@ fetch:
   id_prefix: ada_road
   name_column: StName
   class_column: FuncClass
+  bbox:
+  - -116.52
+  - 43.12
+  - -115.95
+  - 43.81
 classification:
   source_classification:
     column: FuncClass
