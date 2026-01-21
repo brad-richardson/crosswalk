@@ -9,10 +9,27 @@ source:
   api_key_env_var: LTA_API_KEY
   api_key_header: AccountKey
 fetch:
-  crs: EPSG:4326
   id_prefix: sg_footpath
   bbox:
   - 103.6
   - 1.2
   - 104.05
   - 1.5
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:25:29.069622+00:00'
+  bbox:
+  - 103.6
+  - 1.2
+  - 104.05
+  - 1.5
+  bbox_buffered:
+  - 103.59101439411742
+  - 1.1910168882500898
+  - 104.05898560588257
+  - 1.5089831117499102
+  bbox_buffer_m: 1000.0
+  feature_count: 281855
+  geometry_types:
+  - LineString
+  output_path: data/raw

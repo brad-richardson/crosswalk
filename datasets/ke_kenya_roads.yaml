@@ -7,7 +7,6 @@ source:
   url: https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip
   file_format: shp
 fetch:
-  crs: EPSG:4326
   id_prefix: ken_road
   name_column: ROADNAME
   class_column: CLASS
@@ -16,6 +15,24 @@ fetch:
   - -4.7
   - 41.9
   - 4.63
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:46:15.162116+00:00'
+  bbox:
+  - 33.9
+  - -4.7
+  - 41.9
+  - 4.63
+  bbox_buffered:
+  - 33.891016886574036
+  - -4.708983111749911
+  - 41.90898311342596
+  - 4.63898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 1152260
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: CLASS

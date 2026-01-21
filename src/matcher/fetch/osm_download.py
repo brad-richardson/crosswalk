@@ -220,11 +220,49 @@ def _extract_bbox_cli(
     bbox: BoundingBox,
     output_pbf: Path,
 ) -> Path:
-    """Extract bbox using osmium CLI (faster)."""
+    """Extract bbox using osmium CLI (faster).
+
+    Uses a two-step process for efficiency:
+    1. Filter to highway ways only (osmium automatically keeps referenced nodes)
+    2. Extract the bounding box from the filtered file
+
+    This is much faster for large regional extracts since we filter out
+    non-road data before the bbox extraction.
+    """
     # Format: west,south,east,north (lon,lat,lon,lat)
     bbox_str = f"{bbox.xmin},{bbox.ymin},{bbox.xmax},{bbox.ymax}"
 
-    cmd = [
+    # Step 1: Filter to highway ways (keeps ways + all their referenced nodes)
+    # This dramatically reduces file size before bbox extraction
+    filtered_pbf = output_pbf.with_suffix(".highways.pbf")
+
+    filter_cmd = [
+        "osmium",
+        "tags-filter",
+        str(input_pbf),
+        "w/highway",  # Ways with highway tag (nodes auto-included)
+        "-o",
+        str(filtered_pbf),
+        "--overwrite",
+    ]
+
+    input_size_mb = input_pbf.stat().st_size / 1e6
+    logger.info(f"Filtering {input_pbf.name} ({input_size_mb:.0f} MB) to highway ways...")
+
+    subprocess.run(
+        filter_cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    filtered_size_mb = filtered_pbf.stat().st_size / 1e6
+    logger.info(
+        f"Filtered to highways: {filtered_size_mb:.0f} MB ({filtered_size_mb / input_size_mb * 100:.0f}% of original)"
+    )
+
+    # Step 2: Extract bbox from filtered file
+    extract_cmd = [
         "osmium",
         "extract",
         "-b",
@@ -232,12 +270,12 @@ def _extract_bbox_cli(
         "-o",
         str(output_pbf),
         "--overwrite",
-        str(input_pbf),
+        str(filtered_pbf),
     ]
 
-    logger.info(f"Extracting bbox {bbox_str} from {input_pbf.name} using osmium CLI...")
+    logger.info(f"Extracting bbox {bbox_str}...")
     result = subprocess.run(
-        cmd,
+        extract_cmd,
         check=True,
         capture_output=True,
         text=True,
@@ -245,8 +283,12 @@ def _extract_bbox_cli(
     if result.stdout:
         logger.debug(result.stdout)
 
-    size_kb = output_pbf.stat().st_size / 1e3
-    logger.info(f"Extracted bbox to {output_pbf} ({size_kb:.1f} KB)")
+    # Cleanup intermediate file
+    if filtered_pbf.exists():
+        filtered_pbf.unlink()
+
+    size_mb = output_pbf.stat().st_size / 1e6
+    logger.info(f"Extracted bbox to {output_pbf} ({size_mb:.1f} MB)")
     return output_pbf
 
 

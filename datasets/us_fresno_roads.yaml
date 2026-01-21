@@ -7,7 +7,6 @@ source:
   url: https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
   where_clause: County_label = 'FRESNO'
 fetch:
-  crs: EPSG:4326
   id_prefix: us_fresno_roads
   name_column: RouteID
   class_column: F_System
@@ -24,6 +23,24 @@ fetch:
   - 36.65
   - -119.65
   - 36.9
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:42:15.057816+00:00'
+  bbox:
+  - -119.95
+  - 36.65
+  - -119.65
+  - 36.9
+  bbox_buffered:
+  - -119.96121497375447
+  - 36.641016888250086
+  - -119.63878502624554
+  - 36.90898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 56888
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: F_System

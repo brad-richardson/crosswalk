@@ -29,6 +29,9 @@ class FetchMetadata(BaseModel):
     bbox_buffered: tuple[float, float, float, float] | None = None
     bbox_buffer_m: float | None = None
 
+    # Filter mode for validation fetches
+    filter_mode: str | None = None  # "fully_inside" when validation mode is used
+
     # Source information
     source: str  # e.g., "overture", "osm", "arcgis"
     source_url: str | None = None

@@ -200,16 +200,33 @@ def fetch(
     if "osm" in datasets:
         # Name outputs based on dataset if provided
         osm_name = f"{dataset_name}_osm" if dataset_name else "osm"
+
+        # When using --for-dataset, OSM uses unbuffered bbox with fully-inside filter
+        # This ensures OSM coverage matches the target dataset exactly for validation
+        use_validation_mode = for_dataset is not None
+
+        if use_validation_mode:
+            fetch_bbox = original_bbox
+            actual_buffer = None
+            console.print(
+                "[blue]OSM: using unbuffered bbox, filtering to fully-inside features "
+                "(--for-dataset mode)[/blue]"
+            )
+        else:
+            fetch_bbox = osm_bbox
+            actual_buffer = osm_buffer
+
         console.print("[blue]Fetching OSM data...[/blue]")
         segments_path, connectors_path = osm_module.fetch_osm_data(
-            bbox=osm_bbox,
+            bbox=fetch_bbox,
             output_dir=output_dir,
             cache_dir=cache_dir,
             force_download=no_cache,
             keep_pbf=keep_pbf,
             original_bbox=original_bbox,
-            buffer_m=osm_buffer,
+            buffer_m=actual_buffer,
             name=osm_name,
+            filter_fully_inside=use_validation_mode,
         )
         console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
         console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")

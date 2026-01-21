@@ -36,10 +36,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-spark = [
-    "pyspark>=3.5",
-    "apache-sedona>=1.5",
-]
 ml = [
     "xgboost>=2.0",
     "lightgbm>=4.2",

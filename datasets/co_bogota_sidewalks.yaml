@@ -6,10 +6,27 @@ source:
   type: arcgis
   url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/16
 fetch:
-  crs: EPSG:4326
   id_prefix: bog_sidewalk
   bbox:
   - -74.25
   - 4.45
   - -73.95
   - 4.85
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:18:46.299372+00:00'
+  bbox:
+  - -74.25
+  - 4.45
+  - -73.95
+  - 4.85
+  bbox_buffered:
+  - -74.2590127771965
+  - 4.44101688825009
+  - -73.9409872228035
+  - 4.85898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 143462
+  geometry_types:
+  - LineString
+  output_path: data/raw

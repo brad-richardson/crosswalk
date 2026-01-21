@@ -7,7 +7,6 @@ source:
   url: https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5
   portal_url: https://data.boston.gov/dataset/sidewalk-centerline
 fetch:
-  crs: EPSG:4326
   id_prefix: boston_sidewalk
   class_column: TYPE
   class_mapping:
@@ -32,6 +31,24 @@ fetch:
   - 42.21
   - -70.92
   - 42.4
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:15:18.729393+00:00'
+  bbox:
+  - -71.19
+  - 42.21
+  - -70.92
+  - 42.4
+  bbox_buffered:
+  - -71.20214635947308
+  - 42.20101688825009
+  - -70.90785364052692
+  - 42.40898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 116689
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: TYPE
