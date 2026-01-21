@@ -1,4 +1,4 @@
-name: us_utah_roads
+name: us_utah_slc_roads
 display_name: Utah Salt Lake County Roads
 type: road
 description: Salt Lake County roads from Utah SGID
@@ -7,8 +7,7 @@ source:
   url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0
   where_clause: COUNTY_L = '49035'
 fetch:
-  crs: EPSG:4326
-  id_prefix: us_utah_roads
+  id_prefix: us_utah_slc_roads
   name_column: FULLNAME
   class_column: CARTOCODE
   class_mapping:
@@ -28,6 +27,29 @@ fetch:
     '15': service
     '16': path
     '17': unclassified
+  bbox:
+  - -112.26
+  - 40.41
+  - -111.55
+  - 40.92
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:46:23.108950+00:00'
+  bbox:
+  - -112.26
+  - 40.41
+  - -111.55
+  - 40.92
+  bbox_buffered:
+  - -112.27184275069087
+  - 40.40101688825008
+  - -111.53815724930914
+  - 40.928983111749915
+  bbox_buffer_m: 1000.0
+  feature_count: 232768
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: CARTOCODE

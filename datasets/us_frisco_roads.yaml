@@ -6,7 +6,6 @@ source:
   type: arcgis
   url: https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/8
 fetch:
-  crs: EPSG:4326
   id_prefix: frisco_road
   name_column: ROAD_NAME
   class_column: SUBTYPE
@@ -25,6 +24,24 @@ fetch:
   - 33.1
   - -96.75
   - 33.2
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T16:45:41.966217+00:00'
+  bbox:
+  - -96.9
+  - 33.1
+  - -96.75
+  - 33.2
+  bbox_buffered:
+  - -96.91072941100988
+  - 33.09101688825009
+  - -96.73927058899012
+  - 33.208983111749916
+  bbox_buffer_m: 1000.0
+  feature_count: 23347
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: SUBTYPE

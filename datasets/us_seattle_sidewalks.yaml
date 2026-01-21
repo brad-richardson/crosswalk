@@ -7,10 +7,27 @@ source:
   url: https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Sidewalks_(Active)/FeatureServer/0
   portal_url: https://data-seattlecitygis.opendata.arcgis.com/
 fetch:
-  crs: EPSG:4326
   id_prefix: sea_sidewalk
   bbox:
   - -122.45
   - 47.48
   - -122.22
   - 47.78
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:17:44.169855+00:00'
+  bbox:
+  - -122.45
+  - 47.48
+  - -122.22
+  - 47.78
+  bbox_buffered:
+  - -122.46332972735057
+  - 47.471016888250084
+  - -122.20667027264943
+  - 47.788983111749914
+  bbox_buffer_m: 1000.0
+  feature_count: 197705
+  geometry_types:
+  - LineString
+  output_path: data/raw

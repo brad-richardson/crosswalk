@@ -7,7 +7,6 @@ source:
   url: https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg
   file_format: gpkg
 fetch:
-  crs: EPSG:4326
   id_prefix: ams_road
   name_column: stt_naam
   class_column: wegbehsrt
@@ -16,6 +15,24 @@ fetch:
   - 52.3
   - 5.0
   - 52.45
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:42:02.911372+00:00'
+  bbox:
+  - 4.75
+  - 52.3
+  - 5.0
+  - 52.45
+  bbox_buffered:
+  - 4.735285426674251
+  - 52.291016888250084
+  - 5.014714573325749
+  - 52.458983111749916
+  bbox_buffer_m: 1000.0
+  feature_count: 99821
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: wegbehsrt

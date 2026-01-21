@@ -8,6 +8,7 @@ from pathlib import Path
 
 import geopandas as gpd
 from loguru import logger
+from shapely.geometry import box as shapely_box
 
 from ..config import settings
 from .metadata import FetchMetadata, save_metadata
@@ -34,6 +35,7 @@ def fetch_osm_data(
     original_bbox: BoundingBox | None = None,
     buffer_m: float | None = None,
     name: str = "osm",
+    filter_fully_inside: bool = False,
 ) -> tuple[Path, Path]:
     """Download and parse OSM road data (ways/nodes) for a bounding box.
 
@@ -53,6 +55,7 @@ def fetch_osm_data(
         original_bbox: Original unbuffered bbox (for metadata tracking)
         buffer_m: Buffer distance in meters that was applied to bbox
         name: Dataset name for output files (e.g., "osm" -> "osm_segments.parquet")
+        filter_fully_inside: If True, filter to features fully inside bbox (validation mode)
 
     Returns:
         Tuple of (segments_path, connectors_path)
@@ -97,8 +100,20 @@ def fetch_osm_data(
             pbf_path.unlink()
             logger.debug(f"Removed temporary PBF: {pbf_path}")
 
+    # Filter BEFORE transformation (much faster - avoids transforming roads we'll discard)
+    if filter_fully_inside:
+        original_count = len(roads_gdf)
+        roads_gdf = _filter_fully_inside(roads_gdf, bbox)
+        connectors_gdf = _filter_connectors_for_roads(connectors_gdf, roads_gdf)
+        logger.info(
+            f"Filtered to fully-inside: {original_count} -> {len(roads_gdf)} roads, "
+            f"{len(connectors_gdf)} connectors"
+        )
+
     # Transform roads to match expected schema (for load_osm_roads compatibility)
+    logger.debug(f"Transforming {len(roads_gdf)} roads to Overture schema...")
     roads_gdf = _transform_to_overture_schema(roads_gdf)
+    logger.debug("Road transformation complete")
 
     # Transform connectors to match expected schema
     connectors_gdf = _transform_connectors_schema(connectors_gdf)
@@ -107,8 +122,12 @@ def fetch_osm_data(
     segments_path = output_dir / f"{name}_segments.parquet"
     connectors_path = output_dir / f"{name}_connectors.parquet"
 
+    logger.debug("Writing parquet files...")
     roads_gdf.to_parquet(segments_path, write_covering_bbox=True)
     connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
+
+    # Determine filter mode for metadata
+    filter_mode_value = "fully_inside" if filter_fully_inside else None
 
     # Save fetch metadata for segments (roads/ways)
     segments_metadata = FetchMetadata(
@@ -117,6 +136,7 @@ def fetch_osm_data(
         bbox=original_bbox.to_tuple() if original_bbox else bbox.to_tuple(),
         bbox_buffered=bbox.to_tuple() if buffer_m else None,
         bbox_buffer_m=buffer_m,
+        filter_mode=filter_mode_value,
         feature_count=len(roads_gdf),
         geometry_types=list(roads_gdf.geometry.geom_type.unique()) if len(roads_gdf) > 0 else [],
         notes=f"OSM ways for dataset '{name}' fetched from Geofabrik regional PBF extract",
@@ -130,6 +150,7 @@ def fetch_osm_data(
         bbox=original_bbox.to_tuple() if original_bbox else bbox.to_tuple(),
         bbox_buffered=bbox.to_tuple() if buffer_m else None,
         bbox_buffer_m=buffer_m,
+        filter_mode=filter_mode_value,
         feature_count=len(connectors_gdf),
         geometry_types=list(connectors_gdf.geometry.geom_type.unique())
         if len(connectors_gdf) > 0
@@ -190,52 +211,60 @@ def fetch_osm_segments(
     return segments_path
 
 
-def _transform_to_overture_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def _transform_to_overture_schema(
+    gdf: gpd.GeoDataFrame, keep_source_tags: bool = True
+) -> gpd.GeoDataFrame:
     """Transform PBF-parsed data to match Overture schema.
 
     Builds the full Overture-compatible schema at fetch time:
     - id, geometry, names, class, subtype, sources
     - road_flags, level_rules (transformed from OSM tags)
-    - source_tags (preserved for debugging/advanced use)
+    - source_tags (preserved for debugging/advanced use, optional)
+
+    Modifies in place to reduce memory usage.
+
+    Args:
+        gdf: GeoDataFrame with raw OSM data
+        keep_source_tags: If False, drop source_tags to save memory (validation mode)
     """
     if len(gdf) == 0:
         return gdf
 
-    result = gdf.copy()
+    # Work in place to avoid copy
+    tags_col = gdf["tags"]
 
     # Extract class from tags (highway value)
-    result["class"] = result["tags"].apply(
-        lambda t: t.get("highway", "unclassified") if isinstance(t, dict) else "unclassified"
-    )
+    gdf["class"] = [
+        t.get("highway", "unclassified") if isinstance(t, dict) else "unclassified"
+        for t in tags_col
+    ]
 
     # Build names struct to match Overture format
-    result["names"] = result["name"].apply(lambda n: {"primary": n} if n else None)
+    gdf["names"] = [{"primary": n} if n else None for n in gdf["name"]]
 
     # Subtype is always 'road' for highway features
-    result["subtype"] = "road"
+    gdf["subtype"] = "road"
 
     # Sources array with record_id
-    result["sources"] = result["id"].apply(
-        lambda osm_id: [{"dataset": "OpenStreetMap", "record_id": osm_id}]
-    )
+    gdf["sources"] = [[{"dataset": "OpenStreetMap", "record_id": oid}] for oid in gdf["id"]]
 
-    # Build road_flags from tags (matching Overture schema)
-    result["road_flags"] = result.apply(
-        lambda row: _build_road_flags(row["tags"], row["class"]),
-        axis=1,
-    )
+    # Build road_flags and level_rules together to avoid re-iterating tags
+    road_flags = []
+    level_rules = []
+    for tags, cls in zip(tags_col, gdf["class"]):
+        road_flags.append(_build_road_flags(tags, cls))
+        level_rules.append(_build_level_rules(tags))
+    gdf["road_flags"] = road_flags
+    gdf["level_rules"] = level_rules
 
-    # Build level_rules from tags
-    result["level_rules"] = result["tags"].apply(_build_level_rules)
-
-    # Rename tags to source_tags for clarity
-    result["source_tags"] = result["tags"]
+    # Optionally keep source_tags for debugging/discovery (uses memory)
+    if keep_source_tags:
+        gdf["source_tags"] = gdf["tags"]
 
     # Drop internal columns
-    columns_to_drop = ["tags", "name", "node_ids"]
-    result = result.drop(columns=[c for c in columns_to_drop if c in result.columns])
+    gdf.drop(columns=["tags", "name", "node_ids"], inplace=True, errors="ignore")
 
-    return result
+    return gdf
 
 
 def _transform_connectors_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -243,14 +272,10 @@ def _transform_connectors_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if len(gdf) == 0:
         return gdf
 
-    result = gdf.copy()
+    # Work in place to avoid copy
+    gdf["sources"] = [[{"dataset": "OpenStreetMap", "record_id": oid}] for oid in gdf["id"]]
 
-    # Sources array with record_id (OSM node ID)
-    result["sources"] = result["id"].apply(
-        lambda osm_id: [{"dataset": "OpenStreetMap", "record_id": osm_id}]
-    )
-
-    return result
+    return gdf
 
 
 def load_osm_roads(path: Path) -> gpd.GeoDataFrame:
@@ -445,3 +470,65 @@ def _normalize_road_class(road_class: str | None) -> str:
     }
 
     return class_mapping.get(road_class, "unclassified")
+
+
+def _filter_fully_inside(gdf: gpd.GeoDataFrame, bbox: BoundingBox) -> gpd.GeoDataFrame:
+    """Filter to features whose geometry is fully contained within bbox.
+
+    This is used in validation mode to ensure OSM features don't extend
+    outside the target dataset's coverage area.
+
+    Args:
+        gdf: GeoDataFrame with road segments
+        bbox: Bounding box to filter against
+
+    Returns:
+        GeoDataFrame with only features fully inside the bbox
+    """
+    if len(gdf) == 0:
+        return gdf
+
+    bbox_poly = shapely_box(bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax)
+    return gdf[gdf.geometry.within(bbox_poly)].copy()
+
+
+def _filter_connectors_for_roads(
+    connectors_gdf: gpd.GeoDataFrame, roads_gdf: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """Filter connectors to only those at endpoints of remaining roads.
+
+    After filtering roads to fully-inside, we need to filter connectors
+    to only those that are endpoints of the remaining roads.
+
+    Uses coordinate-based lookup for speed instead of geometric intersection.
+
+    Args:
+        connectors_gdf: GeoDataFrame with connector points
+        roads_gdf: GeoDataFrame with filtered road segments
+
+    Returns:
+        GeoDataFrame with only connectors at road endpoints
+    """
+    if len(connectors_gdf) == 0 or len(roads_gdf) == 0:
+        return connectors_gdf.iloc[0:0].copy()
+
+    # Collect endpoint coordinates as rounded tuples (7 decimal places ≈ 1cm precision)
+    endpoint_coords = set()
+    for geom in roads_gdf.geometry:
+        if geom is not None and not geom.is_empty:
+            coords = list(geom.coords)
+            if len(coords) >= 2:
+                endpoint_coords.add((round(coords[0][0], 7), round(coords[0][1], 7)))
+                endpoint_coords.add((round(coords[-1][0], 7), round(coords[-1][1], 7)))
+
+    if not endpoint_coords:
+        return connectors_gdf.iloc[0:0].copy()
+
+    # Filter connectors by coordinate membership (much faster than geometric intersection)
+    # Build mask as pandas Series for proper indexing
+    mask = connectors_gdf.geometry.apply(
+        lambda g: (
+            g is not None and not g.is_empty and (round(g.x, 7), round(g.y, 7)) in endpoint_coords
+        )
+    )
+    return connectors_gdf.loc[mask].copy()

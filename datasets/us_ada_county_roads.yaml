@@ -6,7 +6,6 @@ source:
   type: arcgis
   url: https://maps.achdidaho.org/server/rest/services/Assessor/roadcenterline/MapServer/0
 fetch:
-  crs: EPSG:4326
   id_prefix: ada_road
   name_column: StName
   class_column: FuncClass
@@ -15,6 +14,24 @@ fetch:
   - 43.12
   - -115.95
   - 43.81
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:17:05.855349+00:00'
+  bbox:
+  - -116.52
+  - 43.12
+  - -115.95
+  - 43.81
+  bbox_buffered:
+  - -116.53237693167115
+  - 43.111016888250084
+  - -115.93762306832885
+  - 43.818983111749915
+  bbox_buffer_m: 1000.0
+  feature_count: 133777
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: FuncClass

@@ -7,7 +7,6 @@ source:
   url: https://services8.arcgis.com/r6MmJtuWAzMawmJ8/ArcGIS/rest/services/Streets/FeatureServer/0
   portal_url: https://www.mcgm.gov.in
 fetch:
-  crs: EPSG:4326
   id_prefix: mum_street
   name_column: NAME
   bbox:
@@ -15,3 +14,21 @@ fetch:
   - 18.87
   - 73.05
   - 19.28
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:25:49.292736+00:00'
+  bbox:
+  - 72.75
+  - 18.87
+  - 73.05
+  - 19.28
+  bbox_buffered:
+  - 72.74049498295248
+  - 18.86101688825009
+  - 73.05950501704751
+  - 19.28898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 64070
+  geometry_types:
+  - LineString
+  output_path: data/raw

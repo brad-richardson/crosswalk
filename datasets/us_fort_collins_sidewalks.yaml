@@ -6,7 +6,6 @@ source:
   type: arcgis
   url: https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Sidewalks/FeatureServer/0
 fetch:
-  crs: EPSG:4326
   id_prefix: fc_sidewalk
   class_column: TYPE
   class_mapping:
@@ -27,6 +26,24 @@ fetch:
   - 40.45
   - -104.95
   - 40.65
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-21T17:15:51.879133+00:00'
+  bbox:
+  - -105.15
+  - 40.45
+  - -104.95
+  - 40.65
+  bbox_buffered:
+  - -105.1618223895157
+  - 40.44101688825009
+  - -104.9381776104843
+  - 40.65898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 43454
+  geometry_types:
+  - LineString
+  output_path: data/raw
 classification:
   source_classification:
     column: TYPE

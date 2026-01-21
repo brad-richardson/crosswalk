@@ -7,6 +7,8 @@ from shapely.geometry import LineString, Point
 from matcher.fetch.osm import (
     _build_level_rules,
     _build_road_flags,
+    _filter_connectors_for_roads,
+    _filter_fully_inside,
     _get_level_from_rules,
     _has_flag,
     _normalize_road_class,
@@ -381,3 +383,227 @@ class TestRoadHandler:
 
         assert handler.node_refs[1] == 2
         assert handler.node_refs[2] == 1
+
+
+class TestFilterFullyInside:
+    """Tests for _filter_fully_inside function."""
+
+    def test_empty_geodataframe(self):
+        """Empty input returns empty output."""
+        gdf = gpd.GeoDataFrame(columns=["id", "geometry"], crs="EPSG:4326")
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        assert len(result) == 0
+
+    def test_fully_inside_road_kept(self):
+        """Road completely inside bbox is kept."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0.2, 0.2), (0.8, 0.8)])],
+            },
+            crs="EPSG:4326",
+        )
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        assert len(result) == 1
+
+    def test_road_extending_outside_filtered(self):
+        """Road extending outside bbox is filtered out."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0.2, 0.2), (1.5, 1.5)])],  # Extends past bbox
+            },
+            crs="EPSG:4326",
+        )
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        assert len(result) == 0
+
+    def test_road_touching_boundary_kept(self):
+        """Road with vertex exactly on bbox boundary is kept.
+
+        Shapely's within() for LineStrings considers a feature "within" a polygon
+        if all points are inside or on the boundary. A line ending at the corner
+        is still fully contained.
+        """
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0.5, 0.5), (1.0, 1.0)])],  # Ends on boundary
+            },
+            crs="EPSG:4326",
+        )
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        # within() includes boundary points, so line touching corner is kept
+        assert len(result) == 1
+
+    def test_mixed_roads_partial_kept(self):
+        """Mix of inside and outside roads filters correctly."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1", "w2", "w3"],
+                "geometry": [
+                    LineString([(0.2, 0.2), (0.8, 0.8)]),  # Inside
+                    LineString([(0.5, 0.5), (1.5, 1.5)]),  # Extends outside
+                    LineString([(0.1, 0.1), (0.5, 0.5)]),  # Inside
+                ],
+            },
+            crs="EPSG:4326",
+        )
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        assert len(result) == 2
+        assert set(result["id"]) == {"w1", "w3"}
+
+    def test_returns_copy(self):
+        """Result is a copy, not a view of original."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0.2, 0.2), (0.8, 0.8)])],
+            },
+            crs="EPSG:4326",
+        )
+        bbox = BoundingBox(xmin=0, ymin=0, xmax=1, ymax=1)
+        result = _filter_fully_inside(gdf, bbox)
+        # Modifying result should not affect original
+        result["id"] = ["modified"]
+        assert gdf.iloc[0]["id"] == "w1"
+
+
+class TestFilterConnectorsForRoads:
+    """Tests for _filter_connectors_for_roads function."""
+
+    def test_empty_connectors(self):
+        """Empty connectors input returns empty output."""
+        connectors = gpd.GeoDataFrame(columns=["id", "geometry"], crs="EPSG:4326")
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        assert len(result) == 0
+
+    def test_empty_roads(self):
+        """Empty roads input returns empty output."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1"],
+                "geometry": [Point(0, 0)],
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(columns=["id", "geometry"], crs="EPSG:4326")
+        result = _filter_connectors_for_roads(connectors, roads)
+        assert len(result) == 0
+
+    def test_connector_at_road_endpoint_kept(self):
+        """Connector at road endpoint is kept."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1", "n2"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0, 0), (0.5, 0.5), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        assert len(result) == 2
+        assert set(result["id"]) == {"n1", "n2"}
+
+    def test_connector_not_at_endpoint_filtered(self):
+        """Connector not at any road endpoint is filtered out."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1", "n2", "n3"],
+                "geometry": [Point(0, 0), Point(0.5, 0.5), Point(5, 5)],  # n3 is far away
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0, 0), (0.5, 0.5), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        # Road endpoints are (0,0) and (1,1). Intermediate vertex (0.5,0.5) is NOT an endpoint.
+        # n1 at (0,0) = start endpoint -> kept
+        # n2 at (0.5,0.5) = intermediate vertex -> filtered out
+        # n3 at (5,5) = distant point -> filtered out
+        assert len(result) == 1
+        assert result.iloc[0]["id"] == "n1"
+
+    def test_shared_endpoint_multiple_roads(self):
+        """Connector at shared endpoint of multiple roads is kept."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1"],
+                "geometry": [Point(0.5, 0.5)],
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1", "w2"],
+                "geometry": [
+                    LineString([(0, 0), (0.5, 0.5)]),
+                    LineString([(0.5, 0.5), (1, 1)]),
+                ],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        assert len(result) == 1
+
+    def test_handles_null_geometry(self):
+        """Roads with null geometry don't cause errors."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1"],
+                "geometry": [Point(0, 0)],
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1", "w2"],
+                "geometry": [None, LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        assert len(result) == 1
+
+    def test_returns_copy(self):
+        """Result is a copy, not a view of original."""
+        connectors = gpd.GeoDataFrame(
+            {
+                "id": ["n1"],
+                "geometry": [Point(0, 0)],
+            },
+            crs="EPSG:4326",
+        )
+        roads = gpd.GeoDataFrame(
+            {
+                "id": ["w1"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = _filter_connectors_for_roads(connectors, roads)
+        result["id"] = ["modified"]
+        assert connectors.iloc[0]["id"] == "n1"

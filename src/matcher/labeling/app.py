@@ -19,10 +19,10 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 # Project root for resolving data paths (src/matcher/labeling -> project root)
 PROJECT_ROOT = Path(__file__).parents[3]
 
-# Dataset configurations - maps dataset_id to (target_file, reference_file)
+# Base dataset configurations - maps dataset_id to (target_file, reference_file)
 # Dataset metadata (name, type, urls) comes from DatasetRegistry
 # Reference file is the Overture segments file for the region
-DATASET_CONFIG = {
+_BASE_DATASET_CONFIG = {
     # Boston area (default Overture reference)
     "boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
     "boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
@@ -47,6 +47,85 @@ DATASET_CONFIG = {
     # Utah (legacy - uses subdirectory)
     "utah_roads": ("utah_roads.parquet", "utah_overture/overture_segments.parquet"),
 }
+
+
+def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
+    """Auto-discover OSM datasets from data/raw/ directory.
+
+    Looks for files matching pattern: {region}_osm_segments.parquet
+    Maps them to corresponding Overture reference files.
+    """
+    raw_dir = PROJECT_ROOT / "data/raw"
+    if not raw_dir.exists():
+        return {}
+
+    osm_datasets = {}
+
+    # Find all *_osm_segments.parquet files
+    for osm_file in raw_dir.glob("*_osm_segments.parquet"):
+        # Extract region from filename (e.g., "us_frisco_roads_osm_segments.parquet" -> "us_frisco_roads")
+        filename = osm_file.stem  # "us_frisco_roads_osm_segments"
+        if not filename.endswith("_osm_segments"):
+            continue
+
+        region = filename.replace("_osm_segments", "")  # "us_frisco_roads"
+        dataset_id = f"{region}_osm"  # "us_frisco_roads_osm"
+
+        # Find corresponding Overture reference
+        # Try various naming patterns
+        overture_candidates = [
+            f"{region}_overture_segments.parquet",  # us_frisco_roads_overture_segments.parquet
+            "overture_segments.parquet",  # fallback to default
+        ]
+
+        # Also check for region-specific Overture files (e.g., overture_frisco_segments.parquet)
+        # by extracting city/area name
+        region_parts = region.split("_")
+        if len(region_parts) >= 2:
+            # e.g., "us_frisco_roads" -> "frisco"
+            area_name = (
+                region_parts[1]
+                if region_parts[0] in ["us", "co", "br", "nl", "sg", "fi", "in", "ke", "ng"]
+                else region_parts[0]
+            )
+            overture_candidates.insert(0, f"overture_{area_name}_segments.parquet")
+            overture_candidates.insert(0, f"{area_name}_overture_segments.parquet")
+
+        # Find first existing Overture file
+        overture_file = "overture_segments.parquet"  # default
+        for candidate in overture_candidates:
+            if (raw_dir / candidate).exists():
+                overture_file = candidate
+                break
+
+        osm_datasets[dataset_id] = (osm_file.name, overture_file)
+
+    return osm_datasets
+
+
+def _get_dataset_config() -> dict[str, tuple[str, str]]:
+    """Get combined dataset config including auto-discovered OSM datasets."""
+    config = _BASE_DATASET_CONFIG.copy()
+    config.update(_discover_osm_datasets())
+    return config
+
+
+# Dynamic dataset config that includes auto-discovered OSM datasets
+# Re-computed on each access to pick up newly fetched datasets
+def get_dataset_config() -> dict[str, tuple[str, str]]:
+    """Get current dataset config, refreshing OSM discoveries."""
+    return _get_dataset_config()
+
+
+# Initial config for module-level access
+DATASET_CONFIG = _get_dataset_config()
+
+
+def get_dataset_raw_files() -> dict[str, str]:
+    """Get mapping of dataset_id to raw file, refreshing discoveries."""
+    config = get_dataset_config()
+    return {k: v[0] for k, v in config.items()}
+
 
 # For backwards compatibility
 DATASET_RAW_FILES = {k: v[0] for k, v in DATASET_CONFIG.items()}
@@ -109,11 +188,12 @@ def get_data_paths() -> tuple[Path, Path, str]:
     default_dataset = st.query_params.get("dataset", "boston_streets")
     selected = st.session_state.get("selected_dataset", default_dataset)
 
-    # Validate selection
-    if selected not in DATASET_CONFIG:
+    # Validate selection (refresh config to pick up newly fetched datasets)
+    current_config = get_dataset_config()
+    if selected not in current_config:
         selected = "boston_streets"
 
-    target_filename, reference_filename = DATASET_CONFIG[selected]
+    target_filename, reference_filename = current_config[selected]
 
     # Env vars override dropdown selection (for CLI compatibility)
     reference_path = Path(
@@ -225,11 +305,13 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         st.subheader("Dataset")
 
         # Get default from query params for persistence across refreshes
+        # Refresh config to pick up newly fetched datasets
+        current_raw_files = get_dataset_raw_files()
         default_dataset = st.query_params.get("dataset", "boston_streets")
-        if default_dataset not in DATASET_RAW_FILES:
+        if default_dataset not in current_raw_files:
             default_dataset = "boston_streets"
 
-        dataset_keys = list(DATASET_RAW_FILES.keys())
+        dataset_keys = list(current_raw_files.keys())
 
         def get_dataset_display_name(key: str) -> str:
             """Get display name from registry or fallback to key."""
@@ -252,7 +334,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             st.info("Using env var override")
 
         # Warnings for file issues
-        raw_file = DATASET_RAW_FILES.get(selected_dataset, "")
+        raw_file = current_raw_files.get(selected_dataset, "")
         raw_path = PROJECT_ROOT / "data/raw" / raw_file
         if raw_file and not raw_path.exists():
             st.warning(f"Dataset not found: {raw_file}")
