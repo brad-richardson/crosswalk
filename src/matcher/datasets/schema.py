@@ -205,10 +205,10 @@ def load_dataset_config(path: Path) -> DatasetConfig:
 
 def get_datasets_dir() -> Path:
     """Get the datasets config directory (datasets/ at repo root)."""
-    # Walk up from this file to find repo root
+    # Walk up from this file to find repo root (identified by pyproject.toml)
     current = Path(__file__).parent
     while current != current.parent:
-        if (current / "datasets").is_dir() or (current / "pyproject.toml").exists():
+        if (current / "pyproject.toml").exists():
             datasets_dir = current / "datasets"
             datasets_dir.mkdir(exist_ok=True)
             return datasets_dir
