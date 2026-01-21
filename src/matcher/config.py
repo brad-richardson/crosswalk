@@ -29,7 +29,7 @@ FEATURE_COLUMNS = [
     "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
     "buffer_iou_5m",  # Tight alignment (exact centerline matches)
     "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
-    "overlap_ratio",
+    "overlap_ratio",  # TODO: Remove - always 1.0 due to blocking bias (candidates are already geometrically close)
     "heading_delta",
     "length_ratio",
     "projection_distance_m",
