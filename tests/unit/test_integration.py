@@ -371,6 +371,167 @@ class TestFringeDetection:
         assert fringe.iloc[0]["unmatched_reason"] == "outside_reference_coverage"
 
 
+class TestConnectivityGating:
+    """Tests for connectivity-based gating."""
+
+    def test_short_segment_rejected_without_gating(self):
+        """Short segments are rejected when connectivity gating is disabled."""
+        # Reference: L-shaped network
+        ref_geom1 = LineString([(0, 0), (100, 0)])
+        ref_geom2 = LineString([(100, 0), (100, 100)])
+
+        # Target: short segment (8m) extending from reference
+        # Connected at (50, 0) but too short for min_merge_length_m=20
+        target_geom = LineString([(50, 0), (50, 8)])  # 8m segment
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "t_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_geom1, ref_geom2, target_geom],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, orphans, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,  # Target is only 8m net-new
+            net_new_buffer_m=5.0,
+            max_hops=2,
+            enable_connectivity_gating=False,  # Disabled
+            enable_fringe_detection=False,  # Disable fringe detection for this test
+        )
+
+        # Target should be orphaned (too short)
+        target_orphans = orphans[orphans["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_orphans) == 1
+        assert target_orphans.iloc[0]["unmatched_reason"] == "insufficient_net_new_length"
+
+    def test_connectivity_gating_enabled_flag(self):
+        """Connectivity gating can be enabled via the flag."""
+        # Reference: single segment
+        ref_geom = LineString([(0, 0), (100, 0)])
+
+        # Target: short segment (8m) extending from reference
+        target_geom = LineString([(50, 0), (50, 8)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "t_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_geom, target_geom],
+            },
+            crs="EPSG:32610",
+        )
+
+        # With gating disabled, the short segment should be orphaned
+        main, orphans, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,
+            net_new_buffer_m=5.0,
+            enable_connectivity_gating=False,
+            enable_fringe_detection=False,
+        )
+
+        target_orphans = orphans[orphans["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_orphans) == 1
+
+        # With gating enabled, it still won't help this segment because it doesn't
+        # bridge disconnected components or create shortcuts
+        main2, orphans2, net_new2, stats2 = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,
+            net_new_buffer_m=5.0,
+            enable_connectivity_gating=True,
+            min_connectivity_length_m=5.0,
+            enable_fringe_detection=False,
+        )
+
+        # Still orphaned because it doesn't add connectivity value
+        target_orphans2 = orphans2[orphans2["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_orphans2) == 1
+
+    def test_connectivity_gating_stats(self):
+        """Stats include connectivity gating count."""
+        # Reference: single segment
+        ref_geom = LineString([(0, 0), (100, 0)])
+
+        # Target: connects to reference
+        target_geom = LineString([(50, 0), (50, 50)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "t_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_geom, target_geom],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, orphans, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,
+            enable_connectivity_gating=True,
+        )
+
+        # Stats should include connectivity_gating_accepted key
+        assert "connectivity_gating_accepted" in stats
+
+    def test_segment_below_min_connectivity_length_rejected(self):
+        """Segments below min_connectivity_length_m are rejected even with gating."""
+        # Reference: L-shaped network
+        ref_geom1 = LineString([(0, 0), (100, 0)])
+        ref_geom2 = LineString([(100, 0), (100, 100)])
+
+        # Target: very short segment (3m) - below min_connectivity_length_m
+        # The net_new_buffer is 5m, so a 3m segment from (50, 0) to (50, 3)
+        # would have 0 net-new length because it's inside the buffer
+        # Instead, make it 10m total but only 3m net-new (inside buffer for 7m)
+        target_geom = LineString([(50, 0), (50, 3)])  # Only 3m total
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "t_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_geom1, ref_geom2, target_geom],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, orphans, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,
+            net_new_buffer_m=1.0,  # Small buffer so we get net-new length
+            enable_connectivity_gating=True,
+            min_connectivity_length_m=5.0,  # Target is only 3m, below minimum
+            enable_fringe_detection=False,  # Disable fringe detection for this test
+        )
+
+        # Target should be orphaned (below connectivity minimum because net-new < 5m)
+        target_orphans = orphans[orphans["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_orphans) == 1
+        assert target_orphans.iloc[0]["unmatched_reason"] == "insufficient_net_new_length"
+
+
 class TestBoundingBoxExpand:
     """Tests for BoundingBox expand method."""
 

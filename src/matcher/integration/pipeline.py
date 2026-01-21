@@ -49,6 +49,9 @@ def run_integration_pipeline(
     enable_fringe_detection: bool = True,
     transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
+    enable_connectivity_gating: bool = False,
+    min_connectivity_length_m: float = 5.0,
+    connectivity_path_threshold_m: float = 500.0,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> IntegrationResult:
@@ -83,6 +86,9 @@ def run_integration_pipeline(
             target segments. Defaults to 2x connection_tolerance_m since trails often
             don't share exact endpoints. Set to connection_tolerance_m for strict mode.
         debug_connectivity: Enable debug logging for transitive connectivity analysis.
+        enable_connectivity_gating: Allow shorter segments if they add network connectivity.
+        min_connectivity_length_m: Minimum length for connectivity gating (default 5m).
+        connectivity_path_threshold_m: Path threshold for shortcut detection (default 500m).
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
 
@@ -184,6 +190,9 @@ def run_integration_pipeline(
         enable_fringe_detection=enable_fringe_detection,
         transitive_tolerance_m=transitive_tolerance_m,
         debug_connectivity=debug_connectivity,
+        enable_connectivity_gating=enable_connectivity_gating,
+        min_connectivity_length_m=min_connectivity_length_m,
+        connectivity_path_threshold_m=connectivity_path_threshold_m,
     )
     stats.main_component_edges = len(main_edges)
     stats.orphan_edges = len(orphan_edges)

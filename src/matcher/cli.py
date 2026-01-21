@@ -768,6 +768,21 @@ def integrate(
         "--debug-connectivity",
         help="Enable debug logging for transitive connectivity analysis",
     ),
+    enable_connectivity_gating: bool = typer.Option(
+        False,
+        "--enable-connectivity-gating",
+        help="Allow shorter segments if they add network connectivity",
+    ),
+    min_connectivity_length_m: float = typer.Option(
+        5.0,
+        "--min-connectivity-length-m",
+        help="Minimum net-new length (meters) for connectivity gating",
+    ),
+    connectivity_path_threshold_m: float = typer.Option(
+        500.0,
+        "--connectivity-path-threshold-m",
+        help="Path length (meters) for shortcut detection in connectivity gating",
+    ),
 ):
     """Integrate unmatched segments into reference network.
 
@@ -852,6 +867,9 @@ def integrate(
                 enable_fringe_detection=not no_fringe_filter,
                 transitive_tolerance_m=transitive_tolerance_m,
                 debug_connectivity=debug_connectivity,
+                enable_connectivity_gating=enable_connectivity_gating,
+                min_connectivity_length_m=min_connectivity_length_m,
+                connectivity_path_threshold_m=connectivity_path_threshold_m,
             )
             progress.update(task, completed=True)
 

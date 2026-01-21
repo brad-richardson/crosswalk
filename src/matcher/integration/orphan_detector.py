@@ -171,6 +171,7 @@ def propagate_transitive_connectivity(
         orphan_targets: GeoDataFrame of targets not connected to reference
         connection_tolerance_m: Distance in meters to consider segments connected
         max_hops: Maximum number of hops from reference (default 2)
+        debug: Enable detailed debug logging for connectivity analysis
 
     Returns:
         Tuple of:
@@ -178,7 +179,18 @@ def propagate_transitive_connectivity(
         - Updated orphan_targets with remaining disconnected segments
     """
     if len(orphan_targets) == 0 or len(connected_targets) == 0 or max_hops < 1:
+        if debug:
+            logger.debug(
+                f"  Transitive propagation skipped: "
+                f"orphans={len(orphan_targets)}, connected={len(connected_targets)}, max_hops={max_hops}"
+            )
         return connected_targets, orphan_targets
+
+    if debug:
+        logger.debug(
+            f"  Starting transitive propagation: {len(orphan_targets)} orphans, "
+            f"{len(connected_targets)} connected, tolerance={connection_tolerance_m}m, max_hops={max_hops}"
+        )
 
     # Initialize hop tracking
     if "_connectivity_hop" not in connected_targets.columns:
@@ -231,8 +243,27 @@ def propagate_transitive_connectivity(
 
         if debug and closest_distances:
             # Log the closest distances for remaining orphans
-            sorted_dists = sorted(closest_distances, key=lambda x: x[1])[:5]
-            logger.debug(f"    Hop {hop} closest orphan distances: {sorted_dists}")
+            sorted_dists = sorted(closest_distances, key=lambda x: x[1])[:10]
+            logger.debug(f"    Hop {hop} closest orphan distances (top 10): {sorted_dists}")
+
+            # Log distance distribution for diagnostics
+            all_dists = [d for _, d in closest_distances if d < float("inf")]
+            if all_dists:
+                import statistics
+
+                logger.debug(
+                    f"    Distance distribution: min={min(all_dists):.1f}m, "
+                    f"median={statistics.median(all_dists):.1f}m, "
+                    f"max={max(all_dists):.1f}m, count={len(all_dists)}"
+                )
+                # Suggest tolerance if many orphans are just outside
+                within_double = sum(1 for d in all_dists if d <= connection_tolerance_m * 2)
+                within_triple = sum(1 for d in all_dists if d <= connection_tolerance_m * 3)
+                if within_double > 0 or within_triple > 0:
+                    logger.debug(
+                        f"    Orphans within 2x tolerance ({connection_tolerance_m * 2:.1f}m): {within_double}, "
+                        f"within 3x ({connection_tolerance_m * 3:.1f}m): {within_triple}"
+                    )
 
         if not newly_connected_indices:
             # No new connections at this hop level
@@ -262,6 +293,151 @@ def propagate_transitive_connectivity(
     return connected_targets, remaining_orphans
 
 
+def _check_adds_connectivity(
+    candidate_segments: gpd.GeoDataFrame,
+    main_network: gpd.GeoDataFrame,
+    tolerance_m: float,
+    path_threshold_m: float,
+) -> pd.Series:
+    """Check if segments add connectivity to the network.
+
+    A segment "adds connectivity" if it:
+    1. Bridges two disconnected components in the main network, OR
+    2. Creates a meaningful shortcut (existing graph path > path_threshold_m)
+
+    Args:
+        candidate_segments: Segments to check for connectivity value
+        main_network: The current main network (reference + connected targets)
+        tolerance_m: Distance tolerance for endpoint snapping
+        path_threshold_m: Path length threshold for "shortcut" detection
+
+    Returns:
+        Boolean Series indexed like candidate_segments, True if segment adds connectivity
+    """
+    if len(candidate_segments) == 0:
+        return pd.Series([], dtype=bool)
+
+    if len(main_network) == 0:
+        # No network to connect to
+        return pd.Series(False, index=candidate_segments.index)
+
+    # Build a graph from the main network
+    # Nodes are endpoints of segments, edges are the segments themselves
+    # Extract all endpoints and build adjacency
+    node_coords = {}  # node_id -> (x, y)
+    node_id_counter = 0
+    coord_to_node = {}  # (x, y) rounded -> node_id
+
+    def get_or_create_node(x: float, y: float) -> int:
+        nonlocal node_id_counter
+        # Round coordinates to tolerance for snapping
+        key = (round(x / tolerance_m) * tolerance_m, round(y / tolerance_m) * tolerance_m)
+        if key not in coord_to_node:
+            coord_to_node[key] = node_id_counter
+            node_coords[node_id_counter] = (x, y)
+            node_id_counter += 1
+        return coord_to_node[key]
+
+    # Build graph from main network
+    G = nx.Graph()
+
+    for _, row in main_network.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+
+        endpoints = _get_endpoints(geom)
+        if len(endpoints) != 2:
+            continue
+
+        node_a = get_or_create_node(endpoints[0].x, endpoints[0].y)
+        node_b = get_or_create_node(endpoints[1].x, endpoints[1].y)
+
+        G.add_node(node_a, pos=node_coords[node_a])
+        G.add_node(node_b, pos=node_coords[node_b])
+        G.add_edge(node_a, node_b, weight=geom.length)
+
+    if len(G.nodes) == 0:
+        return pd.Series(False, index=candidate_segments.index)
+
+    # For each candidate, check if it adds connectivity
+    results = []
+
+    for _idx, row in candidate_segments.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            results.append(False)
+            continue
+
+        endpoints = _get_endpoints(geom)
+        if len(endpoints) != 2:
+            results.append(False)
+            continue
+
+        # Find nearest nodes in the graph for each endpoint
+        pt_a, pt_b = endpoints
+
+        # Find closest node to each endpoint
+        min_dist_a = float("inf")
+        min_dist_b = float("inf")
+        closest_node_a = None
+        closest_node_b = None
+
+        for node_id, (nx_coord, ny_coord) in node_coords.items():
+            dist_a = pt_a.distance(Point(nx_coord, ny_coord))
+            dist_b = pt_b.distance(Point(nx_coord, ny_coord))
+
+            if dist_a < min_dist_a:
+                min_dist_a = dist_a
+                closest_node_a = node_id
+            if dist_b < min_dist_b:
+                min_dist_b = dist_b
+                closest_node_b = node_id
+
+        # Both endpoints must be near the network
+        if min_dist_a > tolerance_m or min_dist_b > tolerance_m:
+            results.append(False)
+            continue
+
+        if closest_node_a is None or closest_node_b is None:
+            results.append(False)
+            continue
+
+        # Same node = loop, not adding connectivity
+        if closest_node_a == closest_node_b:
+            results.append(False)
+            continue
+
+        # Check 1: Does this bridge disconnected components?
+        if not nx.has_path(G, closest_node_a, closest_node_b):
+            # Bridges two disconnected components - adds connectivity!
+            results.append(True)
+            continue
+
+        # Check 2: Does this create a meaningful shortcut?
+        try:
+            existing_path_length = nx.shortest_path_length(
+                G, closest_node_a, closest_node_b, weight="weight"
+            )
+            segment_length = geom.length
+
+            # If existing path is much longer than direct segment, this is a shortcut
+            if (
+                existing_path_length > path_threshold_m
+                and existing_path_length > segment_length * 3
+            ):
+                results.append(True)
+                continue
+        except nx.NetworkXNoPath:
+            # Should be caught above, but handle edge case
+            results.append(True)
+            continue
+
+        results.append(False)
+
+    return pd.Series(results, index=candidate_segments.index)
+
+
 def detect_orphans_by_proximity(
     combined_gdf: gpd.GeoDataFrame,
     connection_tolerance_m: float = 3.0,  # Tight tolerance - must actually connect to infrastructure
@@ -273,6 +449,9 @@ def detect_orphans_by_proximity(
     transitive_tolerance_m: float
     | None = None,  # Tolerance for transitive connections (default: 2x connection_tolerance_m)
     debug_connectivity: bool = False,  # Enable debug logging for transitive connectivity
+    enable_connectivity_gating: bool = False,  # Allow shorter segments if they add connectivity
+    min_connectivity_length_m: float = 5.0,  # Minimum length when connectivity gating applies
+    connectivity_path_threshold_m: float = 500.0,  # Path threshold for shortcut detection
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame | None, dict[str, Any]]:
     """Identify orphan segments based on endpoint proximity to reference network.
 
@@ -291,6 +470,10 @@ def detect_orphans_by_proximity(
     Additionally, connected segments shorter than min_merge_length_m are treated
     as orphans since they don't add meaningful new coverage.
 
+    Connectivity-based gating: When enabled, segments shorter than min_merge_length_m
+    but longer than min_connectivity_length_m can still be included if they add
+    network connectivity (bridge components or create shortcuts).
+
     This is a simpler approach that doesn't require planarization - it just checks
     if target endpoints are near the reference network.
 
@@ -306,6 +489,11 @@ def detect_orphans_by_proximity(
         fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
             detection. Segments outside this area are considered fringe. Default 50m.
         enable_fringe_detection: Whether to filter fringe segments. Default True.
+        transitive_tolerance_m: Tolerance for transitive connections. Default: 2x connection_tolerance_m.
+        debug_connectivity: Enable debug logging for transitive connectivity analysis.
+        enable_connectivity_gating: Allow shorter segments if they add network connectivity.
+        min_connectivity_length_m: Minimum length for connectivity gating (default 5m).
+        connectivity_path_threshold_m: Path threshold for shortcut detection (default 500m).
 
     Returns:
         Tuple of:
@@ -328,6 +516,10 @@ def detect_orphans_by_proximity(
     logger.info(f"  Fringe detection: {'enabled' if enable_fringe_detection else 'disabled'}")
     if enable_fringe_detection:
         logger.info(f"  Fringe buffer: {fringe_buffer_m}m")
+    if enable_connectivity_gating:
+        logger.info("  Connectivity gating: enabled")
+        logger.info(f"  Min connectivity length: {min_connectivity_length_m}m")
+        logger.info(f"  Connectivity path threshold: {connectivity_path_threshold_m}m")
 
     # Work in a projected CRS for accurate distance calculations
     original_crs = combined_gdf.crs
@@ -451,6 +643,7 @@ def detect_orphans_by_proximity(
     # Filter connected targets by minimum NET NEW length
     # Only merge if segment adds meaningful new coverage beyond existing reference
     net_new_edges = None
+    connectivity_accepted = 0  # Track segments accepted via connectivity gating
     if min_merge_length_m > 0 and len(connected_targets) > 0:
         # Create a buffer around reference network to define "existing coverage"
         # Segments within this buffer are considered duplicating reference
@@ -483,6 +676,44 @@ def detect_orphans_by_proximity(
         connected_targets["_net_new_geometry"] = net_new_geoms
 
         long_enough = connected_targets["_net_new_length_m"] >= min_merge_length_m
+
+        # Connectivity-based gating: allow shorter segments if they add connectivity
+        connectivity_accepted = 0
+        if enable_connectivity_gating:
+            # Find borderline segments: too short for normal merge but long enough for connectivity check
+            borderline = (connected_targets["_net_new_length_m"] >= min_connectivity_length_m) & (
+                ~long_enough
+            )
+
+            if borderline.any():
+                logger.info(
+                    f"  Checking {borderline.sum()} borderline segments for connectivity value..."
+                )
+
+                # Build main network from reference + segments that are already long enough
+                main_network = gpd.GeoDataFrame(
+                    pd.concat([reference_edges, connected_targets[long_enough]], ignore_index=True),
+                    crs=combined_gdf.crs,
+                )
+
+                # Check if borderline segments add connectivity
+                adds_connectivity = _check_adds_connectivity(
+                    connected_targets[borderline],
+                    main_network,
+                    tolerance_m=connection_tolerance_m,
+                    path_threshold_m=connectivity_path_threshold_m,
+                )
+
+                # Accept borderline segments that add connectivity
+                connectivity_accepted = adds_connectivity.sum()
+                if connectivity_accepted > 0:
+                    logger.info(
+                        f"  Accepted {connectivity_accepted} short segments via connectivity gating"
+                    )
+
+                # Update long_enough mask
+                long_enough = long_enough | (borderline & adds_connectivity)
+
         too_short = connected_targets[~long_enough].copy()
 
         if len(too_short) > 0:
@@ -594,6 +825,7 @@ def detect_orphans_by_proximity(
         "orphan_edges": len(orphan_targets),
         "fringe_edges": fringe_count,
         "too_short_to_merge": too_short_count,
+        "connectivity_gating_accepted": connectivity_accepted,
         **hop_counts,
     }
 
