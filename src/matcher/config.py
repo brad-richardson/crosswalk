@@ -9,6 +9,11 @@ from pydantic_settings import BaseSettings
 # 10km represents "very far" for road segment matching
 MAX_DISTANCE_METERS = 10000.0
 
+# Tolerance for determining if alignment is "full" vs "partial"
+# If fractions are within this tolerance of 0.0 or 1.0, treat as full alignment
+# Uses 1% tolerance (0.01) consistently across UI display and label metadata
+ALIGNMENT_FULL_TOLERANCE = 0.01
+
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================

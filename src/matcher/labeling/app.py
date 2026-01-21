@@ -75,21 +75,18 @@ from matcher.labeling.data_loader import (
     filter_candidates,
     generate_scored_candidates,
     get_cache_info,
-    get_subsegment_estimate,
     load_cached_candidates,
     load_geodataframe,
     save_candidates_to_cache,
 )
 from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.feature_panel import (
-    get_subseg_state,
+    render_alignment_info,
     render_feature_panel,
     render_minimal_feature_panel,
-    render_subsegment_controls,
-    reset_subsegment_state,
 )
 from matcher.labeling.label_store import LabelStore
-from matcher.labeling.map_view import create_comparison_map, create_subsegment_map
+from matcher.labeling.map_view import create_comparison_map
 from matcher.labeling.state import (
     advance_to_next,
     get_session,
@@ -152,9 +149,6 @@ def check_dataset_change() -> bool:
 
         # Reset navigation
         st.session_state.current_index = 0
-
-        # Reset subsegment UI state
-        reset_subsegment_state()
 
         # Reset undo stack
         st.session_state.undo_stack = []
@@ -588,7 +582,7 @@ def render_single_pair_mode(pair, filtered, label_store, session):
     with col_shortcuts:
         labeled_this_session = st.session_state.session_label_count
         st.markdown(
-            f"**Keys:** M N I U Z ←/→ &nbsp;|&nbsp; **Labeled:** {labeled_this_session} &nbsp;|&nbsp; **Remaining:** {len(filtered)}"
+            f"**Keys:** M N U Z ←/→ &nbsp;|&nbsp; **Labeled:** {labeled_this_session} &nbsp;|&nbsp; **Remaining:** {len(filtered)}"
         )
     with col_nav:
         nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
@@ -600,7 +594,6 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 help="Previous (Left Arrow)",
             ):
                 go_to_previous()
-                reset_subsegment_state()
                 st.rerun()
         with nav_col2:
             # Use dynamic key to force update after labeling
@@ -614,7 +607,6 @@ def render_single_pair_mode(pair, filtered, label_store, session):
             )
             if new_idx - 1 != session.current_index:
                 session.current_index = new_idx - 1
-                reset_subsegment_state()
                 st.rerun()
         with nav_col3:
             if st.button(
@@ -624,15 +616,7 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 help="Next (Right Arrow)",
             ):
                 advance_to_next()
-                reset_subsegment_state()
                 st.rerun()
-
-    # Get subsegment state for map rendering (auto-applies estimate if needed)
-    # Compute subsegment estimate on-demand (deferred from bulk loading for performance)
-    estimated_subsegment = get_subsegment_estimate(pair)
-    map_ref_start, map_ref_end, map_target_start, map_target_end, map_subseg_active = (
-        get_subseg_state(estimated_subsegment=estimated_subsegment)
-    )
 
     # Main layout: map on left, features on right
     col_map, col_features = st.columns([2, 1])
@@ -640,6 +624,9 @@ def render_single_pair_mode(pair, filtered, label_store, session):
     with col_features:
         # Feature panel
         render_feature_panel(pair)
+
+        # Show alignment info if partial alignment
+        render_alignment_info(pair)
 
         # 1:N mode button (compact)
         related_count = len(
@@ -654,62 +641,43 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 st.rerun()
 
     with col_map:
-        # Map view - use subsegment map if active
+        # Map view - automatically shows alignment if partial
         tile_layer = st.session_state.get("tile_layer_choice", "Light")
-        if map_subseg_active:
-            m = create_subsegment_map(
-                pair,
-                ref_range=(map_ref_start, map_ref_end),
-                target_range=(map_target_start, map_target_end),
-                tile_layer=tile_layer,
-            )
-        else:
-            m = create_comparison_map(pair, tile_layer=tile_layer)
+        m = create_comparison_map(pair, tile_layer=tile_layer)
         # Render map as static HTML - more reliable than st_folium for automated browsers
         # Use get_root().render() to avoid "Trust Notebook" message
         map_html = m.get_root().render()
         components.html(map_html, height=550)
 
-    # Sub-segment controls + action buttons at bottom
-    ref_start, ref_end, target_start, target_end, subseg_active = render_subsegment_controls(
-        pair, estimated_subsegment=estimated_subsegment
-    )
-
     # Action buttons - compact row with keyboard shortcuts shown
     col1, col2, col3, col4 = st.columns(4)
 
-    # Prepare subsegment kwargs if active
-    subseg_kwargs = {}
-    if subseg_active:
-        subseg_kwargs = {
-            "ref_start_pct": ref_start,
-            "ref_end_pct": ref_end,
-            "target_start_pct": target_start,
-            "target_end_pct": target_end,
-        }
+    # Pass alignment fractions from the pair (computed by pipeline)
+    alignment_kwargs = {
+        "ref_start_pct": pair.ref_start_frac,
+        "ref_end_pct": pair.ref_end_frac,
+        "target_start_pct": pair.target_start_frac,
+        "target_end_pct": pair.target_end_frac,
+    }
 
     with col1:
         if st.button("✅ Match (M)", type="primary", use_container_width=True):
-            record_label(pair, "match", label_store, **subseg_kwargs)
-            reset_subsegment_state()
+            record_label(pair, "match", label_store, **alignment_kwargs)
             st.rerun()
 
     with col2:
         if st.button("❌ No Match (N)", use_container_width=True):
-            record_label(pair, "no_match", label_store, **subseg_kwargs)
-            reset_subsegment_state()
+            record_label(pair, "no_match", label_store, **alignment_kwargs)
             st.rerun()
 
     with col3:
         if st.button("🤔 Unsure (U)", use_container_width=True):
-            record_label(pair, "unsure", label_store, **subseg_kwargs)
-            reset_subsegment_state()
+            record_label(pair, "unsure", label_store, **alignment_kwargs)
             st.rerun()
 
     with col4:
         if st.button("↩️ Undo (Z)", disabled=len(session.undo_stack) == 0, use_container_width=True):
             undo_last_label(label_store)
-            reset_subsegment_state()
             st.rerun()
 
 
@@ -737,7 +705,6 @@ def render_quick_mode(pair, filtered, label_store, session):
             use_container_width=True,
         ):
             go_to_previous()
-            reset_subsegment_state()
             st.rerun()
 
     with nav_col2:
@@ -755,7 +722,6 @@ def render_quick_mode(pair, filtered, label_store, session):
             use_container_width=True,
         ):
             advance_to_next()
-            reset_subsegment_state()
             st.rerun()
 
     # Map - full width, taller for mobile viewing
@@ -767,6 +733,14 @@ def render_quick_mode(pair, filtered, label_store, session):
     # Minimal feature display (confidence + names)
     render_minimal_feature_panel(pair)
 
+    # Pass alignment fractions from the pair (computed by pipeline)
+    alignment_kwargs = {
+        "ref_start_pct": pair.ref_start_frac,
+        "ref_end_pct": pair.ref_end_frac,
+        "target_start_pct": pair.target_start_frac,
+        "target_end_pct": pair.target_end_frac,
+    }
+
     # Large action buttons - Match and No Match prominently displayed
     col1, col2 = st.columns(2)
 
@@ -777,9 +751,8 @@ def render_quick_mode(pair, filtered, label_store, session):
             use_container_width=True,
             key="quick_match",
         ):
-            record_label(pair, "match", label_store)
+            record_label(pair, "match", label_store, **alignment_kwargs)
             advance_to_next()
-            reset_subsegment_state()
             st.rerun()
 
     with col2:
@@ -788,9 +761,8 @@ def render_quick_mode(pair, filtered, label_store, session):
             use_container_width=True,
             key="quick_no_match",
         ):
-            record_label(pair, "no_match", label_store)
+            record_label(pair, "no_match", label_store, **alignment_kwargs)
             advance_to_next()
-            reset_subsegment_state()
             st.rerun()
 
     # More options in an expander for secondary actions
@@ -799,9 +771,8 @@ def render_quick_mode(pair, filtered, label_store, session):
 
         with more_col1:
             if st.button("🤔 Unsure (U)", use_container_width=True, key="quick_unsure"):
-                record_label(pair, "unsure", label_store)
+                record_label(pair, "unsure", label_store, **alignment_kwargs)
                 advance_to_next()
-                reset_subsegment_state()
                 st.rerun()
 
         with more_col2:
@@ -812,7 +783,6 @@ def render_quick_mode(pair, filtered, label_store, session):
                 key="quick_undo",
             ):
                 undo_last_label(label_store)
-                reset_subsegment_state()
                 st.rerun()
 
 
