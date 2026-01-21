@@ -18,31 +18,37 @@ MAX_DISTANCE_METERS = 10000.0
 # All feature columns computed by the matcher
 # Distance/length features use _m suffix to indicate meters
 FEATURE_COLUMNS = [
-    # Geometric features (9)
+    # Geometric features (11)
     "hausdorff_distance_m",
     "mean_hausdorff_distance_m",
-    "buffer_iou",
+    "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
+    "buffer_iou_5m",  # Tight alignment (exact centerline matches)
+    "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
     "overlap_ratio",
     "heading_delta",
     "length_ratio",
     "projection_distance_m",
     "centroid_distance_m",
     "collinear_gap_ratio",
-    # Semantic features - name (5)
+    # Semantic features - name (8)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
     "name_soundex",
     "name_metaphone",
+    "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
+    "has_name_target",  # 1.0 if target has non-empty name, else 0.0
+    "name_is_generic",  # 1.0 if either name matches generic pattern
     # Semantic features - class (1)
     "class_similarity",
-    # Endpoint/connectivity (3)
-    "start_endpoint_proximity_m",
-    "end_endpoint_proximity_m",
+    # Endpoint/connectivity (3) - direction-invariant
+    "min_endpoint_proximity_m",  # Min of start/end proximities
+    "max_endpoint_proximity_m",  # Max of start/end proximities
     "shared_endpoint_count",
-    # Lateral offset (2)
+    # Lateral offset (3)
     "lateral_offset_m",
-    "lateral_offset_consistency",
+    "lateral_offset_iqr_m",  # IQR (p75 - p25) - robust to outliers
+    "lateral_offset_p95_m",  # 95th percentile of lateral offsets
     # Topology features (12)
     "from_degree_ref",
     "to_degree_ref",
@@ -73,6 +79,9 @@ SEMANTIC_FEATURES = [
     "name_token_sort",
     "name_soundex",
     "name_metaphone",
+    "has_name_ref",
+    "has_name_target",
+    "name_is_generic",
     "class_similarity",
 ]
 

@@ -145,31 +145,37 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
-            # Geometric features (9) - distance features use _m suffix for meters
+            # Geometric features (11) - distance features use _m suffix for meters
             "hausdorff_distance_m": features.get("hausdorff_distance_m", 0.0),
             "mean_hausdorff_distance_m": features.get("mean_hausdorff_distance_m", 0.0),
-            "buffer_iou": features.get("buffer_iou", 0.0),
+            "hausdorff_p95_m": features.get("hausdorff_p95_m", 0.0),
+            "buffer_iou_5m": features.get("buffer_iou_5m", 0.0),
+            "buffer_iou_15m": features.get("buffer_iou_15m", 0.0),
             "overlap_ratio": features.get("overlap_ratio", 0.0),
             "heading_delta": features.get("heading_delta", 0.0),
             "length_ratio": features.get("length_ratio", 0.0),
             "projection_distance_m": features.get("projection_distance_m", 0.0),
             "centroid_distance_m": features.get("centroid_distance_m", 0.0),
             "collinear_gap_ratio": features.get("collinear_gap_ratio", 1.0),
-            # Semantic features - name (5)
+            # Semantic features - name (8)
             "name_levenshtein": features.get("name_levenshtein", 0.0),
             "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
             "name_token_sort": features.get("name_token_sort", 0.0),
             "name_soundex": features.get("name_soundex", 0.5),
             "name_metaphone": features.get("name_metaphone", 0.5),
+            "has_name_ref": features.get("has_name_ref", 0.0),
+            "has_name_target": features.get("has_name_target", 0.0),
+            "name_is_generic": features.get("name_is_generic", 0.0),
             # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
-            # Endpoint/connectivity features (3) - distance features use _m suffix
-            "start_endpoint_proximity_m": features.get("start_endpoint_proximity_m", 0.0),
-            "end_endpoint_proximity_m": features.get("end_endpoint_proximity_m", 0.0),
+            # Endpoint/connectivity features (3) - direction-invariant min/max
+            "min_endpoint_proximity_m": features.get("min_endpoint_proximity_m", 0.0),
+            "max_endpoint_proximity_m": features.get("max_endpoint_proximity_m", 0.0),
             "shared_endpoint_count": features.get("shared_endpoint_count", 0),
-            # Lateral offset features (2) - distance features use _m suffix
+            # Lateral offset features (3) - distance features use _m suffix
             "lateral_offset_m": features.get("lateral_offset_m", 0.0),
-            "lateral_offset_consistency": features.get("lateral_offset_consistency", 0.0),
+            "lateral_offset_iqr_m": features.get("lateral_offset_iqr_m", 0.0),
+            "lateral_offset_p95_m": features.get("lateral_offset_p95_m", 0.0),
             # Topology features (12)
             "from_degree_ref": features.get("from_degree_ref", 0),
             "to_degree_ref": features.get("to_degree_ref", 0),

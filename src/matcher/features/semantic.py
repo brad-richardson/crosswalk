@@ -1,8 +1,34 @@
 """Semantic feature extraction (names, classifications)."""
 
+import re
+
 import jellyfish
 from rapidfuzz import fuzz
 from rapidfuzz.distance import JaroWinkler
+
+# Generic name patterns - roads with these names shouldn't strongly influence matching
+# These patterns indicate roads that may share identical names without being the same road
+GENERIC_NAME_PATTERNS = [
+    r"^unnamed",
+    r"^ramp$",
+    r"^service\s*(road|rd)?$",
+    r"^private\s*(road|rd|drive)?$",
+    r"^driveway$",
+    r"^alley$",
+    r"^connector$",
+    r"^access\s*(road|rd)?$",
+    r"^frontage\s*(road|rd)?$",
+    # Non-vehicular infrastructure
+    r"^path$",
+    r"^trail$",
+    r"^walkway$",
+    r"^cycleway$",
+    r"^footway$",
+    r"^bikeway$",
+]
+
+# Pre-compile patterns for efficiency
+_GENERIC_NAME_REGEX = re.compile("|".join(GENERIC_NAME_PATTERNS), re.IGNORECASE)
 
 # Road class mapping to hierarchy levels
 # Expanded to include link roads, bike/pedestrian infrastructure
@@ -155,7 +181,27 @@ _MISSING_NAMES_RESULT = {
     "metaphone_similarity": 0.5,
     "names_match": False,
     "names_missing": True,
+    "has_name_ref": 0.0,
+    "has_name_target": 0.0,
+    "name_is_generic": 0.0,
 }
+
+
+def _is_generic_name(name: str | None) -> bool:
+    """Check if a name matches any generic road name pattern.
+
+    Generic names (e.g., 'Unnamed', 'Ramp', 'Service Road') shouldn't
+    strongly influence matching because many unrelated roads share them.
+
+    Args:
+        name: Street name to check
+
+    Returns:
+        True if name matches a generic pattern
+    """
+    if not name:
+        return False
+    return bool(_GENERIC_NAME_REGEX.match(name.strip()))
 
 
 def _extract_name_string(name) -> str | None:
@@ -199,8 +245,8 @@ def compute_name_similarity(
     """Compute multiple string similarity metrics.
 
     Args:
-        name_a: First street name (string or dict with 'primary' key)
-        name_b: Second street name (string or dict with 'primary' key)
+        name_a: First street name (string or dict with 'primary' key) - reference
+        name_b: Second street name (string or dict with 'primary' key) - target
 
     Returns:
         Dictionary with:
@@ -209,16 +255,28 @@ def compute_name_similarity(
             - token_sort_ratio: Token-sorted fuzzy ratio (0-1)
             - token_set_ratio: Token set ratio (0-1, handles subsets)
             - partial_ratio: Partial string ratio (0-1)
+            - soundex_match: 1.0 if first words have same soundex code
+            - metaphone_similarity: Similarity of metaphone encodings (0-1)
+            - has_name_ref: 1.0 if reference has non-empty name
+            - has_name_target: 1.0 if target has non-empty name
+            - name_is_generic: 1.0 if either name matches generic pattern
     """
     # Extract string from dict if needed
     name_a = _extract_name_string(name_a)
     name_b = _extract_name_string(name_b)
 
+    # Compute name presence flags
+    has_name_ref = 1.0 if name_a else 0.0
+    has_name_target = 1.0 if name_b else 0.0
+
     if not name_a or not name_b:
         # Return neutral scores when names are missing
         # This prevents penalizing valid geometric matches just because
         # one dataset doesn't have name data for this segment
-        return _MISSING_NAMES_RESULT.copy()
+        result = _MISSING_NAMES_RESULT.copy()
+        result["has_name_ref"] = has_name_ref
+        result["has_name_target"] = has_name_target
+        return result
 
     # Normalize names
     norm_a = _normalize_street_name(name_a)
@@ -226,7 +284,13 @@ def compute_name_similarity(
 
     # Handle empty after normalization (e.g., name was just punctuation)
     if not norm_a or not norm_b:
-        return _MISSING_NAMES_RESULT.copy()
+        result = _MISSING_NAMES_RESULT.copy()
+        result["has_name_ref"] = has_name_ref
+        result["has_name_target"] = has_name_target
+        return result
+
+    # Check if either name is generic
+    name_is_generic = 1.0 if (_is_generic_name(name_a) or _is_generic_name(name_b)) else 0.0
 
     # Compute various similarity metrics
     levenshtein_ratio = fuzz.ratio(norm_a, norm_b) / 100.0
@@ -263,6 +327,9 @@ def compute_name_similarity(
         "metaphone_similarity": metaphone_similarity,
         "names_match": names_match,
         "names_missing": False,
+        "has_name_ref": has_name_ref,
+        "has_name_target": has_name_target,
+        "name_is_generic": name_is_generic,
     }
 
 
@@ -440,8 +507,6 @@ def extract_numeric_suffix(name: str | None) -> int | None:
     """
     if not name:
         return None
-
-    import re
 
     # Find all numbers in the name
     numbers = re.findall(r"\d+", name)

@@ -91,9 +91,18 @@ class GeometricFeatures(NamedTuple):
     the overlapping portions align. Preferred over hausdorff_distance for
     datasets with different segmentation schemes."""
 
-    buffer_iou: float
-    """Intersection over Union of buffered geometries (0-1).
-    Robust to small positional offsets. Good general-purpose metric."""
+    hausdorff_p95_distance: float
+    """95th percentile of min-distances (meters).
+    More robust than max (hausdorff_distance) as it ignores the top 5% of
+    outliers (spurs, vertex errors), but more conservative than mean."""
+
+    buffer_iou_5m: float
+    """Intersection over Union of 5m buffered geometries (0-1).
+    Captures tight alignment - exact centerline matches."""
+
+    buffer_iou_15m: float
+    """Intersection over Union of 15m buffered geometries (0-1).
+    Captures offset alignment - sidewalks, bike lanes parallel to roads."""
 
     heading_delta: float
     """Overall direction difference in degrees (0-180).
@@ -130,14 +139,12 @@ class GeometricFeatures(NamedTuple):
 def compute_geometric_features(
     line_a: LineString | MultiLineString,
     line_b: LineString | MultiLineString,
-    buffer_radius: float = 10.0,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
     Args:
         line_a: First geometry (LineString or MultiLineString, projected CRS)
         line_b: Second geometry (LineString or MultiLineString, projected CRS)
-        buffer_radius: Buffer radius for IoU calculation (meters)
 
     Returns:
         GeometricFeatures tuple
@@ -153,11 +160,14 @@ def compute_geometric_features(
     # Hausdorff is symmetric, so digitization direction doesn't matter
     hausdorff = hausdorff_distance(line_a, line_b)
 
-    # Mean Hausdorff (robust to segmentation - uses mean instead of max)
-    mean_hausdorff = _mean_hausdorff_distance(line_a, line_b)
+    # Mean and P95 Hausdorff (robust to segmentation)
+    mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(line_a, line_b)
 
-    # Buffer IoU
-    buffer_iou = _buffer_iou(line_a, line_b, buffer_radius)
+    # Multi-scale Buffer IoU:
+    # - 5m: Captures tight alignment (exact centerline matches)
+    # - 15m: Captures offset alignment (sidewalks, bike lanes parallel to roads)
+    buffer_iou_5m = _buffer_iou(line_a, line_b, radius=5.0)
+    buffer_iou_15m = _buffer_iou(line_a, line_b, radius=15.0)
 
     # Heading delta (overall direction)
     heading_a = _compute_heading(coords_a[0], coords_a[-1])
@@ -174,8 +184,8 @@ def compute_geometric_features(
     # Centroid distance
     centroid_distance = line_a.centroid.distance(line_b.centroid)
 
-    # Overlap ratio
-    overlap_ratio = _overlap_ratio(line_a, line_b, buffer_radius)
+    # Overlap ratio (use 10m as middle ground for overlap calculation)
+    overlap_ratio = _overlap_ratio(line_a, line_b, buffer_radius=10.0)
 
     # Collinear gap ratio (penalty for tip-to-tip segments)
     collinear_gap_ratio = compute_collinear_gap_ratio(line_a, line_b)
@@ -183,7 +193,9 @@ def compute_geometric_features(
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
         mean_hausdorff_distance=mean_hausdorff,
-        buffer_iou=buffer_iou,
+        hausdorff_p95_distance=p95_hausdorff,
+        buffer_iou_5m=buffer_iou_5m,
+        buffer_iou_15m=buffer_iou_15m,
         heading_delta=heading_delta,
         length_ratio=length_ratio,
         projection_distance=projection_distance,
@@ -227,25 +239,14 @@ def _angle_diff(a: float, b: float) -> float:
     return min(diff, opposite_diff)
 
 
-def _mean_hausdorff_distance(line_a: LineString, line_b: LineString) -> float:
-    """Compute mean Hausdorff distance (mean of min distances).
+def _compute_hausdorff_stats(line_a: LineString, line_b: LineString) -> tuple[float, float]:
+    """Compute mean and P95 Hausdorff distances (from min distances).
 
     Standard Hausdorff uses max(min_distances), which is sensitive to
-    segmentation - if one endpoint is far from the other curve, the whole
-    score is ruined. This "Modified Hausdorff" uses mean instead of max.
+    segmentation/outliers.
 
-    Example:
-        Line A: 100m long, overlaps with B for 70m
-        Line B: 70m long, fully within A's extent
-
-        Standard Hausdorff: ~30m (the gap at A's endpoints)
-        Mean Hausdorff: ~15m (averages the well-aligned middle with the gaps)
-
-    This is widely used in road conflation literature because real-world
-    datasets often have different segmentation schemes.
-
-    References:
-        Dubuisson & Jain (1994) "A Modified Hausdorff Distance for Object Matching"
+    Returns:
+        Tuple of (mean_distance, p95_distance)
     """
     # Min distances from each point in A to line B
     dists_a_to_b = [line_b.distance(Point(coord)) for coord in line_a.coords]
@@ -255,9 +256,12 @@ def _mean_hausdorff_distance(line_a: LineString, line_b: LineString) -> float:
     all_min_dists = dists_a_to_b + dists_b_to_a
 
     if not all_min_dists:
-        return float("inf")
+        return float("inf"), float("inf")
 
-    return np.mean(all_min_dists)
+    mean_dist = float(np.mean(all_min_dists))
+    p95_dist = float(np.percentile(all_min_dists, 95))
+
+    return mean_dist, p95_dist
 
 
 def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
@@ -271,8 +275,9 @@ def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
     emphasizes alignment quality, while "mean Hausdorff" emphasizes the
     relationship to the classic Hausdorff metric.
     """
-    # Delegate to mean_hausdorff_distance to avoid code duplication
-    return _mean_hausdorff_distance(line_a, line_b)
+    # Delegate to _compute_hausdorff_stats to avoid code duplication
+    mean_dist, _ = _compute_hausdorff_stats(line_a, line_b)
+    return mean_dist
 
 
 def _overlap_ratio(line_a: LineString, line_b: LineString, buffer_radius: float) -> float:

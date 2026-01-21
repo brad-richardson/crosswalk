@@ -100,14 +100,16 @@ def compute_pair_features(
         name_sim = compute_name_similarity(ref_name, target_name)
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
 
-        # Compute lateral offset
-        lateral_offset, lateral_consistency = compute_perpendicular_offset(target_geom, ref_geom)
+        # Compute lateral offset (now returns mean, iqr, p95)
+        lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
+            target_geom, ref_geom
+        )
 
         # Use provided or default endpoint features
         if endpoint_features is None:
             endpoint_features = {
-                "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
                 "shared_endpoint_count": 0,
             }
 
@@ -149,7 +151,9 @@ def compute_pair_features(
             # Geometric (distance features use _m suffix to indicate meters)
             "hausdorff_distance_m": geom_features.hausdorff_distance,
             "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
-            "buffer_iou": geom_features.buffer_iou,
+            "hausdorff_p95_m": geom_features.hausdorff_p95_distance,
+            "buffer_iou_5m": geom_features.buffer_iou_5m,
+            "buffer_iou_15m": geom_features.buffer_iou_15m,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
@@ -162,19 +166,23 @@ def compute_pair_features(
             "name_token_sort": name_sim["token_sort_ratio"],
             "name_soundex": name_sim["soundex_match"],
             "name_metaphone": name_sim["metaphone_similarity"],
+            "has_name_ref": name_sim["has_name_ref"],
+            "has_name_target": name_sim["has_name_target"],
+            "name_is_generic": name_sim["name_is_generic"],
             # Semantic - class
             "class_similarity": class_sim,
-            # Endpoint proximity (distance in meters)
-            "start_endpoint_proximity_m": endpoint_features.get(
-                "start_endpoint_proximity_m", MAX_DISTANCE_METERS
+            # Endpoint proximity (direction-invariant min/max)
+            "min_endpoint_proximity_m": endpoint_features.get(
+                "min_endpoint_proximity_m", MAX_DISTANCE_METERS
             ),
-            "end_endpoint_proximity_m": endpoint_features.get(
-                "end_endpoint_proximity_m", MAX_DISTANCE_METERS
+            "max_endpoint_proximity_m": endpoint_features.get(
+                "max_endpoint_proximity_m", MAX_DISTANCE_METERS
             ),
             "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
-            # Lateral offset (distance in meters)
+            # Lateral offset (mean, IQR, P95 - robust to outliers)
             "lateral_offset_m": min(lateral_offset, MAX_DISTANCE_METERS),
-            "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
+            "lateral_offset_iqr_m": min(lateral_iqr, MAX_DISTANCE_METERS),
+            "lateral_offset_p95_m": min(lateral_p95, MAX_DISTANCE_METERS),
             # Topology - Tier 1: Degree features
             "from_degree_ref": from_degree_ref,
             "to_degree_ref": to_degree_ref,
@@ -211,7 +219,9 @@ def _get_error_features() -> dict[str, float]:
     return {
         "hausdorff_distance_m": MAX_DISTANCE_METERS,
         "mean_hausdorff_distance_m": MAX_DISTANCE_METERS,
-        "buffer_iou": 0.0,
+        "hausdorff_p95_m": MAX_DISTANCE_METERS,
+        "buffer_iou_5m": 0.0,
+        "buffer_iou_15m": 0.0,
         "overlap_ratio": 0.0,
         "heading_delta": 180.0,
         "length_ratio": 0.0,
@@ -223,12 +233,16 @@ def _get_error_features() -> dict[str, float]:
         "name_token_sort": 0.0,
         "name_soundex": 0.5,  # Neutral for missing names
         "name_metaphone": 0.5,  # Neutral for missing names
+        "has_name_ref": 0.0,
+        "has_name_target": 0.0,
+        "name_is_generic": 0.0,
         "class_similarity": 0.0,
-        "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
-        "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
+        "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+        "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
         "shared_endpoint_count": 0,
         "lateral_offset_m": MAX_DISTANCE_METERS,
-        "lateral_offset_consistency": MAX_DISTANCE_METERS,
+        "lateral_offset_iqr_m": MAX_DISTANCE_METERS,
+        "lateral_offset_p95_m": MAX_DISTANCE_METERS,
         "from_degree_ref": 0,
         "to_degree_ref": 0,
         "from_degree_target": 0,
@@ -292,8 +306,8 @@ def precompute_topology_and_endpoints(
             target_endpoint_features[target_idx] = ep_feats
         else:
             target_endpoint_features[target_idx] = {
-                "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
                 "shared_endpoint_count": 0,
             }
 
