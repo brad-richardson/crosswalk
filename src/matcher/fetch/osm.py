@@ -10,6 +10,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..config import settings
+from .metadata import FetchMetadata, save_metadata
 from .osm_download import download_and_extract
 from .osm_pbf import parse_pbf
 from .overture import BoundingBox
@@ -93,6 +94,30 @@ def fetch_osm_data(
 
     roads_gdf.to_parquet(segments_path, write_covering_bbox=True)
     connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
+
+    # Save fetch metadata for segments
+    segments_metadata = FetchMetadata(
+        source="osm",
+        source_url="https://download.geofabrik.de/",
+        bbox=bbox.to_tuple(),
+        feature_count=len(roads_gdf),
+        geometry_types=list(roads_gdf.geometry.geom_type.unique()) if len(roads_gdf) > 0 else [],
+        notes="Fetched from Geofabrik regional PBF extract",
+    )
+    save_metadata(segments_path, segments_metadata)
+
+    # Save fetch metadata for connectors
+    connectors_metadata = FetchMetadata(
+        source="osm",
+        source_url="https://download.geofabrik.de/",
+        bbox=bbox.to_tuple(),
+        feature_count=len(connectors_gdf),
+        geometry_types=list(connectors_gdf.geometry.geom_type.unique())
+        if len(connectors_gdf) > 0
+        else [],
+        notes="Fetched from Geofabrik regional PBF extract",
+    )
+    save_metadata(connectors_path, connectors_metadata)
 
     logger.info(f"Saved {len(roads_gdf)} OSM segments to {segments_path}")
     logger.info(f"Saved {len(connectors_gdf)} OSM connectors to {connectors_path}")

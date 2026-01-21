@@ -13,6 +13,8 @@ import pandas as pd
 import requests
 from loguru import logger
 
+from .metadata import FetchMetadata, save_metadata
+
 
 def fetch_arcgis_layer(
     url: str,
@@ -94,6 +96,28 @@ def fetch_arcgis_layer(
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
+
+    # Calculate bounding box from the data
+    bounds = gdf.total_bounds  # (minx, miny, maxx, maxy)
+    data_bbox = (bounds[0], bounds[1], bounds[2], bounds[3]) if len(gdf) > 0 else None
+
+    # Save fetch metadata
+    filters_dict: dict[str, Any] = {}
+    if where_clause != "1=1":
+        filters_dict["where_clause"] = where_clause
+    if class_mapping:
+        filters_dict["class_mapping_applied"] = True
+
+    metadata = FetchMetadata(
+        source="arcgis",
+        source_url=url,
+        bbox=data_bbox,
+        feature_count=len(gdf),
+        geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
+        filters=filters_dict if filters_dict else {},
+        notes=f"Fetched from {source_name}",
+    )
+    save_metadata(output_path, metadata)
 
     logger.info(f"Saved {len(gdf)} features to {output_path}")
     return output_path

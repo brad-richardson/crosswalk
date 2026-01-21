@@ -48,10 +48,10 @@ def fetch(
         "--keep-pbf",
         help="Keep extracted PBF file for debugging",
     ),
-    bbox_buffer: float = typer.Option(
-        0.0,
+    bbox_buffer: float | None = typer.Option(
+        None,
         "--bbox-buffer",
-        help="Expand bbox by this distance (meters) to avoid fringe effects in integration",
+        help="Expand bbox by this distance (meters). Defaults to 100m for Overture data.",
     ),
 ):
     """Fetch road data for an area of interest.
@@ -85,36 +85,58 @@ def fetch(
 
     xmin, ymin, xmax, ymax = coords
     output_dir.mkdir(parents=True, exist_ok=True)
-    bbox_obj = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+    original_bbox = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
-    # Expand bbox if buffer specified
-    if bbox_buffer > 0:
-        bbox_obj = bbox_obj.expand(bbox_buffer)
-        console.print(f"[blue]Expanded bbox by {bbox_buffer}m to avoid fringe effects[/blue]")
+    # For Overture fetches, use a default buffer to avoid fringe effects
+    # User can override with --bbox-buffer
+    overture_buffer = bbox_buffer
+    if overture_buffer is None and "overture" in datasets:
+        overture_buffer = ov_module.DEFAULT_OVERTURE_BUFFER_M
         console.print(
-            f"[blue]  New bbox: {bbox_obj.xmin:.6f},{bbox_obj.ymin:.6f},"
-            f"{bbox_obj.xmax:.6f},{bbox_obj.ymax:.6f}[/blue]"
+            f"[blue]Using default {overture_buffer}m buffer for Overture data "
+            f"(override with --bbox-buffer)[/blue]"
         )
+
+    # Create bbox for Overture (potentially buffered)
+    if overture_buffer and overture_buffer > 0:
+        overture_bbox = original_bbox.expand(overture_buffer)
+        console.print(
+            f"[blue]  Buffered bbox: {overture_bbox.xmin:.6f},{overture_bbox.ymin:.6f},"
+            f"{overture_bbox.xmax:.6f},{overture_bbox.ymax:.6f}[/blue]"
+        )
+    else:
+        overture_bbox = original_bbox
+        overture_buffer = None
+
+    # For OSM, use buffer if specified, otherwise use original bbox
+    osm_buffer = bbox_buffer if bbox_buffer and bbox_buffer > 0 else None
+    osm_bbox = original_bbox.expand(osm_buffer) if osm_buffer else original_bbox
 
     if "overture" in datasets:
         console.print(f"[blue]Fetching Overture segments for bbox {bbox}...[/blue]")
         segments_path = ov_module.fetch_overture_segments(
-            bbox=bbox_obj,
+            bbox=overture_bbox,
             output_path=output_dir / "overture_segments.parquet",
+            original_bbox=original_bbox,
+            buffer_m=overture_buffer,
         )
         console.print(f"[green]Saved Overture segments to {segments_path}[/green]")
 
         console.print("[blue]Fetching Overture connectors...[/blue]")
         connectors_path = ov_module.fetch_overture_connectors(
-            bbox=bbox_obj,
+            bbox=overture_bbox,
             output_path=output_dir / "overture_connectors.parquet",
+            original_bbox=original_bbox,
+            buffer_m=overture_buffer,
         )
         console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
 
     if "osm" in datasets:
         console.print(f"[blue]Fetching OSM data for bbox {bbox}...[/blue]")
+        if osm_buffer:
+            console.print(f"[blue]  Using {osm_buffer}m buffer for OSM data[/blue]")
         segments_path, connectors_path = osm_module.fetch_osm_data(
-            bbox=bbox_obj,
+            bbox=osm_bbox,
             output_dir=output_dir,
             cache_dir=cache_dir,
             force_download=no_cache,
