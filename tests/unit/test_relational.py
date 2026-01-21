@@ -60,7 +60,7 @@ class TestRelationalFeatures:
         target = LineString([(0, 0), (100, 0)])
         other_endpoints = np.array([[0, 1], [200, 0]])  # One near start, one far
         start_prox, end_prox, shared = compute_endpoint_proximity(
-            target, other_endpoints, tolerance=5.0
+            target, other_endpoints, tolerance_m=5.0
         )
         assert start_prox == pytest.approx(1.0, abs=0.1)
         assert end_prox > 50
@@ -87,7 +87,7 @@ class TestSpatialContextIndex:
     def test_infer_connectivity(self, segments):
         ctx = SpatialContextIndex()
         ctx.build_from_gdf(segments, id_column="id")
-        connected = ctx.infer_connectivity(0, tolerance=5.0)
+        connected = ctx.infer_connectivity(0, tolerance_m=5.0)
         assert 1 in connected  # s2 shares endpoint
         assert 2 not in connected  # s3 is far
 
@@ -95,9 +95,9 @@ class TestSpatialContextIndex:
         ctx = SpatialContextIndex()
         ctx.build_from_gdf(segments, id_column="id")
         features = compute_endpoint_features(
-            segments.iloc[0].geometry, ctx, exclude_segment_idx=0, tolerance=5.0
+            segments.iloc[0].geometry, ctx, exclude_segment_idx=0, tolerance_m=5.0
         )
-        assert features["end_endpoint_proximity"] < 5.0
+        assert features["end_endpoint_proximity_m"] < 5.0
         assert features["shared_endpoint_count"] >= 1
 
 
@@ -177,7 +177,7 @@ class TestInferEndpointDegree:
 
         # North segment: start at intersection (100,100), end at (100,200)
         north_geom = intersection_network.iloc[0].geometry
-        start_deg, end_deg = infer_endpoint_degree(north_geom, ctx, tolerance=5.0)
+        start_deg, end_deg = infer_endpoint_degree(north_geom, ctx, tolerance_m=5.0)
 
         # Start is at 4-way intersection, end is dead end
         assert start_deg == 4
@@ -195,7 +195,7 @@ class TestInferEndpointDegree:
 
         # Dead end segment
         dead_geom = dead_end_network.iloc[1].geometry
-        start_deg, end_deg = infer_endpoint_degree(dead_geom, ctx, tolerance=5.0)
+        start_deg, end_deg = infer_endpoint_degree(dead_geom, ctx, tolerance_m=5.0)
 
         # Start connects to main road (exactly 2: dead end + main road), end is dead end
         assert start_deg == 2  # Connects to main road endpoint
@@ -213,7 +213,7 @@ class TestInferEndpointDegree:
 
         # Isolated segment (id="dead2")
         isolated_geom = dead_end_network.iloc[2].geometry
-        start_deg, end_deg = infer_endpoint_degree(isolated_geom, ctx, tolerance=5.0)
+        start_deg, end_deg = infer_endpoint_degree(isolated_geom, ctx, tolerance_m=5.0)
 
         # Both ends are isolated
         assert start_deg == 1
@@ -251,7 +251,7 @@ class TestTopologyFeatures:
 
         # North segment: intersection at start, dead end at end
         north_geom = intersection_network.iloc[0].geometry
-        features = compute_topology_features(north_geom, ctx, tolerance=5.0)
+        features = compute_topology_features(north_geom, ctx, tolerance_m=5.0)
 
         assert features["from_degree"] == 4
         assert features["to_degree"] == 1

@@ -39,15 +39,15 @@ def run_integration_pipeline(
     target_configs: list[TargetConfig],
     output_dir: Path,
     overlap_iou_threshold: float = None,
-    min_segment_length: float = None,
+    min_segment_length_m: float = None,
     filter_near_duplicates_flag: bool = True,
-    connection_tolerance: float = 3.0,
-    min_merge_length: float = 20.0,
-    net_new_buffer: float = 5.0,
+    connection_tolerance_m: float = 3.0,
+    min_merge_length_m: float = 20.0,
+    net_new_buffer_m: float = 5.0,
     max_hops: int = 2,
-    fringe_buffer: float = 50.0,
+    fringe_buffer_m: float = 50.0,
     enable_fringe_detection: bool = True,
-    transitive_tolerance: float | None = None,
+    transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
@@ -66,22 +66,22 @@ def run_integration_pipeline(
         target_configs: List of TargetConfig for each target dataset
         output_dir: Directory for output files
         overlap_iou_threshold: IoU threshold for overlap detection
-        min_segment_length: Filter segments shorter than this (meters)
+        min_segment_length_m: Filter segments shorter than this (meters)
         filter_near_duplicates_flag: Whether to detect and filter near-duplicates
-        connection_tolerance: Distance to consider a segment "connected" to reference (meters).
+        connection_tolerance_m: Distance to consider a segment "connected" to reference (meters).
             Default 3m requires actual physical connection to infrastructure.
-        min_merge_length: Minimum net-new length (meters) to merge a segment.
+        min_merge_length_m: Minimum net-new length (meters) to merge a segment.
             Connected segments with less than this much new coverage are orphaned.
-        net_new_buffer: Buffer distance (meters) around reference for net-new calculation.
+        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation.
             Segments within this buffer are considered "covered" by reference. Default 10m.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             Segments connected via other target segments are included up to this depth.
-        fringe_buffer: Buffer distance (meters) around reference coverage for fringe
+        fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
             detection. Segments outside this area are marked as fringe. Default 50m.
         enable_fringe_detection: Whether to filter fringe segments. Default True.
-        transitive_tolerance: Tolerance (meters) for transitive connections between
-            target segments. Defaults to 2x connection_tolerance since trails often
-            don't share exact endpoints. Set to connection_tolerance for strict mode.
+        transitive_tolerance_m: Tolerance (meters) for transitive connections between
+            target segments. Defaults to 2x connection_tolerance_m since trails often
+            don't share exact endpoints. Set to connection_tolerance_m for strict mode.
         debug_connectivity: Enable debug logging for transitive connectivity analysis.
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
@@ -90,7 +90,7 @@ def run_integration_pipeline(
         IntegrationResult with edges, orphans, and statistics
     """
     overlap_iou_threshold = overlap_iou_threshold or settings.overlap_iou_threshold
-    min_segment_length = min_segment_length or settings.min_segment_length
+    min_segment_length_m = min_segment_length_m or settings.min_segment_length_m
 
     logger.info("=" * 60)
     logger.info("Starting integration pipeline")
@@ -133,8 +133,8 @@ def run_integration_pipeline(
             matched = gpd.GeoDataFrame()
 
         # Apply length filter
-        if min_segment_length > 0:
-            unmatched, filtered_short = filter_short_segments(unmatched, min_segment_length)
+        if min_segment_length_m > 0:
+            unmatched, filtered_short = filter_short_segments(unmatched, min_segment_length_m)
             if len(filtered_short) > 0:
                 logger.info(f"    Filtered {len(filtered_short)} short unmatched segments")
 
@@ -176,13 +176,13 @@ def run_integration_pipeline(
     logger.info("Step 4: Detecting orphans by endpoint proximity...")
     main_edges, orphan_edges, net_new_edges, orphan_stats = detect_orphans_by_proximity(
         combined_gdf,
-        connection_tolerance=connection_tolerance,
-        min_merge_length=min_merge_length,
-        net_new_buffer=net_new_buffer,
+        connection_tolerance_m=connection_tolerance_m,
+        min_merge_length_m=min_merge_length_m,
+        net_new_buffer_m=net_new_buffer_m,
         max_hops=max_hops,
-        fringe_buffer=fringe_buffer,
+        fringe_buffer_m=fringe_buffer_m,
         enable_fringe_detection=enable_fringe_detection,
-        transitive_tolerance=transitive_tolerance,
+        transitive_tolerance_m=transitive_tolerance_m,
         debug_connectivity=debug_connectivity,
     )
     stats.main_component_edges = len(main_edges)

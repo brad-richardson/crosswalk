@@ -35,7 +35,7 @@ class TestGenerateCandidates:
         )
 
         candidates = generate_candidates(
-            reference, target, buffer_distance=50.0, ref_id_column="id"
+            reference, target, buffer_distance_m=50.0, ref_id_column="id"
         )
 
         assert len(candidates) == 1
@@ -62,7 +62,7 @@ class TestGenerateCandidates:
         )
 
         candidates = generate_candidates(
-            reference, target, buffer_distance=50.0, ref_id_column="id"
+            reference, target, buffer_distance_m=50.0, ref_id_column="id"
         )
 
         assert len(candidates) == 0
@@ -89,7 +89,7 @@ class TestGenerateCandidates:
         candidates = generate_candidates(
             reference,
             target,
-            buffer_distance=100.0,
+            buffer_distance_m=100.0,
             ref_id_column="id",
         )
 
@@ -120,7 +120,7 @@ class TestGenerateCandidates:
         candidates = generate_candidates(
             reference,
             target,
-            buffer_distance=50.0,
+            buffer_distance_m=50.0,
             ref_id_column="id",
         )
 
@@ -153,7 +153,7 @@ class TestGenerateCandidates:
         )
 
         candidates = generate_candidates(
-            reference, target, buffer_distance=50.0, ref_id_column="id"
+            reference, target, buffer_distance_m=50.0, ref_id_column="id"
         )
 
         # Should match both reference lines

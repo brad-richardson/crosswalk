@@ -99,7 +99,7 @@ class TestComputeAllTopology:
             },
             crs="EPSG:32610",
         )
-        result = compute_all_topology(gdf, tolerance=5.0)
+        result = compute_all_topology(gdf, tolerance_m=5.0)
 
         # seg1's end and seg2's start are connected
         assert result["seg1"]["to_degree"] == 2
@@ -123,7 +123,7 @@ class TestComputeAllTopology:
             },
             crs="EPSG:32610",
         )
-        result = compute_all_topology(gdf, tolerance=5.0)
+        result = compute_all_topology(gdf, tolerance_m=5.0)
 
         # Junction at (50, 0) should have degree 3
         assert result["main_left"]["to_degree"] == 3
@@ -154,7 +154,7 @@ class TestComputeAllTopology:
             },
             crs="EPSG:32610",
         )
-        result = compute_all_topology(gdf, tolerance=5.0)
+        result = compute_all_topology(gdf, tolerance_m=5.0)
 
         # All segments share the center point (50, 50) - degree 4
         for seg_id in ["north", "south", "east", "west"]:
@@ -198,12 +198,12 @@ class TestComputeAllTopology:
         )
 
         # With 5m tolerance, they should be connected
-        result_5m = compute_all_topology(gdf, tolerance=5.0)
+        result_5m = compute_all_topology(gdf, tolerance_m=5.0)
         assert result_5m["seg1"]["to_degree"] == 2
         assert result_5m["seg2"]["from_degree"] == 2
 
         # With 1m tolerance, they should not be connected
-        result_1m = compute_all_topology(gdf, tolerance=1.0)
+        result_1m = compute_all_topology(gdf, tolerance_m=1.0)
         assert result_1m["seg1"]["to_degree"] == 1
         assert result_1m["seg2"]["from_degree"] == 1
 
@@ -219,7 +219,7 @@ class TestComputeAllTopology:
             },
             crs="EPSG:32610",
         )
-        result = compute_all_topology(gdf, tolerance=5.0)
+        result = compute_all_topology(gdf, tolerance_m=5.0)
 
         # seg1: from=1, to=2 -> signature should be (1, 2)
         assert result["seg1"]["degree_signature"] == (1, 2)
@@ -238,7 +238,7 @@ class TestComputeAllTopology:
             },
             crs="EPSG:32610",
         )
-        result = compute_all_topology(gdf, tolerance=5.0)
+        result = compute_all_topology(gdf, tolerance_m=5.0)
 
         # multi1's last endpoint (100, 0) should connect to seg2's start
         assert result["multi1"]["to_degree"] == 2
@@ -262,7 +262,7 @@ class TestSpatialContextIndexClustering:
         )
 
         ctx = SpatialContextIndex()
-        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
 
         # Should have 4 endpoints (2 per segment)
         assert len(ctx.endpoint_coords) == 4
@@ -285,15 +285,15 @@ class TestSpatialContextIndexClustering:
         )
 
         ctx = SpatialContextIndex()
-        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
 
         # seg1 (index 0) should be connected to seg2 (index 1)
-        connected = ctx.infer_connectivity(0, tolerance=5.0)
+        connected = ctx.infer_connectivity(0, tolerance_m=5.0)
         assert 1 in connected
         assert 2 not in connected
 
         # seg3 (index 2) should not be connected to anything
-        connected = ctx.infer_connectivity(2, tolerance=5.0)
+        connected = ctx.infer_connectivity(2, tolerance_m=5.0)
         assert len(connected) == 0
 
 
@@ -315,15 +315,15 @@ class TestTopologyFeaturesConsistency:
         )
 
         # Batch computation
-        batch_result = compute_all_topology(gdf, id_column="id", tolerance=5.0)
+        batch_result = compute_all_topology(gdf, id_column="id", tolerance_m=5.0)
 
         # Per-segment computation using SpatialContextIndex
         ctx = SpatialContextIndex()
-        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
 
         for _idx, row in gdf.iterrows():
             seg_id = row["id"]
-            per_segment = compute_topology_features(row.geometry, ctx, tolerance=5.0)
+            per_segment = compute_topology_features(row.geometry, ctx, tolerance_m=5.0)
 
             # Compare results
             assert batch_result[seg_id]["from_degree"] == per_segment["from_degree"]
@@ -595,7 +595,7 @@ class TestEndpointClusteringPerformance:
 
         start = time.perf_counter()
         ctx = SpatialContextIndex()
-        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
         elapsed = time.perf_counter() - start
 
         assert elapsed < 5.0, f"build_from_gdf took {elapsed:.2f}s, expected < 5.0s"
@@ -622,7 +622,7 @@ class TestEndpointClusteringPerformance:
         )
 
         start = time.perf_counter()
-        topology = compute_all_topology(gdf, id_column="id", tolerance=5.0)
+        topology = compute_all_topology(gdf, id_column="id", tolerance_m=5.0)
         elapsed = time.perf_counter() - start
 
         assert elapsed < 5.0, f"compute_all_topology took {elapsed:.2f}s, expected < 5.0s"
@@ -752,7 +752,7 @@ class TestEndpointClusteringPerformance:
         # N² pairs and taking minutes
         start = time.perf_counter()
         ctx = SpatialContextIndex()
-        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance=5.0)  # 5 meters
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)  # 5 meters
         elapsed = time.perf_counter() - start
 
         assert elapsed < 2.0, f"build_from_gdf with geographic CRS took {elapsed:.2f}s"

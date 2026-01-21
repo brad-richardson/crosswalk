@@ -39,7 +39,7 @@ def run_pipeline(
     target_path: Path,
     output_path: Path,
     method: str = "rule",
-    buffer_distance: float = 75.0,
+    buffer_distance_m: float = 75.0,
     max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
     max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
     min_confidence: float = 0.1,  # Lower = more aggressive matching
@@ -58,7 +58,7 @@ def run_pipeline(
         target_path: Path to target GeoParquet (local data)
         output_path: Path for output bridge file
         method: Matching method ("rule" or "xgboost")
-        buffer_distance: Candidate search radius in meters
+        buffer_distance_m: Candidate search radius in meters
         progress_callback: Optional callback for progress updates
         ref_id_column: ID column in reference
         target_id_column: ID column in target
@@ -130,7 +130,7 @@ def run_pipeline(
     candidates = generate_candidates(
         reference=reference,
         target=target,
-        buffer_distance=buffer_distance,
+        buffer_distance_m=buffer_distance_m,
         max_heading_diff=max_heading_diff,
         max_length_ratio=max_length_ratio,
         ref_id_column=ref_id_column,
@@ -138,9 +138,6 @@ def run_pipeline(
     )
 
     logger.info(f"  Generated {len(candidates)} candidates")
-
-    if progress_callback:
-        progress_callback(40)
 
     if not candidates:
         logger.warning("No candidates found! Check data alignment and buffer distance.")
@@ -170,6 +167,9 @@ def run_pipeline(
             bridge_file=output_path,
             unmatched_file=unmatched_path,
         )
+
+    if progress_callback:
+        progress_callback(40)
 
     # Step 3: Score candidates
     logger.info("Step 3: Scoring candidates...")
@@ -278,7 +278,7 @@ def run_pipeline(
 def run_topology_pipeline(
     input_path: Path,
     output_dir: Path,
-    snap_tolerance: float = 2.0,
+    snap_tolerance_m: float = 2.0,
     respect_z_levels: bool = True,
 ) -> dict[str, Any]:
     """Run the topology reconstruction pipeline.
@@ -286,7 +286,7 @@ def run_topology_pipeline(
     Args:
         input_path: Path to input GeoParquet/GeoJSON
         output_dir: Directory for output files
-        snap_tolerance: Snap tolerance in meters
+        snap_tolerance_m: Snap tolerance in meters
         respect_z_levels: Whether to respect bridge/tunnel z-levels
 
     Returns:
@@ -311,7 +311,7 @@ def run_topology_pipeline(
     logger.info("Planarizing...")
     network = planarize(
         gdf,
-        snap_tolerance=snap_tolerance,
+        snap_tolerance_m=snap_tolerance_m,
         respect_z_levels=respect_z_levels,
     )
 

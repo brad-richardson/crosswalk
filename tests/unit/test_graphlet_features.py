@@ -29,7 +29,7 @@ class TestBuildInferredGraph:
             {"id": ["r1"], "geometry": [LineString([(0, 0), (10, 0)])]},
             crs="EPSG:4326",
         )
-        G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance=1.0)
+        G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
         assert G.number_of_nodes() == 2
         assert G.number_of_edges() == 1
@@ -65,7 +65,7 @@ class TestBuildInferredGraph:
             {"id": ["r1", "r2", "r3"], "geometry": lines},
             crs="EPSG:32632",  # Use projected CRS - units are meters
         )
-        G, _, _ = build_inferred_graph(gdf, "id", tolerance=tolerance)
+        G, _, _ = build_inferred_graph(gdf, "id", tolerance_m=tolerance)
 
         assert G.number_of_nodes() == expected_nodes
         assert G.number_of_edges() == expected_edges
@@ -84,7 +84,7 @@ class TestBuildInferredGraph:
             {"id": ["main_w", "main_e", "side"], "geometry": lines},
             crs="EPSG:4326",
         )
-        G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance=1.0)
+        G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
         # Should have 4 nodes: 3 dead-ends + 1 intersection
         assert G.number_of_nodes() == 4
@@ -109,7 +109,7 @@ class TestBuildInferredGraph:
             {"id": ["bottom", "right", "top", "left"], "geometry": lines},
             crs="EPSG:4326",
         )
-        G, _, _ = build_inferred_graph(gdf, "id", tolerance=1.0)
+        G, _, _ = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
         # 4 corners = 4 nodes, 4 edges
         assert G.number_of_nodes() == 4
@@ -389,8 +389,8 @@ class TestGraphletIntegration:
         )
 
         # Build graphs
-        ref_G, ref_start, ref_end = build_inferred_graph(ref_gdf, "id", tolerance=1.0)
-        target_G, target_start, target_end = build_inferred_graph(target_gdf, "id", tolerance=1.0)
+        ref_G, ref_start, ref_end = build_inferred_graph(ref_gdf, "id", tolerance_m=1.0)
+        target_G, target_start, target_end = build_inferred_graph(target_gdf, "id", tolerance_m=1.0)
 
         # Compute graphlet features
         ref_features = compute_road_graphlet_features(ref_G)

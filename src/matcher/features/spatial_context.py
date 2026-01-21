@@ -220,14 +220,14 @@ class SpatialContextIndex:
         self,
         gdf: gpd.GeoDataFrame,
         id_column: str = "id",
-        snap_tolerance: float = 1.0,
+        snap_tolerance_m: float = 1.0,
     ) -> None:
         """Build spatial indexes from a GeoDataFrame.
 
         Args:
             gdf: GeoDataFrame with LineString geometries
             id_column: Column name for segment IDs
-            snap_tolerance: Distance within which endpoints are considered the same (meters)
+            snap_tolerance_m: Distance within which endpoints are considered the same (meters)
         """
         logger.debug(f"Building SpatialContextIndex from {len(gdf)} segments")
 
@@ -318,7 +318,7 @@ class SpatialContextIndex:
             }
 
         # Cluster nearby endpoints (snap tolerance)
-        self._cluster_endpoints(snap_tolerance)
+        self._cluster_endpoints(snap_tolerance_m)
 
         # Build endpoint tree
         endpoint_points = [Point(c) for c in self.endpoint_coords]
@@ -427,13 +427,13 @@ class SpatialContextIndex:
     def infer_connectivity(
         self,
         segment_idx: int,
-        tolerance: float = 5.0,
+        tolerance_m: float = 5.0,
     ) -> list[int]:
         """Infer segments connected to this one via endpoint proximity.
 
         Args:
             segment_idx: Index of segment to check
-            tolerance: Distance threshold for connectivity
+            tolerance_m: Distance threshold for connectivity (meters)
 
         Returns:
             List of connected segment indices
@@ -457,11 +457,11 @@ class SpatialContextIndex:
             start_point = Point(self.endpoint_coords[start_ep_idx])
             end_point = Point(self.endpoint_coords[end_ep_idx])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(start_point, tolerance):
+            for nearby_ep, _dist in self.query_nearby_endpoints(start_point, tolerance_m):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(end_point, tolerance):
+            for nearby_ep, _dist in self.query_nearby_endpoints(end_point, tolerance_m):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
@@ -480,7 +480,7 @@ class SpatialContextIndex:
 def infer_endpoint_degree(
     geom: LineString | MultiLineString,
     context: SpatialContextIndex,
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> tuple[int, int]:
     """Infer degree at each endpoint based on nearby segment count.
 
@@ -490,7 +490,7 @@ def infer_endpoint_degree(
     Args:
         geom: Segment geometry
         context: SpatialContextIndex with all segments
-        tolerance: Distance threshold for connectivity (meters)
+        tolerance_m: Distance threshold for connectivity (meters)
 
     Returns:
         Tuple of (start_degree, end_degree) where degree = count of segments
@@ -514,7 +514,7 @@ def infer_endpoint_degree(
     # Note: start_segments will include the segment itself since its own endpoint
     # is within tolerance of itself. This is intentional - degree includes self,
     # so an isolated segment has degree 1 (counting only itself).
-    start_nearby = context.query_nearby_endpoints(start_point, tolerance)
+    start_nearby = context.query_nearby_endpoints(start_point, tolerance_m)
     start_segments = set()
     for ep_idx, _dist in start_nearby:
         if ep_idx in context.endpoint_to_segment:
@@ -522,7 +522,7 @@ def infer_endpoint_degree(
     start_degree = max(1, len(start_segments))
 
     # Query nearby endpoints at end
-    end_nearby = context.query_nearby_endpoints(end_point, tolerance)
+    end_nearby = context.query_nearby_endpoints(end_point, tolerance_m)
     end_segments = set()
     for ep_idx, _dist in end_nearby:
         if ep_idx in context.endpoint_to_segment:
@@ -536,7 +536,7 @@ def compute_endpoint_features(
     target_geom: LineString | MultiLineString,
     context: SpatialContextIndex,
     exclude_segment_idx: int | None = None,
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> dict[str, float]:
     """Compute endpoint connectivity features for a target segment.
 
@@ -544,18 +544,18 @@ def compute_endpoint_features(
         target_geom: Target geometry
         context: SpatialContextIndex with other segments
         exclude_segment_idx: Segment index to exclude (self)
-        tolerance: Distance threshold for "shared" endpoints
+        tolerance_m: Distance threshold for "shared" endpoints (meters)
 
     Returns:
         Dictionary with:
-        - start_endpoint_proximity: Distance to nearest other endpoint from start
-        - end_endpoint_proximity: Distance to nearest other endpoint from end
+        - start_endpoint_proximity_m: Distance to nearest other endpoint from start (meters)
+        - end_endpoint_proximity_m: Distance to nearest other endpoint from end (meters)
         - shared_endpoint_count: Number of segments with shared endpoints
     """
     if target_geom.is_empty or context.endpoint_coords.size == 0:
         return {
-            "start_endpoint_proximity": float("inf"),
-            "end_endpoint_proximity": float("inf"),
+            "start_endpoint_proximity_m": float("inf"),
+            "end_endpoint_proximity_m": float("inf"),
             "shared_endpoint_count": 0,
         }
 
@@ -563,8 +563,8 @@ def compute_endpoint_features(
     if target_geom.geom_type == "MultiLineString":
         if len(target_geom.geoms) == 0:
             return {
-                "start_endpoint_proximity": float("inf"),
-                "end_endpoint_proximity": float("inf"),
+                "start_endpoint_proximity_m": float("inf"),
+                "end_endpoint_proximity_m": float("inf"),
                 "shared_endpoint_count": 0,
             }
         start_point = Point(target_geom.geoms[0].coords[0])
@@ -575,8 +575,8 @@ def compute_endpoint_features(
         end_point = Point(coords[-1])
 
     # Query nearby endpoints
-    start_nearby = context.query_nearby_endpoints(start_point, tolerance * 2)
-    end_nearby = context.query_nearby_endpoints(end_point, tolerance * 2)
+    start_nearby = context.query_nearby_endpoints(start_point, tolerance_m * 2)
+    end_nearby = context.query_nearby_endpoints(end_point, tolerance_m * 2)
 
     # Filter out endpoints from excluded segment
     if exclude_segment_idx is not None and exclude_segment_idx in context.segment_endpoints:
@@ -591,11 +591,11 @@ def compute_endpoint_features(
     # Count shared endpoints (within tolerance)
     shared_segments = set()
     for ep_idx, dist in start_nearby:
-        if dist <= tolerance and ep_idx in context.endpoint_to_segment:
+        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
             shared_segments.update(context.endpoint_to_segment[ep_idx])
 
     for ep_idx, dist in end_nearby:
-        if dist <= tolerance and ep_idx in context.endpoint_to_segment:
+        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
             shared_segments.update(context.endpoint_to_segment[ep_idx])
 
     # Remove excluded segment
@@ -603,8 +603,8 @@ def compute_endpoint_features(
         shared_segments.discard(exclude_segment_idx)
 
     return {
-        "start_endpoint_proximity": start_proximity,
-        "end_endpoint_proximity": end_proximity,
+        "start_endpoint_proximity_m": start_proximity,
+        "end_endpoint_proximity_m": end_proximity,
         "shared_endpoint_count": len(shared_segments),
     }
 
@@ -612,7 +612,7 @@ def compute_endpoint_features(
 def compute_topology_features(
     geom: LineString | MultiLineString,
     context: SpatialContextIndex,
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> dict[str, float]:
     """Compute topology features for a segment based on inferred connectivity.
 
@@ -622,7 +622,7 @@ def compute_topology_features(
     Args:
         geom: Segment geometry
         context: SpatialContextIndex with all segments
-        tolerance: Distance threshold for connectivity inference
+        tolerance_m: Distance threshold for connectivity inference (meters)
 
     Returns:
         Dictionary with topology features:
@@ -641,7 +641,7 @@ def compute_topology_features(
             "degree_signature": (1,),
         }
 
-    from_degree, to_degree = infer_endpoint_degree(geom, context, tolerance)
+    from_degree, to_degree = infer_endpoint_degree(geom, context, tolerance_m)
 
     return {
         "from_degree": from_degree,
@@ -806,7 +806,7 @@ def _cluster_endpoints_fast(
 def compute_all_topology(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
     ids_to_compute: set[str] | None = None,
 ) -> dict[str, dict]:
     """Compute topology features for all segments using Union-Find clustering.
@@ -832,7 +832,7 @@ def compute_all_topology(
     Args:
         gdf: GeoDataFrame with LineString geometries
         id_column: Column name for segment IDs
-        tolerance: Distance within which endpoints are considered connected (meters)
+        tolerance_m: Distance within which endpoints are considered connected (meters)
         ids_to_compute: If provided, only return topology for these IDs
 
     Returns:
@@ -937,7 +937,7 @@ def compute_all_topology(
     # Step 2-4: Cluster endpoints using tile-based spatial hashing
     t0 = time.perf_counter()
     endpoint_coords_arr = np.array(endpoint_coords)
-    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance)
+    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance_m)
     logger.debug(f"[topology] Step 2-4: Tile-based clustering in {time.perf_counter() - t0:.2f}s")
 
     # Step 5: Build cluster -> set of segment_ids mapping
@@ -1042,7 +1042,7 @@ def compute_degree_signature_similarity(
 def build_inferred_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> tuple["nx.Graph", dict[str, int], dict[str, int]]:
     """Build NetworkX graph from spaghetti geometry using endpoint clustering.
 
@@ -1056,7 +1056,7 @@ def build_inferred_graph(
     Args:
         gdf: GeoDataFrame with LineString geometries
         id_column: Column name for segment IDs
-        tolerance: Distance within which endpoints are considered connected (meters)
+        tolerance_m: Distance within which endpoints are considered connected (meters)
 
     Returns:
         G: NetworkX graph where nodes=endpoint clusters, edges=segments
@@ -1144,7 +1144,7 @@ def build_inferred_graph(
 
     # Step 2: Cluster endpoints using tile-based spatial hashing
     endpoint_coords_arr = np.array(endpoint_coords)
-    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance)
+    uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance_m)
 
     # Step 3: Build graph
     G = nx.Graph()

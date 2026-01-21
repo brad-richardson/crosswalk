@@ -16,16 +16,17 @@ MAX_DISTANCE_METERS = 10000.0
 # Import these in ml.py, compute.py, and label_store.py to ensure consistency.
 
 # All feature columns computed by the matcher
+# Distance/length features use _m suffix to indicate meters
 FEATURE_COLUMNS = [
     # Geometric features (9)
-    "hausdorff_distance",
-    "mean_hausdorff_distance",
+    "hausdorff_distance_m",
+    "mean_hausdorff_distance_m",
     "buffer_iou",
     "overlap_ratio",
     "heading_delta",
     "length_ratio",
-    "projection_distance",
-    "centroid_distance",
+    "projection_distance_m",
+    "centroid_distance_m",
     "collinear_gap_ratio",
     # Semantic features - name (5)
     "name_levenshtein",
@@ -36,11 +37,11 @@ FEATURE_COLUMNS = [
     # Semantic features - class (1)
     "class_similarity",
     # Endpoint/connectivity (3)
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
+    "start_endpoint_proximity_m",
+    "end_endpoint_proximity_m",
     "shared_endpoint_count",
     # Lateral offset (2)
-    "lateral_offset",
+    "lateral_offset_m",
     "lateral_offset_consistency",
     # Topology features (12)
     "from_degree_ref",
@@ -106,11 +107,11 @@ class MatcherSettings(BaseSettings):
     )
 
     # Topology settings
-    snap_tolerance: float = Field(
+    snap_tolerance_m: float = Field(
         default=2.0,
         description="Snap tolerance for undershoots/overshoots (meters)",
     )
-    node_cluster_tolerance: float = Field(
+    node_cluster_tolerance_m: float = Field(
         default=0.5,
         description="Tolerance for clustering nearby nodes (meters)",
     )
@@ -120,7 +121,7 @@ class MatcherSettings(BaseSettings):
     )
 
     # Blocking settings
-    buffer_distance: float = Field(
+    buffer_distance_m: float = Field(
         default=50.0,
         description="Candidate search radius (meters)",
     )
@@ -180,7 +181,7 @@ class MatcherSettings(BaseSettings):
         return v
 
     # Relational feature settings
-    anchor_search_radius: float = Field(
+    anchor_search_radius_m: float = Field(
         default=30.0,
         description="Max distance to search for anchor road (meters)",
     )
@@ -188,11 +189,11 @@ class MatcherSettings(BaseSettings):
         default=0.7,
         description="Minimum parallel alignment to consider as anchor (0-1)",
     )
-    endpoint_snap_tolerance: float = Field(
+    endpoint_snap_tolerance_m: float = Field(
         default=5.0,
         description="Tolerance for considering endpoints connected (meters)",
     )
-    neighbor_context_radius: float = Field(
+    neighbor_context_radius_m: float = Field(
         default=100.0,
         description="Radius for finding neighboring segments for context propagation (meters)",
     )
@@ -208,7 +209,7 @@ class MatcherSettings(BaseSettings):
     )
 
     # Integration settings
-    min_segment_length: float = Field(
+    min_segment_length_m: float = Field(
         default=3.0,
         description="Minimum segment length to include in integration (meters). Filters noise.",
     )
@@ -216,11 +217,11 @@ class MatcherSettings(BaseSettings):
         default=0.8,
         description="IoU threshold for detecting overlapping segments during integration",
     )
-    overlap_buffer_distance: float = Field(
+    overlap_buffer_m: float = Field(
         default=10.0,
         description="Buffer distance for overlap detection (meters)",
     )
-    near_duplicate_tolerance: float = Field(
+    near_duplicate_tolerance_m: float = Field(
         default=2.0,
         description="Distance to consider segments near-duplicates (meters). "
         "Intentionally tight since near-duplicates should nearly overlay.",

@@ -155,7 +155,7 @@ class TestFilters:
             crs="EPSG:32610",
         )
 
-        kept, filtered = filter_short_segments(gdf, min_length=5.0)
+        kept, filtered = filter_short_segments(gdf, min_length_m=5.0)
 
         assert len(kept) == 1
         assert len(filtered) == 1
@@ -222,7 +222,7 @@ class TestTransitiveConnectivity:
         )
 
         main, orphans, net_new, stats = detect_orphans_by_proximity(
-            combined, connection_tolerance=3.0, min_merge_length=0, max_hops=2
+            combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=2
         )
 
         # Target should be connected (hop 0)
@@ -255,7 +255,7 @@ class TestTransitiveConnectivity:
         )
 
         main, orphans, net_new, stats = detect_orphans_by_proximity(
-            combined, connection_tolerance=3.0, min_merge_length=0, max_hops=2
+            combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=2
         )
 
         # Both targets should be connected
@@ -292,7 +292,7 @@ class TestTransitiveConnectivity:
 
         # With max_hops=1, t3 should be orphan
         main, orphans, net_new, stats = detect_orphans_by_proximity(
-            combined, connection_tolerance=3.0, min_merge_length=0, max_hops=1
+            combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=1
         )
 
         connected = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
@@ -318,7 +318,7 @@ class TestFringeDetection:
             crs="EPSG:32610",
         )
 
-        coverage = compute_reference_coverage(reference, buffer_distance=10.0)
+        coverage = compute_reference_coverage(reference, buffer_distance_m=10.0)
 
         assert coverage is not None
         # Coverage should contain the reference network points
@@ -339,7 +339,7 @@ class TestFringeDetection:
             crs="EPSG:32610",
         )
 
-        coverage = compute_reference_coverage(reference, buffer_distance=30.0)
+        coverage = compute_reference_coverage(reference, buffer_distance_m=30.0)
 
         # Target inside coverage (parallel to reference, within buffer)
         inside = gpd.GeoDataFrame(
@@ -360,12 +360,12 @@ class TestFringeDetection:
         )
 
         # Test inside segment - should be valid (inside_length >= 5m)
-        valid, fringe = filter_fringe_segments(inside, coverage, min_inside_length=5.0)
+        valid, fringe = filter_fringe_segments(inside, coverage, min_inside_length_m=5.0)
         assert len(valid) == 1
         assert len(fringe) == 0
 
         # Test outside segment - should be fringe
-        valid, fringe = filter_fringe_segments(outside, coverage, min_inside_length=5.0)
+        valid, fringe = filter_fringe_segments(outside, coverage, min_inside_length_m=5.0)
         assert len(valid) == 0
         assert len(fringe) == 1
         assert fringe.iloc[0]["unmatched_reason"] == "outside_reference_coverage"

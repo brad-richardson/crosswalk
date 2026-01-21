@@ -106,8 +106,8 @@ def compute_pair_features(
         # Use provided or default endpoint features
         if endpoint_features is None:
             endpoint_features = {
-                "start_endpoint_proximity": MAX_DISTANCE_METERS,
-                "end_endpoint_proximity": MAX_DISTANCE_METERS,
+                "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
                 "shared_endpoint_count": 0,
             }
 
@@ -146,15 +146,15 @@ def compute_pair_features(
         coverage_feats = compute_coverage_features(alignment)
 
         return {
-            # Geometric
-            "hausdorff_distance": geom_features.hausdorff_distance,
-            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
+            # Geometric (distance features use _m suffix to indicate meters)
+            "hausdorff_distance_m": geom_features.hausdorff_distance,
+            "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
             "buffer_iou": geom_features.buffer_iou,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
-            "projection_distance": geom_features.projection_distance,
-            "centroid_distance": geom_features.centroid_distance,
+            "projection_distance_m": geom_features.projection_distance,
+            "centroid_distance_m": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             # Semantic - name
             "name_levenshtein": name_sim["levenshtein_ratio"],
@@ -164,16 +164,16 @@ def compute_pair_features(
             "name_metaphone": name_sim["metaphone_similarity"],
             # Semantic - class
             "class_similarity": class_sim,
-            # Endpoint proximity
-            "start_endpoint_proximity": endpoint_features.get(
-                "start_endpoint_proximity", MAX_DISTANCE_METERS
+            # Endpoint proximity (distance in meters)
+            "start_endpoint_proximity_m": endpoint_features.get(
+                "start_endpoint_proximity_m", MAX_DISTANCE_METERS
             ),
-            "end_endpoint_proximity": endpoint_features.get(
-                "end_endpoint_proximity", MAX_DISTANCE_METERS
+            "end_endpoint_proximity_m": endpoint_features.get(
+                "end_endpoint_proximity_m", MAX_DISTANCE_METERS
             ),
             "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
-            # Lateral offset
-            "lateral_offset": min(lateral_offset, MAX_DISTANCE_METERS),
+            # Lateral offset (distance in meters)
+            "lateral_offset_m": min(lateral_offset, MAX_DISTANCE_METERS),
             "lateral_offset_consistency": min(lateral_consistency, MAX_DISTANCE_METERS),
             # Topology - Tier 1: Degree features
             "from_degree_ref": from_degree_ref,
@@ -209,14 +209,14 @@ def compute_pair_features(
 def _get_error_features() -> dict[str, float]:
     """Return default feature values for error cases."""
     return {
-        "hausdorff_distance": MAX_DISTANCE_METERS,
-        "mean_hausdorff_distance": MAX_DISTANCE_METERS,
+        "hausdorff_distance_m": MAX_DISTANCE_METERS,
+        "mean_hausdorff_distance_m": MAX_DISTANCE_METERS,
         "buffer_iou": 0.0,
         "overlap_ratio": 0.0,
         "heading_delta": 180.0,
         "length_ratio": 0.0,
-        "projection_distance": MAX_DISTANCE_METERS,
-        "centroid_distance": MAX_DISTANCE_METERS,
+        "projection_distance_m": MAX_DISTANCE_METERS,
+        "centroid_distance_m": MAX_DISTANCE_METERS,
         "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
@@ -224,10 +224,10 @@ def _get_error_features() -> dict[str, float]:
         "name_soundex": 0.5,  # Neutral for missing names
         "name_metaphone": 0.5,  # Neutral for missing names
         "class_similarity": 0.0,
-        "start_endpoint_proximity": MAX_DISTANCE_METERS,
-        "end_endpoint_proximity": MAX_DISTANCE_METERS,
+        "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
+        "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
         "shared_endpoint_count": 0,
-        "lateral_offset": MAX_DISTANCE_METERS,
+        "lateral_offset_m": MAX_DISTANCE_METERS,
         "lateral_offset_consistency": MAX_DISTANCE_METERS,
         "from_degree_ref": 0,
         "to_degree_ref": 0,
@@ -255,7 +255,7 @@ def precompute_topology_and_endpoints(
     ref_indices: set[int],
     target_indices: set[int],
     id_column: str = "id",
-    tolerance: float = 5.0,
+    tolerance_m: float = 5.0,
 ) -> tuple[dict, dict, dict]:
     """Pre-compute topology and endpoint features for efficiency.
 
@@ -265,7 +265,7 @@ def precompute_topology_and_endpoints(
         ref_indices: Set of reference indices to compute features for
         target_indices: Set of target indices to compute features for
         id_column: Column name for segment IDs
-        tolerance: Distance tolerance for topology computation (meters)
+        tolerance_m: Distance tolerance for topology computation (meters)
 
     Returns:
         Tuple of (target_endpoint_features, ref_topology_features, target_topology_features)
@@ -292,8 +292,8 @@ def precompute_topology_and_endpoints(
             target_endpoint_features[target_idx] = ep_feats
         else:
             target_endpoint_features[target_idx] = {
-                "start_endpoint_proximity": MAX_DISTANCE_METERS,
-                "end_endpoint_proximity": MAX_DISTANCE_METERS,
+                "start_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                "end_endpoint_proximity_m": MAX_DISTANCE_METERS,
                 "shared_endpoint_count": 0,
             }
 
@@ -314,14 +314,14 @@ def precompute_topology_and_endpoints(
     t0 = time.perf_counter()
     logger.debug("[precompute] Computing target topology...")
     target_topology_by_id = compute_all_topology(
-        target, id_column=id_column, tolerance=tolerance, ids_to_compute=unique_target_ids
+        target, id_column=id_column, tolerance_m=tolerance_m, ids_to_compute=unique_target_ids
     )
     logger.debug(f"[precompute] Target topology in {time.perf_counter() - t0:.2f}s")
 
     t0 = time.perf_counter()
     logger.debug("[precompute] Computing reference topology...")
     ref_topology_by_id = compute_all_topology(
-        reference, id_column=id_column, tolerance=tolerance, ids_to_compute=unique_ref_ids
+        reference, id_column=id_column, tolerance_m=tolerance_m, ids_to_compute=unique_ref_ids
     )
     logger.debug(f"[precompute] Reference topology in {time.perf_counter() - t0:.2f}s")
 

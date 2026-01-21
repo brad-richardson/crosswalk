@@ -196,7 +196,7 @@ class TestCombineNetworks:
             reference_network,
             target_inputs,
             overlap_iou_threshold=0.3,
-            overlap_buffer_distance=10.0,
+            overlap_buffer_m=10.0,
         )
 
         # tl_a should be dropped due to overlap with th_a
@@ -255,7 +255,7 @@ class TestCombineNetworks:
             reference_network,
             target_inputs,
             overlap_iou_threshold=iou_threshold,
-            overlap_buffer_distance=10.0,
+            overlap_buffer_m=10.0,
         )
 
         # Note: The actual behavior depends on geometry - this tests the threshold has effect

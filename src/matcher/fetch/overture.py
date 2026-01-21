@@ -101,9 +101,9 @@ def fetch_overture_segments(
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
 
-    # Save to parquet
+    # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_parquet(output_path)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
 
     logger.info(f"Saved Overture segments to {output_path}")
     return output_path
@@ -142,9 +142,9 @@ def fetch_overture_connectors(
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
 
-    # Save to parquet
+    # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_parquet(output_path)
+    gdf.to_parquet(output_path, write_covering_bbox=True)
 
     logger.info(f"Saved Overture connectors to {output_path}")
     return output_path

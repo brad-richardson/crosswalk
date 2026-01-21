@@ -87,12 +87,12 @@ def fetch_osm_data(
     # Transform connectors to match expected schema
     connectors_gdf = _transform_connectors_schema(connectors_gdf)
 
-    # Save to parquet
+    # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     segments_path = output_dir / "osm_segments.parquet"
     connectors_path = output_dir / "osm_connectors.parquet"
 
-    roads_gdf.to_parquet(segments_path)
-    connectors_gdf.to_parquet(connectors_path)
+    roads_gdf.to_parquet(segments_path, write_covering_bbox=True)
+    connectors_gdf.to_parquet(connectors_path, write_covering_bbox=True)
 
     logger.info(f"Saved {len(roads_gdf)} OSM segments to {segments_path}")
     logger.info(f"Saved {len(connectors_gdf)} OSM connectors to {connectors_path}")

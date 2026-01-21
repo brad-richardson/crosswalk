@@ -145,14 +145,14 @@ def compute_match_score(
     if precomputed_features:
         # Use pre-computed features to avoid duplicate computation
         raw_features = {
-            "hausdorff_distance": precomputed_features["hausdorff_distance"],
-            "mean_hausdorff_distance": precomputed_features["mean_hausdorff_distance"],
+            "hausdorff_distance_m": precomputed_features["hausdorff_distance_m"],
+            "mean_hausdorff_distance_m": precomputed_features["mean_hausdorff_distance_m"],
             "buffer_iou": precomputed_features["buffer_iou"],
             "overlap_ratio": precomputed_features["overlap_ratio"],
             "heading_delta": precomputed_features["heading_delta"],
             "length_ratio": precomputed_features["length_ratio"],
-            "projection_distance": precomputed_features["projection_distance"],
-            "centroid_distance": precomputed_features["centroid_distance"],
+            "projection_distance_m": precomputed_features["projection_distance_m"],
+            "centroid_distance_m": precomputed_features["centroid_distance_m"],
             "collinear_gap_ratio": precomputed_features.get("collinear_gap_ratio", 1.0),
             "name_levenshtein": precomputed_features["name_levenshtein"],
             "name_jaro_winkler": precomputed_features["name_jaro_winkler"],
@@ -167,16 +167,16 @@ def compute_match_score(
         name_sim = compute_name_similarity(ref_name, target_name)
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
 
-        # Raw features for debugging
+        # Raw features for debugging (distance features have _m suffix for clarity)
         raw_features = {
-            "hausdorff_distance": geom_features.hausdorff_distance,
-            "mean_hausdorff_distance": geom_features.mean_hausdorff_distance,
+            "hausdorff_distance_m": geom_features.hausdorff_distance,
+            "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
             "buffer_iou": geom_features.buffer_iou,
             "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
-            "projection_distance": geom_features.projection_distance,
-            "centroid_distance": geom_features.centroid_distance,
+            "projection_distance_m": geom_features.projection_distance,
+            "centroid_distance_m": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             "name_levenshtein": name_sim["levenshtein_ratio"],
             "name_jaro_winkler": name_sim["jaro_winkler"],
@@ -186,16 +186,16 @@ def compute_match_score(
 
     # Normalize geometric features to 0-1 (higher is better)
     scores = {
-        "hausdorff_norm": max(0, 1 - raw_features["hausdorff_distance"] / distance_threshold),
+        "hausdorff_norm": max(0, 1 - raw_features["hausdorff_distance_m"] / distance_threshold),
         "mean_hausdorff_norm": max(
-            0, 1 - raw_features["mean_hausdorff_distance"] / distance_threshold
+            0, 1 - raw_features["mean_hausdorff_distance_m"] / distance_threshold
         ),
         "buffer_iou": raw_features["buffer_iou"],
         "overlap_ratio": raw_features["overlap_ratio"],  # Already 0-1
         "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
         "collinear_gap_ratio": raw_features["collinear_gap_ratio"],  # Already 0-1
         "length_ratio": raw_features["length_ratio"],
-        "projection_norm": max(0, 1 - raw_features["projection_distance"] / distance_threshold),
+        "projection_norm": max(0, 1 - raw_features["projection_distance_m"] / distance_threshold),
         "name_similarity": raw_features["name_token_sort"],
         "class_similarity": raw_features["class_similarity"],
     }
@@ -266,9 +266,19 @@ def score_candidates(
 
     weights = _get_weights(weights)
 
+    # Project to meter-based CRS for accurate distance computations
+    # All distance features will be in meters after this projection
+    working_ref = reference
+    working_target = target
+    if reference.crs is not None and reference.crs.is_geographic:
+        utm_crs = reference.estimate_utm_crs()
+        logger.debug(f"Projecting to {utm_crs} for meter-based feature computation")
+        working_ref = reference.to_crs(utm_crs)
+        working_target = target.to_crs(utm_crs)
+
     # Pre-extract arrays for faster access (avoid repeated .iloc calls)
-    ref_geoms = reference.geometry.values
-    target_geoms = target.geometry.values
+    ref_geoms = working_ref.geometry.values
+    target_geoms = working_target.geometry.values
 
     ref_names = (
         reference[ref_name_column].values

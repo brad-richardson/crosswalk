@@ -11,7 +11,7 @@ class TestPlanarize:
 
     def test_simple_cross(self, simple_cross):
         """Crossing lines should produce intersection node and 4 edges."""
-        result = planarize(simple_cross, snap_tolerance=0.5)
+        result = planarize(simple_cross, snap_tolerance_m=0.5)
 
         assert isinstance(result, PlanarizedNetwork)
 
@@ -28,7 +28,7 @@ class TestPlanarize:
 
     def test_simple_grid(self, simple_grid):
         """4x4 grid should produce 25 nodes (5x5 intersections) and 40 edges."""
-        result = planarize(simple_grid, snap_tolerance=1.0)
+        result = planarize(simple_grid, snap_tolerance_m=1.0)
 
         # 5x5 grid = 25 intersection nodes
         assert len(result.nodes) == 25
@@ -38,7 +38,7 @@ class TestPlanarize:
 
     def test_bridge_over_road_respects_z_levels(self, bridge_over_road):
         """Bridge over road should NOT create intersection when z-levels differ."""
-        result = planarize(bridge_over_road, snap_tolerance=0.5, respect_z_levels=True)
+        result = planarize(bridge_over_road, snap_tolerance_m=0.5, respect_z_levels=True)
 
         # With z-level respect, should not split at crossing
         # 2 original edges remain as 2 edges
@@ -49,7 +49,7 @@ class TestPlanarize:
 
     def test_bridge_over_road_ignores_z_levels(self, bridge_over_road):
         """Bridge over road should create intersection when z-levels ignored."""
-        result = planarize(bridge_over_road, snap_tolerance=0.5, respect_z_levels=False)
+        result = planarize(bridge_over_road, snap_tolerance_m=0.5, respect_z_levels=False)
 
         # Without z-level respect, should split at crossing
         # 2 edges split into 4 edges
@@ -63,7 +63,7 @@ class TestPlanarize:
     )
     def test_undershoot_snapping(self, undershoot_lines):
         """Undershoot should be snapped to nearby edge."""
-        result = planarize(undershoot_lines, snap_tolerance=2.0)
+        result = planarize(undershoot_lines, snap_tolerance_m=2.0)
 
         # After snapping, the side street should connect to the main road
         # This creates an intersection point
@@ -80,7 +80,7 @@ class TestPlanarize:
 
     def test_preserves_attributes(self, simple_cross):
         """Original attributes should be preserved on edges."""
-        result = planarize(simple_cross, snap_tolerance=0.5)
+        result = planarize(simple_cross, snap_tolerance_m=0.5)
 
         assert "name" in result.edges.columns
         assert "original_id" in result.edges.columns
@@ -135,7 +135,7 @@ class TestBuildGraph:
 
     def test_build_graph_from_cross(self, simple_cross):
         """Graph from crossing lines should have correct structure."""
-        network = planarize(simple_cross, snap_tolerance=0.5)
+        network = planarize(simple_cross, snap_tolerance_m=0.5)
         G = build_graph(network)
 
         # Should have nodes and edges
@@ -154,7 +154,7 @@ class TestBuildGraph:
 
     def test_topology_features(self, simple_grid):
         """Topology features should be computed correctly."""
-        network = planarize(simple_grid, snap_tolerance=1.0)
+        network = planarize(simple_grid, snap_tolerance_m=1.0)
         G = build_graph(network)
         features = compute_topology_features(G)
 
@@ -169,7 +169,7 @@ class TestTJunctions:
 
     def test_t_junction_creates_intersection(self, t_junction):
         """T-junction should create an intersection node."""
-        result = planarize(t_junction, snap_tolerance=0.5)
+        result = planarize(t_junction, snap_tolerance_m=0.5)
 
         # Should have at least 3 edges:
         # - Main road split into 2 parts
@@ -192,7 +192,7 @@ class TestBridgeStringParsing:
 
     def test_bridge_no_string_does_not_suppress_intersection(self, bridge_with_string_values):
         """bridge='no' should NOT suppress intersection with ground roads."""
-        result = planarize(bridge_with_string_values, snap_tolerance=0.5, respect_z_levels=True)
+        result = planarize(bridge_with_string_values, snap_tolerance_m=0.5, respect_z_levels=True)
 
         # Ground road (index 0, bridge="no") and tunnel exit (index 2, bridge="no")
         # are both at layer=0, so they should create an intersection where they cross.
@@ -211,7 +211,7 @@ class TestBridgeStringParsing:
 
     def test_bridge_yes_prevents_intersection(self, bridge_with_string_values):
         """bridge='yes' should prevent intersection with ground roads."""
-        result = planarize(bridge_with_string_values, snap_tolerance=0.5, respect_z_levels=True)
+        result = planarize(bridge_with_string_values, snap_tolerance_m=0.5, respect_z_levels=True)
 
         # The bridge is at layer=1, ground is at layer=0
         # They should not create an intersection at the crossing point
@@ -232,7 +232,7 @@ class TestEPSG4326AutoProjection:
 
     def test_epsg4326_input_auto_projects(self, lines_epsg4326):
         """EPSG:4326 input should be auto-projected and work correctly."""
-        result = planarize(lines_epsg4326, snap_tolerance=2.0)
+        result = planarize(lines_epsg4326, snap_tolerance_m=2.0)
 
         # Should have nodes and edges
         assert len(result.nodes) >= 2
@@ -246,7 +246,7 @@ class TestEPSG4326AutoProjection:
         """Snap tolerance should work in meters even with EPSG:4326 input."""
         # The lines are ~10km long, far apart
         # With 2m snap tolerance, they should not be connected
-        result = planarize(lines_epsg4326, snap_tolerance=2.0)
+        result = planarize(lines_epsg4326, snap_tolerance_m=2.0)
 
         # Should have 4 nodes (2 endpoints per line)
         # unless they happen to cross and create an intersection
@@ -255,7 +255,7 @@ class TestEPSG4326AutoProjection:
     def test_crs_preserved_in_output(self, lines_epsg4326):
         """Original CRS should be preserved in output."""
         original_crs = lines_epsg4326.crs
-        result = planarize(lines_epsg4326, snap_tolerance=2.0)
+        result = planarize(lines_epsg4326, snap_tolerance_m=2.0)
 
         # Verify CRS is set and matches input
         assert result.nodes.crs is not None

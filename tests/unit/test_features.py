@@ -574,7 +574,9 @@ class TestComputePairFeaturesWithAlignment:
         # Aligned features should have better (lower) hausdorff because
         # we compare the matching portions only
         # (The full geometry hausdorff includes the non-overlapping 50m)
-        assert features_aligned["hausdorff_distance"] <= features_unaligned["hausdorff_distance"]
+        assert (
+            features_aligned["hausdorff_distance_m"] <= features_unaligned["hausdorff_distance_m"]
+        )
 
     def test_all_feature_columns_present(self):
         """compute_pair_features should return all expected feature columns."""

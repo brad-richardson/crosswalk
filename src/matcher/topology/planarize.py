@@ -107,8 +107,8 @@ class PlanarizedNetwork(NamedTuple):
 
 def planarize(
     lines: gpd.GeoDataFrame,
-    snap_tolerance: float = None,
-    node_cluster_tolerance: float = None,
+    snap_tolerance_m: float = None,
+    node_cluster_tolerance_m: float = None,
     respect_z_levels: bool = True,
     id_column: str = "local_id",
 ) -> PlanarizedNetwork:
@@ -116,20 +116,20 @@ def planarize(
 
     Args:
         lines: GeoDataFrame with LineString geometries
-        snap_tolerance: Distance to snap undershoots/overshoots (meters)
-        node_cluster_tolerance: Tolerance for clustering nearby nodes (meters)
+        snap_tolerance_m: Distance to snap undershoots/overshoots (meters)
+        node_cluster_tolerance_m: Tolerance for clustering nearby nodes (meters)
         respect_z_levels: Whether to respect bridge/tunnel z-levels
         id_column: Column name for original feature IDs
 
     Returns:
         PlanarizedNetwork with nodes and edges GeoDataFrames
     """
-    snap_tolerance = snap_tolerance or settings.snap_tolerance
-    node_cluster_tolerance = node_cluster_tolerance or settings.node_cluster_tolerance
+    snap_tolerance_m = snap_tolerance_m or settings.snap_tolerance_m
+    node_cluster_tolerance_m = node_cluster_tolerance_m or settings.node_cluster_tolerance_m
 
     logger.info(f"Planarizing {len(lines)} features")
-    logger.info(f"  snap_tolerance: {snap_tolerance}m")
-    logger.info(f"  node_cluster_tolerance: {node_cluster_tolerance}m")
+    logger.info(f"  snap_tolerance_m: {snap_tolerance_m}m")
+    logger.info(f"  node_cluster_tolerance_m: {node_cluster_tolerance_m}m")
     logger.info(f"  respect_z_levels: {respect_z_levels}")
 
     # Ensure projected CRS for metric operations
@@ -162,7 +162,7 @@ def planarize(
 
     # Step 5: Cluster nearby nodes
     logger.info("Step 4: Clustering nearby nodes...")
-    clustered_nodes = _cluster_nodes(all_node_points, node_cluster_tolerance)
+    clustered_nodes = _cluster_nodes(all_node_points, node_cluster_tolerance_m)
     logger.info(f"  After clustering: {len(clustered_nodes)} unique nodes")
 
     # Step 6: Split lines at intersection nodes
@@ -172,7 +172,7 @@ def planarize(
 
     # Step 7: Snap undershoots/overshoots
     logger.info("Step 6: Snapping undershoots/overshoots...")
-    split_edges, clustered_nodes = _snap_undershoots(split_edges, clustered_nodes, snap_tolerance)
+    split_edges, clustered_nodes = _snap_undershoots(split_edges, clustered_nodes, snap_tolerance_m)
     logger.info(f"  After snapping: {len(clustered_nodes)} nodes, {len(split_edges)} edges")
 
     # Step 8: Build node and edge GeoDataFrames with connectivity
@@ -374,7 +374,7 @@ def _split_lines_at_nodes(
 
 
 def _snap_undershoots(
-    edges: list[dict], nodes: list[Point], snap_tolerance: float
+    edges: list[dict], nodes: list[Point], snap_tolerance_m: float
 ) -> tuple[list[dict], list[Point]]:
     """Snap dangling endpoints to nearby edges."""
     if not edges:
@@ -411,7 +411,7 @@ def _snap_undershoots(
         # Check if start is dangling
         if start in dangling:
             start_pt = Point(coords[0])
-            snap_pt = _find_snap_point(start_pt, edge_geoms, edge_tree, snap_tolerance, geom)
+            snap_pt = _find_snap_point(start_pt, edge_geoms, edge_tree, snap_tolerance_m, geom)
             if snap_pt is not None:
                 new_coords[0] = [snap_pt.x, snap_pt.y]
                 new_nodes.append(snap_pt)
@@ -420,7 +420,7 @@ def _snap_undershoots(
         # Check if end is dangling
         if end in dangling:
             end_pt = Point(coords[-1])
-            snap_pt = _find_snap_point(end_pt, edge_geoms, edge_tree, snap_tolerance, geom)
+            snap_pt = _find_snap_point(end_pt, edge_geoms, edge_tree, snap_tolerance_m, geom)
             if snap_pt is not None:
                 new_coords[-1] = [snap_pt.x, snap_pt.y]
                 new_nodes.append(snap_pt)
@@ -434,7 +434,7 @@ def _snap_undershoots(
         modified_edges.append(edge)
 
     # Re-cluster nodes after adding snap points
-    new_nodes = _cluster_nodes(new_nodes, snap_tolerance * 0.5)
+    new_nodes = _cluster_nodes(new_nodes, snap_tolerance_m * 0.5)
 
     return modified_edges, new_nodes
 
