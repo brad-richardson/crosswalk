@@ -22,8 +22,13 @@ EXCLUDED_CLASSES = {
 }
 
 # Default buffer distance (meters) for fetching Overture data
-# This ensures we get complete coverage at the edges of the target area
-DEFAULT_OVERTURE_BUFFER_M = 100.0
+# This ensures we get complete network topology at edges by including:
+# - Roads running parallel just outside the boundary
+# - Road connections/intersections just outside the target area
+# - Complete network for integration purposes
+# Note: Partial overlaps ARE included (features intersecting bbox), but
+# the buffer ensures we capture nearby parallel roads and complete connectivity.
+DEFAULT_OVERTURE_BUFFER_M = 1000.0
 
 
 class BoundingBox(BaseModel):

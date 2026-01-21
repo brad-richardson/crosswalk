@@ -16,8 +16,13 @@ from .osm_pbf import parse_pbf
 from .overture import BoundingBox
 
 # Default buffer distance (meters) for fetching OSM data
-# This ensures we get complete coverage at the edges of the target area
-DEFAULT_OSM_BUFFER_M = 100.0
+# This ensures we get complete network topology at edges by including:
+# - Roads running parallel just outside the boundary
+# - Road connections/intersections just outside the target area
+# - Complete network for integration purposes
+# Note: OSM ways with any node inside bbox are included (partial overlaps),
+# but the buffer ensures we capture nearby parallel roads and complete connectivity.
+DEFAULT_OSM_BUFFER_M = 1000.0
 
 
 def fetch_osm_data(
