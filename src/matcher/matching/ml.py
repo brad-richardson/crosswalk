@@ -831,17 +831,27 @@ class MLMatcher:
 
         # Pre-compute graphlet features for network topology similarity
         # For Overture reference data, use explicit connector positions for alignment-aware comparison
-        logger.info("Computing graphlet features for reference and target...")
+        # Filter to only candidate segments to reduce graph building overhead
+        sorted_ref_indices = sorted(unique_ref_indices)
+        ref_candidates_only = working_ref.iloc[sorted_ref_indices].reset_index(drop=True)
+        target_candidates_only_proj = working_target.iloc[sorted_target_indices].reset_index(
+            drop=True
+        )
+
+        logger.info(
+            f"Computing graphlet features for {len(ref_candidates_only)} reference "
+            f"and {len(target_candidates_only_proj)} target segments..."
+        )
         ref_has_connectors = "connectors" in reference.columns
         ref_graphlet_data = precompute_graphlet_features(
-            working_ref,
+            ref_candidates_only,
             id_column="id",
             tolerance_m=5.0,
             connectors_column="connectors" if ref_has_connectors else None,
         )
         # Target data typically doesn't have explicit connectors, use endpoint-based inference
         target_graphlet_data = precompute_graphlet_features(
-            working_target, id_column="id", tolerance_m=5.0
+            target_candidates_only_proj, id_column="id", tolerance_m=5.0
         )
 
         # Pre-compute linestring alignments if enabled
