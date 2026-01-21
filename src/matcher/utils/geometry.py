@@ -26,17 +26,27 @@ def filter_to_linestrings(
 
     original_count = len(gdf)
 
-    # Count different geometry types
+    # Count null/empty geometries explicitly
+    null_mask = gdf.geometry.isna() | gdf.geometry.is_empty
+    null_count = null_mask.sum()
+
+    # Count different geometry types (excluding nulls)
     geom_types = gdf.geometry.geom_type
     multilinestring_count = (geom_types == "MultiLineString").sum()
     linestring_count = (geom_types == "LineString").sum()
-    other_count = original_count - multilinestring_count - linestring_count
+    other_count = original_count - multilinestring_count - linestring_count - null_count
 
-    # Filter to only LineString geometries
+    # Filter to only LineString geometries (this also excludes nulls)
     mask = geom_types == "LineString"
     filtered = gdf[mask].copy()
 
     # Log warnings for filtered geometries
+    if null_count > 0:
+        logger.warning(
+            f"Filtered {null_count} null/empty geometries from {source_name} "
+            f"({null_count}/{original_count} features)."
+        )
+
     if multilinestring_count > 0:
         logger.warning(
             f"Filtered {multilinestring_count} MultiLineString geometries from {source_name} "

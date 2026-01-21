@@ -346,12 +346,12 @@ def _find_contiguous_groups(
     if len(matches) <= 1:
         return [matches] if matches else []
 
-    # Get endpoints for each target (LineStrings only, MultiLineStrings filtered at ingest)
+    # Get endpoints for each target (MultiLineStrings filtered at ingest)
     endpoints = {}
     for m in matches:
         if m.target_id in target_geoms:
             geom = target_geoms[m.target_id]
-            if geom.geom_type == "LineString":
+            if geom is not None and not geom.is_empty:
                 coords = list(geom.coords)
                 if len(coords) >= 2:
                     endpoints[m.target_id] = (Point(coords[0]), Point(coords[-1]))

@@ -324,13 +324,9 @@ def generate_scored_candidates(
     Returns:
         List of CandidatePairView objects sorted by confidence (REVIEW first)
     """
-    # Filter out non-LineString geometries (MultiLineString, etc.)
-    # Sub-segment selection only supports LineString
-    reference = filter_to_linestrings(reference, "reference")
-    target = filter_to_linestrings(target, "target")
-
+    # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
-        logger.warning("No valid LineString geometries after filtering")
+        logger.warning("No geometries in reference or target")
         return []
 
     # Project to metric CRS for accurate distances
