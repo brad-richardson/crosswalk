@@ -55,6 +55,9 @@ class TestFeatureComputationPerformance:
 
     def test_geometric_features_throughput(self, synthetic_lines):
         """Benchmark compute_geometric_features (includes buffer ops)."""
+        # Clear buffer cache for consistent baseline measurement
+        clear_buffer_cache()
+
         n_pairs = N_PAIRS
         pairs = [
             (
@@ -107,6 +110,9 @@ class TestFeatureComputationPerformance:
 
     def test_buffer_iou_throughput(self, synthetic_lines):
         """Benchmark buffer IoU specifically."""
+        # Clear buffer cache for consistent baseline measurement
+        clear_buffer_cache()
+
         n_pairs = N_PAIRS
         pairs = [
             (

@@ -87,7 +87,8 @@ class TestGraphletPrecomputePerformance:
         )
         elapsed = time.perf_counter() - start
 
-        assert G.number_of_nodes() > 0
+        # G may be None when degrees_only=True (default for memory efficiency)
+        # In that case, node_features contains the degree data
         assert len(node_features) > 0
         assert len(seg_to_connectors) > 0
         assert elapsed < max_seconds, (

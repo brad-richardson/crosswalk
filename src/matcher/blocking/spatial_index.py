@@ -172,7 +172,7 @@ class CandidateBatch:
 
     def memory_usage_mb(self) -> float:
         """Estimate memory usage in MB."""
-        # Arrays
+        # Numeric arrays
         arr_bytes = (
             self.ref_idxs.nbytes
             + self.target_idxs.nbytes
@@ -180,10 +180,12 @@ class CandidateBatch:
             + self.heading_diffs.nbytes
             + self.length_ratios.nbytes
         )
-        # Object arrays are trickier - estimate based on ID string lengths
-        # Rough estimate: 50 bytes per ID on average
-        id_bytes = len(self) * 50 * 2
-        return (arr_bytes + id_bytes) / (1024 * 1024)
+        # Object arrays (IDs) - include nbytes plus estimated string storage
+        # nbytes for object arrays only counts pointer storage (~8 bytes each)
+        # Actual string content adds ~50 bytes per ID on average
+        id_arr_bytes = self.ref_ids.nbytes + self.target_ids.nbytes
+        id_content_bytes = len(self) * 50 * 2  # Estimated string content
+        return (arr_bytes + id_arr_bytes + id_content_bytes) / (1024 * 1024)
 
 
 def generate_candidates(
@@ -224,7 +226,9 @@ def generate_candidates(
         try:
             crs = CRS.from_user_input(target.crs)
             is_geographic = crs.is_geographic
-        except Exception:
+        except (ValueError, TypeError):
+            # CRS parsing failed - assume projected CRS (safer for buffer distance)
+            # This can happen with malformed CRS strings or unsupported formats
             pass
 
     # For geographic CRS, convert buffer distance to approximate degrees

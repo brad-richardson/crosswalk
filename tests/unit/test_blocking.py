@@ -127,7 +127,7 @@ class TestGenerateCandidates:
         # Length ratio is computed as a feature, not used as a filter
         # The ML model uses this as a scoring feature
         assert len(candidates) == 1
-        assert candidates[0].length_ratio == 0.1  # 10/100 = 0.1
+        assert candidates[0].length_ratio == pytest.approx(0.1)  # 10/100 = 0.1
 
     def test_multiple_candidates_per_target(self):
         """Should generate multiple candidates when target matches multiple references."""

@@ -97,8 +97,9 @@ def get_cached_buffer(geom: LineString, radius: float):
     try:
         # Use WKB as cache key (hashable representation of geometry)
         return _cached_buffer(geom.wkb, radius)
-    except Exception:
-        # Fall back to direct computation if caching fails
+    except (AttributeError, TypeError):
+        # Fall back to direct computation if WKB serialization fails
+        # (e.g., geometry has no wkb attribute or WKB is not hashable)
         return geom.buffer(radius)
 
 
