@@ -42,11 +42,19 @@ def create_tree_like_graph(n_nodes: int) -> nx.Graph:
     return nx.random_labeled_tree(n_nodes, seed=42)
 
 
-def create_mixed_topology_graph(n_clusters: int = 10, cluster_size: int = 50) -> nx.Graph:
+def create_mixed_topology_graph(
+    n_clusters: int = 10, cluster_size: int = 50, seed: int = 42
+) -> nx.Graph:
     """Create a graph with mixed topology (realistic road network).
 
     Multiple dense clusters connected by sparse bridges.
+
+    Args:
+        n_clusters: Number of grid clusters to create
+        cluster_size: Approximate size of each cluster (actual is sqrt(cluster_size)^2)
+        seed: Random seed for deterministic bridge generation
     """
+    rng = np.random.default_rng(seed)
     G = nx.Graph()
     node_offset = 0
 
@@ -63,9 +71,9 @@ def create_mixed_topology_graph(n_clusters: int = 10, cluster_size: int = 50) ->
             prev_cluster_start = (cluster_id - 1) * cluster_size
             curr_cluster_start = node_offset
             # Add 1-3 bridge edges
-            for _ in range(np.random.randint(1, 4)):
-                src = prev_cluster_start + np.random.randint(0, cluster_size)
-                dst = curr_cluster_start + np.random.randint(0, len(cluster))
+            for _ in range(rng.integers(1, 4)):
+                src = prev_cluster_start + rng.integers(0, cluster_size)
+                dst = curr_cluster_start + rng.integers(0, len(cluster))
                 if G.has_node(src) and G.has_node(dst):
                     G.add_edge(src, dst)
 
@@ -222,11 +230,12 @@ class TestGraphletScaling:
     @pytest.mark.slow
     def test_grid_scales_subquadratically(self):
         """Grid computation should not be O(n²)."""
-        sizes = [20, 40, 60, 80]  # n x n grids
+        sizes = [30, 50, 70, 90]  # n x n grids (900 to 8100 nodes)
         times = []
 
-        # Warmup
-        G_warmup = create_dense_grid_graph(10)
+        # Warmup with large graph to trigger numba JIT compilation
+        # Must be > 500 nodes (the numba threshold) to warm up the JIT
+        G_warmup = create_dense_grid_graph(25)  # 625 nodes
         compute_road_graphlet_features(G_warmup)
 
         for n in sizes:

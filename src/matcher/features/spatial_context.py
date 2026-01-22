@@ -1149,6 +1149,14 @@ def _get_numba_graphlet_functions():
         of v and c is a common neighbor of n1,n2 (c != v).
 
         Uses merge-based intersection of sorted neighbor lists for efficiency.
+
+        Args:
+            n_nodes: Number of nodes in the graph
+            indptr: CSR row pointers array (length n_nodes + 1)
+            indices: CSR column indices array (sorted per row)
+
+        Returns:
+            Array of square counts, one per node
         """
         result = np.zeros(n_nodes, dtype=np.int64)
 
@@ -1201,16 +1209,24 @@ def _get_numba_graphlet_functions():
 
         Two-hop neighbors are nodes reachable in exactly 2 hops,
         excluding direct neighbors and the node itself.
+
+        Args:
+            n_nodes: Number of nodes in the graph
+            indptr: CSR row pointers array
+            indices: CSR column indices array
+
+        Returns:
+            Array of two-hop neighbor counts, one per node
         """
         result = np.zeros(n_nodes, dtype=np.int64)
+
+        # Allocate seen array once and reuse (memory efficiency)
+        seen = np.zeros(n_nodes, dtype=np.int8)
 
         for v in range(n_nodes):
             start_v = indptr[v]
             end_v = indptr[v + 1]
             neighbors_v = indices[start_v:end_v]
-
-            # Use a seen array to track unique two-hop neighbors
-            seen = np.zeros(n_nodes, dtype=np.int8)
 
             # Mark v and its direct neighbors
             seen[v] = 1
@@ -1229,6 +1245,15 @@ def _get_numba_graphlet_functions():
                         two_hop_count += 1
 
             result[v] = two_hop_count
+
+            # Reset seen array for next iteration (only reset marked entries)
+            seen[v] = 0
+            for ni in neighbors_v:
+                seen[ni] = 0
+                start_ni = indptr[ni]
+                end_ni = indptr[ni + 1]
+                for k in range(start_ni, end_ni):
+                    seen[indices[k]] = 0
 
         return result
 
