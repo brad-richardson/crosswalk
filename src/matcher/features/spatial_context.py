@@ -1260,14 +1260,21 @@ def _get_numba_graphlet_functions():
     return count_squares_numba, count_two_hop_numba
 
 
-def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
+def compute_road_graphlet_features(
+    G: "nx.Graph",
+    degrees_only: bool = False,
+) -> dict[int, np.ndarray] | dict[int, int]:
     """Compute simplified graphlet features optimized for road networks.
 
     For large graphs (>500 nodes), uses numba-accelerated computation for
     square counting and two-hop neighbor counting, providing ~10-90x speedup.
     Falls back to pure Python for smaller graphs or if numba is unavailable.
 
-    Returns a 6-dimensional feature vector per node:
+    When degrees_only=True, returns only degree values for minimal memory usage.
+    This is sufficient for the most discriminative feature (endpoint_degree_similarity)
+    and reduces memory by ~90% compared to full 6-feature vectors.
+
+    Returns a 6-dimensional feature vector per node (or just degree if degrees_only):
     - degree: Number of edges at node (1-4 typical for roads)
     - triangles: Count of 3-cycles through node (rare in roads)
     - squares: Count of 4-cycles through node (common in grid cities)
@@ -1277,15 +1284,27 @@ def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
 
     Args:
         G: NetworkX graph from build_inferred_graph()
+        degrees_only: If True, return dict of node_id -> degree (int) only
 
     Returns:
-        Dictionary mapping node_id -> 6-dimensional numpy array of features
+        If degrees_only=False: Dictionary mapping node_id -> 6-dimensional numpy array
+        If degrees_only=True: Dictionary mapping node_id -> degree (int)
     """
     import networkx as nx
 
     n_nodes = G.number_of_nodes()
     if n_nodes == 0:
         return {}
+
+    # Fast path: only compute degrees for memory efficiency
+    if degrees_only:
+        t_start = time.perf_counter()
+        degrees = {node: G.degree(node) for node in G.nodes()}
+        logger.debug(
+            f"[graphlet] Computed degrees for {len(degrees)} nodes in "
+            f"{time.perf_counter() - t_start:.2f}s (degrees_only mode)"
+        )
+        return degrees
 
     t_start = time.perf_counter()
     features: dict[int, np.ndarray] = {}
@@ -1387,7 +1406,10 @@ def build_connector_graph(
     id_column: str = "id",
     connectors_column: str = "connectors",
     tolerance_m: float = 5.0,
-) -> tuple["nx.Graph", dict[str, list[tuple[float, int]]], dict[int, np.ndarray]]:
+    degrees_only: bool = True,
+) -> tuple[
+    "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
+]:
     """Build NetworkX graph from Overture segments using explicit connector data.
 
     Unlike build_inferred_graph() which clusters endpoints, this function uses
@@ -1402,11 +1424,12 @@ def build_connector_graph(
         id_column: Column name for segment IDs
         connectors_column: Column name for connectors array (each element has 'at' and 'connector_id')
         tolerance_m: Distance for clustering connectors at same physical location (meters)
+        degrees_only: If True, only return node degrees for memory efficiency
 
     Returns:
-        G: NetworkX graph where nodes=connectors, edges=segment connections
+        G: NetworkX graph (None if degrees_only) where nodes=connectors, edges=segment connections
         seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
-        node_features: Dict mapping node_id -> graphlet feature vector
+        node_features: Dict mapping node_id -> degree (int) if degrees_only else feature vector
     """
     import networkx as nx
 
@@ -1423,7 +1446,7 @@ def build_connector_graph(
             "inferring connectivity from spatial proximity"
         )
         # Use the new inference function that detects mid-segment crossings
-        return build_inferred_connector_graph(gdf, id_column, tolerance_m)
+        return build_inferred_connector_graph(gdf, id_column, tolerance_m, degrees_only)
 
     # Build mapping from connector_id -> node_id
     # First pass: collect all unique connector IDs
@@ -1476,13 +1499,22 @@ def build_connector_graph(
             if node_a != node_b:
                 G.add_edge(node_a, node_b, segment_id=seg_id)
 
-    # Compute graphlet features for all nodes
+    # Compute graphlet features for all nodes (or just degrees for memory efficiency)
     t0 = time.perf_counter()
-    node_features = compute_road_graphlet_features(G)
-    logger.debug(f"[graphlet-connector] Computed features in {time.perf_counter() - t0:.2f}s")
+    n_nodes = G.number_of_nodes()
+    n_edges = G.number_of_edges()
+    node_features = compute_road_graphlet_features(G, degrees_only=degrees_only)
+    logger.debug(
+        f"[graphlet-connector] Computed {'degrees' if degrees_only else 'features'} "
+        f"in {time.perf_counter() - t0:.2f}s"
+    )
+
+    # Discard graph if using degrees_only mode for memory efficiency
+    if degrees_only:
+        G = None
 
     logger.info(
-        f"[graphlet-connector] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"[graphlet-connector] Built graph: {n_nodes} nodes, {n_edges} edges "
         f"in {time.perf_counter() - t_start:.2f}s"
     )
 
@@ -1504,7 +1536,10 @@ def build_inferred_connector_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
-) -> tuple["nx.Graph", dict[str, list[tuple[float, int]]], dict[int, np.ndarray]]:
+    degrees_only: bool = True,
+) -> tuple[
+    "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
+]:
     """Build connector graph by inferring connectivity from spatial proximity.
 
     Unlike build_inferred_graph() which only uses endpoints, this function
@@ -1523,11 +1558,12 @@ def build_inferred_connector_graph(
         gdf: GeoDataFrame with LineString geometries
         id_column: Column name for segment IDs
         tolerance_m: Distance within which segments are considered connected (meters)
+        degrees_only: If True, only return node degrees for memory efficiency
 
     Returns:
-        G: NetworkX graph where nodes=connection points, edges=segment portions
+        G: NetworkX graph (None if degrees_only) where nodes=connection points, edges=segment portions
         seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
-        node_features: Dict mapping node_id -> graphlet feature vector
+        node_features: Dict mapping node_id -> degree (int) if degrees_only else feature vector
     """
     import networkx as nx
     from shapely import STRtree
@@ -1674,15 +1710,24 @@ def build_inferred_connector_graph(
             if node_a != node_b:
                 G.add_edge(node_a, node_b, segment_id=seg_id)
 
-    # Compute graphlet features
+    # Compute graphlet features (or just degrees for memory efficiency)
     t0 = time.perf_counter()
-    node_features = compute_road_graphlet_features(G)
-    logger.debug(f"[graphlet-infer] Computed features in {time.perf_counter() - t0:.2f}s")
+    n_nodes = G.number_of_nodes()
+    n_edges = G.number_of_edges()
+    node_features = compute_road_graphlet_features(G, degrees_only=degrees_only)
+    logger.debug(
+        f"[graphlet-infer] Computed {'degrees' if degrees_only else 'features'} "
+        f"in {time.perf_counter() - t0:.2f}s"
+    )
 
     logger.info(
-        f"[graphlet-infer] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"[graphlet-infer] Built graph: {n_nodes} nodes, {n_edges} edges "
         f"({mid_crossings_added} mid-segment crossings) in {time.perf_counter() - t_start:.2f}s"
     )
+
+    # Discard graph if using degrees_only mode for memory efficiency
+    if degrees_only:
+        G = None
 
     return G, seg_to_connectors, node_features
 
@@ -1749,8 +1794,8 @@ def get_alignment_connectors(
 def graphlet_similarity_with_alignment(
     ref_seg_id: str,
     target_seg_id: str,
-    ref_features: dict[int, np.ndarray],
-    target_features: dict[int, np.ndarray],
+    ref_features: dict[int, np.ndarray] | dict[int, int],
+    target_features: dict[int, np.ndarray] | dict[int, int],
     ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
     target_seg_to_connectors: dict[str, list[tuple[float, int]]],
     ref_start_frac: float = 0.0,
@@ -1767,11 +1812,15 @@ def graphlet_similarity_with_alignment(
     the nearest connectors to positions 0.3 and 0.8, then compare their graphlet
     features to the corresponding target positions.
 
+    Supports both full feature vectors (6-element arrays) and degrees-only mode
+    (int values) for memory efficiency. In degrees-only mode, graphlet_similarity
+    is set equal to endpoint_degree_similarity.
+
     Args:
         ref_seg_id: Reference segment ID
         target_seg_id: Target segment ID
-        ref_features: Graphlet features for reference graph nodes
-        target_features: Graphlet features for target graph nodes
+        ref_features: Node features - either Dict[node_id, array] or Dict[node_id, int] (degrees only)
+        target_features: Node features - either Dict[node_id, array] or Dict[node_id, int] (degrees only)
         ref_seg_to_connectors: Maps ref segment ID -> [(at, node_id), ...] sorted by at
         target_seg_to_connectors: Maps target segment ID -> [(at, node_id), ...] sorted by at
         ref_start_frac: Start position of alignment on reference (0.0 to 1.0)
@@ -1792,59 +1841,89 @@ def graphlet_similarity_with_alignment(
         target_seg_id, target_seg_to_connectors, target_start_frac, target_end_frac
     )
 
-    # Default feature vector: [degree=1, triangles=0, squares=0, clustering=0, two_hop=0, is_articulation=0]
-    default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    # Helper to extract degree from feature (handles both int and array)
+    def get_degree(features: dict, node: int | None, default: int = 1) -> int:
+        if node is None:
+            return default
+        feat = features.get(node)
+        if feat is None:
+            return default
+        if isinstance(feat, (int, np.integer)):
+            return int(feat)
+        # Array format - degree is first element
+        return int(feat[0]) if len(feat) > 0 else default
 
-    ref_start_f = (
-        ref_features.get(ref_start_node, default) if ref_start_node is not None else default
-    )
-    ref_end_f = ref_features.get(ref_end_node, default) if ref_end_node is not None else default
-    target_start_f = (
-        target_features.get(target_start_node, default)
-        if target_start_node is not None
-        else default
-    )
-    target_end_f = (
-        target_features.get(target_end_node, default) if target_end_node is not None else default
-    )
+    # Get degrees for all endpoints
+    ref_start_deg = get_degree(ref_features, ref_start_node)
+    ref_end_deg = get_degree(ref_features, ref_end_node)
+    target_start_deg = get_degree(target_features, target_start_node)
+    target_end_deg = get_degree(target_features, target_end_node)
 
-    def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
-        """Compute normalized similarity between two feature vectors."""
-        diff = np.abs(a - b)
-        norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
-        normalized = 1.0 - np.clip(diff / norms, 0, 1)
-        return float(normalized.mean())
-
-    # Try both orientations
-    fwd = (
-        feature_similarity(ref_start_f, target_start_f)
-        + feature_similarity(ref_end_f, target_end_f)
-    ) / 2
-    rev = (
-        feature_similarity(ref_start_f, target_end_f)
-        + feature_similarity(ref_end_f, target_start_f)
-    ) / 2
-
-    # Also compare degree specifically (most discriminative for roads)
+    # Compute degree similarity (works for both formats)
     degree_fwd = (
         1.0
-        - abs(ref_start_f[0] - target_start_f[0]) / 10.0
+        - abs(ref_start_deg - target_start_deg) / 10.0
         + 1.0
-        - abs(ref_end_f[0] - target_end_f[0]) / 10.0
+        - abs(ref_end_deg - target_end_deg) / 10.0
     ) / 2.0
     degree_fwd = max(0.0, min(1.0, degree_fwd))
     degree_rev = (
         1.0
-        - abs(ref_start_f[0] - target_end_f[0]) / 10.0
+        - abs(ref_start_deg - target_end_deg) / 10.0
         + 1.0
-        - abs(ref_end_f[0] - target_start_f[0]) / 10.0
+        - abs(ref_end_deg - target_start_deg) / 10.0
     ) / 2.0
     degree_rev = max(0.0, min(1.0, degree_rev))
 
-    return {
-        "graphlet_similarity": max(fwd, rev),
-        "endpoint_degree_similarity": max(degree_fwd, degree_rev),
-    }
+    # Check if we have full feature vectors or just degrees
+    sample_feat = next(iter(ref_features.values()), None) if ref_features else None
+    if sample_feat is not None and isinstance(sample_feat, np.ndarray):
+        # Full feature mode - compute graphlet_similarity from all features
+        default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        ref_start_f = (
+            ref_features.get(ref_start_node, default) if ref_start_node is not None else default
+        )
+        ref_end_f = ref_features.get(ref_end_node, default) if ref_end_node is not None else default
+        target_start_f = (
+            target_features.get(target_start_node, default)
+            if target_start_node is not None
+            else default
+        )
+        target_end_f = (
+            target_features.get(target_end_node, default)
+            if target_end_node is not None
+            else default
+        )
+
+        def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
+            """Compute normalized similarity between two feature vectors."""
+            diff = np.abs(a - b)
+            norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
+            normalized = 1.0 - np.clip(diff / norms, 0, 1)
+            return float(normalized.mean())
+
+        # Try both orientations
+        fwd = (
+            feature_similarity(ref_start_f, target_start_f)
+            + feature_similarity(ref_end_f, target_end_f)
+        ) / 2
+        rev = (
+            feature_similarity(ref_start_f, target_end_f)
+            + feature_similarity(ref_end_f, target_start_f)
+        ) / 2
+
+        return {
+            "graphlet_similarity": max(fwd, rev),
+            "endpoint_degree_similarity": max(degree_fwd, degree_rev),
+        }
+    else:
+        # Degrees-only mode - use degree similarity for both metrics
+        # This is the most discriminative feature for roads anyway
+        return {
+            "graphlet_similarity": max(degree_fwd, degree_rev),
+            "endpoint_degree_similarity": max(degree_fwd, degree_rev),
+        }
 
 
 def graphlet_segment_similarity(
