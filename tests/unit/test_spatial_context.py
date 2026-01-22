@@ -811,6 +811,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,  # Need graph for node count assertion
         )
 
         # Should have 5 unique connectors (conn_a, conn_b, conn_c, conn_d, conn_e)
@@ -824,6 +825,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,  # Need graph for edge count assertion
         )
 
         # seg_1: conn_a--conn_b--conn_c (2 edges)
@@ -840,6 +842,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,  # Test with full features
         )
 
         assert "seg_1" in seg_to_connectors
@@ -889,6 +892,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,
         )
 
         # Full segment (0.0 to 1.0) should return start and end connectors
@@ -913,6 +917,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,
         )
 
         # Compare seg_1 with seg_2 (they share connector conn_c)
@@ -945,6 +950,7 @@ class TestConnectorGraphAndAlignment:
             sample_segment_with_connectors,
             id_column="id",
             connectors_column="connectors",
+            degrees_only=False,
         )
 
         # Compare partial seg_1 (0.4 to 0.6, around the middle connector)

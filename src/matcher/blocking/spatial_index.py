@@ -115,6 +115,79 @@ class CandidatePair:
     length_ratio: float
 
 
+@dataclass
+class CandidateBatch:
+    """Memory-efficient batch storage for candidate pairs using numpy arrays.
+
+    Instead of 8.4M CandidatePair Python objects (~9.5GB), stores data as
+    numpy arrays (~67MB for indices + IDs as object array).
+
+    Provides iteration interface compatible with list[CandidatePair] for
+    backward compatibility.
+    """
+
+    ref_ids: np.ndarray  # object array of IDs
+    ref_idxs: np.ndarray  # int32 array of DataFrame indices
+    target_ids: np.ndarray  # object array of IDs
+    target_idxs: np.ndarray  # int32 array of DataFrame indices
+    distances: np.ndarray  # float32 array
+    heading_diffs: np.ndarray  # float32 array
+    length_ratios: np.ndarray  # float32 array
+
+    def __len__(self) -> int:
+        return len(self.ref_idxs)
+
+    def __iter__(self):
+        """Iterate yielding CandidatePair objects (for backward compatibility)."""
+        for i in range(len(self)):
+            yield CandidatePair(
+                ref_id=self.ref_ids[i],
+                ref_idx=int(self.ref_idxs[i]),
+                target_id=self.target_ids[i],
+                target_idx=int(self.target_idxs[i]),
+                distance_estimate=float(self.distances[i]),
+                heading_diff=float(self.heading_diffs[i]),
+                length_ratio=float(self.length_ratios[i]),
+            )
+
+    def __getitem__(self, idx: int) -> CandidatePair:
+        """Get single CandidatePair by index."""
+        return CandidatePair(
+            ref_id=self.ref_ids[idx],
+            ref_idx=self.ref_idxs[idx].item(),
+            target_id=self.target_ids[idx],
+            target_idx=self.target_idxs[idx].item(),
+            distance_estimate=self.distances[idx].item(),
+            heading_diff=self.heading_diffs[idx].item(),
+            length_ratio=self.length_ratios[idx].item(),
+        )
+
+    def get_unique_indices(self) -> tuple[set[int], set[int]]:
+        """Get unique reference and target indices efficiently."""
+        return set(self.ref_idxs.tolist()), set(self.target_idxs.tolist())
+
+    def get_index_pairs(self) -> list[tuple[int, int]]:
+        """Get list of (ref_idx, target_idx) tuples for work distribution."""
+        return list(zip(self.ref_idxs.tolist(), self.target_idxs.tolist()))
+
+    def memory_usage_mb(self) -> float:
+        """Estimate memory usage in MB."""
+        # Numeric arrays
+        arr_bytes = (
+            self.ref_idxs.nbytes
+            + self.target_idxs.nbytes
+            + self.distances.nbytes
+            + self.heading_diffs.nbytes
+            + self.length_ratios.nbytes
+        )
+        # Object arrays (IDs) - include nbytes plus estimated string storage
+        # nbytes for object arrays only counts pointer storage (~8 bytes each)
+        # Actual string content adds ~50 bytes per ID on average
+        id_arr_bytes = self.ref_ids.nbytes + self.target_ids.nbytes
+        id_content_bytes = len(self) * 50 * 2  # Estimated string content
+        return (arr_bytes + id_arr_bytes + id_content_bytes) / (1024 * 1024)
+
+
 def generate_candidates(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
@@ -123,12 +196,11 @@ def generate_candidates(
     max_length_ratio: float = None,  # Kept for API compatibility, not used for filtering
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
-) -> list[CandidatePair]:
-    """Generate candidate pairs using vectorized spatial join.
+) -> CandidateBatch:
+    """Generate candidate pairs using memory-efficient STRtree spatial query.
 
-    Uses gpd.sjoin for efficient spatial joining. Heading and length ratio
-    are computed for use as ML features but NOT used as blocking filters,
-    since different segmentation schemes make them unreliable for filtering.
+    Uses STRtree.query for efficient spatial matching without copying DataFrames.
+    Heading and length ratio are computed only for matched pairs.
 
     Args:
         reference: Reference edges (Overture) GeoDataFrame
@@ -140,114 +212,131 @@ def generate_candidates(
         target_id_column: Column name for target IDs
 
     Returns:
-        List of CandidatePair objects
+        CandidateBatch with candidate pairs stored as numpy arrays
     """
     buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
-    # Note: heading/length params kept for API compatibility but not used
 
     logger.info(f"Generating candidates: {len(reference)} reference x {len(target)} target")
     logger.info(f"  buffer_distance_m: {buffer_distance_m}m")
-    logger.info("  Note: heading/length filters disabled - ML model handles scoring")
+    logger.info("  Note: Using memory-efficient STRtree query")
 
-    # Check if data is in geographic CRS and needs projection for accurate buffering
-    local_crs = _create_local_projection_crs(target)
-    if local_crs is not None:
-        logger.info("  Projecting to local AEQD CRS for accurate spatial operations")
-        target_proj = target.to_crs(local_crs)
-        reference_proj = reference.to_crs(local_crs)
-    else:
-        target_proj = target
-        reference_proj = reference
+    # Check if data is in geographic CRS - need to handle buffer distance conversion
+    is_geographic = False
+    if target.crs is not None:
+        try:
+            crs = CRS.from_user_input(target.crs)
+            is_geographic = crs.is_geographic
+        except (ValueError, TypeError):
+            # CRS parsing failed - assume projected CRS (safer for buffer distance)
+            # This can happen with malformed CRS strings or unsupported formats
+            pass
 
-    # Prepare target with buffer geometry and pre-computed attributes
-    target_prep = target_proj.copy()
-    target_prep["_target_idx"] = range(len(target))
-    target_prep["_target_heading"] = _compute_headings_vectorized(target_proj.geometry)
-    target_prep["_target_length"] = target_proj.geometry.length
-    target_prep["_target_id"] = (
-        target[target_id_column] if target_id_column in target.columns else range(len(target))
-    )
-    # Store original geometry (in projected CRS) before buffering
-    target_prep["_target_geom"] = target_prep.geometry
-
-    # Buffer target geometries for spatial join (now in meters for projected CRS)
-    target_prep = target_prep.set_geometry(target_prep.geometry.buffer(buffer_distance_m))
-
-    # Prepare reference with pre-computed attributes
-    reference_prep = reference_proj.copy()
-    reference_prep["_ref_idx"] = range(len(reference))
-    reference_prep["_ref_heading"] = _compute_headings_vectorized(reference_proj.geometry)
-    reference_prep["_ref_length"] = reference_proj.geometry.length
-    reference_prep["_ref_id"] = (
-        reference[ref_id_column] if ref_id_column in reference.columns else range(len(reference))
-    )
-    reference_prep["_ref_geom"] = reference_prep.geometry
-
-    # Perform spatial join (vectorized!) - in projected CRS for accurate distance
-    # Keep only needed columns from reference to avoid column name conflicts
-    ref_cols = ["geometry", "_ref_idx", "_ref_heading", "_ref_length", "_ref_id", "_ref_geom"]
-    joined = gpd.sjoin(
-        target_prep,
-        reference_prep[ref_cols],
-        how="inner",
-        predicate="intersects",
-    )
-
-    logger.info(f"  Spatial join found {len(joined)} candidate pairs")
-
-    if len(joined) == 0:
-        return []
-
-    # Compute heading and length ratio for use as CandidatePair attributes
-    # (used by ML model as features, not as blocking filters)
-    heading_diff = _angle_diff_vectorized(
-        joined["_target_heading"].values,
-        joined["_ref_heading"].values,
-    )
-
-    min_len = np.minimum(joined["_target_length"].values, joined["_ref_length"].values)
-    max_len = np.maximum(joined["_target_length"].values, joined["_ref_length"].values)
-    length_ratio = max_len / np.maximum(min_len, 0.1)
-
-    # No blocking filters - spatial proximity is sufficient for candidate generation
-    # The ML model will use heading_diff and length_ratio as scoring features
-    joined_filtered = joined
-    heading_diff_filtered = heading_diff
-    length_ratio_filtered = length_ratio
-
-    logger.info(f"  After spatial join: {len(joined_filtered)} candidates")
-
-    if len(joined_filtered) == 0:
-        return []
-
-    # Compute centroid distances (vectorized)
-    target_centroids = joined_filtered["_target_geom"].centroid
-    ref_centroids = joined_filtered["_ref_geom"].centroid
-    distances = target_centroids.distance(ref_centroids).values
-
-    # Pre-extract arrays for fast list comprehension construction
-    # This is ~6x faster than using iterrows()
-    ref_ids = joined_filtered["_ref_id"].values
-    ref_idxs = joined_filtered["_ref_idx"].values.astype(int)
-    target_ids = joined_filtered["_target_id"].values
-    target_idxs = joined_filtered["_target_idx"].values.astype(int)
-    inv_length_ratios = 1.0 / length_ratio_filtered  # Normalize to 0-1
-
-    # Build CandidatePair objects using list comprehension (vectorized extraction)
-    candidates = [
-        CandidatePair(
-            ref_id=ref_ids[i],
-            ref_idx=ref_idxs[i],
-            target_id=target_ids[i],
-            target_idx=target_idxs[i],
-            distance_estimate=distances[i],
-            heading_diff=heading_diff_filtered[i],
-            length_ratio=inv_length_ratios[i],
+    # For geographic CRS, convert buffer distance to approximate degrees
+    # At equator: 1 degree ≈ 111km, so 50m ≈ 0.00045 degrees
+    # This is approximate but sufficient for candidate generation (blocking)
+    if is_geographic:
+        # Get center latitude for better approximation
+        bounds = target.total_bounds
+        center_lat = (bounds[1] + bounds[3]) / 2
+        # meters per degree longitude varies with latitude
+        meters_per_degree = 111320 * np.cos(np.radians(center_lat))
+        buffer_degrees = buffer_distance_m / meters_per_degree
+        logger.info(
+            f"  Geographic CRS: buffer={buffer_degrees:.6f}° (~{buffer_distance_m}m at lat={center_lat:.1f}°)"
         )
-        for i in range(len(joined_filtered))
-    ]
+    else:
+        buffer_degrees = buffer_distance_m  # Already in projected units (meters)
 
-    logger.info(f"  Generated {len(candidates)} candidates")
+    # Build STRtree on reference geometries (no copying!)
+    ref_geoms = reference.geometry.values
+    ref_tree = STRtree(ref_geoms)
+
+    # Buffer target geometries for query
+    target_geoms = target.geometry.values
+    target_buffered = shapely.buffer(target_geoms, buffer_degrees)
+
+    # Query all matches at once - returns (target_idx, ref_idx) pairs
+    # This is much more memory-efficient than sjoin
+    target_idxs_arr, ref_idxs_arr = ref_tree.query(target_buffered, predicate="intersects")
+
+    n_pairs = len(ref_idxs_arr)
+    logger.info(f"  STRtree query found {n_pairs:,} candidate pairs")
+
+    if n_pairs == 0:
+        return CandidateBatch(
+            ref_ids=np.array([], dtype=object),
+            ref_idxs=np.array([], dtype=np.int32),
+            target_ids=np.array([], dtype=object),
+            target_idxs=np.array([], dtype=np.int32),
+            distances=np.array([], dtype=np.float32),
+            heading_diffs=np.array([], dtype=np.float32),
+            length_ratios=np.array([], dtype=np.float32),
+        )
+
+    # Convert to int32 for memory efficiency
+    ref_idxs = ref_idxs_arr.astype(np.int32)
+    target_idxs = target_idxs_arr.astype(np.int32)
+
+    # Extract IDs using numpy advanced indexing (no DataFrame operations)
+    if ref_id_column in reference.columns:
+        ref_id_arr = reference[ref_id_column].values
+        ref_ids = ref_id_arr[ref_idxs]
+    else:
+        ref_ids = ref_idxs.astype(object)
+
+    if target_id_column in target.columns:
+        target_id_arr = target[target_id_column].values
+        target_ids = target_id_arr[target_idxs]
+    else:
+        target_ids = target_idxs.astype(object)
+
+    # Compute heading differences for matched pairs only
+    # Pre-compute all headings first (vectorized)
+    ref_headings = _compute_headings_vectorized(reference.geometry)
+    target_headings = _compute_headings_vectorized(target.geometry)
+
+    # Index into headings for matched pairs
+    matched_ref_headings = ref_headings[ref_idxs]
+    matched_target_headings = target_headings[target_idxs]
+    heading_diffs = _angle_diff_vectorized(matched_target_headings, matched_ref_headings).astype(
+        np.float32
+    )
+
+    # Compute length ratios for matched pairs
+    # Note: In geographic CRS, lengths are in degrees - but we only use ratios,
+    # so the units cancel out and the relative comparison is still valid
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*geographic CRS.*")
+        ref_lengths = reference.geometry.length.values
+        target_lengths = target.geometry.length.values
+
+    matched_ref_lengths = ref_lengths[ref_idxs]
+    matched_target_lengths = target_lengths[target_idxs]
+
+    min_lens = np.minimum(matched_ref_lengths, matched_target_lengths)
+    max_lens = np.maximum(matched_ref_lengths, matched_target_lengths)
+    length_ratios = (min_lens / np.maximum(max_lens, 0.1)).astype(np.float32)  # Inverted: 0-1 range
+
+    # Compute centroid distances for matched pairs
+    ref_centroids = shapely.centroid(ref_geoms[ref_idxs])
+    target_centroids = shapely.centroid(target_geoms[target_idxs])
+    distances = shapely.distance(ref_centroids, target_centroids).astype(np.float32)
+
+    candidates = CandidateBatch(
+        ref_ids=ref_ids,
+        ref_idxs=ref_idxs,
+        target_ids=target_ids,
+        target_idxs=target_idxs,
+        distances=distances,
+        heading_diffs=heading_diffs,
+        length_ratios=length_ratios,
+    )
+
+    logger.info(
+        f"  Generated {len(candidates):,} candidates (~{candidates.memory_usage_mb():.0f} MB)"
+    )
     return candidates
 
 

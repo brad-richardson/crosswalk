@@ -28,7 +28,8 @@ Key Features:
 from typing import NamedTuple
 
 import numpy as np
-from shapely import LineString, Point
+from shapely import LineString, Point, line_interpolate_point
+from shapely import distance as shapely_distance
 
 
 class RelationalFeatures(NamedTuple):
@@ -74,6 +75,8 @@ def compute_perpendicular_offset(
     distance to the anchor. Returns mean offset, IQR (interquartile range),
     and 95th percentile for robust outlier handling.
 
+    Uses Shapely's vectorized functions for efficient batch computation.
+
     Args:
         target_geom: Target geometry (sidewalk, bike lane)
         anchor_geom: Anchor geometry (road centerline)
@@ -94,24 +97,21 @@ def compute_perpendicular_offset(
     if target_geom.is_empty or anchor_geom.is_empty:
         return float("inf"), float("inf"), float("inf")
 
-    # Sample points along target
+    # Sample points along target using vectorized interpolation
     n_samples = max(3, int(target_geom.length / sample_interval))
     distances_along = np.linspace(0, target_geom.length, n_samples)
 
-    # Compute perpendicular distance at each sample point
-    offsets = []
-    for d in distances_along:
-        point = target_geom.interpolate(d)
-        offset = anchor_geom.distance(point)
-        offsets.append(offset)
+    # Vectorized point creation using absolute distances (matches original behavior)
+    points = line_interpolate_point(target_geom, distances_along, normalized=False)
 
-    offsets = np.array(offsets)
+    # Vectorized distance computation - all points to anchor line
+    offsets = shapely_distance(points, anchor_geom)
+
     mean_offset = float(np.mean(offsets))
 
     # IQR (interquartile range) - robust to outliers
-    p25 = float(np.percentile(offsets, 25))
-    p75 = float(np.percentile(offsets, 75))
-    offset_iqr = p75 - p25
+    p25, p75 = np.percentile(offsets, [25, 75])
+    offset_iqr = float(p75 - p25)
 
     # P95 - captures worst-case while ignoring extreme outliers
     offset_p95 = float(np.percentile(offsets, 95))

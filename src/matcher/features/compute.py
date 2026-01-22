@@ -429,6 +429,8 @@ def precompute_graphlet_features(
         and gdf_reset[connectors_column].notna().any()
     )
 
+    # Use degrees_only=True for memory efficiency (reduces memory by ~90%)
+    # The endpoint_degree_similarity is the most discriminative feature for roads
     if use_connectors:
         logger.info("Building connector-based graph for graphlet features (explicit connectors)...")
         G, seg_to_connectors, node_features = build_connector_graph(
@@ -436,10 +438,12 @@ def precompute_graphlet_features(
             id_column=id_column,
             connectors_column=connectors_column,
             tolerance_m=tolerance_m,
+            degrees_only=True,  # Memory optimization
         )
+        n_nodes = len(node_features) if node_features else 0
         logger.debug(
-            f"[precompute] Built connector graph with {G.number_of_nodes()} nodes "
-            f"in {time.perf_counter() - t0:.2f}s"
+            f"[precompute] Built connector graph with {n_nodes} nodes "
+            f"in {time.perf_counter() - t0:.2f}s (degrees only)"
         )
         return G, seg_to_connectors, node_features, True
     else:
@@ -449,11 +453,12 @@ def precompute_graphlet_features(
 
         logger.info("Building inferred connector graph for graphlet features...")
         G, seg_to_connectors, node_features = build_inferred_connector_graph(
-            gdf_reset, id_column=id_column, tolerance_m=tolerance_m
+            gdf_reset, id_column=id_column, tolerance_m=tolerance_m, degrees_only=True
         )
+        n_nodes = len(node_features) if node_features else 0
         logger.debug(
-            f"[precompute] Built inferred connector graph with {G.number_of_nodes()} nodes "
-            f"in {time.perf_counter() - t0:.2f}s"
+            f"[precompute] Built inferred connector graph with {n_nodes} nodes "
+            f"in {time.perf_counter() - t0:.2f}s (degrees only)"
         )
         # Return True for use_connectors since we now have connector format
         return G, seg_to_connectors, node_features, True

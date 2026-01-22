@@ -362,6 +362,12 @@ def match(
         "-b",
         help="Candidate search radius in meters",
     ),
+    workers: int = typer.Option(
+        -1,
+        "--workers",
+        "-w",
+        help="Number of parallel workers (-1 for auto). Reduce for large datasets to save memory.",
+    ),
 ):
     """Run the full matching pipeline."""
     from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -373,6 +379,8 @@ def match(
     console.print(f"  Target: {target}")
     console.print(f"  Method: {method}")
     console.print(f"  Buffer: {buffer_distance_m}m")
+    if workers != -1:
+        console.print(f"  [yellow]Workers: {workers}[/yellow]")
 
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -389,6 +397,7 @@ def match(
             output_path=output,
             method=method,
             buffer_distance_m=buffer_distance_m,
+            n_jobs=workers,
         )
 
         progress.update(task, completed=True)

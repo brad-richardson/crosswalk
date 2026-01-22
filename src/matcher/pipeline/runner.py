@@ -51,6 +51,7 @@ def run_pipeline(
     target_name_column: str = "name",
     ref_class_column: str = "class",
     target_class_column: str = "road_class",
+    n_jobs: int = -1,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -212,6 +213,7 @@ def run_pipeline(
             target_name_column=target_name_column,
             ref_class_column=ref_class_column,
             target_class_column=target_class_column,
+            n_jobs=n_jobs,
         )
     else:
         raise ValueError(f"Unknown method: {method}")
