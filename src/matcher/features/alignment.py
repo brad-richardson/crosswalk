@@ -705,7 +705,13 @@ def compute_alignment_batch(
     }
 
     # Prepare work items as simple tuples
-    work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+    # Support both CandidateBatch (optimized) and list of CandidatePair
+    from ..blocking.spatial_index import CandidateBatch
+
+    if isinstance(candidates, CandidateBatch):
+        work_items = list(zip(candidates.ref_idxs.tolist(), candidates.target_idxs.tolist()))
+    else:
+        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
 
     # Process with ProcessPoolExecutor
     chunk_size = max(1000, n_candidates // (n_workers * 4))
