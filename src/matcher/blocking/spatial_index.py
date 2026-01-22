@@ -10,6 +10,7 @@ by filtering datasets before loading into memory.
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -105,9 +106,9 @@ def _angle_diff_vectorized(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 class CandidatePair:
     """A candidate match between reference and target edges."""
 
-    ref_id: int
+    ref_id: Any  # ID from reference dataset (str for GERS UUIDs, int for OSM IDs)
     ref_idx: int  # Index in reference GeoDataFrame
-    target_id: int
+    target_id: Any  # ID from target dataset (str or int depending on source)
     target_idx: int  # Index in target GeoDataFrame
     distance_estimate: float
     heading_diff: float
