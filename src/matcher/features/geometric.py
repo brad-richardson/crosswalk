@@ -43,6 +43,7 @@ Metric Selection Rationale:
   initial filtering.
 """
 
+from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
@@ -51,6 +52,72 @@ from shapely import distance as shapely_distance
 
 if TYPE_CHECKING:
     from shapely import Polygon
+
+
+# Buffer cache size - limits memory usage while providing speedup for repeated geometries
+# With ~500K segments and 2 radii, full caching would use ~8GB. Limit to ~800MB.
+_BUFFER_CACHE_SIZE = 50_000
+
+
+@lru_cache(maxsize=_BUFFER_CACHE_SIZE)
+def _cached_buffer(geom_wkb: bytes, radius: float):
+    """Compute buffer with LRU caching based on geometry WKB and radius.
+
+    Uses WKB (Well-Known Binary) representation as the cache key since
+    LineString objects are not hashable. This provides automatic cache
+    invalidation when geometries change.
+
+    Args:
+        geom_wkb: WKB representation of the geometry
+        radius: Buffer radius in meters
+
+    Returns:
+        Buffered polygon geometry
+    """
+    from shapely import wkb
+
+    return wkb.loads(geom_wkb).buffer(radius)
+
+
+def get_cached_buffer(geom: LineString, radius: float):
+    """Get a buffered geometry, using cache when possible.
+
+    This function provides a caching layer for buffer operations.
+    For repeated geometries (common in ML scoring where the same
+    segment appears in multiple candidate pairs), this avoids
+    redundant buffer computations.
+
+    Args:
+        geom: LineString geometry to buffer
+        radius: Buffer radius in meters
+
+    Returns:
+        Buffered polygon geometry
+    """
+    try:
+        # Use WKB as cache key (hashable representation of geometry)
+        return _cached_buffer(geom.wkb, radius)
+    except Exception:
+        # Fall back to direct computation if caching fails
+        return geom.buffer(radius)
+
+
+def clear_buffer_cache():
+    """Clear the buffer cache to free memory.
+
+    Call this after completing a batch of feature computations
+    if memory is a concern, or for testing purposes.
+    """
+    _cached_buffer.cache_clear()
+
+
+def get_buffer_cache_info():
+    """Get buffer cache statistics.
+
+    Returns:
+        CacheInfo with hits, misses, maxsize, and currsize
+    """
+    return _cached_buffer.cache_info()
 
 
 class GeometricFeatures(NamedTuple):
@@ -146,11 +213,11 @@ def compute_geometric_features(
     # Multi-scale Buffer IoU:
     # - 5m: Captures tight alignment (exact centerline matches)
     # - 15m: Captures offset alignment (sidewalks, bike lanes parallel to roads)
-    # Pre-compute buffers once and reuse for IoU and overlap_ratio
-    buf_a_5m = line_a.buffer(5.0)
-    buf_b_5m = line_b.buffer(5.0)
-    buf_a_15m = line_a.buffer(15.0)
-    buf_b_15m = line_b.buffer(15.0)
+    # Use cached buffers when possible for repeated geometries
+    buf_a_5m = get_cached_buffer(line_a, 5.0)
+    buf_b_5m = get_cached_buffer(line_b, 5.0)
+    buf_a_15m = get_cached_buffer(line_a, 15.0)
+    buf_b_15m = get_cached_buffer(line_b, 15.0)
 
     buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
     buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
@@ -205,6 +272,9 @@ def _buffer_iou(line_a: LineString, line_b: LineString, radius: float) -> float:
 def _buffer_iou_from_buffers(buf_a: "Polygon", buf_b: "Polygon") -> float:
     """Compute Intersection over Union from pre-computed buffers.
 
+    Uses the identity: Union = A + B - Intersection to avoid computing
+    the union geometry explicitly, which is more expensive than area lookups.
+
     Args:
         buf_a: Pre-computed buffer polygon for line A
         buf_b: Pre-computed buffer polygon for line B
@@ -213,7 +283,8 @@ def _buffer_iou_from_buffers(buf_a: "Polygon", buf_b: "Polygon") -> float:
         IoU score between 0 and 1
     """
     intersection_area = buf_a.intersection(buf_b).area
-    union_area = buf_a.union(buf_b).area
+    # Optimization: union_area = A + B - intersection (avoids union geometry op)
+    union_area = buf_a.area + buf_b.area - intersection_area
 
     return intersection_area / union_area if union_area > 0 else 0.0
 
