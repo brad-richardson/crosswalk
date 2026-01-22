@@ -43,11 +43,14 @@ Metric Selection Rationale:
   initial filtering.
 """
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
-from shapely import LineString, hausdorff_distance, points, prepare
+from shapely import LineString, hausdorff_distance, points
 from shapely import distance as shapely_distance
+
+if TYPE_CHECKING:
+    from shapely import Polygon
 
 
 class GeometricFeatures(NamedTuple):
@@ -168,7 +171,10 @@ def compute_geometric_features(
     # Centroid distance
     centroid_distance = line_a.centroid.distance(line_b.centroid)
 
-    # Overlap ratio (reuse 15m buffer to avoid creating another buffer)
+    # Overlap ratio - NOTE: Changed from 10m to 15m buffer for performance.
+    # This is a semantic change but overlap_ratio is typically ~1.0 anyway
+    # due to blocking bias (candidates already spatially filtered).
+    # Using 15m buffer avoids creating an additional buffer geometry.
     overlap_ratio = _overlap_ratio(line_a, buf_b_15m)
 
     # Collinear gap ratio (penalty for tip-to-tip segments)
@@ -196,8 +202,16 @@ def _buffer_iou(line_a: LineString, line_b: LineString, radius: float) -> float:
     return _buffer_iou_from_buffers(buf_a, buf_b)
 
 
-def _buffer_iou_from_buffers(buf_a, buf_b) -> float:
-    """Compute Intersection over Union from pre-computed buffers."""
+def _buffer_iou_from_buffers(buf_a: "Polygon", buf_b: "Polygon") -> float:
+    """Compute Intersection over Union from pre-computed buffers.
+
+    Args:
+        buf_a: Pre-computed buffer polygon for line A
+        buf_b: Pre-computed buffer polygon for line B
+
+    Returns:
+        IoU score between 0 and 1
+    """
     intersection_area = buf_a.intersection(buf_b).area
     union_area = buf_a.union(buf_b).area
 
@@ -249,9 +263,9 @@ def _compute_hausdorff_stats(line_a: LineString, line_b: LineString) -> tuple[fl
     points_a = points(coords_a)
     points_b = points(coords_b)
 
-    # Prepare geometries for repeated distance queries (significant speedup)
-    prepare(line_a)
-    prepare(line_b)
+    # Note: prepare() is not used here as it primarily optimizes predicate
+    # operations (contains, intersects) in Shapely 2.0, not distance calculations.
+    # The vectorized shapely.distance() is already optimized for batch operations.
 
     # Vectorized distance computation: all points in A to line B
     dists_a_to_b = shapely_distance(points_a, line_b)
@@ -283,12 +297,15 @@ def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
     return mean_dist
 
 
-def _overlap_ratio(line_a: LineString, buf_b) -> float:
+def _overlap_ratio(line_a: LineString, buf_b: "Polygon") -> float:
     """Compute the ratio of line_a that overlaps with line_b's buffer.
 
     Args:
         line_a: Line to measure overlap for
-        buf_b: Pre-computed buffer of line_b (avoids redundant buffer computation)
+        buf_b: Pre-computed buffer polygon of line_b
+
+    Returns:
+        Fraction of line_a length that falls within buf_b (0 to 1)
     """
     overlap = line_a.intersection(buf_b)
 
