@@ -35,28 +35,41 @@ from loguru import logger
 from shapely.geometry import LineString, MultiLineString, Point
 
 # Mapping from our class values to OSM highway tags
+# Aligned with HIGHWAY_VALUES in src/matcher/fetch/osm_pbf.py
 CLASS_TO_HIGHWAY = {
+    # Major roads
     "motorway": "motorway",
-    "motorway_link": "motorway_link",
     "trunk": "trunk",
-    "trunk_link": "trunk_link",
     "primary": "primary",
-    "primary_link": "primary_link",
     "secondary": "secondary",
-    "secondary_link": "secondary_link",
     "tertiary": "tertiary",
+    # Link roads
+    "motorway_link": "motorway_link",
+    "trunk_link": "trunk_link",
+    "primary_link": "primary_link",
+    "secondary_link": "secondary_link",
     "tertiary_link": "tertiary_link",
+    # Minor roads
     "residential": "residential",
     "living_street": "living_street",
-    "service": "service",
     "unclassified": "unclassified",
-    "footway": "footway",
-    "sidewalk": "footway",
-    "path": "path",
+    "service": "service",
+    # Paths
     "pedestrian": "pedestrian",
-    "cycleway": "cycleway",
-    "track": "track",
+    "footway": "footway",
+    "sidewalk": "footway",  # Map sidewalk to footway
     "steps": "steps",
+    "path": "path",
+    "track": "track",
+    "cycleway": "cycleway",
+    "bridleway": "bridleway",
+    # Unknown (OSM "road" maps to Overture "unknown")
+    "road": "road",
+    "unknown": "road",
+    # Lifecycle states
+    "construction": "construction",
+    "proposed": "proposed",
+    "abandoned": "abandoned",
 }
 
 
@@ -65,8 +78,10 @@ def extract_name(names_value) -> str | None:
 
     Handles various formats:
     - String: "Main Street"
-    - List: [{"value": "Main Street", "language": "en"}]
-    - Dict: {"primary": "Main Street"}
+    - List: [{"value": "Main Street", "language": "en"}] (Overture format)
+    - Dict: {"primary": "Main Street", "common": None, ...}
+
+    Aligned with _extract_name_string in src/matcher/features/semantic.py.
     """
     if names_value is None:
         return None
@@ -74,14 +89,30 @@ def extract_name(names_value) -> str | None:
     if isinstance(names_value, str):
         return names_value if names_value.strip() else None
 
+    # Handle Overture list format: [{"value": "...", "language": "en"}, ...]
     if isinstance(names_value, list) and len(names_value) > 0:
         first = names_value[0]
         if isinstance(first, dict):
             return first.get("value") or first.get("name")
-        return str(first)
+        if isinstance(first, str):
+            return first
+        return None
 
+    # Handle dict format (OSM/Overture): {"primary": "...", "common": "...", ...}
     if isinstance(names_value, dict):
-        return names_value.get("primary") or names_value.get("value")
+        # Try common keys in order of preference (aligned with semantic.py)
+        for key in ["primary", "common", "name", "value"]:
+            if key in names_value and names_value[key]:
+                val = names_value[key]
+                # Handle nested extraction
+                if isinstance(val, str):
+                    return val
+                if isinstance(val, dict):
+                    return extract_name(val)
+        # Last resort - return first non-None string value
+        for v in names_value.values():
+            if isinstance(v, str) and v:
+                return v
 
     return None
 
@@ -258,6 +289,19 @@ class OSMConverter:
                         node_id = self._create_node(lon, lat)
 
                     node_ids.append(node_id)
+
+                # Validate: OSM ways require at least 2 distinct nodes
+                # Coordinate rounding could create degenerate single-node ways
+                unique_node_ids = set(node_ids)
+                if len(unique_node_ids) < 2:
+                    original_id = (
+                        str(row.get(id_column, idx)) if id_column in gdf.columns else str(idx)
+                    )
+                    logger.warning(
+                        f"Skipping way {original_id}: only {len(unique_node_ids)} "
+                        f"distinct node(s) after rounding"
+                    )
+                    continue
 
                 # Collect way attributes
                 way_data = {
