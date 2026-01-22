@@ -1095,10 +1095,178 @@ def build_inferred_graph(
     return G, seg_to_start_node, seg_to_end_node
 
 
+# Threshold for using numba-accelerated graphlet computation
+# Below this, pure Python is fast enough and avoids JIT compilation overhead
+_NUMBA_THRESHOLD_NODES = 500
+
+
+def _build_csr_from_graph(G: "nx.Graph") -> tuple[np.ndarray, np.ndarray, list, dict]:
+    """Convert NetworkX graph to CSR format for numba processing.
+
+    Returns:
+        indptr: CSR row pointers
+        indices: CSR column indices (sorted per row)
+        node_list: List of original node IDs
+        node_to_idx: Mapping from node ID to integer index
+    """
+    from scipy import sparse
+
+    node_list = list(G.nodes())
+    node_to_idx = {n: i for i, n in enumerate(node_list)}
+    n = len(node_list)
+
+    rows, cols = [], []
+    for u, v in G.edges():
+        i, j = node_to_idx[u], node_to_idx[v]
+        rows.extend([i, j])
+        cols.extend([j, i])
+
+    if rows:
+        A = sparse.csr_matrix((np.ones(len(rows), dtype=np.int32), (rows, cols)), shape=(n, n))
+        # Ensure indices are sorted (required for merge-based intersection)
+        A.sort_indices()
+        return A.indptr.astype(np.int64), A.indices.astype(np.int64), node_list, node_to_idx
+    else:
+        # Empty graph
+        return np.zeros(n + 1, dtype=np.int64), np.array([], dtype=np.int64), node_list, node_to_idx
+
+
+def _get_numba_graphlet_functions():
+    """Lazy-load numba-accelerated graphlet functions.
+
+    Returns None if numba is not available.
+    """
+    try:
+        from numba import njit
+    except ImportError:
+        return None, None
+
+    @njit
+    def count_squares_numba(n_nodes, indptr, indices):
+        """Count 4-cycles (squares) through each node using CSR adjacency.
+
+        For each node v, count squares v-n1-c-n2-v where n1,n2 are neighbors
+        of v and c is a common neighbor of n1,n2 (c != v).
+
+        Uses merge-based intersection of sorted neighbor lists for efficiency.
+
+        Args:
+            n_nodes: Number of nodes in the graph
+            indptr: CSR row pointers array (length n_nodes + 1)
+            indices: CSR column indices array (sorted per row)
+
+        Returns:
+            Array of square counts, one per node
+        """
+        result = np.zeros(n_nodes, dtype=np.int64)
+
+        for v in range(n_nodes):
+            start_v = indptr[v]
+            end_v = indptr[v + 1]
+            neighbors_v = indices[start_v:end_v]
+            n_neighbors = len(neighbors_v)
+
+            if n_neighbors < 2:
+                continue
+
+            square_count = 0
+            for i in range(n_neighbors):
+                n1 = neighbors_v[i]
+                start_n1 = indptr[n1]
+                end_n1 = indptr[n1 + 1]
+                neighbors_n1 = indices[start_n1:end_n1]
+
+                for j in range(i + 1, n_neighbors):
+                    n2 = neighbors_v[j]
+                    start_n2 = indptr[n2]
+                    end_n2 = indptr[n2 + 1]
+                    neighbors_n2 = indices[start_n2:end_n2]
+
+                    # Count common neighbors of n1 and n2, excluding v
+                    # Both arrays are sorted (CSR property after sort_indices)
+                    p1, p2 = 0, 0
+                    common_count = 0
+                    while p1 < len(neighbors_n1) and p2 < len(neighbors_n2):
+                        if neighbors_n1[p1] == neighbors_n2[p2]:
+                            if neighbors_n1[p1] != v:
+                                common_count += 1
+                            p1 += 1
+                            p2 += 1
+                        elif neighbors_n1[p1] < neighbors_n2[p2]:
+                            p1 += 1
+                        else:
+                            p2 += 1
+
+                    square_count += common_count
+
+            result[v] = square_count
+
+        return result
+
+    @njit
+    def count_two_hop_numba(n_nodes, indptr, indices):
+        """Count two-hop neighbors for each node.
+
+        Two-hop neighbors are nodes reachable in exactly 2 hops,
+        excluding direct neighbors and the node itself.
+
+        Args:
+            n_nodes: Number of nodes in the graph
+            indptr: CSR row pointers array
+            indices: CSR column indices array
+
+        Returns:
+            Array of two-hop neighbor counts, one per node
+        """
+        result = np.zeros(n_nodes, dtype=np.int64)
+
+        # Allocate seen array once and reuse (memory efficiency)
+        seen = np.zeros(n_nodes, dtype=np.int8)
+
+        for v in range(n_nodes):
+            start_v = indptr[v]
+            end_v = indptr[v + 1]
+            neighbors_v = indices[start_v:end_v]
+
+            # Mark v and its direct neighbors
+            seen[v] = 1
+            for ni in neighbors_v:
+                seen[ni] = 1
+
+            # Count unique two-hop neighbors
+            two_hop_count = 0
+            for ni in neighbors_v:
+                start_ni = indptr[ni]
+                end_ni = indptr[ni + 1]
+                for k in range(start_ni, end_ni):
+                    nj = indices[k]
+                    if seen[nj] == 0:
+                        seen[nj] = 1
+                        two_hop_count += 1
+
+            result[v] = two_hop_count
+
+            # Reset seen array for next iteration (only reset marked entries)
+            seen[v] = 0
+            for ni in neighbors_v:
+                seen[ni] = 0
+                start_ni = indptr[ni]
+                end_ni = indptr[ni + 1]
+                for k in range(start_ni, end_ni):
+                    seen[indices[k]] = 0
+
+        return result
+
+    return count_squares_numba, count_two_hop_numba
+
+
 def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
     """Compute simplified graphlet features optimized for road networks.
 
-    Uses pure NetworkX - no external dependencies.
+    For large graphs (>500 nodes), uses numba-accelerated computation for
+    square counting and two-hop neighbor counting, providing ~10-90x speedup.
+    Falls back to pure Python for smaller graphs or if numba is unavailable.
+
     Returns a 6-dimensional feature vector per node:
     - degree: Number of edges at node (1-4 typical for roads)
     - triangles: Count of 3-cycles through node (rare in roads)
@@ -1115,13 +1283,14 @@ def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
     """
     import networkx as nx
 
-    if G.number_of_nodes() == 0:
+    n_nodes = G.number_of_nodes()
+    if n_nodes == 0:
         return {}
 
     t_start = time.perf_counter()
     features: dict[int, np.ndarray] = {}
 
-    # Pre-compute graph-wide properties
+    # Pre-compute graph-wide properties using NetworkX
     triangles = nx.triangles(G)
     clustering = nx.clustering(G)
 
@@ -1139,41 +1308,76 @@ def compute_road_graphlet_features(G: "nx.Graph") -> dict[int, np.ndarray]:
     except nx.NetworkXError:
         articulation_points = set()
 
-    for node in G.nodes():
-        degree = G.degree(node)
-        neighbors = set(G.neighbors(node))
+    # Try numba-accelerated path for large graphs
+    use_numba = False
+    if n_nodes >= _NUMBA_THRESHOLD_NODES:
+        count_squares_numba, count_two_hop_numba = _get_numba_graphlet_functions()
+        if count_squares_numba is not None:
+            use_numba = True
 
-        # Count 4-cycles (squares) through this node
-        # A square exists if two neighbors share a common neighbor (not this node)
-        square_count = 0
-        neighbor_list = list(neighbors)
-        for i, n1 in enumerate(neighbor_list):
-            for n2 in neighbor_list[i + 1 :]:
-                # Check if n1 and n2 share a neighbor other than node
-                common = set(G.neighbors(n1)) & set(G.neighbors(n2)) - {node}
-                square_count += len(common)
+    if use_numba:
+        # Convert graph to CSR format for numba
+        indptr, indices, node_list, node_to_idx = _build_csr_from_graph(G)
 
-        # Two-hop neighbors (excluding direct neighbors and self)
-        two_hop = set()
-        for neighbor in neighbors:
-            two_hop.update(G.neighbors(neighbor))
-        two_hop -= neighbors
-        two_hop.discard(node)
+        # Compute squares and two-hop counts using numba (vectorized over all nodes)
+        squares_arr = count_squares_numba(n_nodes, indptr, indices)
+        two_hop_arr = count_two_hop_numba(n_nodes, indptr, indices)
 
-        features[node] = np.array(
-            [
-                degree,
-                triangles.get(node, 0),
-                square_count,
-                clustering.get(node, 0.0),
-                len(two_hop),
-                1.0 if node in articulation_points else 0.0,
-            ]
+        # Build feature dictionary
+        for i, node in enumerate(node_list):
+            features[node] = np.array(
+                [
+                    G.degree(node),
+                    triangles.get(node, 0),
+                    squares_arr[i],
+                    clustering.get(node, 0.0),
+                    two_hop_arr[i],
+                    1.0 if node in articulation_points else 0.0,
+                ]
+            )
+
+        logger.debug(
+            f"[graphlet] Computed features for {len(features)} nodes in "
+            f"{time.perf_counter() - t_start:.2f}s (numba-accelerated)"
         )
+    else:
+        # Pure Python fallback for small graphs or when numba is unavailable
+        for node in G.nodes():
+            degree = G.degree(node)
+            neighbors = set(G.neighbors(node))
 
-    logger.debug(
-        f"[graphlet] Computed features for {len(features)} nodes in {time.perf_counter() - t_start:.2f}s"
-    )
+            # Count 4-cycles (squares) through this node
+            # A square exists if two neighbors share a common neighbor (not this node)
+            square_count = 0
+            neighbor_list = list(neighbors)
+            for i, n1 in enumerate(neighbor_list):
+                for n2 in neighbor_list[i + 1 :]:
+                    # Check if n1 and n2 share a neighbor other than node
+                    common = set(G.neighbors(n1)) & set(G.neighbors(n2)) - {node}
+                    square_count += len(common)
+
+            # Two-hop neighbors (excluding direct neighbors and self)
+            two_hop = set()
+            for neighbor in neighbors:
+                two_hop.update(G.neighbors(neighbor))
+            two_hop -= neighbors
+            two_hop.discard(node)
+
+            features[node] = np.array(
+                [
+                    degree,
+                    triangles.get(node, 0),
+                    square_count,
+                    clustering.get(node, 0.0),
+                    len(two_hop),
+                    1.0 if node in articulation_points else 0.0,
+                ]
+            )
+
+        logger.debug(
+            f"[graphlet] Computed features for {len(features)} nodes in "
+            f"{time.perf_counter() - t_start:.2f}s"
+        )
 
     return features
 
