@@ -7,8 +7,13 @@ This guide explains how to compare matcher against external tools like Hootenann
 Convert any GeoParquet dataset to OSM XML format for use with external conflation tools.
 
 ```bash
-# Basic conversion
+# Basic conversion (no topology)
 python scripts/convert_to_osm.py data/raw/boston_streets.parquet -o boston.osm
+
+# With Overture data and connectors (preserves topology)
+python scripts/convert_to_osm.py data/raw/overture_segments.parquet \
+    --connectors data/raw/overture_connectors.parquet \
+    -o overture.osm
 
 # With custom column names
 python scripts/convert_to_osm.py data.parquet \
@@ -21,11 +26,19 @@ python scripts/convert_to_osm.py data.parquet \
 ### Conversion Details
 
 The converter:
-- Creates OSM `<node>` elements for all unique vertices (deduped by coordinate)
+- Creates OSM `<node>` elements for vertices
 - Creates OSM `<way>` elements for each LineString
 - Maps the `class` column to `highway=*` tags using standard mappings
 - Preserves the `names` column as `name=*` tags
 - Adds `matcher:id` tag with the original segment ID for traceability
+
+### Topology Preservation
+
+When the `--connectors` option is provided with Overture connector data, the converter preserves network topology:
+
+- Segments sharing the same `connector_id` will reference the same OSM node
+- Connector IDs are hashed to stable negative integers for deterministic output
+- Without connectors, each vertex gets a unique node (no topology inference)
 
 ### Supported Class Mappings
 
