@@ -211,7 +211,7 @@ def fetch_osm_segments(
     return segments_path
 
 
-def _node_ids_to_connectors(node_ids: list | None) -> list[dict] | None:
+def _node_ids_to_connectors(node_ids) -> list[dict] | None:
     """Convert OSM node_ids to Overture-style connectors format.
 
     Creates connectors at the start (at=0.0) and end (at=1.0) positions
@@ -219,7 +219,7 @@ def _node_ids_to_connectors(node_ids: list | None) -> list[dict] | None:
     explicit topology from OSM for use in degree computation.
 
     Args:
-        node_ids: List of OSM node IDs from a way, or None
+        node_ids: List or numpy array of OSM node IDs from a way, or None
 
     Returns:
         List of connector dicts with 'at' and 'connector_id' keys, or None
@@ -229,7 +229,10 @@ def _node_ids_to_connectors(node_ids: list | None) -> list[dict] | None:
         >>> _node_ids_to_connectors([100, 150, 200])
         [{'at': 0.0, 'connector_id': 'n100'}, {'at': 1.0, 'connector_id': 'n200'}]
     """
-    if not node_ids or len(node_ids) < 2:
+    # Handle None and empty cases (works for both list and numpy array)
+    if node_ids is None:
+        return None
+    if len(node_ids) < 2:
         return None
 
     return [

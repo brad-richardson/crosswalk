@@ -663,6 +663,18 @@ class TestNodeIdsToConnectors:
         assert result[0]["connector_id"] == "n61341696"
         assert result[1]["connector_id"] == "n99999999"
 
+    def test_handles_numpy_array(self):
+        """Should handle numpy arrays (common from pyosmium parsing)."""
+        import numpy as np
+
+        node_ids = np.array([100, 150, 200])
+        result = _node_ids_to_connectors(node_ids)
+
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["connector_id"] == "n100"
+        assert result[1]["connector_id"] == "n200"
+
 
 class TestTransformToOvertureSchemaWithConnectors:
     """Tests for _transform_to_overture_schema preserving connectors."""
