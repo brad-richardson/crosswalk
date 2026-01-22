@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import geopandas as gpd
+import shapely
 from loguru import logger
 
 from ..utils import filter_to_linestrings
@@ -65,6 +66,12 @@ def load_local_roads(
 
     # Filter to LineString geometries only (drop MultiLineStrings)
     gdf = filter_to_linestrings(gdf, source_name=str(path.name))
+
+    # Strip Z coordinates if present (force 2D)
+    if gdf.geometry.has_z.any():
+        n_3d = gdf.geometry.has_z.sum()
+        logger.info(f"Stripping Z coordinates from {n_3d} geometries")
+        gdf.geometry = shapely.force_2d(gdf.geometry)
 
     # Normalize schema
     gdf = _normalize_local_schema(

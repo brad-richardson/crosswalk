@@ -274,12 +274,22 @@ class SpatialContextIndex:
         start_points = shapely.get_point(valid_geoms, 0)
         end_points = shapely.get_point(valid_geoms, -1)
 
+        # Filter out geometries where start or end point is null/empty
+        # (can happen for degenerate LineStrings with single point, etc.)
+        points_valid = ~shapely.is_missing(start_points) & ~shapely.is_missing(end_points)
+        if not points_valid.all():
+            n_filtered = (~points_valid).sum()
+            logger.debug(f"Filtered {n_filtered} geometries with invalid start/end points")
+            start_points = start_points[points_valid]
+            end_points = end_points[points_valid]
+            valid_indices = valid_indices[points_valid]
+
         # Extract coordinates
         start_coords = shapely.get_coordinates(start_points)
         end_coords = shapely.get_coordinates(end_points)
 
         # Interleave start and end coordinates
-        n_valid = len(valid_geoms)
+        n_valid = len(valid_indices)  # Use actual filtered count
         all_endpoints = np.empty((n_valid * 2, 2), dtype=np.float64)
         all_endpoints[0::2] = start_coords
         all_endpoints[1::2] = end_coords
@@ -366,7 +376,8 @@ class SpatialContextIndex:
         candidate_indices = self._endpoint_tree.query(buffered)
 
         results = []
-        point_coords = np.array(point.coords[0])
+        # Handle 3D coordinates by taking only x, y (first 2 dimensions)
+        point_coords = np.array(point.coords[0])[:2]
 
         for ep_idx in candidate_indices:
             ep_coords = self.endpoint_coords[ep_idx]
@@ -844,12 +855,22 @@ def compute_all_topology(
     start_points = shapely.get_point(valid_geoms, 0)
     end_points = shapely.get_point(valid_geoms, -1)
 
+    # Filter out geometries where start or end point is null/empty
+    # (can happen for degenerate LineStrings with single point, etc.)
+    points_valid = ~shapely.is_missing(start_points) & ~shapely.is_missing(end_points)
+    if not points_valid.all():
+        n_filtered = (~points_valid).sum()
+        logger.debug(f"[topology] Filtered {n_filtered} geometries with invalid start/end points")
+        start_points = start_points[points_valid]
+        end_points = end_points[points_valid]
+        valid_seg_ids = valid_seg_ids[points_valid]
+
     # Extract coordinates
     start_coords = shapely.get_coordinates(start_points)
     end_coords = shapely.get_coordinates(end_points)
 
     # Interleave into endpoint arrays
-    n_valid = len(valid_geoms)
+    n_valid = len(start_points)  # Use actual filtered count
     n_endpoints = n_valid * 2
 
     endpoint_coords = np.empty((n_endpoints, 2), dtype=np.float64)

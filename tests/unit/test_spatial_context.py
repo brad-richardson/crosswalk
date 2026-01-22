@@ -225,7 +225,11 @@ class TestComputeAllTopology:
         assert result["seg1"]["degree_signature"] == (1, 2)
 
     def test_multilinestring_geometry(self):
-        """Should handle MultiLineString geometries."""
+        """MultiLineStrings should be filtered out of topology computation.
+
+        The topology computation requires simple LineStrings to extract
+        start/end points. MultiLineStrings are filtered out with a warning.
+        """
         from shapely import MultiLineString
 
         gdf = gpd.GeoDataFrame(
@@ -240,9 +244,12 @@ class TestComputeAllTopology:
         )
         result = compute_all_topology(gdf, tolerance_m=5.0)
 
-        # multi1's last endpoint (100, 0) should connect to seg2's start
-        assert result["multi1"]["to_degree"] == 2
-        assert result["seg2"]["from_degree"] == 2
+        # MultiLineString should be filtered out, only LineString remains
+        assert "multi1" not in result, "MultiLineString should be filtered out"
+        assert "seg2" in result, "LineString should be kept"
+        # seg2 is isolated (no connections after multi1 filtered)
+        assert result["seg2"]["from_degree"] == 1
+        assert result["seg2"]["to_degree"] == 1
 
 
 class TestSpatialContextIndexClustering:

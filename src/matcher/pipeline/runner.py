@@ -12,6 +12,7 @@ from ..blocking import generate_candidates
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
+from ..utils.geometry import filter_to_linestrings
 
 
 class PipelineError(Exception):
@@ -103,10 +104,18 @@ def run_pipeline(
         logger.warning(f"Target has {n_null} null geometries - these will be skipped")
         target = target[~target.geometry.isna()]
 
+    # Filter to LineString geometries only (drop MultiLineStrings)
+    reference = filter_to_linestrings(reference, source_name="reference")
+    target = filter_to_linestrings(target, source_name="target")
+
     if len(reference) == 0:
-        raise PipelineError("Reference dataset is empty after removing null geometries")
+        raise PipelineError(
+            "Reference dataset is empty after filtering (null geometries and non-LineStrings removed)"
+        )
     if len(target) == 0:
-        raise PipelineError("Target dataset is empty after removing null geometries")
+        raise PipelineError(
+            "Target dataset is empty after filtering (null geometries and non-LineStrings removed)"
+        )
 
     logger.info(f"  Reference: {len(reference)} features from {reference_path}")
     logger.info(f"  Target: {len(target)} features from {target_path}")
