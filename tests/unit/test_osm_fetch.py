@@ -11,6 +11,7 @@ from matcher.fetch.osm import (
     _filter_fully_inside,
     _get_level_from_rules,
     _has_flag,
+    _node_ids_to_connectors,
     _normalize_road_class,
     _transform_connectors_schema,
     _transform_to_overture_schema,
@@ -279,7 +280,8 @@ class TestTransformConnectorsSchema:
         assert "sources" in result.columns
         sources = result.iloc[0]["sources"]
         assert sources[0]["dataset"] == "OpenStreetMap"
-        assert sources[0]["record_id"] == "n456@1"
+        # record_id uses normalized ID (without @version)
+        assert sources[0]["record_id"] == "n456"
 
 
 class TestFindBestRegion:
@@ -607,3 +609,180 @@ class TestFilterConnectorsForRoads:
         result = _filter_connectors_for_roads(connectors, roads)
         result["id"] = ["modified"]
         assert connectors.iloc[0]["id"] == "n1"
+
+
+class TestNodeIdsToConnectors:
+    """Tests for _node_ids_to_connectors function."""
+
+    def test_none_returns_none(self):
+        """None input returns None."""
+        assert _node_ids_to_connectors(None) is None
+
+    def test_empty_list_returns_none(self):
+        """Empty list returns None."""
+        assert _node_ids_to_connectors([]) is None
+
+    def test_single_node_returns_none(self):
+        """Single node (degenerate linestring) returns None."""
+        assert _node_ids_to_connectors([123]) is None
+
+    def test_two_nodes_returns_two_connectors(self):
+        """Two nodes returns connectors at 0.0 and 1.0."""
+        result = _node_ids_to_connectors([100, 200])
+
+        assert result is not None
+        assert len(result) == 2
+
+        # First connector at position 0.0
+        assert result[0]["at"] == 0.0
+        assert result[0]["connector_id"] == "n100"
+
+        # Second connector at position 1.0
+        assert result[1]["at"] == 1.0
+        assert result[1]["connector_id"] == "n200"
+
+    def test_multiple_nodes_only_uses_endpoints(self):
+        """Only first and last nodes are used (endpoints)."""
+        result = _node_ids_to_connectors([100, 150, 175, 200])
+
+        assert result is not None
+        assert len(result) == 2
+
+        # First connector (start node)
+        assert result[0]["at"] == 0.0
+        assert result[0]["connector_id"] == "n100"
+
+        # Second connector (end node)
+        assert result[1]["at"] == 1.0
+        assert result[1]["connector_id"] == "n200"
+
+    def test_connector_id_format(self):
+        """Connector IDs use 'n' prefix for OSM node IDs."""
+        result = _node_ids_to_connectors([61341696, 99999999])
+
+        assert result[0]["connector_id"] == "n61341696"
+        assert result[1]["connector_id"] == "n99999999"
+
+
+class TestTransformToOvertureSchemaWithConnectors:
+    """Tests for _transform_to_overture_schema preserving connectors."""
+
+    def test_creates_connectors_from_node_ids(self):
+        """Transformation creates connectors column from node_ids."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w123@1"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+                "tags": [{"highway": "residential"}],
+                "name": ["Main Street"],
+                "node_ids": [[100, 150, 200]],  # Three nodes in way
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_to_overture_schema(gdf)
+
+        # Should have connectors column
+        assert "connectors" in result.columns
+
+        # Should have two connectors (start and end)
+        connectors = result.iloc[0]["connectors"]
+        assert connectors is not None
+        assert len(connectors) == 2
+        assert connectors[0]["at"] == 0.0
+        assert connectors[0]["connector_id"] == "n100"
+        assert connectors[1]["at"] == 1.0
+        assert connectors[1]["connector_id"] == "n200"
+
+    def test_handles_missing_node_ids(self):
+        """Transformation handles missing node_ids column gracefully."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w123@1"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+                "tags": [{"highway": "residential"}],
+                "name": ["Main Street"],
+                # No node_ids column
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_to_overture_schema(gdf)
+
+        # Should still have connectors column (with None values)
+        assert "connectors" in result.columns
+        assert result.iloc[0]["connectors"] is None
+
+    def test_handles_none_node_ids(self):
+        """Transformation handles None node_ids gracefully."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w123@1"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+                "tags": [{"highway": "residential"}],
+                "name": ["Main Street"],
+                "node_ids": [None],
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_to_overture_schema(gdf)
+
+        assert "connectors" in result.columns
+        assert result.iloc[0]["connectors"] is None
+
+
+class TestTransformConnectorsSchemaWithNormalization:
+    """Tests for _transform_connectors_schema ID normalization."""
+
+    def test_strips_version_from_id(self):
+        """Connector IDs should have @version suffix stripped."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n61341696@5", "n12345678@10"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_connectors_schema(gdf)
+
+        # IDs should be normalized (no @version)
+        assert result.iloc[0]["id"] == "n61341696"
+        assert result.iloc[1]["id"] == "n12345678"
+
+    def test_handles_id_without_version(self):
+        """IDs without @version should remain unchanged."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n61341696", "n12345678"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_connectors_schema(gdf)
+
+        assert result.iloc[0]["id"] == "n61341696"
+        assert result.iloc[1]["id"] == "n12345678"
+
+    def test_normalized_ids_match_segment_connectors(self):
+        """Connector file IDs should match segment connector_id references.
+
+        This is critical for 1:1 mapping between segments and connectors:
+        - Segment connectors reference: n{node_id}
+        - Connector file IDs: n{node_id} (after stripping @version)
+        """
+        # Simulate OSM connector data
+        connectors_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n100@3", "n200@5"],  # Raw OSM format with version
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        connectors_result = _transform_connectors_schema(connectors_gdf)
+
+        # Simulate OSM segment with node_ids converted to connectors
+        segment_connectors = _node_ids_to_connectors([100, 200])
+
+        # Verify 1:1 mapping
+        segment_conn_ids = {c["connector_id"] for c in segment_connectors}
+        file_conn_ids = set(connectors_result["id"].values)
+
+        assert segment_conn_ids == file_conn_ids

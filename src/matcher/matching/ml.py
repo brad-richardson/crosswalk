@@ -806,12 +806,26 @@ class MLMatcher:
             f"and {len(unique_ref_ids)} reference segments (batch)..."
         )
 
-        # Compute topology for target and reference using efficient batch algorithm
+        # Check for explicit connector data (Overture/OSM style)
+        # When available, use explicit topology instead of geometry inference
+        ref_has_connectors = "connectors" in reference.columns
+        target_has_connectors = "connectors" in target.columns
+
+        # Compute topology for target and reference
+        # Uses explicit connectors when available, falls back to geometry inference
         target_topology_by_id = compute_all_topology(
-            target, id_column="id", tolerance_m=5.0, ids_to_compute=unique_target_ids
+            target,
+            id_column="id",
+            tolerance_m=5.0,
+            ids_to_compute=unique_target_ids,
+            connectors_column="connectors" if target_has_connectors else None,
         )
         ref_topology_by_id = compute_all_topology(
-            reference, id_column="id", tolerance_m=5.0, ids_to_compute=unique_ref_ids
+            reference,
+            id_column="id",
+            tolerance_m=5.0,
+            ids_to_compute=unique_ref_ids,
+            connectors_column="connectors" if ref_has_connectors else None,
         )
 
         # Map topology from segment IDs to DataFrame indices
@@ -842,7 +856,7 @@ class MLMatcher:
             f"Computing graphlet features for {len(ref_candidates_only)} reference "
             f"and {len(target_candidates_only_proj)} target segments..."
         )
-        ref_has_connectors = "connectors" in reference.columns
+        # ref_has_connectors already defined earlier for topology computation
         ref_graphlet_data = precompute_graphlet_features(
             ref_candidates_only,
             id_column="id",

@@ -776,19 +776,144 @@ def _cluster_endpoints_fast(
     return uf
 
 
+def compute_all_topology_explicit(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    connectors_column: str = "connectors",
+) -> dict[str, dict] | None:
+    """Compute topology from explicit connector data (Overture/OSM style).
+
+    This function uses explicit connector IDs rather than inferring connectivity
+    from geometry proximity. It computes endpoint degrees by counting how many
+    segments share each connector.
+
+    The degree at each endpoint is the number of segments that reference that
+    connector at any position (not just endpoints). This means:
+    - A segment's start connector shared by 2 other segments → from_degree=3
+    - A segment's end connector used only by that segment → to_degree=1
+
+    Args:
+        gdf: GeoDataFrame with LineString geometries and connectors column
+        id_column: Column name for segment IDs
+        connectors_column: Column name for connectors array
+            (each element should have 'at' and 'connector_id' keys)
+
+    Returns:
+        Dict mapping segment_id -> topology features dict, or None if
+        connectors are not available (signals caller should fall back to
+        geometry-based inference).
+
+    Example connector format:
+        [
+            {"at": 0.0, "connector_id": "conn_a"},  # start
+            {"at": 0.5, "connector_id": "conn_b"},  # mid-segment
+            {"at": 1.0, "connector_id": "conn_c"},  # end
+        ]
+    """
+    # Check if connectors column exists and has data
+    if connectors_column not in gdf.columns:
+        return None
+
+    if gdf[connectors_column].isna().all():
+        return None
+
+    t_start = time.perf_counter()
+    logger.info(f"[topology-explicit] Computing topology from {connectors_column} column")
+
+    # Step 1: Build connector_id -> set of segment_ids mapping
+    # This counts how many segments reference each connector
+    connector_segments: dict[str, set[str]] = {}
+    segment_ids = gdf[id_column].astype(str).values
+
+    for seg_idx, connectors in enumerate(gdf[connectors_column].values):
+        if connectors is None:
+            continue
+
+        seg_id = segment_ids[seg_idx]
+        for conn in connectors:
+            if isinstance(conn, dict):
+                conn_id = conn.get("connector_id")
+                if conn_id:
+                    if conn_id not in connector_segments:
+                        connector_segments[conn_id] = set()
+                    connector_segments[conn_id].add(seg_id)
+
+    logger.debug(f"[topology-explicit] Found {len(connector_segments)} unique connectors")
+
+    # Step 2: For each segment, find the connectors at position 0.0 and 1.0
+    # and compute degree as the number of segments sharing that connector
+    topology = {}
+
+    for seg_idx, connectors in enumerate(gdf[connectors_column].values):
+        seg_id = segment_ids[seg_idx]
+
+        if connectors is None or len(connectors) == 0:
+            # No connector data - use default (isolated segment)
+            topology[seg_id] = {
+                "from_degree": 1,
+                "to_degree": 1,
+                "is_dead_end": True,
+                "is_intersection": False,
+                "degree_signature": (1, 1),
+            }
+            continue
+
+        # Find connectors at start (at=0.0) and end (at=1.0)
+        start_conn_id = None
+        end_conn_id = None
+
+        for conn in connectors:
+            if isinstance(conn, dict):
+                at_pos = conn.get("at", -1)
+                conn_id = conn.get("connector_id")
+                if conn_id:
+                    if at_pos == 0.0:
+                        start_conn_id = conn_id
+                    elif at_pos == 1.0:
+                        end_conn_id = conn_id
+
+        # Compute degrees from connector sharing
+        from_degree = len(connector_segments.get(start_conn_id, set())) if start_conn_id else 1
+        to_degree = len(connector_segments.get(end_conn_id, set())) if end_conn_id else 1
+
+        # Ensure minimum degree of 1
+        from_degree = max(1, from_degree)
+        to_degree = max(1, to_degree)
+
+        topology[seg_id] = {
+            "from_degree": from_degree,
+            "to_degree": to_degree,
+            "is_dead_end": min(from_degree, to_degree) == 1,
+            "is_intersection": max(from_degree, to_degree) > 2,
+            "degree_signature": tuple(sorted([from_degree, to_degree])),
+        }
+
+    logger.info(
+        f"[topology-explicit] Computed topology for {len(topology)} segments "
+        f"in {time.perf_counter() - t_start:.2f}s"
+    )
+    return topology
+
+
 def compute_all_topology(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
     ids_to_compute: set[str] | None = None,
+    connectors_column: str | None = None,
 ) -> dict[str, dict]:
-    """Compute topology features for all segments using Union-Find clustering.
+    """Compute topology features for all segments.
 
-    This is an O(N log N) batch computation that's much faster than per-segment
-    queries for large datasets. Uses Union-Find to cluster nearby endpoints
-    without materializing an O(N²) adjacency matrix.
+    When connectors_column is provided and the data contains explicit connector
+    information (Overture/OSM style), topology is computed from connector sharing.
+    Otherwise, falls back to Union-Find clustering based on endpoint proximity.
 
-    Algorithm:
+    The explicit connector approach is preferred when available because:
+    - It uses authoritative topology from the source data
+    - It's O(N) time complexity vs O(N log N) for geometry inference
+    - It handles complex intersections more accurately
+
+    Geometry-based inference algorithm (fallback):
         1. Extract endpoints from all segments              O(N)
         2. Build STRtree from endpoints                     O(N log N)
         3. For each endpoint, query nearby within tolerance O(N × log N)
@@ -807,6 +932,8 @@ def compute_all_topology(
         id_column: Column name for segment IDs
         tolerance_m: Distance within which endpoints are considered connected (meters)
         ids_to_compute: If provided, only return topology for these IDs
+        connectors_column: Column name for explicit connector data. If provided and
+            data is available, uses explicit topology instead of geometry inference.
 
     Returns:
         Dict mapping segment_id -> topology features dict with:
@@ -816,6 +943,29 @@ def compute_all_topology(
         - is_intersection: True if either endpoint has degree > 2
         - degree_signature: Tuple of sorted [from_degree, to_degree]
     """
+    # Try explicit connector-based topology first (if available)
+    if connectors_column is not None:
+        explicit_result = compute_all_topology_explicit(gdf, id_column, connectors_column)
+        if explicit_result is not None:
+            # Filter to requested IDs if specified
+            if ids_to_compute is not None:
+                explicit_result = {k: v for k, v in explicit_result.items() if k in ids_to_compute}
+                # Fill in any missing IDs with defaults
+                for seg_id in ids_to_compute:
+                    if seg_id not in explicit_result:
+                        explicit_result[seg_id] = {
+                            "from_degree": 1,
+                            "to_degree": 1,
+                            "is_dead_end": True,
+                            "is_intersection": False,
+                            "degree_signature": (1, 1),
+                        }
+            return explicit_result
+        # Fall through to geometry inference if explicit failed
+        logger.debug(
+            f"[topology] Explicit connectors not available in '{connectors_column}', "
+            "falling back to geometry inference"
+        )
     if gdf.empty:
         return {}
 

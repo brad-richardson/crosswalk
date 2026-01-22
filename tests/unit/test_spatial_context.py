@@ -970,3 +970,309 @@ class TestConnectorGraphAndAlignment:
 
         assert "graphlet_similarity" in sim
         assert 0.0 <= sim["graphlet_similarity"] <= 1.0
+
+
+class TestComputeAllTopologyExplicit:
+    """Tests for compute_all_topology_explicit function using explicit connector data."""
+
+    def test_returns_none_when_no_connectors_column(self):
+        """Should return None when connectors column doesn't exist."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1"],
+                "geometry": [LineString([(0, 0), (100, 0)])],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+        assert result is None
+
+    def test_returns_none_when_connectors_all_null(self):
+        """Should return None when all connectors are null."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (200, 0)]),
+                ],
+                "connectors": [None, None],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+        assert result is None
+
+    def test_single_segment_with_connectors(self):
+        """Single segment with unique connectors has degree 1 at both ends."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1"],
+                "geometry": [LineString([(0, 0), (100, 0)])],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 1.0, "connector_id": "conn_b"},
+                    ]
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+
+        assert result is not None
+        assert "seg1" in result
+        assert result["seg1"]["from_degree"] == 1
+        assert result["seg1"]["to_degree"] == 1
+        assert result["seg1"]["is_dead_end"] is True
+        assert result["seg1"]["is_intersection"] is False
+
+    def test_two_connected_segments_via_shared_connector(self):
+        """Two segments sharing a connector should have degree 2 at that point."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 1.0, "connector_id": "conn_shared"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_shared"},
+                        {"at": 1.0, "connector_id": "conn_b"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+
+        assert result is not None
+        # seg1's end and seg2's start share conn_shared
+        assert result["seg1"]["to_degree"] == 2
+        assert result["seg2"]["from_degree"] == 2
+        # Other endpoints are dead ends
+        assert result["seg1"]["from_degree"] == 1
+        assert result["seg2"]["to_degree"] == 1
+
+    def test_t_junction_with_shared_connector(self):
+        """T-junction with shared connector should have degree 3."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["main_left", "main_right", "side"],
+                "geometry": [
+                    LineString([(0, 0), (50, 0)]),
+                    LineString([(50, 0), (100, 0)]),
+                    LineString([(50, 50), (50, 0)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_west"},
+                        {"at": 1.0, "connector_id": "conn_junction"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_junction"},
+                        {"at": 1.0, "connector_id": "conn_east"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_north"},
+                        {"at": 1.0, "connector_id": "conn_junction"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+
+        assert result is not None
+        # Junction at conn_junction should have degree 3
+        assert result["main_left"]["to_degree"] == 3
+        assert result["main_right"]["from_degree"] == 3
+        assert result["side"]["to_degree"] == 3
+        # Outer endpoints are dead ends
+        assert result["main_left"]["from_degree"] == 1
+        assert result["main_right"]["to_degree"] == 1
+        assert result["side"]["from_degree"] == 1
+        # All segments touch an intersection
+        assert result["main_left"]["is_intersection"] is True
+        assert result["main_right"]["is_intersection"] is True
+        assert result["side"]["is_intersection"] is True
+
+    def test_cross_intersection_with_shared_connector(self):
+        """4-way intersection with shared connector should have degree 4."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["north", "south", "east", "west"],
+                "geometry": [
+                    LineString([(50, 50), (50, 100)]),
+                    LineString([(50, 50), (50, 0)]),
+                    LineString([(50, 50), (100, 50)]),
+                    LineString([(50, 50), (0, 50)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_center"},
+                        {"at": 1.0, "connector_id": "conn_north"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_center"},
+                        {"at": 1.0, "connector_id": "conn_south"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_center"},
+                        {"at": 1.0, "connector_id": "conn_east"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_center"},
+                        {"at": 1.0, "connector_id": "conn_west"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+
+        assert result is not None
+        # All segments share the center connector - degree 4
+        for seg_id in ["north", "south", "east", "west"]:
+            assert result[seg_id]["from_degree"] == 4
+            assert result[seg_id]["to_degree"] == 1
+            assert result[seg_id]["is_intersection"] is True
+
+    def test_mid_segment_connector_counted_correctly(self):
+        """Mid-segment connectors should not affect endpoint degrees."""
+        from matcher.features.spatial_context import compute_all_topology_explicit
+
+        # seg1 has a mid-segment connector (at=0.5) that is shared with seg2's start
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(50, 0), (50, 50)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 0.5, "connector_id": "conn_mid"},  # mid-segment
+                        {"at": 1.0, "connector_id": "conn_b"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_mid"},  # shares with seg1's mid
+                        {"at": 1.0, "connector_id": "conn_c"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        result = compute_all_topology_explicit(gdf, id_column="id", connectors_column="connectors")
+
+        assert result is not None
+        # seg1's endpoints are conn_a and conn_b - only seg1 uses them
+        assert result["seg1"]["from_degree"] == 1
+        assert result["seg1"]["to_degree"] == 1
+        # seg2's start is conn_mid (shared with seg1's mid) - degree 2
+        # But seg1 doesn't count conn_mid as an endpoint
+        assert result["seg2"]["from_degree"] == 2  # shared with seg1's mid-segment connector
+        assert result["seg2"]["to_degree"] == 1
+
+
+class TestComputeAllTopologyWithConnectors:
+    """Tests for compute_all_topology with connectors_column parameter."""
+
+    def test_uses_explicit_when_connectors_available(self):
+        """Should use explicit topology when connectors column is available."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 1.0, "connector_id": "conn_shared"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_shared"},
+                        {"at": 1.0, "connector_id": "conn_b"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        result = compute_all_topology(gdf, id_column="id", connectors_column="connectors")
+
+        # Should produce same results as explicit computation
+        assert result["seg1"]["to_degree"] == 2
+        assert result["seg2"]["from_degree"] == 2
+
+    def test_falls_back_to_geometry_when_no_connectors(self):
+        """Should fall back to geometry inference when connectors not available."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # Even with connectors_column specified, should work (falls back)
+        result = compute_all_topology(
+            gdf, id_column="id", tolerance_m=5.0, connectors_column="connectors"
+        )
+
+        # Should produce correct results from geometry inference
+        assert result["seg1"]["to_degree"] == 2
+        assert result["seg2"]["from_degree"] == 2
+
+    def test_connectors_column_none_uses_geometry(self):
+        """When connectors_column is None, should use geometry inference."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "conn_a"},
+                        {"at": 1.0, "connector_id": "conn_b"},  # Different from seg2!
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "conn_c"},  # Different connector
+                        {"at": 1.0, "connector_id": "conn_d"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # With connectors_column=None, should use geometry (which finds connection)
+        result = compute_all_topology(gdf, id_column="id", tolerance_m=5.0, connectors_column=None)
+
+        # Geometry inference finds the connection
+        assert result["seg1"]["to_degree"] == 2
+        assert result["seg2"]["from_degree"] == 2

@@ -211,6 +211,33 @@ def fetch_osm_segments(
     return segments_path
 
 
+def _node_ids_to_connectors(node_ids: list | None) -> list[dict] | None:
+    """Convert OSM node_ids to Overture-style connectors format.
+
+    Creates connectors at the start (at=0.0) and end (at=1.0) positions
+    using the first and last node IDs from the way. This preserves the
+    explicit topology from OSM for use in degree computation.
+
+    Args:
+        node_ids: List of OSM node IDs from a way, or None
+
+    Returns:
+        List of connector dicts with 'at' and 'connector_id' keys, or None
+        if node_ids is None, empty, or has only one node.
+
+    Example:
+        >>> _node_ids_to_connectors([100, 150, 200])
+        [{'at': 0.0, 'connector_id': 'n100'}, {'at': 1.0, 'connector_id': 'n200'}]
+    """
+    if not node_ids or len(node_ids) < 2:
+        return None
+
+    return [
+        {"at": 0.0, "connector_id": f"n{node_ids[0]}"},
+        {"at": 1.0, "connector_id": f"n{node_ids[-1]}"},
+    ]
+
+
 def _transform_to_overture_schema(
     gdf: gpd.GeoDataFrame, keep_source_tags: bool = True
 ) -> gpd.GeoDataFrame:
@@ -261,16 +288,34 @@ def _transform_to_overture_schema(
     if keep_source_tags:
         gdf["source_tags"] = gdf["tags"]
 
-    # Drop internal columns
+    # Convert node_ids to Overture-style connectors before dropping
+    # This preserves explicit topology for degree computation
+    if "node_ids" in gdf.columns:
+        gdf["connectors"] = gdf["node_ids"].apply(_node_ids_to_connectors)
+    else:
+        gdf["connectors"] = None
+
+    # Drop internal columns (but NOT connectors - those are preserved)
     gdf.drop(columns=["tags", "name", "node_ids"], inplace=True, errors="ignore")
 
     return gdf
 
 
 def _transform_connectors_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Transform connector data to match Overture-like schema."""
+    """Transform connector data to match Overture-like schema.
+
+    Normalizes connector IDs to match segment connector references:
+    - Raw OSM format: "n61341696@5" (with version suffix)
+    - Normalized format: "n61341696" (without version)
+
+    This ensures 1:1 compatibility between segment connectors and connector file.
+    """
     if len(gdf) == 0:
         return gdf
+
+    # Normalize IDs to match segment connector references (strip @version)
+    # Current: "n61341696@5" -> Target: "n61341696"
+    gdf["id"] = gdf["id"].apply(lambda x: x.split("@")[0] if "@" in str(x) else x)
 
     # Work in place to avoid copy
     gdf["sources"] = [[{"dataset": "OpenStreetMap", "record_id": oid}] for oid in gdf["id"]]
