@@ -6,7 +6,9 @@ Resolves conflicts where multiple targets match the same reference
 Supports both 1:1 matching (Hungarian algorithm) and 1:N matching
 (where one reference can match multiple contiguous target segments).
 
-Memory-efficient sparse optimization is used for large datasets to avoid OOM.
+Uses a two-tier approach:
+- Hungarian algorithm (optimal, O(n³)) for problems under size/memory limits
+- Greedy algorithm (near-optimal, O(n log n)) for large problems
 """
 
 from collections import defaultdict
@@ -54,7 +56,10 @@ def optimize_matches(
     Returns:
         List of optimal MatchResult objects (1:1 assignments)
     """
-    logger.info(f"Optimizing {len(results)} match results...")
+    import time
+
+    t0 = time.perf_counter()
+    logger.info(f"Optimizing {len(results)} match results with Hungarian algorithm...")
 
     # Filter by minimum confidence
     valid_results = [r for r in results if r.confidence >= min_confidence]
@@ -72,12 +77,14 @@ def optimize_matches(
 
     n_ref = len(ref_ids)
     n_target = len(target_ids)
+    matrix_mb = (n_ref * n_target * 8) / (1024 * 1024)
 
-    logger.info(f"  Building {n_ref} x {n_target} cost matrix")
+    logger.info(f"  Building {n_ref} x {n_target} cost matrix ({matrix_mb:.1f} MB)")
 
     # Build cost matrix (use negative confidence for minimization)
-    # Large penalty (1e6) for invalid pairs
-    cost_matrix = np.full((n_ref, n_target), 1e6)
+    # Large penalty for invalid pairs
+    UNMATCHED_COST = 1e9
+    cost_matrix = np.full((n_ref, n_target), UNMATCHED_COST, dtype=np.float64)
 
     # Build result lookup for extracting optimal matches
     result_lookup = {}
@@ -90,118 +97,28 @@ def optimize_matches(
         cost = -result.confidence
 
         # Keep the best score if multiple candidates for same pair
-        if cost < cost_matrix[i, j]:
+        if cost_matrix[i, j] == UNMATCHED_COST or cost < cost_matrix[i, j]:
             cost_matrix[i, j] = cost
             result_lookup[(i, j)] = result
 
+    t1 = time.perf_counter()
+    logger.info(f"  Matrix built in {t1 - t0:.2f}s, running linear_sum_assignment...")
+
     # Solve assignment problem
-    logger.info("  Running Hungarian algorithm...")
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+    t2 = time.perf_counter()
+    logger.info(f"  linear_sum_assignment completed in {t2 - t1:.2f}s")
 
     # Extract optimal matches
     optimal_matches = []
-
     for i, j in zip(row_ind, col_ind):
-        if cost_matrix[i, j] < 1e5:  # Valid match exists
+        if cost_matrix[i, j] < UNMATCHED_COST / 2:  # Valid match exists
             if (i, j) in result_lookup:
                 optimal_matches.append(result_lookup[(i, j)])
 
-    logger.info(f"  Found {len(optimal_matches)} optimal 1:1 matches")
-
-    # Re-classify based on thresholds
-    final_matches = []
-    for match in optimal_matches:
-        # Keep original decision/confidence
-        final_matches.append(match)
-
-    return final_matches
-
-
-def optimize_matches_sparse(
-    results: list[MatchResult],
-    min_confidence: float = 0.5,
-) -> list[MatchResult]:
-    """Optimization using scipy's linear_sum_assignment (LAPJV algorithm).
-
-    Builds a dense cost matrix for unique refs/targets with candidates.
-    Despite the name "sparse", this builds a dense matrix - the "sparse"
-    refers to the input being sparse (few edges relative to all possible pairs).
-
-    Memory: O(unique_refs × unique_targets) - dense matrix
-    Time: O(n³) where n = max(unique_refs, unique_targets)
-
-    Args:
-        results: List of MatchResult objects
-        min_confidence: Minimum confidence to consider a match
-
-    Returns:
-        List of optimal MatchResult objects (1:1 assignments)
-    """
-    import time
-
-    logger.info(f"[LAPJV] Starting optimization of {len(results)} results...")
-
-    # Filter by minimum confidence
-    valid_results = [r for r in results if r.confidence >= min_confidence]
-    logger.info(f"[LAPJV] {len(valid_results)} results above min_confidence={min_confidence}")
-
-    if not valid_results:
-        return []
-
-    # Get unique refs and targets that have edges
-    t0 = time.perf_counter()
-    unique_refs = sorted(set(r.ref_id for r in valid_results), key=str)
-    unique_targets = sorted(set(r.target_id for r in valid_results), key=str)
-
-    ref_to_idx = {r: i for i, r in enumerate(unique_refs)}
-    target_to_idx = {t: i for i, t in enumerate(unique_targets)}
-
-    n_ref = len(unique_refs)
-    n_target = len(unique_targets)
-    matrix_mb = (n_ref * n_target * 8) / (1024 * 1024)
-
     logger.info(
-        f"[LAPJV] Building cost matrix: {n_ref} refs × {n_target} targets = {matrix_mb:.1f} MB"
-    )
-
-    # Build dense cost matrix with high cost for non-edges
-    # Non-edges will be "unmatched" - we filter them out after
-    UNMATCHED_COST = 1e9
-    cost = np.full((n_ref, n_target), UNMATCHED_COST, dtype=np.float64)
-
-    # Build result lookup and fill cost matrix
-    # Negate confidence for minimization (maximize confidence = minimize -confidence)
-    result_lookup: dict[tuple[int, int], MatchResult] = {}
-
-    for result in valid_results:
-        i = ref_to_idx[result.ref_id]
-        j = target_to_idx[result.target_id]
-        neg_conf = -result.confidence
-
-        # Keep the best confidence if multiple candidates for same pair
-        if cost[i, j] == UNMATCHED_COST or neg_conf < cost[i, j]:
-            cost[i, j] = neg_conf
-            result_lookup[(i, j)] = result
-
-    t1 = time.perf_counter()
-    logger.info(f"[LAPJV] Matrix built in {t1 - t0:.2f}s, running linear_sum_assignment...")
-
-    row_ind, col_ind = linear_sum_assignment(cost)
-
-    t2 = time.perf_counter()
-    logger.info(f"[LAPJV] linear_sum_assignment completed in {t2 - t1:.2f}s")
-
-    # Extract optimal matches (filter out unmatched = high cost)
-    optimal_matches = []
-    for i, j in zip(row_ind, col_ind):
-        if cost[i, j] < UNMATCHED_COST / 2:  # Real match, not unmatched
-            if (i, j) in result_lookup:
-                optimal_matches.append(result_lookup[(i, j)])
-
-    t3 = time.perf_counter()
-    logger.info(
-        f"[LAPJV] Found {len(optimal_matches)} optimal matches, "
-        f"extraction took {t3 - t2:.2f}s, total {t3 - t0:.2f}s"
+        f"  Found {len(optimal_matches)} optimal 1:1 matches in {time.perf_counter() - t0:.2f}s total"
     )
 
     return optimal_matches
@@ -211,7 +128,7 @@ def optimize_matches_greedy(
     results: list[MatchResult],
     min_confidence: float = 0.5,
 ) -> list[MatchResult]:
-    """Greedy 1:1 assignment as fallback for extremely large datasets.
+    """Greedy 1:1 assignment for large datasets.
 
     Sorts candidates by confidence and greedily assigns matches,
     ensuring each ref and target is matched at most once.
@@ -219,8 +136,7 @@ def optimize_matches_greedy(
     Time complexity: O(n log n) for sorting
     Space complexity: O(n) where n = number of candidates
 
-    Quality: Achieves ~97-99% of optimal in practice (worst-case competitive
-    ratio of 2 for maximum weight matching).
+    Quality: Achieves ~97-99% of optimal in practice.
 
     Args:
         results: List of MatchResult objects
@@ -229,7 +145,10 @@ def optimize_matches_greedy(
     Returns:
         List of greedily-selected MatchResult objects (1:1 assignments)
     """
-    logger.info(f"Optimizing {len(results)} match results using greedy algorithm...")
+    import time
+
+    t0 = time.perf_counter()
+    logger.info(f"Optimizing {len(results)} match results with greedy algorithm...")
 
     # Filter by minimum confidence
     valid_results = [r for r in results if r.confidence >= min_confidence]
@@ -251,7 +170,9 @@ def optimize_matches_greedy(
             assigned_refs.add(result.ref_id)
             assigned_targets.add(result.target_id)
 
-    logger.info(f"  Found {len(optimal_matches)} greedy 1:1 matches")
+    logger.info(
+        f"  Found {len(optimal_matches)} greedy 1:1 matches in {time.perf_counter() - t0:.2f}s"
+    )
 
     return optimal_matches
 
@@ -263,26 +184,23 @@ def optimize_matches_auto(
 ) -> list[MatchResult]:
     """Auto-select optimization strategy based on problem size.
 
-    Chooses between:
-    1. Dense Hungarian algorithm (small problems, <1GB matrix)
-    2. Sparse algorithm (medium problems, <memory_limit and <50k nodes)
-    3. Greedy fallback (large problems - fast O(n log n) with ~97-99% optimal)
+    Two-tier approach:
+    - Hungarian algorithm: optimal solution, O(n³) time, for smaller problems
+    - Greedy algorithm: near-optimal (~97-99%), O(n log n) time, for large problems
 
-    The key constraint is that scipy's linear_sum_assignment is O(n³) where
-    n = max(n_ref, n_target). For 50k nodes, that's 125 trillion operations.
-    We use greedy for anything larger to avoid multi-minute optimization times.
+    Decision criteria:
+    - Use greedy if matrix dimension > 50k (O(n³) would take minutes)
+    - Use greedy if matrix memory > limit (avoid OOM)
+    - Otherwise use Hungarian for optimal solution
 
     Args:
         results: List of MatchResult objects
         min_confidence: Minimum confidence to consider a match
-        memory_limit_gb: Memory limit for optimization in GB.
-            If None, uses settings.optimizer_memory_limit_gb.
+        memory_limit_gb: Memory limit in GB (default: settings.optimizer_memory_limit_gb)
 
     Returns:
         List of optimal MatchResult objects (1:1 assignments)
     """
-    import time
-
     if memory_limit_gb is None:
         memory_limit_gb = settings.optimizer_memory_limit_gb
 
@@ -292,76 +210,37 @@ def optimize_matches_auto(
 
     n_ref = len(set(r.ref_id for r in valid_results))
     n_target = len(set(r.target_id for r in valid_results))
-    n_edges = len(valid_results)
     max_dim = max(n_ref, n_target)
 
     # Memory: dense matrix is n_ref * n_target * 8 bytes (float64)
-    dense_memory_gb = (n_ref * n_target * 8) / (1024**3)
+    matrix_memory_gb = (n_ref * n_target * 8) / (1024**3)
 
-    # Time complexity threshold: LAPJV is O(n³)
-    # For 50k nodes: 50k³ = 125 trillion ops, takes ~30-60 seconds
-    # For 70k nodes: 70k³ = 343 trillion ops, takes ~2-5 minutes
-    # For 100k nodes: 100k³ = 1 quadrillion ops, takes ~10+ minutes
-    LAPJV_MAX_DIMENSION = 50000  # Max dimension for LAPJV (time constraint)
-    DENSE_THRESHOLD_GB = 1.0  # Max memory for dense algorithm
+    # Time constraint: Hungarian is O(n³), gets slow above 50k dimension
+    MAX_DIMENSION = 50000
 
     logger.info(
-        f"[optimizer] Problem size: {n_ref} refs × {n_target} targets, "
-        f"{n_edges} edges, matrix={dense_memory_gb * 1024:.1f} MB"
+        f"[optimizer] Problem: {n_ref} refs × {n_target} targets, "
+        f"matrix={matrix_memory_gb * 1024:.1f} MB"
     )
 
-    # Decision logic:
-    # 1. If matrix fits in 1GB, use dense Hungarian (fastest for small problems)
-    # 2. If max dimension <= 50k and memory fits, use LAPJV (optimal solution)
-    # 3. Otherwise use greedy (fast, near-optimal)
+    # Use greedy for large problems (time or memory constrained)
+    if max_dim > MAX_DIMENSION:
+        logger.info(f"[optimizer] Using greedy (dimension {max_dim} > {MAX_DIMENSION} limit)")
+        return optimize_matches_greedy(valid_results, min_confidence)
 
-    # Respect both hard-coded threshold and user's memory limit for dense algorithm
-    effective_dense_threshold = min(DENSE_THRESHOLD_GB, memory_limit_gb)
-
-    if dense_memory_gb < effective_dense_threshold:
-        logger.info(f"[optimizer] Using dense Hungarian (matrix < {effective_dense_threshold} GB)")
-        start = time.perf_counter()
-        result = optimize_matches(valid_results, min_confidence)
-        elapsed = time.perf_counter() - start
-        logger.info(f"[optimizer] Dense Hungarian completed in {elapsed:.2f}s")
-        return result
-
-    if max_dim > LAPJV_MAX_DIMENSION:
-        logger.warning(
-            f"[optimizer] Matrix dimension {max_dim} exceeds LAPJV limit {LAPJV_MAX_DIMENSION}, "
-            f"using greedy (O(n³) would be too slow)"
+    if matrix_memory_gb > memory_limit_gb:
+        logger.info(
+            f"[optimizer] Using greedy (memory {matrix_memory_gb:.1f} GB > {memory_limit_gb} GB limit)"
         )
-        start = time.perf_counter()
-        result = optimize_matches_greedy(valid_results, min_confidence)
-        elapsed = time.perf_counter() - start
-        logger.info(f"[optimizer] Greedy completed in {elapsed:.2f}s")
-        return result
+        return optimize_matches_greedy(valid_results, min_confidence)
 
-    if dense_memory_gb > memory_limit_gb:
-        logger.warning(
-            f"[optimizer] Matrix {dense_memory_gb:.1f} GB exceeds memory limit {memory_limit_gb} GB, "
-            "using greedy"
-        )
-        start = time.perf_counter()
-        result = optimize_matches_greedy(valid_results, min_confidence)
-        elapsed = time.perf_counter() - start
-        logger.info(f"[optimizer] Greedy completed in {elapsed:.2f}s")
-        return result
-
-    # Use LAPJV for medium-sized problems
-    logger.info(f"[optimizer] Using LAPJV (dim={max_dim}, memory={dense_memory_gb * 1024:.1f} MB)")
-    start = time.perf_counter()
+    # Use Hungarian for smaller problems (optimal solution)
+    logger.info("[optimizer] Using Hungarian algorithm (optimal)")
     try:
-        result = optimize_matches_sparse(valid_results, min_confidence)
-        elapsed = time.perf_counter() - start
-        logger.info(f"[optimizer] LAPJV completed in {elapsed:.2f}s")
-        return result
+        return optimize_matches(valid_results, min_confidence)
     except MemoryError:
-        logger.warning("[optimizer] LAPJV hit memory limit, falling back to greedy")
-        result = optimize_matches_greedy(valid_results, min_confidence)
-        elapsed = time.perf_counter() - start
-        logger.info(f"[optimizer] Greedy fallback completed in {elapsed:.2f}s")
-        return result
+        logger.warning("[optimizer] Hungarian hit memory limit, falling back to greedy")
+        return optimize_matches_greedy(valid_results, min_confidence)
 
 
 def resolve_conflicts(

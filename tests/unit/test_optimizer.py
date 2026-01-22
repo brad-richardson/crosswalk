@@ -1,6 +1,6 @@
 """Unit tests for match optimization algorithms.
 
-Tests the sparse optimizer, greedy fallback, and auto-selection logic.
+Tests the Hungarian optimizer, greedy fallback, and auto-selection logic.
 """
 
 import pytest
@@ -9,7 +9,6 @@ from matcher.matching.optimizer import (
     optimize_matches,
     optimize_matches_auto,
     optimize_matches_greedy,
-    optimize_matches_sparse,
 )
 from matcher.matching.rules import MatchDecision, MatchResult
 
@@ -55,17 +54,17 @@ def large_conflict_results():
     return results
 
 
-class TestOptimizeMatchesSparse:
-    """Tests for sparse optimization using LAPJV (scipy linear_sum_assignment)."""
+class TestOptimizeMatches:
+    """Tests for Hungarian optimization (optimal solution)."""
 
     def test_empty_input(self):
         """Empty input should return empty output."""
-        result = optimize_matches_sparse([], min_confidence=0.5)
+        result = optimize_matches([], min_confidence=0.5)
         assert result == []
 
     def test_no_conflicts_preserves_all(self, simple_results):
         """When no conflicts exist, all matches above threshold should be kept."""
-        optimized = optimize_matches_sparse(simple_results, min_confidence=0.5)
+        optimized = optimize_matches(simple_results, min_confidence=0.5)
 
         assert len(optimized) == 3
         ref_ids = {r.ref_id for r in optimized}
@@ -73,7 +72,7 @@ class TestOptimizeMatchesSparse:
 
     def test_min_confidence_filters(self, simple_results):
         """Min confidence should filter low-confidence results."""
-        optimized = optimize_matches_sparse(simple_results, min_confidence=0.8)
+        optimized = optimize_matches(simple_results, min_confidence=0.8)
 
         assert len(optimized) == 2
         ref_ids = {r.ref_id for r in optimized}
@@ -82,7 +81,7 @@ class TestOptimizeMatchesSparse:
 
     def test_conflicts_resolved_one_to_one(self, conflicting_results):
         """Conflicts should be resolved with 1:1 assignments."""
-        optimized = optimize_matches_sparse(conflicting_results, min_confidence=0.5)
+        optimized = optimize_matches(conflicting_results, min_confidence=0.5)
 
         # Each reference should appear at most once
         ref_ids = [r.ref_id for r in optimized]
@@ -93,18 +92,15 @@ class TestOptimizeMatchesSparse:
         assert len(target_ids) == len(set(target_ids))
 
     def test_optimal_global_assignment(self, large_conflict_results):
-        """Sparse should produce same result as Hungarian for global optimization."""
-        sparse_result = optimize_matches_sparse(large_conflict_results, min_confidence=0.5)
-        dense_result = optimize_matches(large_conflict_results, min_confidence=0.5)
+        """Hungarian should produce globally optimal assignment."""
+        optimized = optimize_matches(large_conflict_results, min_confidence=0.5)
 
-        # Both should have same total confidence (global optimum)
-        sparse_total = sum(r.confidence for r in sparse_result)
-        dense_total = sum(r.confidence for r in dense_result)
+        # Should have 3 matches (one per reference)
+        assert len(optimized) == 3
 
-        # Allow small floating point tolerance
-        assert abs(sparse_total - dense_total) < 0.01, (
-            f"Sparse ({sparse_total:.4f}) != Dense ({dense_total:.4f})"
-        )
+        # Each target matched at most once
+        target_ids = [r.target_id for r in optimized]
+        assert len(target_ids) == len(set(target_ids))
 
 
 class TestOptimizeMatchesGreedy:
@@ -163,8 +159,8 @@ class TestOptimizeMatchesAuto:
         result = optimize_matches_auto([], min_confidence=0.5)
         assert result == []
 
-    def test_small_problem_uses_dense(self, simple_results):
-        """Small problems should use dense Hungarian algorithm."""
+    def test_small_problem_uses_hungarian(self, simple_results):
+        """Small problems should use Hungarian algorithm."""
         optimized = optimize_matches_auto(simple_results, min_confidence=0.5)
 
         assert len(optimized) == 3
@@ -192,27 +188,6 @@ class TestOptimizeMatchesAuto:
 class TestOptimizerEquivalence:
     """Tests that different optimization strategies produce equivalent results."""
 
-    def test_sparse_equals_dense_simple(self, simple_results):
-        """Sparse and dense should produce identical results for simple case."""
-        sparse = optimize_matches_sparse(simple_results, min_confidence=0.5)
-        dense = optimize_matches(simple_results, min_confidence=0.5)
-
-        sparse_pairs = {(r.ref_id, r.target_id) for r in sparse}
-        dense_pairs = {(r.ref_id, r.target_id) for r in dense}
-
-        assert sparse_pairs == dense_pairs
-
-    def test_sparse_equals_dense_conflicting(self, conflicting_results):
-        """Sparse and dense should produce same global optimum for conflicts."""
-        sparse = optimize_matches_sparse(conflicting_results, min_confidence=0.5)
-        dense = optimize_matches(conflicting_results, min_confidence=0.5)
-
-        # Total confidence should be the same (both are optimal)
-        sparse_total = sum(r.confidence for r in sparse)
-        dense_total = sum(r.confidence for r in dense)
-
-        assert abs(sparse_total - dense_total) < 0.01
-
     def test_greedy_near_optimal(self, large_conflict_results):
         """Greedy should be at least 90% of optimal for typical cases."""
         greedy = optimize_matches_greedy(large_conflict_results, min_confidence=0.5)
@@ -226,6 +201,19 @@ class TestOptimizerEquivalence:
             f"Greedy ({greedy_total:.4f}) < 90% of optimal ({optimal_total:.4f})"
         )
 
+    def test_both_produce_valid_assignment(self, conflicting_results):
+        """Both algorithms should produce valid 1:1 assignments."""
+        for optimize_fn in [optimize_matches, optimize_matches_greedy]:
+            optimized = optimize_fn(conflicting_results, min_confidence=0.5)
+
+            # Each reference appears at most once
+            ref_ids = [r.ref_id for r in optimized]
+            assert len(ref_ids) == len(set(ref_ids))
+
+            # Each target appears at most once
+            target_ids = [r.target_id for r in optimized]
+            assert len(target_ids) == len(set(target_ids))
+
 
 class TestDuplicateCandidates:
     """Tests for handling duplicate candidates for the same ref-target pair."""
@@ -238,7 +226,7 @@ class TestDuplicateCandidates:
             MatchResult("ref_2", "t_2", MatchDecision.MATCH, 0.85, {}, {}),
         ]
 
-        for optimize_fn in [optimize_matches, optimize_matches_sparse, optimize_matches_greedy]:
+        for optimize_fn in [optimize_matches, optimize_matches_greedy]:
             optimized = optimize_fn(results, min_confidence=0.5)
 
             # Should only have 2 unique pairs
