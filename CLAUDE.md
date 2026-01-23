@@ -8,7 +8,7 @@ For installation and usage instructions, see [README.md](README.md).
 
 ```bash
 # Install with all dependencies
-pip install -e ".[dev,ml]"
+pip install -e ".[dev,ml,label]"
 
 # Train ML model (required after fresh clone)
 matcher train --combined
@@ -57,17 +57,20 @@ src/matcher/
 ## Key Commands
 
 ```bash
-# Fetch data by explicit bbox
+# Fetch local data from ArcGIS (reads config from datasets/*.yaml)
+python scripts/fetch_new_cities.py --dataset us_boston_streets
+python scripts/fetch_new_cities.py --prefix us_boston  # All Boston datasets
+python scripts/fetch_new_cities.py --list              # List available datasets
+
+# Fetch Overture/OSM reference data for a configured dataset
+matcher fetch --for-dataset us_boston_streets -d overture
+matcher fetch --for-dataset us_boston_streets -d osm -d overture  # Both
+
+# Fetch by explicit bbox
 matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture -d osm
 
-# Fetch reference data for a configured dataset (auto-uses bbox from config)
-matcher fetch --for-dataset us_boston_streets -d osm -d overture
-
-# Fetch local data (see scripts/fetch_*.py for examples)
-python scripts/fetch_boston.py
-
 # Run matching with ML model
-matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet -m xgboost
+matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet -m xgboost
 
 # Train ML model on labels
 matcher train
@@ -75,8 +78,8 @@ matcher train
 # Evaluate model on holdout set
 matcher eval-model data/models/matcher_model_combined.joblib
 
-# Launch labeling UI
-matcher label data/raw/overture_segments.parquet data/raw/boston_streets.parquet
+# Launch labeling UI (auto-discovers datasets with data in data/raw/)
+streamlit run src/matcher/labeling/app.py
 
 # Integrate unmatched segments into network
 matcher integrate data/raw/overture_segments.parquet \
@@ -93,6 +96,36 @@ matcher discover-classes data/raw/new_dataset.parquet \
 # Run validation experiments (ground-truth from Overture provenance)
 matcher validate data/raw/overture.parquet --bbox "-71.19,42.21,-70.92,42.40" --strategy random
 ```
+
+## Labeling App
+
+The Streamlit labeling app auto-discovers datasets and provides a UI for creating training labels.
+
+### Running the App
+
+```bash
+# Install labeling dependencies
+pip install -e ".[label]"
+
+# Launch the app (auto-discovers datasets from data/raw/)
+streamlit run src/matcher/labeling/app.py
+```
+
+### Prerequisites
+
+Before running the labeling app, ensure data exists in `data/raw/`:
+
+```bash
+# 1. Fetch local data (ArcGIS)
+python scripts/fetch_new_cities.py --prefix us_boston
+
+# 2. Fetch Overture reference data
+matcher fetch -f us_boston_streets -d overture
+```
+
+The app will auto-discover any dataset that has both:
+- `data/raw/{dataset_name}.parquet` (target/local data)
+- `data/raw/{region}_overture_segments.parquet` (reference data)
 
 ## Labels Directory
 
@@ -259,19 +292,19 @@ for name in list_dataset_configs():
 
 ### Adding a new dataset
 1. **Find data source**: State DOTs, county GIS portals, open data portals
-2. **Create fetch script** in `scripts/` (see `fetch_boston.py` as template)
-3. **Fetch reference data**: `matcher fetch --bbox <bbox> -d overture`
-4. **Run initial matching**: `matcher match ... -m xgboost`
-5. **Analyze class mappings**: `matcher discover-classes <dataset> --reference <overture> --bridge <bridge>`
-6. **Create YAML config** in `src/matcher/datasets/` if needed
-7. **Label samples** to improve model: `matcher label`
+2. **Create YAML config** in `datasets/` with ArcGIS URL, bbox, class mappings
+3. **Fetch local data**: `python scripts/fetch_new_cities.py --dataset <name>`
+4. **Fetch reference data**: `matcher fetch -f <dataset> -d overture`
+5. **Run initial matching**: `matcher match ... -m xgboost`
+6. **Analyze class mappings**: `matcher discover-classes <dataset> --reference <overture> --bridge <bridge>`
+7. **Label samples** to improve model: `streamlit run src/matcher/labeling/app.py`
 8. **Retrain and iterate**: `matcher train && matcher eval-model`
 
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions.
 
 ### Improving match quality
 1. Identify weak spots: run `matcher eval-model` and check per-dataset metrics
-2. Label more examples in the labeling UI: `matcher label`
+2. Label more examples: `streamlit run src/matcher/labeling/app.py`
 3. Retrain model: `matcher train`
 4. Evaluate improvement: `matcher eval-model`
 5. Repeat until F1 is acceptable (typically >0.95)

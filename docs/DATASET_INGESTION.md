@@ -6,9 +6,8 @@ This guide covers the process for adding a new road dataset to the matcher pipel
 
 The matcher pipeline links local road datasets to Overture Maps GERS identifiers. Each dataset needs:
 
-1. A **fetch script** to download and normalize the data
-2. A **YAML configuration** mapping source classifications to Overture classes
-3. An entry in **datasets.csv** for tracking
+1. A **YAML configuration** in `datasets/` with source URL, bbox, and class mappings
+2. The **fetch script** (`scripts/fetch_new_cities.py`) reads the YAML and downloads data
 
 ## Step 1: Find and Fetch the Data
 
@@ -25,105 +24,60 @@ Look for datasets that include:
 - Classification codes (FHWA functional class, local codes, etc.)
 - Geometry as LineStrings
 
-### Creating a Fetch Script
+### Creating a Dataset Configuration
 
-Create a script in `scripts/fetch_<dataset>.py`. Example structure:
+Create a YAML config in `datasets/<dataset_name>.yaml`:
 
-```python
-#!/usr/bin/env python
-"""Fetch <location> road data from <source>."""
+```yaml
+name: us_example_streets
+display_name: Example City Streets
+type: road
+description: Street centerlines from Example City GIS portal
 
-from pathlib import Path
-import geopandas as gpd
-import requests
-from loguru import logger
+source:
+  type: arcgis
+  url: https://example.com/arcgis/rest/services/Roads/FeatureServer/0
+  portal_url: https://example-city.gov/open-data/streets
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
-
-# ArcGIS FeatureServer endpoint
-ROADS_URL = "https://example.com/arcgis/rest/services/Roads/FeatureServer/0/query"
-
-# Initial class mapping (refined later via match analysis)
-CLASS_MAPPING = {
-    1: "motorway",
-    2: "trunk",
-    3: "primary",
-    # etc.
-}
-
-def fetch_roads(output_path: Path, batch_size: int = 2000) -> gpd.GeoDataFrame:
-    """Fetch roads from FeatureServer.
-
-    ArcGIS servers typically limit results to 2000 records per request,
-    so we paginate through the full dataset.
-    """
-    # Get total count
-    count_params = {
-        "where": "1=1",  # Or filter by county/region
-        "returnCountOnly": "true",
-        "f": "json",
-    }
-    resp = requests.get(ROADS_URL, params=count_params)
-    resp.raise_for_status()
-    total_count = resp.json()["count"]
-    logger.info(f"Total roads: {total_count}")
-
-    # Fetch in batches
-    all_features = []
-    offset = 0
-    while offset < total_count:
-        params = {
-            "where": "1=1",
-            "outFields": "NAME,CLASS_COLUMN,OTHER_ATTRS",
-            "outSR": "4326",
-            "f": "geojson",
-            "resultOffset": offset,
-            "resultRecordCount": batch_size,
-        }
-        resp = requests.get(ROADS_URL, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-
-        if "features" in data:
-            all_features.extend(data["features"])
-        offset += batch_size
-
-    # Convert to GeoDataFrame with Overture-compatible schema
-    gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
-
-    # Generate unique IDs
-    gdf["id"] = [f"dataset_{i}" for i in range(len(gdf))]
-
-    # Map to Overture class
-    gdf["class"] = gdf["CLASS_COLUMN"].map(CLASS_MAPPING).fillna("unclassified")
-
-    # Create names dict (Overture format)
-    gdf["names"] = gdf["NAME"].apply(
-        lambda n: {"primary": n} if n and n.strip() else None
-    )
-
-    # Store original attributes
-    gdf["source_tags"] = gdf.apply(
-        lambda row: {"CLASS_COLUMN": row["CLASS_COLUMN"]},
-        axis=1,
-    )
-
-    # Save
-    gdf[["id", "geometry", "names", "class", "source_tags"]].to_parquet(output_path)
-    return gdf
+fetch:
+  bbox: [-122.5, 37.7, -122.3, 37.9]  # [xmin, ymin, xmax, ymax]
+  name_column: STREETNAME
+  class_column: FCLASS
+  class_mapping:
+    1: motorway
+    2: trunk
+    3: primary
+    4: secondary
+    5: tertiary
+    6: residential
+    7: service
 ```
+
+### Fetching the Data
+
+Use the unified fetch script:
+
+```bash
+# Fetch a specific dataset
+python scripts/fetch_new_cities.py --dataset us_example_streets
+
+# Fetch all datasets for a region
+python scripts/fetch_new_cities.py --prefix us_boston
+
+# List available datasets
+python scripts/fetch_new_cities.py --list
+```
+
+The script reads the YAML config and handles:
+- ArcGIS FeatureServer pagination
+- Coordinate system transformation
+- Overture-compatible schema conversion
+- Class mapping application
 
 ### Common Issues
 
-- **MultiLineString geometries**: Explode to LineStrings before matching:
-  ```python
-  gdf = gdf.explode(index_parts=False).reset_index(drop=True)
-  ```
-
-- **CRS issues**: Overture data sometimes has `None` CRS, set explicitly:
-  ```python
-  overture = overture.set_crs('EPSG:4326')
-  ```
+- **MultiLineString geometries**: The fetch script automatically explodes to LineStrings
+- **CRS issues**: Specify `crs` in the YAML config if the source uses a non-WGS84 CRS
 
 ## Step 2: Fetch Reference Data
 
@@ -300,13 +254,16 @@ notes: |
   - Any special handling required
 ```
 
-## Step 6: Register the Dataset
+## Step 6: Verify the Configuration
 
-Add an entry to `datasets.csv`:
+The YAML config you created in Step 1 serves as the dataset registry. Verify it's recognized:
 
-```csv
-dataset_id,name,type,fetch_url,info_url,metadata
-your_dataset,Display Name,road,https://feature-server-url,https://docs-url,{"classification_column": "CLASS_COLUMN"}
+```bash
+# List all configured datasets
+matcher list-datasets
+
+# Check your dataset appears
+python scripts/fetch_new_cities.py --list
 ```
 
 ## Step 7: Validate
