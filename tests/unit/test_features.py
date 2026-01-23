@@ -608,3 +608,36 @@ class TestComputePairFeaturesWithAlignment:
         # All feature columns should be present
         for col in ALL_FEATURE_COLUMNS:
             assert col in features, f"Missing feature: {col}"
+
+    def test_lateral_offset_uses_aligned_sublines(self):
+        """Lateral offset should be computed on aligned sublines, not full geometries.
+
+        Regression test: A target that extends beyond the reference should not
+        inflate the lateral offset. Only the overlapping portion should be measured.
+        """
+        from matcher.features.alignment import linestring_alignment
+        from matcher.features.compute import compute_pair_features
+
+        # Reference: 100m segment
+        ref = LineString([(0, 0), (100, 0)])
+        # Target: 300m segment, first 100m overlaps at 3m offset, then extends 200m
+        target = LineString([(0, 3), (100, 3), (300, 3)])
+
+        alignment = linestring_alignment(ref, target)
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=alignment,
+        )
+
+        # Lateral offset should be ~3m (the offset in the overlapping region)
+        # NOT ~100m (which would happen if measuring full 300m target to 100m ref)
+        assert features["lateral_offset_m"] < 10.0, (
+            f"Lateral offset {features['lateral_offset_m']:.1f}m is too high. "
+            "Should be ~3m for aligned sublines, not inflated by non-overlapping portion."
+        )
