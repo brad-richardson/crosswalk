@@ -82,11 +82,11 @@ apt install osmium-tool
 # For machine learning matching (XGBoost, LightGBM)
 pip install -e ".[ml]"
 
-# For distributed processing with Apache Spark/Sedona
-pip install -e ".[spark]"
+# For labeling UI (Streamlit)
+pip install -e ".[label]"
 
 # All optional dependencies
-pip install -e ".[dev,ml]"
+pip install -e ".[dev,ml,label]"
 ```
 
 ## Usage
@@ -143,21 +143,23 @@ See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instruct
 After installation, here's the typical workflow for matching a new dataset:
 
 ```bash
-# 1. Fetch reference data (Overture) for your area
-matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture
+# 1. Fetch local data from ArcGIS (reads config from datasets/*.yaml)
+python scripts/fetch_new_cities.py --dataset us_boston_streets
+# Or fetch all datasets for a region:
+python scripts/fetch_new_cities.py --prefix us_boston
 
-# 2. Fetch or prepare your local dataset (see scripts/fetch_*.py for examples)
-python scripts/fetch_boston.py
+# 2. Fetch Overture reference data for the region
+matcher fetch -f us_boston_streets -d overture
 
 # 3. Train the ML model (required after fresh clone)
 matcher train
 
 # 4. Run matching
-matcher match data/raw/overture_segments.parquet data/raw/boston_streets.parquet \
-    -m xgboost -o data/output/boston_streets_bridge.parquet
+matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+    -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
-# 5. If match quality needs improvement, label more examples
-matcher label data/raw/overture_segments.parquet data/raw/boston_streets.parquet
+# 5. If match quality needs improvement, label more examples (auto-discovers datasets)
+streamlit run src/matcher/labeling/app.py
 
 # 6. Retrain and re-match until satisfied
 matcher train && matcher match ...
@@ -190,7 +192,8 @@ The matcher computes ~40 features for each candidate pair:
 When match quality isn't sufficient, use the labeling UI to create training data:
 
 ```bash
-matcher label data/raw/overture_segments.parquet data/raw/your_dataset.parquet
+# Launch labeling app (auto-discovers all datasets with data in data/raw/)
+streamlit run src/matcher/labeling/app.py
 ```
 
 Label pairs as `match`, `no_match`, or `unsure`, then retrain:
