@@ -303,7 +303,7 @@ class LabelStore:
         dfs = []
         errors = []
 
-        for partition_dir in sorted(labels_dir.glob("dataset=*")):
+        for partition_dir in labels_dir.glob("dataset=*"):
             dataset_id = partition_dir.name.split("=")[1]
             csv_path = partition_dir / "data.csv"
             if csv_path.exists():

@@ -1955,7 +1955,9 @@ def backfill_labels(
     console.print(f"  Overture: {overture or '(auto-discover per dataset)'}")
     console.print(f"  Data dir: {data_dir}")
     if skip_missing:
-        console.print("[yellow]  Skip missing: enabled (will skip datasets with missing data)[/yellow]")
+        console.print(
+            "[yellow]  Skip missing: enabled (will skip datasets with missing data)[/yellow]"
+        )
 
     try:
         results = backfill_features(
