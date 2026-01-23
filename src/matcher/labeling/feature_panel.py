@@ -9,25 +9,28 @@ from .data_loader import CandidatePairView
 
 # Feature display configuration - top features by XGBoost importance
 # These are the features that most influence the ML model's predictions
-# Ordered by importance (descending)
+# Ordered by importance (descending) - updated 2026-01-23 after alignment-aware topology fix
 TOP_FEATURES = [
-    ("name_token_sort", "Name Match", 0.221),  # 22.1% importance
-    ("centroid_distance_m", "Centroid Dist", 0.100),
-    ("collinear_gap_ratio", "Collinear Gap", 0.073),
-    ("name_jaro_winkler", "Name Jaro", 0.059),
-    ("intersection_match", "Intersection", 0.050),
-    ("buffer_iou_15m", "Buffer IoU", 0.043),
-    ("mean_hausdorff_distance_m", "Mean Haus.", 0.028),
-    ("heading_delta", "Heading", 0.027),
-    ("class_similarity", "Class", 0.026),
-    ("lateral_offset_m", "Lateral Offset", 0.025),
+    ("name_levenshtein", "Name Edit Dist", 0.091),
+    ("centroid_distance_m", "Centroid Dist", 0.073),
+    ("collinear_gap_ratio", "Collinear Gap", 0.066),
+    ("has_name_target", "Has Name", 0.057),
+    ("min_endpoint_proximity_m", "Endpoint Prox", 0.054),
+    ("class_similarity", "Class", 0.051),
+    ("hausdorff_p95_m", "Hausdorff P95", 0.037),
+    ("from_degree_target", "From Degree", 0.037),  # Topology feature now significant
+    ("mean_hausdorff_distance_m", "Mean Haus.", 0.032),
+    ("lateral_offset_m", "Lateral Offset", 0.026),
 ]
 
 RAW_FEATURE_UNITS = {
     "hausdorff_distance_m": "m",
     "mean_hausdorff_distance_m": "m",
+    "hausdorff_p95_m": "m",
     "projection_distance_m": "m",
     "centroid_distance_m": "m",
+    "min_endpoint_proximity_m": "m",
+    "max_endpoint_proximity_m": "m",
     "heading_delta": "°",
     "lateral_offset_m": "m",
     "buffer_iou_5m": "",
@@ -37,6 +40,10 @@ RAW_FEATURE_UNITS = {
     "name_jaro_winkler": "",
     "name_token_sort": "",
     "class_similarity": "",
+    "from_degree_target": "",
+    "from_degree_ref": "",
+    "to_degree_target": "",
+    "to_degree_ref": "",
 }
 
 
@@ -114,20 +121,32 @@ def _normalize_feature_for_display(feature_key: str, value: float | None) -> flo
         return 0.0
 
     # Distance features: lower is better, normalize with reasonable max
-    if feature_key in ("centroid_distance_m", "mean_hausdorff_distance_m", "hausdorff_distance_m"):
+    if feature_key in (
+        "centroid_distance_m",
+        "mean_hausdorff_distance_m",
+        "hausdorff_distance_m",
+        "hausdorff_p95_m",
+    ):
         return max(0.0, 1.0 - value / 50.0)  # 50m = 0 score
     if feature_key == "lateral_offset_m":
         return max(0.0, 1.0 - value / 30.0)  # 30m = 0 score
+    if feature_key in ("min_endpoint_proximity_m", "max_endpoint_proximity_m"):
+        return max(0.0, 1.0 - value / 20.0)  # 20m = 0 score
 
     # Heading: 0-90 degrees, lower is better
     if feature_key == "heading_delta":
         return max(0.0, 1.0 - value / 90.0)
 
+    # Degree features: normalize to 0-1 based on typical values (1-4)
+    # Higher degrees generally indicate more connected intersections
+    if feature_key in ("from_degree_target", "from_degree_ref", "to_degree_target", "to_degree_ref"):
+        return min(1.0, value / 4.0)  # 4+ = max
+
     # collinear_gap_ratio is already 0-1 where higher = better match
     # (handled by default case below)
 
     # Boolean/binary features
-    if feature_key in ("intersection_match", "dead_end_match"):
+    if feature_key in ("intersection_match", "dead_end_match", "has_name_target", "has_name_ref"):
         return 1.0 if value else 0.0
 
     # Already 0-1 scores (similarities, IoU, etc.)

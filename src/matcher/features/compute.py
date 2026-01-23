@@ -47,6 +47,10 @@ def compute_pair_features(
     target_topology: dict[str, Any] | None = None,
     alignment: AlignmentResult | None = None,
     graphlet_features: dict[str, float] | None = None,
+    ref_graphlet_data: tuple | None = None,
+    target_graphlet_data: tuple | None = None,
+    ref_seg_id: str | None = None,
+    target_seg_id: str | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -68,6 +72,10 @@ def compute_pair_features(
         target_topology: Pre-computed topology features for target (optional)
         alignment: Pre-computed alignment result for using aligned sublines (optional)
         graphlet_features: Pre-computed graphlet similarity features (optional)
+        ref_graphlet_data: Graphlet data for reference (G, seg_to_connectors, node_features, use_connectors)
+        target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
+        ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
+        target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -114,17 +122,62 @@ def compute_pair_features(
                 "shared_endpoint_count": 0,
             }
 
-        # Use provided or default topology features
-        if ref_topology is None:
-            ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
-        if target_topology is None:
-            target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+        # Compute topology features - prefer alignment-aware when graphlet data is available
+        # This is critical for partial overlaps where we need degrees at the aligned
+        # subline endpoints, not at the full geometry endpoints.
+        use_aligned_topology = (
+            alignment is not None
+            and ref_graphlet_data is not None
+            and target_graphlet_data is not None
+            and ref_seg_id is not None
+            and target_seg_id is not None
+        )
 
-        # Extract degree values
-        from_degree_ref = ref_topology.get("from_degree", 1)
-        to_degree_ref = ref_topology.get("to_degree", 1)
-        from_degree_target = target_topology.get("from_degree", 1)
-        to_degree_target = target_topology.get("to_degree", 1)
+        if use_aligned_topology:
+            # Compute alignment-aware topology from graphlet connector data
+            from .spatial_context import compute_aligned_topology_features
+
+            # Unpack graphlet data (G, seg_to_connectors, node_features, use_connectors)
+            _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
+            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
+
+            # Compute aligned topology for reference
+            ref_aligned_topo = compute_aligned_topology_features(
+                ref_seg_id,
+                ref_seg_to_connectors,
+                ref_node_features,
+                alignment.overture_start_frac,
+                alignment.overture_end_frac,
+            )
+
+            # Compute aligned topology for target
+            target_aligned_topo = compute_aligned_topology_features(
+                target_seg_id,
+                target_seg_to_connectors,
+                target_node_features,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+
+            # Use aligned values
+            from_degree_ref = ref_aligned_topo["from_degree"]
+            to_degree_ref = ref_aligned_topo["to_degree"]
+            from_degree_target = target_aligned_topo["from_degree"]
+            to_degree_target = target_aligned_topo["to_degree"]
+            ref_topology = ref_aligned_topo
+            target_topology = target_aligned_topo
+        else:
+            # Fall back to pre-computed topology (for backward compatibility)
+            if ref_topology is None:
+                ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+            if target_topology is None:
+                target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+
+            # Extract degree values
+            from_degree_ref = ref_topology.get("from_degree", 1)
+            to_degree_ref = ref_topology.get("to_degree", 1)
+            from_degree_target = target_topology.get("from_degree", 1)
+            to_degree_target = target_topology.get("to_degree", 1)
 
         # Compute degree match score
         degree_match = compute_degree_match_score(

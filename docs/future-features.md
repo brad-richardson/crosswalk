@@ -71,6 +71,46 @@ After training with the current 42 features, feature importance analysis will in
    - Fréchet distance (expensive to compute)
    - Network continuity score (requires global graph analysis)
 
+## Infrastructure & Tooling
+
+### Unified Dataset Fetch/Load/Parse Utility
+
+**Problem**: Dataset loading logic is duplicated across multiple modules (backfill, ML scorer, labeling UI, etc.) with inconsistent handling of:
+- Dataset-specific vs shared Overture reference files
+- OSM variant datasets (e.g., `us_boston_streets_osm` using base `us_boston_streets` Overture)
+- Column naming conventions (id, gers_id, ref_id)
+- CRS projection and coordinate systems
+- Missing data file detection and fallbacks
+
+**Proposed Solution**: Create a unified `DatasetLoader` class that:
+1. **Auto-discovers** data files based on dataset config and naming conventions
+2. **Handles variants**: OSM datasets automatically use base dataset Overture files
+3. **Provides consistent projections**: Always returns data in appropriate CRS for the task
+4. **Validates data**: Fails fast with clear errors when data is missing or malformed
+5. **Caches loaded data**: Avoids redundant parquet reads within a session
+
+```python
+# Proposed API
+from matcher.datasets import DatasetLoader
+
+loader = DatasetLoader(data_dir="data/raw")
+ref_gdf, target_gdf = loader.load_pair("us_boston_streets")  # Returns projected GDFs
+ref_gdf, osm_gdf = loader.load_pair("us_boston_streets_osm")  # Auto-uses base Overture
+
+# For backfill/batch processing
+with loader.session():
+    for dataset in loader.list_available():
+        ref, target = loader.load_pair(dataset)
+        # Data cached within session
+```
+
+**Current workarounds**:
+- `backfill_features()` has its own `get_reference_data()` helper with caching
+- `ml.py` pre-loads data in `score_candidates()`
+- Labeling UI's `data_loader.py` has separate loading logic
+
+**Priority**: Medium-High (reduces code duplication and bug surface area)
+
 ## References
 
 - Feedback from Codex and Gemini model reviews confirmed the current feature set

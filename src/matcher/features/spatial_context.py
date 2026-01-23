@@ -605,6 +605,88 @@ def compute_endpoint_features(
     }
 
 
+def compute_aligned_endpoint_features(
+    geom: LineString,
+    context: SpatialContextIndex,
+    start_frac: float = 0.0,
+    end_frac: float = 1.0,
+    exclude_segment_idx: int | None = None,
+    tolerance_m: float = 5.0,
+) -> dict[str, float]:
+    """Compute endpoint proximity at aligned subline endpoints.
+
+    Instead of using the full geometry endpoints, this function uses the
+    coordinates at the alignment boundaries (start_frac, end_frac). This
+    is critical for partial overlaps where the segments only partially match.
+
+    For example, if a 438m segment only overlaps with a 186m segment at
+    [0%, 43%], we want to measure endpoint proximity at the 43% position,
+    not at the 100% position (the actual segment end).
+
+    Args:
+        geom: Full segment geometry
+        context: SpatialContextIndex with all segments
+        start_frac: Start of aligned region (0.0 to 1.0)
+        end_frac: End of aligned region (0.0 to 1.0)
+        exclude_segment_idx: Segment index to exclude (self)
+        tolerance_m: Distance threshold for "shared" endpoints (meters)
+
+    Returns:
+        Dictionary with:
+        - min_endpoint_proximity_m: Minimum of start/end proximities (meters)
+        - max_endpoint_proximity_m: Maximum of start/end proximities (meters)
+        - shared_endpoint_count: Number of segments with shared endpoints
+    """
+    if geom is None or geom.is_empty or context.endpoint_coords.size == 0:
+        return {
+            "min_endpoint_proximity_m": float("inf"),
+            "max_endpoint_proximity_m": float("inf"),
+            "shared_endpoint_count": 0,
+        }
+
+    # Interpolate to get aligned endpoint coordinates
+    start_point = geom.interpolate(start_frac, normalized=True)
+    end_point = geom.interpolate(end_frac, normalized=True)
+
+    # Query nearby endpoints at these positions
+    start_nearby = context.query_nearby_endpoints(start_point, tolerance_m * 2)
+    end_nearby = context.query_nearby_endpoints(end_point, tolerance_m * 2)
+
+    # Filter out endpoints from excluded segment
+    if exclude_segment_idx is not None and exclude_segment_idx in context.segment_endpoints:
+        excluded_eps = set(context.segment_endpoints[exclude_segment_idx])
+        start_nearby = [(ep, d) for ep, d in start_nearby if ep not in excluded_eps]
+        end_nearby = [(ep, d) for ep, d in end_nearby if ep not in excluded_eps]
+
+    # Get minimum distances for start and end
+    start_proximity = start_nearby[0][1] if start_nearby else float("inf")
+    end_proximity = end_nearby[0][1] if end_nearby else float("inf")
+
+    # Direction-invariant: use min/max instead of start/end
+    min_proximity = min(start_proximity, end_proximity)
+    max_proximity = max(start_proximity, end_proximity)
+
+    # Count shared endpoints (within tolerance)
+    shared_segments = set()
+    for ep_idx, dist in start_nearby:
+        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
+            shared_segments.update(context.endpoint_to_segment[ep_idx])
+
+    for ep_idx, dist in end_nearby:
+        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
+            shared_segments.update(context.endpoint_to_segment[ep_idx])
+
+    # Remove excluded segment
+    if exclude_segment_idx is not None:
+        shared_segments.discard(exclude_segment_idx)
+
+    return {
+        "min_endpoint_proximity_m": min_proximity,
+        "max_endpoint_proximity_m": max_proximity,
+        "shared_endpoint_count": len(shared_segments),
+    }
+
+
 def compute_topology_features(
     geom: LineString,
     context: SpatialContextIndex,
@@ -1780,9 +1862,14 @@ def build_inferred_connector_graph(
     # Collect all connection points: (seg_id, seg_idx, at_position, x, y)
     connection_points = []
 
-    # Step 1: Add endpoints for all segments (LineStrings only, MultiLineStrings filtered at ingest)
+    # Step 1: Add endpoints for all segments (LineStrings only, MultiLineStrings skipped)
+    from shapely import LineString
+
     for seg_idx, geom in enumerate(geometries):
         if geom is None or geom.is_empty:
+            continue
+        # Skip MultiLineStrings - they don't have direct coords
+        if not isinstance(geom, LineString):
             continue
         seg_id = segment_ids[seg_idx]
 
@@ -1804,6 +1891,8 @@ def build_inferred_connector_graph(
     for seg_idx, geom in enumerate(geometries):
         if geom is None or geom.is_empty:
             continue
+        if not isinstance(geom, LineString):
+            continue
         seg_id = segment_ids[seg_idx]
 
         # Query for nearby segments using buffered geometry
@@ -1816,6 +1905,8 @@ def build_inferred_connector_graph(
 
             other_geom = geometries[other_idx]
             if other_geom is None or other_geom.is_empty:
+                continue
+            if not isinstance(other_geom, LineString):
                 continue
 
             # Check actual distance between segments
@@ -1948,6 +2039,97 @@ def find_nearest_connector(
             best_node = node_id
 
     return best_node
+
+
+def compute_aligned_topology_at_position(
+    seg_to_connectors: dict[str, list[tuple[float, int]]],
+    node_features: dict[int, int],
+    seg_id: str,
+    position: float,
+) -> int:
+    """Get topology degree at a specific position along a segment.
+
+    Uses the connector graph to find the nearest connector to the
+    given position, then returns its degree.
+
+    This function enables alignment-aware topology computation. For partial
+    overlaps, instead of using full geometry endpoints, we use the degrees
+    at the aligned subline endpoints (where the segments actually overlap).
+
+    Args:
+        seg_to_connectors: Maps segment ID -> list of (at_position, node_id) tuples
+        node_features: Maps node_id -> degree (or feature vector, degree is first element)
+        seg_id: Segment ID to lookup
+        position: Linear position along segment (0.0 to 1.0)
+
+    Returns:
+        Degree at the nearest connector to the position.
+        Returns 1 (dead end default) if no connectors found.
+    """
+    connectors = seg_to_connectors.get(seg_id, [])
+    if not connectors:
+        return 1  # Dead end default
+
+    node_id = find_nearest_connector(connectors, position)
+    if node_id is None:
+        return 1
+
+    # Handle both int (degrees only) and array (full feature vector) formats
+    feat = node_features.get(node_id)
+    if feat is None:
+        return 1
+    if isinstance(feat, (int, np.integer)):
+        return int(feat)
+    # Array format - degree is first element
+    return int(feat[0]) if len(feat) > 0 else 1
+
+
+def compute_aligned_topology_features(
+    seg_id: str,
+    seg_to_connectors: dict[str, list[tuple[float, int]]],
+    node_features: dict[int, int],
+    start_frac: float = 0.0,
+    end_frac: float = 1.0,
+) -> dict[str, int | float | bool | tuple]:
+    """Compute topology features at aligned subline endpoints.
+
+    This is the alignment-aware version of compute_topology_features().
+    Instead of using the full geometry endpoints, it uses the degrees
+    at the aligned subline endpoints.
+
+    For partial overlaps (e.g., only 43% of the segment overlaps), this
+    gives the correct topology at the boundaries of the actual overlap,
+    not at the full segment endpoints.
+
+    Args:
+        seg_id: Segment ID
+        seg_to_connectors: Maps segment ID -> list of (at_position, node_id) tuples
+        node_features: Maps node_id -> degree (int or feature vector)
+        start_frac: Start of aligned region (0.0 to 1.0)
+        end_frac: End of aligned region (0.0 to 1.0)
+
+    Returns:
+        Dictionary with topology features:
+        - from_degree: Degree at alignment start
+        - to_degree: Degree at alignment end
+        - is_dead_end: True if either endpoint has degree 1
+        - is_intersection: True if either endpoint has degree > 2
+        - degree_signature: Tuple of sorted [from_degree, to_degree]
+    """
+    from_degree = compute_aligned_topology_at_position(
+        seg_to_connectors, node_features, seg_id, start_frac
+    )
+    to_degree = compute_aligned_topology_at_position(
+        seg_to_connectors, node_features, seg_id, end_frac
+    )
+
+    return {
+        "from_degree": from_degree,
+        "to_degree": to_degree,
+        "is_dead_end": min(from_degree, to_degree) == 1,
+        "is_intersection": max(from_degree, to_degree) > 2,
+        "degree_signature": tuple(sorted([from_degree, to_degree])),
+    }
 
 
 def get_alignment_connectors(

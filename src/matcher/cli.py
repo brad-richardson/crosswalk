@@ -1879,6 +1879,113 @@ def generate_agent_test_batch(
     console.print(f"  3. Compare: matcher agent-consensus {batch_dir}")
 
 
+@app.command("backfill-labels")
+def backfill_labels(
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Labels directory (Hive-partitioned CSV format)",
+    ),
+    overture: Path = typer.Option(
+        None,
+        "--overture",
+        "-r",
+        help="Path to Overture segments parquet. If not specified, looks for "
+        "{dataset}_overture_segments.parquet in the data directory.",
+    ),
+    data_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--data-dir",
+        "-d",
+        help="Directory containing target dataset parquet files",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Compute features but don't write to disk",
+    ),
+    skip_missing: bool = typer.Option(
+        False,
+        "--skip-missing",
+        help="Skip datasets with missing data files instead of failing",
+    ),
+):
+    """Recompute features for all existing labels.
+
+    This command is needed after changes to feature computation logic to ensure
+    existing training labels have consistent features. It recomputes:
+    - Alignment fractions (where segments overlap)
+    - All topology features (using alignment-aware computation)
+    - Endpoint proximity features
+    - Graphlet similarity features
+    - All other geometric/semantic features
+
+    The command preserves the label (match/no_match) but updates all feature
+    columns and alignment fractions.
+
+    By default, the command will FAIL if any dataset is missing required data
+    files. Use --skip-missing to skip those datasets instead.
+
+    Examples:
+        # Backfill all labels (fails if any data is missing)
+        matcher backfill-labels
+
+        # Skip datasets with missing data
+        matcher backfill-labels --skip-missing
+
+        # Dry run (show what would be updated)
+        matcher backfill-labels --dry-run
+    """
+    from .labeling.label_store import backfill_features
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    if overture is not None and not overture.exists():
+        console.print(f"[red]Overture file not found: {overture}[/red]")
+        raise typer.Exit(1)
+
+    if dry_run:
+        console.print("[yellow]Dry run mode - no files will be modified[/yellow]")
+
+    console.print("[blue]Starting feature backfill...[/blue]")
+    console.print(f"  Labels: {labels_dir}")
+    console.print(f"  Overture: {overture or '(auto-discover per dataset)'}")
+    console.print(f"  Data dir: {data_dir}")
+    if skip_missing:
+        console.print("[yellow]  Skip missing: enabled (will skip datasets with missing data)[/yellow]")
+
+    try:
+        results = backfill_features(
+            labels_dir=labels_dir,
+            overture_path=overture,
+            data_dir=data_dir,
+            dry_run=dry_run,
+            skip_missing=skip_missing,
+        )
+
+        console.print()
+        console.print("[green]Backfill complete![/green]")
+        console.print("Results by dataset:")
+        for dataset, count in sorted(results.items()):
+            console.print(f"  {dataset}: {count} labels updated")
+
+        total = sum(results.values())
+        console.print(f"\n  Total: {total} labels updated")
+
+        if dry_run:
+            console.print(
+                "\n[yellow]Dry run - no files were modified. "
+                "Remove --dry-run to apply changes.[/yellow]"
+            )
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
 @app.command()
 def version():
     """Show version information."""
