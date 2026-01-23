@@ -49,38 +49,38 @@ LABELED_DATASETS = {
         "fetch_script": "fetch_boston.py",
         "region": "boston",
         "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
+        "overture_file": "boston_overture_segments.parquet",
     },
     "us_boston_sidewalks": {
         "fetch_script": "fetch_boston.py",
         "region": "boston",
         "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
+        "overture_file": "boston_overture_segments.parquet",
     },
     "us_boston_bikes": {
         "fetch_script": "fetch_boston.py",
         "region": "boston",
         "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
+        "overture_file": "boston_overture_segments.parquet",
     },
     "us_boston_osm": {
         "fetch_script": None,  # Fetched via CLI
         "region": "boston",
         "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
+        "overture_file": "boston_overture_segments.parquet",
         "osm_fetch": True,  # Uses matcher fetch -d osm
     },
     "us_fort_collins_streets": {
         "fetch_script": "fetch_fort_collins.py",
         "region": "fort_collins",
         "bbox": "-105.15,40.45,-104.95,40.65",
-        "overture_file": "overture_fort_collins_segments.parquet",
+        "overture_file": "fort_collins_overture_segments.parquet",
     },
     "us_frisco_trails": {
         "fetch_script": "fetch_frisco.py",
         "region": "frisco",
         "bbox": "-96.95,33.08,-96.75,33.18",
-        "overture_file": "overture_frisco_segments.parquet",
+        "overture_file": "frisco_overture_segments.parquet",
     },
 }
 
@@ -88,17 +88,17 @@ LABELED_DATASETS = {
 REGIONS = {
     "boston": {
         "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_output": "overture_segments.parquet",
+        "overture_output": "boston_overture_segments.parquet",
         "fetch_scripts": ["fetch_boston.py"],
     },
     "fort_collins": {
         "bbox": "-105.15,40.45,-104.95,40.65",
-        "overture_output": "overture_fort_collins_segments.parquet",
+        "overture_output": "fort_collins_overture_segments.parquet",
         "fetch_scripts": ["fetch_fort_collins.py"],
     },
     "frisco": {
         "bbox": "-96.95,33.08,-96.75,33.18",
-        "overture_output": "overture_frisco_segments.parquet",
+        "overture_output": "frisco_overture_segments.parquet",
         "fetch_scripts": ["fetch_frisco.py"],
     },
 }
@@ -153,6 +153,8 @@ def fetch_overture_for_region(region_name: str, region_config: dict, dry_run: bo
         "overture",
         "-o",
         str(DATA_DIR),
+        "--name",
+        region_name,  # e.g., boston_overture_segments.parquet
     ]
     return run_command(cmd, f"Fetching Overture data for {region_name}", dry_run)
 
@@ -168,6 +170,8 @@ def fetch_osm_for_region(region_name: str, bbox: str, dry_run: bool = False) -> 
         "osm",
         "-o",
         str(DATA_DIR),
+        "--name",
+        region_name,  # e.g., boston_osm_segments.parquet
     ]
     return run_command(cmd, f"Fetching OSM data for {region_name}", dry_run)
 

@@ -53,21 +53,22 @@ from matcher.features.spatial_context import (
 # Dataset name to (target file, reference file) mapping
 # Reference file is the Overture segments file to use for this dataset
 # Note: Dataset names have us_ prefix but data files use shorter names
+# Reference file naming: {region}_overture_segments.parquet (e.g., boston_overture_segments.parquet)
 DATASET_CONFIG = {
-    "us_boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
-    "us_boston_sidewalks": ("boston_sidewalks.parquet", "overture_segments.parquet"),
-    "us_boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
-    "us_boston_osm": ("osm_segments.parquet", "overture_segments.parquet"),
+    "us_boston_bikes": ("boston_bike_network.parquet", "boston_overture_segments.parquet"),
+    "us_boston_sidewalks": ("boston_sidewalks.parquet", "boston_overture_segments.parquet"),
+    "us_boston_streets": ("boston_streets.parquet", "boston_overture_segments.parquet"),
+    "us_boston_osm": ("boston_osm_segments.parquet", "boston_overture_segments.parquet"),
     "us_fort_collins_streets": (
         "fort_collins_streets.parquet",
-        "overture_fort_collins_segments.parquet",
+        "fort_collins_overture_segments.parquet",
     ),
     "us_fort_collins_sidewalks": (
         "fort_collins_sidewalks.parquet",
-        "overture_fort_collins_segments.parquet",
+        "fort_collins_overture_segments.parquet",
     ),
-    "us_frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
-    "us_frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
+    "us_frisco_trails": ("frisco_trails.parquet", "frisco_overture_segments.parquet"),
+    "us_frisco_roads": ("frisco_roads.parquet", "frisco_overture_segments.parquet"),
 }
 
 # Alignment coverage feature columns

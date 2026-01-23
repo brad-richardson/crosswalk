@@ -59,6 +59,12 @@ def fetch(
         "--bbox-buffer",
         help="Expand bbox by this distance (meters). Defaults to 1km for complete network coverage.",
     ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Output file prefix (e.g., --name boston produces boston_overture_segments.parquet)",
+    ),
 ):
     """Fetch road data for an area of interest.
 
@@ -67,6 +73,10 @@ def fetch(
         matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
+
+        # Fetch with explicit output name prefix
+        matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture --name boston
+            # Produces: boston_overture_segments.parquet, boston_overture_connectors.parquet
 
         # Fetch for a configured dataset (auto-uses bbox, auto-names outputs)
         matcher fetch --for-dataset boston_streets -d osm              # boston_streets_osm_segments.parquet
@@ -89,7 +99,8 @@ def fetch(
         raise typer.Exit(1)
 
     # Determine bbox and dataset name
-    dataset_name: str | None = None
+    # --name takes precedence if provided, otherwise use --for-dataset name
+    dataset_name: str | None = name
 
     if for_dataset:
         # Look up bbox from dataset YAML configs
@@ -110,7 +121,9 @@ def fetch(
             raise typer.Exit(1)
 
         xmin, ymin, xmax, ymax = config.fetch.bbox
-        dataset_name = for_dataset
+        # Use --name if provided, otherwise use for_dataset name
+        if dataset_name is None:
+            dataset_name = for_dataset
         console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
         console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
 

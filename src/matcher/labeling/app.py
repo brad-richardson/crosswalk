@@ -21,29 +21,29 @@ PROJECT_ROOT = Path(__file__).parents[3]
 
 # Base dataset configurations - maps dataset_id to (target_file, reference_file)
 # Dataset metadata (name, type, urls) comes from DatasetRegistry
-# Reference file is the Overture segments file for the region
+# Reference file naming: {region}_overture_segments.parquet (e.g., boston_overture_segments.parquet)
 _BASE_DATASET_CONFIG = {
-    # Boston area (default Overture reference)
-    "boston_streets": ("boston_streets.parquet", "overture_segments.parquet"),
-    "boston_bikes": ("boston_bike_network.parquet", "overture_segments.parquet"),
-    "boston_sidewalks": ("boston_sidewalks.parquet", "overture_segments.parquet"),
-    "osm": ("osm_segments.parquet", "overture_segments.parquet"),
+    # Boston area
+    "boston_streets": ("boston_streets.parquet", "boston_overture_segments.parquet"),
+    "boston_bikes": ("boston_bike_network.parquet", "boston_overture_segments.parquet"),
+    "boston_sidewalks": ("boston_sidewalks.parquet", "boston_overture_segments.parquet"),
+    "osm": ("boston_osm_segments.parquet", "boston_overture_segments.parquet"),
     # Fort Collins, CO
     "fort_collins_streets": (
         "fort_collins_streets.parquet",
-        "overture_fort_collins_segments.parquet",
+        "fort_collins_overture_segments.parquet",
     ),
     "fort_collins_sidewalks": (
         "fort_collins_sidewalks.parquet",
-        "overture_fort_collins_segments.parquet",
+        "fort_collins_overture_segments.parquet",
     ),
     # Frisco, TX
-    "frisco_roads": ("frisco_roads.parquet", "overture_frisco_segments.parquet"),
-    "frisco_trails": ("frisco_trails.parquet", "overture_frisco_segments.parquet"),
-    # Salt Lake City, UT (uses same Overture as Utah)
-    "salt_lake_roads": ("utah_roads.parquet", "overture_salt_lake_segments.parquet"),
+    "frisco_roads": ("frisco_roads.parquet", "frisco_overture_segments.parquet"),
+    "frisco_trails": ("frisco_trails.parquet", "frisco_overture_segments.parquet"),
+    # Salt Lake City, UT
+    "salt_lake_roads": ("utah_roads.parquet", "salt_lake_overture_segments.parquet"),
     # Fresno, CA
-    "fresno_roads": ("fresno_roads.parquet", "fresno_overture/overture_segments.parquet"),
+    "fresno_roads": ("fresno_roads.parquet", "fresno_overture_segments.parquet"),
     # Utah (legacy - uses subdirectory)
     "utah_roads": ("utah_roads.parquet", "utah_overture/overture_segments.parquet"),
 }

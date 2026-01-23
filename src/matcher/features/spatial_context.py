@@ -1197,6 +1197,17 @@ def build_inferred_graph(
 
     start_points = shapely.get_point(valid_geoms, 0)
     end_points = shapely.get_point(valid_geoms, -1)
+
+    # Filter out geometries where get_point returned None (e.g., degenerate LineStrings)
+    valid_points_mask = ~shapely.is_missing(start_points) & ~shapely.is_missing(end_points)
+    if not valid_points_mask.all():
+        n_filtered = (~valid_points_mask).sum()
+        logger.debug(f"[graphlet] Filtered {n_filtered} geometries with invalid start/end points")
+        start_points = start_points[valid_points_mask]
+        end_points = end_points[valid_points_mask]
+        valid_geoms = valid_geoms[valid_points_mask]
+        valid_seg_ids = valid_seg_ids[valid_points_mask]
+
     start_coords = shapely.get_coordinates(start_points)
     end_coords = shapely.get_coordinates(end_points)
 
