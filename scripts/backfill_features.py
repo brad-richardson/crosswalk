@@ -50,44 +50,78 @@ from matcher.features.spatial_context import (
     graphlet_segment_similarity,
 )
 
-# Dataset name to (target file, reference file) mapping
-# Reference file is the Overture segments file to use for this dataset
-# Note: Dataset names have us_ prefix but data files use shorter names
-# Reference file naming: {region}_overture_segments.parquet (e.g., boston_overture_segments.parquet)
-DATASET_CONFIG = {
-    "us_boston_bike_network": (
-        "us_boston_bike_network.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_boston_sidewalks": (
-        "us_boston_sidewalks.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_boston_streets": (
-        "us_boston_streets.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_boston_streets_osm": (
-        "us_boston_streets_osm_segments.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_fort_collins_streets": (
-        "us_fort_collins_streets.parquet",
-        "us_fort_collins_overture_segments.parquet",
-    ),
-    "us_fort_collins_sidewalks": (
-        "us_fort_collins_sidewalks.parquet",
-        "us_fort_collins_overture_segments.parquet",
-    ),
-    "us_frisco_trails": (
-        "us_frisco_trails.parquet",
-        "us_frisco_overture_segments.parquet",
-    ),
-    "us_frisco_roads": (
-        "us_frisco_roads.parquet",
-        "us_frisco_overture_segments.parquet",
-    ),
-}
+# Data directory
+DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
+
+
+def _find_overture_reference(dataset_name: str) -> str | None:
+    """Find the Overture reference file for a dataset by checking what exists.
+
+    Tries progressively shorter region prefixes until a matching Overture file is found.
+    """
+    parts = dataset_name.split("_")
+
+    # Try progressively shorter prefixes
+    for i in range(len(parts), 0, -1):
+        region = "_".join(parts[:i])
+        candidate = f"{region}_overture_segments.parquet"
+        if (DATA_DIR / candidate).exists():
+            return candidate
+
+    # Fallback to generic overture_segments.parquet
+    if (DATA_DIR / "overture_segments.parquet").exists():
+        return "overture_segments.parquet"
+
+    return None
+
+
+def _discover_datasets() -> dict[str, tuple[str, str]]:
+    """Auto-discover datasets from existing label directories.
+
+    Only includes datasets that have label files, since backfill operates on labels.
+
+    Returns:
+        Dict mapping dataset_name to (target_file, reference_file)
+    """
+    datasets = {}
+
+    # Only process datasets that have existing labels
+    labels_dir = Path(__file__).parent.parent / "labels"
+    if not labels_dir.exists():
+        return datasets
+
+    for label_dir in labels_dir.iterdir():
+        if not label_dir.is_dir() or not label_dir.name.startswith("dataset="):
+            continue
+
+        dataset_name = label_dir.name.replace("dataset=", "")
+
+        # Determine target file based on whether it's an OSM dataset
+        if dataset_name.endswith("_osm"):
+            # OSM datasets: us_boston_streets_osm -> us_boston_streets_osm_segments.parquet
+            target_file = f"{dataset_name}_segments.parquet"
+        else:
+            # Regular datasets: us_boston_streets -> us_boston_streets.parquet
+            target_file = f"{dataset_name}.parquet"
+
+        if not (DATA_DIR / target_file).exists():
+            logger.warning(f"Target file not found for {dataset_name}: {target_file}")
+            continue
+
+        reference_file = _find_overture_reference(dataset_name)
+        if not reference_file:
+            logger.warning(f"No Overture reference found for {dataset_name}")
+            continue
+
+        datasets[dataset_name] = (target_file, reference_file)
+
+    return datasets
+
+
+def get_dataset_config() -> dict[str, tuple[str, str]]:
+    """Get dataset configuration, auto-discovering from yaml configs."""
+    return _discover_datasets()
+
 
 # Alignment coverage feature columns
 ALIGNMENT_FEATURE_COLUMNS = [
@@ -371,6 +405,7 @@ def backfill_dataset(
     dataset_name: str,
     labels_dir: Path,
     data_dir: Path,
+    dataset_config: dict[str, tuple[str, str]],
     ref_gdf: gpd.GeoDataFrame | None = None,
     ref_topology: dict | None = None,
     ref_graphlet_data: tuple | None = None,
@@ -386,9 +421,10 @@ def backfill_dataset(
     """Backfill features for a single dataset.
 
     Args:
-        dataset_name: Name of the dataset (e.g., 'boston_streets')
+        dataset_name: Name of the dataset (e.g., 'us_boston_streets')
         labels_dir: Path to labels directory
         data_dir: Path to raw data directory
+        dataset_config: Dict mapping dataset names to (target_file, reference_file)
         ref_gdf: Pre-loaded reference GeoDataFrame (for alignment)
         ref_topology: Pre-computed reference topology dict
         ref_graphlet_data: Pre-computed reference graphlet data (G, seg_to_start, seg_to_end, features)
@@ -409,11 +445,11 @@ def backfill_dataset(
         logger.warning(f"No labels found for {dataset_name}")
         return 0
 
-    if dataset_name not in DATASET_CONFIG:
+    if dataset_name not in dataset_config:
         logger.warning(f"Unknown dataset: {dataset_name}")
         return 0
 
-    target_file, _ = DATASET_CONFIG[dataset_name]
+    target_file, _ = dataset_config[dataset_name]
     target_path = data_dir / target_file
     if not target_path.exists():
         logger.warning(f"Target file not found: {target_path}")
@@ -834,19 +870,23 @@ def main():
     compute_alignment = not args.topology_only
     compute_topology = not args.alignment_only
 
+    # Get dataset configuration (auto-discovered from label directories)
+    dataset_config = get_dataset_config()
+    logger.info(f"Discovered {len(dataset_config)} datasets with labels")
+
     # Determine which datasets to process
     if args.dataset:
         datasets = [args.dataset]
     else:
-        datasets = list(DATASET_CONFIG.keys())
+        datasets = list(dataset_config.keys())
 
     # Group datasets by reference file
     ref_file_to_datasets = {}
     for dataset_name in datasets:
-        if dataset_name not in DATASET_CONFIG:
+        if dataset_name not in dataset_config:
             logger.warning(f"Unknown dataset: {dataset_name}")
             continue
-        _, ref_file = DATASET_CONFIG[dataset_name]
+        _, ref_file = dataset_config[dataset_name]
         if ref_file not in ref_file_to_datasets:
             ref_file_to_datasets[ref_file] = []
         ref_file_to_datasets[ref_file].append(dataset_name)
@@ -913,6 +953,7 @@ def main():
                 dataset_name,
                 labels_dir,
                 data_dir,
+                dataset_config=dataset_config,
                 ref_gdf=ref_gdf,
                 ref_topology=ref_topology,
                 ref_graphlet_data=ref_graphlet_data,
