@@ -17,6 +17,7 @@ import pytest
 from shapely import LineString
 
 from matcher.blocking.spatial_index import (
+    CandidateBatch,
     CandidatePair,
     generate_candidates,
 )
@@ -322,9 +323,9 @@ class TestMemoryEfficiency:
             target_id_column="id",
         )
 
-        # Basic sanity check
-        assert isinstance(candidates, list)
-        assert all(isinstance(c, CandidatePair) for c in candidates[:100])
+        # Basic sanity check - generate_candidates now returns CandidateBatch
+        assert isinstance(candidates, CandidateBatch)
+        assert len(candidates) > 0
 
 
 class TestCandidateGenerationProfiling:

@@ -59,6 +59,12 @@ def fetch(
         "--bbox-buffer",
         help="Expand bbox by this distance (meters). Defaults to 1km for complete network coverage.",
     ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Output file prefix (e.g., --name us_boston produces us_boston_overture_segments.parquet)",
+    ),
 ):
     """Fetch road data for an area of interest.
 
@@ -68,9 +74,13 @@ def fetch(
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
         matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
 
+        # Fetch with explicit output name prefix
+        matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture --name us_boston
+            # Produces: us_boston_overture_segments.parquet, us_boston_overture_connectors.parquet
+
         # Fetch for a configured dataset (auto-uses bbox, auto-names outputs)
-        matcher fetch --for-dataset boston_streets -d osm              # boston_streets_osm_segments.parquet
-        matcher fetch -f boston_streets -d overture -d osm             # Both, named for boston_streets
+        matcher fetch --for-dataset us_boston_streets -d osm   # us_boston_streets_osm_segments.parquet
+        matcher fetch -f us_boston_streets -d overture -d osm  # Both, named for us_boston_streets
 
     Note: OSM fetching requires osmium-tool to be installed:
         brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
@@ -89,7 +99,8 @@ def fetch(
         raise typer.Exit(1)
 
     # Determine bbox and dataset name
-    dataset_name: str | None = None
+    # --name takes precedence if provided, otherwise use --for-dataset name
+    dataset_name: str | None = name
 
     if for_dataset:
         # Look up bbox from dataset YAML configs
@@ -110,7 +121,9 @@ def fetch(
             raise typer.Exit(1)
 
         xmin, ymin, xmax, ymax = config.fetch.bbox
-        dataset_name = for_dataset
+        # Use --name if provided, otherwise use for_dataset name
+        if dataset_name is None:
+            dataset_name = for_dataset
         console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
         console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
 
@@ -422,11 +435,11 @@ def evaluate(
 
     Examples:
         # Basic bridge file stats
-        matcher evaluate data/output/boston_streets_bridge.parquet
+        matcher evaluate data/output/us_boston_streets_bridge.parquet
 
         # With ground truth evaluation
-        matcher evaluate data/output/boston_streets_bridge.parquet \\
-            --ground-truth labels/dataset=boston_streets/data.csv
+        matcher evaluate data/output/us_boston_streets_bridge.parquet \\
+            --ground-truth labels/dataset=us_boston_streets/data.csv
     """
     import pandas as pd
 
@@ -562,7 +575,7 @@ def label(
     """Launch the labeling UI for creating training data.
 
     Example:
-        matcher label data/raw/overture_segments.parquet data/raw/boston_streets.parquet
+        matcher label data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet
     """
     import os
     import subprocess
@@ -802,18 +815,18 @@ def integrate(
 
     Examples:
         # Single dataset
-        matcher integrate data/raw/overture.parquet \\
-            -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \\
+        matcher integrate data/raw/us_boston_overture_segments.parquet \\
+            -t us_boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \\
             -o data/integrated
 
         # Multiple datasets with priority
-        matcher integrate data/raw/overture.parquet \\
-            -t boston_streets:data/boston_streets/bridge.parquet:data/boston_streets/unmatched.parquet:1 \\
-            -t boston_bikes:data/boston_bikes/bridge.parquet:data/boston_bikes/unmatched.parquet:2 \\
+        matcher integrate data/raw/us_boston_overture_segments.parquet \\
+            -t us_boston_streets:data/us_boston_streets/bridge.parquet:data/us_boston_streets/unmatched.parquet:1 \\
+            -t us_boston_bike_network:data/us_boston_bike_network/bridge.parquet:data/us_boston_bike_network/unmatched.parquet:2 \\
             -o data/integrated
 
         # From config file
-        matcher integrate data/raw/overture.parquet -c integration_config.yaml -o data/integrated
+        matcher integrate data/raw/us_boston_overture_segments.parquet -c integration_config.yaml -o data/integrated
     """
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -1158,12 +1171,12 @@ def discover_classes(
 
     Examples:
         # Basic discovery
-        matcher discover-classes data/raw/boston_streets.parquet
+        matcher discover-classes data/raw/us_boston_streets.parquet
 
         # With match-based analysis (more accurate)
-        matcher discover-classes data/raw/boston_streets.parquet \\
-            --reference data/raw/overture_segments.parquet \\
-            --bridge data/output/boston_streets_bridge.parquet
+        matcher discover-classes data/raw/us_boston_streets.parquet \\
+            --reference data/raw/us_boston_overture_segments.parquet \\
+            --bridge data/output/us_boston_streets_bridge.parquet
 
         # Print report only (don't save config)
         matcher discover-classes data/raw/new_dataset.parquet --print-only
@@ -1286,7 +1299,7 @@ def list_datasets():
 
 @app.command("generate-agent-batch")
 def generate_agent_batch(
-    dataset: str = typer.Argument(..., help="Target dataset name (e.g., 'boston_streets')"),
+    dataset: str = typer.Argument(..., help="Target dataset name (e.g., 'us_boston_streets')"),
     n_candidates: int = typer.Option(
         100,
         "--n-candidates",
@@ -1334,17 +1347,17 @@ def generate_agent_batch(
     packages with metadata YAML and images for each candidate.
 
     Examples:
-        # Generate 100 candidates for boston_streets
-        matcher generate-agent-batch boston_streets
+        # Generate 100 candidates for us_boston_streets
+        matcher generate-agent-batch us_boston_streets
 
         # Generate 50 candidates with custom paths
-        matcher generate-agent-batch boston_streets -n 50 \\
-            -r data/raw/overture_segments.parquet \\
-            -t data/raw/boston_streets.parquet \\
+        matcher generate-agent-batch us_boston_streets -n 50 \\
+            -r data/raw/us_boston_overture_segments.parquet \\
+            -t data/raw/us_boston_streets.parquet \\
             -o agent_labels
 
         # Use ML model for confidence scoring
-        matcher generate-agent-batch boston_streets \\
+        matcher generate-agent-batch us_boston_streets \\
             -m data/models/matcher_model_combined.joblib
     """
     from .agent_labeling import SamplingConfig, sample_candidates
@@ -1618,7 +1631,7 @@ def generate_agent_test_batch(
         matcher generate-agent-test-batch -n 200
 
         # Specific datasets only
-        matcher generate-agent-test-batch -n 100 -d boston_streets -d boston_bikes
+        matcher generate-agent-test-batch -n 100 -d us_boston_streets -d us_boston_bike_network
 
         # Filter by labeler
         matcher generate-agent-test-batch -n 50 --labeler brad
@@ -1698,18 +1711,19 @@ def generate_agent_test_batch(
     ref_gdf = gpd.read_parquet(reference)
     ref_lookup = ref_gdf.set_index("id")
 
-    # Load target datasets
+    # Load target datasets - auto-discover paths based on dataset name
     target_gdfs = {}
-    dataset_paths = {
-        "boston_streets": Path("data/raw/boston_streets.parquet"),
-        "boston_sidewalks": Path("data/raw/boston_sidewalks.parquet"),
-        "boston_bikes": Path("data/raw/boston_bike_network.parquet"),
-        "osm": Path("data/raw/osm_segments.parquet"),
-    }
+    data_dir = Path("data/raw")
 
     for dataset in sampled_df["dataset"].unique():
-        path = dataset_paths.get(dataset)
-        if path and path.exists():
+        # Try different naming patterns
+        candidates = [
+            data_dir / f"{dataset}.parquet",  # e.g., us_boston_streets.parquet
+            data_dir
+            / f"{dataset}_segments.parquet",  # e.g., us_boston_streets_osm_segments.parquet
+        ]
+        path = next((p for p in candidates if p.exists()), None)
+        if path:
             target_gdfs[dataset] = gpd.read_parquet(path).set_index("id")
         else:
             console.print(f"[yellow]Warning: No data file for {dataset}[/yellow]")

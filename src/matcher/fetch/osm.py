@@ -8,9 +8,13 @@ from pathlib import Path
 
 import geopandas as gpd
 from loguru import logger
+from pyproj import Geod
 from shapely.geometry import box as shapely_box
 
 from ..config import settings
+
+# Reusable WGS84 geodetic calculator (avoids repeated object construction)
+_WGS84_GEOD = Geod(ellps="WGS84")
 from .metadata import FetchMetadata, save_metadata
 from .osm_download import download_and_extract
 from .osm_pbf import parse_pbf
@@ -211,6 +215,122 @@ def fetch_osm_segments(
     return segments_path
 
 
+def _node_ids_to_connectors(
+    node_ids, geometry, junction_nodes: set | None = None
+) -> list[dict] | None:
+    """Convert OSM node_ids to Overture-style connectors format.
+
+    Creates connectors for endpoints and junction nodes only. Junction nodes are
+    nodes shared by multiple ways (intersections). Shape nodes (intermediate
+    nodes that just define geometry) are excluded to avoid polluting topology
+    metrics.
+
+    Args:
+        node_ids: List or numpy array of OSM node IDs from a way, or None
+        geometry: Shapely LineString geometry for the way
+        junction_nodes: Set of node IDs that are junctions (shared by multiple ways).
+            If None, only endpoints are included.
+
+    Returns:
+        List of connector dicts with 'at' and 'connector_id' keys, or None
+        if node_ids is None, empty, or has only one node.
+
+    Example:
+        >>> # 3-node way where middle node 150 is a junction
+        >>> _node_ids_to_connectors([100, 150, 200], linestring, {150})
+        [{'at': 0.0, 'connector_id': 'n100'},
+         {'at': 0.4, 'connector_id': 'n150'},
+         {'at': 1.0, 'connector_id': 'n200'}]
+        >>> # Same way but 150 is just a shape node
+        >>> _node_ids_to_connectors([100, 150, 200], linestring, set())
+        [{'at': 0.0, 'connector_id': 'n100'},
+         {'at': 1.0, 'connector_id': 'n200'}]
+    """
+    # Handle None and empty cases (works for both list and numpy array)
+    if node_ids is None:
+        return None
+    if len(node_ids) < 2:
+        return None
+    if geometry is None or geometry.is_empty:
+        return None
+
+    junction_nodes = junction_nodes or set()
+
+    # Get coordinates from geometry
+    coords = list(geometry.coords)
+    n_coords = len(coords)
+    n_nodes = len(node_ids)
+
+    # Sanity check: node_ids should match coordinate count
+    if n_nodes != n_coords:
+        # Fallback to endpoints only if mismatch
+        return [
+            {"at": 0.0, "connector_id": f"n{node_ids[0]}"},
+            {"at": 1.0, "connector_id": f"n{node_ids[-1]}"},
+        ]
+
+    # Compute geodetic distances between consecutive points
+    cumulative_distances = [0.0]
+
+    for i in range(1, n_coords):
+        lon1, lat1 = coords[i - 1]
+        lon2, lat2 = coords[i]
+        _, _, dist = _WGS84_GEOD.inv(lon1, lat1, lon2, lat2)
+        cumulative_distances.append(cumulative_distances[-1] + dist)
+
+    total_length = cumulative_distances[-1]
+
+    # Build connectors for endpoints and junctions only
+    connectors = []
+    for i, node_id in enumerate(node_ids):
+        is_endpoint = (i == 0) or (i == n_nodes - 1)
+        is_junction = node_id in junction_nodes
+
+        if not is_endpoint and not is_junction:
+            continue  # Skip shape nodes
+
+        if total_length > 0:
+            at_value = cumulative_distances[i] / total_length
+        else:
+            # Degenerate case: all points at same location
+            at_value = 0.0 if i == 0 else 1.0
+
+        # Round to avoid floating point precision issues
+        at_value = round(at_value, 6)
+
+        connectors.append({"at": at_value, "connector_id": f"n{node_id}"})
+
+    return connectors
+
+
+def _find_junction_nodes(node_ids_series) -> set:
+    """Find nodes that are junctions (shared by multiple ways).
+
+    A junction node is any node that appears in more than one way.
+    These are the points where roads intersect.
+
+    Args:
+        node_ids_series: Pandas Series where each element is a list/array of node IDs
+
+    Returns:
+        Set of node IDs that are junctions
+    """
+    from collections import Counter
+
+    node_counts: Counter = Counter()
+
+    for node_ids in node_ids_series:
+        if node_ids is None:
+            continue
+        # Count each unique node in this way (a node appearing twice in one way
+        # is not a junction by itself)
+        for node_id in set(node_ids):
+            node_counts[node_id] += 1
+
+    # Junction nodes appear in 2+ ways
+    return {node_id for node_id, count in node_counts.items() if count >= 2}
+
+
 def _transform_to_overture_schema(
     gdf: gpd.GeoDataFrame, keep_source_tags: bool = True
 ) -> gpd.GeoDataFrame:
@@ -261,16 +381,42 @@ def _transform_to_overture_schema(
     if keep_source_tags:
         gdf["source_tags"] = gdf["tags"]
 
-    # Drop internal columns
+    # Convert node_ids to Overture-style connectors before dropping
+    # Only include endpoints and junction nodes (not shape nodes)
+    if "node_ids" in gdf.columns:
+        # First pass: find junction nodes (shared by multiple ways)
+        junction_nodes = _find_junction_nodes(gdf["node_ids"])
+        logger.info(f"Found {len(junction_nodes)} junction nodes across {len(gdf)} ways")
+
+        # Second pass: create connectors for endpoints + junctions
+        gdf["connectors"] = [
+            _node_ids_to_connectors(node_ids, geom, junction_nodes)
+            for node_ids, geom in zip(gdf["node_ids"], gdf["geometry"])
+        ]
+    else:
+        gdf["connectors"] = None
+
+    # Drop internal columns (but NOT connectors - those are preserved)
     gdf.drop(columns=["tags", "name", "node_ids"], inplace=True, errors="ignore")
 
     return gdf
 
 
 def _transform_connectors_schema(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Transform connector data to match Overture-like schema."""
+    """Transform connector data to match Overture-like schema.
+
+    Normalizes connector IDs to match segment connector references:
+    - Raw OSM format: "n61341696@5" (with version suffix)
+    - Normalized format: "n61341696" (without version)
+
+    This ensures 1:1 compatibility between segment connectors and connector file.
+    """
     if len(gdf) == 0:
         return gdf
+
+    # Normalize IDs to match segment connector references (strip @version)
+    # Current: "n61341696@5" -> Target: "n61341696"
+    gdf["id"] = gdf["id"].apply(lambda x: x.split("@")[0] if "@" in str(x) else x)
 
     # Work in place to avoid copy
     gdf["sources"] = [[{"dataset": "OpenStreetMap", "record_id": oid}] for oid in gdf["id"]]

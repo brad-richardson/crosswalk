@@ -42,66 +42,7 @@ from pathlib import Path
 
 from loguru import logger
 
-# Labeled datasets and their region configurations
-# Maps dataset name to region info for Overture fetch
-LABELED_DATASETS = {
-    "us_boston_streets": {
-        "fetch_script": "fetch_boston.py",
-        "region": "boston",
-        "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
-    },
-    "us_boston_sidewalks": {
-        "fetch_script": "fetch_boston.py",
-        "region": "boston",
-        "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
-    },
-    "us_boston_bikes": {
-        "fetch_script": "fetch_boston.py",
-        "region": "boston",
-        "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
-    },
-    "us_boston_osm": {
-        "fetch_script": None,  # Fetched via CLI
-        "region": "boston",
-        "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_file": "overture_segments.parquet",
-        "osm_fetch": True,  # Uses matcher fetch -d osm
-    },
-    "us_fort_collins_streets": {
-        "fetch_script": "fetch_fort_collins.py",
-        "region": "fort_collins",
-        "bbox": "-105.15,40.45,-104.95,40.65",
-        "overture_file": "overture_fort_collins_segments.parquet",
-    },
-    "us_frisco_trails": {
-        "fetch_script": "fetch_frisco.py",
-        "region": "frisco",
-        "bbox": "-96.95,33.08,-96.75,33.18",
-        "overture_file": "overture_frisco_segments.parquet",
-    },
-}
-
-# Group datasets by region for efficient fetching
-REGIONS = {
-    "boston": {
-        "bbox": "-71.19,42.21,-70.92,42.40",
-        "overture_output": "overture_segments.parquet",
-        "fetch_scripts": ["fetch_boston.py"],
-    },
-    "fort_collins": {
-        "bbox": "-105.15,40.45,-104.95,40.65",
-        "overture_output": "overture_fort_collins_segments.parquet",
-        "fetch_scripts": ["fetch_fort_collins.py"],
-    },
-    "frisco": {
-        "bbox": "-96.95,33.08,-96.75,33.18",
-        "overture_output": "overture_frisco_segments.parquet",
-        "fetch_scripts": ["fetch_frisco.py"],
-    },
-}
+from matcher.datasets.schema import get_dataset_config as get_yaml_config
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent
@@ -115,6 +56,181 @@ RESULTS_FILE = BENCHMARKS_DIR / "model_performance.csv"
 # Default benchmark settings
 DEFAULT_TRAIN_SIZE = 0.7  # 70% train, 30% test (industry standard)
 SPLIT_SEED = 999  # Seed for train/test split (different from any internal seeds)
+
+
+def _find_fetch_script(dataset_name: str) -> str | None:
+    """Find the fetch script for a dataset based on city name.
+
+    Extracts the city name from the dataset (e.g., us_boston_streets -> boston)
+    and looks for fetch_{city}.py in the scripts directory.
+    """
+    parts = dataset_name.split("_")
+    if len(parts) < 2:
+        return None
+
+    # Skip country prefix and try progressively longer city names
+    # E.g., us_fort_collins_streets -> try fort_collins, then fort
+    for i in range(len(parts) - 1, 1, -1):
+        city = "_".join(parts[1:i])
+        script = f"fetch_{city}.py"
+        if (SCRIPTS_DIR / script).exists():
+            return script
+
+    return None
+
+
+def _find_overture_reference(dataset_name: str) -> str | None:
+    """Find the Overture reference file for a dataset.
+
+    Tries progressively shorter region prefixes until a matching file is found.
+    """
+    parts = dataset_name.split("_")
+
+    # Try progressively shorter prefixes
+    for i in range(len(parts), 0, -1):
+        region = "_".join(parts[:i])
+        candidate = f"{region}_overture_segments.parquet"
+        if (DATA_DIR / candidate).exists():
+            return candidate
+
+    # Fallback to generic overture_segments.parquet
+    if (DATA_DIR / "overture_segments.parquet").exists():
+        return "overture_segments.parquet"
+
+    return None
+
+
+def _extract_region(dataset_name: str) -> str:
+    """Extract region from dataset name for grouping.
+
+    Uses yaml config bbox to find matching Overture file,
+    then derives region from that.
+    E.g., us_boston_streets -> us_boston (shares Overture with other Boston datasets)
+    """
+    parts = dataset_name.split("_")
+
+    # Try progressively shorter prefixes
+    for i in range(len(parts), 1, -1):
+        region = "_".join(parts[:i])
+        candidate = f"{region}_overture_segments.parquet"
+        if (DATA_DIR / candidate).exists():
+            return region
+
+    # Default to country + first city part
+    if len(parts) >= 2:
+        return "_".join(parts[:2])
+
+    return dataset_name
+
+
+def _get_bbox_from_yaml(dataset_name: str) -> str | None:
+    """Get bbox string from yaml config.
+
+    For OSM datasets (ending in _osm), look up the base dataset config.
+    """
+    # For OSM datasets, look up the base dataset
+    config_name = dataset_name
+    if dataset_name.endswith("_osm"):
+        config_name = dataset_name[:-4]  # Remove _osm suffix
+
+    config = get_yaml_config(config_name)
+    if config and config.fetch and config.fetch.bbox:
+        bbox = config.fetch.bbox
+        return f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+
+    return None
+
+
+def _discover_datasets() -> dict[str, dict]:
+    """Auto-discover labeled datasets and their configurations.
+
+    Returns:
+        Dict mapping dataset_name to config dict with keys:
+        - fetch_script: Path to fetch script (or None for OSM/CLI datasets)
+        - region: Region name for grouping (e.g., us_boston)
+        - bbox: Bounding box string
+        - overture_file: Overture parquet filename
+        - osm_fetch: True if this is an OSM dataset (fetched via CLI)
+    """
+    datasets = {}
+
+    if not LABELS_DIR.exists():
+        return datasets
+
+    for label_dir in sorted(LABELS_DIR.iterdir()):
+        if not label_dir.is_dir() or not label_dir.name.startswith("dataset="):
+            continue
+
+        dataset_name = label_dir.name.replace("dataset=", "")
+
+        # Get bbox from yaml config
+        bbox = _get_bbox_from_yaml(dataset_name)
+        if not bbox:
+            logger.warning(f"No bbox found for {dataset_name}, skipping")
+            continue
+
+        # Determine region for grouping
+        region = _extract_region(dataset_name)
+
+        # Find Overture reference file
+        overture_file = _find_overture_reference(dataset_name)
+        if not overture_file:
+            # Construct expected filename based on region
+            overture_file = f"{region}_overture_segments.parquet"
+
+        # Check if OSM dataset
+        is_osm = dataset_name.endswith("_osm")
+
+        # Find fetch script (only for non-OSM datasets)
+        fetch_script = None if is_osm else _find_fetch_script(dataset_name)
+
+        config = {
+            "fetch_script": fetch_script,
+            "region": region,
+            "bbox": bbox,
+            "overture_file": overture_file,
+        }
+
+        if is_osm:
+            config["osm_fetch"] = True
+
+        datasets[dataset_name] = config
+
+    return datasets
+
+
+def _discover_regions(labeled_datasets: dict[str, dict]) -> dict[str, dict]:
+    """Group labeled datasets by region for efficient fetching.
+
+    Returns:
+        Dict mapping region_name to config dict with keys:
+        - bbox: Bounding box string
+        - overture_output: Overture parquet filename
+        - fetch_scripts: List of unique fetch scripts for this region
+    """
+    regions = {}
+
+    for _dataset_name, config in labeled_datasets.items():
+        region = config["region"]
+
+        if region not in regions:
+            regions[region] = {
+                "bbox": config["bbox"],
+                "overture_output": config["overture_file"],
+                "fetch_scripts": [],
+            }
+
+        # Add fetch script if present and not already in list
+        fetch_script = config.get("fetch_script")
+        if fetch_script and fetch_script not in regions[region]["fetch_scripts"]:
+            regions[region]["fetch_scripts"].append(fetch_script)
+
+    return regions
+
+
+# Auto-discover configurations
+LABELED_DATASETS = _discover_datasets()
+REGIONS = _discover_regions(LABELED_DATASETS)
 
 
 def run_command(cmd: list[str], description: str, dry_run: bool = False) -> bool:
@@ -153,6 +269,8 @@ def fetch_overture_for_region(region_name: str, region_config: dict, dry_run: bo
         "overture",
         "-o",
         str(DATA_DIR),
+        "--name",
+        region_name,  # e.g., boston_overture_segments.parquet
     ]
     return run_command(cmd, f"Fetching Overture data for {region_name}", dry_run)
 
@@ -168,6 +286,8 @@ def fetch_osm_for_region(region_name: str, bbox: str, dry_run: bool = False) -> 
         "osm",
         "-o",
         str(DATA_DIR),
+        "--name",
+        region_name,  # e.g., boston_osm_segments.parquet
     ]
     return run_command(cmd, f"Fetching OSM data for {region_name}", dry_run)
 
@@ -181,7 +301,7 @@ def fetch_local_datasets(fetch_scripts: list[str], dry_run: bool = False) -> boo
             logger.warning(f"Fetch script not found: {script_path}")
             continue
 
-        cmd = ["python", str(script_path)]
+        cmd = [sys.executable, str(script_path)]
         if not run_command(cmd, f"Fetching local data via {script}", dry_run):
             success = False
     return success
@@ -232,7 +352,7 @@ def fetch_all_data(datasets: list[str] | None = None, dry_run: bool = False) -> 
 
 def run_backfill(datasets: list[str] | None = None, dry_run: bool = False) -> bool:
     """Run feature backfill for labeled datasets."""
-    cmd = ["python", str(SCRIPTS_DIR / "backfill_features.py")]
+    cmd = [sys.executable, str(SCRIPTS_DIR / "backfill_features.py")]
 
     if datasets and len(datasets) == 1:
         cmd.extend(["--dataset", datasets[0]])

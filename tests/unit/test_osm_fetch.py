@@ -11,6 +11,7 @@ from matcher.fetch.osm import (
     _filter_fully_inside,
     _get_level_from_rules,
     _has_flag,
+    _node_ids_to_connectors,
     _normalize_road_class,
     _transform_connectors_schema,
     _transform_to_overture_schema,
@@ -279,7 +280,8 @@ class TestTransformConnectorsSchema:
         assert "sources" in result.columns
         sources = result.iloc[0]["sources"]
         assert sources[0]["dataset"] == "OpenStreetMap"
-        assert sources[0]["record_id"] == "n456@1"
+        # record_id uses normalized ID (without @version)
+        assert sources[0]["record_id"] == "n456"
 
 
 class TestFindBestRegion:
@@ -607,3 +609,212 @@ class TestFilterConnectorsForRoads:
         result = _filter_connectors_for_roads(connectors, roads)
         result["id"] = ["modified"]
         assert connectors.iloc[0]["id"] == "n1"
+
+
+class TestNodeIdsToConnectors:
+    """Tests for _node_ids_to_connectors function."""
+
+    @pytest.mark.parametrize(
+        "node_ids,expected",
+        [
+            (None, None),
+            ([], None),
+            ([123], None),  # Single node is degenerate
+        ],
+        ids=["none", "empty", "single_node"],
+    )
+    def test_invalid_input_returns_none(self, node_ids, expected):
+        """Invalid inputs return None."""
+        geom = LineString([(0, 0), (1, 1)])
+        assert _node_ids_to_connectors(node_ids, geom) is expected
+
+    @pytest.mark.parametrize(
+        "node_ids,junction_nodes,expected_ids",
+        [
+            # Only endpoints when no junctions
+            ([100, 200], None, ["n100", "n200"]),
+            ([100, 150, 200], None, ["n100", "n200"]),
+            ([100, 150, 175, 200], None, ["n100", "n200"]),
+            # Junctions included when specified
+            ([100, 150, 200], {150}, ["n100", "n150", "n200"]),
+            ([100, 150, 175, 200], {150}, ["n100", "n150", "n200"]),
+            ([100, 150, 175, 200], {150, 175}, ["n100", "n150", "n175", "n200"]),
+        ],
+        ids=[
+            "two_nodes",
+            "three_nodes_no_junction",
+            "four_nodes_no_junction",
+            "three_nodes_with_junction",
+            "four_nodes_one_junction",
+            "four_nodes_two_junctions",
+        ],
+    )
+    def test_filters_to_endpoints_and_junctions(self, node_ids, junction_nodes, expected_ids):
+        """Connectors include endpoints and junction nodes only."""
+        coords = [(0, i) for i in range(len(node_ids))]
+        geom = LineString(coords)
+        result = _node_ids_to_connectors(node_ids, geom, junction_nodes)
+
+        assert result is not None
+        assert [c["connector_id"] for c in result] == expected_ids
+        assert result[0]["at"] == 0.0
+        assert result[-1]["at"] == 1.0
+
+    def test_handles_numpy_array(self):
+        """Handles numpy arrays from pyosmium parsing."""
+        import numpy as np
+
+        geom = LineString([(0, 0), (0, 1), (0, 2)])
+        result = _node_ids_to_connectors(np.array([100, 150, 200]), geom)
+
+        assert [c["connector_id"] for c in result] == ["n100", "n200"]
+
+    def test_mismatched_node_count_falls_back_to_endpoints(self):
+        """Falls back to endpoints when node count mismatches coordinates."""
+        geom = LineString([(0, 0), (0, 1), (0, 2)])
+        result = _node_ids_to_connectors([100, 200], geom)  # 2 nodes, 3 coords
+
+        assert len(result) == 2
+        assert result[0] == {"at": 0.0, "connector_id": "n100"}
+        assert result[1] == {"at": 1.0, "connector_id": "n200"}
+
+
+class TestTransformToOvertureSchemaWithConnectors:
+    """Tests for _transform_to_overture_schema connector handling."""
+
+    @pytest.fixture
+    def base_gdf_data(self):
+        """Base data for creating test GeoDataFrames."""
+        return {
+            "tags": [{"highway": "residential"}],
+            "name": ["Main Street"],
+        }
+
+    def test_single_way_has_endpoints_only(self, base_gdf_data):
+        """Single way has no junctions, so only endpoints are included."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1@1"],
+                "geometry": [LineString([(0, 0), (0.5, 0.5), (1, 1)])],
+                "node_ids": [[100, 150, 200]],
+                **base_gdf_data,
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_to_overture_schema(gdf)
+
+        connectors = result.iloc[0]["connectors"]
+        assert [c["connector_id"] for c in connectors] == ["n100", "n200"]
+
+    def test_intersecting_ways_include_junction(self):
+        """Junction nodes are included where ways intersect."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["w1@1", "w2@1"],
+                "geometry": [
+                    LineString([(0, 0), (0.5, 0.5), (1, 1)]),
+                    LineString([(0, 1), (0.5, 0.5), (1, 0)]),
+                ],
+                "tags": [{"highway": "residential"}] * 2,
+                "name": ["Main St", "Cross St"],
+                "node_ids": [[100, 150, 200], [300, 150, 400]],  # Share node 150
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_to_overture_schema(gdf)
+
+        # Both ways should include the shared junction node
+        assert [c["connector_id"] for c in result.iloc[0]["connectors"]] == [
+            "n100",
+            "n150",
+            "n200",
+        ]
+        assert [c["connector_id"] for c in result.iloc[1]["connectors"]] == [
+            "n300",
+            "n150",
+            "n400",
+        ]
+
+    @pytest.mark.parametrize(
+        "node_ids_value",
+        [
+            pytest.param(None, id="none_value"),
+            pytest.param("missing", id="missing_column"),
+        ],
+    )
+    def test_handles_missing_node_ids(self, base_gdf_data, node_ids_value):
+        """Gracefully handles missing or None node_ids."""
+        data = {
+            "id": ["w1@1"],
+            "geometry": [LineString([(0, 0), (1, 1)])],
+            **base_gdf_data,
+        }
+        if node_ids_value is not None:
+            data["node_ids"] = [None]
+
+        gdf = gpd.GeoDataFrame(data, crs="EPSG:4326")
+        result = _transform_to_overture_schema(gdf)
+
+        assert "connectors" in result.columns
+        assert result.iloc[0]["connectors"] is None
+
+
+class TestTransformConnectorsSchemaWithNormalization:
+    """Tests for _transform_connectors_schema ID normalization."""
+
+    def test_strips_version_from_id(self):
+        """Connector IDs should have @version suffix stripped."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n61341696@5", "n12345678@10"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_connectors_schema(gdf)
+
+        # IDs should be normalized (no @version)
+        assert result.iloc[0]["id"] == "n61341696"
+        assert result.iloc[1]["id"] == "n12345678"
+
+    def test_handles_id_without_version(self):
+        """IDs without @version should remain unchanged."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n61341696", "n12345678"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        result = _transform_connectors_schema(gdf)
+
+        assert result.iloc[0]["id"] == "n61341696"
+        assert result.iloc[1]["id"] == "n12345678"
+
+    def test_normalized_ids_match_segment_connectors(self):
+        """Connector file IDs should match segment connector_id references.
+
+        This is critical for 1:1 mapping between segments and connectors:
+        - Segment connectors reference: n{node_id}
+        - Connector file IDs: n{node_id} (after stripping @version)
+        """
+        # Simulate OSM connector data
+        connectors_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n100@3", "n200@5"],  # Raw OSM format with version
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        connectors_result = _transform_connectors_schema(connectors_gdf)
+
+        # Simulate OSM segment with node_ids converted to connectors
+        # Need geometry with 2 coords to match 2 node_ids
+        segment_geometry = LineString([(0, 0), (1, 1)])
+        segment_connectors = _node_ids_to_connectors([100, 200], segment_geometry)
+
+        # Verify 1:1 mapping
+        segment_conn_ids = {c["connector_id"] for c in segment_connectors}
+        file_conn_ids = set(connectors_result["id"].values)
+
+        assert segment_conn_ids == file_conn_ids

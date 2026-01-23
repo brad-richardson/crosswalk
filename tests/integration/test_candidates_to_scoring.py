@@ -249,8 +249,9 @@ class TestFeatureComputation:
         if not candidates:
             pytest.skip("No candidates generated for feature test")
 
+        # generate_candidates returns CandidateBatch; extract first as list
         results = score_candidates(
-            candidates[:1],  # Just test one
+            [candidates[0]],  # Just test one candidate
             reference_gdf,
             target_gdf,
             ref_name_column="names",

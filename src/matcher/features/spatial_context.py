@@ -22,6 +22,7 @@ from shapely.strtree import STRtree
 
 if TYPE_CHECKING:
     import networkx as nx
+    from pyproj import Transformer
 
 from .relational import (
     compute_parallel_alignment,
@@ -205,7 +206,7 @@ class SpatialContextIndex:
     """
 
     endpoint_coords: np.ndarray = field(default_factory=lambda: np.array([]))
-    """Array of shape (N, 2) with all endpoint coordinates."""
+    """Array of shape (N, 2) with all endpoint coordinates (in projected CRS if geographic)."""
 
     endpoint_to_segment: dict[int, list[int]] = field(default_factory=dict)
     """Map from endpoint index to list of segment indices that share it."""
@@ -219,6 +220,8 @@ class SpatialContextIndex:
     _endpoint_tree: STRtree | None = field(default=None, repr=False)
     _segment_tree: STRtree | None = field(default=None, repr=False)
     _geometries: gpd.GeoSeries | None = field(default=None, repr=False)
+    _transformer: "Transformer | None" = field(default=None, repr=False)
+    """Transformer to project query points from source CRS to endpoint CRS."""
 
     def build_from_gdf(
         self,
@@ -247,12 +250,17 @@ class SpatialContextIndex:
 
         # Project to local CRS if in geographic coordinates (for accurate distance)
         work_gdf = gdf
+        self._transformer = None
         if gdf.crs is not None and gdf.crs.is_geographic:
+            from pyproj import Transformer
+
             centroid = gdf.geometry.union_all().centroid
             utm_zone = int((centroid.x + 180) / 6) + 1
             hemisphere = "north" if centroid.y >= 0 else "south"
             epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
             work_gdf = gdf.to_crs(epsg=epsg)
+            # Store transformer to project query points
+            self._transformer = Transformer.from_crs(gdf.crs, f"EPSG:{epsg}", always_xy=True)
 
         # Extract all endpoints using vectorized shapely operations
         geometries = work_gdf.geometry.values
@@ -359,12 +367,14 @@ class SpatialContextIndex:
         self,
         point: Point,
         radius: float,
+        already_projected: bool = False,
     ) -> list[tuple[int, float]]:
         """Find endpoints within radius of a point.
 
         Args:
-            point: Query point
+            point: Query point (in source CRS, typically WGS84)
             radius: Search radius (meters)
+            already_projected: If True, skip projection (point already in index CRS)
 
         Returns:
             List of (endpoint_idx, distance) tuples sorted by distance
@@ -372,12 +382,20 @@ class SpatialContextIndex:
         if self._endpoint_tree is None:
             return []
 
-        buffered = point.buffer(radius)
+        # Project query point if we have a transformer (geographic -> projected)
+        # Skip projection if caller indicates point is already in index CRS
+        query_point = point
+        if self._transformer is not None and not already_projected:
+            x, y = point.coords[0][:2]
+            px, py = self._transformer.transform(x, y)
+            query_point = Point(px, py)
+
+        buffered = query_point.buffer(radius)
         candidate_indices = self._endpoint_tree.query(buffered)
 
         results = []
         # Handle 3D coordinates by taking only x, y (first 2 dimensions)
-        point_coords = np.array(point.coords[0])[:2]
+        point_coords = np.array(query_point.coords[0])[:2]
 
         for ep_idx in candidate_indices:
             ep_coords = self.endpoint_coords[ep_idx]
@@ -440,11 +458,16 @@ class SpatialContextIndex:
             start_point = Point(self.endpoint_coords[start_ep_idx])
             end_point = Point(self.endpoint_coords[end_ep_idx])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(start_point, tolerance_m):
+            # Points from endpoint_coords are already projected
+            for nearby_ep, _dist in self.query_nearby_endpoints(
+                start_point, tolerance_m, already_projected=True
+            ):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(end_point, tolerance_m):
+            for nearby_ep, _dist in self.query_nearby_endpoints(
+                end_point, tolerance_m, already_projected=True
+            ):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
@@ -776,19 +799,149 @@ def _cluster_endpoints_fast(
     return uf
 
 
+def compute_all_topology_explicit(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    connectors_column: str = "connectors",
+) -> dict[str, dict] | None:
+    """Compute topology from explicit connector data (Overture/OSM style).
+
+    This function uses explicit connector IDs rather than inferring connectivity
+    from geometry proximity. It computes endpoint degrees by counting how many
+    segments share each connector.
+
+    The degree at each endpoint is the number of segments that reference that
+    connector at any position (not just endpoints). This means:
+    - A segment's start connector shared by 2 other segments → from_degree=3
+    - A segment's end connector used only by that segment → to_degree=1
+
+    Args:
+        gdf: GeoDataFrame with LineString geometries and connectors column
+        id_column: Column name for segment IDs
+        connectors_column: Column name for connectors array
+            (each element should have 'at' and 'connector_id' keys)
+
+    Returns:
+        Dict mapping segment_id -> topology features dict, or None if
+        connectors are not available (signals caller should fall back to
+        geometry-based inference).
+
+    Example connector format:
+        [
+            {"at": 0.0, "connector_id": "conn_a"},  # start
+            {"at": 0.5, "connector_id": "conn_b"},  # mid-segment
+            {"at": 1.0, "connector_id": "conn_c"},  # end
+        ]
+    """
+    # Check if connectors column exists and has data
+    if connectors_column not in gdf.columns:
+        return None
+
+    if gdf[connectors_column].isna().all():
+        return None
+
+    t_start = time.perf_counter()
+    logger.info(f"[topology-explicit] Computing topology from {connectors_column} column")
+
+    # Step 1: Build connector_id -> set of segment_ids mapping
+    # This counts how many segments reference each connector
+    connector_segments: dict[str, set[str]] = {}
+    segment_ids = gdf[id_column].astype(str).values
+
+    for seg_idx, connectors in enumerate(gdf[connectors_column].values):
+        if connectors is None:
+            continue
+
+        seg_id = segment_ids[seg_idx]
+        for conn in connectors:
+            if isinstance(conn, dict):
+                conn_id = conn.get("connector_id")
+                if conn_id:
+                    if conn_id not in connector_segments:
+                        connector_segments[conn_id] = set()
+                    connector_segments[conn_id].add(seg_id)
+
+    logger.debug(f"[topology-explicit] Found {len(connector_segments)} unique connectors")
+
+    # Step 2: For each segment, compute degrees from ALL connectors (not just endpoints)
+    # This properly handles mid-segment intersections
+    topology = {}
+
+    for seg_idx, connectors in enumerate(gdf[connectors_column].values):
+        seg_id = segment_ids[seg_idx]
+
+        if connectors is None or len(connectors) == 0:
+            # No connector data - use default (isolated segment)
+            topology[seg_id] = {
+                "from_degree": 1,
+                "to_degree": 1,
+                "is_dead_end": True,
+                "is_intersection": False,
+                "degree_signature": (1, 1),
+            }
+            continue
+
+        # Collect degrees for ALL connectors, tracking endpoint vs midpoint
+        from_degree = 1  # Default for start
+        to_degree = 1  # Default for end
+        all_degrees = []
+
+        for conn in connectors:
+            if isinstance(conn, dict):
+                at_pos = conn.get("at", -1)
+                conn_id = conn.get("connector_id")
+                if conn_id:
+                    degree = len(connector_segments.get(conn_id, set()))
+                    degree = max(1, degree)  # Ensure minimum of 1
+                    all_degrees.append(degree)
+
+                    # Track endpoint degrees specifically
+                    # Use small epsilon for floating point comparison
+                    if at_pos <= 0.001:  # Start (at ~0.0)
+                        from_degree = degree
+                    elif at_pos >= 0.999:  # End (at ~1.0)
+                        to_degree = degree
+
+        # Use max degree across ALL connectors for intersection detection
+        # (mid-segment junctions count as intersections)
+        max_degree = max(all_degrees) if all_degrees else 1
+
+        # Dead-end is based on ENDPOINT degrees only, not mid-segment connectors
+        # A segment is a dead-end if either endpoint has degree 1
+        topology[seg_id] = {
+            "from_degree": from_degree,
+            "to_degree": to_degree,
+            "is_dead_end": from_degree == 1 or to_degree == 1,
+            "is_intersection": max_degree > 2,  # True if ANY connector has degree > 2
+            "degree_signature": tuple(sorted([from_degree, to_degree])),
+        }
+
+    logger.info(
+        f"[topology-explicit] Computed topology for {len(topology)} segments "
+        f"in {time.perf_counter() - t_start:.2f}s"
+    )
+    return topology
+
+
 def compute_all_topology(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
     ids_to_compute: set[str] | None = None,
+    connectors_column: str | None = None,
 ) -> dict[str, dict]:
-    """Compute topology features for all segments using Union-Find clustering.
+    """Compute topology features for all segments.
 
-    This is an O(N log N) batch computation that's much faster than per-segment
-    queries for large datasets. Uses Union-Find to cluster nearby endpoints
-    without materializing an O(N²) adjacency matrix.
+    When connectors_column is provided and the data contains explicit connector
+    information (Overture/OSM style), topology is computed from connector sharing.
+    Otherwise, falls back to Union-Find clustering based on endpoint proximity.
 
-    Algorithm:
+    The explicit connector approach is preferred when available because:
+    - It uses authoritative topology from the source data
+    - It's O(N) time complexity vs O(N log N) for geometry inference
+    - It handles complex intersections more accurately
+
+    Geometry-based inference algorithm (fallback):
         1. Extract endpoints from all segments              O(N)
         2. Build STRtree from endpoints                     O(N log N)
         3. For each endpoint, query nearby within tolerance O(N × log N)
@@ -807,6 +960,8 @@ def compute_all_topology(
         id_column: Column name for segment IDs
         tolerance_m: Distance within which endpoints are considered connected (meters)
         ids_to_compute: If provided, only return topology for these IDs
+        connectors_column: Column name for explicit connector data. If provided and
+            data is available, uses explicit topology instead of geometry inference.
 
     Returns:
         Dict mapping segment_id -> topology features dict with:
@@ -816,6 +971,29 @@ def compute_all_topology(
         - is_intersection: True if either endpoint has degree > 2
         - degree_signature: Tuple of sorted [from_degree, to_degree]
     """
+    # Try explicit connector-based topology first (if available)
+    if connectors_column is not None:
+        explicit_result = compute_all_topology_explicit(gdf, id_column, connectors_column)
+        if explicit_result is not None:
+            # Filter to requested IDs if specified
+            if ids_to_compute is not None:
+                explicit_result = {k: v for k, v in explicit_result.items() if k in ids_to_compute}
+                # Fill in any missing IDs with defaults
+                for seg_id in ids_to_compute:
+                    if seg_id not in explicit_result:
+                        explicit_result[seg_id] = {
+                            "from_degree": 1,
+                            "to_degree": 1,
+                            "is_dead_end": True,
+                            "is_intersection": False,
+                            "degree_signature": (1, 1),
+                        }
+            return explicit_result
+        # Fall through to geometry inference if explicit failed
+        logger.debug(
+            f"[topology] Explicit connectors not available in '{connectors_column}', "
+            "falling back to geometry inference"
+        )
     if gdf.empty:
         return {}
 
@@ -1047,6 +1225,17 @@ def build_inferred_graph(
 
     start_points = shapely.get_point(valid_geoms, 0)
     end_points = shapely.get_point(valid_geoms, -1)
+
+    # Filter out geometries where get_point returned None (e.g., degenerate LineStrings)
+    valid_points_mask = ~shapely.is_missing(start_points) & ~shapely.is_missing(end_points)
+    if not valid_points_mask.all():
+        n_filtered = (~valid_points_mask).sum()
+        logger.debug(f"[graphlet] Filtered {n_filtered} geometries with invalid start/end points")
+        start_points = start_points[valid_points_mask]
+        end_points = end_points[valid_points_mask]
+        valid_geoms = valid_geoms[valid_points_mask]
+        valid_seg_ids = valid_seg_ids[valid_points_mask]
+
     start_coords = shapely.get_coordinates(start_points)
     end_coords = shapely.get_coordinates(end_points)
 
