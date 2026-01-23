@@ -7,28 +7,31 @@ import streamlit as st
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
 
-# Feature display configuration
-# All scores are normalized 0-1 where higher = better match
-FEATURE_LABELS = {
-    "hausdorff_norm": "Hausdorff",
-    "mean_hausdorff_norm": "Mean Haus.",
-    "buffer_iou": "Buffer IoU",
-    "overlap_ratio": "Overlap",
-    "heading_norm": "Heading",
-    "length_ratio": "Length",
-    "projection_norm": "Proximity",
-    "name_similarity": "Name",
-    "class_similarity": "Class",
-}
+# Feature display configuration - top features by XGBoost importance
+# These are the features that most influence the ML model's predictions
+# Ordered by importance (descending)
+TOP_FEATURES = [
+    ("name_token_sort", "Name Match", 0.221),  # 22.1% importance
+    ("centroid_distance_m", "Centroid Dist", 0.100),
+    ("collinear_gap_ratio", "Collinear Gap", 0.073),
+    ("name_jaro_winkler", "Name Jaro", 0.059),
+    ("intersection_match", "Intersection", 0.050),
+    ("buffer_iou_15m", "Buffer IoU", 0.043),
+    ("mean_hausdorff_distance_m", "Mean Haus.", 0.028),
+    ("heading_delta", "Heading", 0.027),
+    ("class_similarity", "Class", 0.026),
+    ("lateral_offset_m", "Lateral Offset", 0.025),
+]
 
 RAW_FEATURE_UNITS = {
-    "hausdorff_distance": "m",
-    "mean_hausdorff_distance": "m",
-    "projection_distance": "m",
-    "centroid_distance": "m",
-    "heading_delta": "deg",
-    "buffer_iou": "",
-    "overlap_ratio": "",
+    "hausdorff_distance_m": "m",
+    "mean_hausdorff_distance_m": "m",
+    "projection_distance_m": "m",
+    "centroid_distance_m": "m",
+    "heading_delta": "°",
+    "lateral_offset_m": "m",
+    "buffer_iou_5m": "",
+    "buffer_iou_15m": "",
     "length_ratio": "",
     "name_levenshtein": "",
     "name_jaro_winkler": "",
@@ -105,14 +108,43 @@ def render_segment_comparison(pair: CandidatePairView) -> None:
     )
 
 
-def render_score_breakdown(pair: CandidatePairView) -> None:
-    """Render the weighted score breakdown as compact inline bars."""
-    # Build all scores in one HTML block for compactness
-    scores_html = '<div style="font-size: 11px;">'
+def _normalize_feature_for_display(feature_key: str, value: float | None) -> float:
+    """Normalize a raw feature value to 0-1 for bar display (higher = better match)."""
+    if value is None:
+        return 0.0
 
-    for key, label in FEATURE_LABELS.items():
-        score = pair.score_breakdown.get(key, 0.0)
+    # Distance features: lower is better, normalize with reasonable max
+    if feature_key in ("centroid_distance_m", "mean_hausdorff_distance_m", "hausdorff_distance_m"):
+        return max(0.0, 1.0 - value / 50.0)  # 50m = 0 score
+    if feature_key == "lateral_offset_m":
+        return max(0.0, 1.0 - value / 30.0)  # 30m = 0 score
+
+    # Heading: 0-90 degrees, lower is better
+    if feature_key == "heading_delta":
+        return max(0.0, 1.0 - value / 90.0)
+
+    # Gap ratio: lower is better (0 = no gap = perfect)
+    if feature_key == "collinear_gap_ratio":
+        return max(0.0, 1.0 - value)
+
+    # Boolean/binary features
+    if feature_key in ("intersection_match", "dead_end_match"):
+        return 1.0 if value else 0.0
+
+    # Already 0-1 scores (similarities, IoU, etc.)
+    return max(0.0, min(1.0, value))
+
+
+def render_score_breakdown(pair: CandidatePairView) -> None:
+    """Render top ML features as compact inline bars, ordered by importance."""
+    scores_html = '<div style="font-size: 11px;">'
+    scores_html += '<div style="color: #888; margin-bottom: 4px; font-size: 10px;">Top features by model importance:</div>'
+
+    for feature_key, label, _importance in TOP_FEATURES:
+        raw_value = pair.features.get(feature_key)
+        score = _normalize_feature_for_display(feature_key, raw_value)
         bar_width = int(score * 100)
+
         if score >= 0.7:
             bar_color = "#4CAF50"
         elif score >= 0.4:
@@ -120,13 +152,23 @@ def render_score_breakdown(pair: CandidatePairView) -> None:
         else:
             bar_color = "#F44336"
 
+        # Show raw value in tooltip-style format
+        if raw_value is not None:
+            unit = RAW_FEATURE_UNITS.get(feature_key, "")
+            if unit:
+                raw_str = f"{raw_value:.1f}{unit}"
+            else:
+                raw_str = f"{raw_value:.2f}"
+        else:
+            raw_str = "N/A"
+
         scores_html += f"""
         <div style="display: flex; align-items: center; margin-bottom: 2px;">
             <span style="width: 90px; flex-shrink: 0;">{label}</span>
             <div style="flex-grow: 1; background: #333; border-radius: 2px; height: 6px; margin: 0 6px;">
                 <div style="background: {bar_color}; width: {bar_width}%; height: 100%; border-radius: 2px;"></div>
             </div>
-            <span style="width: 32px; text-align: right; font-weight: bold;">{score:.2f}</span>
+            <span style="width: 45px; text-align: right; font-size: 10px; color: #aaa;">{raw_str}</span>
         </div>"""
 
     scores_html += "</div>"
@@ -134,14 +176,96 @@ def render_score_breakdown(pair: CandidatePairView) -> None:
 
 
 def render_raw_features(pair: CandidatePairView) -> None:
-    """Render raw feature values in a collapsible section."""
-    with st.expander("Raw Features"):
-        for key, value in pair.features.items():
-            unit = RAW_FEATURE_UNITS.get(key, "")
-            if unit:
-                st.text(f"{key}: {value:.2f} {unit}")
-            else:
-                st.text(f"{key}: {value:.3f}")
+    """Render raw feature values in a collapsible section, organized by category."""
+    # Organize features by category for better readability
+    FEATURE_CATEGORIES = {
+        "Geometric": [
+            "hausdorff_distance_m",
+            "mean_hausdorff_distance_m",
+            "hausdorff_p95_m",
+            "buffer_iou_5m",
+            "buffer_iou_15m",
+            "heading_delta",
+            "length_ratio",
+            "projection_distance_m",
+            "centroid_distance_m",
+            "collinear_gap_ratio",
+        ],
+        "Name Similarity": [
+            "name_levenshtein",
+            "name_jaro_winkler",
+            "name_token_sort",
+            "name_soundex",
+            "name_metaphone",
+            "has_name_ref",
+            "has_name_target",
+            "name_is_generic",
+            "cardinal_direction_mismatch",
+        ],
+        "Class": [
+            "class_similarity",
+        ],
+        "Endpoint/Connectivity": [
+            "min_endpoint_proximity_m",
+            "max_endpoint_proximity_m",
+            "shared_endpoint_count",
+        ],
+        "Lateral Offset": [
+            "lateral_offset_m",
+            "lateral_offset_iqr_m",
+            "lateral_offset_p95_m",
+        ],
+        "Topology": [
+            "from_degree_ref",
+            "to_degree_ref",
+            "from_degree_target",
+            "to_degree_target",
+            "degree_match_score",
+            "degree_signature_similarity",
+            "is_dead_end_ref",
+            "is_dead_end_target",
+            "dead_end_match",
+            "is_intersection_ref",
+            "is_intersection_target",
+            "intersection_match",
+        ],
+        "Alignment Coverage": [
+            "ref_coverage",
+            "target_coverage",
+            "min_coverage",
+            "coverage_ratio",
+        ],
+        "Graphlet": [
+            "graphlet_similarity",
+            "endpoint_degree_similarity",
+        ],
+    }
+
+    with st.expander("All Features (ML)"):
+        for category, feature_keys in FEATURE_CATEGORIES.items():
+            # Check if any features in this category exist
+            category_features = {
+                k: pair.features.get(k) for k in feature_keys if k in pair.features
+            }
+            if not category_features:
+                continue
+
+            st.markdown(f"**{category}**")
+            for key, value in category_features.items():
+                if value is None:
+                    display = "N/A"
+                elif isinstance(value, bool):
+                    display = "Yes" if value else "No"
+                elif isinstance(value, float):
+                    unit = RAW_FEATURE_UNITS.get(key, "")
+                    if unit:
+                        display = f"{value:.2f} {unit}"
+                    else:
+                        display = f"{value:.3f}"
+                else:
+                    display = str(value)
+                st.text(f"  {key}: {display}")
+            st.markdown("")  # Spacer
 
 
 def render_feature_panel(pair: CandidatePairView) -> None:
@@ -151,6 +275,8 @@ def render_feature_panel(pair: CandidatePairView) -> None:
     render_segment_comparison(pair)
     st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
     render_score_breakdown(pair)
+    st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
+    render_raw_features(pair)
 
 
 def render_minimal_feature_panel(pair: CandidatePairView) -> None:

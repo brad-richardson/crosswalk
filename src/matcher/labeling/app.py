@@ -184,6 +184,7 @@ from matcher.labeling.comparison_view import render_comparison_view
 from matcher.labeling.data_loader import (
     CandidatePairView,
     delete_cache,
+    filter_by_confidence_band,
     filter_candidates,
     generate_scored_candidates,
     get_cache_info,
@@ -291,7 +292,7 @@ def main():
         """
         <style>
         .block-container {
-            padding-top: 0.5rem;
+            padding-top: 2rem;
             padding-bottom: 0rem;
             padding-left: 1rem;
             padding-right: 1rem;
@@ -353,9 +354,29 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         dataset_keys = list(current_raw_files.keys())
 
         def get_dataset_display_name(key: str) -> str:
-            """Get display name from registry or fallback to key."""
-            ds = registry.get(key)
-            return ds.name if ds else key.replace("_", " ").title()
+            """Get display name from registry or fallback to key.
+
+            Always includes country code prefix (e.g., "US Boston Streets").
+            """
+            # Extract country code from key (e.g., "us" from "us_boston_streets")
+            parts = key.replace("_osm", "").split("_")
+            country_prefix = ""
+            if len(parts) >= 2 and len(parts[0]) == 2:
+                country_prefix = parts[0].upper() + " "
+
+            # Handle auto-discovered OSM datasets (e.g., "us_boston_streets_osm")
+            is_osm = key.endswith("_osm")
+            base_key = key[:-4] if is_osm else key
+
+            ds = registry.get(base_key)
+            if ds:
+                name = f"{country_prefix}{ds.name}"
+                return f"{name} (OSM)" if is_osm else name
+
+            # Fallback: format nicely from key
+            rest = " ".join(p.title() for p in parts[1:])
+            name = f"{country_prefix}{rest}".strip()
+            return f"{name} (OSM)" if is_osm else name
 
         selected_dataset = st.selectbox(
             "Target Dataset",
@@ -448,14 +469,38 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                 if st.button("🔄 Regenerate Cache", help="Force fresh computation"):
                     with st.spinner("Regenerating cache..."):
                         delete_cache(dataset_id)
-                        load_data(reference_path, target_path, dataset_id, use_cache=False)
+                        # Get review_only state (may not be set yet)
+                        review_only_val = st.session_state.get("review_only", True)
+                        load_data(
+                            reference_path,
+                            target_path,
+                            dataset_id,
+                            use_cache=False,
+                            review_only=review_only_val,
+                        )
                     st.rerun()
             else:
                 st.caption("No cache available - will compute fresh")
 
+            # Confidence band filter
+            st.divider()
+            lower_bound = settings.review_threshold - 0.05
+            upper_bound = settings.match_threshold + 0.05
+
+            if "review_only" not in st.session_state:
+                st.session_state.review_only = True
+
+            review_only = st.checkbox(
+                f"Review band only ({lower_bound:.2f} - {upper_bound:.2f})",
+                value=st.session_state.review_only,
+                key="review_only_checkbox",
+                help="Focus on candidates near decision boundaries - the most valuable for labeling",
+            )
+            st.session_state.review_only = review_only
+
             if st.button("Load Data", type="primary"):
                 with st.spinner("Loading and scoring candidates..."):
-                    load_data(reference_path, target_path, dataset_id, use_cache)
+                    load_data(reference_path, target_path, dataset_id, use_cache, review_only)
                 st.rerun()
         else:
             st.success(f"Loaded {len(st.session_state.candidates)} candidates")
@@ -1016,6 +1061,7 @@ def load_data(
     target_path: Path,
     dataset_id: str,
     use_cache: bool = True,
+    review_only: bool = True,
 ) -> None:
     """Load reference and target data and generate candidates.
 
@@ -1024,36 +1070,48 @@ def load_data(
         target_path: Path to target (local) data
         dataset_id: Unique identifier for dataset (used for caching)
         use_cache: Whether to use cached candidates if available
+        review_only: If True, filter to review band (thresholds ± 0.05)
     """
     candidates = None
 
     # Try to load from cache first
     if use_cache:
         candidates = load_cached_candidates(dataset_id)
+
+    # Generate fresh candidates if cache miss
+    if candidates is None:
+        reference = load_geodataframe(reference_path)
+        target = load_geodataframe(target_path)
+
+        candidates = generate_scored_candidates(
+            reference=reference,
+            target=target,
+            buffer_distance_m=settings.buffer_distance_m,
+            ref_id_column="id",
+            target_id_column="id",
+            ref_name_column="names",
+            target_name_column="names",
+            ref_class_column="class",
+            target_class_column="class",
+        )
+
+        # Save full candidates to cache for next time
         if candidates:
-            st.session_state.candidates = candidates
-            st.session_state.data_loaded = True
-            return
+            save_candidates_to_cache(dataset_id, candidates)
 
-    # Generate fresh candidates
-    reference = load_geodataframe(reference_path)
-    target = load_geodataframe(target_path)
+    # Apply confidence band filter if requested
+    if candidates and review_only:
+        full_count = len(candidates)
+        candidates = filter_by_confidence_band(candidates, review_only=True)
+        filtered_count = len(candidates)
+        # Log filter results
+        import logging
 
-    candidates = generate_scored_candidates(
-        reference=reference,
-        target=target,
-        buffer_distance=settings.buffer_distance,
-        ref_id_column="id",
-        target_id_column="id",
-        ref_name_column="names",
-        target_name_column="names",
-        ref_class_column="class",
-        target_class_column="class",
-    )
-
-    # Save to cache for next time
-    if candidates:
-        save_candidates_to_cache(dataset_id, candidates)
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"Confidence band filter: {filtered_count}/{full_count} candidates "
+            f"({100 * filtered_count / full_count:.1f}%)"
+        )
 
     st.session_state.candidates = candidates
     st.session_state.data_loaded = True
