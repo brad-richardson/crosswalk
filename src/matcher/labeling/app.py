@@ -21,31 +21,54 @@ PROJECT_ROOT = Path(__file__).parents[3]
 
 # Base dataset configurations - maps dataset_id to (target_file, reference_file)
 # Dataset metadata (name, type, urls) comes from DatasetRegistry
-# Reference file naming: {region}_overture_segments.parquet (e.g., boston_overture_segments.parquet)
+# Reference file naming: {region}_overture_segments.parquet (e.g., us_boston_overture_segments.parquet)
 _BASE_DATASET_CONFIG = {
-    # Boston area
-    "boston_streets": ("boston_streets.parquet", "boston_overture_segments.parquet"),
-    "boston_bikes": ("boston_bike_network.parquet", "boston_overture_segments.parquet"),
-    "boston_sidewalks": ("boston_sidewalks.parquet", "boston_overture_segments.parquet"),
-    "osm": ("boston_osm_segments.parquet", "boston_overture_segments.parquet"),
-    # Fort Collins, CO
-    "fort_collins_streets": (
-        "fort_collins_streets.parquet",
-        "fort_collins_overture_segments.parquet",
+    # Boston, MA
+    "us_boston_streets": (
+        "us_boston_streets.parquet",
+        "us_boston_overture_segments.parquet",
     ),
-    "fort_collins_sidewalks": (
-        "fort_collins_sidewalks.parquet",
-        "fort_collins_overture_segments.parquet",
+    "us_boston_bike_network": (
+        "us_boston_bike_network.parquet",
+        "us_boston_overture_segments.parquet",
+    ),
+    "us_boston_sidewalks": (
+        "us_boston_sidewalks.parquet",
+        "us_boston_overture_segments.parquet",
+    ),
+    # Fort Collins, CO
+    "us_fort_collins_streets": (
+        "us_fort_collins_streets.parquet",
+        "us_fort_collins_overture_segments.parquet",
+    ),
+    "us_fort_collins_sidewalks": (
+        "us_fort_collins_sidewalks.parquet",
+        "us_fort_collins_overture_segments.parquet",
     ),
     # Frisco, TX
-    "frisco_roads": ("frisco_roads.parquet", "frisco_overture_segments.parquet"),
-    "frisco_trails": ("frisco_trails.parquet", "frisco_overture_segments.parquet"),
+    "us_frisco_roads": (
+        "us_frisco_roads.parquet",
+        "us_frisco_overture_segments.parquet",
+    ),
+    "us_frisco_trails": (
+        "us_frisco_trails.parquet",
+        "us_frisco_overture_segments.parquet",
+    ),
     # Salt Lake City, UT
-    "salt_lake_roads": ("utah_roads.parquet", "salt_lake_overture_segments.parquet"),
+    "us_salt_lake_roads": (
+        "us_utah_roads.parquet",
+        "us_salt_lake_overture_segments.parquet",
+    ),
     # Fresno, CA
-    "fresno_roads": ("fresno_roads.parquet", "fresno_overture_segments.parquet"),
+    "us_fresno_roads": (
+        "us_fresno_roads.parquet",
+        "us_fresno_overture_segments.parquet",
+    ),
     # Utah (legacy - uses subdirectory)
-    "utah_roads": ("utah_roads.parquet", "utah_overture/overture_segments.parquet"),
+    "us_utah_roads": (
+        "us_utah_roads.parquet",
+        "utah_overture/overture_segments.parquet",
+    ),
 }
 
 
@@ -78,18 +101,18 @@ def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
             "overture_segments.parquet",  # fallback to default
         ]
 
-        # Also check for region-specific Overture files (e.g., overture_frisco_segments.parquet)
-        # by extracting city/area name
+        # Also check for region-specific Overture files
+        # by extracting country_city from dataset name
         region_parts = region.split("_")
-        if len(region_parts) >= 2:
-            # e.g., "us_frisco_roads" -> "frisco"
-            area_name = (
-                region_parts[1]
-                if region_parts[0] in ["us", "co", "br", "nl", "sg", "fi", "in", "ke", "ng"]
-                else region_parts[0]
-            )
-            overture_candidates.insert(0, f"overture_{area_name}_segments.parquet")
-            overture_candidates.insert(0, f"{area_name}_overture_segments.parquet")
+        country_codes = ["us", "co", "br", "nl", "sg", "fi", "in", "ke", "ng"]
+        if len(region_parts) >= 2 and region_parts[0] in country_codes:
+            # e.g., "us_frisco_roads" -> country="us", city="frisco"
+            country = region_parts[0]
+            city = region_parts[1]
+            # Add candidates for us_boston_overture_segments.parquet pattern
+            overture_candidates.insert(0, f"{country}_{city}_overture_segments.parquet")
+            overture_candidates.insert(0, f"overture_{city}_segments.parquet")
+            overture_candidates.insert(0, f"{city}_overture_segments.parquet")
 
         # Find first existing Overture file
         overture_file = "overture_segments.parquet"  # default
