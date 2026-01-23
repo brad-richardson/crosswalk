@@ -38,10 +38,13 @@ def perfect_match_features():
         # Geometric features (in meters)
         "hausdorff_distance_m": 0.1,  # 0.1 meter - nearly identical
         "mean_hausdorff_distance_m": 0.08,
-        "buffer_iou": 0.9999,
+        "hausdorff_p95_m": 0.12,
+        "buffer_iou_5m": 0.9999,
+        "buffer_iou_15m": 0.9999,
         "overlap_ratio": 0.99,
         "heading_delta": 0.1,
         "length_ratio": 0.999,
+        "projection_distance_m": 0.1,
         "centroid_distance_m": 0.05,
         "collinear_gap_ratio": 0.01,
         # Semantic features (exact name match)
@@ -50,14 +53,17 @@ def perfect_match_features():
         "name_token_sort": 1.0,
         "name_soundex": 1.0,
         "name_metaphone": 1.0,
+        "has_name_ref": 1.0,
+        "has_name_target": 1.0,
+        "name_is_generic": 0.0,
         "class_similarity": 1.0,
         # Connectivity (in meters)
-        "start_endpoint_proximity_m": 1.0,  # 1 meter
-        "end_endpoint_proximity_m": 1.0,
+        "min_endpoint_proximity_m": 1.0,  # 1 meter
+        "max_endpoint_proximity_m": 1.0,
         "shared_endpoint_count": 2,
         "lateral_offset_m": 1.0,
-        "lateral_offset_consistency": 0.5,
-        "projection_distance_m": 0.1,
+        "lateral_offset_iqr_m": 0.5,
+        "lateral_offset_p95_m": 1.5,
         # Topology: same pattern
         "from_degree_ref": 3,
         "to_degree_ref": 3,
@@ -76,6 +82,9 @@ def perfect_match_features():
         "target_coverage": 1.0,
         "min_coverage": 1.0,
         "coverage_ratio": 1.0,
+        # Graphlet features
+        "graphlet_similarity": 1.0,
+        "endpoint_degree_similarity": 1.0,
     }
 
 
@@ -84,39 +93,45 @@ def terrible_match_features():
     """Features representing a clear non-match.
 
     All distance values are in meters. Large distances and poor overlap
-    indicate a clear non-match.
+    indicate a clear non-match. Values are extreme to ensure confidence < 0.1.
     """
     return {
         # Geometric features (in meters - large distances)
-        "hausdorff_distance_m": 100.0,  # 100 meters - very far apart
-        "mean_hausdorff_distance_m": 80.0,
-        "buffer_iou": 0.5,  # Low overlap
-        "overlap_ratio": 0.3,
-        "heading_delta": 45.0,  # Significantly different heading
-        "length_ratio": 0.34,
-        "centroid_distance_m": 50.0,  # 50 meters apart
-        "collinear_gap_ratio": 0.8,
-        "projection_distance_m": 100.0,
+        "hausdorff_distance_m": 150.0,  # 150 meters - very far apart
+        "mean_hausdorff_distance_m": 120.0,
+        "hausdorff_p95_m": 140.0,
+        "buffer_iou_5m": 0.0,  # No overlap at 5m buffer
+        "buffer_iou_15m": 0.1,  # Minimal overlap at 15m buffer
+        "overlap_ratio": 0.1,
+        "heading_delta": 80.0,  # Nearly perpendicular
+        "length_ratio": 0.2,
+        "projection_distance_m": 150.0,
+        "centroid_distance_m": 100.0,  # 100 meters apart
+        "collinear_gap_ratio": 0.9,
         # Semantic features (completely different names)
         "name_levenshtein": 0.0,
         "name_jaro_winkler": 0.0,
         "name_token_sort": 0.0,
         "name_soundex": 0.0,
         "name_metaphone": 0.0,
-        "class_similarity": 0.3,
+        "has_name_ref": 1.0,
+        "has_name_target": 1.0,
+        "name_is_generic": 0.0,
+        "class_similarity": 0.1,
         # Connectivity (far from other segments)
-        "start_endpoint_proximity_m": 100.0,  # Far from network
-        "end_endpoint_proximity_m": 100.0,
+        "min_endpoint_proximity_m": 150.0,  # Far from network
+        "max_endpoint_proximity_m": 150.0,
         "shared_endpoint_count": 0,
-        "lateral_offset_m": 100.0,  # 100 meters offset
-        "lateral_offset_consistency": 80.0,
+        "lateral_offset_m": 150.0,  # 150 meters offset
+        "lateral_offset_iqr_m": 100.0,
+        "lateral_offset_p95_m": 180.0,
         # Topology: different patterns
-        "from_degree_ref": 3,
-        "to_degree_ref": 3,
+        "from_degree_ref": 4,
+        "to_degree_ref": 4,
         "from_degree_target": 1,
         "to_degree_target": 1,
-        "degree_match_score": 0.2,
-        "degree_signature_similarity": 0.2,
+        "degree_match_score": 0.1,
+        "degree_signature_similarity": 0.1,
         "is_dead_end_ref": 0,
         "is_dead_end_target": 1,
         "dead_end_match": 0.0,
@@ -124,10 +139,13 @@ def terrible_match_features():
         "is_intersection_target": 0,
         "intersection_match": 0.0,
         # Coverage features
-        "ref_coverage": 0.3,
-        "target_coverage": 0.3,
-        "min_coverage": 0.3,
-        "coverage_ratio": 0.5,
+        "ref_coverage": 0.2,
+        "target_coverage": 0.2,
+        "min_coverage": 0.2,
+        "coverage_ratio": 0.3,
+        # Graphlet features
+        "graphlet_similarity": 0.1,
+        "endpoint_degree_similarity": 0.1,
     }
 
 
@@ -142,28 +160,34 @@ def borderline_match_features():
         # Moderate geometry (in meters)
         "hausdorff_distance_m": 10.0,  # 10 meters
         "mean_hausdorff_distance_m": 6.0,
-        "buffer_iou": 0.998,  # Reasonable overlap on aligned sublines
+        "hausdorff_p95_m": 12.0,
+        "buffer_iou_5m": 0.85,  # Moderate overlap at 5m buffer
+        "buffer_iou_15m": 0.95,  # Better overlap at 15m buffer
         "overlap_ratio": 0.7,
         "heading_delta": 3.7,
         "length_ratio": 0.74,
+        "projection_distance_m": 10.0,
         "centroid_distance_m": 8.0,
         "collinear_gap_ratio": 0.3,
-        "projection_distance_m": 10.0,
         # Partial name match (similar but not identical)
         "name_levenshtein": 0.64,
         "name_jaro_winkler": 0.86,
         "name_token_sort": 0.64,
         "name_soundex": 1.0,
         "name_metaphone": 0.8,
+        "has_name_ref": 1.0,
+        "has_name_target": 1.0,
+        "name_is_generic": 0.0,
         # Similar class
         "class_similarity": 0.8,
         # Moderate connectivity (in meters)
-        "start_endpoint_proximity_m": 25.0,  # Not super close
-        "end_endpoint_proximity_m": 30.0,
+        "min_endpoint_proximity_m": 25.0,  # Not super close
+        "max_endpoint_proximity_m": 30.0,
         "shared_endpoint_count": 1,
         # Moderate lateral offset
         "lateral_offset_m": 30.0,  # 30 meters
-        "lateral_offset_consistency": 20.0,
+        "lateral_offset_iqr_m": 20.0,
+        "lateral_offset_p95_m": 40.0,
         # Mixed topology
         "from_degree_ref": 3,
         "to_degree_ref": 4,
@@ -182,4 +206,7 @@ def borderline_match_features():
         "target_coverage": 0.7,
         "min_coverage": 0.7,
         "coverage_ratio": 0.85,
+        # Graphlet features
+        "graphlet_similarity": 0.6,
+        "endpoint_degree_similarity": 0.7,
     }
