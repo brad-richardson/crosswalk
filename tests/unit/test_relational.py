@@ -67,6 +67,38 @@ class TestRelationalFeatures:
         assert end_prox > 50
         assert shared >= 1
 
+    def test_perpendicular_offset_partial_overlap(self):
+        """Lateral offset should be computed on overlapping portion only.
+
+        Regression test for bug where target extending beyond reference
+        inflated the offset (e.g., 73m instead of 1m).
+        """
+        # Reference: 100m segment
+        reference = LineString([(0, 0), (100, 0)])
+        # Target: 300m segment, first 100m overlaps with reference at 3m offset,
+        # then extends 200m beyond
+        target = LineString([(0, 3), (100, 3), (300, 3)])
+
+        # Full geometry offset would include points far from reference
+        offset_full, _, _ = compute_perpendicular_offset(target, reference)
+        # Points at 200m and 300m along target are >100m from reference
+        assert offset_full > 50, "Full geometry should have large offset"
+
+        # With aligned sublines (only overlapping portion), offset should be ~3m
+        from matcher.features.alignment import create_subline, linestring_alignment
+
+        alignment = linestring_alignment(reference, target)
+        target_subline = create_subline(
+            target, alignment.dataset_start_frac, alignment.dataset_end_frac
+        )
+        ref_subline = create_subline(
+            reference, alignment.overture_start_frac, alignment.overture_end_frac
+        )
+
+        offset_aligned, iqr, _ = compute_perpendicular_offset(target_subline, ref_subline)
+        assert offset_aligned == pytest.approx(3.0, abs=0.5), "Aligned offset should be ~3m"
+        assert iqr < 1.0, "IQR should be low for consistent offset"
+
 
 class TestSpatialContextIndex:
     """Tests for spatial context indexing - the primary utility for endpoint features."""

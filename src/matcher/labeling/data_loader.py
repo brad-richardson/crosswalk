@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -15,13 +16,10 @@ from shapely.geometry import LineString
 from shapely.ops import transform
 
 from ..blocking import generate_candidates
-from ..features.alignment import create_subline, linestring_alignment
-from ..features.compute import (
-    compute_pair_features,
-    precompute_topology_and_endpoints,
-)
+from ..config import settings
+from ..features.alignment import create_subline
 from ..features.semantic import _extract_name_string
-from ..matching.rules import compute_match_score
+from ..matching.ml import MLMatcher
 from ..utils import filter_to_linestrings
 
 logger = logging.getLogger(__name__)
@@ -29,6 +27,54 @@ logger = logging.getLogger(__name__)
 # Cache directory relative to project root (data/cache/labeling/)
 # Path: src/matcher/labeling/data_loader.py -> parents[3] = project root
 CACHE_DIR = Path(__file__).parents[3] / "data" / "cache" / "labeling"
+
+
+def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[str, float]:
+    """Compute normalized score breakdown from raw ML features for UI display.
+
+    The ML scorer doesn't produce component scores like the rule-based scorer,
+    so we derive normalized 0-1 scores from raw features for the UI and cached
+    score breakdowns.
+
+    Args:
+        features: Raw feature dict from ML scorer
+
+    Returns:
+        Dict of normalized scores derived from the raw ML feature values.
+    """
+
+    # Normalize distance features (lower distance = higher score)
+    # Use 50m as "bad" threshold (score approaches 0)
+    def norm_distance(dist_m: float, max_m: float = 50.0) -> float:
+        if dist_m is None or dist_m < 0:
+            return 0.0
+        return max(0.0, 1.0 - dist_m / max_m)
+
+    # Normalize heading delta (0-180 degrees, lower = better)
+    def norm_heading(delta: float) -> float:
+        if delta is None or delta < 0:
+            return 0.0
+        return max(0.0, 1.0 - delta / 90.0)  # 90 degrees = score 0
+
+    # Normalize length ratio (1.0 = perfect, further from 1 = worse)
+    def norm_length_ratio(ratio: float) -> float:
+        if ratio is None or ratio <= 0:
+            return 0.0
+        if ratio > 1:
+            ratio = 1.0 / ratio  # Normalize so ratio is always <= 1
+        return ratio
+
+    return {
+        "hausdorff_norm": norm_distance(features.get("hausdorff_distance_m", 50)),
+        "mean_hausdorff_norm": norm_distance(features.get("mean_hausdorff_distance_m", 50)),
+        "buffer_iou": features.get("buffer_iou_5m", 0.0),
+        "overlap_ratio": features.get("min_coverage", 0.0),
+        "heading_norm": norm_heading(features.get("heading_delta", 90)),
+        "length_ratio": norm_length_ratio(features.get("length_ratio", 0)),
+        "projection_norm": norm_distance(features.get("projection_distance_m", 50)),
+        "name_similarity": features.get("name_jaro_winkler", 0.0),
+        "class_similarity": features.get("class_similarity", 0.0),
+    }
 
 
 @dataclass
@@ -227,6 +273,13 @@ def load_cached_candidates(dataset_id: str) -> list[CandidatePairView] | None:
         df = pd.read_parquet(cache_path)
         # Use to_dict('records') instead of iterrows() for 10-20x faster loading
         candidates = [CandidatePairView.from_dict(row) for row in df.to_dict("records")]
+
+        # Recompute score_breakdown from features for UI display
+        # (cached data may have empty score_breakdown from ML scorer)
+        for cand in candidates:
+            if not cand.score_breakdown and cand.features:
+                cand.score_breakdown = _compute_score_breakdown_from_features(cand.features)
+
         logger.info(f"Loaded {len(candidates)} candidates from cache")
         return candidates
     except Exception as e:
@@ -300,7 +353,7 @@ def load_geodataframe(path: Path) -> gpd.GeoDataFrame:
 def generate_scored_candidates(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    buffer_distance: float = 50.0,
+    buffer_distance_m: float = 50.0,
     ref_id_column: str = "id",
     target_id_column: str = "id",
     ref_name_column: str = "names",
@@ -308,12 +361,17 @@ def generate_scored_candidates(
     ref_class_column: str = "class",
     target_class_column: str = "class",
 ) -> list[CandidatePairView]:
-    """Generate and score candidates, returning view models for UI.
+    """Generate and score candidates using the optimized ML pipeline.
+
+    Uses MLMatcher.score_candidates() which provides:
+    - Parallel feature computation via ProcessPoolExecutor
+    - Pre-computed topology/endpoints/alignments
+    - Batch XGBoost prediction
 
     Args:
         reference: Reference GeoDataFrame (Overture)
         target: Target GeoDataFrame (local data)
-        buffer_distance: Search radius in meters
+        buffer_distance_m: Search radius in meters
         ref_id_column: ID column in reference
         target_id_column: ID column in target
         ref_name_column: Name column in reference
@@ -330,7 +388,6 @@ def generate_scored_candidates(
         return []
 
     # Project to metric CRS for accurate distances
-    # Track original CRS and projected CRS for transforming aligned geometries back
     original_crs = reference.crs
     projected_crs = None
     if reference.crs and reference.crs.is_geographic:
@@ -344,49 +401,200 @@ def generate_scored_candidates(
         target_proj = target
 
     # Create transformer for converting aligned geometries back to WGS84
-    # Alignment fractions are computed on projected coords, so sublines must be
-    # extracted from projected coords and transformed back
     proj_to_wgs84 = None
     if projected_crs and original_crs:
         proj_to_wgs84 = Transformer.from_crs(projected_crs, original_crs, always_xy=True).transform
 
-    # Generate candidates
+    # Generate candidates (blocking step - already fast)
+    t0 = time.perf_counter()
     candidates = generate_candidates(
         reference=reference_proj,
         target=target_proj,
-        buffer_distance=buffer_distance,
+        buffer_distance_m=buffer_distance_m,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )
+    logger.info(f"Generated {len(candidates)} candidates in {time.perf_counter() - t0:.1f}s")
 
     if not candidates:
         return []
 
-    # Build view models (use original WGS84 geometries for map display)
-    # Create index lookups for O(1) access (avoid O(n) DataFrame filtering per candidate)
-    # Note: If IDs are not unique, .loc returns DataFrame; we take first row
+    # Use MLMatcher for optimized scoring (parallel feature computation + batch prediction)
+    t0 = time.perf_counter()
+    matcher = MLMatcher(auto_select=True)
+
+    # Check if model exists, fall back to rules if not
+    model_path = settings.model_path
+    if not model_path.exists():
+        logger.warning(f"ML model not found at {model_path}, falling back to rule-based scoring")
+        return _generate_scored_candidates_rules(
+            reference=reference,
+            target=target,
+            reference_proj=reference_proj,
+            target_proj=target_proj,
+            candidates=candidates,
+            proj_to_wgs84=proj_to_wgs84,
+            ref_id_column=ref_id_column,
+            target_id_column=target_id_column,
+            ref_name_column=ref_name_column,
+            target_name_column=target_name_column,
+            ref_class_column=ref_class_column,
+            target_class_column=target_class_column,
+        )
+
+    # Score all candidates using ML pipeline (parallelized)
+    match_results = matcher.score_candidates(
+        candidates=candidates,
+        reference=reference_proj,
+        target=target_proj,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+    )
+    logger.info(f"ML scoring completed in {time.perf_counter() - t0:.1f}s")
+
+    # Convert MatchResult objects to CandidatePairView objects
+    t0 = time.perf_counter()
+
+    # Build lookups for geometry and attribute access
     ref_lookup = reference.set_index(ref_id_column)
     target_lookup = target.set_index(target_id_column)
     ref_proj_lookup = reference_proj.set_index(ref_id_column)
     target_proj_lookup = target_proj.set_index(target_id_column)
 
-    # Pre-check column existence
     has_ref_name = ref_name_column in reference.columns
     has_target_name = target_name_column in target.columns
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
 
     def get_row(lookup, id_val):
-        """Get single row from lookup, handling duplicate IDs and single-column DataFrames."""
-        # Use [[id_val]] to always get a DataFrame, then take first row as Series
-        # This handles: duplicate IDs, single-column DataFrames (where .loc returns scalar)
+        """Get single row from lookup, handling duplicate IDs."""
         result = lookup.loc[[id_val]]
         if len(result) == 0:
             raise KeyError(f"ID {id_val} not found in lookup")
         return result.iloc[0]
 
-    # Pre-compute topology and endpoint features for all candidate pairs
-    # This is the same approach used by the ML pipeline for efficiency
+    views = []
+    for result in match_results:
+        # Look up original geometries
+        ref_row = get_row(ref_lookup, result.ref_id)
+        target_row = get_row(target_lookup, result.target_id)
+
+        # Extract names and classes
+        ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
+        target_name = (
+            _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
+        )
+        ref_class = ref_row.get(ref_class_column) if has_ref_class else None
+        target_class = target_row.get(target_class_column) if has_target_class else None
+
+        # Get alignment fractions from MatchResult
+        ref_start_frac = result.gers_start_frac if result.gers_start_frac is not None else 0.0
+        ref_end_frac = result.gers_end_frac if result.gers_end_frac is not None else 1.0
+        target_start_frac = result.local_start_frac if result.local_start_frac is not None else 0.0
+        target_end_frac = result.local_end_frac if result.local_end_frac is not None else 1.0
+
+        # Create aligned geometries for map display
+        ref_proj_row = get_row(ref_proj_lookup, result.ref_id)
+        target_proj_row = get_row(target_proj_lookup, result.target_id)
+
+        ref_aligned_proj = create_subline(ref_proj_row.geometry, ref_start_frac, ref_end_frac)
+        target_aligned_proj = create_subline(
+            target_proj_row.geometry, target_start_frac, target_end_frac
+        )
+
+        # Transform aligned geometries back to WGS84
+        if proj_to_wgs84:
+            ref_aligned = transform(proj_to_wgs84, ref_aligned_proj)
+            target_aligned = transform(proj_to_wgs84, target_aligned_proj)
+        else:
+            ref_aligned = ref_aligned_proj
+            target_aligned = target_aligned_proj
+
+        # Convert decision enum to string
+        decision = result.decision.value  # MatchDecision enum -> string
+
+        # Compute score_breakdown from features for UI display
+        # ML scorer doesn't provide component scores, so we derive them
+        score_breakdown = _compute_score_breakdown_from_features(result.features)
+
+        views.append(
+            CandidatePairView(
+                ref_id=str(result.ref_id),
+                target_id=str(result.target_id),
+                ref_geometry=ref_row.geometry,
+                target_geometry=target_row.geometry,
+                ref_name=ref_name,
+                target_name=target_name,
+                ref_class=ref_class,
+                target_class=target_class,
+                decision=decision,
+                confidence=result.confidence,
+                score_breakdown=score_breakdown,
+                features=result.features,
+                ref_aligned_geometry=ref_aligned,
+                target_aligned_geometry=target_aligned,
+                ref_start_frac=ref_start_frac,
+                ref_end_frac=ref_end_frac,
+                target_start_frac=target_start_frac,
+                target_end_frac=target_end_frac,
+            )
+        )
+
+    logger.info(f"Built {len(views)} CandidatePairView objects in {time.perf_counter() - t0:.1f}s")
+
+    # Sort: REVIEW first, then by confidence descending
+    def sort_key(v):
+        decision_order = {"review": 0, "match": 1, "no_match": 2}
+        return (decision_order.get(v.decision, 3), -v.confidence)
+
+    views.sort(key=sort_key)
+
+    return views
+
+
+def _generate_scored_candidates_rules(
+    reference: gpd.GeoDataFrame,
+    target: gpd.GeoDataFrame,
+    reference_proj: gpd.GeoDataFrame,
+    target_proj: gpd.GeoDataFrame,
+    candidates: list,
+    proj_to_wgs84,
+    ref_id_column: str,
+    target_id_column: str,
+    ref_name_column: str,
+    target_name_column: str,
+    ref_class_column: str,
+    target_class_column: str,
+) -> list[CandidatePairView]:
+    """Fallback: generate scored candidates using rule-based scoring.
+
+    Used when ML model is not available. This is the original sequential
+    implementation, which is slower but doesn't require a trained model.
+    """
+    from ..features.alignment import linestring_alignment
+    from ..features.compute import compute_pair_features, precompute_topology_and_endpoints
+    from ..matching.rules import compute_match_score
+
+    # Build lookups
+    ref_lookup = reference.set_index(ref_id_column)
+    target_lookup = target.set_index(target_id_column)
+    ref_proj_lookup = reference_proj.set_index(ref_id_column)
+    target_proj_lookup = target_proj.set_index(target_id_column)
+
+    has_ref_name = ref_name_column in reference.columns
+    has_target_name = target_name_column in target.columns
+    has_ref_class = ref_class_column in reference.columns
+    has_target_class = target_class_column in target.columns
+
+    def get_row(lookup, id_val):
+        result = lookup.loc[[id_val]]
+        if len(result) == 0:
+            raise KeyError(f"ID {id_val} not found in lookup")
+        return result.iloc[0]
+
+    # Pre-compute topology and endpoint features
     logger.info("Pre-computing topology and endpoint features...")
     unique_ref_indices = {cand.ref_idx for cand in candidates}
     unique_target_indices = {cand.target_idx for cand in candidates}
@@ -398,37 +606,31 @@ def generate_scored_candidates(
             ref_indices=unique_ref_indices,
             target_indices=unique_target_indices,
             id_column=ref_id_column,
-            tolerance=5.0,
+            tolerance_m=5.0,
         )
     )
 
-    logger.info(f"Computing alignment and features for {len(candidates)} candidates...")
+    logger.info(f"Computing features for {len(candidates)} candidates (rule-based fallback)...")
     views = []
+
     for i, cand in enumerate(candidates):
-        if i > 0 and i % 1000 == 0:
-            logger.info(f"  Processed {i}/{len(candidates)} candidates...")
-        # Get rows from indexed lookups
+        if i > 0 and i % 10000 == 0:
+            logger.info(f"  Progress: {i}/{len(candidates)} ({100 * i / len(candidates):.0f}%)")
+
         ref_row = get_row(ref_lookup, cand.ref_id)
         target_row = get_row(target_lookup, cand.target_id)
         ref_proj_row = get_row(ref_proj_lookup, cand.ref_id)
         target_proj_row = get_row(target_proj_lookup, cand.target_id)
 
-        # Extract names
         ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
         target_name = (
             _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
         )
-
-        # Extract classes
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
         target_class = target_row.get(target_class_column) if has_target_class else None
 
-        # Compute alignment between the two geometries (on projected coords)
-        # This finds where the two lines overlap
         alignment = linestring_alignment(ref_proj_row.geometry, target_proj_row.geometry)
 
-        # Compute all features using shared module (uses projected geometries)
-        # Pass alignment so features are computed on aligned sublines
         features = compute_pair_features(
             ref_geom=ref_proj_row.geometry,
             target_geom=target_proj_row.geometry,
@@ -442,8 +644,6 @@ def generate_scored_candidates(
             alignment=alignment,
         )
 
-        # Compute confidence and decision using rule-based scoring
-        # Pass pre-computed features to avoid duplicate computation (~50% speedup)
         confidence, score_breakdown, _ = compute_match_score(
             ref_geom=ref_proj_row.geometry,
             target_geom=target_proj_row.geometry,
@@ -454,7 +654,6 @@ def generate_scored_candidates(
             precomputed_features=features,
         )
 
-        # Determine decision based on confidence
         if confidence >= 0.5:
             decision = "match"
         elif confidence >= 0.1:
@@ -462,9 +661,6 @@ def generate_scored_candidates(
         else:
             decision = "no_match"
 
-        # Create aligned geometries for map display
-        # IMPORTANT: Alignment fractions are computed on projected (UTM) geometries,
-        # so we must extract sublines from projected coords and transform back to WGS84
         ref_aligned_proj = create_subline(
             ref_proj_row.geometry, alignment.overture_start_frac, alignment.overture_end_frac
         )
@@ -472,7 +668,6 @@ def generate_scored_candidates(
             target_proj_row.geometry, alignment.dataset_start_frac, alignment.dataset_end_frac
         )
 
-        # Transform aligned geometries back to WGS84 for map display
         if proj_to_wgs84:
             ref_aligned = transform(proj_to_wgs84, ref_aligned_proj)
             target_aligned = transform(proj_to_wgs84, target_aligned_proj)
@@ -484,7 +679,7 @@ def generate_scored_candidates(
             CandidatePairView(
                 ref_id=str(cand.ref_id),
                 target_id=str(cand.target_id),
-                ref_geometry=ref_row.geometry,  # Full geometry in WGS84 for context
+                ref_geometry=ref_row.geometry,
                 target_geometry=target_row.geometry,
                 ref_name=ref_name,
                 target_name=target_name,
@@ -493,11 +688,9 @@ def generate_scored_candidates(
                 decision=decision,
                 confidence=confidence,
                 score_breakdown=score_breakdown,
-                features=features,  # Now computed on aligned sublines
-                # Aligned geometries in WGS84 for display
+                features=features,
                 ref_aligned_geometry=ref_aligned,
                 target_aligned_geometry=target_aligned,
-                # Alignment fractions
                 ref_start_frac=alignment.overture_start_frac,
                 ref_end_frac=alignment.overture_end_frac,
                 target_start_frac=alignment.dataset_start_frac,
@@ -550,3 +743,32 @@ def filter_candidates(
         filtered = [v for v in filtered if (v.ref_id, v.target_id) not in labeled_pairs]
 
     return filtered
+
+
+def filter_by_confidence_band(
+    views: list[CandidatePairView],
+    review_only: bool = True,
+    buffer: float = 0.05,
+) -> list[CandidatePairView]:
+    """Filter candidates to review band (near decision boundaries) or return all.
+
+    The review band catches edge cases near the production thresholds by adding
+    a small buffer on each side. This helps labelers focus on the most uncertain
+    cases that would most benefit from human review.
+
+    Args:
+        views: List of candidate views
+        review_only: If True, filter to review band. If False, return all.
+        buffer: Buffer to add around thresholds (default 0.05)
+
+    Returns:
+        Filtered list of views within the confidence band
+    """
+    if not review_only:
+        return views
+
+    # Use production thresholds from settings
+    lower = settings.review_threshold - buffer  # e.g., 0.50 - 0.05 = 0.45
+    upper = settings.match_threshold + buffer  # e.g., 0.75 + 0.05 = 0.80
+
+    return [v for v in views if lower <= v.confidence <= upper]

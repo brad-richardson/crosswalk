@@ -100,9 +100,10 @@ def compute_pair_features(
         name_sim = compute_name_similarity(ref_name, target_name)
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
 
-        # Compute lateral offset (now returns mean, iqr, p95)
+        # Compute lateral offset on aligned sublines (not full geometries)
+        # This prevents segments that extend beyond the overlap from inflating the offset
         lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-            target_geom, ref_geom
+            geom_for_similarity_target, geom_for_similarity_ref
         )
 
         # Use provided or default endpoint features
