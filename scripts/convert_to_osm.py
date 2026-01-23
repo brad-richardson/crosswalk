@@ -157,9 +157,12 @@ class OSMConverter:
 
     def _hash_to_negative_int(self, s: str) -> int:
         """Convert string to a stable negative integer ID."""
-        # Use first 8 bytes of SHA256 hash, converted to negative int
-        h = hashlib.sha256(s.encode()).digest()[:8]
-        return -abs(int.from_bytes(h, byteorder="big"))
+        # Use first 4 bytes of SHA256 hash, converted to negative int
+        # Limited to 32-bit range to avoid overflow issues in parsers
+        h = hashlib.sha256(s.encode()).digest()[:4]
+        # Keep in range -2^31 to -1 (avoiding 0 and positive)
+        val = int.from_bytes(h, byteorder="big") % (2**31 - 1) + 1
+        return -val
 
     def _get_connector_node_id(self, connector_id: str) -> int:
         """Get or create node ID for a connector (shared across segments)."""
@@ -200,6 +203,7 @@ class OSMConverter:
         class_column: str = "class",
         name_column: str = "names",
         connectors_column: str = "connectors",
+        source_tag: str | None = None,
     ) -> ET.Element:
         """Convert GeoDataFrame to OSM XML Element.
 
@@ -209,10 +213,17 @@ class OSMConverter:
             class_column: Column containing road class
             name_column: Column containing road names
             connectors_column: Column containing connector references (Overture format)
+            source_tag: If provided, use 'matcher:{source_tag}:id' instead of 'matcher:id'
+                       e.g., source_tag='ref' creates 'matcher:ref:id'
 
         Returns:
             ElementTree Element representing OSM XML
         """
+        # Determine ID tagging strategy
+        # If source_tag provided, use ID as key: matcher:{source}:{id} = 1
+        # This allows N:M merges to preserve all IDs
+        self._source_tag = source_tag
+        self._id_tag = "matcher:id"  # Fallback for old format
         # Ensure WGS84
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
@@ -367,7 +378,15 @@ class OSMConverter:
                 ET.SubElement(way_elem, "tag", k="name", v=way_data["name"])
 
             # Preserve original ID
-            ET.SubElement(way_elem, "tag", k="matcher:id", v=way_data["original_id"])
+            # Use ID as key for N:M merge support, but sanitize for OSM compatibility
+            # Format: matcher_ref_<sanitized_id> = <original_id>
+            # Sanitization: replace hyphens and special chars with underscores
+            if self._source_tag:
+                sanitized = way_data["original_id"].replace("-", "_").replace(":", "_")
+                tag_key = f"matcher_{self._source_tag}_{sanitized}"
+                ET.SubElement(way_elem, "tag", k=tag_key, v=way_data["original_id"])
+            else:
+                ET.SubElement(way_elem, "tag", k="matcher:id", v=way_data["original_id"])
 
         return osm
 
@@ -404,6 +423,7 @@ def convert_parquet_to_osm(
     id_column: str = "id",
     class_column: str = "class",
     name_column: str = "names",
+    source_tag: str | None = None,
 ) -> None:
     """Convert a GeoParquet file to OSM XML.
 
@@ -414,6 +434,7 @@ def convert_parquet_to_osm(
         id_column: Column containing segment IDs
         class_column: Column containing road class
         name_column: Column containing road names
+        source_tag: If provided, use 'matcher:{source_tag}:id' tag (e.g., 'ref' or 'tgt')
     """
     logger.info(f"Loading {input_path}")
     gdf = gpd.read_parquet(input_path)
@@ -431,6 +452,7 @@ def convert_parquet_to_osm(
         id_column=id_column,
         class_column=class_column,
         name_column=name_column,
+        source_tag=source_tag,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,6 +499,12 @@ def main():
         default="names",
         help="Column containing road names (default: names)",
     )
+    parser.add_argument(
+        "--source-tag",
+        type=str,
+        default=None,
+        help="Source tag prefix for ID (e.g., 'ref' creates 'matcher:ref:id')",
+    )
     args = parser.parse_args()
 
     # Default output path
@@ -489,6 +517,7 @@ def main():
         id_column=args.id_column,
         class_column=args.class_column,
         name_column=args.name_column,
+        source_tag=args.source_tag,
     )
 
 

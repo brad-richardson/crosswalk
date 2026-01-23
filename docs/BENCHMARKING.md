@@ -72,7 +72,7 @@ cd hootenanny
 make -f Makefile.docker up
 
 # Verify it's working
-docker compose exec core-services hoot --version
+docker compose exec core-services /var/lib/hootenanny/bin/hoot --version
 ```
 
 Once running, use the Python wrapper:
@@ -98,12 +98,12 @@ cp data/osm/*.osm ../hootenanny/data/
 
 # Run conflation
 cd ../hootenanny
-docker compose exec core-services hoot conflate \
+docker compose exec core-services /var/lib/hootenanny/bin/hoot conflate \
     -D match.creators="HighwayMatchCreator" \
     -D merger.creators="HighwayMergerCreator" \
-    /home/hoot/hoot/data/reference.osm \
-    /home/hoot/hoot/data/target.osm \
-    /home/hoot/hoot/data/conflated.osm
+    /var/lib/hootenanny/data/reference.osm \
+    /var/lib/hootenanny/data/target.osm \
+    /var/lib/hootenanny/data/conflated.osm
 ```
 
 To stop services: `make -f Makefile.docker down`

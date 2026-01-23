@@ -632,6 +632,12 @@ def train(
         "--exclude-semantic",
         help="Exclude semantic features (name_*, class_similarity) for geometry-only model",
     ),
+    exclude_dataset: list[str] = typer.Option(
+        [],
+        "--exclude-dataset",
+        "-x",
+        help="Dataset(s) to exclude from training (for leave-one-out evaluation). Can be repeated.",
+    ),
 ):
     """Train an ML model on labeled data.
 
@@ -643,6 +649,9 @@ def train(
 
         # Train geometry-only model (no name/class features)
         matcher train --exclude-semantic -o data/models/matcher_model_geom_only.joblib
+
+        # Leave-one-out: train without Frisco labels to test generalization
+        matcher train -x us_frisco_trails -o data/models/no_frisco.joblib
     """
     from .labeling.label_store import LabelStore
     from .matching.ml import MLMatcher
@@ -662,12 +671,19 @@ def train(
     df = LabelStore.load_all(labels_dir)
     console.print(f"  Found {len(df)} labels from {df['dataset'].nunique()} datasets")
 
+    if exclude_dataset:
+        console.print(f"[yellow]Excluding datasets: {', '.join(exclude_dataset)}[/yellow]")
+
     # Train model
     model_type = "geometry-only" if exclude_semantic else "full"
     console.print(f"[blue]Training {model_type} model...[/blue]")
     matcher = MLMatcher()
     metrics = matcher.train(
-        labels_dir=labels_dir, test_size=0.2, binary=True, exclude_semantic=exclude_semantic
+        labels_dir=labels_dir,
+        test_size=0.2,
+        binary=True,
+        exclude_semantic=exclude_semantic,
+        exclude_datasets=list(exclude_dataset) if exclude_dataset else None,
     )
 
     # Save model
@@ -692,6 +708,12 @@ def eval_model(
         "--by-dataset/--overall",
         help="Show metrics broken down by dataset",
     ),
+    dataset: list[str] = typer.Option(
+        [],
+        "--dataset",
+        "-d",
+        help="Only evaluate on specific dataset(s). Can be repeated.",
+    ),
     holdout: bool = typer.Option(
         True,
         "--holdout/--no-holdout",
@@ -712,12 +734,18 @@ def eval_model(
         matcher eval-model data/models/matcher_model.joblib
         matcher eval-model data/models/combined.joblib --no-holdout
         matcher eval-model data/models/combined.joblib --seed 123
+
+        # Evaluate only on specific dataset (for leave-one-out testing)
+        matcher eval-model data/models/no_frisco.joblib -d us_frisco_trails --no-holdout
     """
     from .matching.ml import evaluate_by_dataset
 
     if not model.exists():
         console.print(f"[red]Model not found: {model}[/red]")
         raise typer.Exit(1)
+
+    if dataset:
+        console.print(f"[blue]Filtering to datasets: {', '.join(dataset)}[/blue]")
 
     if holdout:
         console.print(f"[blue]Evaluating {model.name} on 20% holdout (seed={seed})...[/blue]")
@@ -727,7 +755,12 @@ def eval_model(
         )
 
     evaluate_by_dataset(
-        str(model), str(labels_dir), show_by_dataset=by_dataset, holdout=holdout, seed=seed
+        str(model),
+        str(labels_dir),
+        show_by_dataset=by_dataset,
+        holdout=holdout,
+        seed=seed,
+        filter_datasets=list(dataset) if dataset else None,
     )
 
     console.print("[green]Evaluation complete[/green]")

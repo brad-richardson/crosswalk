@@ -88,7 +88,7 @@ def _run_hoot_compose(*args, data_dir: Path) -> subprocess.CompletedProcess:
         if isinstance(arg, str) and arg.startswith("/data/"):
             # Map /data/foo to the hootenanny/data/foo path
             rel_path = arg[6:]  # Remove /data/
-            rewritten_args.append(f"/home/hoot/hoot/data/{rel_path}")
+            rewritten_args.append(f"/var/lib/hootenanny/data/{rel_path}")
         else:
             rewritten_args.append(str(arg))
 
@@ -98,7 +98,7 @@ def _run_hoot_compose(*args, data_dir: Path) -> subprocess.CompletedProcess:
         "exec",
         "-T",  # Disable TTY for scripting
         "core-services",
-        "hoot",
+        "/var/lib/hootenanny/bin/hoot",
         *rewritten_args,
     ]
     return subprocess.run(
@@ -139,7 +139,7 @@ def copy_to_hoot_data(src: Path, dest_name: str) -> Path:
     data_dir.mkdir(exist_ok=True)
     dest = data_dir / dest_name
     shutil.copy2(src, dest)
-    return Path(f"/home/hoot/hoot/data/{dest_name}")
+    return Path(f"/var/lib/hootenanny/data/{dest_name}")
 
 
 def conflate(
@@ -167,7 +167,7 @@ def conflate(
         # Copy files to hootenanny data dir and run
         ref_container = copy_to_hoot_data(data_dir / reference, reference.name)
         tgt_container = copy_to_hoot_data(data_dir / target, target.name)
-        out_container = Path(f"/home/hoot/hoot/data/{output.name}")
+        out_container = Path(f"/var/lib/hootenanny/data/{output.name}")
 
         run_hoot(
             "conflate",

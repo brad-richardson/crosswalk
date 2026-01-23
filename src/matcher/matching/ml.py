@@ -260,6 +260,7 @@ class MLMatcher:
         binary: bool = True,
         test_size: float = 0.2,
         exclude_semantic: bool = False,
+        exclude_datasets: list[str] | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
@@ -271,6 +272,8 @@ class MLMatcher:
             test_size: Fraction of data to hold out for testing
             exclude_semantic: If True, exclude semantic features (name_*, class_similarity)
                              for training a geometry-only model
+            exclude_datasets: List of dataset names to exclude from training
+                             (for leave-one-out cross-validation)
             **kwargs: Additional XGBoost parameters
 
         Returns:
@@ -302,6 +305,14 @@ class MLMatcher:
         logger.info(
             f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets"
         )
+
+        # Exclude specified datasets (for leave-one-out evaluation)
+        if exclude_datasets:
+            before_count = len(df)
+            df = df[~df["dataset"].isin(exclude_datasets)].copy()
+            excluded_count = before_count - len(df)
+            logger.info(f"Excluded {excluded_count} labels from datasets: {exclude_datasets}")
+            logger.info(f"Training on {len(df)} labels from {df['dataset'].nunique()} datasets")
 
         # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
         valid_labels = {"match", "no_match", "associated"}
@@ -1007,6 +1018,7 @@ def evaluate_by_dataset(
     show_by_dataset: bool = True,
     holdout: bool = True,
     seed: int = 42,
+    filter_datasets: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate model performance broken down by dataset.
 
@@ -1019,6 +1031,7 @@ def evaluate_by_dataset(
         show_by_dataset: If True, show per-dataset metrics; if False, only show overall
         holdout: If True (default), use 20% holdout set for unbiased evaluation
         seed: Random seed for holdout split (for reproducibility)
+        filter_datasets: If provided, only evaluate on these datasets
 
     Returns:
         Dictionary mapping dataset name to metrics dict
@@ -1047,6 +1060,14 @@ def evaluate_by_dataset(
     if "dataset" not in all_labels.columns:
         logger.warning("No 'dataset' column found - cannot evaluate by dataset")
         return {}
+
+    # Filter to specific datasets if requested
+    if filter_datasets:
+        all_labels = all_labels[all_labels["dataset"].isin(filter_datasets)].copy()
+        if len(all_labels) == 0:
+            logger.warning(f"No labels found for datasets: {filter_datasets}")
+            return {}
+        logger.info(f"Filtered to {len(all_labels)} labels from: {filter_datasets}")
 
     # If holdout requested, split the data first (stratified by label)
     if holdout:
