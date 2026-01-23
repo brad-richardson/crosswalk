@@ -840,8 +840,8 @@ def compute_all_topology_explicit(
 
     logger.debug(f"[topology-explicit] Found {len(connector_segments)} unique connectors")
 
-    # Step 2: For each segment, find the connectors at position 0.0 and 1.0
-    # and compute degree as the number of segments sharing that connector
+    # Step 2: For each segment, compute degrees from ALL connectors (not just endpoints)
+    # This properly handles mid-segment intersections
     topology = {}
 
     for seg_idx, connectors in enumerate(gdf[connectors_column].values):
@@ -858,33 +858,37 @@ def compute_all_topology_explicit(
             }
             continue
 
-        # Find connectors at start (at=0.0) and end (at=1.0)
-        start_conn_id = None
-        end_conn_id = None
+        # Collect degrees for ALL connectors, tracking endpoint vs midpoint
+        from_degree = 1  # Default for start
+        to_degree = 1  # Default for end
+        all_degrees = []
 
         for conn in connectors:
             if isinstance(conn, dict):
                 at_pos = conn.get("at", -1)
                 conn_id = conn.get("connector_id")
                 if conn_id:
-                    if at_pos == 0.0:
-                        start_conn_id = conn_id
-                    elif at_pos == 1.0:
-                        end_conn_id = conn_id
+                    degree = len(connector_segments.get(conn_id, set()))
+                    degree = max(1, degree)  # Ensure minimum of 1
+                    all_degrees.append(degree)
 
-        # Compute degrees from connector sharing
-        from_degree = len(connector_segments.get(start_conn_id, set())) if start_conn_id else 1
-        to_degree = len(connector_segments.get(end_conn_id, set())) if end_conn_id else 1
+                    # Track endpoint degrees specifically
+                    # Use small epsilon for floating point comparison
+                    if at_pos <= 0.001:  # Start (at ~0.0)
+                        from_degree = degree
+                    elif at_pos >= 0.999:  # End (at ~1.0)
+                        to_degree = degree
 
-        # Ensure minimum degree of 1
-        from_degree = max(1, from_degree)
-        to_degree = max(1, to_degree)
+        # Use max/min across ALL connectors for intersection/dead_end detection
+        # This ensures mid-segment intersections are properly flagged
+        max_degree = max(all_degrees) if all_degrees else 1
+        min_degree = min(all_degrees) if all_degrees else 1
 
         topology[seg_id] = {
             "from_degree": from_degree,
             "to_degree": to_degree,
-            "is_dead_end": min(from_degree, to_degree) == 1,
-            "is_intersection": max(from_degree, to_degree) > 2,
+            "is_dead_end": min_degree == 1,  # True if ANY connector is degree 1
+            "is_intersection": max_degree > 2,  # True if ANY connector has degree > 2
             "degree_signature": tuple(sorted([from_degree, to_degree])),
         }
 

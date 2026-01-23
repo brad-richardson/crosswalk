@@ -616,19 +616,23 @@ class TestNodeIdsToConnectors:
 
     def test_none_returns_none(self):
         """None input returns None."""
-        assert _node_ids_to_connectors(None) is None
+        geom = LineString([(0, 0), (1, 1)])
+        assert _node_ids_to_connectors(None, geom) is None
 
     def test_empty_list_returns_none(self):
         """Empty list returns None."""
-        assert _node_ids_to_connectors([]) is None
+        geom = LineString([(0, 0), (1, 1)])
+        assert _node_ids_to_connectors([], geom) is None
 
     def test_single_node_returns_none(self):
         """Single node (degenerate linestring) returns None."""
-        assert _node_ids_to_connectors([123]) is None
+        geom = LineString([(0, 0), (1, 1)])
+        assert _node_ids_to_connectors([123], geom) is None
 
     def test_two_nodes_returns_two_connectors(self):
         """Two nodes returns connectors at 0.0 and 1.0."""
-        result = _node_ids_to_connectors([100, 200])
+        geom = LineString([(0, 0), (1, 1)])
+        result = _node_ids_to_connectors([100, 200], geom)
 
         assert result is not None
         assert len(result) == 2
@@ -641,24 +645,33 @@ class TestNodeIdsToConnectors:
         assert result[1]["at"] == 1.0
         assert result[1]["connector_id"] == "n200"
 
-    def test_multiple_nodes_only_uses_endpoints(self):
-        """Only first and last nodes are used (endpoints)."""
-        result = _node_ids_to_connectors([100, 150, 175, 200])
+    def test_multiple_nodes_includes_all(self):
+        """All nodes are included with geodetic position."""
+        # 4 evenly spaced points along latitude line
+        geom = LineString([(0, 0), (0, 1), (0, 2), (0, 3)])
+        result = _node_ids_to_connectors([100, 150, 175, 200], geom)
 
         assert result is not None
-        assert len(result) == 2
+        assert len(result) == 4  # All nodes included
 
         # First connector (start node)
         assert result[0]["at"] == 0.0
         assert result[0]["connector_id"] == "n100"
 
-        # Second connector (end node)
-        assert result[1]["at"] == 1.0
-        assert result[1]["connector_id"] == "n200"
+        # Middle connectors (at ~0.33 and ~0.67 for evenly spaced)
+        assert 0.3 < result[1]["at"] < 0.4
+        assert result[1]["connector_id"] == "n150"
+        assert 0.6 < result[2]["at"] < 0.7
+        assert result[2]["connector_id"] == "n175"
+
+        # Last connector (end node)
+        assert result[3]["at"] == 1.0
+        assert result[3]["connector_id"] == "n200"
 
     def test_connector_id_format(self):
         """Connector IDs use 'n' prefix for OSM node IDs."""
-        result = _node_ids_to_connectors([61341696, 99999999])
+        geom = LineString([(0, 0), (1, 1)])
+        result = _node_ids_to_connectors([61341696, 99999999], geom)
 
         assert result[0]["connector_id"] == "n61341696"
         assert result[1]["connector_id"] == "n99999999"
@@ -667,13 +680,27 @@ class TestNodeIdsToConnectors:
         """Should handle numpy arrays (common from pyosmium parsing)."""
         import numpy as np
 
+        geom = LineString([(0, 0), (0, 1), (0, 2)])
         node_ids = np.array([100, 150, 200])
-        result = _node_ids_to_connectors(node_ids)
+        result = _node_ids_to_connectors(node_ids, geom)
 
         assert result is not None
-        assert len(result) == 2
+        assert len(result) == 3  # All nodes included
         assert result[0]["connector_id"] == "n100"
-        assert result[1]["connector_id"] == "n200"
+        assert result[1]["connector_id"] == "n150"
+        assert result[2]["connector_id"] == "n200"
+
+    def test_mismatched_node_count_falls_back_to_endpoints(self):
+        """If node count doesn't match coordinate count, fall back to endpoints."""
+        # 3 coordinates but only 2 node_ids
+        geom = LineString([(0, 0), (0, 1), (0, 2)])
+        result = _node_ids_to_connectors([100, 200], geom)
+
+        # Should fall back to endpoints only
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["at"] == 0.0
+        assert result[1]["at"] == 1.0
 
 
 class TestTransformToOvertureSchemaWithConnectors:
@@ -681,10 +708,11 @@ class TestTransformToOvertureSchemaWithConnectors:
 
     def test_creates_connectors_from_node_ids(self):
         """Transformation creates connectors column from node_ids."""
+        # Geometry with 3 coordinates to match 3 node_ids
         gdf = gpd.GeoDataFrame(
             {
                 "id": ["w123@1"],
-                "geometry": [LineString([(0, 0), (1, 1)])],
+                "geometry": [LineString([(0, 0), (0.5, 0.5), (1, 1)])],
                 "tags": [{"highway": "residential"}],
                 "name": ["Main Street"],
                 "node_ids": [[100, 150, 200]],  # Three nodes in way
@@ -696,14 +724,17 @@ class TestTransformToOvertureSchemaWithConnectors:
         # Should have connectors column
         assert "connectors" in result.columns
 
-        # Should have two connectors (start and end)
+        # Should have three connectors (all nodes now included)
         connectors = result.iloc[0]["connectors"]
         assert connectors is not None
-        assert len(connectors) == 2
+        assert len(connectors) == 3
         assert connectors[0]["at"] == 0.0
         assert connectors[0]["connector_id"] == "n100"
-        assert connectors[1]["at"] == 1.0
-        assert connectors[1]["connector_id"] == "n200"
+        # Middle connector at ~0.5
+        assert 0.4 < connectors[1]["at"] < 0.6
+        assert connectors[1]["connector_id"] == "n150"
+        assert connectors[2]["at"] == 1.0
+        assert connectors[2]["connector_id"] == "n200"
 
     def test_handles_missing_node_ids(self):
         """Transformation handles missing node_ids column gracefully."""
@@ -791,7 +822,9 @@ class TestTransformConnectorsSchemaWithNormalization:
         connectors_result = _transform_connectors_schema(connectors_gdf)
 
         # Simulate OSM segment with node_ids converted to connectors
-        segment_connectors = _node_ids_to_connectors([100, 200])
+        # Need geometry with 2 coords to match 2 node_ids
+        segment_geometry = LineString([(0, 0), (1, 1)])
+        segment_connectors = _node_ids_to_connectors([100, 200], segment_geometry)
 
         # Verify 1:1 mapping
         segment_conn_ids = {c["connector_id"] for c in segment_connectors}

@@ -211,34 +211,78 @@ def fetch_osm_segments(
     return segments_path
 
 
-def _node_ids_to_connectors(node_ids) -> list[dict] | None:
+def _node_ids_to_connectors(node_ids, geometry) -> list[dict] | None:
     """Convert OSM node_ids to Overture-style connectors format.
 
-    Creates connectors at the start (at=0.0) and end (at=1.0) positions
-    using the first and last node IDs from the way. This preserves the
-    explicit topology from OSM for use in degree computation.
+    Creates connectors for ALL nodes in the way, not just endpoints. This
+    preserves explicit topology including mid-segment intersections. The `at`
+    value is computed as the geodetic distance ratio along the line.
 
     Args:
         node_ids: List or numpy array of OSM node IDs from a way, or None
+        geometry: Shapely LineString geometry for the way
 
     Returns:
         List of connector dicts with 'at' and 'connector_id' keys, or None
         if node_ids is None, empty, or has only one node.
 
     Example:
-        >>> _node_ids_to_connectors([100, 150, 200])
-        [{'at': 0.0, 'connector_id': 'n100'}, {'at': 1.0, 'connector_id': 'n200'}]
+        >>> # 3-node way where middle node is at 40% of geodetic length
+        >>> _node_ids_to_connectors([100, 150, 200], linestring)
+        [{'at': 0.0, 'connector_id': 'n100'},
+         {'at': 0.4, 'connector_id': 'n150'},
+         {'at': 1.0, 'connector_id': 'n200'}]
     """
+    from pyproj import Geod
+
     # Handle None and empty cases (works for both list and numpy array)
     if node_ids is None:
         return None
     if len(node_ids) < 2:
         return None
+    if geometry is None or geometry.is_empty:
+        return None
 
-    return [
-        {"at": 0.0, "connector_id": f"n{node_ids[0]}"},
-        {"at": 1.0, "connector_id": f"n{node_ids[-1]}"},
-    ]
+    # Get coordinates from geometry
+    coords = list(geometry.coords)
+    n_coords = len(coords)
+    n_nodes = len(node_ids)
+
+    # Sanity check: node_ids should match coordinate count
+    if n_nodes != n_coords:
+        # Fallback to endpoints only if mismatch
+        return [
+            {"at": 0.0, "connector_id": f"n{node_ids[0]}"},
+            {"at": 1.0, "connector_id": f"n{node_ids[-1]}"},
+        ]
+
+    # Compute geodetic distances between consecutive points
+    geod = Geod(ellps="WGS84")
+    cumulative_distances = [0.0]
+
+    for i in range(1, n_coords):
+        lon1, lat1 = coords[i - 1]
+        lon2, lat2 = coords[i]
+        _, _, dist = geod.inv(lon1, lat1, lon2, lat2)
+        cumulative_distances.append(cumulative_distances[-1] + dist)
+
+    total_length = cumulative_distances[-1]
+
+    # Build connectors with normalized position
+    connectors = []
+    for i, node_id in enumerate(node_ids):
+        if total_length > 0:
+            at_value = cumulative_distances[i] / total_length
+        else:
+            # Degenerate case: all points at same location
+            at_value = 0.0 if i == 0 else 1.0
+
+        # Round to avoid floating point precision issues
+        at_value = round(at_value, 6)
+
+        connectors.append({"at": at_value, "connector_id": f"n{node_id}"})
+
+    return connectors
 
 
 def _transform_to_overture_schema(
@@ -292,9 +336,12 @@ def _transform_to_overture_schema(
         gdf["source_tags"] = gdf["tags"]
 
     # Convert node_ids to Overture-style connectors before dropping
-    # This preserves explicit topology for degree computation
+    # This preserves explicit topology for degree computation (including midpoints)
     if "node_ids" in gdf.columns:
-        gdf["connectors"] = gdf["node_ids"].apply(_node_ids_to_connectors)
+        gdf["connectors"] = [
+            _node_ids_to_connectors(node_ids, geom)
+            for node_ids, geom in zip(gdf["node_ids"], gdf["geometry"])
+        ]
     else:
         gdf["connectors"] = None
 
