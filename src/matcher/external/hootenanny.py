@@ -101,9 +101,7 @@ def _run_hoot_compose(*args, data_dir: Path) -> subprocess.CompletedProcess:
         "/var/lib/hootenanny/bin/hoot",
         *rewritten_args,
     ]
-    return subprocess.run(
-        cmd, cwd=hoot_dir, capture_output=True, text=True, check=True
-    )
+    return subprocess.run(cmd, cwd=hoot_dir, capture_output=True, text=True, check=True)
 
 
 def _run_hoot_standalone(*args, data_dir: Path) -> subprocess.CompletedProcess:
