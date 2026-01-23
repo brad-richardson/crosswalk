@@ -335,12 +335,14 @@ def load_and_compute_topology(
     gdf_reset = gdf.reset_index()
     gdf_reset[id_column] = gdf_reset[id_column].astype(str)
 
-    # Use the efficient Union-Find based batch computation
+    # Use explicit connector-based topology if available, otherwise geometry inference
+    connectors_col = "connectors" if "connectors" in gdf_reset.columns else None
     topology = compute_all_topology(
         gdf_reset,
         id_column=id_column,
         tolerance_m=5.0,
         ids_to_compute=ids_to_compute,
+        connectors_column=connectors_col,
     )
 
     logger.debug(f"Computed topology for {len(topology)} segments")
