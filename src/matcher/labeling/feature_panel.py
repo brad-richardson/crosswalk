@@ -139,12 +139,15 @@ def _normalize_feature_for_display(feature_key: str, value: float | None) -> flo
 
     # Degree features: normalize to 0-1 based on typical values (1-4)
     # Higher degrees generally indicate more connected intersections
+    # Handle degree=0 (isolated/invalid nodes) as no connectivity
     if feature_key in (
         "from_degree_target",
         "from_degree_ref",
         "to_degree_target",
         "to_degree_ref",
     ):
+        if value <= 0:
+            return 0.0
         return min(1.0, value / 4.0)  # 4+ = max
 
     # collinear_gap_ratio is already 0-1 where higher = better match

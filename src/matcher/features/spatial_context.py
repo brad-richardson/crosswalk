@@ -644,6 +644,10 @@ def compute_aligned_endpoint_features(
             "shared_endpoint_count": 0,
         }
 
+    # Clamp fractions to [0.0, 1.0] to avoid undefined behavior
+    start_frac = min(1.0, max(0.0, start_frac))
+    end_frac = min(1.0, max(0.0, end_frac))
+
     # Interpolate to get aligned endpoint coordinates
     start_point = geom.interpolate(start_frac, normalized=True)
     end_point = geom.interpolate(end_frac, normalized=True)
