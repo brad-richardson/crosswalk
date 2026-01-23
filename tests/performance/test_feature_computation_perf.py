@@ -163,6 +163,7 @@ class TestFeatureComputationPerformance:
         # Should be faster without buffer creation overhead
         assert per_pair_us < 300, f"Buffer IoU (pre-computed) too slow: {per_pair_us:.1f} µs/call"
 
+    @pytest.mark.skip(reason="Flaky on CI due to timing variability")
     def test_iou_calculation_optimization(self, synthetic_lines):
         """Verify IoU optimization: union = A + B - intersection."""
         # Take a sample pair

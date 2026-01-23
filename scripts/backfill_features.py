@@ -38,7 +38,7 @@ from matcher.features.alignment import (
 )
 from matcher.features.geometric import compute_geometric_features
 from matcher.features.relational import compute_perpendicular_offset
-from matcher.features.semantic import compute_name_similarity
+from matcher.features.semantic import compute_cardinal_mismatch, compute_name_similarity
 from matcher.features.spatial_context import (
     SpatialContextIndex,
     build_inferred_graph,
@@ -139,7 +139,6 @@ SIMILARITY_FEATURE_COLUMNS = [
     "hausdorff_p95_m",
     "buffer_iou_5m",
     "buffer_iou_15m",
-    "overlap_ratio",
     "heading_delta",
     "length_ratio",
     "projection_distance_m",
@@ -170,6 +169,7 @@ SEMANTIC_FEATURE_COLUMNS = [
     "has_name_ref",
     "has_name_target",
     "name_is_generic",
+    "cardinal_direction_mismatch",
 ]
 
 # Endpoint proximity feature columns (direction-invariant)
@@ -304,7 +304,6 @@ def compute_aligned_features(
             "hausdorff_p95_m": geom_features.hausdorff_p95_distance,
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
-            "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
             "projection_distance_m": geom_features.projection_distance,
@@ -583,6 +582,7 @@ def backfill_dataset(
             target_name = target_name_lookup.get(target_id)
 
             name_sim = compute_name_similarity(ref_name, target_name)
+            cardinal_mismatch = compute_cardinal_mismatch(ref_name, target_name)
             semantic_features.append(
                 {
                     "name_soundex": name_sim.get("soundex_match", 0.5),
@@ -590,6 +590,7 @@ def backfill_dataset(
                     "has_name_ref": name_sim.get("has_name_ref", 0.0),
                     "has_name_target": name_sim.get("has_name_target", 0.0),
                     "name_is_generic": name_sim.get("name_is_generic", 0.0),
+                    "cardinal_direction_mismatch": cardinal_mismatch,
                 }
             )
 
