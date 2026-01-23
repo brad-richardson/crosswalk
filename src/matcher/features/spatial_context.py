@@ -22,6 +22,7 @@ from shapely.strtree import STRtree
 
 if TYPE_CHECKING:
     import networkx as nx
+    from pyproj import Transformer
 
 from .relational import (
     compute_parallel_alignment,
@@ -205,7 +206,7 @@ class SpatialContextIndex:
     """
 
     endpoint_coords: np.ndarray = field(default_factory=lambda: np.array([]))
-    """Array of shape (N, 2) with all endpoint coordinates."""
+    """Array of shape (N, 2) with all endpoint coordinates (in projected CRS if geographic)."""
 
     endpoint_to_segment: dict[int, list[int]] = field(default_factory=dict)
     """Map from endpoint index to list of segment indices that share it."""
@@ -219,6 +220,8 @@ class SpatialContextIndex:
     _endpoint_tree: STRtree | None = field(default=None, repr=False)
     _segment_tree: STRtree | None = field(default=None, repr=False)
     _geometries: gpd.GeoSeries | None = field(default=None, repr=False)
+    _transformer: "Transformer | None" = field(default=None, repr=False)
+    """Transformer to project query points from source CRS to endpoint CRS."""
 
     def build_from_gdf(
         self,
@@ -247,12 +250,17 @@ class SpatialContextIndex:
 
         # Project to local CRS if in geographic coordinates (for accurate distance)
         work_gdf = gdf
+        self._transformer = None
         if gdf.crs is not None and gdf.crs.is_geographic:
+            from pyproj import Transformer
+
             centroid = gdf.geometry.union_all().centroid
             utm_zone = int((centroid.x + 180) / 6) + 1
             hemisphere = "north" if centroid.y >= 0 else "south"
             epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
             work_gdf = gdf.to_crs(epsg=epsg)
+            # Store transformer to project query points
+            self._transformer = Transformer.from_crs(gdf.crs, f"EPSG:{epsg}", always_xy=True)
 
         # Extract all endpoints using vectorized shapely operations
         geometries = work_gdf.geometry.values
@@ -363,7 +371,7 @@ class SpatialContextIndex:
         """Find endpoints within radius of a point.
 
         Args:
-            point: Query point
+            point: Query point (in source CRS, typically WGS84)
             radius: Search radius (meters)
 
         Returns:
@@ -372,12 +380,19 @@ class SpatialContextIndex:
         if self._endpoint_tree is None:
             return []
 
-        buffered = point.buffer(radius)
+        # Project query point if we have a transformer (geographic -> projected)
+        query_point = point
+        if self._transformer is not None:
+            x, y = point.coords[0][:2]
+            px, py = self._transformer.transform(x, y)
+            query_point = Point(px, py)
+
+        buffered = query_point.buffer(radius)
         candidate_indices = self._endpoint_tree.query(buffered)
 
         results = []
         # Handle 3D coordinates by taking only x, y (first 2 dimensions)
-        point_coords = np.array(point.coords[0])[:2]
+        point_coords = np.array(query_point.coords[0])[:2]
 
         for ep_idx in candidate_indices:
             ep_coords = self.endpoint_coords[ep_idx]
