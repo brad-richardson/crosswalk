@@ -276,3 +276,61 @@ LLMs are text-based and don't natively understand geometry. Need a way to repres
 3. Prompt Claude/GPT to label with explanation
 4. Compare to human labels
 5. If >85% agreement, consider scaling up
+
+---
+
+## Data File Versioning / Schema Checksums
+
+**Priority:** Medium
+**Status:** Idea
+
+### Problem
+
+Data files in `data/raw/` can become stale when:
+- Feature computation logic changes (new features added, formulas updated)
+- Schema changes in the fetch pipeline (new columns, renamed fields)
+- Overture/OSM schema updates break assumptions
+
+Currently there's no automated way to detect when data files need to be refetched. This leads to:
+- Subtle bugs from schema mismatches
+- Wasted debugging time when old data causes failures
+- Training on stale features
+
+### Proposed Solution
+
+Add a versioning system to data files:
+
+1. **Schema Version in Config**
+   ```python
+   # config.py
+   DATA_SCHEMA_VERSION = "1.0"  # Bump when schema changes
+   ```
+
+2. **Version in Meta Files**
+   - Store `schema_version` in `.meta.yaml` files when fetching
+   - Example:
+     ```yaml
+     fetched_at: "2026-01-23T15:30:00Z"
+     schema_version: "1.0"
+     feature_count: 125769
+     ```
+
+3. **Version Check on Load**
+   - When loading parquet files, verify schema version matches
+   - Fail fast with clear error: "Data file us_boston_streets.parquet has schema v0.9, expected v1.0. Please refetch."
+
+4. **CLI Integration**
+   - `matcher validate-data` - Check all data files for version compatibility
+   - `matcher fetch --force` - Refetch even if data exists
+
+### Benefits
+
+- Early failure with clear messaging
+- Prevents subtle bugs from stale data
+- Documents when schema changes require data refresh
+
+### Alternatives Considered
+
+- Git LFS for data versioning (too heavy for this use case)
+- Checksums of entire files (doesn't capture semantic changes)
+- DVC (overkill for current project size)
