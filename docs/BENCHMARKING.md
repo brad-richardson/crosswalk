@@ -58,61 +58,81 @@ When the `--connectors` option is provided with Overture connector data, the con
 
 ### Installation Options
 
-Hootenanny can be installed via several methods. Choose based on your environment:
+#### Option 1: Docker Compose (Recommended)
 
-#### Option 1: Vagrant + VirtualBox (Recommended for Ubuntu/Debian)
-
-This is the recommended approach for most users:
+Use Hootenanny's official docker-compose setup. This builds from source and runs all services in containers:
 
 ```bash
-# Install prerequisites
-sudo apt-get update
-sudo apt-get install vagrant virtualbox
-
-# Clone Hootenanny
+# Clone Hootenanny as a sibling to matcher
+cd /path/to/matcher/..
 git clone https://github.com/ngageoint/hootenanny.git
 cd hootenanny
 
-# Start the VM (this takes a while on first run)
-vagrant up
+# Start services (first run builds everything - takes 20-40 min)
+make -f Makefile.docker up
 
-# SSH into the VM
-vagrant ssh
-
-# Inside VM, hoot command is available
-hoot --version
+# Verify it's working
+docker compose exec core-services hoot --version
 ```
 
-#### Option 2: RPM Installation (CentOS/RHEL)
+Once running, use the Python wrapper:
 
-For CentOS 7 systems, use the official Yum repository:
+```python
+from pathlib import Path
+from matcher.external.hootenanny import conflate
+
+# Files are automatically copied to/from the Hootenanny container
+conflate(
+    reference=Path("osm/reference.osm"),
+    target=Path("osm/target.osm"),
+    output=Path("osm/conflated.osm"),
+    data_dir=Path("/path/to/matcher/data"),
+)
+```
+
+Or run commands directly:
 
 ```bash
-# Add the Hootenanny repo
+# Copy your OSM files to hootenanny/data/
+cp data/osm/*.osm ../hootenanny/data/
+
+# Run conflation
+cd ../hootenanny
+docker compose exec core-services hoot conflate \
+    -D match.creators="HighwayMatchCreator" \
+    -D merger.creators="HighwayMergerCreator" \
+    /home/hoot/hoot/data/reference.osm \
+    /home/hoot/hoot/data/target.osm \
+    /home/hoot/hoot/data/conflated.osm
+```
+
+To stop services: `make -f Makefile.docker down`
+
+#### Option 2: Vagrant + VirtualBox
+
+Alternative for systems where Docker is problematic:
+
+```bash
+sudo apt-get install vagrant virtualbox
+git clone https://github.com/ngageoint/hootenanny.git
+cd hootenanny
+vagrant up
+vagrant ssh
+# Inside VM: hoot --version
+```
+
+#### Option 3: RPM Installation (CentOS 7 only)
+
+For legacy CentOS 7 systems:
+
+```bash
 sudo curl -o /etc/yum.repos.d/hootenanny.repo \
     https://s3.amazonaws.com/hoot-repo/el7/release/hoot.repo
-
-# Install Hootenanny
 sudo yum install hootenanny-core
-
-# Verify
 hoot --version
 ```
 
 See [hootenanny-rpms](https://github.com/ngageoint/hootenanny-rpms) for details.
-
-#### Option 3: Build from Source with Docker
-
-For advanced users who want to build RPMs:
-
-```bash
-# Clone the RPM build repo
-git clone https://github.com/ngageoint/hootenanny-rpms.git
-cd hootenanny-rpms
-
-# Build (requires Docker and Vagrant)
-make -f Makefile.docker up
-```
 
 ### Running Hootenanny Conflation
 
