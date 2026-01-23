@@ -8,6 +8,8 @@ from matcher.features.spatial_context import (
     SpatialContextIndex,
     UnionFind,
     _cluster_endpoints_fast,
+    compute_aligned_topology_at_position,
+    compute_aligned_topology_features,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
@@ -1191,6 +1193,189 @@ class TestComputeAllTopologyExplicit:
         # But seg1 doesn't count conn_mid as an endpoint
         assert result["seg2"]["from_degree"] == 2  # shared with seg1's mid-segment connector
         assert result["seg2"]["to_degree"] == 1
+
+
+class TestAlignedTopologyFeatures:
+    """Tests for alignment-aware topology computation.
+
+    These tests verify that topology features are computed at the correct
+    positions for partial overlaps, using the connector infrastructure.
+    """
+
+    @pytest.fixture
+    def connector_graph_data(self):
+        """Create sample connector data for testing aligned topology."""
+        # seg_1: Linear segment with connectors at 0.0, 0.5, 1.0
+        # Connector degrees: conn_a=1 (dead end), conn_b=3 (T-junction), conn_c=2 (through)
+        seg_to_connectors = {
+            "seg_1": [(0.0, 1), (0.5, 2), (1.0, 3)],  # connector positions and node IDs
+            "seg_2": [(0.0, 3), (1.0, 4)],  # shares node 3 with seg_1
+            "seg_3": [(0.0, 2), (1.0, 5)],  # shares node 2 with seg_1's middle
+        }
+        node_features = {
+            1: 1,  # dead end
+            2: 3,  # T-junction (connected to seg_1 and seg_3)
+            3: 2,  # through connection (seg_1 end to seg_2 start)
+            4: 1,  # dead end
+            5: 1,  # dead end
+        }
+        return seg_to_connectors, node_features
+
+    def test_compute_aligned_topology_at_position_exact_match(self, connector_graph_data):
+        """Should return correct degree when position exactly matches a connector."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        # At position 0.0, should return degree of node 1 (dead end)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.0
+        )
+        assert degree == 1
+
+        # At position 0.5, should return degree of node 2 (T-junction)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.5
+        )
+        assert degree == 3
+
+        # At position 1.0, should return degree of node 3 (through)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 1.0
+        )
+        assert degree == 2
+
+    def test_compute_aligned_topology_at_position_interpolated(self, connector_graph_data):
+        """Should return degree of nearest connector for intermediate positions."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        # Position 0.3 is closer to 0.5 (node 2, degree 3) than to 0.0 (node 1, degree 1)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.3
+        )
+        assert degree == 3
+
+        # Position 0.2 is closer to 0.0 (node 1, degree 1) than to 0.5 (node 2, degree 3)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.2
+        )
+        assert degree == 1
+
+        # Position 0.8 is closer to 1.0 (node 3, degree 2) than to 0.5 (node 2, degree 3)
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.8
+        )
+        assert degree == 2
+
+    def test_compute_aligned_topology_at_position_missing_segment(self, connector_graph_data):
+        """Should return 1 (dead end) for missing segment."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "nonexistent_seg", 0.5
+        )
+        assert degree == 1  # Dead end default
+
+    def test_compute_aligned_topology_at_position_empty_connectors(self):
+        """Should return 1 (dead end) when segment has no connectors."""
+        seg_to_connectors = {"seg_1": []}  # Empty connector list
+        node_features = {}
+
+        degree = compute_aligned_topology_at_position(
+            seg_to_connectors, node_features, "seg_1", 0.5
+        )
+        assert degree == 1  # Dead end default
+
+    def test_compute_aligned_topology_features_full_segment(self, connector_graph_data):
+        """Should return correct topology features for full segment (0.0 to 1.0)."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        features = compute_aligned_topology_features(
+            "seg_1", seg_to_connectors, node_features, 0.0, 1.0
+        )
+
+        assert features["from_degree"] == 1  # node 1 at position 0.0
+        assert features["to_degree"] == 2  # node 3 at position 1.0
+        assert features["is_dead_end"] is True  # min(1, 2) == 1
+        assert features["is_intersection"] is False  # max(1, 2) = 2, not > 2
+        assert features["degree_signature"] == (1, 2)
+
+    def test_compute_aligned_topology_features_partial_overlap_at_intersection(
+        self, connector_graph_data
+    ):
+        """Should return correct topology for partial overlap at T-junction."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        # Partial overlap from 0.3 to 0.7 - both endpoints map to node 2 (T-junction)
+        features = compute_aligned_topology_features(
+            "seg_1", seg_to_connectors, node_features, 0.3, 0.7
+        )
+
+        # Both endpoints map to the 0.5 connector (node 2, degree 3)
+        assert features["from_degree"] == 3
+        assert features["to_degree"] == 3
+        assert features["is_dead_end"] is False  # min(3, 3) = 3, not 1
+        assert features["is_intersection"] is True  # max(3, 3) = 3 > 2
+        assert features["degree_signature"] == (3, 3)
+
+    def test_compute_aligned_topology_features_partial_overlap_spanning_connectors(
+        self, connector_graph_data
+    ):
+        """Should use nearest connectors for partial overlap spanning multiple."""
+        seg_to_connectors, node_features = connector_graph_data
+
+        # Partial overlap from 0.2 to 0.8
+        # 0.2 is closer to 0.0 (node 1, degree 1)
+        # 0.8 is closer to 1.0 (node 3, degree 2)
+        features = compute_aligned_topology_features(
+            "seg_1", seg_to_connectors, node_features, 0.2, 0.8
+        )
+
+        assert features["from_degree"] == 1
+        assert features["to_degree"] == 2
+        assert features["is_dead_end"] is True
+        assert features["is_intersection"] is False
+
+    def test_aligned_topology_differs_from_full_geometry(self):
+        """Verify that aligned topology can differ from full geometry topology.
+
+        This is the key test case from the investigation: a 438m segment that
+        only overlaps 43% with a 186m reference segment should use the degrees
+        at the aligned endpoints, not the full geometry endpoints.
+        """
+        # Simulated scenario:
+        # Full segment has connectors at 0.0 (intersection, degree 4) and 1.0 (dead end, degree 1)
+        # But the alignment only covers 0.0 to 0.43 (43% overlap)
+        # The 0.43 position is closest to a mid-segment connector at 0.5 (T-junction, degree 3)
+
+        seg_to_connectors = {
+            "long_segment": [
+                (0.0, 1),  # Start: intersection
+                (0.5, 2),  # Middle: T-junction
+                (1.0, 3),  # End: dead end
+            ]
+        }
+        node_features = {
+            1: 4,  # intersection degree
+            2: 3,  # T-junction degree
+            3: 1,  # dead end degree
+        }
+
+        # Full segment topology (incorrect for partial overlap)
+        full_features = compute_aligned_topology_features(
+            "long_segment", seg_to_connectors, node_features, 0.0, 1.0
+        )
+        assert full_features["from_degree"] == 4
+        assert full_features["to_degree"] == 1
+
+        # Aligned topology (correct for 43% overlap from start)
+        # Position 0.43 maps to connector at 0.5 (distance 0.07) vs 0.0 (distance 0.43)
+        aligned_features = compute_aligned_topology_features(
+            "long_segment", seg_to_connectors, node_features, 0.0, 0.43
+        )
+        assert aligned_features["from_degree"] == 4  # Start is still at intersection
+        assert aligned_features["to_degree"] == 3  # End maps to T-junction, not dead end!
+
+        # The key difference: aligned end degree (3) != full end degree (1)
+        assert aligned_features["to_degree"] != full_features["to_degree"]
 
 
 class TestComputeAllTopologyWithConnectors:

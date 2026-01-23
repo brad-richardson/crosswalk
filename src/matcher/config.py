@@ -24,6 +24,19 @@ DEFAULT_TOPOLOGY_FEATURES = {
 # Uses 1% tolerance (0.01) consistently across UI display and label metadata
 ALIGNMENT_FULL_TOLERANCE = 0.01
 
+# Default snap tolerance for endpoint clustering, topology computation, etc.
+# 5 meters is appropriate for road network matching where GPS/digitization error
+# typically ranges from 1-5 meters
+DEFAULT_SNAP_TOLERANCE_M = 5.0
+
+# ============================================================================
+# DATA AND FEATURE VERSIONING
+# ============================================================================
+# Version string for feature computation. Bump this when feature computation
+# logic changes to track which features were computed with which code version.
+# Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
+FEATURE_VERSION = "2026-01-23"
+
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================

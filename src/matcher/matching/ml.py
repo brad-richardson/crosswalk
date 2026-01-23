@@ -102,6 +102,7 @@ def _compute_single_feature(args):
 
         # Delegate to shared compute_pair_features function
         # This ensures consistency with backfill pipeline (training data generation)
+        # Pass graphlet_data for alignment-aware topology computation (partial overlaps)
         features = compute_pair_features(
             ref_geom,
             target_geom,
@@ -116,6 +117,10 @@ def _compute_single_feature(args):
             target_topology=target_topology,
             alignment=alignment,
             graphlet_features=graphlet_features,
+            ref_graphlet_data=ref_graphlet_data,
+            target_graphlet_data=target_graphlet_data,
+            ref_seg_id=ref_seg_id,
+            target_seg_id=target_seg_id,
         )
         features["_error"] = None
         return features

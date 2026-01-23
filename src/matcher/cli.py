@@ -1879,6 +1879,170 @@ def generate_agent_test_batch(
     console.print(f"  3. Compare: matcher agent-consensus {batch_dir}")
 
 
+@app.command("backfill-labels")
+def backfill_labels(
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Labels directory (Hive-partitioned CSV format)",
+    ),
+    overture: Path = typer.Option(
+        None,
+        "--overture",
+        "-r",
+        help="Path to Overture segments parquet. If not specified, looks for "
+        "{dataset}_overture_segments.parquet in the data directory.",
+    ),
+    data_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--data-dir",
+        "-d",
+        help="Directory containing target dataset parquet files",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Compute features but don't write to disk",
+    ),
+    skip_missing: bool = typer.Option(
+        False,
+        "--skip-missing",
+        help="Skip datasets with missing data files instead of failing",
+    ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help="Report what can/cannot be backfilled without modifying any files",
+    ),
+    drop_orphaned: bool = typer.Option(
+        False,
+        "--drop-orphaned",
+        help="Remove labels where IDs are not found in current data (orphaned labels)",
+    ),
+):
+    """Recompute features for all existing labels.
+
+    This command is needed after changes to feature computation logic to ensure
+    existing training labels have consistent features. It recomputes:
+    - Alignment fractions (where segments overlap)
+    - All topology features (using alignment-aware computation)
+    - Endpoint proximity features
+    - Graphlet similarity features
+    - All other geometric/semantic features
+    - Data version tracking columns (ref_data_version, target_data_version, feature_version)
+
+    The command preserves the label (match/no_match) but updates all feature
+    columns, alignment fractions, and version tracking.
+
+    Labels are considered "orphaned" when their IDs are not found in the current
+    data files (e.g., if data was re-fetched with different IDs).
+
+    By default, the command will FAIL if any dataset is missing required data
+    files. Use --skip-missing to skip those datasets instead.
+
+    Examples:
+        # Backfill all labels (fails if any data is missing)
+        matcher backfill-labels
+
+        # Skip datasets with missing data
+        matcher backfill-labels --skip-missing
+
+        # Report what can/cannot be backfilled (no changes)
+        matcher backfill-labels --report
+
+        # Dry run (compute but don't write)
+        matcher backfill-labels --dry-run
+
+        # Drop labels that can't be backfilled (orphaned IDs)
+        matcher backfill-labels --drop-orphaned
+    """
+    from .labeling.label_store import backfill_features
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    if overture is not None and not overture.exists():
+        console.print(f"[red]Overture file not found: {overture}[/red]")
+        raise typer.Exit(1)
+
+    if dry_run:
+        console.print("[yellow]Dry run mode - no files will be modified[/yellow]")
+    if report:
+        console.print("[yellow]Report mode - no files will be modified[/yellow]")
+    if drop_orphaned:
+        console.print(
+            "[yellow]Drop orphaned mode - labels with missing IDs will be removed[/yellow]"
+        )
+
+    console.print("[blue]Starting feature backfill...[/blue]")
+    console.print(f"  Labels: {labels_dir}")
+    console.print(f"  Overture: {overture or '(auto-discover per dataset)'}")
+    console.print(f"  Data dir: {data_dir}")
+    if skip_missing:
+        console.print(
+            "[yellow]  Skip missing: enabled (will skip datasets with missing data)[/yellow]"
+        )
+
+    try:
+        results = backfill_features(
+            labels_dir=labels_dir,
+            overture_path=overture,
+            data_dir=data_dir,
+            dry_run=dry_run,
+            skip_missing=skip_missing,
+            report_only=report,
+            drop_orphaned=drop_orphaned,
+        )
+
+        console.print()
+        if report:
+            console.print("[green]Backfill report complete![/green]")
+        else:
+            console.print("[green]Backfill complete![/green]")
+
+        console.print("Results by dataset:")
+        total_updated = 0
+        total_orphaned = 0
+        for dataset, stats in sorted(results.items()):
+            updated = stats.get("updated", 0)
+            orphaned = stats.get("orphaned", 0)
+            total = stats.get("total", 0)
+            skipped = stats.get("skipped")
+            dropped = stats.get("dropped", 0)
+
+            total_updated += updated
+            total_orphaned += orphaned
+
+            if skipped:
+                console.print(f"  {dataset}: [yellow]skipped ({skipped})[/yellow]")
+            elif orphaned > 0:
+                orphan_status = f"[red]{orphaned} orphaned[/red]"
+                if dropped > 0:
+                    orphan_status += f" [yellow]({dropped} dropped)[/yellow]"
+                console.print(f"  {dataset}: {updated}/{total} updated, {orphan_status}")
+            else:
+                console.print(f"  {dataset}: {updated}/{total} updated")
+
+        console.print(f"\n  Total: {total_updated} updated, {total_orphaned} orphaned")
+
+        if dry_run:
+            console.print(
+                "\n[yellow]Dry run - no files were modified. "
+                "Remove --dry-run to apply changes.[/yellow]"
+            )
+        if report:
+            console.print(
+                "\n[yellow]Report mode - no files were modified. "
+                "Remove --report to apply changes.[/yellow]"
+            )
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
 @app.command()
 def version():
     """Show version information."""

@@ -71,7 +71,7 @@ class TestFeatureParity:
         saved in the add() method (relying on defaults instead).
         """
         # Features that should be explicitly handled in add()
-        # (not metadata columns like gers_id, label, etc.)
+        # (not metadata columns like gers_id, label, versioning, etc.)
         feature_columns = [
             col
             for col in LABEL_COLUMNS
@@ -90,6 +90,10 @@ class TestFeatureParity:
                 "target_start_pct",
                 "target_end_pct",
                 "is_subsegment",
+                # Data versioning columns (metadata, not ML features)
+                "ref_data_version",
+                "target_data_version",
+                "feature_version",
             }
         ]
 

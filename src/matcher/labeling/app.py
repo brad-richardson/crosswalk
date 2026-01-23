@@ -198,7 +198,7 @@ from matcher.labeling.feature_panel import (
     render_feature_panel,
     render_minimal_feature_panel,
 )
-from matcher.labeling.label_store import LabelStore
+from matcher.labeling.label_store import LabelStore, get_data_version
 from matcher.labeling.map_view import create_comparison_map
 from matcher.labeling.state import (
     advance_to_next,
@@ -1058,6 +1058,9 @@ def record_one_to_n_label(
                 original_decision=cand.decision,
                 original_confidence=cand.confidence,
                 features=cand.features,
+                # Data version tracking
+                ref_data_version=st.session_state.get("ref_data_version"),
+                target_data_version=st.session_state.get("target_data_version"),
             )
             push_undo(cand.ref_id, cand.target_id, "match_1n")
 
@@ -1079,6 +1082,10 @@ def load_data(
         review_only: If True, filter to review band (thresholds ± 0.05)
     """
     candidates = None
+
+    # Capture data versions for version tracking in labels
+    st.session_state.ref_data_version = get_data_version(reference_path)
+    st.session_state.target_data_version = get_data_version(target_path)
 
     # Try to load from cache first
     if use_cache:
@@ -1146,7 +1153,7 @@ def record_label(
         st.error("Please enter your name in the sidebar first!")
         return
 
-    # Add to label store with sub-segment info
+    # Add to label store with sub-segment info and version tracking
     label_store.add(
         gers_id=pair.ref_id,  # ref_id is the Overture GERS ID
         target_id=pair.target_id,
@@ -1160,6 +1167,9 @@ def record_label(
         ref_end_pct=ref_end_pct,
         target_start_pct=target_start_pct,
         target_end_pct=target_end_pct,
+        # Data version tracking (captured when data was loaded)
+        ref_data_version=st.session_state.get("ref_data_version"),
+        target_data_version=st.session_state.get("target_data_version"),
     )
 
     # Push to undo stack
