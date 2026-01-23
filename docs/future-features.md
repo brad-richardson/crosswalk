@@ -111,6 +111,51 @@ with loader.session():
 
 **Priority**: Medium-High (reduces code duplication and bug surface area)
 
+## Label Data Management
+
+### Stable ID Strategy
+
+**Problem**: Labels reference segments by ID, but IDs can change when data is re-fetched (e.g., `boston_streets_123` becomes `us_boston_streets_123`). This breaks the link between labels and their source data.
+
+**Best Practices**:
+1. **Never re-fetch data that has labels** without checking label compatibility
+2. **Use source-provided IDs when available**: Many datasets include stable FIDs (e.g., ArcGIS `source_tags.FID`) that persist across fetches
+3. **Consider geometry hashes**: For datasets without stable IDs, a hash of the geometry provides a reproducible identifier
+4. **Add `--id-column` option**: Allow users to specify which column to use for IDs during fetch
+
+**Proposed Improvements**:
+- Add `--id-column` flag to `matcher fetch` commands
+- Store source FID in parquet metadata for auditing
+- Create migration tool for updating label IDs when prefixes change
+
+### Feature Version Management
+
+**Current State**: Labels now track `feature_version` to identify which computation logic was used.
+
+**Future Improvements**:
+- Semantic versioning for features (e.g., `2.1.0`)
+- Automatic feature version bumps in CI when `features/*.py` changes
+- Deprecation warnings when loading labels with outdated feature versions
+- Migration tooling to backfill features when versions differ
+
+### Label Archive & History
+
+**Problem**: When labels become orphaned (IDs no longer match), they're either lost or manually fixed.
+
+**Proposed Solution**:
+- Archive orphaned labels to `labels/archived/` instead of deleting
+- Track label history (when labeled, when backfilled, version changes)
+- Provide recovery tooling to re-link archived labels when data issues are fixed
+
+### Data Lineage Documentation
+
+**Problem**: It's hard to trace which data version was used for which model.
+
+**Proposed Solution**:
+- Store data versions in model metadata
+- Add `matcher model-info` command to show training data provenance
+- Include data lineage in MLflow/experiment tracking
+
 ## References
 
 - Feedback from Codex and Gemini model reviews confirmed the current feature set

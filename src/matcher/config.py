@@ -30,6 +30,14 @@ ALIGNMENT_FULL_TOLERANCE = 0.01
 DEFAULT_SNAP_TOLERANCE_M = 5.0
 
 # ============================================================================
+# DATA AND FEATURE VERSIONING
+# ============================================================================
+# Version string for feature computation. Bump this when feature computation
+# logic changes to track which features were computed with which code version.
+# Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
+FEATURE_VERSION = "2026-01-23"
+
+# ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================
 # These lists define all features computed during matching and used for ML.

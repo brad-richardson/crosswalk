@@ -1910,6 +1910,16 @@ def backfill_labels(
         "--skip-missing",
         help="Skip datasets with missing data files instead of failing",
     ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help="Report what can/cannot be backfilled without modifying any files",
+    ),
+    drop_orphaned: bool = typer.Option(
+        False,
+        "--drop-orphaned",
+        help="Remove labels where IDs are not found in current data (orphaned labels)",
+    ),
 ):
     """Recompute features for all existing labels.
 
@@ -1920,9 +1930,13 @@ def backfill_labels(
     - Endpoint proximity features
     - Graphlet similarity features
     - All other geometric/semantic features
+    - Data version tracking columns (ref_data_version, target_data_version, feature_version)
 
     The command preserves the label (match/no_match) but updates all feature
-    columns and alignment fractions.
+    columns, alignment fractions, and version tracking.
+
+    Labels are considered "orphaned" when their IDs are not found in the current
+    data files (e.g., if data was re-fetched with different IDs).
 
     By default, the command will FAIL if any dataset is missing required data
     files. Use --skip-missing to skip those datasets instead.
@@ -1934,8 +1948,14 @@ def backfill_labels(
         # Skip datasets with missing data
         matcher backfill-labels --skip-missing
 
-        # Dry run (show what would be updated)
+        # Report what can/cannot be backfilled (no changes)
+        matcher backfill-labels --report
+
+        # Dry run (compute but don't write)
         matcher backfill-labels --dry-run
+
+        # Drop labels that can't be backfilled (orphaned IDs)
+        matcher backfill-labels --drop-orphaned
     """
     from .labeling.label_store import backfill_features
 
@@ -1949,6 +1969,12 @@ def backfill_labels(
 
     if dry_run:
         console.print("[yellow]Dry run mode - no files will be modified[/yellow]")
+    if report:
+        console.print("[yellow]Report mode - no files will be modified[/yellow]")
+    if drop_orphaned:
+        console.print(
+            "[yellow]Drop orphaned mode - labels with missing IDs will be removed[/yellow]"
+        )
 
     console.print("[blue]Starting feature backfill...[/blue]")
     console.print(f"  Labels: {labels_dir}")
@@ -1966,21 +1992,50 @@ def backfill_labels(
             data_dir=data_dir,
             dry_run=dry_run,
             skip_missing=skip_missing,
+            report_only=report,
+            drop_orphaned=drop_orphaned,
         )
 
         console.print()
-        console.print("[green]Backfill complete![/green]")
-        console.print("Results by dataset:")
-        for dataset, count in sorted(results.items()):
-            console.print(f"  {dataset}: {count} labels updated")
+        if report:
+            console.print("[green]Backfill report complete![/green]")
+        else:
+            console.print("[green]Backfill complete![/green]")
 
-        total = sum(results.values())
-        console.print(f"\n  Total: {total} labels updated")
+        console.print("Results by dataset:")
+        total_updated = 0
+        total_orphaned = 0
+        for dataset, stats in sorted(results.items()):
+            updated = stats.get("updated", 0)
+            orphaned = stats.get("orphaned", 0)
+            total = stats.get("total", 0)
+            skipped = stats.get("skipped")
+            dropped = stats.get("dropped", 0)
+
+            total_updated += updated
+            total_orphaned += orphaned
+
+            if skipped:
+                console.print(f"  {dataset}: [yellow]skipped ({skipped})[/yellow]")
+            elif orphaned > 0:
+                orphan_status = f"[red]{orphaned} orphaned[/red]"
+                if dropped > 0:
+                    orphan_status += f" [yellow]({dropped} dropped)[/yellow]"
+                console.print(f"  {dataset}: {updated}/{total} updated, {orphan_status}")
+            else:
+                console.print(f"  {dataset}: {updated}/{total} updated")
+
+        console.print(f"\n  Total: {total_updated} updated, {total_orphaned} orphaned")
 
         if dry_run:
             console.print(
                 "\n[yellow]Dry run - no files were modified. "
                 "Remove --dry-run to apply changes.[/yellow]"
+            )
+        if report:
+            console.print(
+                "\n[yellow]Report mode - no files were modified. "
+                "Remove --report to apply changes.[/yellow]"
             )
 
     except Exception as e:

@@ -8,7 +8,29 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS
+from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
+
+
+def get_data_version(file_path: Path) -> str:
+    """Get a version identifier for a data file.
+
+    The version identifier is based on the file's modification time and size,
+    which together provide a reasonably unique fingerprint. This is faster than
+    computing a full content hash while still detecting when files have changed.
+
+    Args:
+        file_path: Path to the data file (parquet, etc.)
+
+    Returns:
+        Version string in format "{mtime_ns}_{size}" (e.g., "1706050800000000000_12345678")
+        Returns "unknown" if file doesn't exist or can't be stat'd.
+    """
+    try:
+        file_path = Path(file_path)
+        stat = file_path.stat()
+        return f"{stat.st_mtime_ns}_{stat.st_size}"
+    except (OSError, FileNotFoundError):
+        return "unknown"
 
 
 def is_subsegment_selection(
@@ -56,6 +78,10 @@ LABEL_METADATA_COLUMNS = [
     "target_start_pct",
     "target_end_pct",
     "is_subsegment",
+    # Data versioning columns (added 2026-01-23)
+    "ref_data_version",  # Version identifier for reference data file
+    "target_data_version",  # Version identifier for target data file
+    "feature_version",  # Feature computation version (from config.FEATURE_VERSION)
 ]
 
 # Column definitions for labels: metadata + all feature columns
@@ -69,6 +95,13 @@ SUBSEGMENT_DEFAULTS = {
     "target_start_pct": 0.0,
     "target_end_pct": 1.0,
     "is_subsegment": False,
+}
+
+# Default values for version columns (None = pre-versioning label)
+VERSION_DEFAULTS = {
+    "ref_data_version": None,
+    "target_data_version": None,
+    "feature_version": None,
 }
 
 
@@ -98,8 +131,12 @@ class LabelStore:
         if self.csv_path.exists():
             try:
                 df = pd.read_csv(self.csv_path)
-                # Handle backward compatibility - add missing columns
+                # Handle backward compatibility - add missing subsegment columns
                 for col, default_val in SUBSEGMENT_DEFAULTS.items():
+                    if col not in df.columns:
+                        df[col] = default_val
+                # Handle backward compatibility - add missing version columns
+                for col, default_val in VERSION_DEFAULTS.items():
                     if col not in df.columns:
                         df[col] = default_val
                 # Handle ref_id -> gers_id rename for backward compatibility
@@ -133,6 +170,9 @@ class LabelStore:
         ref_end_pct: float = 1.0,
         target_start_pct: float = 0.0,
         target_end_pct: float = 1.0,
+        ref_data_version: str | None = None,
+        target_data_version: str | None = None,
+        feature_version: str | None = None,
     ) -> None:
         """Add a new label.
 
@@ -149,6 +189,9 @@ class LabelStore:
             ref_end_pct: End of reference sub-segment (0.0-1.0)
             target_start_pct: Start of target sub-segment (0.0-1.0)
             target_end_pct: End of target sub-segment (0.0-1.0)
+            ref_data_version: Version identifier for reference data file
+            target_data_version: Version identifier for target data file
+            feature_version: Feature computation version (defaults to FEATURE_VERSION)
         """
         # Determine if this is a sub-segment selection
         is_subseg = is_subsegment_selection(
@@ -170,6 +213,10 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
+            # Data versioning fields
+            "ref_data_version": ref_data_version,
+            "target_data_version": target_data_version,
+            "feature_version": feature_version if feature_version else FEATURE_VERSION,
             # Geometric features (11) - distance features use _m suffix for meters
             "hausdorff_distance_m": features.get("hausdorff_distance_m", 0.0),
             "mean_hausdorff_distance_m": features.get("mean_hausdorff_distance_m", 0.0),
@@ -365,7 +412,9 @@ def backfill_features(
     data_dir: Path | None = None,
     dry_run: bool = False,
     skip_missing: bool = False,
-) -> dict[str, int]:
+    report_only: bool = False,
+    drop_orphaned: bool = False,
+) -> dict[str, dict[str, int]]:
     """Recompute all features for existing labels using current computation logic.
 
     This function is needed after changes to feature computation (e.g., alignment-aware
@@ -377,6 +426,7 @@ def backfill_features(
     3. For each dataset, loads source geometries and builds spatial indexes
     4. Recomputes alignment and ALL features from scratch for each label
     5. Updates the label CSV files with new feature values
+    6. Updates version tracking columns (ref_data_version, target_data_version, feature_version)
 
     Args:
         labels_dir: Directory containing Hive-partitioned label CSVs
@@ -386,9 +436,11 @@ def backfill_features(
         dry_run: If True, compute features but don't write to disk
         skip_missing: If True, skip datasets with missing data files. If False (default),
                      raise an error when any dataset is missing required data.
+        report_only: If True, only report what can/cannot be backfilled without modifying
+        drop_orphaned: If True, remove labels where IDs are not found in current data
 
     Returns:
-        Dict with counts: {dataset_name: n_updated}
+        Dict with counts per dataset: {dataset_name: {"updated": n, "orphaned": n, "total": n}}
 
     Raises:
         FileNotFoundError: If skip_missing=False and any dataset is missing required data
@@ -478,7 +530,7 @@ def backfill_features(
             connectors_column="connectors" if ref_has_connectors else None,
         )
 
-        result = (ref_gdf, ref_gdf_proj, ref_lookup, ref_graphlet_data, utm_crs)
+        result = (ref_gdf, ref_gdf_proj, ref_lookup, ref_graphlet_data, utm_crs, ref_path)
         ref_cache[ref_path_str] = result
         return result
 
@@ -495,7 +547,7 @@ def backfill_features(
 
         if original_count == 0:
             logger.info(f"  Skipping {dataset_name}: no labels")
-            results[dataset_name] = 0
+            results[dataset_name] = {"updated": 0, "orphaned": 0, "total": 0}
             continue
 
         # Load reference data for this dataset
@@ -503,7 +555,12 @@ def backfill_features(
         if ref_data is None:
             if skip_missing:
                 logger.warning(f"  Skipping {dataset_name}: reference data not found")
-                results[dataset_name] = 0
+                results[dataset_name] = {
+                    "updated": 0,
+                    "orphaned": 0,
+                    "total": original_count,
+                    "skipped": "ref_not_found",
+                }
                 continue
             else:
                 # Determine what file was expected
@@ -517,7 +574,7 @@ def backfill_features(
                     f"Use --skip-missing to skip datasets with missing data."
                 )
 
-        ref_gdf, ref_gdf_proj, ref_lookup, ref_graphlet_data, utm_crs = ref_data
+        ref_gdf, ref_gdf_proj, ref_lookup, ref_graphlet_data, utm_crs, ref_path = ref_data
 
         # Find target dataset file
         target_path = data_dir / f"{dataset_name}.parquet"
@@ -534,7 +591,12 @@ def backfill_features(
         if target_path is None:
             if skip_missing:
                 logger.warning(f"  Skipping {dataset_name}: target data not found")
-                results[dataset_name] = 0
+                results[dataset_name] = {
+                    "updated": 0,
+                    "orphaned": 0,
+                    "total": original_count,
+                    "skipped": "target_not_found",
+                }
                 continue
             else:
                 raise FileNotFoundError(
@@ -566,27 +628,34 @@ def backfill_features(
             target_gdf_proj, id_column="id", tolerance_m=DEFAULT_SNAP_TOLERANCE_M
         )
 
+        # Get data versions for tracking
+        ref_data_version = get_data_version(ref_path)
+        target_data_version = get_data_version(target_path)
+
         # Process each label row
         updated = 0
+        orphaned_indices = []
         for idx, row in df.iterrows():
             # Handle both gers_id and ref_id naming
             ref_id = str(row.get("gers_id", row.get("ref_id", "")))
             target_id = str(row["target_id"])
 
-            # Skip if we can't find the geometries
+            # Track orphaned labels (IDs not found in current data)
             if ref_id not in ref_lookup.index or target_id not in target_lookup.index:
-                logger.debug(f"    Skipping {ref_id}/{target_id}: geometry not found")
+                orphaned_indices.append(idx)
+                if not report_only:
+                    logger.debug(f"    Orphaned: {ref_id}/{target_id} - geometry not found")
                 continue
 
             ref_row = ref_lookup.loc[ref_id]
             target_row = target_lookup.loc[target_id]
 
-            # Get projected geometries
+            # Get projected geometries using label index (.loc), not positional (.iloc)
             ref_idx_in_gdf = ref_gdf[ref_gdf["id"] == ref_id].index[0]
             target_idx_in_gdf = target_gdf[target_gdf["id"] == target_id].index[0]
 
-            ref_geom = ref_gdf_proj.geometry.iloc[ref_idx_in_gdf]
-            target_geom = target_gdf_proj.geometry.iloc[target_idx_in_gdf]
+            ref_geom = ref_gdf_proj.geometry.loc[ref_idx_in_gdf]
+            target_geom = target_gdf_proj.geometry.loc[target_idx_in_gdf]
 
             if ref_geom is None or ref_geom.is_empty:
                 continue
@@ -661,22 +730,58 @@ def backfill_features(
                 alignment.dataset_end_frac,
             )
 
+            # Update version columns
+            if "ref_data_version" not in df.columns:
+                df["ref_data_version"] = None
+            if "target_data_version" not in df.columns:
+                df["target_data_version"] = None
+            if "feature_version" not in df.columns:
+                df["feature_version"] = None
+
+            df.at[idx, "ref_data_version"] = ref_data_version
+            df.at[idx, "target_data_version"] = target_data_version
+            df.at[idx, "feature_version"] = FEATURE_VERSION
+
             updated += 1
             if updated % 100 == 0:
                 logger.info(f"    Processed {updated}/{original_count} labels...")
 
-        logger.info(f"  Updated {updated}/{original_count} labels")
-        results[dataset_name] = updated
+        orphaned_count = len(orphaned_indices)
+        logger.info(f"  Updated {updated}/{original_count} labels, {orphaned_count} orphaned")
+
+        # Store detailed results
+        results[dataset_name] = {
+            "updated": updated,
+            "orphaned": orphaned_count,
+            "total": original_count,
+        }
+
+        # Report mode - just show stats, don't modify
+        if report_only:
+            if orphaned_count > 0:
+                logger.warning(
+                    f"  [REPORT] {orphaned_count} labels would be orphaned "
+                    f"(IDs not found in current data)"
+                )
+            continue
+
+        # Drop orphaned labels if requested
+        if drop_orphaned and orphaned_indices:
+            logger.info(f"  Dropping {orphaned_count} orphaned labels...")
+            df = df.drop(orphaned_indices)
+            results[dataset_name]["dropped"] = orphaned_count
 
         # Write back to CSV
-        if not dry_run and updated > 0:
+        if not dry_run and (updated > 0 or (drop_orphaned and orphaned_indices)):
             df.to_csv(partition_path, index=False, float_format=lambda x: f"{x:.10g}")
             logger.info(f"  Saved to {partition_path}")
 
     # Summary
-    total_updated = sum(results.values())
+    total_updated = sum(r["updated"] for r in results.values())
+    total_orphaned = sum(r["orphaned"] for r in results.values())
     logger.info(
-        f"\nBackfill complete: {total_updated} labels updated across {len(results)} datasets"
+        f"\nBackfill complete: {total_updated} labels updated, "
+        f"{total_orphaned} orphaned across {len(results)} datasets"
     )
 
     return results
