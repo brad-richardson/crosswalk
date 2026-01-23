@@ -10,17 +10,19 @@ from .data_loader import CandidatePairView
 # Feature display configuration - top features by XGBoost importance
 # These are the features that most influence the ML model's predictions
 # Ordered by importance (descending) - updated 2026-01-23 after alignment-aware topology fix
+# Top 10 features by importance from latest model (2026-01-23)
+# Geometric features dominate (58% total), especially distance/overlap metrics
 TOP_FEATURES = [
-    ("name_levenshtein", "Name Edit Dist", 0.091),
-    ("centroid_distance_m", "Centroid Dist", 0.073),
-    ("collinear_gap_ratio", "Collinear Gap", 0.066),
-    ("has_name_target", "Has Name", 0.057),
-    ("min_endpoint_proximity_m", "Endpoint Prox", 0.054),
-    ("class_similarity", "Class", 0.051),
-    ("hausdorff_p95_m", "Hausdorff P95", 0.037),
-    ("from_degree_target", "From Degree", 0.037),  # Topology feature now significant
-    ("mean_hausdorff_distance_m", "Mean Haus.", 0.032),
-    ("lateral_offset_m", "Lateral Offset", 0.026),
+    ("centroid_distance_m", "Centroid Dist", 0.230),
+    ("buffer_iou_5m", "Buffer IoU 5m", 0.101),
+    ("buffer_iou_15m", "Buffer IoU 15m", 0.100),
+    ("target_coverage", "Target Cov", 0.052),
+    ("length_ratio", "Length Ratio", 0.049),
+    ("min_coverage", "Min Coverage", 0.040),
+    ("hausdorff_p95_m", "Hausdorff P95", 0.036),
+    ("hausdorff_distance_m", "Hausdorff Dist", 0.032),
+    ("class_similarity", "Class", 0.030),
+    ("lateral_offset_m", "Lateral Offset", 0.027),
 ]
 
 RAW_FEATURE_UNITS = {
@@ -136,6 +138,12 @@ def _normalize_feature_for_display(feature_key: str, value: float | None) -> flo
     # Heading: 0-90 degrees, lower is better
     if feature_key == "heading_delta":
         return max(0.0, 1.0 - value / 90.0)
+
+    # Length ratio: 1.0 = perfect match, penalize deviation from 1.0
+    if feature_key == "length_ratio":
+        # Ratio of 0.5 or 2.0 = 50% score, 0.25 or 4.0 = 0% score
+        deviation = abs(1.0 - value)
+        return max(0.0, 1.0 - deviation / 0.75)
 
     # Degree features: normalize to 0-1 based on typical values (1-4)
     # Higher degrees generally indicate more connected intersections
