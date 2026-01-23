@@ -9,6 +9,16 @@ from pydantic_settings import BaseSettings
 # 10km represents "very far" for road segment matching
 MAX_DISTANCE_METERS = 10000.0
 
+# Default topology features for empty/missing geometries
+# Represents an isolated dead-end segment (degree 1 at both endpoints)
+DEFAULT_TOPOLOGY_FEATURES = {
+    "from_degree": 1,
+    "to_degree": 1,
+    "is_dead_end": True,
+    "is_intersection": False,
+    "degree_signature": (1,),
+}
+
 # Tolerance for determining if alignment is "full" vs "partial"
 # If fractions are within this tolerance of 0.0 or 1.0, treat as full alignment
 # Uses 1% tolerance (0.01) consistently across UI display and label metadata
@@ -29,7 +39,6 @@ FEATURE_COLUMNS = [
     "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
     "buffer_iou_5m",  # Tight alignment (exact centerline matches)
     "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
-    "overlap_ratio",  # TODO: Remove - always 1.0 due to blocking bias (candidates are already geometrically close)
     "heading_delta",
     "length_ratio",
     "projection_distance_m",
@@ -44,6 +53,7 @@ FEATURE_COLUMNS = [
     "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
     "has_name_target",  # 1.0 if target has non-empty name, else 0.0
     "name_is_generic",  # 1.0 if either name matches generic pattern
+    "cardinal_direction_mismatch",  # 1.0 if cardinal directions conflict (N vs S, E vs W)
     # Semantic features - class (1)
     "class_similarity",
     # Endpoint/connectivity (3) - direction-invariant
@@ -87,6 +97,7 @@ SEMANTIC_FEATURES = [
     "has_name_ref",
     "has_name_target",
     "name_is_generic",
+    "cardinal_direction_mismatch",
     "class_similarity",
 ]
 
@@ -103,6 +114,14 @@ class MatcherSettings(BaseSettings):
         default=Path("data/processed"), description="Processed data directory"
     )
     output_dir: Path = Field(default=Path("data/output"), description="Output directory")
+    model_path: Path = Field(
+        default=Path("data/models/matcher_model_combined.joblib"),
+        description="Path to trained ML model",
+    )
+    model_geom_only_path: Path = Field(
+        default=Path("data/models/matcher_model_geom_only.joblib"),
+        description="Path to geometry-only ML model",
+    )
 
     # Overture settings
     overture_release: str | None = Field(
@@ -179,8 +198,7 @@ class MatcherSettings(BaseSettings):
         default={
             "hausdorff_norm": 0.10,
             "mean_hausdorff_norm": 0.10,
-            "buffer_iou": 0.15,
-            "overlap_ratio": 0.15,
+            "buffer_iou": 0.30,
             "heading_norm": 0.10,
             "length_ratio": 0.10,
             "projection_norm": 0.10,

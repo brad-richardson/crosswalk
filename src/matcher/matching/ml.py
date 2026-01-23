@@ -32,7 +32,12 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import cross_val_score, train_test_split
 
-from ..config import FEATURE_COLUMNS, MAX_DISTANCE_METERS, SEMANTIC_FEATURES
+from ..config import (
+    DEFAULT_TOPOLOGY_FEATURES,
+    FEATURE_COLUMNS,
+    MAX_DISTANCE_METERS,
+    SEMANTIC_FEATURES,
+)
 from .rules import MatchDecision, MatchResult
 
 # Additional relational features (kept for backward compatibility with old labels)
@@ -42,16 +47,6 @@ RELATIONAL_FEATURE_COLUMNS = [
     "end_endpoint_proximity",
     "shared_endpoint_count",
 ]
-
-# Default topology features for empty/missing geometries
-# Represents an isolated dead-end segment (degree 1 at both endpoints)
-DEFAULT_TOPOLOGY_FEATURES = {
-    "from_degree": 1,
-    "to_degree": 1,
-    "is_dead_end": True,
-    "is_intersection": False,
-    "degree_signature": (1,),
-}
 
 
 # Module-level globals for multiprocessing worker data
@@ -134,8 +129,8 @@ def _compute_single_feature(args):
 
 def select_model_for_dataset(
     target_gdf,
-    full_model_path: str = "data/models/matcher_model_combined.joblib",
-    geom_only_model_path: str = "data/models/matcher_model_geom_only.joblib",
+    full_model_path: str | None = None,
+    geom_only_model_path: str | None = None,
     name_column: str = "names",
     min_name_coverage: float = 0.5,
 ) -> str:
@@ -154,6 +149,14 @@ def select_model_for_dataset(
     Returns:
         Path to selected model
     """
+    from ..config import settings
+
+    # Use configured paths if not explicitly provided
+    if full_model_path is None:
+        full_model_path = str(settings.model_path)
+    if geom_only_model_path is None:
+        geom_only_model_path = str(settings.model_geom_only_path)
+
     # Check for name column variations
     has_names = name_column in target_gdf.columns or "name" in target_gdf.columns
     name_col = name_column if name_column in target_gdf.columns else "name"
@@ -669,10 +672,10 @@ class MLMatcher:
 
             if settings.auto_select_model:
                 # Auto-select model based on target dataset
+                # select_model_for_dataset uses settings defaults when paths are None
                 selected_model = select_model_for_dataset(
                     target,
-                    full_model_path=self.model_path or "data/models/matcher_model_combined.joblib",
-                    geom_only_model_path="data/models/matcher_model_geom_only.joblib",
+                    full_model_path=self.model_path,
                     name_column=target_name_column,
                 )
                 self.load_model(selected_model)

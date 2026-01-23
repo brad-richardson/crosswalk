@@ -76,11 +76,11 @@ class TestErrorFeaturesConsistency:
         [
             "buffer_iou_5m",
             "buffer_iou_15m",
-            "overlap_ratio",
             "length_ratio",
             "name_levenshtein",
             "name_jaro_winkler",
             "name_token_sort",
+            "cardinal_direction_mismatch",
             "class_similarity",
         ],
     )

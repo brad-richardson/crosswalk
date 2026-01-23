@@ -10,11 +10,15 @@ from typing import Any
 import geopandas as gpd
 from loguru import logger
 
-from ..config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
+from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import compute_geometric_features
 from .relational import compute_perpendicular_offset
-from .semantic import compute_class_similarity, compute_name_similarity
+from .semantic import (
+    compute_cardinal_mismatch,
+    compute_class_similarity,
+    compute_name_similarity,
+)
 from .spatial_context import (
     SpatialContextIndex,
     build_connector_graph,
@@ -24,15 +28,6 @@ from .spatial_context import (
     compute_endpoint_features,
     graphlet_similarity_with_alignment,
 )
-
-# Default topology features for empty/missing geometries
-DEFAULT_TOPOLOGY_FEATURES = {
-    "from_degree": 1,
-    "to_degree": 1,
-    "is_dead_end": True,
-    "is_intersection": False,
-    "degree_signature": (1,),
-}
 
 # Alias for backward compatibility - the authoritative list is in config.py
 ALL_FEATURE_COLUMNS = FEATURE_COLUMNS
@@ -159,7 +154,6 @@ def compute_pair_features(
             "hausdorff_p95_m": geom_features.hausdorff_p95_distance,
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
-            "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
             "projection_distance_m": geom_features.projection_distance,
@@ -174,6 +168,7 @@ def compute_pair_features(
             "has_name_ref": name_sim["has_name_ref"],
             "has_name_target": name_sim["has_name_target"],
             "name_is_generic": name_sim["name_is_generic"],
+            "cardinal_direction_mismatch": compute_cardinal_mismatch(ref_name, target_name),
             # Semantic - class
             "class_similarity": class_sim,
             # Endpoint proximity (direction-invariant min/max)
@@ -238,7 +233,6 @@ def _get_error_features() -> dict[str, float]:
         "hausdorff_p95_m": MAX_DISTANCE_METERS,
         "buffer_iou_5m": 0.0,
         "buffer_iou_15m": 0.0,
-        "overlap_ratio": 0.0,
         "heading_delta": 180.0,
         "length_ratio": 0.0,
         "projection_distance_m": MAX_DISTANCE_METERS,
@@ -253,6 +247,7 @@ def _get_error_features() -> dict[str, float]:
         "has_name_ref": 0.0,
         "has_name_target": 0.0,
         "name_is_generic": 0.0,
+        "cardinal_direction_mismatch": 0.0,  # No mismatch assumed in error case
         # Semantic features - class
         "class_similarity": 0.0,
         # Endpoint proximity

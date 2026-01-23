@@ -195,16 +195,17 @@ def run_pipeline(
             target_class_column=target_class_column,
         )
     elif method == "xgboost":
+        from ..config import settings
         from ..matching.ml import MLMatcher
 
-        # Load trained model from default location (combined model for better generalization)
-        model_path = "data/models/matcher_model_combined.joblib"
-        if not Path(model_path).exists():
+        # Load trained model from configured location
+        model_path = settings.model_path
+        if not model_path.exists():
             raise FileNotFoundError(
                 f"ML model not found at {model_path}. "
                 "Run 'matcher train --combined' to train the model on labeled data from data/labels/."
             )
-        matcher = MLMatcher(model_path=model_path)
+        matcher = MLMatcher(model_path=str(model_path))
         results = matcher.score_candidates(
             candidates,
             reference,

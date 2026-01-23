@@ -177,7 +177,6 @@ class LabelStore:
             "hausdorff_p95_m": features.get("hausdorff_p95_m", 0.0),
             "buffer_iou_5m": features.get("buffer_iou_5m", 0.0),
             "buffer_iou_15m": features.get("buffer_iou_15m", 0.0),
-            "overlap_ratio": features.get("overlap_ratio", 0.0),
             "heading_delta": features.get("heading_delta", 0.0),
             "length_ratio": features.get("length_ratio", 0.0),
             "projection_distance_m": features.get("projection_distance_m", 0.0),
@@ -192,6 +191,7 @@ class LabelStore:
             "has_name_ref": features.get("has_name_ref", 0.0),
             "has_name_target": features.get("has_name_target", 0.0),
             "name_is_generic": features.get("name_is_generic", 0.0),
+            "cardinal_direction_mismatch": features.get("cardinal_direction_mismatch", 0.0),
             # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
             # Endpoint/connectivity features (3) - direction-invariant min/max

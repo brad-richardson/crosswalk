@@ -10,7 +10,7 @@ class TestExcludeSemanticFlag:
 
     def test_semantic_features_defined_in_config(self):
         """SEMANTIC_FEATURES should be defined in config."""
-        assert len(SEMANTIC_FEATURES) == 9
+        assert len(SEMANTIC_FEATURES) == 10
         assert "name_levenshtein" in SEMANTIC_FEATURES
         assert "name_jaro_winkler" in SEMANTIC_FEATURES
         assert "name_token_sort" in SEMANTIC_FEATURES
@@ -19,6 +19,7 @@ class TestExcludeSemanticFlag:
         assert "has_name_ref" in SEMANTIC_FEATURES
         assert "has_name_target" in SEMANTIC_FEATURES
         assert "name_is_generic" in SEMANTIC_FEATURES
+        assert "cardinal_direction_mismatch" in SEMANTIC_FEATURES
         assert "class_similarity" in SEMANTIC_FEATURES
 
     def test_all_semantic_features_are_in_feature_columns(self):
@@ -61,7 +62,6 @@ class TestExcludeSemanticFlag:
                     "hausdorff_p95_m",
                     "buffer_iou_5m",
                     "buffer_iou_15m",
-                    "overlap_ratio",
                     "heading_delta",
                     "length_ratio",
                     "projection_distance_m",
@@ -142,7 +142,6 @@ class TestExcludeSemanticFlag:
                 "hausdorff_p95_m",
                 "buffer_iou_5m",
                 "buffer_iou_15m",
-                "overlap_ratio",
                 "heading_delta",
                 "length_ratio",
                 "projection_distance_m",
@@ -150,7 +149,7 @@ class TestExcludeSemanticFlag:
                 "collinear_gap_ratio",
             ]
         )
-        assert geometric_count == 11, "Should have 11 geometric features"
+        assert geometric_count == 10, "Should have 10 geometric features"
 
         endpoint_count = sum(
             1
@@ -192,7 +191,7 @@ class TestExcludeSemanticFlag:
         graphlet_count = sum(1 for f in geom_only_features if f in graphlet_features)
         assert graphlet_count == 2, "Should have 2 graphlet features"
 
-        # Total geometry-only features: 11 + 3 + 3 + 12 + 4 + 2 = 35
-        assert len(geom_only_features) == 35, (
-            f"Expected 35 geometry-only features, got {len(geom_only_features)}"
+        # Total geometry-only features: 10 + 3 + 3 + 12 + 4 + 2 = 34
+        assert len(geom_only_features) == 34, (
+            f"Expected 34 geometry-only features, got {len(geom_only_features)}"
         )
