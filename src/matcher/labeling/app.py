@@ -19,57 +19,62 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 # Project root for resolving data paths (src/matcher/labeling -> project root)
 PROJECT_ROOT = Path(__file__).parents[3]
 
-# Base dataset configurations - maps dataset_id to (target_file, reference_file)
-# Dataset metadata (name, type, urls) comes from DatasetRegistry
-# Reference file naming: {region}_overture_segments.parquet (e.g., us_boston_overture_segments.parquet)
-_BASE_DATASET_CONFIG = {
-    # Boston, MA
-    "us_boston_streets": (
-        "us_boston_streets.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_boston_bike_network": (
-        "us_boston_bike_network.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    "us_boston_sidewalks": (
-        "us_boston_sidewalks.parquet",
-        "us_boston_overture_segments.parquet",
-    ),
-    # Fort Collins, CO
-    "us_fort_collins_streets": (
-        "us_fort_collins_streets.parquet",
-        "us_fort_collins_overture_segments.parquet",
-    ),
-    "us_fort_collins_sidewalks": (
-        "us_fort_collins_sidewalks.parquet",
-        "us_fort_collins_overture_segments.parquet",
-    ),
-    # Frisco, TX
-    "us_frisco_roads": (
-        "us_frisco_roads.parquet",
-        "us_frisco_overture_segments.parquet",
-    ),
-    "us_frisco_trails": (
-        "us_frisco_trails.parquet",
-        "us_frisco_overture_segments.parquet",
-    ),
-    # Salt Lake City, UT
-    "us_salt_lake_roads": (
-        "us_utah_roads.parquet",
-        "us_salt_lake_overture_segments.parquet",
-    ),
-    # Fresno, CA
-    "us_fresno_roads": (
-        "us_fresno_roads.parquet",
-        "us_fresno_overture_segments.parquet",
-    ),
-    # Utah (legacy - uses subdirectory)
-    "us_utah_roads": (
-        "us_utah_roads.parquet",
-        "utah_overture/overture_segments.parquet",
-    ),
-}
+
+def _find_overture_reference(dataset_name: str, raw_dir: Path) -> str | None:
+    """Find the Overture reference file for a dataset by checking what exists.
+
+    Tries progressively shorter region prefixes until a matching Overture file is found.
+
+    Examples:
+        us_boston_streets -> us_boston_overture_segments.parquet
+        us_fort_collins_sidewalks -> us_fort_collins_overture_segments.parquet
+    """
+    parts = dataset_name.split("_")
+
+    # Try progressively shorter prefixes (from longest to shortest)
+    # e.g., for "us_fort_collins_streets", try:
+    #   us_fort_collins_streets_overture_segments.parquet
+    #   us_fort_collins_overture_segments.parquet
+    #   us_fort_overture_segments.parquet
+    #   us_overture_segments.parquet
+    for i in range(len(parts), 0, -1):
+        region = "_".join(parts[:i])
+        candidate = f"{region}_overture_segments.parquet"
+        if (raw_dir / candidate).exists():
+            return candidate
+
+    # Fallback to generic overture_segments.parquet
+    if (raw_dir / "overture_segments.parquet").exists():
+        return "overture_segments.parquet"
+
+    return None
+
+
+def _discover_datasets_from_yaml() -> dict[str, tuple[str, str]]:
+    """Auto-discover datasets from yaml config files in datasets/ directory.
+
+    Returns:
+        Dict mapping dataset_name to (target_file, reference_file)
+    """
+    from matcher.datasets.schema import list_dataset_configs
+
+    datasets = {}
+    raw_dir = PROJECT_ROOT / "data/raw"
+
+    for dataset_name in list_dataset_configs():
+        # Target file: {dataset_name}.parquet
+        target_file = f"{dataset_name}.parquet"
+
+        # Only add if target file exists
+        if not (raw_dir / target_file).exists():
+            continue
+
+        # Find corresponding Overture reference file
+        reference_file = _find_overture_reference(dataset_name, raw_dir)
+        if reference_file:
+            datasets[dataset_name] = (target_file, reference_file)
+
+    return datasets
 
 
 def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
@@ -127,8 +132,10 @@ def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
 
 
 def _get_dataset_config() -> dict[str, tuple[str, str]]:
-    """Get combined dataset config including auto-discovered OSM datasets."""
-    config = _BASE_DATASET_CONFIG.copy()
+    """Get combined dataset config from yaml configs and auto-discovered OSM datasets."""
+    # Start with datasets discovered from yaml configs
+    config = _discover_datasets_from_yaml()
+    # Add auto-discovered OSM datasets
     config.update(_discover_osm_datasets())
     return config
 

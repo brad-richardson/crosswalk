@@ -68,7 +68,7 @@ DATASET_CONFIG = {
         "us_boston_overture_segments.parquet",
     ),
     "us_boston_streets_osm": (
-        "us_boston_osm_segments.parquet",
+        "us_boston_streets_osm_segments.parquet",
         "us_boston_overture_segments.parquet",
     ),
     "us_fort_collins_streets": (
