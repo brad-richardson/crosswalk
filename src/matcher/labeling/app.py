@@ -1109,8 +1109,8 @@ def load_data(
     full_count = len(candidates) if candidates else 0
     st.session_state.candidates_full_count = full_count
 
-    # Apply confidence band filter if requested
-    if candidates and review_only:
+    # Apply confidence band filter if requested and we have candidates
+    if review_only and full_count > 0:
         candidates = filter_by_confidence_band(candidates, review_only=True)
         st.session_state.candidates_filtered = True
     else:

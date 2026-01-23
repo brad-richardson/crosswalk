@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -32,13 +33,14 @@ def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[s
     """Compute normalized score breakdown from raw ML features for UI display.
 
     The ML scorer doesn't produce component scores like the rule-based scorer,
-    so we derive normalized 0-1 scores from raw features for the UI.
+    so we derive normalized 0-1 scores from raw features for the UI and cached
+    score breakdowns.
 
     Args:
         features: Raw feature dict from ML scorer
 
     Returns:
-        Dict of normalized scores matching FEATURE_LABELS in feature_panel.py
+        Dict of normalized scores derived from the raw ML feature values.
     """
 
     # Normalize distance features (lower distance = higher score)
@@ -380,8 +382,6 @@ def generate_scored_candidates(
     Returns:
         List of CandidatePairView objects sorted by confidence (REVIEW first)
     """
-    import time
-
     # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")

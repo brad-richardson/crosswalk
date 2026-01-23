@@ -123,9 +123,8 @@ def _normalize_feature_for_display(feature_key: str, value: float | None) -> flo
     if feature_key == "heading_delta":
         return max(0.0, 1.0 - value / 90.0)
 
-    # Gap ratio: lower is better (0 = no gap = perfect)
-    if feature_key == "collinear_gap_ratio":
-        return max(0.0, 1.0 - value)
+    # collinear_gap_ratio is already 0-1 where higher = better match
+    # (handled by default case below)
 
     # Boolean/binary features
     if feature_key in ("intersection_match", "dead_end_match"):
@@ -154,11 +153,15 @@ def render_score_breakdown(pair: CandidatePairView) -> None:
 
         # Show raw value in tooltip-style format
         if raw_value is not None:
-            unit = RAW_FEATURE_UNITS.get(feature_key, "")
-            if unit:
-                raw_str = f"{raw_value:.1f}{unit}"
+            # Handle booleans explicitly to avoid float-formatting TypeError
+            if isinstance(raw_value, bool):
+                raw_str = "Yes" if raw_value else "No"
             else:
-                raw_str = f"{raw_value:.2f}"
+                unit = RAW_FEATURE_UNITS.get(feature_key, "")
+                if unit:
+                    raw_str = f"{raw_value:.1f}{unit}"
+                else:
+                    raw_str = f"{raw_value:.2f}"
         else:
             raw_str = "N/A"
 
