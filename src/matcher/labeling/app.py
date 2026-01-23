@@ -19,6 +19,9 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 # Project root for resolving data paths (src/matcher/labeling -> project root)
 PROJECT_ROOT = Path(__file__).parents[3]
 
+# Default dataset to use when none is selected
+DEFAULT_DATASET = "us_boston_streets"
+
 
 def _find_overture_reference(dataset_name: str, raw_dir: Path) -> str | None:
     """Find the Overture reference file for a dataset by checking what exists.
@@ -215,13 +218,17 @@ def get_data_paths() -> tuple[Path, Path, str]:
         Tuple of (reference_path, target_path, dataset_id)
     """
     # Get selected dataset from session state or query params
-    default_dataset = st.query_params.get("dataset", "boston_streets")
+    default_dataset = st.query_params.get("dataset", DEFAULT_DATASET)
     selected = st.session_state.get("selected_dataset", default_dataset)
 
     # Validate selection (refresh config to pick up newly fetched datasets)
     current_config = get_dataset_config()
     if selected not in current_config:
-        selected = "boston_streets"
+        # Fall back to first available dataset, or error
+        if current_config:
+            selected = next(iter(current_config))
+        else:
+            raise ValueError("No datasets configured - add YAML files to datasets/ directory")
 
     target_filename, reference_filename = current_config[selected]
 
@@ -244,7 +251,7 @@ def check_dataset_change() -> bool:
     Returns:
         True if dataset changed and state was reset, False otherwise
     """
-    current = st.session_state.get("selected_dataset", "boston_streets")
+    current = st.session_state.get("selected_dataset", DEFAULT_DATASET)
     previous = st.session_state.get("_last_dataset")
 
     if previous is not None and previous != current:
@@ -337,9 +344,11 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         # Get default from query params for persistence across refreshes
         # Refresh config to pick up newly fetched datasets
         current_raw_files = get_dataset_raw_files()
-        default_dataset = st.query_params.get("dataset", "boston_streets")
+        default_dataset = st.query_params.get("dataset", DEFAULT_DATASET)
         if default_dataset not in current_raw_files:
-            default_dataset = "boston_streets"
+            default_dataset = (
+                next(iter(current_raw_files)) if current_raw_files else DEFAULT_DATASET
+            )
 
         dataset_keys = list(current_raw_files.keys())
 
