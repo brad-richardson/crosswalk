@@ -503,7 +503,13 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                     load_data(reference_path, target_path, dataset_id, use_cache, review_only)
                 st.rerun()
         else:
-            st.success(f"Loaded {len(st.session_state.candidates)} candidates")
+            # Show load status with filter indicator
+            loaded_count = len(st.session_state.candidates)
+            if st.session_state.get("candidates_filtered", False):
+                full_count = st.session_state.get("candidates_full_count", loaded_count)
+                st.success(f"Loaded {loaded_count:,} of {full_count:,} candidates (review band)")
+            else:
+                st.success(f"Loaded {loaded_count:,} candidates")
 
             # Map style
             st.subheader("Map")
@@ -1099,19 +1105,16 @@ def load_data(
         if candidates:
             save_candidates_to_cache(dataset_id, candidates)
 
+    # Track full count before filtering
+    full_count = len(candidates) if candidates else 0
+    st.session_state.candidates_full_count = full_count
+
     # Apply confidence band filter if requested
     if candidates and review_only:
-        full_count = len(candidates)
         candidates = filter_by_confidence_band(candidates, review_only=True)
-        filtered_count = len(candidates)
-        # Log filter results
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.info(
-            f"Confidence band filter: {filtered_count}/{full_count} candidates "
-            f"({100 * filtered_count / full_count:.1f}%)"
-        )
+        st.session_state.candidates_filtered = True
+    else:
+        st.session_state.candidates_filtered = False
 
     st.session_state.candidates = candidates
     st.session_state.data_loaded = True
