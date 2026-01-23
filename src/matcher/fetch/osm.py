@@ -8,9 +8,13 @@ from pathlib import Path
 
 import geopandas as gpd
 from loguru import logger
+from pyproj import Geod
 from shapely.geometry import box as shapely_box
 
 from ..config import settings
+
+# Reusable WGS84 geodetic calculator (avoids repeated object construction)
+_WGS84_GEOD = Geod(ellps="WGS84")
 from .metadata import FetchMetadata, save_metadata
 from .osm_download import download_and_extract
 from .osm_pbf import parse_pbf
@@ -242,8 +246,6 @@ def _node_ids_to_connectors(
         [{'at': 0.0, 'connector_id': 'n100'},
          {'at': 1.0, 'connector_id': 'n200'}]
     """
-    from pyproj import Geod
-
     # Handle None and empty cases (works for both list and numpy array)
     if node_ids is None:
         return None
@@ -268,13 +270,12 @@ def _node_ids_to_connectors(
         ]
 
     # Compute geodetic distances between consecutive points
-    geod = Geod(ellps="WGS84")
     cumulative_distances = [0.0]
 
     for i in range(1, n_coords):
         lon1, lat1 = coords[i - 1]
         lon2, lat2 = coords[i]
-        _, _, dist = geod.inv(lon1, lat1, lon2, lat2)
+        _, _, dist = _WGS84_GEOD.inv(lon1, lat1, lon2, lat2)
         cumulative_distances.append(cumulative_distances[-1] + dist)
 
     total_length = cumulative_distances[-1]

@@ -367,12 +367,14 @@ class SpatialContextIndex:
         self,
         point: Point,
         radius: float,
+        already_projected: bool = False,
     ) -> list[tuple[int, float]]:
         """Find endpoints within radius of a point.
 
         Args:
             point: Query point (in source CRS, typically WGS84)
             radius: Search radius (meters)
+            already_projected: If True, skip projection (point already in index CRS)
 
         Returns:
             List of (endpoint_idx, distance) tuples sorted by distance
@@ -381,8 +383,9 @@ class SpatialContextIndex:
             return []
 
         # Project query point if we have a transformer (geographic -> projected)
+        # Skip projection if caller indicates point is already in index CRS
         query_point = point
-        if self._transformer is not None:
+        if self._transformer is not None and not already_projected:
             x, y = point.coords[0][:2]
             px, py = self._transformer.transform(x, y)
             query_point = Point(px, py)
@@ -455,11 +458,16 @@ class SpatialContextIndex:
             start_point = Point(self.endpoint_coords[start_ep_idx])
             end_point = Point(self.endpoint_coords[end_ep_idx])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(start_point, tolerance_m):
+            # Points from endpoint_coords are already projected
+            for nearby_ep, _dist in self.query_nearby_endpoints(
+                start_point, tolerance_m, already_projected=True
+            ):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
-            for nearby_ep, _dist in self.query_nearby_endpoints(end_point, tolerance_m):
+            for nearby_ep, _dist in self.query_nearby_endpoints(
+                end_point, tolerance_m, already_projected=True
+            ):
                 if nearby_ep in self.endpoint_to_segment:
                     connected.update(self.endpoint_to_segment[nearby_ep])
 
@@ -894,15 +902,16 @@ def compute_all_topology_explicit(
                     elif at_pos >= 0.999:  # End (at ~1.0)
                         to_degree = degree
 
-        # Use max/min across ALL connectors for intersection/dead_end detection
-        # This ensures mid-segment intersections are properly flagged
+        # Use max degree across ALL connectors for intersection detection
+        # (mid-segment junctions count as intersections)
         max_degree = max(all_degrees) if all_degrees else 1
-        min_degree = min(all_degrees) if all_degrees else 1
 
+        # Dead-end is based on ENDPOINT degrees only, not mid-segment connectors
+        # A segment is a dead-end if either endpoint has degree 1
         topology[seg_id] = {
             "from_degree": from_degree,
             "to_degree": to_degree,
-            "is_dead_end": min_degree == 1,  # True if ANY connector is degree 1
+            "is_dead_end": from_degree == 1 or to_degree == 1,
             "is_intersection": max_degree > 2,  # True if ANY connector has degree > 2
             "degree_signature": tuple(sorted([from_degree, to_degree])),
         }
