@@ -459,6 +459,14 @@ def train_and_evaluate(
         print(f"  Precision: {overall_precision:.3f}")
         print(f"  Recall:    {overall_recall:.3f}")
 
+        # Extract top 5 feature importances
+        feature_importances = dict(zip(matcher.feature_names, matcher.model.feature_importances_))
+        top_5_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:5]
+
+        print("\nTop 5 features by importance:")
+        for feat, imp in top_5_features:
+            print(f"  {feat}: {imp:.3f}")
+
         # Per-dataset metrics
         results = {
             "_meta": {
@@ -467,6 +475,7 @@ def train_and_evaluate(
                 "n_train": len(train_df),
                 "n_test": len(test_df),
                 "split_seed": SPLIT_SEED,
+                "top_5_features": top_5_features,
             },
             "_overall": {
                 "n_samples": len(test_df),
@@ -541,7 +550,18 @@ def save_results(
         "precision",
         "recall",
         "split_seed",
-        "model_path",
+        "model_name",
+        # Top 5 features by importance
+        "top1_feature",
+        "top1_importance",
+        "top2_feature",
+        "top2_importance",
+        "top3_feature",
+        "top3_importance",
+        "top4_feature",
+        "top4_importance",
+        "top5_feature",
+        "top5_importance",
     ]
 
     write_header = not RESULTS_FILE.exists()
@@ -558,6 +578,9 @@ def save_results(
             if dataset_name.startswith("_"):
                 continue
 
+            # Get top 5 features from meta
+            top_5 = meta.get("top_5_features", [])
+
             row = {
                 "run_date": run_date.isoformat(),
                 "data_pull_date": data_pull_date.isoformat(),
@@ -573,7 +596,18 @@ def save_results(
                 "precision": f"{metrics.get('precision', 0):.4f}",
                 "recall": f"{metrics.get('recall', 0):.4f}",
                 "split_seed": SPLIT_SEED,
-                "model_path": model_path,
+                "model_name": Path(model_path).name,
+                # Top 5 features
+                "top1_feature": top_5[0][0] if len(top_5) > 0 else "",
+                "top1_importance": f"{top_5[0][1]:.4f}" if len(top_5) > 0 else "",
+                "top2_feature": top_5[1][0] if len(top_5) > 1 else "",
+                "top2_importance": f"{top_5[1][1]:.4f}" if len(top_5) > 1 else "",
+                "top3_feature": top_5[2][0] if len(top_5) > 2 else "",
+                "top3_importance": f"{top_5[2][1]:.4f}" if len(top_5) > 2 else "",
+                "top4_feature": top_5[3][0] if len(top_5) > 3 else "",
+                "top4_importance": f"{top_5[3][1]:.4f}" if len(top_5) > 3 else "",
+                "top5_feature": top_5[4][0] if len(top_5) > 4 else "",
+                "top5_importance": f"{top_5[4][1]:.4f}" if len(top_5) > 4 else "",
             }
             writer.writerow(row)
 
