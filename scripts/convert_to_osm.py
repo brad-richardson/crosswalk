@@ -213,14 +213,14 @@ class OSMConverter:
             class_column: Column containing road class
             name_column: Column containing road names
             connectors_column: Column containing connector references (Overture format)
-            source_tag: If provided, use 'matcher:{source_tag}:id' instead of 'matcher:id'
-                       e.g., source_tag='ref' creates 'matcher:ref:id'
+            source_tag: If provided, creates 'matcher_{source_tag}_{sanitized_id}' tags
+                       where the value is the original ID (e.g., source_tag='ref')
 
         Returns:
             ElementTree Element representing OSM XML
         """
         # Determine ID tagging strategy
-        # If source_tag provided, use ID as key: matcher:{source}:{id} = 1
+        # If source_tag provided: matcher_{source}_{sanitized_id} = original_id
         # This allows N:M merges to preserve all IDs
         self._source_tag = source_tag
         self._id_tag = "matcher:id"  # Fallback for old format
@@ -434,7 +434,7 @@ def convert_parquet_to_osm(
         id_column: Column containing segment IDs
         class_column: Column containing road class
         name_column: Column containing road names
-        source_tag: If provided, use 'matcher:{source_tag}:id' tag (e.g., 'ref' or 'tgt')
+        source_tag: If provided, creates 'matcher_{source_tag}_{sanitized_id}' tags (e.g., 'ref' or 'tgt')
     """
     logger.info(f"Loading {input_path}")
     gdf = gpd.read_parquet(input_path)
@@ -503,7 +503,7 @@ def main():
         "--source-tag",
         type=str,
         default=None,
-        help="Source tag prefix for ID (e.g., 'ref' creates 'matcher:ref:id')",
+        help="Source tag prefix for ID (e.g., 'ref' creates 'matcher_ref_{id}' tags)",
     )
     args = parser.parse_args()
 

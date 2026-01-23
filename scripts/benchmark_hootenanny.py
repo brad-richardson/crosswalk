@@ -140,7 +140,8 @@ def convert_to_osm(
     """Convert parquet to OSM format.
 
     Args:
-        source_tag: If provided, use 'matcher:{source_tag}:id' tag (e.g., 'ref' or 'tgt')
+        source_tag: If provided, creates 'matcher_{source_tag}_{sanitized_id}' tags
+                   where the value is the original ID (e.g., 'ref' or 'tgt')
     """
     cmd = [
         "python",
@@ -430,28 +431,25 @@ def _build_id_map(osm_path: Path, source_tag: str | None = None) -> dict[str, st
     """Build map from OSM way ID to original matcher ID.
 
     Args:
-        source_tag: If provided, look for values with '{source_tag}:' prefix
+        source_tag: If provided, look for 'matcher_{source_tag}_*' tag keys
+                   where the value contains the original ID.
     """
     id_map = {}
     tree = ET.parse(osm_path)
     root = tree.getroot()
 
-    value_prefix = f"{source_tag}:" if source_tag else None
+    # New format: matcher_{source_tag}_{sanitized_id} = original_id
+    key_prefix = f"matcher_{source_tag}_" if source_tag else None
 
     for way in root.findall(".//way"):
         way_id = way.get("id")
         for tag in way.findall("tag"):
-            if tag.get("k") == "matcher:id":
-                v = tag.get("v")
-                # New format: matcher:id = ref:<id> or tgt:<id>
-                if value_prefix and v.startswith(value_prefix):
-                    id_map[way_id] = v[len(value_prefix) :]
-                elif not value_prefix:
-                    # Extract ID without prefix for general lookup
-                    if v.startswith("ref:") or v.startswith("tgt:"):
-                        id_map[way_id] = v.split(":", 1)[1]
-                    else:
-                        id_map[way_id] = v
+            k = tag.get("k")
+            v = tag.get("v")
+
+            # New format: matcher_ref_* or matcher_tgt_* keys
+            if key_prefix and k and k.startswith(key_prefix) and v or k == "matcher:id" and v:
+                id_map[way_id] = v
                 break
 
     return id_map
@@ -468,8 +466,10 @@ def extract_matches_via_diff(
     This compares the conflated output against the reference to see
     what features were modified (indicating they were merged with target).
     """
-    # This is a fallback approach - parsing the conflated output directly is preferred
-    pass
+    raise NotImplementedError(
+        "extract_matches_via_diff is not implemented; "
+        "parsing the conflated output directly is the preferred approach."
+    )
 
 
 def compute_metrics(
@@ -595,9 +595,8 @@ def main():
     if args.reference and args.target:
         ref_segments = args.reference
         tgt_segments = args.target
-        ref_connectors = None
     else:
-        ref_segments, tgt_segments, ref_connectors = get_dataset_files(args.dataset)
+        ref_segments, tgt_segments, _ref_connectors = get_dataset_files(args.dataset)
 
     logger.info(f"Reference: {ref_segments}")
     logger.info(f"Target: {tgt_segments}")
@@ -734,25 +733,24 @@ def _get_all_matcher_ids(osm_path: Path, source_tag: str | None = None) -> set[s
     """Get all matcher ID values from an OSM file.
 
     Args:
-        source_tag: If provided, look for 'matcher:{source_tag}:<id>' keys
+        source_tag: If provided, look for 'matcher_{source_tag}_*' tag keys
+                   where the value contains the original ID.
     """
-    ids = set()
+    ids: set[str] = set()
     tree = ET.parse(osm_path)
     root = tree.getroot()
 
-    prefix = f"matcher:{source_tag}:" if source_tag else None
+    # New format: matcher_{source_tag}_{sanitized_id} = original_id
+    key_prefix = f"matcher_{source_tag}_" if source_tag else None
 
     for way in root.findall(".//way"):
         for tag in way.findall("tag"):
             k = tag.get("k")
-            # New format: matcher:ref:<id> = 1 (ID is in the key)
-            if prefix and k.startswith(prefix):
-                extracted_id = k[len(prefix) :]
-                if extracted_id and extracted_id != "id":
-                    ids.add(extracted_id)
-            # Old format: matcher:id = <id>
-            elif k == "matcher:id":
-                ids.add(tag.get("v"))
+            v = tag.get("v")
+
+            # New format: matcher_ref_* or matcher_tgt_* keys
+            if key_prefix and k and k.startswith(key_prefix) and v or k == "matcher:id" and v:
+                ids.add(v)
 
     return ids
 
