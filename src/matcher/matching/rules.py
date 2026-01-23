@@ -82,8 +82,7 @@ DEFAULT_WEIGHTS = {
     # Geometric features (63% total)
     "hausdorff_norm": 0.08,  # Max deviation - sensitive to segmentation, catches outliers
     "mean_hausdorff_norm": 0.10,  # Mean deviation - robust to partial overlaps
-    "buffer_iou": 0.12,  # Overlap quality - robust general-purpose metric
-    "overlap_ratio": 0.15,  # Overlap quantity - "how much actually matches?"
+    "buffer_iou": 0.27,  # Overlap quality - robust general-purpose metric
     "heading_norm": 0.10,  # Direction alignment - distinguishes parallel roads
     "collinear_gap_ratio": 0.08,  # Penalizes tip-to-tip collinear segments
     # Length/proximity (10% total)
@@ -149,7 +148,6 @@ def compute_match_score(
             "mean_hausdorff_distance_m": precomputed_features["mean_hausdorff_distance_m"],
             "buffer_iou_5m": precomputed_features.get("buffer_iou_5m", 0.0),
             "buffer_iou_15m": precomputed_features.get("buffer_iou_15m", 0.0),
-            "overlap_ratio": precomputed_features["overlap_ratio"],
             "heading_delta": precomputed_features["heading_delta"],
             "length_ratio": precomputed_features["length_ratio"],
             "projection_distance_m": precomputed_features["projection_distance_m"],
@@ -174,7 +172,6 @@ def compute_match_score(
             "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
-            "overlap_ratio": geom_features.overlap_ratio,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
             "projection_distance_m": geom_features.projection_distance,
@@ -194,7 +191,6 @@ def compute_match_score(
             0, 1 - raw_features["mean_hausdorff_distance_m"] / distance_threshold
         ),
         "buffer_iou": raw_features["buffer_iou_5m"],  # Use 5m buffer for scoring
-        "overlap_ratio": raw_features["overlap_ratio"],  # Already 0-1
         "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
         "collinear_gap_ratio": raw_features["collinear_gap_ratio"],  # Already 0-1
         "length_ratio": raw_features["length_ratio"],

@@ -148,24 +148,30 @@ CARDINAL_PREFIXES = {
 }
 
 # Cardinal direction pairs that conflict (opposite directions)
-CONFLICTING_CARDINALS = {
-    ("north", "south"),
-    ("south", "north"),
-    ("east", "west"),
-    ("west", "east"),
-    ("n", "s"),
-    ("s", "n"),
-    ("e", "w"),
-    ("w", "e"),
-    ("northeast", "southwest"),
-    ("southwest", "northeast"),
-    ("northwest", "southeast"),
-    ("southeast", "northwest"),
-    ("ne", "sw"),
-    ("sw", "ne"),
-    ("nw", "se"),
-    ("se", "nw"),
-}
+# Include all combinations of full and abbreviated forms, so that e.g.
+# ("n", "south") and ("north", "s") are both treated as conflicting.
+_NORTH = {"north", "n"}
+_SOUTH = {"south", "s"}
+_EAST = {"east", "e"}
+_WEST = {"west", "w"}
+_NORTHEAST = {"northeast", "ne"}
+_SOUTHWEST = {"southwest", "sw"}
+_NORTHWEST = {"northwest", "nw"}
+_SOUTHEAST = {"southeast", "se"}
+
+CONFLICTING_CARDINALS: set[tuple[str, str]] = set()
+
+# Cardinal axis opposites (N/S and E/W)
+CONFLICTING_CARDINALS.update({(a, b) for a in _NORTH for b in _SOUTH})
+CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTH for b in _NORTH})
+CONFLICTING_CARDINALS.update({(a, b) for a in _EAST for b in _WEST})
+CONFLICTING_CARDINALS.update({(a, b) for a in _WEST for b in _EAST})
+
+# Diagonal opposites (NE/SW and NW/SE)
+CONFLICTING_CARDINALS.update({(a, b) for a in _NORTHEAST for b in _SOUTHWEST})
+CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTHWEST for b in _NORTHEAST})
+CONFLICTING_CARDINALS.update({(a, b) for a in _NORTHWEST for b in _SOUTHEAST})
+CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTHEAST for b in _NORTHWEST})
 
 # Common street name abbreviations
 # Note: Keys must include trailing space to avoid matching inside words
