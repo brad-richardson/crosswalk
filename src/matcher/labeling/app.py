@@ -148,17 +148,16 @@ def load_config() -> dict:
         try:
             return json.loads(CONFIG_FILE.read_text())
         except Exception as e:
-            import logging
-
-            logging.warning(f"Failed to load config from {CONFIG_FILE}: {e}")
+            # Config is non-critical, just print warning
+            print(f"Warning: Failed to load config from {CONFIG_FILE}: {e}")
 
             # Try backup
             if backup_file.exists():
                 try:
-                    logging.info(f"Recovering config from backup: {backup_file}")
+                    print(f"Recovering config from backup: {backup_file}")
                     return json.loads(backup_file.read_text())
                 except Exception as backup_e:
-                    logging.warning(f"Backup config also failed: {backup_e}")
+                    print(f"Warning: Backup config also failed: {backup_e}")
 
     # Try backup as fallback if primary doesn't exist
     if backup_file.exists():
@@ -173,7 +172,7 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     """Save config to file atomically with backup.
 
-    Uses write-to-temp-then-rename pattern to prevent corruption.
+    Uses write-to-temp-then-replace pattern to prevent corruption.
     """
     temp_file = CONFIG_FILE.with_suffix(".json.tmp")
     backup_file = CONFIG_FILE.with_suffix(".json.bak")
@@ -181,14 +180,12 @@ def save_config(config: dict) -> None:
     # Write to temp file first
     temp_file.write_text(json.dumps(config))
 
-    # Backup existing file
+    # Backup existing file (replace() is cross-platform atomic)
     if CONFIG_FILE.exists():
-        if backup_file.exists():
-            backup_file.unlink()
-        CONFIG_FILE.rename(backup_file)
+        CONFIG_FILE.replace(backup_file)
 
-    # Atomic rename
-    temp_file.rename(CONFIG_FILE)
+    # Atomic replace
+    temp_file.replace(CONFIG_FILE)
 
 
 from matcher.config import settings

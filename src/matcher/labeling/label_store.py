@@ -225,13 +225,19 @@ class LabelStore:
         has_label = "label" in df.columns
 
         if not (has_gers_id or has_ref_id):
-            raise ValueError(f"Missing required column: gers_id (found: {list(df.columns)[:5]}...)")
+            cols = list(df.columns)
+            sample = f"{cols[:3]}...{cols[-2:]}" if len(cols) > 5 else str(cols)
+            raise ValueError(f"Missing required column: gers_id (found {len(cols)} cols: {sample})")
         if not has_target_id:
+            cols = list(df.columns)
+            sample = f"{cols[:3]}...{cols[-2:]}" if len(cols) > 5 else str(cols)
             raise ValueError(
-                f"Missing required column: target_id (found: {list(df.columns)[:5]}...)"
+                f"Missing required column: target_id (found {len(cols)} cols: {sample})"
             )
         if not has_label:
-            raise ValueError(f"Missing required column: label (found: {list(df.columns)[:5]}...)")
+            cols = list(df.columns)
+            sample = f"{cols[:3]}...{cols[-2:]}" if len(cols) > 5 else str(cols)
+            raise ValueError(f"Missing required column: label (found {len(cols)} cols: {sample})")
 
         # Handle backward compatibility - add missing subsegment columns
         for col, default_val in SUBSEGMENT_DEFAULTS.items():
@@ -269,12 +275,11 @@ class LabelStore:
 
         # Backup existing file (if present)
         if self.csv_path.exists():
-            if backup_path.exists():
-                backup_path.unlink()
-            self.csv_path.rename(backup_path)
+            # Use replace() for cross-platform atomicity (rename() fails on Windows if dest exists)
+            self.csv_path.replace(backup_path)
 
-        # Atomic rename temp to final
-        temp_path.rename(self.csv_path)
+        # Atomic replace temp to final
+        temp_path.replace(self.csv_path)
 
     def add(
         self,
@@ -892,12 +897,11 @@ def backfill_features(
 
             # Backup existing file
             if partition_path.exists():
-                if backup_path.exists():
-                    backup_path.unlink()
-                partition_path.rename(backup_path)
+                # Use replace() for cross-platform atomicity
+                partition_path.replace(backup_path)
 
-            # Atomic rename
-            temp_path.rename(partition_path)
+            # Atomic replace
+            temp_path.replace(partition_path)
             logger.info(f"  Saved to {partition_path}")
 
     # Summary
