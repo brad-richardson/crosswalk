@@ -429,7 +429,9 @@ def fetch_overture(
     if errors:
         console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
         raise typer.Exit(1)
-    console.print(f"\n[green]Successfully fetched Overture data for {len(datasets)} dataset(s)[/green]")
+    console.print(
+        f"\n[green]Successfully fetched Overture data for {len(datasets)} dataset(s)[/green]"
+    )
 
 
 @fetch_app.command("osm")
