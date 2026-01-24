@@ -1025,9 +1025,7 @@ class MLMatcher:
                 features_list.extend(batch_results)
                 processed = min(i + len(batch), len(work_items))
                 pct = processed / len(work_items) * 100
-                logger.info(
-                    f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)"
-                )
+                logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
 
         # Log any errors encountered during feature computation
         errors = [f for f in features_list if f.get("_error")]
