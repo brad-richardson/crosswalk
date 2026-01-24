@@ -605,6 +605,15 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 - **Location**: `src/matcher/pipeline/runner.py`
 - **Solution**: Switch to DuckDB streaming or chunked processing
 
+### LOW: Datasets with Polygon Geometries (Need Re-fetch)
+
+- **Problem**: Some target datasets have Polygon geometries instead of LineStrings
+- **Affected datasets** (files deleted, need re-fetch with correct data):
+  - `ca_toronto_roads` - 57,345 Polygons (wrong layer from source?)
+  - `co_bogota_bike_network` - 6,082 Polygons (wrong layer from source?)
+  - `co_bogota_sidewalks` - 164,868 Polygons (sidewalk polygons, not centerlines)
+- **Action needed**: Check source data portals for LineString road centerline layers
+
 ### Medium: Robustness Issues
 
 #### Overly Broad Exception Handling

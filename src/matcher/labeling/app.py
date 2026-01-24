@@ -1,9 +1,18 @@
 """Main Streamlit application for labeling road segment matches."""
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+# Configure logging to show in terminal
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Add src to path for direct streamlit execution
 src_path = Path(__file__).parent.parent.parent
@@ -196,6 +205,7 @@ from matcher.labeling.data_loader import (
     filter_by_confidence_band,
     filter_candidates,
     generate_scored_candidates,
+    generate_scored_candidates_with_cache,
     get_cache_info,
     load_cached_candidates,
     load_geodataframe,
@@ -262,6 +272,11 @@ def check_dataset_change() -> bool:
     """
     current = st.session_state.get("selected_dataset", DEFAULT_DATASET)
     previous = st.session_state.get("_last_dataset")
+
+    # Prevent dataset change while loading
+    if st.session_state.get("is_loading", False) and previous is not None and previous != current:
+        st.session_state.selected_dataset = previous
+        return False
 
     if previous is not None and previous != current:
         # Clear data cache
@@ -413,6 +428,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             format_func=get_dataset_display_name,
             index=dataset_keys.index(default_dataset),
             key="selected_dataset",
+            disabled=st.session_state.is_loading,
         )
 
         # Update query params for persistence
@@ -432,32 +448,23 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         if legacy_path.exists():
             st.warning("Found legacy labels.parquet - rename to labels_boston_streets.parquet")
 
-        st.divider()
-
-        # Session info
-        st.subheader("Session")
-
-        # Load saved name from config
+        # Labeler name (compact)
         config = load_config()
         default_name = session.labeler_name or config.get("labeler_name", "")
-
         labeler = st.text_input(
-            "Your name",
+            "Labeler",
             value=default_name,
-            placeholder="Enter your name",
+            placeholder="Your name",
+            label_visibility="collapsed",
         )
         if labeler != session.labeler_name:
             set_labeler_name(labeler)
-            # Save to config for persistence
             config["labeler_name"] = labeler
             save_config(config)
-
-        st.text(f"Session ID: {session.session_id}")
 
         st.divider()
 
         # Data loading
-        st.subheader("Data")
         if not st.session_state.data_loaded:
             # Check for cache
             cache_info = get_cache_info(dataset_id, reference_path, target_path)
@@ -470,6 +477,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
 
             # Auto-load if cache exists
             if cache_info["exists"]:
+                st.session_state.is_loading = True
                 with st.spinner("Loading cached candidates..."):
                     load_data(
                         reference_path,
@@ -478,45 +486,43 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                         use_cache=True,
                         review_only=st.session_state.review_only,
                     )
+                st.session_state.is_loading = False
                 st.rerun()
 
             # No cache - show manual load UI
-            st.text(f"Reference: {reference_path.name}")
-            st.text(f"Target: {target_path.name}")
-            st.caption("No cache available - will compute fresh")
+            st.caption(f"Ref: {reference_path.name}")
+            st.caption(f"Target: {target_path.name}")
 
             # Confidence band filter
-            st.divider()
             lower_bound = settings.review_threshold - 0.05
             upper_bound = settings.match_threshold + 0.05
-
             review_only = st.checkbox(
-                f"Review band only ({lower_bound:.2f} - {upper_bound:.2f})",
+                f"Review band ({lower_bound:.2f}-{upper_bound:.2f})",
                 value=st.session_state.review_only,
                 key="review_only_checkbox",
-                help="Focus on candidates near decision boundaries - the most valuable for labeling",
+                help="Focus on candidates near decision boundaries",
             )
             st.session_state.review_only = review_only
 
-            if st.button("Load Data", type="primary"):
+            if st.button("Load Data", type="primary", disabled=st.session_state.is_loading):
+                st.session_state.is_loading = True
                 with st.spinner("Loading and scoring candidates..."):
                     load_data(reference_path, target_path, dataset_id, use_cache=True, review_only=review_only)
+                st.session_state.is_loading = False
                 st.rerun()
         else:
             # Show load status with filter indicator
             loaded_count = len(st.session_state.candidates)
             if st.session_state.get("candidates_filtered", False):
                 full_count = st.session_state.get("candidates_full_count", loaded_count)
-                st.success(f"Loaded {loaded_count:,} of {full_count:,} candidates (review band)")
+                st.caption(f"✓ {loaded_count:,}/{full_count:,} candidates (review band)")
             else:
-                st.success(f"Loaded {loaded_count:,} candidates")
+                st.caption(f"✓ {loaded_count:,} candidates")
 
             # Filter controls
-            st.subheader("Filter")
             filter_options = ["All", "Review", "Match", "No Match"]
             current_filter = session.decision_filter
             if current_filter:
-                # Convert "no_match" -> "No Match" for display
                 display_filter = current_filter.replace("_", " ").title()
                 default_idx = (
                     filter_options.index(display_filter) if display_filter in filter_options else 0
@@ -525,7 +531,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                 default_idx = 0
 
             selected = st.radio(
-                "Show decisions",
+                "Filter",
                 filter_options,
                 index=default_idx,
                 horizontal=True,
@@ -539,11 +545,8 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         st.divider()
 
         # Progress stats
-        st.subheader("Progress")
         label_store = st.session_state.label_store
         stats = label_store.get_stats()
-
-        st.metric("Total Labeled", stats["total"])
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -552,25 +555,20 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             st.metric("No Match", stats["no_match"])
         with col3:
             unsure_count = stats.get("unsure", 0) + stats.get("maybe", 0) + stats.get("skip", 0)
-            if unsure_count > 0:
-                st.metric("Unsure", unsure_count)
-
-        st.divider()
+            st.metric("Unsure", unsure_count)
 
         # Mode toggle
-        st.subheader("Mode")
         if "show_comparison" not in st.session_state:
             st.session_state.show_comparison = False
 
         mode = st.radio(
-            "View",
-            ["Labeling", "Compare Labelers"],
+            "Mode",
+            ["Labeling", "Compare"],
             index=1 if st.session_state.show_comparison else 0,
             horizontal=True,
-            label_visibility="collapsed",
         )
-        if (mode == "Compare Labelers") != st.session_state.show_comparison:
-            st.session_state.show_comparison = mode == "Compare Labelers"
+        if (mode == "Compare") != st.session_state.show_comparison:
+            st.session_state.show_comparison = mode == "Compare"
             st.rerun()
 
         st.divider()
@@ -954,18 +952,28 @@ def load_data(
     st.session_state.ref_data_version = get_data_version(reference_path)
     st.session_state.target_data_version = get_data_version(target_path)
 
+    logger.info(f"Loading data for {dataset_id}...")
+
     # Try to load from cache first
     if use_cache:
+        logger.info("Checking scored cache...")
         candidates = load_cached_candidates(dataset_id)
+        if candidates:
+            logger.info(f"Scored cache hit: {len(candidates):,} candidates loaded")
 
     # Generate fresh candidates if cache miss
     if candidates is None:
+        logger.info("Scored cache miss - loading from feature cache...")
+        logger.info(f"Loading reference: {reference_path}")
         reference = load_geodataframe(reference_path)
+        logger.info(f"Loading target: {target_path}")
         target = load_geodataframe(target_path)
 
-        candidates = generate_scored_candidates(
+        # Use feature cache for faster loading (skips feature computation if cached)
+        candidates = generate_scored_candidates_with_cache(
             reference=reference,
             target=target,
+            dataset_id=dataset_id,
             buffer_distance_m=settings.buffer_distance_m,
             ref_id_column="id",
             target_id_column="id",
@@ -977,7 +985,9 @@ def load_data(
 
         # Save full candidates to cache for next time
         if candidates:
+            logger.info(f"Saving {len(candidates):,} candidates to scored cache...")
             save_candidates_to_cache(dataset_id, candidates)
+            logger.info("Scored cache saved - next load will be fast")
 
     # Track full count before filtering
     full_count = len(candidates) if candidates else 0
@@ -985,13 +995,16 @@ def load_data(
 
     # Apply confidence band filter if requested and we have candidates
     if review_only and full_count > 0:
+        logger.info(f"Filtering to review band...")
         candidates = filter_by_confidence_band(candidates, review_only=True)
         st.session_state.candidates_filtered = True
+        logger.info(f"Filtered to {len(candidates):,} candidates in review band")
     else:
         st.session_state.candidates_filtered = False
 
     st.session_state.candidates = candidates
     st.session_state.data_loaded = True
+    logger.info(f"Data loading complete: {len(candidates):,} candidates ready")
 
 
 def record_label(

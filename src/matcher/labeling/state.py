@@ -37,6 +37,9 @@ def init_session_state() -> None:
     if "data_loaded" not in st.session_state:
         st.session_state.data_loaded = False
 
+    if "is_loading" not in st.session_state:
+        st.session_state.is_loading = False
+
 
 def get_session() -> LabelingSession:
     """Get the current session."""
