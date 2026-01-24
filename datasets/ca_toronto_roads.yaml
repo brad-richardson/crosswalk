@@ -1,0 +1,18 @@
+name: ca_toronto_roads
+display_name: Toronto Road Centreline
+type: road
+description: City of Toronto road network from municipal GIS
+source:
+  type: arcgis
+  url: https://gis.toronto.ca/arcgis/rest/services/cot_geospatial3/FeatureServer/3
+  portal_url: https://open.toronto.ca/dataset/toronto-centreline-tcl/
+fetch:
+  id_prefix: ca_toronto
+  name_column: LNAME
+  class_column: FCODE
+  bbox:
+  - -79.65
+  - 43.58
+  - -79.10
+  - 43.86
+  crs: EPSG:4326

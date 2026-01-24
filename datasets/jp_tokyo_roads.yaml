@@ -1,0 +1,18 @@
+name: jp_tokyo_roads
+display_name: NLNI Emergency Transport Roads (Tokyo)
+type: road
+description: Japanese road network with Kanji/Kana street names from National Land Numerical Information
+notes: Download prefecture 13 (Tokyo) from MLIT. Route names in Japanese (路線名称).
+source:
+  type: manual
+  portal_url: https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N10-2024.html
+fetch:
+  id_prefix: jp_tokyo
+  name_column: null
+  class_column: null
+  bbox:
+  - 138.9
+  - 35.5
+  - 139.9
+  - 35.9
+  crs: EPSG:4326

@@ -1,0 +1,24 @@
+name: de_berlin_roads
+display_name: Berlin Detailnetz
+type: road
+description: Berlin detailed road network with German street names and StEP classification
+source:
+  type: arcgis
+  url: https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Stra%C3%9Fennetz_Berlin/FeatureServer/2
+  portal_url: https://daten.berlin.de/datensaetze/detailnetz-berlin-wfs-4f2045ef
+fetch:
+  id_prefix: de_berlin
+  name_column: strassenname
+  class_column: strassenklasse1
+  class_mapping:
+    "0": motorway
+    I: primary
+    II: secondary
+    III: tertiary
+    IV: residential
+  bbox:
+  - 13.088
+  - 52.340
+  - 13.757
+  - 52.660
+  crs: EPSG:4326

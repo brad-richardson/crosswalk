@@ -1,0 +1,18 @@
+name: us_gwinnett_roads
+display_name: Gwinnett County Street Centerlines
+type: road
+description: Suburban Atlanta road network from Gwinnett County, GA open data portal
+source:
+  type: arcgis
+  url: https://services3.arcgis.com/RfpmnkSAQleRbndX/arcgis/rest/services/GwinnettTransportation/FeatureServer/2
+  portal_url: https://gcgis-gwinnettcountyga.hub.arcgis.com/datasets/3e039e014f774429b44ac2f721e0cb0e_2/about
+fetch:
+  id_prefix: us_gwinnett
+  name_column: null
+  class_column: null
+  bbox:
+  - -84.25
+  - 33.75
+  - -83.80
+  - 34.15
+  crs: EPSG:4326

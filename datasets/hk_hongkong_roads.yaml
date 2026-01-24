@@ -1,0 +1,19 @@
+name: hk_hongkong_roads
+display_name: Hong Kong Transport Dept Roads
+type: road
+description: Road network from HK Transport Department with bilingual names (English + Traditional Chinese)
+source:
+  type: download
+  url: https://static.data.gov.hk/td/road-network/RoadNetwork2ndGeneration.zip
+  file_format: gml
+  portal_url: https://data.gov.hk/en-data/dataset/hk-td-tis_15-road-network-v2
+fetch:
+  id_prefix: hk_road
+  name_column: null
+  class_column: null
+  bbox:
+  - 113.82
+  - 22.15
+  - 114.45
+  - 22.58
+  crs: EPSG:4326
