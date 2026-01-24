@@ -12,11 +12,19 @@ from loguru import logger
 
 from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
-from .geometric import compute_geometric_features
+from .geometric import (
+    compute_geometric_features,
+    compute_heading_consistency,
+    compute_length_bin,
+    compute_shape_complexity,
+    compute_sinuosity,
+    compute_vertex_density,
+)
 from .relational import compute_perpendicular_offset
 from .semantic import (
     compute_cardinal_mismatch,
     compute_class_similarity,
+    compute_name_numeric_match,
     compute_name_similarity,
 )
 from .spatial_context import (
@@ -113,6 +121,43 @@ def compute_pair_features(
         lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
             geom_for_similarity_target, geom_for_similarity_ref
         )
+
+        # Compute sinuosity on aligned sublines
+        sinuosity_ref = compute_sinuosity(geom_for_similarity_ref)
+        sinuosity_target = compute_sinuosity(geom_for_similarity_target)
+        sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
+
+        # Compute heading consistency on aligned sublines
+        heading_consistency_ref = compute_heading_consistency(geom_for_similarity_ref)
+        heading_consistency_target = compute_heading_consistency(geom_for_similarity_target)
+        heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
+
+        # Compute vertex density on aligned sublines
+        vertex_density_ref = compute_vertex_density(geom_for_similarity_ref)
+        vertex_density_target = compute_vertex_density(geom_for_similarity_target)
+        # Ratio: min/max to get value in [0, 1]
+        if vertex_density_ref > 0 and vertex_density_target > 0:
+            vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
+                vertex_density_ref, vertex_density_target
+            )
+        else:
+            vertex_density_ratio = 0.0
+
+        # Compute length bins using aligned subline lengths
+        ref_length = geom_for_similarity_ref.length
+        target_length = geom_for_similarity_target.length
+        length_bin_ref = compute_length_bin(ref_length)
+        length_bin_target = compute_length_bin(target_length)
+        length_bin_match = 1.0 if length_bin_ref == length_bin_target else 0.0
+        min_length_m = min(ref_length, target_length)
+
+        # Compute shape complexity on aligned sublines
+        shape_complexity_ref = compute_shape_complexity(geom_for_similarity_ref)
+        shape_complexity_target = compute_shape_complexity(geom_for_similarity_target)
+        shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
+
+        # Compute name numeric match for numbered routes
+        name_numeric_match = compute_name_numeric_match(ref_name, target_name)
 
         # Use provided or default endpoint features
         if endpoint_features is None:
@@ -266,6 +311,29 @@ def compute_pair_features(
                 if graphlet_features
                 else 0.5
             ),
+            # Sinuosity features
+            "sinuosity_ref": sinuosity_ref,
+            "sinuosity_target": sinuosity_target,
+            "sinuosity_delta": sinuosity_delta,
+            # Heading consistency features
+            "heading_consistency_ref": heading_consistency_ref,
+            "heading_consistency_target": heading_consistency_target,
+            "heading_consistency_delta": heading_consistency_delta,
+            # Vertex density features
+            "vertex_density_ref": vertex_density_ref,
+            "vertex_density_target": vertex_density_target,
+            "vertex_density_ratio": vertex_density_ratio,
+            # Length binning features
+            "length_bin_ref": length_bin_ref,
+            "length_bin_target": length_bin_target,
+            "length_bin_match": length_bin_match,
+            "min_length_m": min_length_m,
+            # Shape complexity features
+            "shape_complexity_ref": shape_complexity_ref,
+            "shape_complexity_target": shape_complexity_target,
+            "shape_complexity_delta": shape_complexity_delta,
+            # Numeric route matching
+            "name_numeric_match": name_numeric_match,
         }
 
     except Exception as e:
@@ -333,6 +401,29 @@ def _get_error_features() -> dict[str, float]:
         # Graphlet features - neutral values for error case
         "graphlet_similarity": 0.5,
         "endpoint_degree_similarity": 0.5,
+        # Sinuosity features - default to straight line (1.0)
+        "sinuosity_ref": 1.0,
+        "sinuosity_target": 1.0,
+        "sinuosity_delta": 0.0,
+        # Heading consistency features - default to perfectly straight (1.0)
+        "heading_consistency_ref": 1.0,
+        "heading_consistency_target": 1.0,
+        "heading_consistency_delta": 0.0,
+        # Vertex density features - default to 0 (unknown)
+        "vertex_density_ref": 0.0,
+        "vertex_density_target": 0.0,
+        "vertex_density_ratio": 0.0,
+        # Length binning features - default to short (0)
+        "length_bin_ref": 0,
+        "length_bin_target": 0,
+        "length_bin_match": 0.0,
+        "min_length_m": 0.0,
+        # Shape complexity features - default to no turns
+        "shape_complexity_ref": 0,
+        "shape_complexity_target": 0,
+        "shape_complexity_delta": 0,
+        # Numeric route matching - neutral (0.5)
+        "name_numeric_match": 0.5,
     }
 
 
@@ -478,8 +569,8 @@ def precompute_graphlet_features(
         and gdf_reset[connectors_column].notna().any()
     )
 
-    # Use degrees_only=True for memory efficiency (reduces memory by ~90%)
-    # The endpoint_degree_similarity is the most discriminative feature for roads
+    # Use full graphlet features for richer topology comparison
+    # This computes: degree, triangles, squares, clustering, two_hop_count, is_articulation
     if use_connectors:
         logger.info("Building connector-based graph for graphlet features (explicit connectors)...")
         G, seg_to_connectors, node_features = build_connector_graph(
@@ -487,7 +578,7 @@ def precompute_graphlet_features(
             id_column=id_column,
             connectors_column=connectors_column,
             tolerance_m=tolerance_m,
-            degrees_only=True,  # Memory optimization
+            degrees_only=False,  # Full 6-feature vectors
         )
         n_nodes = len(node_features) if node_features else 0
         logger.debug(
@@ -502,7 +593,7 @@ def precompute_graphlet_features(
 
         logger.info("Building inferred connector graph for graphlet features...")
         G, seg_to_connectors, node_features = build_inferred_connector_graph(
-            gdf_reset, id_column=id_column, tolerance_m=tolerance_m, degrees_only=True
+            gdf_reset, id_column=id_column, tolerance_m=tolerance_m, degrees_only=False
         )
         n_nodes = len(node_features) if node_features else 0
         logger.debug(

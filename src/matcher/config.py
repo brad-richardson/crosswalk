@@ -47,7 +47,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-01-23"
+FEATURE_VERSION = "2026-01-24"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -110,6 +110,29 @@ FEATURE_COLUMNS = [
     # Graphlet features (2) - network topology similarity
     "graphlet_similarity",
     "endpoint_degree_similarity",
+    # Sinuosity features (3) - distinguish curvy vs straight roads
+    "sinuosity_ref",
+    "sinuosity_target",
+    "sinuosity_delta",
+    # Heading consistency features (3) - roads that constantly change direction
+    "heading_consistency_ref",
+    "heading_consistency_target",
+    "heading_consistency_delta",
+    # Vertex density features (3) - quality signal for consistent vertex spacing
+    "vertex_density_ref",
+    "vertex_density_target",
+    "vertex_density_ratio",
+    # Length binning features (4) - different matching logic by segment length class
+    "length_bin_ref",
+    "length_bin_target",
+    "length_bin_match",
+    "min_length_m",
+    # Shape complexity features (3) - count of significant turns (>10 deg)
+    "shape_complexity_ref",
+    "shape_complexity_target",
+    "shape_complexity_delta",
+    # Numeric route matching (1) - better matching for numbered routes (I-90, US-101)
+    "name_numeric_match",
 ]
 
 # Semantic features - excluded when training geometry-only models
@@ -124,6 +147,7 @@ SEMANTIC_FEATURES = [
     "name_is_generic",
     "cardinal_direction_mismatch",
     "class_similarity",
+    "name_numeric_match",
 ]
 
 
