@@ -479,26 +479,15 @@ def backfill_features(
 
     def get_reference_data(dataset_name: str):
         """Load reference data for a dataset, with caching."""
+        from ..filenames import find_overture_segments
+
         # Determine Overture file path
         if overture_path is not None:
             ref_path = overture_path
         else:
-            # Look for dataset-specific Overture file
-            ref_path = data_dir / f"{dataset_name}_overture_segments.parquet"
-            if not ref_path.exists():
-                # Try base dataset name (e.g., us_boston_streets_osm -> us_boston_streets)
-                # This handles cases where multiple datasets share the same Overture reference
-                for suffix in ["_osm", "_local"]:
-                    if dataset_name.endswith(suffix):
-                        base_name = dataset_name[: -len(suffix)]
-                        alt_path = data_dir / f"{base_name}_overture_segments.parquet"
-                        if alt_path.exists():
-                            ref_path = alt_path
-                            logger.info(f"  Using base dataset Overture: {alt_path}")
-                            break
-            if not ref_path.exists():
-                # Fallback to generic name
-                ref_path = data_dir / "overture_segments.parquet"
+            # Use find_overture_segments for progressive prefix matching
+            # Handles versioned filenames and tries progressively shorter prefixes
+            ref_path = find_overture_segments(data_dir, dataset_name)
 
         ref_path_str = str(ref_path)
         if ref_path_str in ref_cache:
@@ -578,17 +567,15 @@ def backfill_features(
 
         ref_gdf, ref_gdf_proj, ref_lookup, ref_graphlet_data, utm_crs, ref_path = ref_data
 
-        # Find target dataset file
-        target_path = data_dir / f"{dataset_name}.parquet"
-        if not target_path.exists():
-            # Try alternate naming patterns
-            alt_paths = [
-                data_dir / f"{dataset_name}_segments.parquet",
-            ]
-            # Handle OSM datasets: us_boston_streets_osm -> us_boston_streets_osm_segments.parquet
-            if dataset_name.endswith("_osm"):
-                alt_paths.insert(0, data_dir / f"{dataset_name}_segments.parquet")
-            target_path = next((p for p in alt_paths if p.exists()), None)
+        # Find target dataset file using centralized filename functions
+        from ..filenames import find_osm_segments, find_target_file
+
+        # For OSM datasets, use find_osm_segments
+        if dataset_name.endswith("_osm"):
+            base_name = dataset_name[:-4]  # Remove "_osm" suffix
+            target_path = find_osm_segments(data_dir, base_name)
+        else:
+            target_path = find_target_file(data_dir, dataset_name)
 
         if target_path is None:
             if skip_missing:

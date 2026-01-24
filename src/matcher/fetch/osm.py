@@ -11,7 +11,8 @@ from loguru import logger
 from pyproj import Geod
 from shapely.geometry import box as shapely_box
 
-from ..config import settings
+from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION, settings
+from ..filenames import osm_connectors_filename, osm_segments_filename
 
 # Reusable WGS84 geodetic calculator (avoids repeated object construction)
 _WGS84_GEOD = Geod(ellps="WGS84")
@@ -123,8 +124,9 @@ def fetch_osm_data(
     connectors_gdf = _transform_connectors_schema(connectors_gdf)
 
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
-    segments_path = output_dir / f"{name}_segments.parquet"
-    connectors_path = output_dir / f"{name}_connectors.parquet"
+    # Use versioned filenames
+    segments_path = output_dir / osm_segments_filename(name)
+    connectors_path = output_dir / osm_connectors_filename(name)
 
     logger.debug("Writing parquet files...")
     roads_gdf.to_parquet(segments_path, write_covering_bbox=True)
@@ -144,6 +146,12 @@ def fetch_osm_data(
         feature_count=len(roads_gdf),
         geometry_types=list(roads_gdf.geometry.geom_type.unique()) if len(roads_gdf) > 0 else [],
         notes=f"OSM ways for dataset '{name}' fetched from Geofabrik regional PBF extract",
+        # Version tracking
+        transform_version=TRANSFORM_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_version=DATA_VERSION,
+        # ID column tracking (OSM uses 'id' as the ID column)
+        id_column="id",
     )
     save_metadata(segments_path, segments_metadata)
 
@@ -160,6 +168,12 @@ def fetch_osm_data(
         if len(connectors_gdf) > 0
         else [],
         notes=f"OSM nodes for dataset '{name}' fetched from Geofabrik regional PBF extract",
+        # Version tracking
+        transform_version=TRANSFORM_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_version=DATA_VERSION,
+        # ID column tracking (OSM uses 'id' as the ID column)
+        id_column="id",
     )
     save_metadata(connectors_path, connectors_metadata)
 

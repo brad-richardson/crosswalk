@@ -24,33 +24,19 @@ DEFAULT_DATASET = "us_boston_streets"
 
 
 def _find_overture_reference(dataset_name: str, raw_dir: Path) -> str | None:
-    """Find the Overture reference file for a dataset by checking what exists.
+    """Find the Overture reference file for a dataset.
 
-    Tries progressively shorter region prefixes until a matching Overture file is found.
+    Uses the centralized find_overture_segments() which tries progressively
+    shorter region prefixes with versioned filenames.
 
     Examples:
-        us_boston_streets -> us_boston_overture_segments.parquet
-        us_fort_collins_sidewalks -> us_fort_collins_overture_segments.parquet
+        us_boston_streets -> us_boston_overture_segments_v1.0.parquet
+        us_fort_collins_streets -> us_fort_collins_overture_segments_v1.0.parquet
     """
-    parts = dataset_name.split("_")
+    from matcher.filenames import find_overture_segments
 
-    # Try progressively shorter prefixes (from longest to shortest)
-    # e.g., for "us_fort_collins_streets", try:
-    #   us_fort_collins_streets_overture_segments.parquet
-    #   us_fort_collins_overture_segments.parquet
-    #   us_fort_overture_segments.parquet
-    #   us_overture_segments.parquet
-    for i in range(len(parts), 0, -1):
-        region = "_".join(parts[:i])
-        candidate = f"{region}_overture_segments.parquet"
-        if (raw_dir / candidate).exists():
-            return candidate
-
-    # Fallback to generic overture_segments.parquet
-    if (raw_dir / "overture_segments.parquet").exists():
-        return "overture_segments.parquet"
-
-    return None
+    path = find_overture_segments(raw_dir, dataset_name)
+    return path.name if path else None
 
 
 def _discover_datasets_from_yaml() -> dict[str, tuple[str, str]]:
@@ -60,22 +46,21 @@ def _discover_datasets_from_yaml() -> dict[str, tuple[str, str]]:
         Dict mapping dataset_name to (target_file, reference_file)
     """
     from matcher.datasets.schema import list_dataset_configs
+    from matcher.filenames import find_target_file
 
     datasets = {}
     raw_dir = PROJECT_ROOT / "data/raw"
 
     for dataset_name in list_dataset_configs():
-        # Target file: {dataset_name}.parquet
-        target_file = f"{dataset_name}.parquet"
-
-        # Only add if target file exists
-        if not (raw_dir / target_file).exists():
+        # Find versioned target file
+        target_path = find_target_file(raw_dir, dataset_name)
+        if not target_path:
             continue
 
         # Find corresponding Overture reference file
         reference_file = _find_overture_reference(dataset_name, raw_dir)
         if reference_file:
-            datasets[dataset_name] = (target_file, reference_file)
+            datasets[dataset_name] = (target_path.name, reference_file)
 
     return datasets
 
@@ -83,53 +68,39 @@ def _discover_datasets_from_yaml() -> dict[str, tuple[str, str]]:
 def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
     """Auto-discover OSM datasets from data/raw/ directory.
 
-    Looks for files matching pattern: {region}_osm_segments.parquet
+    Looks for versioned files matching pattern: {region}_osm_segments_v*.parquet
     Maps them to corresponding Overture reference files.
     """
+    from matcher.filenames import extract_version_from_filename
+
     raw_dir = PROJECT_ROOT / "data/raw"
     if not raw_dir.exists():
         return {}
 
     osm_datasets = {}
 
-    # Find all *_osm_segments.parquet files
-    for osm_file in raw_dir.glob("*_osm_segments.parquet"):
-        # Extract region from filename (e.g., "us_frisco_roads_osm_segments.parquet" -> "us_frisco_roads")
-        filename = osm_file.stem  # "us_frisco_roads_osm_segments"
-        if not filename.endswith("_osm_segments"):
+    # Find all *_osm_segments*.parquet files
+    for osm_file in raw_dir.glob("*_osm_segments*.parquet"):
+        # Only process versioned files
+        version = extract_version_from_filename(osm_file)
+        if version is None:
             continue
 
-        region = filename.replace("_osm_segments", "")  # "us_frisco_roads"
-        dataset_id = f"{region}_osm"  # "us_frisco_roads_osm"
+        filename = osm_file.stem  # e.g., "us_boston_streets_osm_segments_v1.0"
+
+        # Extract region from filename by removing version suffix
+        base_name = filename.rsplit("_v", 1)[0]  # "us_boston_streets_osm_segments"
+
+        if not base_name.endswith("_osm_segments"):
+            continue
+
+        region = base_name.replace("_osm_segments", "")  # "us_boston_streets"
+        dataset_id = f"{region}_osm"  # "us_boston_streets_osm"
 
         # Find corresponding Overture reference
-        # Try various naming patterns
-        overture_candidates = [
-            f"{region}_overture_segments.parquet",  # us_frisco_roads_overture_segments.parquet
-            "overture_segments.parquet",  # fallback to default
-        ]
-
-        # Also check for region-specific Overture files
-        # by extracting country_city from dataset name
-        region_parts = region.split("_")
-        country_codes = ["us", "co", "br", "nl", "sg", "fi", "in", "ke", "ng"]
-        if len(region_parts) >= 2 and region_parts[0] in country_codes:
-            # e.g., "us_frisco_roads" -> country="us", city="frisco"
-            country = region_parts[0]
-            city = region_parts[1]
-            # Add candidates for us_boston_overture_segments.parquet pattern
-            overture_candidates.insert(0, f"{country}_{city}_overture_segments.parquet")
-            overture_candidates.insert(0, f"overture_{city}_segments.parquet")
-            overture_candidates.insert(0, f"{city}_overture_segments.parquet")
-
-        # Find first existing Overture file
-        overture_file = "overture_segments.parquet"  # default
-        for candidate in overture_candidates:
-            if (raw_dir / candidate).exists():
-                overture_file = candidate
-                break
-
-        osm_datasets[dataset_id] = (osm_file.name, overture_file)
+        overture_ref = _find_overture_reference(region, raw_dir)
+        if overture_ref:
+            osm_datasets[dataset_id] = (osm_file.name, overture_ref)
 
     return osm_datasets
 

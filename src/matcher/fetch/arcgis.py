@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 from loguru import logger
 
+from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
 from .metadata import FetchMetadata, save_metadata
 
 
@@ -76,6 +77,9 @@ def fetch_arcgis_layer(
     # Convert to GeoDataFrame
     gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
 
+    # Find source ID column before transformation (for metadata tracking)
+    source_id_col = _find_id_column(gdf) if len(gdf) > 0 else None
+
     # Transform to Overture schema
     gdf = _transform_to_overture_schema(
         gdf,
@@ -121,6 +125,13 @@ def fetch_arcgis_layer(
         geometry_types=geom_types,
         filters=filters_dict if filters_dict else {},
         notes=f"Fetched from {source_name}",
+        # Version tracking
+        transform_version=TRANSFORM_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_version=DATA_VERSION,
+        # ID column tracking
+        id_column=source_id_col,
+        id_prefix=id_prefix,
     )
     save_metadata(output_path, metadata)
 
