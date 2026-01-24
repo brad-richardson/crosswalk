@@ -739,33 +739,33 @@ def fetch_os_downloads(
         logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
         gdf = gdf.to_crs("EPSG:4326")
 
-    # Apply bbox filter after download
+    # Apply bbox filter after download (if specified)
     if bbox and len(gdf) > 0:
         xmin, ymin, xmax, ymax = bbox
         original_count = len(gdf)
         gdf = gdf.cx[xmin:xmax, ymin:ymax]
         logger.info(f"Filtered from {original_count} to {len(gdf)} features within bbox")
 
-        if len(gdf) == 0:
-            logger.warning("No features after filtering")
-            return output_path
-
-        # Transform to Overture schema
-        gdf = _transform_download_data(
-            gdf,
-            id_prefix=id_prefix,
-            name_column=name_column,
-            class_column=class_column,
-            class_mapping=class_mapping,
-            source_name=source_name,
-        )
-
-        # Save to parquet
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        gdf.to_parquet(output_path)
-        logger.success(f"Saved {len(gdf)} features to {output_path}")
-
+    if len(gdf) == 0:
+        logger.warning("No features to save")
         return output_path
+
+    # Transform to Overture schema
+    gdf = _transform_download_data(
+        gdf,
+        id_prefix=id_prefix,
+        name_column=name_column,
+        class_column=class_column,
+        class_mapping=class_mapping,
+        source_name=source_name,
+    )
+
+    # Save to parquet
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_path)
+    logger.success(f"Saved {len(gdf)} features to {output_path}")
+
+    return output_path
 
 
 def fetch_dataset(
