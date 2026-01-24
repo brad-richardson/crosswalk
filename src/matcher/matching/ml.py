@@ -333,6 +333,22 @@ class MLMatcher:
             X, y, test_size=test_size, random_state=42, stratify=y
         )
 
+        # Verify labels have all expected features before computing medians
+        # This catches bugs where new features are added to FEATURE_COLUMNS but
+        # the labels (created with older code) don't have them
+        expected_features = (
+            [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
+            if exclude_semantic
+            else FEATURE_COLUMNS
+        )
+        missing_in_labels = set(expected_features) - set(self.feature_names)
+        if missing_in_labels:
+            raise ValueError(
+                f"Labels are missing {len(missing_in_labels)} expected features: {sorted(missing_in_labels)}. "
+                f"This usually means labels were created with an older version. "
+                f"Run backfill to add missing features, or retrain with updated labels."
+            )
+
         # Compute imputation values from TRAINING data only
         self.feature_medians = {}
         for i, feat_name in enumerate(self.feature_names):

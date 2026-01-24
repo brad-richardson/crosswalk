@@ -290,22 +290,26 @@ def run_pipeline(
     )
 
     # Unmatched report
-    matched_target_ids = {m.target_id for m in optimized if m.decision != MatchDecision.NO_MATCH}
+    # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
+    # and should appear in unmatched.parquet so they can be labeled/reviewed.
+    matched_target_ids = {m.target_id for m in optimized if m.decision == MatchDecision.MATCH}
+    review_target_ids = {m.target_id for m in optimized if m.decision == MatchDecision.REVIEW}
     unmatched_path = output_path.parent / "unmatched.parquet"
     generate_unmatched_report(
         target=target,
         matched_ids=matched_target_ids,
         output_path=unmatched_path,
         id_column=target_id_column,
+        review_ids=review_target_ids,
     )
 
     if progress_callback:
         progress_callback(100)
 
-    # Compute statistics
-    n_matched = sum(1 for m in optimized if m.decision == MatchDecision.MATCH)
-    n_review = sum(1 for m in optimized if m.decision == MatchDecision.REVIEW)
-    n_unmatched = len(target) - len(matched_target_ids)
+    # Compute statistics - counts should be mutually exclusive and sum to n_target
+    n_matched = len(matched_target_ids)
+    n_review = len(review_target_ids)
+    n_unmatched = len(target) - n_matched - n_review
 
     logger.info("=" * 60)
     logger.info("Pipeline complete!")
