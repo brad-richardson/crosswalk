@@ -1128,6 +1128,209 @@ def label(
         raise typer.Exit(result.returncode)
 
 
+@app.command("compute-features")
+def compute_features(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID to compute features for (e.g., us_boston_streets)",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Compute features for all datasets with fetched data",
+    ),
+    prefix: str = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Compute features for datasets matching this prefix",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Recompute even if cached (ignores existing feature cache)",
+    ),
+    workers: int = typer.Option(
+        -1,
+        "--workers",
+        "-w",
+        help="Number of parallel workers for feature computation (-1 for auto)",
+    ),
+):
+    """Compute and cache features for dataset(s) without ML scoring.
+
+    This pre-computes the expensive feature computation step (~90% of processing time)
+    and caches the results. When the labeling UI loads, it can use the cached features
+    and only run ML prediction (fast).
+
+    Features are versioned - when feature computation logic changes, bump FEATURE_VERSION
+    in config.py and old caches will be ignored.
+
+    Examples:
+        matcher compute-features us_boston_streets           # Single dataset
+        matcher compute-features --prefix us_                # All US datasets
+        matcher compute-features --all                       # All datasets with data
+        matcher compute-features --all --force               # Recompute all
+        matcher compute-features us_boston_streets -w 4      # Limit workers
+    """
+    from .datasets.schema import get_dataset_config, list_dataset_configs
+    from .filenames import find_overture_segments, find_target_file
+    from .labeling.data_loader import (
+        compute_features_only,
+        get_feature_cache_info,
+        load_geodataframe,
+        save_feature_cache,
+    )
+
+    raw_dir = Path("data/raw")
+
+    def get_dataset_files(dataset_id: str) -> tuple[Path, Path] | None:
+        """Get reference and target file paths for a dataset."""
+        config = get_dataset_config(dataset_id)
+        if config is None:
+            return None
+
+        # Target file (with version suffix)
+        target_path = find_target_file(raw_dir, dataset_id)
+        if target_path is None:
+            return None
+
+        # Reference file (Overture, with version suffix)
+        ref_path = find_overture_segments(raw_dir, dataset_id)
+        if ref_path is None:
+            return None
+
+        return ref_path, target_path
+
+    def compute_for_dataset(dataset_id: str) -> bool:
+        """Compute features for a single dataset. Returns True if successful."""
+        files = get_dataset_files(dataset_id)
+        if files is None:
+            console.print(f"[yellow]Skipping {dataset_id}: missing data files[/yellow]")
+            return False
+
+        ref_path, target_path = files
+
+        # Check cache
+        cache_info = get_feature_cache_info(dataset_id, ref_path, target_path)
+        if cache_info["exists"] and not force:
+            console.print(
+                f"[blue]Skipping {dataset_id}: feature cache exists "
+                f"({cache_info['candidate_count']:,} candidates, "
+                f"version {cache_info['version']})[/blue]"
+            )
+            return True
+
+        console.print(f"[blue]Computing features for {dataset_id}...[/blue]")
+
+        try:
+            # Load data
+            reference = load_geodataframe(ref_path)
+            target = load_geodataframe(target_path)
+
+            console.print(f"  Reference: {len(reference):,} segments")
+            console.print(f"  Target: {len(target):,} segments")
+
+            # Get column names from dataset config
+            config = get_dataset_config(dataset_id)
+            ref_name_column = "names"
+            target_name_column = config.fetch.name_column if config and config.fetch else "names"
+            ref_class_column = "class"
+            target_class_column = config.fetch.class_column if config and config.fetch else "class"
+
+            # Compute features
+            feature_df = compute_features_only(
+                reference=reference,
+                target=target,
+                ref_name_column=ref_name_column,
+                target_name_column=target_name_column,
+                ref_class_column=ref_class_column,
+                target_class_column=target_class_column,
+                n_jobs=workers,
+            )
+
+            if len(feature_df) == 0:
+                console.print(f"[yellow]  No candidates generated for {dataset_id}[/yellow]")
+                return False
+
+            # Save cache
+            cache_path = save_feature_cache(dataset_id, feature_df)
+            console.print(
+                f"[green]  Saved {len(feature_df):,} features to {cache_path.name}[/green]"
+            )
+            return True
+
+        except Exception as e:
+            console.print(f"[red]  Error computing features for {dataset_id}: {e}[/red]")
+            return False
+
+    # Determine which datasets to process
+    datasets_to_process: list[str] = []
+
+    if all_datasets:
+        # Find all datasets with both target and reference data
+        for dataset_id in sorted(list_dataset_configs()):
+            if get_dataset_files(dataset_id) is not None:
+                datasets_to_process.append(dataset_id)
+
+        if not datasets_to_process:
+            console.print("[yellow]No datasets found with fetched data[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(f"[blue]Found {len(datasets_to_process)} datasets with data[/blue]")
+
+    elif prefix:
+        # Find datasets matching prefix
+        for dataset_id in sorted(list_dataset_configs()):
+            if dataset_id.startswith(prefix) and get_dataset_files(dataset_id) is not None:
+                datasets_to_process.append(dataset_id)
+
+        if not datasets_to_process:
+            console.print(f"[yellow]No datasets found with prefix '{prefix}'[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(
+            f"[blue]Found {len(datasets_to_process)} datasets matching prefix '{prefix}'[/blue]"
+        )
+
+    elif dataset:
+        datasets_to_process = [dataset]
+
+    else:
+        console.print("[red]Error: Provide a dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    # Process datasets sequentially
+    success_count = 0
+    skip_count = 0
+    fail_count = 0
+
+    for dataset_id in datasets_to_process:
+        # Check cache BEFORE computation to distinguish skip vs compute
+        cache_info_before = get_feature_cache_info(dataset_id)
+        had_cache = cache_info_before.get("exists", False)
+
+        result = compute_for_dataset(dataset_id)
+        if not result:
+            fail_count += 1
+        elif had_cache and not force:
+            # Had cache and didn't force recompute = skipped
+            skip_count += 1
+        else:
+            # Newly computed (or force recomputed)
+            success_count += 1
+
+    # Summary
+    console.print()
+    console.print("[bold]Summary:[/bold]")
+    console.print(f"  Computed: {success_count}")
+    console.print(f"  Skipped (cached): {skip_count}")
+    if fail_count > 0:
+        console.print(f"  [red]Failed: {fail_count}[/red]")
+
+
 @app.command()
 def train(
     labels_dir: Path = typer.Option(

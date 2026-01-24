@@ -57,6 +57,9 @@ Thumbs.db
 *.log
 logs/
 
+# Backup files
+*.bak
+
 # Trained models (derived from labels)
 models/
 
