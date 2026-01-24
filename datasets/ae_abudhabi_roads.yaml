@@ -5,17 +5,36 @@ description: Road network from Abu Dhabi SDI with Arabic and English names
 source:
   type: manual
   portal_url: https://sdi.gov.abudhabi/
-notes: |
-  ArcGIS REST services endpoint no longer publicly accessible (404 as of Jan 2026).
-  Portal has moved from sdi.abudhabi.ae to sdi.gov.abudhabi.
-  Contact SDI for data access or check portal for updated service URLs.
 fetch:
   id_prefix: ae_abudhabi
-  name_column: null
-  class_column: null
   bbox:
   - 54.25
-  - 24.30
-  - 54.60
-  - 24.60
+  - 24.3
+  - 54.6
+  - 24.6
   crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-24T14:50:12.630801+00:00'
+  bbox:
+  - 54.25
+  - 24.3
+  - 54.6
+  - 24.6
+  bbox_buffered:
+  - 54.24013194920869
+  - 24.29101688825009
+  - 54.60986805079131
+  - 24.60898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 80518
+  geometry_types:
+  - LineString
+  output_path: data/raw
+notes: 'ArcGIS REST services endpoint no longer publicly accessible (404 as of Jan
+  2026).
+
+  Portal has moved from sdi.abudhabi.ae to sdi.gov.abudhabi.
+
+  Contact SDI for data access or check portal for updated service URLs.
+
+  '

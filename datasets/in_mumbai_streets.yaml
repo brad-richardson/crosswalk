@@ -16,7 +16,7 @@ fetch:
   - 19.28
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-01-21T17:25:49.292736+00:00'
+  fetched_at: '2026-01-24T14:55:02.499230+00:00'
   bbox:
   - 72.75
   - 18.87
@@ -28,7 +28,7 @@ last_fetch:
   - 73.05950501704751
   - 19.28898311174991
   bbox_buffer_m: 1000.0
-  feature_count: 64070
+  feature_count: 113349
   geometry_types:
   - LineString
   output_path: data/raw

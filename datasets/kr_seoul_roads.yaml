@@ -2,10 +2,6 @@ name: kr_seoul_roads
 display_name: Seoul Road Network
 type: road
 description: Korean road network with Hangul street names from Korea Public Data Portal
-notes: |
-  Requires manual download from data.go.kr (free registration required).
-  Source data uses EPSG:5179 (UTM-K) and EUC-KR encoding.
-  After download, use fetch_download() with encoding and source_crs options.
 source:
   type: manual
   portal_url: https://www.data.go.kr/data/15146878/fileData.do
@@ -15,9 +11,33 @@ fetch:
   class_column: ROA_CLS_SE
   bbox:
   - 126.75
-  - 37.40
-  - 127.20
-  - 37.70
+  - 37.4
+  - 127.2
+  - 37.7
   crs: EPSG:4326
   source_crs: EPSG:5179
   encoding: EUC-KR
+last_fetch:
+  fetched_at: '2026-01-24T14:56:31.345627+00:00'
+  bbox:
+  - 126.75
+  - 37.4
+  - 127.2
+  - 37.7
+  bbox_buffered:
+  - 126.73866944397693
+  - 37.391016888250086
+  - 127.21133055602307
+  - 37.708983111749916
+  bbox_buffer_m: 1000.0
+  feature_count: 246114
+  geometry_types:
+  - LineString
+  output_path: data/raw
+notes: 'Requires manual download from data.go.kr (free registration required).
+
+  Source data uses EPSG:5179 (UTM-K) and EUC-KR encoding.
+
+  After download, use fetch_download() with encoding and source_crs options.
+
+  '

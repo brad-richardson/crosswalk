@@ -1,8 +1,8 @@
 name: us_usfs_flathead
 display_name: USFS Roads (Flathead NF)
 type: road
-description: US Forest Service road network subset - Flathead National Forest / Glacier NP area
-notes: Regional subset for efficient processing. Part of USFS National Forest System Roads.
+description: US Forest Service road network subset - Flathead National Forest / Glacier
+  NP area
 source:
   type: arcgis
   url: https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_RoadBasic_01/MapServer/0
@@ -23,3 +23,22 @@ fetch:
   - -113.5
   - 49.0
   crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-24T15:02:32.356956+00:00'
+  bbox:
+  - -114.5
+  - 48.0
+  - -113.5
+  - 49.0
+  bbox_buffered:
+  - -114.51355695737564
+  - 47.99101688825009
+  - -113.48644304262436
+  - 49.00898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 24716
+  geometry_types:
+  - LineString
+  output_path: data/raw
+notes: Regional subset for efficient processing. Part of USFS National Forest System
+  Roads.
