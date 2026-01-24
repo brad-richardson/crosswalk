@@ -1,20 +1,36 @@
 name: hk_hongkong_roads
 display_name: Hong Kong Transport Dept Roads
 type: road
-description: Road network from HK Transport Department with bilingual names (English + Traditional Chinese)
+description: Road network from HK Transport Department with bilingual names (English
+  + Traditional Chinese)
 source:
   type: download
-  url: https://static.data.gov.hk/td/road-network/RoadNetwork2ndGeneration.zip
-  file_format: gml
+  url: https://static.data.gov.hk/td/road-network-v2/RdNet_IRNP.gdb.zip
   portal_url: https://data.gov.hk/en-data/dataset/hk-td-tis_15-road-network-v2
-notes: GML format requires manual preprocessing before ingestion.
+  file_format: gdb
 fetch:
   id_prefix: hk_hongkong
-  name_column: null
-  class_column: null
   bbox:
   - 113.82
   - 22.15
   - 114.45
   - 22.58
   crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-24T14:54:42.467756+00:00'
+  bbox:
+  - 113.82
+  - 22.15
+  - 114.45
+  - 22.58
+  bbox_buffered:
+  - 113.81028620328694
+  - 22.14101688825009
+  - 114.45971379671306
+  - 22.588983111749908
+  bbox_buffer_m: 1000.0
+  feature_count: 182808
+  geometry_types:
+  - LineString
+  output_path: data/raw
+notes: GML format is automatically parsed during fetch.

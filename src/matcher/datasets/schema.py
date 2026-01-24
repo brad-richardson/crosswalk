@@ -21,13 +21,16 @@ from pydantic import BaseModel, Field
 class SourceConfig(BaseModel):
     """Source data configuration - where to fetch the data from."""
 
-    type: str = "arcgis"  # arcgis, osm, overture, download, manual
+    type: str = "arcgis"  # arcgis, osm, overture, download, manual, os_downloads
     url: str | None = None  # ArcGIS FeatureServer URL or download URL
     portal_url: str | None = None  # Human-readable portal/documentation URL
-    file_format: str | None = None  # For downloads: shp, gpkg, geojson
+    file_format: str | None = None  # For downloads: shp, gpkg, geojson, gml
     where_clause: str | None = None  # SQL WHERE filter for ArcGIS
     api_key_env_var: str | None = None  # Environment variable for API key
     api_key_header: str | None = None  # HTTP header name for API key
+    product_id: str | None = None  # OS Data Hub product ID (e.g., "OpenRoads")
+    cache_download: bool = False  # Cache large downloads to ~/.cache/matcher/downloads
+    cache_ttl_hours: int = 168  # Cache TTL in hours (default: 7 days)
 
 
 class FetchConfig(BaseModel):
@@ -42,6 +45,8 @@ class FetchConfig(BaseModel):
     level_column: str | None = None  # Column for z-level (bridges/tunnels)
     bbox: tuple[float, float, float, float] | None = None  # xmin, ymin, xmax, ymax
     crs: str = "EPSG:4326"  # Coordinate reference system
+    source_crs: str | None = None  # Source data CRS if different (e.g., "EPSG:5179")
+    encoding: str | None = None  # File encoding if non-UTF8 (e.g., "EUC-KR")
 
 
 class LastFetch(BaseModel):

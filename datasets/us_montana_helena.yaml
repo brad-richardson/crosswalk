@@ -1,0 +1,35 @@
+name: us_montana_helena
+display_name: Montana Roads (Helena)
+type: road
+description: Montana transportation network subset - Helena state capital area
+source:
+  type: arcgis
+  url: https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0
+  portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
+fetch:
+  id_prefix: us_montana_helena
+  class_column: SurfaceType
+  bbox:
+  - -112.25
+  - 46.45
+  - -111.75
+  - 46.75
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-24T15:01:31.804895+00:00'
+  bbox:
+  - -112.25
+  - 46.45
+  - -111.75
+  - 46.75
+  bbox_buffered:
+  - -112.26307418867124
+  - 46.44101688825009
+  - -111.73692581132876
+  - 46.75898311174991
+  bbox_buffer_m: 1000.0
+  feature_count: 22137
+  geometry_types:
+  - LineString
+  output_path: data/raw
+notes: Regional subset for efficient processing. Part of Montana Transportation Framework.

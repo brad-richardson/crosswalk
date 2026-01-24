@@ -1,5 +1,6 @@
 """Tests for the fetch CLI subcommands."""
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,6 +9,12 @@ from typer.testing import CliRunner
 from matcher.cli import app
 
 runner = CliRunner()
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
 
 
 class TestFetchTargetCommand:
@@ -109,6 +116,71 @@ class TestFetchListCommand:
         mock_print.assert_called_once_with("us_")
 
 
+class TestFetchVerifyCommand:
+    """Tests for the fetch verify command."""
+
+    def test_fetch_verify_help(self):
+        """Test fetch verify help output."""
+        result = runner.invoke(app, ["fetch", "verify", "--help"])
+        assert result.exit_code == 0
+        assert "Verify" in result.output
+        assert "dataset" in result.output.lower()
+
+    def test_fetch_verify_no_args(self):
+        """Test fetch verify with no arguments shows error."""
+        result = runner.invoke(app, ["fetch", "verify"])
+        assert result.exit_code == 1
+        assert "Error" in result.output or "Must specify" in result.output
+
+    @patch("matcher.datasets.schema.get_dataset_config")
+    def test_fetch_verify_missing_dataset(self, mock_get_config):
+        """Test error when dataset doesn't exist."""
+        mock_get_config.return_value = None
+
+        result = runner.invoke(app, ["fetch", "verify", "nonexistent"])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower() or "Could not find" in result.output
+
+
+class TestFetchOvertureCommand:
+    """Tests for the fetch overture command."""
+
+    def test_fetch_overture_help(self):
+        """Test fetch overture help output."""
+        result = runner.invoke(app, ["fetch", "overture", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "Overture" in output
+        assert "--all" in output
+        assert "--prefix" in output
+
+    def test_fetch_overture_no_args(self):
+        """Test fetch overture with no arguments shows error."""
+        result = runner.invoke(app, ["fetch", "overture"])
+        assert result.exit_code == 1
+        assert "Must specify" in result.output or "Error" in result.output
+
+
+class TestFetchOsmCommand:
+    """Tests for the fetch osm command."""
+
+    def test_fetch_osm_help(self):
+        """Test fetch osm help output."""
+        result = runner.invoke(app, ["fetch", "osm", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "OSM" in output
+        assert "--all" in output
+        assert "--prefix" in output
+
+    def test_fetch_osm_no_args(self):
+        """Test fetch osm with no arguments shows error."""
+        result = runner.invoke(app, ["fetch", "osm"])
+        assert result.exit_code == 1
+        assert "Must specify" in result.output or "Error" in result.output
+
+
 class TestFetchSubcommands:
     """Test the fetch subcommand structure."""
 
@@ -120,3 +192,6 @@ class TestFetchSubcommands:
         assert "reference" in result.output
         assert "all" in result.output
         assert "list" in result.output
+        assert "verify" in result.output
+        assert "overture" in result.output
+        assert "osm" in result.output

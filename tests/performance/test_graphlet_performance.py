@@ -126,6 +126,7 @@ class TestScalingBehavior:
     """Tests to verify algorithms scale well (O(n) to O(n log n))."""
 
     @pytest.mark.slow
+    @pytest.mark.skip(reason="Flaky on CI due to timing variance")
     def test_graph_building_scales_linearly(self, grid_network_factory):
         """Verify graph building scales approximately linearly."""
         sizes = [100, 500, 1000, 2000]

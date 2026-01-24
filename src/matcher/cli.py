@@ -56,6 +56,12 @@ def fetch_target(
         "--force",
         help="Re-fetch even if file already exists",
     ),
+    workers: int = typer.Option(
+        4,
+        "--workers",
+        "-w",
+        help="Number of parallel download workers (default: 4)",
+    ),
 ):
     """Fetch target/local road data from municipal GIS portals.
 
@@ -67,21 +73,25 @@ def fetch_target(
         matcher fetch target us_boston_streets      # Fetch specific dataset
         matcher fetch target --prefix us_boston     # Fetch all Boston datasets
         matcher fetch target --all                  # Fetch all datasets
-        matcher fetch target us_boston_streets --force  # Re-fetch existing
+        matcher fetch target --all --workers 8      # Fetch all with 8 workers
     """
     from .fetch import target as target_module
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if fetch_all:
-        console.print("[blue]Fetching all datasets...[/blue]")
-        results = target_module.fetch_all_datasets(output_dir, page_size, force)
+        console.print(f"[blue]Fetching all datasets ({workers} workers)...[/blue]")
+        results = target_module.fetch_all_datasets(output_dir, page_size, force, workers)
         success = sum(1 for p in results.values() if p is not None)
         console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
 
     elif prefix:
-        console.print(f"[blue]Fetching datasets with prefix '{prefix}'...[/blue]")
-        results = target_module.fetch_datasets_by_prefix(prefix, output_dir, page_size, force)
+        console.print(
+            f"[blue]Fetching datasets with prefix '{prefix}' ({workers} workers)...[/blue]"
+        )
+        results = target_module.fetch_datasets_by_prefix(
+            prefix, output_dir, page_size, force, workers
+        )
         if not results:
             console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
             raise typer.Exit(1)
@@ -349,6 +359,192 @@ def _fetch_reference_impl(
         console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
 
 
+@fetch_app.command("overture")
+def fetch_overture(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset name to fetch Overture data for (uses bbox from config)",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Fetch Overture data for all datasets matching prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        help="Fetch Overture data for all datasets",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    bbox_buffer: float | None = typer.Option(
+        None,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters). Defaults to 1km.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
+    ),
+):
+    """Fetch Overture reference data for dataset(s).
+
+    Examples:
+        matcher fetch overture us_boston_streets      # Single dataset
+        matcher fetch overture --prefix us_           # All US datasets
+        matcher fetch overture --all                  # All datasets
+    """
+    from .datasets.schema import list_dataset_configs
+
+    # Determine which datasets to fetch
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    if not datasets:
+        console.print("[yellow]No datasets found[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Fetching Overture data for {len(datasets)} dataset(s)...[/blue]")
+
+    errors = []
+    for name in sorted(datasets):
+        try:
+            console.print(f"\n[blue]{'=' * 60}[/blue]")
+            console.print(f"[blue]Fetching Overture for: {name}[/blue]")
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources={"overture"},
+                bbox_buffer=bbox_buffer,
+                force=force,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            errors.append(name)
+
+    if errors:
+        console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"\n[green]Successfully fetched Overture data for {len(datasets)} dataset(s)[/green]"
+    )
+
+
+@fetch_app.command("osm")
+def fetch_osm(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset name to fetch OSM data for (uses bbox from config)",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Fetch OSM data for all datasets matching prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        help="Fetch OSM data for all datasets",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    cache_dir: Path | None = typer.Option(
+        None,
+        "--cache-dir",
+        help="Cache directory for PBF files (default: ~/.cache/matcher/pbf/)",
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Force fresh download, ignore cache",
+    ),
+    keep_pbf: bool = typer.Option(
+        False,
+        "--keep-pbf",
+        help="Keep extracted PBF file for debugging",
+    ),
+    bbox_buffer: float | None = typer.Option(
+        None,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters). Defaults to 5km for OSM.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
+    ),
+):
+    """Fetch OSM reference data for dataset(s).
+
+    Examples:
+        matcher fetch osm us_boston_streets      # Single dataset
+        matcher fetch osm --prefix us_           # All US datasets
+        matcher fetch osm --all                  # All datasets
+    """
+    from .datasets.schema import list_dataset_configs
+
+    # Determine which datasets to fetch
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    if not datasets:
+        console.print("[yellow]No datasets found[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Fetching OSM data for {len(datasets)} dataset(s)...[/blue]")
+
+    errors = []
+    for name in sorted(datasets):
+        try:
+            console.print(f"\n[blue]{'=' * 60}[/blue]")
+            console.print(f"[blue]Fetching OSM for: {name}[/blue]")
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources={"osm"},
+                cache_dir=cache_dir,
+                no_cache=no_cache,
+                keep_pbf=keep_pbf,
+                bbox_buffer=bbox_buffer,
+                force=force,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            errors.append(name)
+
+    if errors:
+        console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
+        raise typer.Exit(1)
+    console.print(f"\n[green]Successfully fetched OSM data for {len(datasets)} dataset(s)[/green]")
+
+
 @fetch_app.command("all")
 def fetch_all(
     dataset_name: str = typer.Argument(
@@ -459,6 +655,162 @@ def fetch_list(
     from .fetch import target as target_module
 
     target_module.print_datasets(prefix)
+
+
+@fetch_app.command("verify")
+def fetch_verify(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset name to verify (e.g., us_boston_streets)",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Verify all datasets matching prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        help="Verify all datasets",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only check config validity, don't test URLs",
+    ),
+):
+    """Verify dataset configurations are valid and accessible.
+
+    Checks:
+    - YAML config is valid and parseable
+    - Required fields are present (source.url or source.product_id)
+    - API keys are available if required
+    - Source URL/endpoint is accessible (unless --dry-run)
+    - Bounding box area is reasonable
+
+    Examples:
+        matcher fetch verify us_boston_streets      # Verify single dataset
+        matcher fetch verify --prefix ae_           # Verify by prefix
+        matcher fetch verify --all --dry-run        # Check all configs
+    """
+    import os
+
+    import requests
+
+    from .datasets.schema import get_dataset_config, list_dataset_configs
+
+    def verify_dataset(name: str, dry_run: bool) -> tuple[str, bool, str]:
+        """Verify a single dataset config. Returns (name, success, message)."""
+        config = get_dataset_config(name)
+        if config is None:
+            return (name, False, "Config file not found or invalid YAML")
+
+        # Check source type
+        source_type = config.source.type if config.source else "unknown"
+        if source_type == "manual":
+            return (name, True, "[yellow]Manual download[/yellow] - skipped")
+
+        # Check required fields based on source type
+        if source_type == "os_downloads":
+            if not config.source or not config.source.product_id:
+                return (name, False, "Missing source.product_id for os_downloads type")
+        else:
+            if not config.source or not config.source.url:
+                return (name, False, "Missing source.url")
+
+        # Check API key if required
+        if config.source and config.source.api_key_env_var:
+            env_var = config.source.api_key_env_var
+            if not os.environ.get(env_var):
+                return (name, True, f"[yellow]API key {env_var} not set[/yellow]")
+
+        # Check bbox area
+        if config.fetch and config.fetch.bbox:
+            xmin, ymin, xmax, ymax = config.fetch.bbox
+            # Approximate area in km²
+            width_km = (xmax - xmin) * 111 * 0.7  # Rough lon to km at mid-lat
+            height_km = (ymax - ymin) * 111
+            area_km2 = width_km * height_km
+            if area_km2 > 50000:
+                return (
+                    name,
+                    True,
+                    f"[yellow]Large bbox: ~{area_km2:.0f} km²[/yellow]",
+                )
+
+        if dry_run:
+            return (name, True, "[green]Config valid[/green]")
+
+        # Test URL accessibility
+        url = config.source.url if config.source else None
+        if url and source_type in ("arcgis", "ogc_features", "wfs"):
+            try:
+                # For ArcGIS, test the metadata endpoint
+                test_url = url if source_type != "arcgis" else f"{url}?f=json"
+                resp = requests.get(test_url, timeout=10)
+                if resp.status_code == 200:
+                    return (name, True, "[green]URL accessible[/green]")
+                else:
+                    return (name, False, f"URL returned status {resp.status_code}")
+            except requests.exceptions.RequestException as e:
+                return (name, False, f"URL error: {e}")
+        elif url and source_type == "download":
+            try:
+                resp = requests.head(url, timeout=10, allow_redirects=True)
+                if resp.status_code == 200:
+                    return (name, True, "[green]URL accessible[/green]")
+                else:
+                    return (name, False, f"URL returned status {resp.status_code}")
+            except requests.exceptions.RequestException as e:
+                return (name, False, f"URL error: {e}")
+
+        return (name, True, "[green]Config valid[/green]")
+
+    # Determine which datasets to verify
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    if not datasets:
+        console.print("[yellow]No datasets found to verify[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Verifying {len(datasets)} dataset(s)...[/blue]")
+    console.print()
+
+    success_count = 0
+    warning_count = 0
+    error_count = 0
+
+    for dataset in sorted(datasets):
+        _name, success, message = verify_dataset(dataset, dry_run)
+        if success:
+            if "yellow" in message:
+                warning_count += 1
+            else:
+                success_count += 1
+        else:
+            error_count += 1
+        status_icon = "[green]✓[/green]" if success else "[red]✗[/red]"
+        console.print(f"  {status_icon} {dataset}: {message}")
+
+    console.print()
+    console.print(
+        f"[green]{success_count} passed[/green], "
+        f"[yellow]{warning_count} warnings[/yellow], "
+        f"[red]{error_count} errors[/red]"
+    )
+
+    if error_count > 0:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -1485,23 +1837,6 @@ def discover_classes(
         console.print()
         console.print(f"[green]Configuration saved to: {saved_path}[/green]")
         console.print("[yellow]Review and adjust the mapping rules as needed.[/yellow]")
-
-
-@app.command("list-datasets")
-def list_datasets():
-    """List available dataset configurations."""
-    from .datasets.schema import get_datasets_dir, list_dataset_configs
-
-    configs = list_dataset_configs()
-    console.print(f"[blue]Dataset configs directory: {get_datasets_dir()}[/blue]")
-    if not configs:
-        console.print("[yellow]No dataset configurations found.[/yellow]")
-        console.print("Use 'matcher discover-classes' to create one.")
-        return
-
-    console.print("[blue]Available dataset configurations:[/blue]")
-    for name in sorted(configs):
-        console.print(f"  - {name}")
 
 
 @app.command("generate-agent-batch")
