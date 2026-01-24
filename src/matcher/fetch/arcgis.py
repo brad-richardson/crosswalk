@@ -32,7 +32,7 @@ def fetch_arcgis_layer(
     status_column: str | None = None,
     status_mapping: dict | None = None,
     source_name: str = "ArcGIS",
-    page_size: int = 2000,
+    page_size: int = 5000,
     where_clause: str = "1=1",
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
@@ -142,9 +142,12 @@ def fetch_arcgis_layer(
 def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> list[dict]:
     """Fetch all features from ArcGIS REST API with pagination.
 
+    Uses adaptive page sizing - if server returns fewer features than requested,
+    adjusts subsequent requests to match the server's cap for efficiency.
+
     Args:
         url: ArcGIS REST API layer URL
-        page_size: Number of features per request
+        page_size: Number of features per request (initial, may be reduced)
         where_clause: SQL WHERE clause to filter features
 
     Returns:
@@ -155,6 +158,8 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
 
     all_features = []
     offset = 0
+    effective_page_size = page_size
+    server_cap_detected = False
 
     while True:
         params = {
@@ -164,7 +169,7 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
             "returnGeometry": "true",
             "outSR": "4326",
             "resultOffset": offset,
-            "resultRecordCount": page_size,
+            "resultRecordCount": effective_page_size,
         }
         # Add orderByFields for deterministic pagination if we have an ID field
         if id_field:
@@ -184,7 +189,6 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
             break
 
         all_features.extend(features)
-        logger.debug(f"Fetched {len(all_features)} features so far...")
 
         # Check if there are more results
         # For GeoJSON format, exceededTransferLimit is in properties
@@ -192,6 +196,19 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
         exceeded = props.get("exceededTransferLimit", False) or data.get(
             "exceededTransferLimit", False
         )
+
+        # Adaptive page sizing: detect if server caps below our requested size
+        if exceeded and len(features) < effective_page_size and not server_cap_detected:
+            server_cap_detected = True
+            old_page_size = effective_page_size
+            effective_page_size = len(features)
+            logger.info(
+                f"Server caps page size at {effective_page_size} (requested {old_page_size}), "
+                f"adapting for subsequent requests"
+            )
+
+        logger.debug(f"Fetched {len(all_features)} features so far...")
+
         if not exceeded:
             break
 

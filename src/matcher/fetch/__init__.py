@@ -26,6 +26,16 @@ from .overture import (
     fetch_overture_segments,
     load_overture_segments,
 )
+from .target import (
+    fetch_dataset,
+    fetch_datasets_by_prefix,
+    fetch_download,
+    fetch_lta_geospatial,
+    fetch_ogc_features,
+    fetch_wfs,
+    list_datasets,
+    print_datasets,
+)
 
 __all__ = [
     "BoundingBox",
@@ -44,6 +54,15 @@ __all__ = [
     "FetchMetadata",
     "load_metadata",
     "save_metadata",
+    # Target/local data fetching
+    "fetch_dataset",
+    "fetch_datasets_by_prefix",
+    "fetch_download",
+    "fetch_lta_geospatial",
+    "fetch_ogc_features",
+    "fetch_wfs",
+    "list_datasets",
+    "print_datasets",
     # Version constants
     "DATA_VERSION",
     "SCHEMA_VERSION",
