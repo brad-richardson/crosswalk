@@ -1,0 +1,25 @@
+name: au_sydney_roads
+display_name: NSW Road Segments (Sydney)
+type: road
+description: Road centerlines from NSW Spatial Portal with function hierarchy
+source:
+  type: arcgis
+  url: https://portal.spatial.nsw.gov.au/server/rest/services/NSW_Transport_Theme/FeatureServer/5
+  portal_url: https://portal.spatial.nsw.gov.au/
+fetch:
+  id_prefix: au_sydney
+  name_column: roadnamebase
+  class_column: functionhierarchy
+  class_mapping:
+    1: motorway
+    2: primary
+    3: secondary
+    4: tertiary
+    5: tertiary
+    6: residential
+  bbox:
+  - 150.85
+  - -34.15
+  - 151.35
+  - -33.65
+  crs: EPSG:4326

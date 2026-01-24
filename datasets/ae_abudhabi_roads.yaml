@@ -1,0 +1,18 @@
+name: ae_abudhabi_roads
+display_name: Abu Dhabi Roads
+type: road
+description: Road network from Abu Dhabi SDI with Arabic and English names
+source:
+  type: arcgis
+  url: https://arcgis.sdi.abudhabi.ae/arcgis/rest/services/Pub/CF_Transportation/MapServer/0
+  portal_url: https://sdi.abudhabi.ae/sdi/
+fetch:
+  id_prefix: ae_abudhabi
+  name_column: null
+  class_column: null
+  bbox:
+  - 54.25
+  - 24.30
+  - 54.60
+  - 24.60
+  crs: EPSG:4326

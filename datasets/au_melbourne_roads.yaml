@@ -1,0 +1,19 @@
+name: au_melbourne_roads
+display_name: VicRoads Declared Roads (Melbourne)
+type: road
+description: Victoria declared roads from VicRoads - arterials and highways (~15% of network)
+notes: This covers declared roads only. For complete network, use Vicmap Transport download from data.vic.gov.au
+source:
+  type: arcgis
+  url: https://services2.arcgis.com/18ajPSI0b3ppsmMt/arcgis/rest/services/VicRoads_Declared_Roads/FeatureServer/0
+  portal_url: https://vicroadsopendata-vicroadsmaps.opendata.arcgis.com/
+fetch:
+  id_prefix: au_melbourne
+  name_column: EZI_RDNAME
+  class_column: CLASS_CODE
+  bbox:
+  - 144.55
+  - -38.10
+  - 145.35
+  - -37.55
+  crs: EPSG:4326
