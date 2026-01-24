@@ -86,8 +86,12 @@ def fetch_target(
         console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
 
     elif prefix:
-        console.print(f"[blue]Fetching datasets with prefix '{prefix}' ({workers} workers)...[/blue]")
-        results = target_module.fetch_datasets_by_prefix(prefix, output_dir, page_size, force, workers)
+        console.print(
+            f"[blue]Fetching datasets with prefix '{prefix}' ({workers} workers)...[/blue]"
+        )
+        results = target_module.fetch_datasets_by_prefix(
+            prefix, output_dir, page_size, force, workers
+        )
         if not results:
             console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
             raise typer.Exit(1)
@@ -786,8 +790,8 @@ def fetch_verify(
     warning_count = 0
     error_count = 0
 
-    for name in sorted(datasets):
-        name, success, message = verify_dataset(name, dry_run)
+    for dataset in sorted(datasets):
+        _name, success, message = verify_dataset(dataset, dry_run)
         if success:
             if "yellow" in message:
                 warning_count += 1
@@ -796,7 +800,7 @@ def fetch_verify(
         else:
             error_count += 1
         status_icon = "[green]✓[/green]" if success else "[red]✗[/red]"
-        console.print(f"  {status_icon} {name}: {message}")
+        console.print(f"  {status_icon} {dataset}: {message}")
 
     console.print()
     console.print(

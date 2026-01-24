@@ -74,7 +74,6 @@ def _transform_download_data(
     # Convert single-part MultiLineStrings to LineStrings
     multi_mask = gdf.geometry.geom_type == "MultiLineString"
     if multi_mask.any():
-        n_multi = multi_mask.sum()
 
         def to_linestring(geom):
             if geom.geom_type == "MultiLineString" and len(geom.geoms) == 1:
@@ -82,18 +81,14 @@ def _transform_download_data(
             return geom
 
         gdf.geometry = gdf.geometry.apply(to_linestring)
-        n_converted = (gdf.geometry.geom_type == "LineString").sum() - (
-            ~multi_mask
-        ).sum()
+        n_converted = (gdf.geometry.geom_type == "LineString").sum() - (~multi_mask).sum()
         logger.info(f"Converted {n_converted} single-part MultiLineStrings to LineStrings")
 
     # Filter to LineStrings only (drop remaining MultiLineStrings, Points, etc.)
     linestring_mask = gdf.geometry.geom_type == "LineString"
     if not linestring_mask.all():
         n_filtered = (~linestring_mask).sum()
-        logger.warning(
-            f"Filtering {n_filtered} non-LineString geometries from {source_name}"
-        )
+        logger.warning(f"Filtering {n_filtered} non-LineString geometries from {source_name}")
         gdf = gdf[linestring_mask].copy()
 
     # Strip Z coordinates if present (force 2D)
@@ -507,9 +502,7 @@ def fetch_download(
                     data_file = geojson_files[0]
                 elif file_format == "gdb":
                     # FileGDB is a folder with .gdb extension
-                    gdb_dirs = [
-                        d for d in tmpdir_path.rglob("*.gdb") if d.is_dir()
-                    ]
+                    gdb_dirs = [d for d in tmpdir_path.rglob("*.gdb") if d.is_dir()]
                     if not gdb_dirs:
                         raise ValueError("No .gdb folder found in zip")
                     data_file = gdb_dirs[0]
@@ -617,14 +610,14 @@ def _get_cached_os_data(product_id: str, cache_ttl_hours: int = 168) -> Path | N
     Returns:
         Path to cached gpkg file if valid, None otherwise
     """
-    from datetime import datetime, timedelta
+    from datetime import UTC, datetime, timedelta
 
     cache_dir = _get_os_cache_dir()
     cached_gpkg = cache_dir / f"{product_id}.gpkg"
 
     if cached_gpkg.exists():
-        mtime = datetime.fromtimestamp(cached_gpkg.stat().st_mtime)
-        if datetime.now() - mtime < timedelta(hours=cache_ttl_hours):
+        mtime = datetime.fromtimestamp(cached_gpkg.stat().st_mtime, tz=UTC)
+        if datetime.now(UTC) - mtime < timedelta(hours=cache_ttl_hours):
             logger.info(f"Using cached OS data: {cached_gpkg}")
             return cached_gpkg
         else:
@@ -672,7 +665,7 @@ def fetch_os_downloads(
     except ImportError as err:
         raise ImportError(
             "osdatahub package required for OS Data Hub downloads. "
-            "Install with: pip install osdatahub"
+            'Install with: pip install "matcher[os]"'
         ) from err
 
     logger.info(f"Fetching OS Data Hub product: {product_id}")
