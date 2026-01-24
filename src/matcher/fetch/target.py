@@ -1022,11 +1022,25 @@ def fetch_dataset(
         return None
 
 
+def _fetch_dataset_worker(
+    args: tuple[str, Path | None, int | None, bool],
+) -> tuple[str, Path | None]:
+    """Worker function for parallel dataset fetching."""
+    name, output_dir, page_size, force = args
+    try:
+        result = fetch_dataset(name, output_dir, page_size, force)
+        return (name, result)
+    except Exception as e:
+        logger.error(f"Failed to fetch {name}: {e}")
+        return (name, None)
+
+
 def fetch_datasets_by_prefix(
     prefix: str,
     output_dir: Path | None = None,
     page_size: int | None = None,
     force: bool = False,
+    max_workers: int = 4,
 ) -> dict[str, Path | None]:
     """Fetch all datasets matching a prefix.
 
@@ -1035,10 +1049,13 @@ def fetch_datasets_by_prefix(
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches
         force: If False (default), skip datasets whose files already exist
+        max_workers: Maximum number of parallel downloads (default: 4)
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_datasets = list_dataset_configs()
     matching = [d for d in all_datasets if d.startswith(prefix)]
 
@@ -1047,11 +1064,16 @@ def fetch_datasets_by_prefix(
         return {}
 
     logger.info(f"Found {len(matching)} datasets matching prefix '{prefix}'")
-    results: dict[str, Path | None] = {}
+    logger.info(f"Fetching with {max_workers} parallel workers")
 
-    for name in sorted(matching):
-        logger.info(f"\n{'=' * 60}")
-        results[name] = fetch_dataset(name, output_dir, page_size, force)
+    results: dict[str, Path | None] = {}
+    tasks = [(name, output_dir, page_size, force) for name in sorted(matching)]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_dataset_worker, task): task[0] for task in tasks}
+        for future in as_completed(futures):
+            name, result = future.result()
+            results[name] = result
 
     return results
 
@@ -1060,6 +1082,7 @@ def fetch_all_datasets(
     output_dir: Path | None = None,
     page_size: int | None = None,
     force: bool = False,
+    max_workers: int = 4,
 ) -> dict[str, Path | None]:
     """Fetch all available datasets.
 
@@ -1067,22 +1090,24 @@ def fetch_all_datasets(
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches
         force: If False (default), skip datasets whose files already exist
+        max_workers: Maximum number of parallel downloads (default: 4)
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
     """
-    all_datasets = list_dataset_configs()
-    results: dict[str, Path | None] = {}
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    for name in sorted(all_datasets):
-        logger.info(f"\n{'=' * 60}")
-        logger.info(f"Fetching {name}...")
-        logger.info(f"{'=' * 60}")
-        try:
-            results[name] = fetch_dataset(name, output_dir, page_size, force)
-        except Exception as e:
-            logger.error(f"Failed to fetch {name}: {e}")
-            results[name] = None
+    all_datasets = list_dataset_configs()
+    logger.info(f"Fetching {len(all_datasets)} datasets with {max_workers} parallel workers")
+
+    results: dict[str, Path | None] = {}
+    tasks = [(name, output_dir, page_size, force) for name in sorted(all_datasets)]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_dataset_worker, task): task[0] for task in tasks}
+        for future in as_completed(futures):
+            name, result = future.result()
+            results[name] = result
 
     return results
 

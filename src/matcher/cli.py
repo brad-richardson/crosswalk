@@ -56,6 +56,12 @@ def fetch_target(
         "--force",
         help="Re-fetch even if file already exists",
     ),
+    workers: int = typer.Option(
+        4,
+        "--workers",
+        "-w",
+        help="Number of parallel download workers (default: 4)",
+    ),
 ):
     """Fetch target/local road data from municipal GIS portals.
 
@@ -67,21 +73,21 @@ def fetch_target(
         matcher fetch target us_boston_streets      # Fetch specific dataset
         matcher fetch target --prefix us_boston     # Fetch all Boston datasets
         matcher fetch target --all                  # Fetch all datasets
-        matcher fetch target us_boston_streets --force  # Re-fetch existing
+        matcher fetch target --all --workers 8      # Fetch all with 8 workers
     """
     from .fetch import target as target_module
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if fetch_all:
-        console.print("[blue]Fetching all datasets...[/blue]")
-        results = target_module.fetch_all_datasets(output_dir, page_size, force)
+        console.print(f"[blue]Fetching all datasets ({workers} workers)...[/blue]")
+        results = target_module.fetch_all_datasets(output_dir, page_size, force, workers)
         success = sum(1 for p in results.values() if p is not None)
         console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
 
     elif prefix:
-        console.print(f"[blue]Fetching datasets with prefix '{prefix}'...[/blue]")
-        results = target_module.fetch_datasets_by_prefix(prefix, output_dir, page_size, force)
+        console.print(f"[blue]Fetching datasets with prefix '{prefix}' ({workers} workers)...[/blue]")
+        results = target_module.fetch_datasets_by_prefix(prefix, output_dir, page_size, force, workers)
         if not results:
             console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
             raise typer.Exit(1)
