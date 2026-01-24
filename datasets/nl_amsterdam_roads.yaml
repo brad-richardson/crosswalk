@@ -6,6 +6,7 @@ source:
   type: download
   url: https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg
   file_format: gpkg
+  cache_download: true  # Large file (NL nationwide), cache locally
 fetch:
   id_prefix: ams_road
   name_column: stt_naam

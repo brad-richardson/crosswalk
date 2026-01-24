@@ -412,6 +412,46 @@ def fetch_lta_geospatial(
     )
 
 
+def _get_download_cache_dir() -> Path:
+    """Get or create download cache directory."""
+    cache_dir = Path.home() / ".cache" / "matcher" / "downloads"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _get_cached_download(url: str, cache_ttl_hours: int = 168) -> Path | None:
+    """Check if cached download exists and is valid.
+
+    Args:
+        url: URL that was downloaded
+        cache_ttl_hours: Hours before cache expires (default: 168 = 7 days)
+
+    Returns:
+        Path to cached file if valid, None otherwise
+    """
+    import hashlib
+    from datetime import UTC, datetime, timedelta
+
+    # Use URL hash as cache key
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+    cache_dir = _get_download_cache_dir()
+
+    # Look for any cached file with this hash prefix
+    cached_files = list(cache_dir.glob(f"{url_hash}_*"))
+    if not cached_files:
+        return None
+
+    cached_file = cached_files[0]
+    mtime = datetime.fromtimestamp(cached_file.stat().st_mtime, tz=UTC)
+    if datetime.now(UTC) - mtime < timedelta(hours=cache_ttl_hours):
+        logger.info(f"Using cached download: {cached_file}")
+        return cached_file
+    else:
+        logger.info(f"Cache expired for {url}, re-downloading...")
+        cached_file.unlink()
+        return None
+
+
 def fetch_download(
     url: str,
     output_path: Path,
@@ -427,6 +467,8 @@ def fetch_download(
     api_key_header: str | None = None,
     encoding: str | None = None,
     source_crs: str | None = None,
+    cache_download: bool = False,
+    cache_ttl_hours: int = 168,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -445,181 +487,198 @@ def fetch_download(
         api_key_header: Header name for API key (e.g., "AccountKey")
         encoding: File encoding for non-UTF8 files (e.g., "EUC-KR")
         source_crs: Source CRS if different from data file (e.g., "EPSG:5179")
+        cache_download: If True, cache the downloaded file for future use
+        cache_ttl_hours: Hours before cache expires (default: 168 = 7 days)
 
     Returns:
         Path to the output GeoParquet file
     """
+    import hashlib
+
     logger.info(f"Downloading {file_format} from: {url}")
+
+    # Check cache first if caching is enabled
+    cached_file = None
+    if cache_download:
+        cached_file = _get_cached_download(url, cache_ttl_hours)
 
     headers = {}
     if api_key and api_key_header:
         headers[api_key_header] = api_key
 
     try:
-        resp = requests.get(url, headers=headers, timeout=600, stream=True)
-        resp.raise_for_status()
+        # If we have a cached file, use it directly
+        if cached_file:
+            data_file = cached_file
+            is_zip = cached_file.suffix == ".zip"
+            tmpdir_context = None
+        else:
+            # Download the file
+            resp = requests.get(url, headers=headers, timeout=600, stream=True)
+            resp.raise_for_status()
 
-        # Get content length for progress reporting
-        total_size = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        last_progress_mb = 0
-        progress_interval_mb = 10  # Report every 10 MB
+            # Get content length for progress reporting
+            total_size = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            last_progress_mb = 0
+            progress_interval_mb = 10  # Report every 10 MB
 
-        # Save to temp file
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-
-            # Check if it's a zip file
+            # Determine if it's a zip file
             content_type = resp.headers.get("content-type", "")
-            if "zip" in content_type or url.endswith(".zip"):
-                zip_path = tmpdir_path / "download.zip"
-                with open(zip_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        # Report progress for large downloads
-                        current_mb = downloaded // (1024 * 1024)
-                        if current_mb >= last_progress_mb + progress_interval_mb:
-                            last_progress_mb = current_mb
-                            if total_size:
-                                pct = 100 * downloaded / total_size
-                                logger.info(
-                                    f"Download progress: {current_mb} MB / "
-                                    f"{total_size // (1024 * 1024)} MB ({pct:.0f}%)"
-                                )
-                            else:
-                                logger.info(f"Download progress: {current_mb} MB")
+            is_zip = "zip" in content_type or url.endswith(".zip")
 
-                logger.info(f"Downloaded {zip_path.stat().st_size / 1024 / 1024:.1f} MB")
+            # Determine where to save (cache or temp)
+            if cache_download:
+                url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+                ext = ".zip" if is_zip else f".{file_format}"
+                cache_path = _get_download_cache_dir() / f"{url_hash}_{Path(url).stem}{ext}"
+                download_path = cache_path
+            else:
+                tmpdir_context = tempfile.TemporaryDirectory()
+                tmpdir_path = Path(tmpdir_context.name)
+                ext = ".zip" if is_zip else f".{file_format}"
+                download_path = tmpdir_path / f"download{ext}"
 
-                # Extract zip
-                with zipfile.ZipFile(zip_path, "r") as zf:
-                    zf.extractall(tmpdir_path)
+            # Download with progress reporting
+            with open(download_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    current_mb = downloaded // (1024 * 1024)
+                    if current_mb >= last_progress_mb + progress_interval_mb:
+                        last_progress_mb = current_mb
+                        if total_size:
+                            pct = 100 * downloaded / total_size
+                            logger.info(
+                                f"Download progress: {current_mb} MB / "
+                                f"{total_size // (1024 * 1024)} MB ({pct:.0f}%)"
+                            )
+                        else:
+                            logger.info(f"Download progress: {current_mb} MB")
+
+            logger.info(f"Downloaded {download_path.stat().st_size / 1024 / 1024:.1f} MB")
+            if cache_download:
+                logger.info(f"Cached to: {download_path}")
+
+            data_file = download_path
+
+        # Process the downloaded file
+        if is_zip:
+            # Need a temp directory for extraction
+            extract_dir = tempfile.mkdtemp()
+            try:
+                with zipfile.ZipFile(data_file, "r") as zf:
+                    zf.extractall(extract_dir)
+                extract_path = Path(extract_dir)
 
                 # Find the data file
                 if file_format == "shp":
-                    shp_files = list(tmpdir_path.rglob("*.shp"))
-                    if not shp_files:
+                    found_files = list(extract_path.rglob("*.shp"))
+                    if not found_files:
                         raise ValueError("No .shp file found in zip")
-                    data_file = shp_files[0]
+                    data_file = found_files[0]
                 elif file_format == "gpkg":
-                    gpkg_files = list(tmpdir_path.rglob("*.gpkg"))
-                    if not gpkg_files:
+                    found_files = list(extract_path.rglob("*.gpkg"))
+                    if not found_files:
                         raise ValueError("No .gpkg file found in zip")
-                    data_file = gpkg_files[0]
+                    data_file = found_files[0]
                 elif file_format == "gml":
-                    gml_files = list(tmpdir_path.rglob("*.gml"))
-                    if not gml_files:
+                    found_files = list(extract_path.rglob("*.gml"))
+                    if not found_files:
                         raise ValueError("No .gml file found in zip")
-                    data_file = gml_files[0]
+                    data_file = found_files[0]
                 elif file_format == "geojson":
-                    geojson_files = list(tmpdir_path.rglob("*.geojson")) + list(
-                        tmpdir_path.rglob("*.json")
+                    found_files = list(extract_path.rglob("*.geojson")) + list(
+                        extract_path.rglob("*.json")
                     )
-                    if not geojson_files:
+                    if not found_files:
                         raise ValueError("No .geojson file found in zip")
-                    data_file = geojson_files[0]
+                    data_file = found_files[0]
                 elif file_format == "gdb":
-                    # FileGDB is a folder with .gdb extension
-                    gdb_dirs = [d for d in tmpdir_path.rglob("*.gdb") if d.is_dir()]
-                    if not gdb_dirs:
+                    found_dirs = [d for d in extract_path.rglob("*.gdb") if d.is_dir()]
+                    if not found_dirs:
                         raise ValueError("No .gdb folder found in zip")
-                    data_file = gdb_dirs[0]
+                    data_file = found_dirs[0]
                 else:
                     raise ValueError(f"Unsupported file format: {file_format}")
 
                 logger.info(f"Loading from: {data_file}")
-            else:
-                # Direct file download
-                data_file = tmpdir_path / f"data.{file_format}"
-                with open(data_file, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        # Report progress for large downloads
-                        current_mb = downloaded // (1024 * 1024)
-                        if current_mb >= last_progress_mb + progress_interval_mb:
-                            last_progress_mb = current_mb
-                            if total_size:
-                                pct = 100 * downloaded / total_size
-                                logger.info(
-                                    f"Download progress: {current_mb} MB / "
-                                    f"{total_size // (1024 * 1024)} MB ({pct:.0f}%)"
-                                )
-                            else:
-                                logger.info(f"Download progress: {current_mb} MB")
-                logger.info(f"Downloaded {data_file.stat().st_size / 1024 / 1024:.1f} MB")
+            finally:
+                # Clean up extract directory after we're done (handled after geopandas load)
+                pass
 
-            # Load with geopandas
-            read_kwargs: dict[str, Any] = {}
-            if encoding:
-                read_kwargs["encoding"] = encoding
-                logger.info(f"Using encoding: {encoding}")
-            if file_format == "gml":
-                read_kwargs["driver"] = "GML"
+        logger.info(f"Loading from: {data_file}")
 
-            # For multi-layer formats (gdb, gpkg), select the road centerline layer
-            if file_format == "gdb":
-                import pyogrio
+        # Load with geopandas
+        read_kwargs: dict[str, Any] = {}
+        if encoding:
+            read_kwargs["encoding"] = encoding
+            logger.info(f"Using encoding: {encoding}")
+        if file_format == "gml":
+            read_kwargs["driver"] = "GML"
 
-                layers = pyogrio.list_layers(data_file)
-                layer_names = [layer_info[0] for layer_info in layers]
-                logger.debug(f"Available layers: {layer_names}")
+        # For multi-layer formats (gdb, gpkg), select the road centerline layer
+        if file_format == "gdb":
+            import pyogrio
 
-                # Prefer centerline/road layers
-                for preferred in [
-                    "CENTERLINE",
-                    "centerline",
-                    "road_link",
-                    "RoadLink",
-                    "roads",
-                    "road",
-                ]:
-                    if preferred in layer_names:
-                        read_kwargs["layer"] = preferred
-                        logger.info(f"Selected layer: {preferred}")
-                        break
+            layers = pyogrio.list_layers(data_file)
+            layer_names = [layer_info[0] for layer_info in layers]
+            logger.debug(f"Available layers: {layer_names}")
 
-            gdf = gpd.read_file(data_file, **read_kwargs)
-            logger.info(f"Loaded {len(gdf)} features")
+            # Prefer centerline/road layers
+            for preferred in [
+                "CENTERLINE",
+                "centerline",
+                "road_link",
+                "RoadLink",
+                "roads",
+                "road",
+            ]:
+                if preferred in layer_names:
+                    read_kwargs["layer"] = preferred
+                    logger.info(f"Selected layer: {preferred}")
+                    break
 
-            # Set source CRS if provided (overrides file metadata)
-            if source_crs:
-                logger.info(f"Setting source CRS from config: {source_crs}")
-                gdf = gdf.set_crs(source_crs, allow_override=True)
+        gdf = gpd.read_file(data_file, **read_kwargs)
+        logger.info(f"Loaded {len(gdf)} features")
 
-            # Reproject to WGS84 if needed
-            if gdf.crs and gdf.crs != "EPSG:4326":
-                logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
-                gdf = gdf.to_crs("EPSG:4326")
+        # Set source CRS if provided (overrides file metadata)
+        if source_crs:
+            logger.info(f"Setting source CRS from config: {source_crs}")
+            gdf = gdf.set_crs(source_crs, allow_override=True)
 
-            # Apply bbox filter if requested
-            if bbox_filter and bbox and len(gdf) > 0:
-                xmin, ymin, xmax, ymax = bbox
-                original_count = len(gdf)
-                gdf = gdf.cx[xmin:xmax, ymin:ymax]
-                logger.info(f"Filtered from {original_count} to {len(gdf)} features within bbox")
+        # Reproject to WGS84 if needed
+        if gdf.crs and gdf.crs != "EPSG:4326":
+            logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
+            gdf = gdf.to_crs("EPSG:4326")
 
-            if len(gdf) == 0:
-                logger.warning("No features after filtering")
-                return output_path
+        # Apply bbox filter if requested
+        if bbox_filter and bbox and len(gdf) > 0:
+            xmin, ymin, xmax, ymax = bbox
+            original_count = len(gdf)
+            gdf = gdf.cx[xmin:xmax, ymin:ymax]
+            logger.info(f"Filtered from {original_count} to {len(gdf)} features within bbox")
 
-            # Transform to Overture schema
-            gdf = _transform_download_data(
-                gdf,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                source_name=source_name,
-            )
-
-            # Save to parquet
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            gdf.to_parquet(output_path)
-            logger.success(f"Saved {len(gdf)} features to {output_path}")
-
+        if len(gdf) == 0:
+            logger.warning("No features after filtering")
             return output_path
+
+        # Transform to Overture schema
+        gdf = _transform_download_data(
+            gdf,
+            id_prefix=id_prefix,
+            name_column=name_column,
+            class_column=class_column,
+            class_mapping=class_mapping,
+            source_name=source_name,
+        )
+
+        # Save to parquet
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        gdf.to_parquet(output_path)
+        logger.success(f"Saved {len(gdf)} features to {output_path}")
+
+        return output_path
 
     except Exception as e:
         logger.error(f"Failed to download: {e}")
@@ -972,6 +1031,10 @@ def fetch_dataset(
                     bbox_filter=bool(bbox),
                 )
 
+            # Check if caching is enabled for this download
+            cache_download = config.source.cache_download if config.source else False
+            cache_ttl_hours = config.source.cache_ttl_hours if config.source else 168
+
             return fetch_download(
                 url=url,
                 output_path=output_path,
@@ -987,6 +1050,8 @@ def fetch_dataset(
                 api_key_header=api_key_header,
                 encoding=encoding,
                 source_crs=source_crs,
+                cache_download=cache_download,
+                cache_ttl_hours=cache_ttl_hours,
             )
 
         elif source_type == "ogc_features":
