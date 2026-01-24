@@ -543,6 +543,64 @@ Modify `_add_target_segments` in `combiner.py` to:
 
 ---
 
+## Integration: Connectivity-Based Gating
+
+**Priority:** Medium
+**Status:** Designed and prototyped (branch: `feature/connectivity-gating-and-debug-logging`)
+
+### Problem
+
+Short segments (< 20m) are currently rejected during integration even if they provide valuable network connectivity. This leads to gaps in the integrated network where small connector segments would bridge disconnected components.
+
+### Proposed Solution
+
+Allow segments below `min_merge_length_m` but above a new `min_connectivity_length_m` threshold if they add network connectivity value.
+
+#### Connectivity Check Logic
+
+A segment "adds connectivity" if it:
+1. **Bridges two disconnected components** in the main network, OR
+2. **Creates a meaningful shortcut** (existing graph path > `connectivity_path_threshold_m`)
+
+#### Implementation
+
+```python
+def _check_adds_connectivity(
+    candidate_segments: gpd.GeoDataFrame,
+    main_network: gpd.GeoDataFrame,
+    tolerance_m: float,
+    path_threshold_m: float,
+) -> pd.Series:
+    """Check if segments add connectivity to the network."""
+    # Build graph from main network
+    # For each candidate:
+    #   1. Find nearest nodes to endpoints
+    #   2. Check if bridges disconnected components (no path exists)
+    #   3. Check if creates shortcut (existing path > threshold AND > 3x segment length)
+```
+
+#### CLI Options
+
+- `--enable-connectivity-gating` (default: False)
+- `--min-connectivity-length-m` (default: 5m) - Minimum length when gating applies
+- `--connectivity-path-threshold-m` (default: 500m) - Path threshold for shortcut detection
+
+### Related: Debug Logging for Transitive Connectivity
+
+The prototype also includes enhanced diagnostic logging for debugging transitive connectivity issues:
+
+- Log counts and tolerance at start of propagation
+- Log top 10 closest orphan distances per hop
+- Log distance distribution stats (min, median, max)
+- Suggest tolerance adjustments when orphans are within 2x/3x of current tolerance
+- Enable with `--debug-connectivity` flag
+
+### Location
+
+`src/matcher/integration/orphan_detector.py`
+
+---
+
 ## Known Issues & Technical Debt
 
 ### HIGH: ML Metrics Likely Optimistic (Data Leakage)
