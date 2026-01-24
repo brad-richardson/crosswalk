@@ -30,7 +30,7 @@ import pandas as pd
 from loguru import logger
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.model_selection import GroupShuffleSplit, cross_val_score
 
 from ..config import (
     DEFAULT_TOPOLOGY_FEATURES,
@@ -188,6 +188,98 @@ def select_model_for_dataset(
         return full_model_path
 
 
+def create_segment_groups(df: pd.DataFrame) -> pd.Series:
+    """Create group IDs for segment-aware train/test splitting.
+
+    Uses Union-Find to ensure pairs sharing any segment are in the same group.
+    This prevents data leakage where the model sees a segment during training
+    and then evaluates on the same segment.
+
+    Args:
+        df: DataFrame with 'gers_id' and 'target_id' columns
+
+    Returns:
+        Series of group IDs (one per row in df)
+    """
+    from collections import defaultdict
+
+    # Union-Find implementation
+    parent = {}
+
+    def find(x):
+        if x not in parent:
+            parent[x] = x
+        if parent[x] != x:
+            parent[x] = find(parent[x])
+        return parent[x]
+
+    def union(x, y):
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+
+    # Map segments to pairs (using DataFrame index)
+    segment_to_pairs = defaultdict(list)
+    for idx in df.index:
+        row = df.loc[idx]
+        segment_to_pairs[row["gers_id"]].append(idx)
+        segment_to_pairs[row["target_id"]].append(idx)
+
+    # Union pairs that share a segment
+    for _segment, pair_idxs in segment_to_pairs.items():
+        for i in range(1, len(pair_idxs)):
+            union(pair_idxs[0], pair_idxs[i])
+
+    # Return group for each row
+    return pd.Series([find(idx) for idx in df.index], index=df.index)
+
+
+def segment_aware_split(
+    df: pd.DataFrame,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split data ensuring no segment appears in both train and test sets.
+
+    Uses Union-Find to group pairs that share segments, then splits by group.
+    This prevents data leakage where the model trains on a segment and then
+    evaluates on the same segment in a different pair.
+
+    Args:
+        df: DataFrame with 'gers_id' and 'target_id' columns
+        test_size: Fraction of data to use for testing (0.0 to 1.0)
+        random_state: Random seed for reproducibility
+
+    Returns:
+        Tuple of (train_indices, test_indices) as numpy arrays
+    """
+    # Handle empty DataFrame
+    if len(df) == 0:
+        return np.array([], dtype=int), np.array([], dtype=int)
+
+    groups = create_segment_groups(df)
+    n_groups = groups.nunique()
+
+    # Need at least 2 groups to split
+    if n_groups < 2:
+        logger.warning(
+            f"Only {n_groups} segment group(s) found - cannot split. "
+            "All pairs are transitively connected. Placing all in training set."
+        )
+        return np.arange(len(df)), np.array([], dtype=int)
+
+    # Use GroupShuffleSplit to split by group
+    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+    train_idx, test_idx = next(gss.split(df, groups=groups))
+
+    logger.info(
+        f"Segment-aware split: {len(train_idx)} train, {len(test_idx)} test "
+        f"across {n_groups} groups"
+    )
+
+    return train_idx, test_idx
+
+
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
@@ -328,10 +420,11 @@ class MLMatcher:
         logger.info(f"Feature matrix shape: {X.shape}")
         logger.info(f"Label distribution: {pd.Series(y).value_counts().to_dict()}")
 
-        # Train/test split BEFORE imputation to avoid data leakage
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
+        # Segment-aware train/test split to prevent data leakage
+        train_idx, test_idx = segment_aware_split(df, test_size=test_size, random_state=42)
+
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
 
         # Compute imputation values from TRAINING data only
         self.feature_medians = {}
@@ -954,6 +1047,7 @@ def evaluate_by_dataset(
     binary: bool = True,
     show_by_dataset: bool = True,
     holdout: bool = True,
+    holdout_pct: float = 0.2,
     seed: int = 42,
     filter_datasets: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
@@ -966,7 +1060,8 @@ def evaluate_by_dataset(
         labels_dir: Directory containing Hive-partitioned label CSVs
         binary: Evaluate as binary (match vs no_match)
         show_by_dataset: If True, show per-dataset metrics; if False, only show overall
-        holdout: If True (default), use 20% holdout set for unbiased evaluation
+        holdout: If True (default), use holdout set for unbiased evaluation
+        holdout_pct: Fraction of data to hold out for testing (default 0.2 = 20%)
         seed: Random seed for holdout split (for reproducibility)
         filter_datasets: If provided, only evaluate on these datasets
 
@@ -1006,15 +1101,14 @@ def evaluate_by_dataset(
             return {}
         logger.info(f"Filtered to {len(all_labels)} labels from: {filter_datasets}")
 
-    # If holdout requested, split the data first (stratified by label)
+    # If holdout requested, split the data first using segment-aware splitting
     if holdout:
         valid_labels = {"match", "no_match", "associated"}
         eval_df = all_labels[all_labels["label"].isin(valid_labels)].copy()
-        _, all_labels = train_test_split(
-            eval_df, test_size=0.2, random_state=seed, stratify=eval_df["label"]
-        )
+        _, test_idx = segment_aware_split(eval_df, test_size=holdout_pct, random_state=seed)
+        all_labels = eval_df.iloc[test_idx]
         print(
-            f"\n[Holdout mode: evaluating on {len(all_labels)} samples (20% of data, seed={seed})]"
+            f"\n[Holdout mode: evaluating on {len(all_labels)} samples ({holdout_pct * 100:.0f}% of data, seed={seed})]"
         )
 
     datasets = all_labels["dataset"].unique()
