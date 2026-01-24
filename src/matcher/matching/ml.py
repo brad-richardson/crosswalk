@@ -333,23 +333,28 @@ class MLMatcher:
             X, y, test_size=test_size, random_state=42, stratify=y
         )
 
+        # Verify labels have all expected features before computing medians
+        # This catches bugs where new features are added to FEATURE_COLUMNS but
+        # the labels (created with older code) don't have them
+        expected_features = (
+            [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
+            if exclude_semantic
+            else FEATURE_COLUMNS
+        )
+        missing_in_labels = set(expected_features) - set(self.feature_names)
+        if missing_in_labels:
+            raise ValueError(
+                f"Labels are missing {len(missing_in_labels)} expected features: {sorted(missing_in_labels)}. "
+                f"This usually means labels were created with an older version. "
+                f"Run backfill to add missing features, or retrain with updated labels."
+            )
+
         # Compute imputation values from TRAINING data only
         self.feature_medians = {}
         for i, feat_name in enumerate(self.feature_names):
             col_vals = X_train[:, i]
             median_val = np.nanmedian(col_vals)
             self.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
-
-        # Verify all expected features have medians computed
-        # This catches bugs where new features are added to FEATURE_COLUMNS but
-        # not properly computed in the training data
-        missing_medians = set(self.feature_names) - set(self.feature_medians.keys())
-        if missing_medians:
-            raise ValueError(
-                f"Missing feature medians for {len(missing_medians)} features: {sorted(missing_medians)}. "
-                f"This usually means these features are not being computed during labeling. "
-                f"Check that label_store.py includes these features in LABEL_COLUMNS."
-            )
 
         # Apply imputation to both train and test using training medians
         X_train = self._impute_missing(X_train)

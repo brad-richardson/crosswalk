@@ -105,21 +105,25 @@ def generate_unmatched_report(
     matched_ids: set,
     output_path: Path,
     id_column: str = "local_id",
+    review_ids: set | None = None,
 ) -> Path:
     """Generate report of unmatched target features.
 
     Args:
         target: Target GeoDataFrame
-        matched_ids: Set of matched target IDs
+        matched_ids: Set of matched target IDs (high-confidence MATCH only)
         output_path: Path for output file
         id_column: Column name for target IDs
+        review_ids: Set of target IDs with REVIEW decision (low confidence, needs labeling)
 
     Returns:
         Path to generated file
     """
     logger.info("Generating unmatched report...")
 
-    # Find unmatched features
+    review_ids = review_ids or set()
+
+    # Find unmatched features (not in matched_ids)
     if id_column in target.columns:
         unmatched_mask = ~target[id_column].isin(matched_ids)
     else:
@@ -129,8 +133,14 @@ def generate_unmatched_report(
 
     logger.info(f"  {len(unmatched)} unmatched features")
 
-    # Add reason column
+    # Add reason column - distinguish REVIEW from true no_match
+    if id_column in unmatched.columns:
+        is_review = unmatched[id_column].isin(review_ids)
+    else:
+        is_review = unmatched.index.isin(review_ids)
+
     unmatched["unmatched_reason"] = "no_match_found"
+    unmatched.loc[is_review, "unmatched_reason"] = "low_confidence_review"
 
     # Select relevant columns
     columns_to_keep = ["geometry"]
