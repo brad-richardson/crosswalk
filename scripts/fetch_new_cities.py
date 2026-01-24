@@ -19,7 +19,7 @@ Usage:
     # Fetch all datasets for a country/city prefix
     python scripts/fetch_new_cities.py --prefix us_boston
 
-Output files will be saved to data/raw/<dataset_name>.parquet
+Output files will be saved to data/raw/<dataset_name>_v{version}.parquet
 """
 
 import argparse
@@ -539,12 +539,14 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
     Returns:
         Path to output file, or None if fetch failed
     """
+    from matcher.filenames import target_filename
+
     config = get_dataset_config(dataset_name)
     if config is None:
         logger.error(f"No config found for {dataset_name}")
         return None
 
-    output_path = output_dir / f"{dataset_name}.parquet"
+    output_path = output_dir / target_filename(dataset_name)
 
     logger.info(f"Fetching dataset: {dataset_name}")
     if config.description:

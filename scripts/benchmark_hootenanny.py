@@ -22,6 +22,8 @@ from loguru import logger
 # Add matcher to path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
+from matcher.filenames import find_overture_segments, find_target_file
+
 HOOT_BIN = "/var/lib/hootenanny/bin/hoot"
 
 
@@ -53,53 +55,33 @@ def get_available_datasets() -> dict[str, int]:
 
 
 def get_dataset_files(dataset_name: str) -> tuple[Path, Path, Path | None]:
-    """Get reference and target files for a dataset using labeling app logic.
+    """Get reference and target files for a dataset using filenames module.
 
     Returns:
         (reference_segments, target_segments, reference_connectors)
     """
     raw_dir = Path(__file__).parents[1] / "data" / "raw"
 
-    # Target file: {dataset_name}.parquet (e.g., us_boston_streets.parquet)
-    target_file = raw_dir / f"{dataset_name}.parquet"
-    if not target_file.exists():
-        raise FileNotFoundError(f"Target file not found: {target_file}")
+    # Target file using versioned filename lookup
+    target_file = find_target_file(raw_dir, dataset_name)
+    if target_file is None:
+        raise FileNotFoundError(f"Target file not found for {dataset_name} in {raw_dir}")
 
-    # Find Overture reference using same logic as labeling app
-    reference_file = _find_overture_reference(dataset_name, raw_dir)
-    if reference_file is None:
+    # Find Overture reference using centralized filenames module
+    reference_path = find_overture_segments(raw_dir, dataset_name)
+    if reference_path is None:
         raise FileNotFoundError(f"Overture reference not found for {dataset_name}")
 
-    reference_path = raw_dir / reference_file
-
-    # Check for connectors
-    connectors_path = reference_path.parent / reference_file.replace("_segments.", "_connectors.")
-    if not connectors_path.exists():
-        connectors_path = raw_dir / "overture_connectors.parquet"
+    # Check for connectors - derive from segments filename
+    # e.g., us_boston_overture_segments_v1.0.parquet -> us_boston_overture_connectors_v1.0.parquet
+    connectors_filename = reference_path.name.replace("_segments_", "_connectors_")
+    connectors_path = raw_dir / connectors_filename
 
     return (
         reference_path,
         target_file,
         connectors_path if connectors_path.exists() else None,
     )
-
-
-def _find_overture_reference(dataset_name: str, raw_dir: Path) -> str | None:
-    """Find the Overture reference file for a dataset (same as labeling app)."""
-    parts = dataset_name.split("_")
-
-    # Try progressively shorter prefixes
-    for i in range(len(parts), 0, -1):
-        region = "_".join(parts[:i])
-        candidate = f"{region}_overture_segments.parquet"
-        if (raw_dir / candidate).exists():
-            return candidate
-
-    # Fallback to generic
-    if (raw_dir / "overture_segments.parquet").exists():
-        return "overture_segments.parquet"
-
-    return None
 
 
 def load_labels(dataset_name: str | None = None) -> pd.DataFrame:

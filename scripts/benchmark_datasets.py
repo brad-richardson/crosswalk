@@ -43,6 +43,7 @@ from pathlib import Path
 from loguru import logger
 
 from matcher.datasets.schema import get_dataset_config as get_yaml_config
+from matcher.filenames import find_overture_segments, overture_segments_filename
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent
@@ -82,41 +83,33 @@ def _find_fetch_script(dataset_name: str) -> str | None:
 def _find_overture_reference(dataset_name: str) -> str | None:
     """Find the Overture reference file for a dataset.
 
-    Tries progressively shorter region prefixes until a matching file is found.
+    Uses the centralized find_overture_segments() which tries progressively
+    shorter region prefixes with versioned filenames.
     """
-    parts = dataset_name.split("_")
-
-    # Try progressively shorter prefixes
-    for i in range(len(parts), 0, -1):
-        region = "_".join(parts[:i])
-        candidate = f"{region}_overture_segments.parquet"
-        if (DATA_DIR / candidate).exists():
-            return candidate
-
-    # Fallback to generic overture_segments.parquet
-    if (DATA_DIR / "overture_segments.parquet").exists():
-        return "overture_segments.parquet"
-
-    return None
+    path = find_overture_segments(DATA_DIR, dataset_name)
+    return path.name if path else None
 
 
 def _extract_region(dataset_name: str) -> str:
     """Extract region from dataset name for grouping.
 
-    Uses yaml config bbox to find matching Overture file,
-    then derives region from that.
+    Uses find_overture_segments to find matching Overture file,
+    then derives region from that filename.
     E.g., us_boston_streets -> us_boston (shares Overture with other Boston datasets)
     """
-    parts = dataset_name.split("_")
-
-    # Try progressively shorter prefixes
-    for i in range(len(parts), 1, -1):
-        region = "_".join(parts[:i])
-        candidate = f"{region}_overture_segments.parquet"
-        if (DATA_DIR / candidate).exists():
-            return region
+    path = find_overture_segments(DATA_DIR, dataset_name)
+    if path:
+        # Extract region from filename like "us_boston_overture_segments_v1.0.parquet"
+        stem = path.stem  # "us_boston_overture_segments_v1.0"
+        # Remove version suffix if present
+        if "_v" in stem:
+            stem = stem.rsplit("_v", 1)[0]  # "us_boston_overture_segments"
+        # Remove "_overture_segments" suffix
+        if "_overture_segments" in stem:
+            return stem.replace("_overture_segments", "")
 
     # Default to country + first city part
+    parts = dataset_name.split("_")
     if len(parts) >= 2:
         return "_".join(parts[:2])
 
@@ -175,8 +168,8 @@ def _discover_datasets() -> dict[str, dict]:
         # Find Overture reference file
         overture_file = _find_overture_reference(dataset_name)
         if not overture_file:
-            # Construct expected filename based on region
-            overture_file = f"{region}_overture_segments.parquet"
+            # Construct expected versioned filename based on region
+            overture_file = overture_segments_filename(region)
 
         # Check if OSM dataset
         is_osm = dataset_name.endswith("_osm")

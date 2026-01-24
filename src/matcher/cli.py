@@ -213,7 +213,8 @@ def fetch(
 
     if "osm" in datasets:
         # Name outputs based on dataset if provided
-        osm_name = f"{dataset_name}_osm" if dataset_name else "osm"
+        # Note: osm_segments_filename() adds "_osm_segments" suffix, so don't add "_osm" here
+        osm_name = dataset_name if dataset_name else "default"
 
         # When using --for-dataset, OSM uses unbuffered bbox with fully-inside filter
         # This ensures OSM coverage matches the target dataset exactly for validation
