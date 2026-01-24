@@ -699,7 +699,7 @@ def fetch_verify(
         # Check source type
         source_type = config.source.type if config.source else "unknown"
         if source_type == "manual":
-            return (name, True, f"[yellow]Manual download[/yellow] - skipped")
+            return (name, True, "[yellow]Manual download[/yellow] - skipped")
 
         # Check required fields based on source type
         if source_type == "os_downloads":

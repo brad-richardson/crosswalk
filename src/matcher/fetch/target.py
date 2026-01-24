@@ -621,11 +621,11 @@ def fetch_os_downloads(
     """
     try:
         from osdatahub import OpenDataDownload
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "osdatahub package required for OS Data Hub downloads. "
             "Install with: pip install osdatahub"
-        )
+        ) from err
 
     logger.info(f"Fetching OS Data Hub product: {product_id}")
     if bbox:
@@ -703,7 +703,7 @@ def fetch_os_downloads(
                             shutil.copy(src, cached_file.with_suffix(ext))
                     data_file = cached_file
                 else:
-                    raise ValueError(f"No .gpkg or .shp found in downloaded data")
+                    raise ValueError("No .gpkg or .shp found in downloaded data")
             else:
                 # Copy gpkg to cache
                 cached_gpkg = cache_dir / f"{product_id}.gpkg"
@@ -719,7 +719,7 @@ def fetch_os_downloads(
         import pyogrio
 
         layers = pyogrio.list_layers(data_file)
-        layer_names = [l[0] for l in layers]
+        layer_names = [layer_info[0] for layer_info in layers]
         logger.debug(f"Available layers: {layer_names}")
 
         # Prefer road_link layer for OS OpenRoads (contains actual road segments)
