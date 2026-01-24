@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     import networkx as nx
     from pyproj import Transformer
 
+from matcher.config import MAX_DISTANCE_METERS
+
 from .relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
@@ -556,9 +558,11 @@ def compute_endpoint_features(
         - shared_endpoint_count: Number of segments with shared endpoints
     """
     if target_geom.is_empty or context.endpoint_coords.size == 0:
+        # Use MAX_DISTANCE_METERS instead of float("inf") for consistency
+        # with _get_error_features() and ml.py fallback defaults
         return {
-            "min_endpoint_proximity_m": float("inf"),
-            "max_endpoint_proximity_m": float("inf"),
+            "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+            "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
             "shared_endpoint_count": 0,
         }
 
@@ -638,9 +642,11 @@ def compute_aligned_endpoint_features(
         - shared_endpoint_count: Number of segments with shared endpoints
     """
     if geom is None or geom.is_empty or context.endpoint_coords.size == 0:
+        # Use MAX_DISTANCE_METERS instead of float("inf") for consistency
+        # with _get_error_features() and ml.py fallback defaults
         return {
-            "min_endpoint_proximity_m": float("inf"),
-            "max_endpoint_proximity_m": float("inf"),
+            "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+            "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
             "shared_endpoint_count": 0,
         }
 
