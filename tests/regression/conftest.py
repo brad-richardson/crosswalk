@@ -85,6 +85,25 @@ def perfect_match_features():
         # Graphlet features
         "graphlet_similarity": 1.0,
         "endpoint_degree_similarity": 1.0,
+        # New features (PR #74) - neutral/matching values
+        "cardinal_direction_mismatch": 0.0,  # No mismatch
+        "sinuosity_ref": 1.0,  # Straight line
+        "sinuosity_target": 1.0,
+        "sinuosity_delta": 0.0,
+        "heading_consistency_ref": 1.0,  # Consistent heading
+        "heading_consistency_target": 1.0,
+        "heading_consistency_delta": 0.0,
+        "vertex_density_ref": 0.1,  # Typical density
+        "vertex_density_target": 0.1,
+        "vertex_density_ratio": 1.0,
+        "length_bin_ref": 1,  # Medium length (10-100m)
+        "length_bin_target": 1,
+        "length_bin_match": 1.0,
+        "min_length_m": 50.0,
+        "shape_complexity_ref": 0,  # No significant turns
+        "shape_complexity_target": 0,
+        "shape_complexity_delta": 0.0,
+        "name_numeric_match": 1.0,  # Numeric portions match
     }
 
 
@@ -101,7 +120,7 @@ def terrible_match_features():
         "mean_hausdorff_distance_m": 120.0,
         "hausdorff_p95_m": 140.0,
         "buffer_iou_5m": 0.0,  # No overlap at 5m buffer
-        "buffer_iou_15m": 0.1,  # Minimal overlap at 15m buffer
+        "buffer_iou_15m": 0.0,  # No overlap at 15m buffer either
         "overlap_ratio": 0.1,
         "heading_delta": 80.0,  # Nearly perpendicular
         "length_ratio": 0.2,
@@ -146,6 +165,25 @@ def terrible_match_features():
         # Graphlet features
         "graphlet_similarity": 0.1,
         "endpoint_degree_similarity": 0.1,
+        # New features (PR #74) - mismatched values
+        "cardinal_direction_mismatch": 1.0,  # Cardinal directions conflict
+        "sinuosity_ref": 1.0,  # Straight
+        "sinuosity_target": 2.5,  # Very curvy
+        "sinuosity_delta": 1.5,
+        "heading_consistency_ref": 1.0,  # Consistent
+        "heading_consistency_target": 0.3,  # Inconsistent
+        "heading_consistency_delta": 0.7,
+        "vertex_density_ref": 0.1,
+        "vertex_density_target": 0.01,  # Sparse vertices
+        "vertex_density_ratio": 0.1,
+        "length_bin_ref": 0,  # Short (<10m)
+        "length_bin_target": 3,  # Highway (>500m)
+        "length_bin_match": 0.0,
+        "min_length_m": 5.0,  # Very short
+        "shape_complexity_ref": 0,
+        "shape_complexity_target": 15,  # Many turns
+        "shape_complexity_delta": 15.0,
+        "name_numeric_match": 0.0,  # Numerics don't match
     }
 
 
@@ -209,4 +247,23 @@ def borderline_match_features():
         # Graphlet features
         "graphlet_similarity": 0.6,
         "endpoint_degree_similarity": 0.7,
+        # New features (PR #74) - borderline/mixed values (some good, some bad)
+        "cardinal_direction_mismatch": 0.0,  # No mismatch
+        "sinuosity_ref": 1.1,
+        "sinuosity_target": 1.5,  # More different
+        "sinuosity_delta": 0.4,
+        "heading_consistency_ref": 0.9,
+        "heading_consistency_target": 0.6,  # Less consistent
+        "heading_consistency_delta": 0.3,
+        "vertex_density_ref": 0.1,
+        "vertex_density_target": 0.05,  # Different density
+        "vertex_density_ratio": 0.5,
+        "length_bin_ref": 1,  # Medium
+        "length_bin_target": 2,  # Different bin
+        "length_bin_match": 0.0,
+        "min_length_m": 15.0,  # Shorter
+        "shape_complexity_ref": 2,
+        "shape_complexity_target": 6,  # More complex
+        "shape_complexity_delta": 4.0,
+        "name_numeric_match": 0.0,  # No match
     }

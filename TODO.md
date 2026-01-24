@@ -23,13 +23,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 
 ## Geometric Features
 
-### Sinuosity Ratio / Delta
-- **Feature**: `sinuosity_ratio`, `sinuosity_delta`
-- **Purpose**: Distinguish curvy roads from straight roads
-- **Computation**: `sinuosity = line_length / straight_distance` for each segment, then compare
-- **Use case**: Prevent matching a curved residential street to a straight highway even if they have similar endpoints
-- **Priority**: High (quick win)
-
 ### Fréchet Distance
 - **Feature**: `frechet_distance_m`
 - **Purpose**: Order-preserving distance metric that considers both position and traversal order
@@ -37,31 +30,10 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Use case**: Distinguish segments that have similar point sets but different shapes
 - **Priority**: Lower (expensive to compute)
 
-### Vertex Density
-- **Feature**: `vertex_density_m`
-- **Purpose**: Quality signal - high-quality data tends to have consistent vertex spacing
-- **Computation**: `num_vertices / line_length`
-- **Use case**: Weight matching decisions based on data quality
-- **Priority**: High (quick win)
-
 ### Short Segment Flag
 - **Feature**: `short_segment_flag`, `min_length_m`
 - **Purpose**: Short segments (<10m) may need different matching logic
 - **Use case**: Improve matching for ramps, driveways, and connection segments
-
-### Heading Consistency / Variance
-- **Feature**: `heading_consistency`
-- **Purpose**: Complement sinuosity with along-track curvature information
-- **Computation**: Sample heading at 10m intervals, compute circular variance
-- **Note**: Function `compute_heading_consistency()` exists in codebase but not wired as feature
-- **Use case**: Distinguish roads that are long (low sinuosity) but constantly change direction
-- **Priority**: High (function already exists)
-
-### Shape Complexity Index
-- **Feature**: `shape_complexity`
-- **Purpose**: Discrete count of significant direction changes
-- **Computation**: Count turn angles > 10 degrees along the segment
-- **Use case**: Complement sinuosity - straight road with 1 corner != consistently curvy road
 
 ### Turn-Angle Histogram
 - **Feature**: `turn_angle_histogram`
@@ -69,13 +41,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Computation**: Compute histogram of angles between consecutive segments
 - **Academic basis**: Hootenanny "shape distance" and conflation literature
 - **Use case**: Compare shape fingerprints between candidate pairs
-
-### Length Binning
-- **Feature**: `length_bin` (categorical: short/medium/long/highway)
-- **Purpose**: Enable different matching logic for different segment lengths
-- **Computation**: Bins: short (<10m), medium (10-100m), long (100-500m), highway (>500m)
-- **Use case**: XGBoost can learn different decision boundaries per length class
-- **Priority**: High (quick win)
 
 ---
 
@@ -87,12 +52,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Purpose**: Catch "North Main St" vs "South Main St" false positives
 - **Computation**: Extract direction prefix (N/S/E/W/NE/NW/SE/SW) and compare
 - **Use case**: Prevent matching different ends of the same named road
-
-### Name Numeric Match
-- **Feature**: `name_numeric_match`
-- **Purpose**: Better matching for numbered routes (I-90, US-101, Route 66)
-- **Computation**: Extract numeric suffix and compare equality
-- **Use case**: Numbered highways often have similar names across datasets
 
 ### Name Abbreviation Normalization
 - **Feature**: Enhancement to existing name similarity
@@ -619,13 +578,6 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 
 ## Known Issues & Technical Debt
 
-### HIGH: ML Metrics Likely Optimistic (Data Leakage)
-
-- **Problem**: Train/test split is random by pair, so the same ref/target segments can appear in both sets
-- **Impact**: Model sees same segments during training and evaluation, inflating metrics
-- **Location**: `src/matcher/matching/ml.py:340`
-- **Solution**: Split by segment ID, not by pair; ensure no segment appears in both train and test
-
 ### HIGH: Feature/Data Versioning Not Enforced
 
 - **Problem**: Models don't persist `feature_version`; training doesn't filter labels by feature/data version
@@ -700,20 +652,14 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
-| Sinuosity | Geometric | Very Low |
-| Heading consistency (wire existing) | Geometric | Very Low |
-| Vertex density | Geometric | Very Low |
-| Length binning | Geometric | Low |
 | Multi-stage blocking | Blocking | Low |
 
 ### Medium Priority
 
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
-| Name numeric matching | Semantic | Very Low |
 | Junction angle distribution | Topology | Medium |
 | Local clustering coefficient | Topology | Low |
-| Shape complexity index | Geometric | Low |
 | Integration gap fix | Integration | Medium |
 | ID column hardcoding | ML | Medium |
 

@@ -503,48 +503,66 @@ class MLMatcher:
         # Train
         logger.info(f"Training XGBoost with params: {params}")
         self.model = xgb.XGBClassifier(**params)
-        self.model.fit(
-            X_train,
-            y_train,
-            eval_set=[(X_test, y_test)],
-            verbose=False,
-        )
 
-        # Evaluate
-        y_pred = self.model.predict(X_test)
+        # Only use eval_set if we have test data
+        if len(X_test) > 0:
+            self.model.fit(
+                X_train,
+                y_train,
+                eval_set=[(X_test, y_test)],
+                verbose=False,
+            )
+        else:
+            self.model.fit(X_train, y_train, verbose=False)
 
-        # Cross-validation score (need to impute full X for this)
-        X_imputed = self._impute_missing(X.copy())
-        cv_scores = cross_val_score(self.model, X_imputed, y, cv=5, scoring="f1_weighted")
-
-        # Results
+        # Results dict
         target_names = ["no_match", "match"] if binary else ["no_match", "match", "associated"]
         results = {
             "n_train": len(X_train),
             "n_test": len(X_test),
-            "test_accuracy": (y_pred == y_test).mean(),
-            "cv_f1_mean": cv_scores.mean(),
-            "cv_f1_std": cv_scores.std(),
-            "classification_report": classification_report(
-                y_test,
-                y_pred,
-                target_names=target_names,
-                output_dict=True,
-            ),
-            "confusion_matrix": sklearn_confusion_matrix(y_test, y_pred).tolist(),
             "feature_importance": dict(zip(self.feature_names, self.model.feature_importances_)),
         }
 
-        # Print summary
-        print("\n" + "=" * 50)
-        print("TRAINING RESULTS")
-        print("=" * 50)
-        print(f"Training samples: {results['n_train']}")
-        print(f"Test samples: {results['n_test']}")
-        print(f"Test accuracy: {results['test_accuracy']:.3f}")
-        print(f"CV F1 (5-fold): {results['cv_f1_mean']:.3f} ± {results['cv_f1_std']:.3f}")
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred, target_names=target_names))
+        # Evaluate on test set if we have one
+        if len(X_test) > 0:
+            y_pred = self.model.predict(X_test)
+
+            # Cross-validation score (need to impute full X for this)
+            X_imputed = self._impute_missing(X.copy())
+            cv_scores = cross_val_score(self.model, X_imputed, y, cv=5, scoring="f1_weighted")
+
+            results.update(
+                {
+                    "test_accuracy": (y_pred == y_test).mean(),
+                    "cv_f1_mean": cv_scores.mean(),
+                    "cv_f1_std": cv_scores.std(),
+                    "classification_report": classification_report(
+                        y_test,
+                        y_pred,
+                        target_names=target_names,
+                        output_dict=True,
+                    ),
+                    "confusion_matrix": sklearn_confusion_matrix(y_test, y_pred).tolist(),
+                }
+            )
+
+            # Print summary with test metrics
+            print("\n" + "=" * 50)
+            print("TRAINING RESULTS")
+            print("=" * 50)
+            print(f"Training samples: {results['n_train']}")
+            print(f"Test samples: {results['n_test']}")
+            print(f"Test accuracy: {results['test_accuracy']:.3f}")
+            print(f"CV F1 (5-fold): {results['cv_f1_mean']:.3f} ± {results['cv_f1_std']:.3f}")
+            print("\nClassification Report:")
+            print(classification_report(y_test, y_pred, target_names=target_names))
+        else:
+            # No test set - just print training info
+            print("\n" + "=" * 50)
+            print("TRAINING RESULTS (no test set)")
+            print("=" * 50)
+            print(f"Training samples: {results['n_train']}")
+
         print("\nFeature Importance (top 5):")
         importance = sorted(results["feature_importance"].items(), key=lambda x: -x[1])
         for feat, imp in importance[:5]:
