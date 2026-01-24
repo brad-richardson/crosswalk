@@ -1,5 +1,6 @@
 """CLI entry point for the road network conflation pipeline."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import typer
@@ -12,20 +13,26 @@ app = typer.Typer(
 )
 console = Console()
 
+# Create fetch subcommand group
+fetch_app = typer.Typer(
+    name="fetch",
+    help="Fetch road data from various sources",
+    no_args_is_help=True,
+)
+app.add_typer(fetch_app, name="fetch")
 
-@app.command()
-def fetch(
-    bbox: str | None = typer.Option(
+
+@fetch_app.command("target")
+def fetch_target(
+    dataset_name: str = typer.Argument(
         None,
-        "--bbox",
-        "-b",
-        help="Bounding box: xmin,ymin,xmax,ymax (EPSG:4326). Required unless --for-dataset is used.",
+        help="Dataset name to fetch (e.g., us_boston_streets)",
     ),
-    for_dataset: str | None = typer.Option(
+    prefix: str | None = typer.Option(
         None,
-        "--for-dataset",
-        "-f",
-        help="Fetch reference data for a target dataset (uses bbox from dataset config, names outputs accordingly)",
+        "--prefix",
+        "-p",
+        help="Fetch all datasets matching this prefix (e.g., us_boston)",
     ),
     output_dir: Path = typer.Option(
         Path("data/raw"),
@@ -33,11 +40,85 @@ def fetch(
         "-o",
         help="Output directory for fetched data",
     ),
-    dataset: list[str] = typer.Option(
+    page_size: int | None = typer.Option(
+        None,
+        "--page-size",
+        help="Override page size for ArcGIS fetches (default: 5000)",
+    ),
+    fetch_all: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Fetch all available datasets",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if file already exists",
+    ),
+):
+    """Fetch target/local road data from municipal GIS portals.
+
+    Downloads data from ArcGIS, WFS, OGC API Features, or direct download
+    based on the dataset's YAML configuration. By default, skips files that
+    already exist (use --force to re-fetch).
+
+    Examples:
+        matcher fetch target us_boston_streets      # Fetch specific dataset
+        matcher fetch target --prefix us_boston     # Fetch all Boston datasets
+        matcher fetch target --all                  # Fetch all datasets
+        matcher fetch target us_boston_streets --force  # Re-fetch existing
+    """
+    from .fetch import target as target_module
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if fetch_all:
+        console.print("[blue]Fetching all datasets...[/blue]")
+        results = target_module.fetch_all_datasets(output_dir, page_size, force)
+        success = sum(1 for p in results.values() if p is not None)
+        console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
+
+    elif prefix:
+        console.print(f"[blue]Fetching datasets with prefix '{prefix}'...[/blue]")
+        results = target_module.fetch_datasets_by_prefix(prefix, output_dir, page_size, force)
+        if not results:
+            console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
+            raise typer.Exit(1)
+        success = sum(1 for p in results.values() if p is not None)
+        console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
+
+    elif dataset_name:
+        console.print(f"[blue]Fetching dataset: {dataset_name}[/blue]")
+        result = target_module.fetch_dataset(dataset_name, output_dir, page_size, force)
+        if result:
+            console.print(f"[green]Saved to {result}[/green]")
+        else:
+            console.print("[red]Fetch failed or requires manual download[/red]")
+            raise typer.Exit(1)
+
+    else:
+        console.print("[red]Error: Provide a dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+
+@fetch_app.command("reference")
+def fetch_reference(
+    dataset_name: str = typer.Argument(
+        ...,
+        help="Dataset name to fetch reference data for (uses bbox from config)",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    source: list[str] = typer.Option(
         ["overture"],
-        "--dataset",
-        "-d",
-        help="Dataset(s) to fetch: 'overture' or 'osm' (can specify multiple)",
+        "--source",
+        "-s",
+        help="Reference source(s): 'overture' or 'osm' (can specify multiple)",
     ),
     cache_dir: Path | None = typer.Option(
         None,
@@ -59,252 +140,325 @@ def fetch(
         "--bbox-buffer",
         help="Expand bbox by this distance (meters). Defaults to 1km for complete network coverage.",
     ),
-    name: str | None = typer.Option(
-        None,
-        "--name",
-        "-n",
-        help="Output file prefix (e.g., --name us_boston produces us_boston_overture_segments.parquet)",
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
     ),
 ):
-    """Fetch road data for an area of interest.
+    """Fetch reference data (Overture/OSM) for a dataset.
+
+    Uses the bounding box from the dataset's YAML configuration.
+    By default, skips files that already exist (use --force to re-fetch).
 
     Examples:
-        # Fetch by explicit bbox
-        matcher fetch --bbox -122.7,45.5,-122.6,45.55                    # Overture (default)
-        matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm             # OSM only
-        matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm # Both
-
-        # Fetch with explicit output name prefix
-        matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture --name us_boston
-            # Produces: us_boston_overture_segments.parquet, us_boston_overture_connectors.parquet
-
-        # Fetch for a configured dataset (auto-uses bbox, auto-names outputs)
-        matcher fetch --for-dataset us_boston_streets -d osm   # us_boston_streets_osm_segments.parquet
-        matcher fetch -f us_boston_streets -d overture -d osm  # Both, named for us_boston_streets
-
-    Note: OSM fetching requires osmium-tool to be installed:
-        brew install osmium-tool (macOS) or apt install osmium-tool (Ubuntu)
+        matcher fetch reference us_boston_streets           # Fetch Overture (default)
+        matcher fetch reference us_boston_streets -s osm    # Fetch OSM
+        matcher fetch reference us_boston_streets -s overture -s osm  # Both
     """
+    _fetch_reference_impl(
+        dataset_name=dataset_name,
+        output_dir=output_dir,
+        sources=set(s.lower() for s in source),
+        cache_dir=cache_dir,
+        no_cache=no_cache,
+        keep_pbf=keep_pbf,
+        bbox_buffer=bbox_buffer,
+        force=force,
+    )
+
+
+def _fetch_reference_impl(
+    dataset_name: str,
+    output_dir: Path,
+    sources: set[str],
+    cache_dir: Path | None = None,
+    no_cache: bool = False,
+    keep_pbf: bool = False,
+    bbox_buffer: float | None = None,
+    force: bool = False,
+) -> None:
+    """Implementation of reference data fetching."""
+    from .datasets.schema import get_dataset_config, list_dataset_configs
     from .fetch import osm as osm_module
     from .fetch import overture as ov_module
-    from .filenames import overture_connectors_filename, overture_segments_filename
+    from .filenames import (
+        osm_segments_filename,
+        overture_connectors_filename,
+        overture_segments_filename,
+    )
 
-    # Validate datasets
-    valid_datasets = {"overture", "osm"}
-    datasets = {d.lower() for d in dataset}
-    invalid = datasets - valid_datasets
+    # Validate sources
+    valid_sources = {"overture", "osm"}
+    invalid = sources - valid_sources
     if invalid:
         console.print(
-            f"[red]Error: Invalid dataset(s): {invalid}. Must be 'overture' or 'osm'[/red]"
+            f"[red]Error: Invalid source(s): {invalid}. Must be 'overture' or 'osm'[/red]"
         )
         raise typer.Exit(1)
 
-    # Determine bbox and dataset name
-    # --name takes precedence if provided, otherwise use --for-dataset name
-    dataset_name: str | None = name
-
-    if for_dataset:
-        # Look up bbox from dataset YAML configs
-        from .datasets.schema import get_dataset_config, list_dataset_configs
-
-        config = get_dataset_config(for_dataset)
-        if config is None:
-            console.print(f"[red]Error: Could not find dataset config for '{for_dataset}'[/red]")
-            available = list_dataset_configs()
-            if available:
-                console.print("[yellow]Available datasets: " + ", ".join(sorted(available)[:10]))
-                if len(available) > 10:
-                    console.print(f"  ... and {len(available) - 10} more[/yellow]")
-            raise typer.Exit(1)
-
-        if config.fetch is None or config.fetch.bbox is None:
-            console.print(f"[red]Error: Dataset '{for_dataset}' has no bbox configured[/red]")
-            raise typer.Exit(1)
-
-        xmin, ymin, xmax, ymax = config.fetch.bbox
-        # Use --name if provided, otherwise use for_dataset name
-        if dataset_name is None:
-            dataset_name = for_dataset
-        console.print(f"[blue]Using bbox from dataset config: {for_dataset}[/blue]")
-        console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
-
-    elif bbox:
-        coords = [float(x.strip()) for x in bbox.split(",")]
-        if len(coords) != 4:
-            console.print("[red]Error: bbox must have 4 values: xmin,ymin,xmax,ymax[/red]")
-            raise typer.Exit(1)
-        xmin, ymin, xmax, ymax = coords
-
-    else:
-        console.print("[red]Error: Either --bbox or --for-dataset is required[/red]")
+    # Look up bbox from dataset config
+    config = get_dataset_config(dataset_name)
+    if config is None:
+        console.print(f"[red]Error: Could not find dataset config for '{dataset_name}'[/red]")
+        available = list_dataset_configs()
+        if available:
+            console.print("[yellow]Available datasets: " + ", ".join(sorted(available)[:10]))
+            if len(available) > 10:
+                console.print(f"  ... and {len(available) - 10} more[/yellow]")
         raise typer.Exit(1)
+
+    if config.fetch is None or config.fetch.bbox is None:
+        console.print(f"[red]Error: Dataset '{dataset_name}' has no bbox configured[/red]")
+        raise typer.Exit(1)
+
+    xmin, ymin, xmax, ymax = config.fetch.bbox
+    console.print(f"[blue]Using bbox from dataset config: {dataset_name}[/blue]")
+    console.print(f"[blue]  bbox: {xmin},{ymin},{xmax},{ymax}[/blue]")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     original_bbox = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
-    # For Overture fetches, use a default buffer to avoid fringe effects
-    # User can override with --bbox-buffer
-    overture_buffer = bbox_buffer
-    if overture_buffer is None and "overture" in datasets:
-        overture_buffer = ov_module.DEFAULT_OVERTURE_BUFFER_M
+    # Get buffered bboxes for each source
+    overture_bbox, overture_buffer = ov_module.get_buffered_bbox(
+        original_bbox, bbox_buffer, ov_module.DEFAULT_OVERTURE_BUFFER_M
+    )
+    osm_bbox, osm_buffer = ov_module.get_buffered_bbox(
+        original_bbox, bbox_buffer, osm_module.DEFAULT_OSM_BUFFER_M
+    )
+
+    # Log buffer info
+    if "overture" in sources and overture_buffer:
         console.print(
-            f"[blue]Using default {overture_buffer}m buffer for Overture data "
+            f"[blue]Using {overture_buffer}m buffer for Overture data "
             f"(override with --bbox-buffer)[/blue]"
         )
-
-    # Create bbox for Overture (potentially buffered)
-    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
-    if overture_buffer is not None and overture_buffer > 0:
-        overture_bbox = original_bbox.expand(overture_buffer)
         console.print(
             f"[blue]  Buffered bbox: {overture_bbox.xmin:.6f},{overture_bbox.ymin:.6f},"
             f"{overture_bbox.xmax:.6f},{overture_bbox.ymax:.6f}[/blue]"
         )
-    else:
-        overture_bbox = original_bbox
-        if overture_buffer == 0 and "overture" in datasets:
-            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
-        overture_buffer = None
+    elif "overture" in sources and bbox_buffer == 0:
+        console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
 
-    # For OSM, also use a default buffer to avoid fringe effects
-    osm_buffer = bbox_buffer
-    if osm_buffer is None and "osm" in datasets:
-        osm_buffer = osm_module.DEFAULT_OSM_BUFFER_M
+    if "osm" in sources and osm_buffer:
         console.print(
-            f"[blue]Using default {osm_buffer}m buffer for OSM data "
-            f"(override with --bbox-buffer)[/blue]"
+            f"[blue]Using {osm_buffer}m buffer for OSM data (override with --bbox-buffer)[/blue]"
         )
+        console.print(
+            f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
+            f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
+        )
+    elif "osm" in sources and bbox_buffer == 0:
+        console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
 
-    # Create bbox for OSM (potentially buffered)
-    # Use explicit None check to allow --bbox-buffer=0 to disable buffering
-    if osm_buffer is not None and osm_buffer > 0:
-        osm_bbox = original_bbox.expand(osm_buffer)
-        if "osm" in datasets:
+    if "overture" in sources:
+        overture_seg_path = output_dir / overture_segments_filename(dataset_name)
+        overture_conn_path = output_dir / overture_connectors_filename(dataset_name)
+
+        if not force and overture_seg_path.exists() and overture_conn_path.exists():
             console.print(
-                f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
-                f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
-            )
-    else:
-        osm_bbox = original_bbox
-        if osm_buffer == 0 and "osm" in datasets:
-            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
-        osm_buffer = None
-
-    if "overture" in datasets:
-        # Name outputs based on dataset if provided, using versioned filenames
-        overture_region = dataset_name if dataset_name else "overture"
-        console.print("[blue]Fetching Overture segments...[/blue]")
-        segments_path = ov_module.fetch_overture_segments(
-            bbox=overture_bbox,
-            output_path=output_dir / overture_segments_filename(overture_region),
-            original_bbox=original_bbox,
-            buffer_m=overture_buffer,
-        )
-        console.print(f"[green]Saved Overture segments to {segments_path}[/green]")
-
-        console.print("[blue]Fetching Overture connectors...[/blue]")
-        connectors_path = ov_module.fetch_overture_connectors(
-            bbox=overture_bbox,
-            output_path=output_dir / overture_connectors_filename(overture_region),
-            original_bbox=original_bbox,
-            buffer_m=overture_buffer,
-        )
-        console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
-
-    if "osm" in datasets:
-        # Name outputs based on dataset if provided
-        # Note: osm_segments_filename() adds "_osm_segments" suffix, so don't add "_osm" here
-        osm_name = dataset_name if dataset_name else "default"
-
-        # When using --for-dataset, OSM uses unbuffered bbox with fully-inside filter
-        # This ensures OSM coverage matches the target dataset exactly for validation
-        use_validation_mode = for_dataset is not None
-
-        if use_validation_mode:
-            fetch_bbox = original_bbox
-            actual_buffer = None
-            console.print(
-                "[blue]OSM: using unbuffered bbox, filtering to fully-inside features "
-                "(--for-dataset mode)[/blue]"
+                f"[blue]Skipping Overture: {overture_seg_path.name} already exists "
+                f"(use --force to re-fetch)[/blue]"
             )
         else:
-            fetch_bbox = osm_bbox
-            actual_buffer = osm_buffer
-
-        console.print("[blue]Fetching OSM data...[/blue]")
-        segments_path, connectors_path = osm_module.fetch_osm_data(
-            bbox=fetch_bbox,
-            output_dir=output_dir,
-            cache_dir=cache_dir,
-            force_download=no_cache,
-            keep_pbf=keep_pbf,
-            original_bbox=original_bbox,
-            buffer_m=actual_buffer,
-            name=osm_name,
-            filter_fully_inside=use_validation_mode,
-        )
-        console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
-        console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
-
-    # Update last_fetch in dataset config if using --for-dataset
-    if dataset_name:
-        from datetime import UTC, datetime
-
-        from .datasets.schema import (
-            LastFetch,
-            get_dataset_config,
-            get_datasets_dir,
-            save_dataset_config,
-        )
-
-        config = get_dataset_config(dataset_name)
-        if config:
-            # Determine which buffer was used
-            buffer_m = overture_buffer if "overture" in datasets else osm_buffer
-
-            # Get feature count from metadata if available
-            feature_count = 0
-            geometry_types: list[str] = []
-
-            # Try to read metadata from fetched file
-            if "overture" in datasets:
-                overture_seg_file = overture_segments_filename(overture_region)
-                meta_path = output_dir / f"{overture_seg_file}.meta.yaml"
-                if meta_path.exists():
-                    from .fetch.metadata import load_metadata
-
-                    meta = load_metadata(output_dir / overture_seg_file)
-                    if meta:
-                        feature_count = meta.feature_count
-                        geometry_types = meta.geometry_types
-            elif "osm" in datasets:
-                from .filenames import osm_segments_filename
-
-                osm_seg_file = osm_segments_filename(osm_name)
-                meta_path = output_dir / f"{osm_seg_file}.meta.yaml"
-                if meta_path.exists():
-                    from .fetch.metadata import load_metadata
-
-                    meta = load_metadata(output_dir / osm_seg_file)
-                    if meta:
-                        feature_count = meta.feature_count
-                        geometry_types = meta.geometry_types
-
-            config.last_fetch = LastFetch(
-                fetched_at=datetime.now(UTC),
-                bbox=original_bbox.to_tuple(),
-                bbox_buffered=(overture_bbox if "overture" in datasets else osm_bbox).to_tuple()
-                if buffer_m
-                else None,
-                bbox_buffer_m=buffer_m,
-                feature_count=feature_count,
-                geometry_types=geometry_types,
-                output_path=str(output_dir),
+            console.print("[blue]Fetching Overture segments...[/blue]")
+            segments_path = ov_module.fetch_overture_segments(
+                bbox=overture_bbox,
+                output_path=overture_seg_path,
+                original_bbox=original_bbox,
+                buffer_m=overture_buffer,
             )
+            console.print(f"[green]Saved Overture segments to {segments_path}[/green]")
 
-            config_path = get_datasets_dir() / f"{dataset_name}.yaml"
-            save_dataset_config(config, config_path)
-            console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
+            console.print("[blue]Fetching Overture connectors...[/blue]")
+            connectors_path = ov_module.fetch_overture_connectors(
+                bbox=overture_bbox,
+                output_path=overture_conn_path,
+                original_bbox=original_bbox,
+                buffer_m=overture_buffer,
+            )
+            console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
+
+    if "osm" in sources:
+        osm_seg_path = output_dir / osm_segments_filename(dataset_name)
+
+        if not force and osm_seg_path.exists():
+            console.print(
+                f"[blue]Skipping OSM: {osm_seg_path.name} already exists "
+                f"(use --force to re-fetch)[/blue]"
+            )
+        else:
+            # OSM uses unbuffered bbox with fully-inside filter for dataset mode
+            console.print(
+                "[blue]OSM: using unbuffered bbox, filtering to fully-inside features[/blue]"
+            )
+            console.print("[blue]Fetching OSM data...[/blue]")
+            segments_path, connectors_path = osm_module.fetch_osm_data(
+                bbox=original_bbox,
+                output_dir=output_dir,
+                cache_dir=cache_dir,
+                force_download=no_cache,
+                keep_pbf=keep_pbf,
+                original_bbox=original_bbox,
+                buffer_m=None,
+                name=dataset_name,
+                filter_fully_inside=True,
+            )
+            console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
+            console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
+
+    # Update last_fetch in dataset config
+    from datetime import UTC, datetime
+
+    from .datasets.schema import LastFetch, get_datasets_dir, save_dataset_config
+    from .fetch.metadata import load_metadata
+
+    config = get_dataset_config(dataset_name)
+    if config:
+        buffer_m = overture_buffer if "overture" in sources else osm_buffer
+        feature_count = 0
+        geometry_types: list[str] = []
+
+        if "overture" in sources:
+            overture_seg_file = overture_segments_filename(dataset_name)
+            meta = load_metadata(output_dir / overture_seg_file)
+            if meta:
+                feature_count = meta.feature_count
+                geometry_types = meta.geometry_types
+        elif "osm" in sources:
+            osm_seg_file = osm_segments_filename(dataset_name)
+            meta = load_metadata(output_dir / osm_seg_file)
+            if meta:
+                feature_count = meta.feature_count
+                geometry_types = meta.geometry_types
+
+        config.last_fetch = LastFetch(
+            fetched_at=datetime.now(UTC),
+            bbox=original_bbox.to_tuple(),
+            bbox_buffered=(overture_bbox if "overture" in sources else osm_bbox).to_tuple()
+            if buffer_m
+            else None,
+            bbox_buffer_m=buffer_m,
+            feature_count=feature_count,
+            geometry_types=geometry_types,
+            output_path=str(output_dir),
+        )
+
+        config_path = get_datasets_dir() / f"{dataset_name}.yaml"
+        save_dataset_config(config, config_path)
+        console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
+
+
+@fetch_app.command("all")
+def fetch_all(
+    dataset_name: str = typer.Argument(
+        ...,
+        help="Dataset name to fetch all data for",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    page_size: int | None = typer.Option(
+        None,
+        "--page-size",
+        help="Override page size for ArcGIS fetches (default: 5000)",
+    ),
+    bbox_buffer: float | None = typer.Option(
+        None,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters) for reference data",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
+    ),
+):
+    """Fetch both target and reference data for a dataset.
+
+    Fetches target (local/ArcGIS) data and Overture reference data in parallel.
+    This is the command to use when setting up a new dataset for labeling.
+    By default, skips files that already exist (use --force to re-fetch).
+
+    Examples:
+        matcher fetch all us_boston_streets    # Fetch both target + Overture
+    """
+    from .fetch import target as target_module
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"[blue]Fetching all data for {dataset_name}...[/blue]")
+
+    errors = []
+
+    def fetch_target_data():
+        try:
+            result = target_module.fetch_dataset(dataset_name, output_dir, page_size, force)
+            return ("target", result)
+        except Exception as e:
+            return ("target", e)
+
+    def fetch_reference_data():
+        try:
+            _fetch_reference_impl(
+                dataset_name=dataset_name,
+                output_dir=output_dir,
+                sources={"overture"},
+                bbox_buffer=bbox_buffer,
+                force=force,
+            )
+            return ("reference", True)
+        except Exception as e:
+            return ("reference", e)
+
+    # Run both fetches in parallel
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(fetch_target_data),
+            executor.submit(fetch_reference_data),
+        ]
+
+        for future in as_completed(futures):
+            name, result = future.result()
+            if isinstance(result, Exception):
+                errors.append((name, result))
+                console.print(f"[red]Error fetching {name}: {result}[/red]")
+            elif name == "target":
+                if result:
+                    console.print(f"[green]Target data saved to {result}[/green]")
+                else:
+                    errors.append((name, "Fetch failed or requires manual download"))
+            else:
+                console.print("[green]Reference data fetched successfully[/green]")
+
+    if errors:
+        console.print(f"[yellow]Completed with {len(errors)} error(s)[/yellow]")
+        raise typer.Exit(1)
+    else:
+        console.print("[green]All data fetched successfully![/green]")
+
+
+@fetch_app.command("list")
+def fetch_list(
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Filter datasets by prefix (e.g., us_boston)",
+    ),
+):
+    """List available datasets.
+
+    Examples:
+        matcher fetch list                  # List all datasets
+        matcher fetch list --prefix us_     # List US datasets
+    """
+    from .fetch import target as target_module
+
+    target_module.print_datasets(prefix)
 
 
 @app.command()

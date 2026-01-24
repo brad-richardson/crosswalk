@@ -1,0 +1,122 @@
+"""Tests for the fetch CLI subcommands."""
+
+from pathlib import Path
+from unittest.mock import patch
+
+from typer.testing import CliRunner
+
+from matcher.cli import app
+
+runner = CliRunner()
+
+
+class TestFetchTargetCommand:
+    """Tests for the fetch target command."""
+
+    def test_fetch_target_help(self):
+        """Test fetch target help output."""
+        result = runner.invoke(app, ["fetch", "target", "--help"])
+        assert result.exit_code == 0
+        assert "target" in result.output.lower()
+        assert "gis portals" in result.output.lower()
+
+    def test_fetch_target_no_args(self):
+        """Test fetch target with no arguments shows error."""
+        result = runner.invoke(app, ["fetch", "target"])
+        assert result.exit_code == 1
+        assert "Error" in result.output
+
+    @patch("matcher.fetch.target.fetch_dataset")
+    def test_fetch_target_single_dataset(self, mock_fetch):
+        """Test fetching a single dataset."""
+        mock_fetch.return_value = Path("data/raw/test_v1.0.parquet")
+
+        result = runner.invoke(app, ["fetch", "target", "test_dataset"])
+
+        assert result.exit_code == 0
+        mock_fetch.assert_called_once()
+
+    @patch("matcher.fetch.target.fetch_datasets_by_prefix")
+    def test_fetch_target_by_prefix(self, mock_fetch_by_prefix):
+        """Test fetching datasets by prefix."""
+        mock_fetch_by_prefix.return_value = {
+            "test_a": Path("a.parquet"),
+            "test_b": Path("b.parquet"),
+        }
+
+        result = runner.invoke(app, ["fetch", "target", "--prefix", "test_"])
+
+        assert result.exit_code == 0
+        mock_fetch_by_prefix.assert_called_once()
+
+
+class TestFetchReferenceCommand:
+    """Tests for the fetch reference command."""
+
+    def test_fetch_reference_help(self):
+        """Test fetch reference help output."""
+        result = runner.invoke(app, ["fetch", "reference", "--help"])
+        assert result.exit_code == 0
+        assert "reference" in result.output.lower()
+        assert "Overture" in result.output
+
+    @patch("matcher.datasets.schema.get_dataset_config")
+    @patch("matcher.datasets.schema.list_dataset_configs")
+    def test_fetch_reference_missing_dataset(self, mock_list, mock_get_config):
+        """Test error when dataset doesn't exist."""
+        mock_get_config.return_value = None
+        mock_list.return_value = []
+
+        result = runner.invoke(app, ["fetch", "reference", "nonexistent"])
+
+        assert result.exit_code == 1
+        assert "Could not find" in result.output
+
+
+class TestFetchAllCommand:
+    """Tests for the fetch all command."""
+
+    def test_fetch_all_help(self):
+        """Test fetch all help output."""
+        result = runner.invoke(app, ["fetch", "all", "--help"])
+        assert result.exit_code == 0
+        assert "target and reference" in result.output.lower()
+
+
+class TestFetchListCommand:
+    """Tests for the fetch list command."""
+
+    def test_fetch_list_help(self):
+        """Test fetch list help output."""
+        result = runner.invoke(app, ["fetch", "list", "--help"])
+        assert result.exit_code == 0
+        assert "List available datasets" in result.output
+
+    @patch("matcher.fetch.target.print_datasets")
+    def test_fetch_list_all(self, mock_print):
+        """Test listing all datasets."""
+        result = runner.invoke(app, ["fetch", "list"])
+
+        assert result.exit_code == 0
+        mock_print.assert_called_once_with(None)
+
+    @patch("matcher.fetch.target.print_datasets")
+    def test_fetch_list_with_prefix(self, mock_print):
+        """Test listing datasets with prefix filter."""
+        result = runner.invoke(app, ["fetch", "list", "--prefix", "us_"])
+
+        assert result.exit_code == 0
+        mock_print.assert_called_once_with("us_")
+
+
+class TestFetchSubcommands:
+    """Test the fetch subcommand structure."""
+
+    def test_fetch_shows_subcommands(self):
+        """Test that fetch command shows available subcommands."""
+        result = runner.invoke(app, ["fetch", "--help"])
+        assert result.exit_code == 0
+        assert "target" in result.output
+        assert "reference" in result.output
+        assert "all" in result.output
+        assert "list" in result.output

@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-"""Fetch road and sidewalk data from municipal GIS portals worldwide.
+"""Fetch target/local road data from municipal GIS portals worldwide.
 
 Downloads road centerlines, sidewalks, and trail data from various GIS portals
 and converts them to GeoParquet with Overture-compatible schema.
@@ -7,41 +6,41 @@ and converts them to GeoParquet with Overture-compatible schema.
 Supports multiple fetch types based on source.type in YAML config:
 - arcgis: ArcGIS FeatureServer/MapServer (default)
 - download: File downloads (Shapefile, GeoPackage)
-- manual: Requires manual download
+- ogc_features: OGC API Features (modern REST API)
+- wfs: Web Feature Service
+- manual: Requires manual download (skipped)
 
 Usage:
+    from matcher.fetch.target import fetch_dataset, list_datasets
+
     # Fetch specific dataset
-    python scripts/fetch_new_cities.py --dataset co_bogota_roads
+    fetch_dataset("us_boston_streets")
+
+    # Fetch all datasets for a prefix
+    fetch_datasets_by_prefix("us_boston")
 
     # List available datasets
-    python scripts/fetch_new_cities.py --list
-
-    # Fetch all datasets for a country/city prefix
-    python scripts/fetch_new_cities.py --prefix us_boston
-
-Output files will be saved to data/raw/<dataset_name>_v{version}.parquet
+    list_datasets()
 """
 
-import argparse
 import os
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 import requests
-from dotenv import load_dotenv
+import shapely
 from loguru import logger
 
-# Load environment variables from .env file (if present)
-load_dotenv()
+from ..datasets.schema import get_dataset_config, list_dataset_configs
+from ..filenames import target_filename
+from .arcgis import fetch_arcgis_layer
 
-from matcher.datasets.schema import get_dataset_config, list_dataset_configs
-from matcher.fetch.arcgis import fetch_arcgis_layer
-
-# Output directory
-DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
+# Default output directory
+DEFAULT_DATA_DIR = Path("data/raw")
 
 
 def _transform_download_data(
@@ -68,9 +67,6 @@ def _transform_download_data(
         subclass_mapping: Dict mapping source values to subclass values
         default_subclass: Default subclass if no column provided
     """
-    import pandas as pd
-    import shapely
-
     if len(gdf) == 0:
         return gdf
 
@@ -104,7 +100,7 @@ def _transform_download_data(
     source_tags_data = gdf[original_cols].to_dict(orient="records")
 
     # Build result
-    data = {
+    data: dict[str, Any] = {
         "id": gdf[id_col].apply(lambda x: f"{id_prefix}_{x}").values,
         "subtype": ["road"] * len(gdf),
         "sources": gdf[id_col]
@@ -178,14 +174,13 @@ def fetch_ogc_features(
     Returns:
         Path to the output GeoParquet file
     """
-
     logger.info(f"Fetching OGC API Features: {url}")
 
     all_features = []
     offset = 0
 
     # Build base params
-    params = {"f": "json", "limit": limit_per_page}
+    params: dict[str, Any] = {"f": "json", "limit": limit_per_page}
     if bbox:
         params["bbox"] = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
 
@@ -268,7 +263,6 @@ def fetch_wfs(
     Returns:
         Path to the output GeoParquet file
     """
-
     logger.info(f"Fetching WFS: {url} / {type_name}")
 
     all_features = []
@@ -529,17 +523,25 @@ def fetch_download(
         raise
 
 
-def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | None:
+def fetch_dataset(
+    dataset_name: str,
+    output_dir: Path | None = None,
+    page_size: int | None = None,
+    force: bool = False,
+) -> Path | None:
     """Fetch a single dataset based on its YAML configuration.
 
     Args:
         dataset_name: Name of the dataset (matches YAML filename)
-        output_dir: Directory for output files
+        output_dir: Directory for output files (default: data/raw)
+        page_size: Override page size for ArcGIS fetches (default: use arcgis module default)
+        force: If False (default), skip if output file already exists
 
     Returns:
-        Path to output file, or None if fetch failed
+        Path to output file, or None if fetch failed or requires manual download
     """
-    from matcher.filenames import target_filename
+    if output_dir is None:
+        output_dir = DEFAULT_DATA_DIR
 
     config = get_dataset_config(dataset_name)
     if config is None:
@@ -547,6 +549,13 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
         return None
 
     output_path = output_dir / target_filename(dataset_name)
+
+    # Skip if file already exists (unless force=True)
+    if not force and output_path.exists():
+        logger.info(
+            f"Skipping {dataset_name}: {output_path.name} already exists (use --force to re-fetch)"
+        )
+        return output_path
 
     logger.info(f"Fetching dataset: {dataset_name}")
     if config.description:
@@ -667,138 +676,158 @@ def fetch_dataset_from_config(dataset_name: str, output_dir: Path) -> Path | Non
 
         else:
             # Default: ArcGIS FeatureServer/MapServer fetch
-            return fetch_arcgis_layer(
-                url=url,
-                output_path=output_path,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                subclass_column=subclass_column,
-                subclass_mapping=subclass_mapping,
-                source_name=config.display_name or dataset_name,
-            )
+            # Build kwargs, only pass page_size if specified
+            arcgis_kwargs: dict[str, Any] = {
+                "url": url,
+                "output_path": output_path,
+                "id_prefix": id_prefix,
+                "name_column": name_column,
+                "class_column": class_column,
+                "class_mapping": class_mapping,
+                "subclass_column": subclass_column,
+                "subclass_mapping": subclass_mapping,
+                "source_name": config.display_name or dataset_name,
+            }
+            if page_size is not None:
+                arcgis_kwargs["page_size"] = page_size
+
+            return fetch_arcgis_layer(**arcgis_kwargs)
 
     except Exception as e:
         logger.error(f"Failed to fetch {dataset_name}: {e}")
         return None
 
 
-def list_datasets():
-    """List all available datasets from YAML configs."""
+def fetch_datasets_by_prefix(
+    prefix: str,
+    output_dir: Path | None = None,
+    page_size: int | None = None,
+    force: bool = False,
+) -> dict[str, Path | None]:
+    """Fetch all datasets matching a prefix.
+
+    Args:
+        prefix: Prefix to match (e.g., "us_boston")
+        output_dir: Directory for output files (default: data/raw)
+        page_size: Override page size for ArcGIS fetches
+        force: If False (default), skip datasets whose files already exist
+
+    Returns:
+        Dict mapping dataset names to output paths (None if failed)
+    """
+    all_datasets = list_dataset_configs()
+    matching = [d for d in all_datasets if d.startswith(prefix)]
+
+    if not matching:
+        logger.error(f"No datasets found matching prefix: {prefix}")
+        return {}
+
+    logger.info(f"Found {len(matching)} datasets matching prefix '{prefix}'")
+    results: dict[str, Path | None] = {}
+
+    for name in sorted(matching):
+        logger.info(f"\n{'=' * 60}")
+        results[name] = fetch_dataset(name, output_dir, page_size, force)
+
+    return results
+
+
+def fetch_all_datasets(
+    output_dir: Path | None = None,
+    page_size: int | None = None,
+    force: bool = False,
+) -> dict[str, Path | None]:
+    """Fetch all available datasets.
+
+    Args:
+        output_dir: Directory for output files (default: data/raw)
+        page_size: Override page size for ArcGIS fetches
+        force: If False (default), skip datasets whose files already exist
+
+    Returns:
+        Dict mapping dataset names to output paths (None if failed)
+    """
+    all_datasets = list_dataset_configs()
+    results: dict[str, Path | None] = {}
+
+    for name in sorted(all_datasets):
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"Fetching {name}...")
+        logger.info(f"{'=' * 60}")
+        try:
+            results[name] = fetch_dataset(name, output_dir, page_size, force)
+        except Exception as e:
+            logger.error(f"Failed to fetch {name}: {e}")
+            results[name] = None
+
+    return results
+
+
+def list_datasets(prefix: str | None = None) -> list[dict[str, Any]]:
+    """List available datasets with their metadata.
+
+    Args:
+        prefix: Optional prefix to filter datasets (e.g., "us_boston")
+
+    Returns:
+        List of dataset info dicts with keys: name, type, description, source_type, api_key_required
+    """
+    datasets = list_dataset_configs()
+    if prefix:
+        datasets = [d for d in datasets if d.startswith(prefix)]
+    datasets.sort()
+
+    result = []
+    for name in datasets:
+        config = get_dataset_config(name)
+        if config:
+            source_type = config.source.type if config.source else "unknown"
+            api_key_required = bool(config.source and config.source.api_key_env_var)
+            result.append(
+                {
+                    "name": name,
+                    "type": config.type,
+                    "description": config.description,
+                    "source_type": source_type,
+                    "api_key_required": api_key_required,
+                }
+            )
+
+    return result
+
+
+def print_datasets(prefix: str | None = None) -> None:
+    """Print available datasets in a formatted table.
+
+    Args:
+        prefix: Optional prefix to filter datasets
+    """
+    datasets = list_datasets(prefix)
+
     print("\nAvailable Datasets:")
     print("=" * 60)
 
-    datasets = list_dataset_configs()
-    datasets.sort()
-
     # Group by country prefix
-    grouped: dict[str, list[str]] = {}
-    for name in datasets:
-        # Extract country prefix (e.g., "us" from "us_boston_streets")
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for ds in datasets:
+        name = ds["name"]
         parts = name.split("_", 1)
         if len(parts) > 1 and len(parts[0]) == 2:
             country = parts[0].upper()
         else:
             country = "Other"
-        grouped.setdefault(country, []).append(name)
+        grouped.setdefault(country, []).append(ds)
 
-    for country, names in sorted(grouped.items()):
+    for country, items in sorted(grouped.items()):
         print(f"\n{country}:")
-        for name in sorted(names):
-            config = get_dataset_config(name)
-            if config:
-                source_type = config.source.type if config.source else "unknown"
-                api_note = ""
-                if config.source and config.source.api_key_env_var:
-                    api_note = " (API key required)"
-                print(f"  - {name} [{source_type}]{api_note}")
-                if config.description:
-                    print(f"    {config.description}")
+        for ds in sorted(items, key=lambda x: x["name"]):
+            api_note = " (API key required)" if ds["api_key_required"] else ""
+            print(f"  - {ds['name']} [{ds['source_type']}]{api_note}")
+            if ds["description"]:
+                print(f"    {ds['description']}")
 
     print("\n" + "=" * 60)
     print("\nUsage examples:")
-    print("  python scripts/fetch_new_cities.py --dataset co_bogota_roads")
-    print("  python scripts/fetch_new_cities.py --prefix us_boston")
+    print("  matcher fetch target us_boston_streets")
+    print("  matcher fetch target --prefix us_boston")
     print()
-
-
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Fetch road and sidewalk data from municipal GIS portals worldwide"
-    )
-    parser.add_argument(
-        "--dataset",
-        help="Specific dataset name to fetch (e.g., co_bogota_roads)",
-    )
-    parser.add_argument(
-        "--prefix",
-        help="Fetch all datasets matching prefix (e.g., us_boston)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=DATA_DIR,
-        help="Output directory (default: data/raw/)",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List all available datasets",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Fetch all datasets",
-    )
-
-    args = parser.parse_args()
-
-    if args.list:
-        list_datasets()
-        return
-
-    # Ensure output directory exists
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.dataset:
-        # Fetch specific dataset
-        fetch_dataset_from_config(args.dataset, args.output_dir)
-
-    elif args.prefix:
-        # Fetch all datasets matching prefix
-        all_datasets = list_dataset_configs()
-        matching = [d for d in all_datasets if d.startswith(args.prefix)]
-
-        if not matching:
-            logger.error(f"No datasets found matching prefix: {args.prefix}")
-            sys.exit(1)
-
-        logger.info(f"Found {len(matching)} datasets matching prefix '{args.prefix}'")
-        for name in sorted(matching):
-            logger.info(f"\n{'=' * 60}")
-            fetch_dataset_from_config(name, args.output_dir)
-
-    elif args.all:
-        # Fetch all datasets
-        all_datasets = list_dataset_configs()
-        for name in sorted(all_datasets):
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"Fetching {name}...")
-            logger.info(f"{'=' * 60}")
-            try:
-                fetch_dataset_from_config(name, args.output_dir)
-            except Exception as e:
-                logger.error(f"Failed to fetch {name}: {e}")
-
-    else:
-        # No arguments - show help
-        parser.print_help()
-        print("\nTo see available datasets, use: --list")
-
-    logger.info("\nDone!")
-
-
-if __name__ == "__main__":
-    main()
