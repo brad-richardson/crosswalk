@@ -24,14 +24,19 @@ class PipelineError(Exception):
 
 
 def validate_data_version(file_path: Path, file_type: str = "data") -> None:
-    """Validate data file version matches current code. Strict - no legacy support.
+    """Validate that a data file's version matches the current code.
+
+    This is backward-compatible with legacy/unversioned files: if no version
+    suffix can be extracted from the filename, a warning is logged and the
+    function returns without raising an error.
 
     Args:
         file_path: Path to the data file
         file_type: Description of the file type for error messages
 
     Raises:
-        PipelineError: If version doesn't match or is missing
+        PipelineError: If a version suffix is present but does not match
+            the expected version.
     """
     file_version = extract_version_from_filename(file_path)
     expected = DATA_VERSION.lstrip("v")  # '1.0'

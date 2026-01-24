@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from matcher.config import DATA_VERSION
 from matcher.filenames import (
     bridge_filename,

@@ -2058,9 +2058,11 @@ def validate_data(
 ):
     """Validate data files for version compatibility.
 
-    Checks that all parquet files in the data directory have version suffixes
-    matching the current code version. This helps catch stale data that needs
-    to be re-fetched after code updates.
+    For each parquet file in the data directory, checks that any version
+    suffix present matches the current code version. Files without a version
+    suffix are treated as legacy data and reported with a warning but do not
+    cause validation to fail. This helps catch stale versioned data that
+    needs to be re-fetched after code updates.
 
     Examples:
         matcher validate-data
