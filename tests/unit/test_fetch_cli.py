@@ -1,5 +1,6 @@
 """Tests for the fetch CLI subcommands."""
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,6 +9,12 @@ from typer.testing import CliRunner
 from matcher.cli import app
 
 runner = CliRunner()
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
 
 
 class TestFetchTargetCommand:
@@ -143,9 +150,10 @@ class TestFetchOvertureCommand:
         """Test fetch overture help output."""
         result = runner.invoke(app, ["fetch", "overture", "--help"])
         assert result.exit_code == 0
-        assert "Overture" in result.output
-        assert "--all" in result.output
-        assert "--prefix" in result.output
+        output = strip_ansi(result.output)
+        assert "Overture" in output
+        assert "--all" in output
+        assert "--prefix" in output
 
     def test_fetch_overture_no_args(self):
         """Test fetch overture with no arguments shows error."""
@@ -161,9 +169,10 @@ class TestFetchOsmCommand:
         """Test fetch osm help output."""
         result = runner.invoke(app, ["fetch", "osm", "--help"])
         assert result.exit_code == 0
-        assert "OSM" in result.output
-        assert "--all" in result.output
-        assert "--prefix" in result.output
+        output = strip_ansi(result.output)
+        assert "OSM" in output
+        assert "--all" in output
+        assert "--prefix" in output
 
     def test_fetch_osm_no_args(self):
         """Test fetch osm with no arguments shows error."""
