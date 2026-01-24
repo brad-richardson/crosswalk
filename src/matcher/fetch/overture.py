@@ -11,6 +11,7 @@ from loguru import logger
 from overturemaps.core import geodataframe, get_latest_release
 from pydantic import BaseModel
 
+from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
 from ..utils import filter_to_linestrings
 from .metadata import FetchMetadata, save_metadata
 
@@ -162,6 +163,12 @@ def fetch_overture_segments(
         feature_count=len(gdf),
         geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
         filters={"subtype": "road", "excluded_classes": list(EXCLUDED_CLASSES)},
+        # Version tracking
+        transform_version=TRANSFORM_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_version=DATA_VERSION,
+        # ID column tracking (Overture uses 'id' as the ID column)
+        id_column="id",
     )
     meta_path = save_metadata(output_path, metadata)
     logger.debug(f"Saved fetch metadata to {meta_path}")
@@ -225,6 +232,12 @@ def fetch_overture_connectors(
         bbox_buffer_m=buffer_m,
         feature_count=len(gdf),
         geometry_types=list(gdf.geometry.geom_type.unique()) if len(gdf) > 0 else [],
+        # Version tracking
+        transform_version=TRANSFORM_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_version=DATA_VERSION,
+        # ID column tracking (Overture uses 'id' as the ID column)
+        id_column="id",
     )
     meta_path = save_metadata(output_path, metadata)
     logger.debug(f"Saved fetch metadata to {meta_path}")

@@ -50,6 +50,15 @@ class FetchMetadata(BaseModel):
     # Additional notes
     notes: str | None = None
 
+    # Version tracking (added for data versioning)
+    transform_version: str | None = None  # TRANSFORM_VERSION at fetch time
+    schema_version: str | None = None  # SCHEMA_VERSION at fetch time
+    data_version: str | None = None  # Combined DATA_VERSION (e.g., "v1.0")
+
+    # ID column tracking
+    id_column: str | None = None  # Source column used (OBJECTID, fid, etc.)
+    id_prefix: str | None = None  # Prefix applied to IDs
+
 
 def save_metadata(output_path: Path, metadata: FetchMetadata) -> Path:
     """Save fetch metadata to a sidecar YAML file.

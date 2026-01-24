@@ -9,6 +9,8 @@ import geopandas as gpd
 from loguru import logger
 
 from ..blocking import generate_candidates
+from ..config import DATA_VERSION
+from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
@@ -19,6 +21,38 @@ class PipelineError(Exception):
     """Error during pipeline execution."""
 
     pass
+
+
+def validate_data_version(file_path: Path, file_type: str = "data") -> None:
+    """Validate data file version matches current code. Strict - no legacy support.
+
+    Args:
+        file_path: Path to the data file
+        file_type: Description of the file type for error messages
+
+    Raises:
+        PipelineError: If version doesn't match or is missing
+    """
+    file_version = extract_version_from_filename(file_path)
+    expected = DATA_VERSION.lstrip("v")  # '1.0'
+
+    if file_version is None:
+        # No version suffix - could be legacy file or different naming scheme
+        # Log a warning but don't fail (backward compatibility during migration)
+        logger.warning(
+            f"{file_type} file {file_path.name} has no version suffix. "
+            f"Expected format: <name>_{DATA_VERSION}.parquet. "
+            f"Re-fetch data with: matcher fetch --for-dataset <name> -d <source>"
+        )
+        return
+
+    if file_version != expected:
+        raise PipelineError(
+            f"Version mismatch for {file_path.name}:\n"
+            f"  File version: v{file_version}\n"
+            f"  Expected: {DATA_VERSION}\n"
+            f"Re-fetch data to update."
+        )
 
 
 @dataclass

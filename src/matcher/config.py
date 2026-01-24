@@ -32,6 +32,18 @@ DEFAULT_SNAP_TOLERANCE_M = 5.0
 # ============================================================================
 # DATA AND FEATURE VERSIONING
 # ============================================================================
+
+# Schema version (major) - tracks structural/breaking changes
+# Bump when: FEATURE_COLUMNS changes, label CSV schema changes, column renames
+SCHEMA_VERSION = "1"
+
+# Transform version (minor) - tracks data transformation logic
+# Bump when: CRS handling, ID mapping, geometry processing changes
+TRANSFORM_VERSION = "0"
+
+# Combined data version for filename suffix: v{SCHEMA}.{TRANSFORM}
+DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
+
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")

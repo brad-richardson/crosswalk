@@ -1,5 +1,18 @@
 """Data fetching module for Overture, OSM, local, and ArcGIS sources."""
 
+# Re-export version constants and filename utilities for convenience
+from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
+from ..filenames import (
+    extract_version_from_filename,
+    find_osm_segments,
+    find_overture_segments,
+    find_target_file,
+    osm_connectors_filename,
+    osm_segments_filename,
+    overture_connectors_filename,
+    overture_segments_filename,
+    target_filename,
+)
 from .arcgis import fetch_arcgis_layer
 from .local import load_local_roads
 from .metadata import FetchMetadata, load_metadata, save_metadata
@@ -31,4 +44,18 @@ __all__ = [
     "FetchMetadata",
     "load_metadata",
     "save_metadata",
+    # Version constants
+    "DATA_VERSION",
+    "SCHEMA_VERSION",
+    "TRANSFORM_VERSION",
+    # Filename utilities
+    "target_filename",
+    "overture_segments_filename",
+    "overture_connectors_filename",
+    "osm_segments_filename",
+    "osm_connectors_filename",
+    "extract_version_from_filename",
+    "find_overture_segments",
+    "find_osm_segments",
+    "find_target_file",
 ]

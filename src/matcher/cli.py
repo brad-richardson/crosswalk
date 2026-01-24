@@ -87,6 +87,7 @@ def fetch(
     """
     from .fetch import osm as osm_module
     from .fetch import overture as ov_module
+    from .filenames import overture_connectors_filename, overture_segments_filename
 
     # Validate datasets
     valid_datasets = {"overture", "osm"}
@@ -190,12 +191,12 @@ def fetch(
         osm_buffer = None
 
     if "overture" in datasets:
-        # Name outputs based on dataset if provided
-        overture_prefix = f"{dataset_name}_overture" if dataset_name else "overture"
+        # Name outputs based on dataset if provided, using versioned filenames
+        overture_region = dataset_name if dataset_name else "overture"
         console.print("[blue]Fetching Overture segments...[/blue]")
         segments_path = ov_module.fetch_overture_segments(
             bbox=overture_bbox,
-            output_path=output_dir / f"{overture_prefix}_segments.parquet",
+            output_path=output_dir / overture_segments_filename(overture_region),
             original_bbox=original_bbox,
             buffer_m=overture_buffer,
         )
@@ -204,7 +205,7 @@ def fetch(
         console.print("[blue]Fetching Overture connectors...[/blue]")
         connectors_path = ov_module.fetch_overture_connectors(
             bbox=overture_bbox,
-            output_path=output_dir / f"{overture_prefix}_connectors.parquet",
+            output_path=output_dir / overture_connectors_filename(overture_region),
             original_bbox=original_bbox,
             buffer_m=overture_buffer,
         )
@@ -266,20 +267,24 @@ def fetch(
 
             # Try to read metadata from fetched file
             if "overture" in datasets:
-                meta_path = output_dir / f"{overture_prefix}_segments.parquet.meta.yaml"
+                overture_seg_file = overture_segments_filename(overture_region)
+                meta_path = output_dir / f"{overture_seg_file}.meta.yaml"
                 if meta_path.exists():
                     from .fetch.metadata import load_metadata
 
-                    meta = load_metadata(output_dir / f"{overture_prefix}_segments.parquet")
+                    meta = load_metadata(output_dir / overture_seg_file)
                     if meta:
                         feature_count = meta.feature_count
                         geometry_types = meta.geometry_types
             elif "osm" in datasets:
-                meta_path = output_dir / f"{osm_name}_segments.parquet.meta.yaml"
+                from .filenames import osm_segments_filename
+
+                osm_seg_file = osm_segments_filename(osm_name)
+                meta_path = output_dir / f"{osm_seg_file}.meta.yaml"
                 if meta_path.exists():
                     from .fetch.metadata import load_metadata
 
-                    meta = load_metadata(output_dir / f"{osm_name}_segments.parquet")
+                    meta = load_metadata(output_dir / osm_seg_file)
                     if meta:
                         feature_count = meta.feature_count
                         geometry_types = meta.geometry_types
@@ -2041,6 +2046,60 @@ def backfill_labels(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from e
+
+
+@app.command("validate-data")
+def validate_data(
+    data_dir: Path = typer.Argument(
+        Path("data/raw"),
+        help="Directory containing data files",
+    ),
+):
+    """Validate data files for version compatibility.
+
+    Checks that all parquet files in the data directory have version suffixes
+    matching the current code version. This helps catch stale data that needs
+    to be re-fetched after code updates.
+
+    Examples:
+        matcher validate-data
+        matcher validate-data data/raw
+    """
+    from .config import DATA_VERSION
+    from .filenames import extract_version_from_filename
+
+    console.print(f"[blue]Current data version: {DATA_VERSION}[/blue]\n")
+
+    if not data_dir.exists():
+        console.print(f"[red]Directory not found: {data_dir}[/red]")
+        raise typer.Exit(1)
+
+    parquet_files = list(data_dir.glob("*.parquet"))
+
+    if not parquet_files:
+        console.print(f"[yellow]No parquet files found in {data_dir}[/yellow]")
+        return
+
+    has_errors = False
+    expected = DATA_VERSION.lstrip("v")
+
+    for path in sorted(parquet_files):
+        version = extract_version_from_filename(path)
+
+        if version is None:
+            console.print(f"[yellow]{path.name}: No version suffix[/yellow]")
+            # Don't count as error - could be legacy file
+        elif version == expected:
+            console.print(f"[green]{path.name}: OK ({DATA_VERSION})[/green]")
+        else:
+            console.print(f"[red]{path.name}: v{version} != {DATA_VERSION}[/red]")
+            has_errors = True
+
+    if has_errors:
+        console.print("\n[red]Validation failed. Re-fetch data to fix.[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("\n[green]All versioned files valid.[/green]")
 
 
 @app.command()
