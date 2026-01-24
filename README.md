@@ -94,17 +94,19 @@ pip install -e ".[dev,ml,label]"
 ### Fetch data
 
 ```bash
-# Fetch Overture data (default)
-matcher fetch --bbox -122.7,45.5,-122.6,45.55
+# Fetch all data (target + Overture reference) for a configured dataset
+matcher fetch all us_boston_streets
 
-# Fetch OSM data (auto-downloads from Geofabrik)
-matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d osm
+# Fetch target data only (from ArcGIS/WFS)
+matcher fetch target us_boston_streets
+matcher fetch target --prefix us_boston  # All datasets for a region
 
-# Fetch both Overture and OSM
-matcher fetch --bbox -122.7,45.5,-122.6,45.55 -d overture -d osm
+# Fetch reference data only (Overture by default)
+matcher fetch reference us_boston_streets
+matcher fetch reference us_boston_streets --source osm  # Use OSM instead
 
-# OSM with options
-matcher fetch --bbox -71.08,42.35,-71.05,42.37 -d osm --no-cache --keep-pbf
+# List available datasets
+matcher fetch list
 ```
 
 ### Run topology reconstruction
@@ -133,7 +135,7 @@ matcher discover-classes data/raw/new_dataset.parquet \
     --bridge data/output/new_dataset_bridge.parquet
 
 # List available dataset configurations
-matcher list-datasets
+matcher fetch list
 ```
 
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions on adding new datasets.
@@ -143,25 +145,23 @@ See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instruct
 After installation, here's the typical workflow for matching a new dataset:
 
 ```bash
-# 1. Fetch local data from ArcGIS (reads config from datasets/*.yaml)
-python scripts/fetch_new_cities.py --dataset us_boston_streets
+# 1. Fetch all data (target + Overture reference) for a dataset
+matcher fetch all us_boston_streets
 # Or fetch all datasets for a region:
-python scripts/fetch_new_cities.py --prefix us_boston
+matcher fetch target --prefix us_boston
+matcher fetch reference us_boston_streets
 
-# 2. Fetch Overture reference data for the region
-matcher fetch -f us_boston_streets -d overture
-
-# 3. Train the ML model (required after fresh clone)
+# 2. Train the ML model (required after fresh clone)
 matcher train
 
-# 4. Run matching
+# 3. Run matching
 matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
-# 5. If match quality needs improvement, label more examples (auto-discovers datasets)
+# 4. If match quality needs improvement, label more examples (auto-discovers datasets)
 streamlit run src/matcher/labeling/app.py
 
-# 6. Retrain and re-match until satisfied
+# 5. Retrain and re-match until satisfied
 matcher train && matcher match ...
 ```
 

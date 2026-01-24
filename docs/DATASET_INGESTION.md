@@ -7,7 +7,7 @@ This guide covers the process for adding a new road dataset to the matcher pipel
 The matcher pipeline links local road datasets to Overture Maps GERS identifiers. Each dataset needs:
 
 1. A **YAML configuration** in `datasets/` with source URL, bbox, and class mappings
-2. The **fetch script** (`scripts/fetch_new_cities.py`) reads the YAML and downloads data
+2. The **fetch CLI** (`matcher fetch`) reads the YAML and downloads data
 
 ## Step 1: Find and Fetch the Data
 
@@ -55,20 +55,23 @@ fetch:
 
 ### Fetching the Data
 
-Use the unified fetch script:
+Use the fetch CLI:
 
 ```bash
-# Fetch a specific dataset
-python scripts/fetch_new_cities.py --dataset us_example_streets
+# Fetch all data (target + Overture reference) for a dataset
+matcher fetch all us_example_streets
+
+# Fetch target data only
+matcher fetch target us_example_streets
 
 # Fetch all datasets for a region
-python scripts/fetch_new_cities.py --prefix us_boston
+matcher fetch target --prefix us_boston
 
 # List available datasets
-python scripts/fetch_new_cities.py --list
+matcher fetch list
 ```
 
-The script reads the YAML config and handles:
+The CLI reads the YAML config and handles:
 - ArcGIS FeatureServer pagination
 - Coordinate system transformation
 - Overture-compatible schema conversion
@@ -81,18 +84,14 @@ The script reads the YAML config and handles:
 
 ## Step 2: Fetch Reference Data
 
-Fetch Overture data for your area of interest:
+Fetch Overture reference data for your dataset:
 
 ```bash
-# Get bounding box from your local data
-python -c "
-import geopandas as gpd
-gdf = gpd.read_parquet('data/raw/your_dataset.parquet')
-print(f'{gdf.total_bounds[0]:.4f},{gdf.total_bounds[1]:.4f},{gdf.total_bounds[2]:.4f},{gdf.total_bounds[3]:.4f}')
-"
+# Fetch Overture reference data (uses bbox from dataset config)
+matcher fetch reference us_example_streets
 
-# Fetch Overture segments
-matcher fetch --bbox <xmin,ymin,xmax,ymax> -d overture
+# Or fetch both target and reference in one command
+matcher fetch all us_example_streets
 ```
 
 ## Step 3: Run Initial Matching
@@ -260,10 +259,7 @@ The YAML config you created in Step 1 serves as the dataset registry. Verify it'
 
 ```bash
 # List all configured datasets
-matcher list-datasets
-
-# Check your dataset appears
-python scripts/fetch_new_cities.py --list
+matcher fetch list
 ```
 
 ## Step 7: Validate
@@ -271,7 +267,7 @@ python scripts/fetch_new_cities.py --list
 ### List available configs
 
 ```bash
-matcher list-datasets
+matcher fetch list
 ```
 
 ### Run discovery on new data

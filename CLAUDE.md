@@ -57,17 +57,17 @@ src/matcher/
 ## Key Commands
 
 ```bash
-# Fetch local data from ArcGIS (reads config from datasets/*.yaml)
-python scripts/fetch_new_cities.py --dataset us_boston_streets
-python scripts/fetch_new_cities.py --prefix us_boston  # All Boston datasets
-python scripts/fetch_new_cities.py --list              # List available datasets
+# Fetch target data from ArcGIS (reads config from datasets/*.yaml)
+matcher fetch target us_boston_streets
+matcher fetch target --prefix us_boston  # All Boston datasets
+matcher fetch list                        # List available datasets
 
-# Fetch Overture/OSM reference data for a configured dataset
-matcher fetch --for-dataset us_boston_streets -d overture
-matcher fetch --for-dataset us_boston_streets -d osm -d overture  # Both
+# Fetch Overture reference data for a configured dataset
+matcher fetch reference us_boston_streets
+matcher fetch reference us_boston_streets --source osm  # Use OSM instead
 
-# Fetch by explicit bbox
-matcher fetch --bbox -71.19,42.21,-70.92,42.40 -d overture -d osm
+# Fetch both target + reference in one command
+matcher fetch all us_boston_streets
 
 # Run matching with ML model
 matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet -m xgboost
@@ -116,11 +116,12 @@ streamlit run src/matcher/labeling/app.py
 Before running the labeling app, ensure data exists in `data/raw/`:
 
 ```bash
-# 1. Fetch local data (ArcGIS)
-python scripts/fetch_new_cities.py --prefix us_boston
+# Fetch both target and reference data for a dataset
+matcher fetch all us_boston_streets
 
-# 2. Fetch Overture reference data
-matcher fetch -f us_boston_streets -d overture
+# Or fetch separately:
+matcher fetch target --prefix us_boston   # Target data from ArcGIS
+matcher fetch reference us_boston_streets  # Overture reference data
 ```
 
 The app will auto-discover any dataset that has both:
@@ -241,10 +242,10 @@ Each YAML file contains:
 
 ```bash
 # Fetch reference data for a configured dataset
-matcher fetch --for-dataset us_boston_streets -d osm -d overture
+matcher fetch reference us_boston_streets
 
 # List available dataset configs
-matcher list-datasets
+matcher fetch list
 
 # Discover classification for a new dataset
 matcher discover-classes data/raw/new_dataset.parquet
@@ -293,9 +294,8 @@ for name in list_dataset_configs():
 ### Adding a new dataset
 1. **Find data source**: State DOTs, county GIS portals, open data portals
 2. **Create YAML config** in `datasets/` with ArcGIS URL, bbox, class mappings
-3. **Fetch local data**: `python scripts/fetch_new_cities.py --dataset <name>`
-4. **Fetch reference data**: `matcher fetch -f <dataset> -d overture`
-5. **Run initial matching**: `matcher match ... -m xgboost`
+3. **Fetch all data**: `matcher fetch all <dataset_name>`
+4. **Run initial matching**: `matcher match ... -m xgboost`
 6. **Analyze class mappings**: `matcher discover-classes <dataset> --reference <overture> --bridge <bridge>`
 7. **Label samples** to improve model: `streamlit run src/matcher/labeling/app.py`
 8. **Retrain and iterate**: `matcher train && matcher eval-model`
