@@ -1,0 +1,19 @@
+name: ke_kisumu_roads
+display_name: Kenya Roads (Kisumu Region)
+type: road
+description: Kenya road network subset - Kisumu Lake Victoria region
+notes: Regional subset of Kenya Roads Board data for efficient processing.
+source:
+  type: download
+  url: https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip
+  file_format: shp
+fetch:
+  id_prefix: ke_kisumu
+  name_column: ROADNAME
+  class_column: CLASS
+  bbox:
+  - 34.65
+  - -0.25
+  - 34.95
+  - 0.05
+  crs: EPSG:4326

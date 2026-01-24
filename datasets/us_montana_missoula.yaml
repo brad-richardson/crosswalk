@@ -1,0 +1,19 @@
+name: us_montana_missoula
+display_name: Montana Roads (Missoula)
+type: road
+description: Montana transportation network subset - Missoula university town area
+notes: Regional subset for efficient processing. Part of Montana Transportation Framework.
+source:
+  type: arcgis
+  url: https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0
+  portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
+fetch:
+  id_prefix: us_montana_missoula
+  name_column: null
+  class_column: SurfaceType
+  bbox:
+  - -114.25
+  - 46.75
+  - -113.75
+  - 47.05
+  crs: EPSG:4326

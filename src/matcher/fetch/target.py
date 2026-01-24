@@ -24,6 +24,7 @@ Usage:
 """
 
 import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -411,13 +412,15 @@ def fetch_download(
     bbox_filter: bool = False,
     api_key: str | None = None,
     api_key_header: str | None = None,
+    encoding: str | None = None,
+    source_crs: str | None = None,
 ) -> Path:
-    """Download and process geospatial file (Shapefile, GeoPackage).
+    """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
     Args:
         url: URL to download from
         output_path: Path for output GeoParquet file
-        file_format: Format of downloaded file (shp, gpkg)
+        file_format: Format of downloaded file (shp, gpkg, gml, geojson)
         id_prefix: Prefix for generated IDs
         name_column: Column name for feature names
         class_column: Column name for classification
@@ -427,6 +430,8 @@ def fetch_download(
         bbox_filter: Whether to apply bbox filter after loading
         api_key: Optional API key for authenticated downloads
         api_key_header: Header name for API key (e.g., "AccountKey")
+        encoding: File encoding for non-UTF8 files (e.g., "EUC-KR")
+        source_crs: Source CRS if different from data file (e.g., "EPSG:5179")
 
     Returns:
         Path to the output GeoParquet file
@@ -470,6 +475,18 @@ def fetch_download(
                     if not gpkg_files:
                         raise ValueError("No .gpkg file found in zip")
                     data_file = gpkg_files[0]
+                elif file_format == "gml":
+                    gml_files = list(tmpdir_path.rglob("*.gml"))
+                    if not gml_files:
+                        raise ValueError("No .gml file found in zip")
+                    data_file = gml_files[0]
+                elif file_format == "geojson":
+                    geojson_files = list(tmpdir_path.rglob("*.geojson")) + list(
+                        tmpdir_path.rglob("*.json")
+                    )
+                    if not geojson_files:
+                        raise ValueError("No .geojson file found in zip")
+                    data_file = geojson_files[0]
                 else:
                     raise ValueError(f"Unsupported file format: {file_format}")
 
@@ -482,8 +499,20 @@ def fetch_download(
                         f.write(chunk)
 
             # Load with geopandas
-            gdf = gpd.read_file(data_file)
+            read_kwargs: dict[str, Any] = {}
+            if encoding:
+                read_kwargs["encoding"] = encoding
+                logger.info(f"Using encoding: {encoding}")
+            if file_format == "gml":
+                read_kwargs["driver"] = "GML"
+
+            gdf = gpd.read_file(data_file, **read_kwargs)
             logger.info(f"Loaded {len(gdf)} features")
+
+            # Set source CRS if provided (overrides file metadata)
+            if source_crs:
+                logger.info(f"Setting source CRS from config: {source_crs}")
+                gdf = gdf.set_crs(source_crs, allow_override=True)
 
             # Reproject to WGS84 if needed
             if gdf.crs and gdf.crs != "EPSG:4326":
@@ -521,6 +550,222 @@ def fetch_download(
     except Exception as e:
         logger.error(f"Failed to download: {e}")
         raise
+
+
+def _get_os_cache_dir() -> Path:
+    """Get or create OS Data Hub cache directory."""
+    cache_dir = Path.home() / ".cache" / "matcher" / "os_downloads"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _get_cached_os_data(product_id: str, cache_ttl_hours: int = 168) -> Path | None:
+    """Check if cached OS data exists and is valid.
+
+    Args:
+        product_id: OS product ID
+        cache_ttl_hours: Cache TTL in hours (default: 7 days)
+
+    Returns:
+        Path to cached gpkg file if valid, None otherwise
+    """
+    from datetime import datetime, timedelta
+
+    cache_dir = _get_os_cache_dir()
+    cached_gpkg = cache_dir / f"{product_id}.gpkg"
+
+    if cached_gpkg.exists():
+        mtime = datetime.fromtimestamp(cached_gpkg.stat().st_mtime)
+        if datetime.now() - mtime < timedelta(hours=cache_ttl_hours):
+            logger.info(f"Using cached OS data: {cached_gpkg}")
+            return cached_gpkg
+        else:
+            logger.info(f"Cache expired for {product_id}, re-downloading...")
+            cached_gpkg.unlink()
+
+    return None
+
+
+def fetch_os_downloads(
+    product_id: str,
+    output_path: Path,
+    id_prefix: str,
+    name_column: str | None = None,
+    class_column: str | None = None,
+    class_mapping: dict | None = None,
+    source_name: str = "OS Data Hub",
+    bbox: tuple | None = None,
+    api_key: str | None = None,
+    cache_ttl_hours: int = 168,
+) -> Path:
+    """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
+
+    Uses the osdatahub package for access to OS OpenData products like
+    OpenRoads, OpenMap Local, etc. No API key required for open data.
+    Downloads are cached for 7 days by default.
+
+    Args:
+        product_id: OS Data Hub product ID (e.g., "OpenRoads", "OpenMapLocal")
+        output_path: Path for output GeoParquet file
+        id_prefix: Prefix for generated IDs
+        name_column: Column name for feature names
+        class_column: Column name for classification
+        class_mapping: Dict mapping source values to standard classes
+        source_name: Name for the data source
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter after download
+        api_key: Not used for OpenData (kept for API compatibility)
+        cache_ttl_hours: Cache TTL in hours (default: 168 = 7 days)
+
+    Returns:
+        Path to the output GeoParquet file
+    """
+    try:
+        from osdatahub import OpenDataDownload
+    except ImportError:
+        raise ImportError(
+            "osdatahub package required for OS Data Hub downloads. "
+            "Install with: pip install osdatahub"
+        )
+
+    logger.info(f"Fetching OS Data Hub product: {product_id}")
+    if bbox:
+        logger.info(f"Will filter to bbox after download: {bbox}")
+
+    # Check cache first
+    cached_gpkg = _get_cached_os_data(product_id, cache_ttl_hours)
+
+    if cached_gpkg:
+        data_file = cached_gpkg
+    else:
+        # Download to cache directory
+        cache_dir = _get_os_cache_dir()
+        download = OpenDataDownload(product_id)
+
+        # Get available downloads to find GeoPackage format
+        available = download.product_list(file_format="GeoPackage")
+        if not available:
+            available = download.product_list()
+
+        if not available:
+            raise ValueError(f"No downloads available for product: {product_id}")
+
+        logger.info(f"Found {len(available)} download option(s)")
+
+        # Download to temp dir then extract to cache
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            # Download the files (returns list of zip file paths)
+            downloaded_files = download.download(
+                output_dir=str(tmpdir_path),
+                file_format="GeoPackage",
+                download_multiple=False,
+                overwrite=True,
+            )
+
+            if not downloaded_files:
+                downloaded_files = download.download(
+                    output_dir=str(tmpdir_path),
+                    download_multiple=False,
+                    overwrite=True,
+                )
+
+            logger.info(f"Downloaded {len(downloaded_files)} file(s): {downloaded_files}")
+
+            # The download returns zip files - extract them
+            for downloaded_file in downloaded_files:
+                downloaded_path = Path(downloaded_file)
+                if downloaded_path.suffix == ".zip":
+                    logger.info(f"Extracting {downloaded_path.name}...")
+                    with zipfile.ZipFile(downloaded_path, "r") as zf:
+                        zf.extractall(tmpdir_path / "extracted")
+
+            # Find the gpkg file
+            gpkg_files = list(tmpdir_path.rglob("*.gpkg"))
+            if not gpkg_files:
+                # Also check extracted subdirectory
+                gpkg_files = list((tmpdir_path / "extracted").rglob("*.gpkg"))
+
+            if not gpkg_files:
+                # Fall back to shapefile
+                shp_files = list(tmpdir_path.rglob("*.shp"))
+                if not shp_files:
+                    shp_files = list((tmpdir_path / "extracted").rglob("*.shp"))
+                if shp_files:
+                    data_file = shp_files[0]
+                    # Copy to cache
+                    cached_file = cache_dir / f"{product_id}.shp"
+                    shutil.copy(data_file, cached_file)
+                    # Copy associated files (.dbf, .shx, .prj)
+                    for ext in [".dbf", ".shx", ".prj", ".cpg"]:
+                        src = data_file.with_suffix(ext)
+                        if src.exists():
+                            shutil.copy(src, cached_file.with_suffix(ext))
+                    data_file = cached_file
+                else:
+                    raise ValueError(f"No .gpkg or .shp found in downloaded data")
+            else:
+                # Copy gpkg to cache
+                cached_gpkg = cache_dir / f"{product_id}.gpkg"
+                shutil.copy(gpkg_files[0], cached_gpkg)
+                data_file = cached_gpkg
+                logger.info(f"Cached to: {cached_gpkg}")
+
+    logger.info(f"Loading from: {data_file}")
+
+    # For GeoPackages with multiple layers, select the road links layer
+    layer = None
+    if data_file.suffix == ".gpkg":
+        import pyogrio
+
+        layers = pyogrio.list_layers(data_file)
+        layer_names = [l[0] for l in layers]
+        logger.debug(f"Available layers: {layer_names}")
+
+        # Prefer road_link layer for OS OpenRoads (contains actual road segments)
+        for preferred in ["road_link", "RoadLink", "roads", "road"]:
+            if preferred in layer_names:
+                layer = preferred
+                break
+
+        if layer:
+            logger.info(f"Selected layer: {layer}")
+
+    gdf = gpd.read_file(data_file, layer=layer)
+    logger.info(f"Loaded {len(gdf)} features")
+
+    # Reproject to WGS84 if needed (OS data is typically in EPSG:27700)
+    if gdf.crs and gdf.crs != "EPSG:4326":
+        logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
+        gdf = gdf.to_crs("EPSG:4326")
+
+    # Apply bbox filter after download
+    if bbox and len(gdf) > 0:
+        xmin, ymin, xmax, ymax = bbox
+        original_count = len(gdf)
+        gdf = gdf.cx[xmin:xmax, ymin:ymax]
+        logger.info(f"Filtered from {original_count} to {len(gdf)} features within bbox")
+
+        if len(gdf) == 0:
+            logger.warning("No features after filtering")
+            return output_path
+
+        # Transform to Overture schema
+        gdf = _transform_download_data(
+            gdf,
+            id_prefix=id_prefix,
+            name_column=name_column,
+            class_column=class_column,
+            class_mapping=class_mapping,
+            source_name=source_name,
+        )
+
+        # Save to parquet
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        gdf.to_parquet(output_path)
+        logger.success(f"Saved {len(gdf)} features to {output_path}")
+
+        return output_path
 
 
 def fetch_dataset(
@@ -577,10 +822,6 @@ def fetch_dataset(
             )
             return None
 
-        if url is None:
-            logger.error(f"No URL in config for {dataset_name}")
-            return None
-
         # Common parameters from config
         fetch_config = config.fetch
         id_prefix = fetch_config.id_prefix if fetch_config else dataset_name
@@ -590,6 +831,36 @@ def fetch_dataset(
         subclass_column = fetch_config.subclass_column if fetch_config else None
         subclass_mapping = fetch_config.subclass_mapping if fetch_config else None
         bbox = fetch_config.bbox if fetch_config else None
+        encoding = fetch_config.encoding if fetch_config else None
+        source_crs = fetch_config.source_crs if fetch_config else None
+
+        # Handle os_downloads before URL check (it uses product_id, not url)
+        if source_type == "os_downloads":
+            product_id = config.source.product_id if config.source else None
+            if not product_id:
+                logger.error("os_downloads source requires product_id in source config")
+                return None
+
+            api_key = None
+            api_key_env_var = config.source.api_key_env_var if config.source else "OS_API_KEY"
+            if api_key_env_var:
+                api_key = os.environ.get(api_key_env_var)
+
+            return fetch_os_downloads(
+                product_id=product_id,
+                output_path=output_path,
+                id_prefix=id_prefix,
+                name_column=name_column,
+                class_column=class_column,
+                class_mapping=class_mapping,
+                source_name=config.display_name or dataset_name,
+                bbox=bbox,
+                api_key=api_key,
+            )
+
+        if url is None:
+            logger.error(f"No URL in config for {dataset_name}")
+            return None
 
         if source_type == "download":
             # Get file format from source config
@@ -640,6 +911,8 @@ def fetch_dataset(
                 bbox_filter=bool(bbox),
                 api_key=api_key,
                 api_key_header=api_key_header,
+                encoding=encoding,
+                source_crs=source_crs,
             )
 
         elif source_type == "ogc_features":
@@ -690,6 +963,9 @@ def fetch_dataset(
             }
             if page_size is not None:
                 arcgis_kwargs["page_size"] = page_size
+            # Pass bbox for server-side filtering (reduces bandwidth for large datasets)
+            if bbox:
+                arcgis_kwargs["bbox"] = bbox
 
             return fetch_arcgis_layer(**arcgis_kwargs)
 

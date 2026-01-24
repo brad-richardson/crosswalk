@@ -1,0 +1,19 @@
+name: ke_nairobi_roads
+display_name: Kenya Roads (Nairobi Region)
+type: road
+description: Kenya road network subset - Nairobi capital region
+notes: Regional subset of Kenya Roads Board data for efficient processing.
+source:
+  type: download
+  url: https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip
+  file_format: shp
+fetch:
+  id_prefix: ke_nairobi
+  name_column: ROADNAME
+  class_column: CLASS
+  bbox:
+  - 36.65
+  - -1.45
+  - 37.15
+  - -1.15
+  crs: EPSG:4326

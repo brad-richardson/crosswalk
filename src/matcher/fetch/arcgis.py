@@ -34,6 +34,7 @@ def fetch_arcgis_layer(
     source_name: str = "ArcGIS",
     page_size: int = 5000,
     where_clause: str = "1=1",
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -57,6 +58,7 @@ def fetch_arcgis_layer(
         source_name: Name for the data source in sources array
         page_size: Number of features per API request
         where_clause: SQL WHERE clause to filter features (default: "1=1" for all)
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) for server-side filtering
 
     Returns:
         Path to the output GeoParquet file
@@ -64,9 +66,11 @@ def fetch_arcgis_layer(
     logger.info(f"Fetching ArcGIS layer: {url}")
     if where_clause != "1=1":
         logger.info(f"Filtering with: {where_clause}")
+    if bbox:
+        logger.info(f"Server-side bbox filter: {bbox}")
 
     # Fetch all features with pagination
-    features = _fetch_all_features(url, page_size, where_clause)
+    features = _fetch_all_features(url, page_size, where_clause, bbox)
 
     if not features:
         logger.warning(f"No features returned from {url}")
@@ -139,7 +143,12 @@ def fetch_arcgis_layer(
     return output_path
 
 
-def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> list[dict]:
+def _fetch_all_features(
+    url: str,
+    page_size: int,
+    where_clause: str = "1=1",
+    bbox: tuple[float, float, float, float] | None = None,
+) -> list[dict]:
     """Fetch all features from ArcGIS REST API with pagination.
 
     Uses adaptive page sizing - if server returns fewer features than requested,
@@ -149,6 +158,7 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
         url: ArcGIS REST API layer URL
         page_size: Number of features per request (initial, may be reduced)
         where_clause: SQL WHERE clause to filter features
+        bbox: Optional bounding box (xmin, ymin, xmax, ymax) for server-side spatial filtering
 
     Returns:
         List of GeoJSON features
@@ -171,6 +181,13 @@ def _fetch_all_features(url: str, page_size: int, where_clause: str = "1=1") -> 
             "resultOffset": offset,
             "resultRecordCount": effective_page_size,
         }
+        # Add server-side bbox filtering if provided
+        if bbox:
+            xmin, ymin, xmax, ymax = bbox
+            params["geometry"] = f"{xmin},{ymin},{xmax},{ymax}"
+            params["geometryType"] = "esriGeometryEnvelope"
+            params["spatialRel"] = "esriSpatialRelIntersects"
+            params["inSR"] = "4326"
         # Add orderByFields for deterministic pagination if we have an ID field
         if id_field:
             params["orderByFields"] = id_field

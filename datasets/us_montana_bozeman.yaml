@@ -1,0 +1,19 @@
+name: us_montana_bozeman
+display_name: Montana Roads (Bozeman)
+type: road
+description: Montana transportation network subset - Bozeman tech hub area
+notes: Regional subset for efficient processing. Part of Montana Transportation Framework.
+source:
+  type: arcgis
+  url: https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0
+  portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
+fetch:
+  id_prefix: us_montana_bozeman
+  name_column: null
+  class_column: SurfaceType
+  bbox:
+  - -111.25
+  - 45.55
+  - -110.75
+  - 45.85
+  crs: EPSG:4326

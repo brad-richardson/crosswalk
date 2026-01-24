@@ -2,20 +2,23 @@ name: gb_london_roads
 display_name: OS Open Roads (London)
 type: road
 description: Ordnance Survey Open Roads - complete street network for Great Britain, clipped to London
-notes: Requires free registration at osdatahub.os.uk. Download GeoPackage and clip to London bbox.
+notes: Requires free registration at osdatahub.os.uk. OS_API_KEY env var optional but recommended.
 source:
-  type: manual
+  type: os_downloads
+  product_id: OpenRoads
+  api_key_env_var: OS_API_KEY
   portal_url: https://osdatahub.os.uk/downloads/open/OpenRoads
 fetch:
   id_prefix: gb_london
-  name_column: name1
-  class_column: roadClassification
+  name_column: name_1
+  class_column: road_classification
   class_mapping:
     Motorway: motorway
     A Road: primary
     B Road: secondary
     Unclassified: residential
     Not Classified: service
+    Unknown: unclassified
   bbox:
   - -0.51
   - 51.28

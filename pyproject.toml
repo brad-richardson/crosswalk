@@ -45,6 +45,9 @@ label = [
     "streamlit-folium>=0.15",
     "folium>=0.15",
 ]
+os = [
+    "osdatahub>=1.0.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
