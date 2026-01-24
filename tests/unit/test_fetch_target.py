@@ -247,3 +247,42 @@ class TestFetchDatasetsByPrefix:
         results = fetch_datasets_by_prefix("jp_", tmp_path)
 
         assert results == {}
+
+
+class TestGetBufferedBbox:
+    """Tests for get_buffered_bbox utility function."""
+
+    def test_uses_default_when_none(self):
+        """Test that default buffer is used when buffer_m is None."""
+        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+
+        bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
+        result_bbox, effective_buffer = get_buffered_bbox(bbox, None, 1000.0)
+
+        assert effective_buffer == 1000.0
+        assert result_bbox.xmin < bbox.xmin
+        assert result_bbox.ymin < bbox.ymin
+        assert result_bbox.xmax > bbox.xmax
+        assert result_bbox.ymax > bbox.ymax
+
+    def test_uses_explicit_buffer(self):
+        """Test that explicit buffer overrides default."""
+        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+
+        bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
+        result_bbox, effective_buffer = get_buffered_bbox(bbox, 500.0, 1000.0)
+
+        assert effective_buffer == 500.0
+
+    def test_zero_buffer_returns_original(self):
+        """Test that buffer=0 returns original bbox."""
+        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+
+        bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
+        result_bbox, effective_buffer = get_buffered_bbox(bbox, 0, 1000.0)
+
+        assert effective_buffer is None
+        assert result_bbox.xmin == bbox.xmin
+        assert result_bbox.ymin == bbox.ymin
+        assert result_bbox.xmax == bbox.xmax
+        assert result_bbox.ymax == bbox.ymax

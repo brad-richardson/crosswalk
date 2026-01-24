@@ -24,6 +24,7 @@ from .overture import (
     BoundingBox,
     fetch_overture_connectors,
     fetch_overture_segments,
+    get_buffered_bbox,
     load_overture_segments,
 )
 from .target import (
@@ -43,6 +44,7 @@ __all__ = [
     "DEFAULT_OSM_BUFFER_M",
     "fetch_overture_segments",
     "fetch_overture_connectors",
+    "get_buffered_bbox",
     "load_overture_segments",
     "fetch_osm_data",
     "fetch_osm_segments",

@@ -200,49 +200,37 @@ def _fetch_reference_impl(
     output_dir.mkdir(parents=True, exist_ok=True)
     original_bbox = ov_module.BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
-    # For Overture fetches, use a default buffer to avoid fringe effects
-    overture_buffer = bbox_buffer
-    if overture_buffer is None and "overture" in sources:
-        overture_buffer = ov_module.DEFAULT_OVERTURE_BUFFER_M
+    # Get buffered bboxes for each source
+    overture_bbox, overture_buffer = ov_module.get_buffered_bbox(
+        original_bbox, bbox_buffer, ov_module.DEFAULT_OVERTURE_BUFFER_M
+    )
+    osm_bbox, osm_buffer = ov_module.get_buffered_bbox(
+        original_bbox, bbox_buffer, osm_module.DEFAULT_OSM_BUFFER_M
+    )
+
+    # Log buffer info
+    if "overture" in sources and overture_buffer:
         console.print(
-            f"[blue]Using default {overture_buffer}m buffer for Overture data "
+            f"[blue]Using {overture_buffer}m buffer for Overture data "
             f"(override with --bbox-buffer)[/blue]"
         )
-
-    # Create bbox for Overture (potentially buffered)
-    if overture_buffer is not None and overture_buffer > 0:
-        overture_bbox = original_bbox.expand(overture_buffer)
         console.print(
             f"[blue]  Buffered bbox: {overture_bbox.xmin:.6f},{overture_bbox.ymin:.6f},"
             f"{overture_bbox.xmax:.6f},{overture_bbox.ymax:.6f}[/blue]"
         )
-    else:
-        overture_bbox = original_bbox
-        if overture_buffer == 0 and "overture" in sources:
-            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
-        overture_buffer = None
+    elif "overture" in sources and bbox_buffer == 0:
+        console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
 
-    # For OSM, also use a default buffer
-    osm_buffer = bbox_buffer
-    if osm_buffer is None and "osm" in sources:
-        osm_buffer = osm_module.DEFAULT_OSM_BUFFER_M
+    if "osm" in sources and osm_buffer:
         console.print(
-            f"[blue]Using default {osm_buffer}m buffer for OSM data "
-            f"(override with --bbox-buffer)[/blue]"
+            f"[blue]Using {osm_buffer}m buffer for OSM data (override with --bbox-buffer)[/blue]"
         )
-
-    if osm_buffer is not None and osm_buffer > 0:
-        osm_bbox = original_bbox.expand(osm_buffer)
-        if "osm" in sources:
-            console.print(
-                f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
-                f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
-            )
-    else:
-        osm_bbox = original_bbox
-        if osm_buffer == 0 and "osm" in sources:
-            console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
-        osm_buffer = None
+        console.print(
+            f"[blue]  Buffered bbox: {osm_bbox.xmin:.6f},{osm_bbox.ymin:.6f},"
+            f"{osm_bbox.xmax:.6f},{osm_bbox.ymax:.6f}[/blue]"
+        )
+    elif "osm" in sources and bbox_buffer == 0:
+        console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
 
     if "overture" in sources:
         console.print("[blue]Fetching Overture segments...[/blue]")

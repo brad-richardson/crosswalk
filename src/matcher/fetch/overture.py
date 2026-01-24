@@ -84,6 +84,34 @@ class BoundingBox(BaseModel):
         )
 
 
+def get_buffered_bbox(
+    original_bbox: BoundingBox,
+    buffer_m: float | None,
+    default_buffer_m: float,
+) -> tuple[BoundingBox, float | None]:
+    """Apply buffer to bbox, using default if not specified.
+
+    Args:
+        original_bbox: The original bounding box
+        buffer_m: User-specified buffer in meters, or None to use default
+        default_buffer_m: Default buffer to use when buffer_m is None
+
+    Returns:
+        Tuple of (buffered_bbox, effective_buffer_m)
+        - If buffer is 0, returns (original_bbox, None)
+        - Otherwise returns (expanded_bbox, buffer_used)
+    """
+    # Use default if not specified
+    effective_buffer = buffer_m if buffer_m is not None else default_buffer_m
+
+    # Apply buffer if positive
+    if effective_buffer > 0:
+        return original_bbox.expand(effective_buffer), effective_buffer
+
+    # Buffer explicitly disabled (0) or negative
+    return original_bbox, None
+
+
 def fetch_overture_segments(
     bbox: BoundingBox,
     output_path: Path,
