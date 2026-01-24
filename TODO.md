@@ -30,7 +30,7 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Use case**: Prevent matching a curved residential street to a straight highway even if they have similar endpoints
 - **Priority**: High (quick win)
 
-### Frechet Distance
+### Fréchet Distance
 - **Feature**: `frechet_distance_m`
 - **Purpose**: Order-preserving distance metric that considers both position and traversal order
 - **Trade-off**: Heavier computation than Hausdorff (~O(n^2) with Douglas-Peucker simplification)
@@ -162,8 +162,8 @@ Features derived from road attributes beyond names and classes.
 - **Priority**: Lower (requires global graph analysis)
 
 ### Junction Angle Signature
-- **Feature**: `junction_angle_similarity`
-- **Purpose**: Compare intersection geometry beyond simple degree count
+- **Feature**: `junction_angle_signature`
+- **Purpose**: Compare intersection geometry beyond simple degree count (more detailed than `junction_angle_similarity` above)
 - **Computation**: For each endpoint, extract bearings of all incident edges; compare "bearing fingerprints" (sorted list of angles)
 - **Gap**: Currently have `heading_delta` but no feature comparing angles of incident roads at intersection nodes
 - **Use case**: Distinguish T-intersections (90 degree branch) from Y-splits
@@ -198,7 +198,7 @@ Features derived from road attributes beyond names and classes.
 
 ### Graphlet Signature / Lateral Offset (Partial)
 - **Status**: PARTIALLY IMPLEMENTED (Jan 2026)
-- **Implemented**: `lateral_offset`, `lateral_offset_iqr`, `lateral_offset_p95` features
+- **Implemented**: `lateral_offset_m`, `lateral_offset_iqr_m`, `lateral_offset_p95_m` features
 - **Measures**: Perpendicular distance between candidate segments
 - **Use case**: Same-side sidewalks have low lateral offset (< 5m), opposite-side have high (10-30m)
 - **Gap**: Junction angles and intersection connectivity signature not yet implemented
@@ -289,7 +289,7 @@ For actual conflation/merging of datasets, we need to know:
 
 2. **Post-ML Geometric Alignment**
    - Run ML model first to identify candidate matches
-   - Then use geometric algorithms (e.g., Frechet matching, point projection) to find exact correspondence
+   - Then use geometric algorithms (e.g., Fréchet matching, point projection) to find exact correspondence
    - Simpler labeling, alignment handled algorithmically
 
 3. **Segment Pre-processing**
@@ -669,7 +669,7 @@ Modify `_add_target_segments` in `combiner.py` to:
 
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
-| Frechet distance | Geometric | High |
+| Fréchet distance | Geometric | High |
 | Neighbor consistency (MRF) | Context | High |
 | Language-aware names | Semantic | Medium |
 | Graph embeddings | Research | High |
