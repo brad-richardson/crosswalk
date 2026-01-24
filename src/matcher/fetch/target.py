@@ -521,7 +521,7 @@ def fetch_download(
             total_size = int(resp.headers.get("content-length", 0))
             downloaded = 0
             last_progress_mb = 0
-            progress_interval_mb = 10  # Report every 10 MB
+            progress_interval_mb = 100  # Report every 100 MB
 
             # Determine if it's a zip file
             content_type = resp.headers.get("content-type", "")
