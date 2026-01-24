@@ -205,7 +205,6 @@ from matcher.labeling.dataset_registry import DatasetRegistry
 from matcher.labeling.feature_panel import (
     render_alignment_info,
     render_feature_panel,
-    render_minimal_feature_panel,
 )
 from matcher.labeling.label_store import LabelLoadError, LabelStore, get_data_version
 from matcher.labeling.map_view import create_comparison_map
@@ -314,6 +313,17 @@ def main():
         }
         iframe {
             min-height: 50vh;
+        }
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .block-container {
+                padding-left: 0.5rem !important;
+                padding-right: 0.5rem !important;
+                padding-top: 1rem !important;
+            }
+            div[data-testid="stVerticalBlock"] > div {
+                gap: 0.2rem !important;
+            }
         }
         </style>
     """,
@@ -449,65 +459,36 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         # Data loading
         st.subheader("Data")
         if not st.session_state.data_loaded:
-            st.text(f"Reference: {reference_path.name}")
-            st.text(f"Target: {target_path.name}")
-
-            # Cache controls
+            # Check for cache
             cache_info = get_cache_info(dataset_id, reference_path, target_path)
 
-            # Initialize cache preference in session state
+            # Initialize preferences
             if "use_cache" not in st.session_state:
                 st.session_state.use_cache = True
+            if "review_only" not in st.session_state:
+                st.session_state.review_only = True
 
-            use_cache = st.checkbox(
-                "Use cached candidates",
-                value=st.session_state.use_cache,
-                key="use_cache_checkbox",
-                help="Load pre-computed candidates from cache for faster startup",
-            )
-            st.session_state.use_cache = use_cache
-
-            # Show cache status
+            # Auto-load if cache exists
             if cache_info["exists"]:
-                age_str = (
-                    f"{cache_info['age_hours']:.1f}h ago"
-                    if cache_info["age_hours"] is not None
-                    else "unknown"
-                )
-                count_str = (
-                    f"{cache_info['candidate_count']:,}" if cache_info["candidate_count"] else "?"
-                )
-                fresh_indicator = (
-                    ("✓" if cache_info["is_fresh"] else "⚠️ stale")
-                    if cache_info["is_fresh"] is not None
-                    else ""
-                )
+                with st.spinner("Loading cached candidates..."):
+                    load_data(
+                        reference_path,
+                        target_path,
+                        dataset_id,
+                        use_cache=True,
+                        review_only=st.session_state.review_only,
+                    )
+                st.rerun()
 
-                st.caption(f"Cache: {count_str} pairs, {age_str} {fresh_indicator}")
-
-                if st.button("🔄 Regenerate Cache", help="Force fresh computation"):
-                    with st.spinner("Regenerating cache..."):
-                        delete_cache(dataset_id)
-                        # Get review_only state (may not be set yet)
-                        review_only_val = st.session_state.get("review_only", True)
-                        load_data(
-                            reference_path,
-                            target_path,
-                            dataset_id,
-                            use_cache=False,
-                            review_only=review_only_val,
-                        )
-                    st.rerun()
-            else:
-                st.caption("No cache available - will compute fresh")
+            # No cache - show manual load UI
+            st.text(f"Reference: {reference_path.name}")
+            st.text(f"Target: {target_path.name}")
+            st.caption("No cache available - will compute fresh")
 
             # Confidence band filter
             st.divider()
             lower_bound = settings.review_threshold - 0.05
             upper_bound = settings.match_threshold + 0.05
-
-            if "review_only" not in st.session_state:
-                st.session_state.review_only = True
 
             review_only = st.checkbox(
                 f"Review band only ({lower_bound:.2f} - {upper_bound:.2f})",
@@ -519,7 +500,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
 
             if st.button("Load Data", type="primary"):
                 with st.spinner("Loading and scoring candidates..."):
-                    load_data(reference_path, target_path, dataset_id, use_cache, review_only)
+                    load_data(reference_path, target_path, dataset_id, use_cache=True, review_only=review_only)
                 st.rerun()
         else:
             # Show load status with filter indicator
@@ -529,20 +510,6 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                 st.success(f"Loaded {loaded_count:,} of {full_count:,} candidates (review band)")
             else:
                 st.success(f"Loaded {loaded_count:,} candidates")
-
-            # Map style
-            st.subheader("Map")
-            tile_options = ["Light", "Satellite", "OpenStreetMap"]
-            current_tile = st.session_state.get("tile_layer_choice", "Light")
-            tile_index = tile_options.index(current_tile) if current_tile in tile_options else 0
-            tile_layer = st.selectbox(
-                "Base map",
-                tile_options,
-                index=tile_index,
-                key="tile_layer",
-            )
-            # Store the choice separately so it persists across reruns
-            st.session_state.tile_layer_choice = tile_layer
 
             # Filter controls
             st.subheader("Filter")
@@ -594,8 +561,6 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         st.subheader("Mode")
         if "show_comparison" not in st.session_state:
             st.session_state.show_comparison = False
-        if "quick_mode" not in st.session_state:
-            st.session_state.quick_mode = False
 
         mode = st.radio(
             "View",
@@ -606,16 +571,6 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
         )
         if (mode == "Compare Labelers") != st.session_state.show_comparison:
             st.session_state.show_comparison = mode == "Compare Labelers"
-            st.rerun()
-
-        # Quick Mode toggle (mobile-optimized)
-        quick_mode = st.checkbox(
-            "📱 Quick Mode",
-            value=st.session_state.quick_mode,
-            help="Simplified UI optimized for mobile/touch",
-        )
-        if quick_mode != st.session_state.quick_mode:
-            st.session_state.quick_mode = quick_mode
             st.rerun()
 
         st.divider()
@@ -725,19 +680,18 @@ def _add_keyboard_shortcuts():
             }
 
             const key = e.key.toLowerCase();
-            // Match button by shortcut key shown in parentheses, e.g. "(M)"
-            // This is more robust than matching full button text
+            // Match button by emoji/text content
             let shortcutMatch = null;
 
-            if (key === 'm') shortcutMatch = '(M)';
-            else if (key === 'n') shortcutMatch = '(N)';
-            else if (key === 'u') shortcutMatch = '(U)';
-            else if (key === 'z') shortcutMatch = '(Z)';
+            if (key === 'm') shortcutMatch = '✅';
+            else if (key === 'n') shortcutMatch = '❌';
+            else if (key === 'u') shortcutMatch = '🤔';
+            else if (key === 'z') shortcutMatch = '↩️';
             else if (key === 'arrowleft') shortcutMatch = '←';
             else if (key === 'arrowright') shortcutMatch = '→';
 
             if (shortcutMatch) {
-                // Find button containing the shortcut pattern
+                // Find button containing the emoji/text
                 const buttons = doc.querySelectorAll('button');
                 for (const btn of buttons) {
                     if (btn.innerText.includes(shortcutMatch) && !btn.disabled) {
@@ -756,11 +710,6 @@ def _add_keyboard_shortcuts():
 
 def render_single_pair_mode(pair, filtered, label_store, session):
     """Render the standard single-pair labeling mode."""
-    # Check if quick mode is enabled
-    if st.session_state.get("quick_mode", False):
-        render_quick_mode(pair, filtered, label_store, session)
-        return
-
     # Add keyboard shortcut handler via JavaScript
     _add_keyboard_shortcuts()
 
@@ -809,8 +758,52 @@ def render_single_pair_mode(pair, filtered, label_store, session):
                 advance_to_next()
                 st.rerun()
 
-    # Main layout: map on left, features on right
+    # Pass alignment fractions from the pair (computed by pipeline)
+    alignment_kwargs = {
+        "ref_start_pct": pair.ref_start_frac,
+        "ref_end_pct": pair.ref_end_frac,
+        "target_start_pct": pair.target_start_frac,
+        "target_end_pct": pair.target_end_frac,
+    }
+
+    # Main layout: map + buttons on left, features on right
     col_map, col_features = st.columns([2, 1])
+
+    with col_map:
+        # Basemap selector - compact horizontal radio
+        tile_options = ["Light", "Satellite", "OpenStreetMap"]
+        current_tile = st.session_state.get("tile_layer_choice", "Light")
+        tile_index = tile_options.index(current_tile) if current_tile in tile_options else 0
+        tile_layer = st.radio(
+            "Base map",
+            tile_options,
+            index=tile_index,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="tile_layer",
+        )
+        st.session_state.tile_layer_choice = tile_layer
+
+        # Map view - automatically shows alignment if partial
+        m = create_comparison_map(pair, tile_layer=tile_layer)
+        # Render map as static HTML - more reliable than st_folium for automated browsers
+        # Use get_root().render() to avoid "Trust Notebook" message
+        map_html = m.get_root().render()
+        components.html(map_html, height=550)
+
+        # Action buttons - full width under the map
+        if st.button("✅ Match", type="primary", use_container_width=True, key="btn_match"):
+            record_label(pair, "match", label_store, **alignment_kwargs)
+            st.rerun()
+        if st.button("❌ No Match", use_container_width=True, key="btn_no_match"):
+            record_label(pair, "no_match", label_store, **alignment_kwargs)
+            st.rerun()
+        if st.button("🤔 Unsure", use_container_width=True, key="btn_unsure"):
+            record_label(pair, "unsure", label_store, **alignment_kwargs)
+            st.rerun()
+        if st.button("↩️ Undo", disabled=len(session.undo_stack) == 0, use_container_width=True, key="btn_undo"):
+            undo_last_label(label_store)
+            st.rerun()
 
     with col_features:
         # Feature panel
@@ -829,151 +822,6 @@ def render_single_pair_mode(pair, filtered, label_store, session):
             ):
                 st.session_state.one_to_n_mode = True
                 st.session_state.selected_refs = {pair.ref_id}
-                st.rerun()
-
-    with col_map:
-        # Map view - automatically shows alignment if partial
-        tile_layer = st.session_state.get("tile_layer_choice", "Light")
-        m = create_comparison_map(pair, tile_layer=tile_layer)
-        # Render map as static HTML - more reliable than st_folium for automated browsers
-        # Use get_root().render() to avoid "Trust Notebook" message
-        map_html = m.get_root().render()
-        components.html(map_html, height=550)
-
-    # Action buttons - compact row with keyboard shortcuts shown
-    col1, col2, col3, col4 = st.columns(4)
-
-    # Pass alignment fractions from the pair (computed by pipeline)
-    alignment_kwargs = {
-        "ref_start_pct": pair.ref_start_frac,
-        "ref_end_pct": pair.ref_end_frac,
-        "target_start_pct": pair.target_start_frac,
-        "target_end_pct": pair.target_end_frac,
-    }
-
-    with col1:
-        if st.button("✅ Match (M)", type="primary", use_container_width=True):
-            record_label(pair, "match", label_store, **alignment_kwargs)
-            st.rerun()
-
-    with col2:
-        if st.button("❌ No Match (N)", use_container_width=True):
-            record_label(pair, "no_match", label_store, **alignment_kwargs)
-            st.rerun()
-
-    with col3:
-        if st.button("🤔 Unsure (U)", use_container_width=True):
-            record_label(pair, "unsure", label_store, **alignment_kwargs)
-            st.rerun()
-
-    with col4:
-        if st.button("↩️ Undo (Z)", disabled=len(session.undo_stack) == 0, use_container_width=True):
-            undo_last_label(label_store)
-            st.rerun()
-
-
-def render_quick_mode(pair, filtered, label_store, session):
-    """Render mobile-optimized quick labeling mode.
-
-    Provides a simplified single-column layout with large touch targets
-    and minimal feature display for efficient labeling on mobile devices.
-    """
-    # Add keyboard shortcut handler
-    _add_keyboard_shortcuts()
-
-    # Track session labels count
-    if "session_label_count" not in st.session_state:
-        st.session_state.session_label_count = 0
-
-    # Navigation bar - simplified for mobile
-    nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
-
-    with nav_col1:
-        if st.button(
-            "◀",
-            disabled=session.current_index == 0,
-            key="prev_quick",
-            use_container_width=True,
-        ):
-            go_to_previous()
-            st.rerun()
-
-    with nav_col2:
-        st.markdown(
-            f"<div style='text-align: center; font-size: 16px; padding: 8px;'>"
-            f"<b>Pair {session.current_index + 1} / {len(filtered)}</b></div>",
-            unsafe_allow_html=True,
-        )
-
-    with nav_col3:
-        if st.button(
-            "▶",
-            disabled=session.current_index >= len(filtered) - 1,
-            key="next_quick",
-            use_container_width=True,
-        ):
-            advance_to_next()
-            st.rerun()
-
-    # Map - full width, taller for mobile viewing
-    tile_layer = st.session_state.get("tile_layer_choice", "Light")
-    m = create_comparison_map(pair, tile_layer=tile_layer)
-    map_html = m.get_root().render()
-    components.html(map_html, height=450)
-
-    # Minimal feature display (confidence + names)
-    render_minimal_feature_panel(pair)
-
-    # Pass alignment fractions from the pair (computed by pipeline)
-    alignment_kwargs = {
-        "ref_start_pct": pair.ref_start_frac,
-        "ref_end_pct": pair.ref_end_frac,
-        "target_start_pct": pair.target_start_frac,
-        "target_end_pct": pair.target_end_frac,
-    }
-
-    # Large action buttons - Match and No Match prominently displayed
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button(
-            "✅ MATCH (M)",
-            type="primary",
-            use_container_width=True,
-            key="quick_match",
-        ):
-            record_label(pair, "match", label_store, **alignment_kwargs)
-            advance_to_next()
-            st.rerun()
-
-    with col2:
-        if st.button(
-            "❌ NO MATCH (N)",
-            use_container_width=True,
-            key="quick_no_match",
-        ):
-            record_label(pair, "no_match", label_store, **alignment_kwargs)
-            advance_to_next()
-            st.rerun()
-
-    # More options in an expander for secondary actions
-    with st.expander("More Options"):
-        more_col1, more_col2 = st.columns(2)
-
-        with more_col1:
-            if st.button("🤔 Unsure (U)", use_container_width=True, key="quick_unsure"):
-                record_label(pair, "unsure", label_store, **alignment_kwargs)
-                advance_to_next()
-                st.rerun()
-
-        with more_col2:
-            if st.button(
-                "↩️ Undo (Z)",
-                disabled=len(session.undo_stack) == 0,
-                use_container_width=True,
-                key="quick_undo",
-            ):
-                undo_last_label(label_store)
                 st.rerun()
 
 

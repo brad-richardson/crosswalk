@@ -476,7 +476,9 @@ def generate_scored_candidates(
         return result.iloc[0]
 
     views = []
-    for result in match_results:
+    total_results = len(match_results)
+    logger.info(f"Converting {total_results:,} MatchResults to CandidatePairViews...")
+    for i, result in enumerate(match_results):
         # Look up original geometries
         ref_row = get_row(ref_lookup, result.ref_id)
         target_row = get_row(target_lookup, result.target_id)
@@ -542,14 +544,20 @@ def generate_scored_candidates(
             )
         )
 
-    logger.info(f"Built {len(views)} CandidatePairView objects in {time.perf_counter() - t0:.1f}s")
+        # Progress logging every 50k
+        if (i + 1) % 50000 == 0:
+            logger.info(f"View conversion: {i + 1:,}/{total_results:,}")
+
+    logger.info(f"Built {len(views):,} CandidatePairView objects in {time.perf_counter() - t0:.1f}s")
 
     # Sort: REVIEW first, then by confidence descending
+    logger.info(f"Sorting {len(views):,} views...")
     def sort_key(v):
         decision_order = {"review": 0, "match": 1, "no_match": 2}
         return (decision_order.get(v.decision, 3), -v.confidence)
 
     views.sort(key=sort_key)
+    logger.info("Sorting complete")
 
     return views
 

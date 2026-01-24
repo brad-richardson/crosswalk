@@ -1,7 +1,7 @@
 """Map visualization component using folium."""
 
 import folium
-from shapely.geometry import LineString, mapping
+from shapely.geometry import LineString, Point, mapping
 
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
@@ -13,6 +13,9 @@ TARGET_COLOR = "#F44336"  # Red (aligned/matched portion)
 TARGET_FADED_COLOR = "#FFCDD2"  # Light red (full geometry context)
 REFERENCE_WEIGHT = 5
 TARGET_WEIGHT = 4
+
+# Dot marker percentages along line
+DOT_PERCENTAGES = [0.0, 0.5, 1.0]
 
 
 TILE_LAYERS = {
@@ -34,6 +37,40 @@ def _add_tile_layer(m: folium.Map, layer_name: str = "Light") -> None:
         ).add_to(m)
     else:
         folium.TileLayer(tiles=tiles, max_zoom=21).add_to(m)
+
+
+def _add_line_markers(
+    m: folium.Map,
+    geometry: LineString,
+    color: str,
+    percentages: list[float] = DOT_PERCENTAGES,
+) -> None:
+    """Add dot markers at specified percentages along a line.
+
+    Args:
+        m: Folium map to add markers to
+        geometry: LineString geometry
+        color: Color for the markers
+        percentages: List of percentages (0.0-1.0) where to place markers
+    """
+    if not isinstance(geometry, LineString) or geometry.is_empty:
+        return
+
+    for pct in percentages:
+        # Interpolate point along line
+        point = geometry.interpolate(pct, normalized=True)
+        label = f"{int(pct * 100)}%"
+
+        folium.CircleMarker(
+            location=[point.y, point.x],
+            radius=6,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.8,
+            weight=2,
+            popup=label,
+        ).add_to(m)
 
 
 def create_comparison_map(
@@ -173,6 +210,10 @@ def create_comparison_map(
             popup=target_aligned_popup,
         )
 
+        # Add dot markers at 0%, 50%, 100% for aligned portions
+        _add_line_markers(m, pair.ref_aligned_geometry, REFERENCE_COLOR)
+        _add_line_markers(m, pair.target_aligned_geometry, TARGET_COLOR)
+
         # Add alignment legend
         _add_alignment_legend(m)
     else:
@@ -206,6 +247,10 @@ def create_comparison_map(
             dash_array="10, 5",
             popup=target_popup,
         )
+
+        # Add dot markers at 0%, 50%, 100% for full geometries
+        _add_line_markers(m, pair.ref_geometry, REFERENCE_COLOR)
+        _add_line_markers(m, pair.target_geometry, TARGET_COLOR)
 
         # Add simple legend
         _add_legend(m)

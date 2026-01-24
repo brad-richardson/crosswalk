@@ -1007,8 +1007,11 @@ class MLMatcher:
         work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
 
         # Process with map for ordered results
-        chunk_size = max(1000, n_candidates // (n_workers * 4))
+        # Use smaller chunks for more frequent progress updates
+        chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
         features_list = []
+
+        logger.info(f"Starting parallel feature computation (chunk_size={chunk_size})...")
 
         with ProcessPoolExecutor(
             max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
@@ -1020,8 +1023,10 @@ class MLMatcher:
                     executor.map(_compute_single_feature, batch, chunksize=chunk_size)
                 )
                 features_list.extend(batch_results)
+                processed = min(i + len(batch), len(work_items))
+                pct = processed / len(work_items) * 100
                 logger.info(
-                    f"Processed {min(i + len(batch), len(work_items))}/{len(work_items)} candidates..."
+                    f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)"
                 )
 
         # Log any errors encountered during feature computation
@@ -1031,11 +1036,14 @@ class MLMatcher:
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
+        logger.info(f"Running XGBoost prediction on {len(features_list):,} candidates...")
         probs = self.predict(features_list)
+        logger.info("XGBoost prediction complete")
 
         # Build results - use confidence-based decision, not class-based
         # This ensures high-confidence matches aren't filtered just because
         # the model's decision boundary puts them in "no_match" class
+        logger.info(f"Building {len(candidates):,} MatchResult objects...")
         results = []
         for i, cand in enumerate(candidates):
             prob = probs[i]
@@ -1067,6 +1075,11 @@ class MLMatcher:
                 )
             )
 
+            # Progress logging every 100k
+            if (i + 1) % 100000 == 0:
+                logger.info(f"Built {i + 1:,}/{len(candidates):,} MatchResult objects...")
+
+        logger.info(f"Built {len(results):,} MatchResult objects")
         return results
 
 
