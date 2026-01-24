@@ -40,15 +40,6 @@ from ..config import (
 )
 from .rules import MatchDecision, MatchResult
 
-# Additional relational features (kept for backward compatibility with old labels)
-# These are now part of FEATURE_COLUMNS
-RELATIONAL_FEATURE_COLUMNS = [
-    "start_endpoint_proximity",
-    "end_endpoint_proximity",
-    "shared_endpoint_count",
-]
-
-
 # Module-level globals for multiprocessing worker data
 _worker_data = None
 
@@ -472,35 +463,9 @@ class MLMatcher:
             else FEATURE_COLUMNS
         )
 
-        # Build list of actual feature columns to use (no duplicates)
-        actual_features = []
-        for feat in base_features:
-            if feat in df.columns:
-                actual_features.append(feat)
-            elif feat == "mean_hausdorff_distance" and "hausdorff_distance" in df.columns:
-                # Skip - we'll use hausdorff_distance instead, but don't duplicate
-                if "hausdorff_distance" not in actual_features:
-                    actual_features.append("hausdorff_distance")
-            elif feat == "overlap_ratio" and "buffer_iou" in df.columns:
-                # Skip - we'll use buffer_iou instead, but don't duplicate
-                if "buffer_iou" not in actual_features:
-                    actual_features.append("buffer_iou")
-
-        # Add relational features if present in the data (only if not using pre-set list)
-        if not (hasattr(self, "feature_names") and self.feature_names):
-            for feat in RELATIONAL_FEATURE_COLUMNS:
-                if feat in df.columns:
-                    actual_features.append(feat)
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_features = []
-        for f in actual_features:
-            if f not in seen:
-                seen.add(f)
-                unique_features.append(f)
-
-        self.feature_names = unique_features
+        # Build list of actual feature columns present in the data
+        actual_features = [feat for feat in base_features if feat in df.columns]
+        self.feature_names = actual_features
         logger.info(f"Using features: {self.feature_names}")
 
         # Extract feature matrix (without imputation)
@@ -518,35 +483,12 @@ class MLMatcher:
         self, df: pd.DataFrame, binary: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract features from nested dict column."""
-        # Check if relational features are present in any row's feature dict
-        sample_features = df["features"].iloc[0] if len(df) > 0 else {}
-        has_relational = (
-            any(feat in sample_features for feat in RELATIONAL_FEATURE_COLUMNS)
-            if sample_features
-            else False
-        )
-
-        # Build feature names list including relational if present
-        feature_names = self.feature_names.copy()
-        if has_relational:
-            for feat in RELATIONAL_FEATURE_COLUMNS:
-                if feat not in feature_names:
-                    feature_names.append(feat)
-            self.feature_names = feature_names
-
         feature_rows = []
 
         for _, row in df.iterrows():
             features = row.get("features", {})
             if features and isinstance(features, dict):
-                feat_row = []
-                for col in self.feature_names:
-                    val = features.get(col, np.nan)
-                    if col == "mean_hausdorff_distance" and pd.isna(val):
-                        val = features.get("hausdorff_distance", np.nan)
-                    if col == "overlap_ratio" and pd.isna(val):
-                        val = features.get("buffer_iou", np.nan)
-                    feat_row.append(val)
+                feat_row = [features.get(col, np.nan) for col in self.feature_names]
                 feature_rows.append(feat_row)
             else:
                 # Fill with NaNs for rows without features
@@ -657,7 +599,6 @@ class MLMatcher:
         target_class_column: str = "class",
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
-        spatial_context=None,
         n_jobs: int = -1,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
@@ -672,15 +613,10 @@ class MLMatcher:
             target_class_column: Column name for target class
             ref_subclass_column: Column name for reference subclass
             target_subclass_column: Column name for target subclass
-            spatial_context: Optional SpatialContextIndex for endpoint features
             n_jobs: Number of parallel jobs (-1 for all cores)
 
         Returns:
             List of MatchResult objects
-
-        Note:
-            spatial_context is not supported in parallel mode and will be ignored.
-            Use n_jobs=1 for sequential processing with spatial_context support.
         """
         # Handle auto model selection
         if self.model is None and self._auto_select:
@@ -707,13 +643,6 @@ class MLMatcher:
         # Handle empty candidates list
         if not candidates:
             return []
-
-        # spatial_context parameter is now deprecated - endpoint features are computed automatically
-        if spatial_context is not None:
-            logger.debug(
-                "spatial_context parameter is deprecated; endpoint features are now "
-                "computed automatically from target data."
-            )
 
         # Project to meter-based CRS for accurate distance computations
         # All distance features will be in meters after this projection
@@ -808,8 +737,8 @@ class MLMatcher:
                 target_endpoint_features[target_idx] = ep_feats
             else:
                 target_endpoint_features[target_idx] = {
-                    "start_endpoint_proximity": MAX_DISTANCE_METERS,
-                    "end_endpoint_proximity": MAX_DISTANCE_METERS,
+                    "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+                    "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
                     "shared_endpoint_count": 0,
                 }
 
