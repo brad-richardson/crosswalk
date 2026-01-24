@@ -11,6 +11,20 @@ from loguru import logger
 from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
 
 
+class LabelLoadError(Exception):
+    """Raised when labels cannot be loaded and recovery fails.
+
+    This exception is raised when:
+    - The primary CSV file exists but is corrupted
+    - The backup file (if any) is also corrupted or missing
+    - Both files fail to parse
+
+    The UI should catch this and display an actionable error message.
+    """
+
+    pass
+
+
 def get_data_version(file_path: Path) -> str:
     """Get a version identifier for a data file.
 
@@ -127,34 +141,140 @@ class LabelStore:
         return self._df
 
     def _load(self) -> pd.DataFrame:
-        """Load labels from CSV."""
-        if self.csv_path.exists():
+        """Load labels from CSV with backup recovery.
+
+        Attempts to load from primary CSV first. If that fails and the file
+        exists, tries to recover from backup (.csv.bak). Only returns an
+        empty dataframe if no file exists; raises LabelLoadError if files
+        exist but cannot be read.
+
+        Returns:
+            DataFrame with labels
+
+        Raises:
+            LabelLoadError: If files exist but cannot be loaded
+        """
+        backup_path = self.csv_path.with_suffix(".csv.bak")
+        primary_exists = self.csv_path.exists()
+        backup_exists = backup_path.exists()
+
+        # Try primary file first
+        if primary_exists:
             try:
-                df = pd.read_csv(self.csv_path)
-                # Handle backward compatibility - add missing subsegment columns
-                for col, default_val in SUBSEGMENT_DEFAULTS.items():
-                    if col not in df.columns:
-                        df[col] = default_val
-                # Handle backward compatibility - add missing version columns
-                for col, default_val in VERSION_DEFAULTS.items():
-                    if col not in df.columns:
-                        df[col] = default_val
-                # Handle ref_id -> gers_id rename for backward compatibility
-                if "ref_id" in df.columns and "gers_id" not in df.columns:
-                    df = df.rename(columns={"ref_id": "gers_id"})
+                df = self._read_and_migrate(self.csv_path)
+                return df
+            except Exception as primary_error:
+                logger.warning(f"Failed to load labels from {self.csv_path}: {primary_error}")
+
+                # Try backup file
+                if backup_exists:
+                    try:
+                        logger.info(f"Attempting recovery from backup: {backup_path}")
+                        df = self._read_and_migrate(backup_path)
+                        logger.info(f"Successfully recovered {len(df)} labels from backup")
+                        return df
+                    except Exception as backup_error:
+                        logger.error(f"Backup recovery also failed: {backup_error}")
+                        raise LabelLoadError(
+                            f"Both primary and backup label files are corrupted.\n"
+                            f"Primary ({self.csv_path}): {primary_error}\n"
+                            f"Backup ({backup_path}): {backup_error}"
+                        ) from backup_error
+
+                # Primary exists but is corrupted, no backup available
+                raise LabelLoadError(
+                    f"Label file is corrupted and no backup available: {self.csv_path}\n"
+                    f"Error: {primary_error}"
+                ) from primary_error
+
+        # No primary file - try backup as last resort
+        if backup_exists:
+            try:
+                logger.info(f"Primary file missing, loading from backup: {backup_path}")
+                df = self._read_and_migrate(backup_path)
+                logger.info(f"Loaded {len(df)} labels from backup (primary missing)")
                 return df
             except Exception as e:
-                logger.warning(f"Failed to load labels from {self.csv_path}: {e}")
+                logger.warning(f"Backup file exists but failed to load: {e}")
+                raise LabelLoadError(
+                    f"Backup file exists but is corrupted: {backup_path}\nError: {e}"
+                ) from e
+
+        # No files exist - return empty dataframe (fresh start)
         return self._empty_dataframe()
+
+    def _read_and_migrate(self, path: Path) -> pd.DataFrame:
+        """Read CSV and apply backward compatibility migrations.
+
+        Args:
+            path: Path to CSV file
+
+        Returns:
+            Migrated DataFrame
+
+        Raises:
+            ValueError: If file is missing required columns (corrupted schema)
+        """
+        df = pd.read_csv(path)
+
+        # Validate required columns exist (detect schema corruption)
+        # Need either gers_id or ref_id (legacy) to be present
+        has_gers_id = "gers_id" in df.columns
+        has_ref_id = "ref_id" in df.columns
+        has_target_id = "target_id" in df.columns
+        has_label = "label" in df.columns
+
+        if not (has_gers_id or has_ref_id):
+            raise ValueError(f"Missing required column: gers_id (found: {list(df.columns)[:5]}...)")
+        if not has_target_id:
+            raise ValueError(
+                f"Missing required column: target_id (found: {list(df.columns)[:5]}...)"
+            )
+        if not has_label:
+            raise ValueError(f"Missing required column: label (found: {list(df.columns)[:5]}...)")
+
+        # Handle backward compatibility - add missing subsegment columns
+        for col, default_val in SUBSEGMENT_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = default_val
+        # Handle backward compatibility - add missing version columns
+        for col, default_val in VERSION_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = default_val
+        # Handle ref_id -> gers_id rename for backward compatibility
+        if "ref_id" in df.columns and "gers_id" not in df.columns:
+            df = df.rename(columns={"ref_id": "gers_id"})
+        return df
 
     def _empty_dataframe(self) -> pd.DataFrame:
         """Create empty DataFrame with correct schema."""
         return pd.DataFrame(columns=LABEL_COLUMNS)
 
     def save(self) -> None:
-        """Save labels to CSV."""
+        """Save labels to CSV atomically with backup.
+
+        Uses a write-to-temp-then-rename pattern to prevent data loss
+        if the process crashes during write:
+        1. Write to temporary file (.csv.tmp)
+        2. Backup existing file (.csv.bak) if present
+        3. Atomic rename temp file to final path
+        """
         self.partition_path.mkdir(parents=True, exist_ok=True)
-        self._df.to_csv(self.csv_path, index=False, float_format=lambda x: f"{x:.10g}")
+
+        temp_path = self.csv_path.with_suffix(".csv.tmp")
+        backup_path = self.csv_path.with_suffix(".csv.bak")
+
+        # Write to temp file first
+        self._df.to_csv(temp_path, index=False, float_format=lambda x: f"{x:.10g}")
+
+        # Backup existing file (if present)
+        if self.csv_path.exists():
+            if backup_path.exists():
+                backup_path.unlink()
+            self.csv_path.rename(backup_path)
+
+        # Atomic rename temp to final
+        temp_path.rename(self.csv_path)
 
     def add(
         self,
@@ -762,9 +882,22 @@ def backfill_features(
             df = df.drop(orphaned_indices)
             results[dataset_name]["dropped"] = orphaned_count
 
-        # Write back to CSV
+        # Write back to CSV atomically
         if not dry_run and (updated > 0 or (drop_orphaned and orphaned_indices)):
-            df.to_csv(partition_path, index=False, float_format=lambda x: f"{x:.10g}")
+            temp_path = partition_path.with_suffix(".csv.tmp")
+            backup_path = partition_path.with_suffix(".csv.bak")
+
+            # Write to temp file first
+            df.to_csv(temp_path, index=False, float_format=lambda x: f"{x:.10g}")
+
+            # Backup existing file
+            if partition_path.exists():
+                if backup_path.exists():
+                    backup_path.unlink()
+                partition_path.rename(backup_path)
+
+            # Atomic rename
+            temp_path.rename(partition_path)
             logger.info(f"  Saved to {partition_path}")
 
     # Summary

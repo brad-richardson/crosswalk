@@ -136,18 +136,59 @@ DATASET_RAW_FILES = {k: v[0] for k, v in DATASET_CONFIG.items()}
 
 
 def load_config() -> dict:
-    """Load config from file."""
+    """Load config from file with backup recovery.
+
+    Returns:
+        Config dict, or empty dict if no config exists
+    """
+    backup_file = CONFIG_FILE.with_suffix(".json.bak")
+
+    # Try primary config first
     if CONFIG_FILE.exists():
         try:
             return json.loads(CONFIG_FILE.read_text())
+        except Exception as e:
+            import logging
+
+            logging.warning(f"Failed to load config from {CONFIG_FILE}: {e}")
+
+            # Try backup
+            if backup_file.exists():
+                try:
+                    logging.info(f"Recovering config from backup: {backup_file}")
+                    return json.loads(backup_file.read_text())
+                except Exception as backup_e:
+                    logging.warning(f"Backup config also failed: {backup_e}")
+
+    # Try backup as fallback if primary doesn't exist
+    if backup_file.exists():
+        try:
+            return json.loads(backup_file.read_text())
         except Exception:
-            return {}
+            pass
+
     return {}
 
 
 def save_config(config: dict) -> None:
-    """Save config to file."""
-    CONFIG_FILE.write_text(json.dumps(config))
+    """Save config to file atomically with backup.
+
+    Uses write-to-temp-then-rename pattern to prevent corruption.
+    """
+    temp_file = CONFIG_FILE.with_suffix(".json.tmp")
+    backup_file = CONFIG_FILE.with_suffix(".json.bak")
+
+    # Write to temp file first
+    temp_file.write_text(json.dumps(config))
+
+    # Backup existing file
+    if CONFIG_FILE.exists():
+        if backup_file.exists():
+            backup_file.unlink()
+        CONFIG_FILE.rename(backup_file)
+
+    # Atomic rename
+    temp_file.rename(CONFIG_FILE)
 
 
 from matcher.config import settings
@@ -169,7 +210,7 @@ from matcher.labeling.feature_panel import (
     render_feature_panel,
     render_minimal_feature_panel,
 )
-from matcher.labeling.label_store import LabelStore, get_data_version
+from matcher.labeling.label_store import LabelLoadError, LabelStore, get_data_version
 from matcher.labeling.map_view import create_comparison_map
 from matcher.labeling.state import (
     advance_to_next,
@@ -293,7 +334,17 @@ def main():
 
     # Initialize label store with dataset_id (uses Hive partitioning)
     if st.session_state.label_store is None:
-        st.session_state.label_store = LabelStore(dataset_id)
+        try:
+            st.session_state.label_store = LabelStore(dataset_id)
+            # Access .df to trigger load and catch errors early
+            _ = st.session_state.label_store.df
+        except LabelLoadError as e:
+            st.error(
+                f"**Failed to load labels for {dataset_id}**\n\n"
+                f"{e}\n\n"
+                "Check the label files in the `labels/` directory for corruption."
+            )
+            st.stop()
 
     # Render UI
     render_sidebar(reference_path, target_path, dataset_id)

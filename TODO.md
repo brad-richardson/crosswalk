@@ -591,11 +591,6 @@ Modify `_add_target_segments` in `combiner.py` to:
 
 ### Medium: Robustness Issues
 
-#### Atomic File Writes
-- **Problem**: Direct parquet writes without temp file; crash mid-write leaves corrupted files
-- **Location**: `integration/output.py:91`, `pipeline/runner.py:343`
-- **Solution**: Write to temp file, then atomic rename
-
 #### Overly Broad Exception Handling
 - **Problem**: `except Exception: return None` silently swallows errors
 - **Location**: `blocking/spatial_index.py`
@@ -651,7 +646,6 @@ Modify `_add_target_segments` in `combiner.py` to:
 | Vertex density | Geometric | Very Low |
 | Length binning | Geometric | Low |
 | Multi-stage blocking | Blocking | Low |
-| Atomic file writes | Robustness | Low |
 | Feature medians assertion | Robustness | Very Low |
 
 ### Medium Priority
