@@ -428,6 +428,131 @@ def compute_heading_consistency(line: LineString, sample_interval: float = 10.0)
     return max(0.0, 1.0 - avg_diff / 90.0)
 
 
+def compute_sinuosity(line: LineString) -> float:
+    """Compute sinuosity of a line (ratio of path length to straight-line distance).
+
+    Sinuosity = line_length / straight_distance
+    - 1.0 = perfectly straight
+    - >1.0 = increasingly curvy
+    - Loop (start == end): returns 100.0 to indicate loop
+
+    Args:
+        line: LineString geometry
+
+    Returns:
+        Sinuosity ratio (>= 1.0, or 100.0 for loops)
+    """
+    if line is None or line.is_empty:
+        return 1.0
+
+    line_length = line.length
+    if line_length <= 0:
+        return 1.0
+
+    coords = np.array(line.coords)
+    if len(coords) < 2:
+        return 1.0
+
+    # Compute straight-line (Euclidean) distance between endpoints
+    start = coords[0]
+    end = coords[-1]
+    straight_distance = np.sqrt(np.sum((end - start) ** 2))
+
+    # Handle loop case (start == end)
+    if straight_distance < 1e-9:
+        return 100.0
+
+    return line_length / straight_distance
+
+
+def compute_vertex_density(line: LineString) -> float:
+    """Compute vertex density of a line (vertices per meter).
+
+    Higher density often indicates more detailed/higher-quality data.
+    Lower density indicates simpler geometry.
+
+    Args:
+        line: LineString geometry
+
+    Returns:
+        Vertices per meter (>= 0.0)
+    """
+    if line is None or line.is_empty:
+        return 0.0
+
+    line_length = line.length
+    if line_length <= 0:
+        return 0.0
+
+    n_vertices = len(line.coords)
+    return n_vertices / line_length
+
+
+def compute_length_bin(length_m: float) -> int:
+    """Compute length bin for a segment.
+
+    Bins:
+    - 0 = short (<10m)
+    - 1 = medium (10-100m)
+    - 2 = long (100-500m)
+    - 3 = highway (>500m)
+
+    Args:
+        length_m: Segment length in meters
+
+    Returns:
+        Length bin (0-3)
+    """
+    if length_m < 10:
+        return 0
+    elif length_m < 100:
+        return 1
+    elif length_m < 500:
+        return 2
+    else:
+        return 3
+
+
+def compute_shape_complexity(line: LineString, angle_threshold: float = 10.0) -> int:
+    """Count significant direction changes (turns) in a line.
+
+    A "significant turn" is where the heading changes by more than
+    angle_threshold degrees between consecutive segments.
+
+    Args:
+        line: LineString geometry
+        angle_threshold: Minimum angle change to count as a turn (degrees)
+
+    Returns:
+        Number of significant turns (>= 0)
+    """
+    if line is None or line.is_empty:
+        return 0
+
+    coords = np.array(line.coords)
+    if len(coords) < 3:
+        return 0
+
+    turn_count = 0
+
+    # Compute headings between consecutive points
+    for i in range(len(coords) - 2):
+        # Heading from point i to i+1
+        heading1 = _compute_heading(coords[i], coords[i + 1])
+        # Heading from point i+1 to i+2
+        heading2 = _compute_heading(coords[i + 1], coords[i + 2])
+
+        # Compute angle difference
+        angle_diff = abs(heading1 - heading2)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+
+        if angle_diff > angle_threshold:
+            turn_count += 1
+
+    return turn_count
+
+
 def compute_collinear_gap_ratio(
     line_a: LineString,
     line_b: LineString,

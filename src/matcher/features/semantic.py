@@ -635,6 +635,44 @@ def extract_numeric_suffix(name: str | None) -> int | None:
     return None
 
 
+def compute_name_numeric_match(name_a, name_b) -> float:
+    """Compute numeric route matching score for numbered routes (I-90, US-101, etc.).
+
+    This feature helps match numbered routes that may have different formatting
+    (e.g., "Interstate 90" vs "I-90", "US Route 101" vs "US-101").
+
+    Args:
+        name_a: First name (string or dict with 'primary' key)
+        name_b: Second name (string or dict with 'primary' key)
+
+    Returns:
+        1.0 if both have matching route numbers
+        0.5 if neither has a numeric suffix (neutral)
+        0.0 if route numbers mismatch
+    """
+    # Extract name strings from dict if needed
+    name_a = _extract_name_string(name_a)
+    name_b = _extract_name_string(name_b)
+
+    # Extract numeric suffixes
+    num_a = extract_numeric_suffix(name_a)
+    num_b = extract_numeric_suffix(name_b)
+
+    # Neither has a number - neutral score
+    if num_a is None and num_b is None:
+        return 0.5
+
+    # Only one has a number - neutral (don't penalize)
+    if num_a is None or num_b is None:
+        return 0.5
+
+    # Both have numbers - check if they match
+    if num_a == num_b:
+        return 1.0
+    else:
+        return 0.0
+
+
 def names_likely_same_road(name_a: str | None, name_b: str | None) -> bool:
     """Quick check if two names likely refer to the same road.
 

@@ -726,7 +726,12 @@ def eval_model(
     holdout: bool = typer.Option(
         True,
         "--holdout/--no-holdout",
-        help="Use 20%% holdout set for evaluation (default: True for unbiased metrics)",
+        help="Use holdout set for evaluation (default: True for unbiased metrics)",
+    ),
+    holdout_pct: float = typer.Option(
+        0.2,
+        "--holdout-pct",
+        help="Fraction of data to hold out for testing (default: 0.2 = 20%%)",
     ),
     seed: int = typer.Option(
         42,
@@ -743,6 +748,7 @@ def eval_model(
         matcher eval-model data/models/matcher_model.joblib
         matcher eval-model data/models/combined.joblib --no-holdout
         matcher eval-model data/models/combined.joblib --seed 123
+        matcher eval-model data/models/combined.joblib --holdout-pct 0.3
 
         # Evaluate only on specific dataset (for leave-one-out testing)
         matcher eval-model data/models/no_frisco.joblib -d us_frisco_trails --no-holdout
@@ -757,7 +763,9 @@ def eval_model(
         console.print(f"[blue]Filtering to datasets: {', '.join(dataset)}[/blue]")
 
     if holdout:
-        console.print(f"[blue]Evaluating {model.name} on 20% holdout (seed={seed})...[/blue]")
+        console.print(
+            f"[blue]Evaluating {model.name} on {holdout_pct * 100:.0f}% holdout (seed={seed})...[/blue]"
+        )
     else:
         console.print(
             f"[yellow]Evaluating {model.name} on all data (may include training data)...[/yellow]"
@@ -768,6 +776,7 @@ def eval_model(
         str(labels_dir),
         show_by_dataset=by_dataset,
         holdout=holdout,
+        holdout_pct=holdout_pct,
         seed=seed,
         filter_datasets=list(dataset) if dataset else None,
     )
@@ -2114,6 +2123,264 @@ def validate_data(
         raise typer.Exit(1)
     else:
         console.print("\n[green]All versioned files valid.[/green]")
+
+
+@app.command()
+def benchmark(
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Labels directory (Hive-partitioned CSV format)",
+    ),
+    output_dir: Path = typer.Option(
+        Path("benchmarks"),
+        "--output",
+        "-o",
+        help="Output directory for benchmark results",
+    ),
+    train_size: float = typer.Option(
+        0.7,
+        "--train-size",
+        "-t",
+        help="Fraction of data for training (default: 0.7 = 70/30 split)",
+    ),
+    seed: int = typer.Option(
+        999,
+        "--seed",
+        "-s",
+        help="Random seed for train/test split",
+    ),
+    skip_save: bool = typer.Option(
+        False,
+        "--skip-save",
+        help="Skip saving results to CSV (just print)",
+    ),
+):
+    """Run a benchmark: train on subset, evaluate on holdout.
+
+    Uses segment-aware splitting to prevent data leakage - no segment
+    appears in both train and test sets. Results are saved to
+    benchmarks/model_performance.csv for tracking over time.
+
+    Examples:
+        matcher benchmark
+        matcher benchmark --train-size 0.8
+        matcher benchmark --seed 123 --skip-save
+    """
+    import csv
+    from datetime import UTC, datetime
+
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+    from .labeling.label_store import LabelStore
+    from .matching.ml import MLMatcher, segment_aware_split
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Validate train size
+    if not 0.1 <= train_size <= 0.9:
+        console.print("[red]--train-size must be between 0.1 and 0.9[/red]")
+        raise typer.Exit(1)
+
+    run_date = datetime.now(UTC)
+    test_pct = int((1 - train_size) * 100)
+    train_pct = int(train_size * 100)
+
+    console.print("[blue]Loading labels...[/blue]")
+    all_labels = LabelStore.load_all(labels_dir)
+    console.print(f"  Total labels: {len(all_labels)}")
+
+    # Filter to valid labels only
+    valid_labels = {"match", "no_match"}
+    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
+
+    # Segment-aware split to prevent leakage
+    console.print(f"\n[blue]Splitting {train_pct}/{test_pct} with segment-aware split...[/blue]")
+    train_idx, test_idx = segment_aware_split(
+        all_labels, test_size=1 - train_size, random_state=seed
+    )
+
+    train_df = all_labels.iloc[train_idx].copy()
+    test_df = all_labels.iloc[test_idx].copy()
+
+    console.print(f"  Train: {len(train_df)}, Test: {len(test_df)}")
+    console.print(f"  Train labels: {train_df['label'].value_counts().to_dict()}")
+    console.print(f"  Test labels: {test_df['label'].value_counts().to_dict()}")
+
+    # Save train labels to temp directory for training
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Save each dataset's train portion
+        for dataset in train_df["dataset"].unique():
+            ds_train = train_df[train_df["dataset"] == dataset]
+            ds_dir = tmpdir / f"dataset={dataset}"
+            ds_dir.mkdir(parents=True, exist_ok=True)
+            ds_train.to_csv(ds_dir / "data.csv", index=False)
+
+        # Train model on train set only (no internal split since we already split)
+        console.print(f"\n[blue]Training model on {len(train_df)} samples...[/blue]")
+        matcher = MLMatcher()
+        matcher.train(labels_dir=str(tmpdir), binary=True, test_size=0.0)
+
+        # Save the model
+        model_dir = Path("data/models")
+        model_dir.mkdir(parents=True, exist_ok=True)
+        model_path = model_dir / "matcher_model_combined.joblib"
+        matcher.save_model(str(model_path))
+        console.print(f"  Model saved to {model_path}")
+
+        # Evaluate on test set (completely unseen during training)
+        console.print(f"\n[blue]Evaluating on {len(test_df)} holdout samples...[/blue]")
+
+        X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
+        X_test = matcher._impute_missing(X_test)
+        y_pred = matcher.model.predict(X_test)
+
+        # Overall metrics
+        overall_acc = accuracy_score(y_test, y_pred)
+        overall_f1 = f1_score(y_test, y_pred, average="weighted")
+        overall_precision = precision_score(y_test, y_pred, average="weighted")
+        overall_recall = recall_score(y_test, y_pred, average="weighted")
+
+        console.print(f"\n{'=' * 60}")
+        console.print(f"[bold]EVALUATION ON {test_pct}% HOLDOUT ({len(test_df)} samples)[/bold]")
+        console.print("=" * 60)
+        console.print("\nOverall:")
+        console.print(f"  Accuracy:  {overall_acc:.3f}")
+        console.print(f"  F1:        {overall_f1:.3f}")
+        console.print(f"  Precision: {overall_precision:.3f}")
+        console.print(f"  Recall:    {overall_recall:.3f}")
+
+        # Extract top 5 feature importances
+        feature_importances = dict(zip(matcher.feature_names, matcher.model.feature_importances_))
+        top_5_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:5]
+
+        console.print("\nTop 5 features by importance:")
+        for feat, imp in top_5_features:
+            console.print(f"  {feat}: {imp:.3f}")
+
+        # Per-dataset metrics
+        results = {}
+        console.print("\nPer-dataset results:")
+        for dataset in sorted(test_df["dataset"].unique()):
+            ds_test = test_df[test_df["dataset"] == dataset]
+            X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
+            X_ds = matcher._impute_missing(X_ds)
+            y_ds_pred = matcher.model.predict(X_ds)
+
+            ds_acc = accuracy_score(y_ds, y_ds_pred)
+            ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
+            ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+            ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+            n_match = int((y_ds == 1).sum())
+            n_no_match = int((y_ds == 0).sum())
+
+            console.print(
+                f"  {dataset}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
+                f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
+            )
+
+            results[dataset] = {
+                "n_samples": len(ds_test),
+                "n_match": n_match,
+                "n_no_match": n_no_match,
+                "accuracy": ds_acc,
+                "f1": ds_f1,
+                "precision": ds_precision,
+                "recall": ds_recall,
+            }
+
+        # Save results to CSV
+        if not skip_save:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            results_file = output_dir / "model_performance.csv"
+
+            fieldnames = [
+                "run_date",
+                "data_pull_date",
+                "dataset",
+                "n_train",
+                "n_test",
+                "train_size",
+                "n_samples",
+                "n_match",
+                "n_no_match",
+                "accuracy",
+                "f1",
+                "precision",
+                "recall",
+                "split_seed",
+                "model_name",
+                "top1_feature",
+                "top1_importance",
+                "top2_feature",
+                "top2_importance",
+                "top3_feature",
+                "top3_importance",
+                "top4_feature",
+                "top4_importance",
+                "top5_feature",
+                "top5_importance",
+            ]
+
+            write_header = not results_file.exists()
+
+            with open(results_file, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+                if write_header:
+                    writer.writeheader()
+
+                for dataset_name, metrics in results.items():
+                    row = {
+                        "run_date": run_date.isoformat(),
+                        "data_pull_date": run_date.isoformat(),
+                        "dataset": dataset_name,
+                        "n_train": len(train_df),
+                        "n_test": len(test_df),
+                        "train_size": train_size,
+                        "n_samples": metrics.get("n_samples", 0),
+                        "n_match": metrics.get("n_match", 0),
+                        "n_no_match": metrics.get("n_no_match", 0),
+                        "accuracy": f"{metrics.get('accuracy', 0):.4f}",
+                        "f1": f"{metrics.get('f1', 0):.4f}",
+                        "precision": f"{metrics.get('precision', 0):.4f}",
+                        "recall": f"{metrics.get('recall', 0):.4f}",
+                        "split_seed": seed,
+                        "model_name": model_path.name,
+                        "top1_feature": top_5_features[0][0] if len(top_5_features) > 0 else "",
+                        "top1_importance": f"{top_5_features[0][1]:.4f}"
+                        if len(top_5_features) > 0
+                        else "",
+                        "top2_feature": top_5_features[1][0] if len(top_5_features) > 1 else "",
+                        "top2_importance": f"{top_5_features[1][1]:.4f}"
+                        if len(top_5_features) > 1
+                        else "",
+                        "top3_feature": top_5_features[2][0] if len(top_5_features) > 2 else "",
+                        "top3_importance": f"{top_5_features[2][1]:.4f}"
+                        if len(top_5_features) > 2
+                        else "",
+                        "top4_feature": top_5_features[3][0] if len(top_5_features) > 3 else "",
+                        "top4_importance": f"{top_5_features[3][1]:.4f}"
+                        if len(top_5_features) > 3
+                        else "",
+                        "top5_feature": top_5_features[4][0] if len(top_5_features) > 4 else "",
+                        "top5_importance": f"{top_5_features[4][1]:.4f}"
+                        if len(top_5_features) > 4
+                        else "",
+                    }
+                    writer.writerow(row)
+
+            console.print(f"\n[green]Results saved to {results_file}[/green]")
+
+    console.print("\n[green]Benchmark complete![/green]")
 
 
 @app.command()

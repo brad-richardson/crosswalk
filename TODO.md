@@ -196,6 +196,22 @@ Features derived from road attributes beyond names and classes.
 - **Proposed**: Use Earth Mover's Distance (EMD) or optimal matching instead of simple comparison
 - **Use case**: More nuanced comparison of "4-way intersection" vs "5-way intersection"
 
+### Investigate Graphlet Performance
+- **Status**: Enabled full graphlet features (Jan 2026)
+- **Background**: Disabled `degrees_only` mode to compute full 6-dimensional graphlet vectors:
+  - degree, triangles, squares, clustering, two_hop_count, is_articulation
+- **Observation**: CV F1 improved slightly (0.905 vs 0.901), holdout metrics unchanged (99.6%)
+- **Open questions**:
+  - Are graphlet features providing signal or just noise?
+  - Which graphlet components are most predictive (triangles? clustering?)?
+  - Does performance vary by dataset type (urban grid vs suburban)?
+  - Memory/compute trade-off worth the marginal improvement?
+- **Suggested experiments**:
+  - Feature importance analysis for graphlet components
+  - Ablation study: train with/without each graphlet component
+  - Per-dataset breakdown of graphlet feature impact
+- **Priority**: Low-Medium (incremental improvement)
+
 ### Graphlet Signature / Lateral Offset (Partial)
 - **Status**: PARTIALLY IMPLEMENTED (Jan 2026)
 - **Implemented**: `lateral_offset_m`, `lateral_offset_iqr_m`, `lateral_offset_p95_m` features

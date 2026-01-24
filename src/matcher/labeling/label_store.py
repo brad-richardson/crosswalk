@@ -396,6 +396,29 @@ class LabelStore:
             # Graphlet features (2)
             "graphlet_similarity": features.get("graphlet_similarity", 0.5),
             "endpoint_degree_similarity": features.get("endpoint_degree_similarity", 0.5),
+            # Sinuosity features (3)
+            "sinuosity_ref": features.get("sinuosity_ref", 1.0),
+            "sinuosity_target": features.get("sinuosity_target", 1.0),
+            "sinuosity_delta": features.get("sinuosity_delta", 0.0),
+            # Heading consistency features (3)
+            "heading_consistency_ref": features.get("heading_consistency_ref", 1.0),
+            "heading_consistency_target": features.get("heading_consistency_target", 1.0),
+            "heading_consistency_delta": features.get("heading_consistency_delta", 0.0),
+            # Vertex density features (3)
+            "vertex_density_ref": features.get("vertex_density_ref", 0.0),
+            "vertex_density_target": features.get("vertex_density_target", 0.0),
+            "vertex_density_ratio": features.get("vertex_density_ratio", 0.0),
+            # Length binning features (4)
+            "length_bin_ref": features.get("length_bin_ref", 0),
+            "length_bin_target": features.get("length_bin_target", 0),
+            "length_bin_match": features.get("length_bin_match", 0.0),
+            "min_length_m": features.get("min_length_m", 0.0),
+            # Shape complexity features (3)
+            "shape_complexity_ref": features.get("shape_complexity_ref", 0),
+            "shape_complexity_target": features.get("shape_complexity_target", 0),
+            "shape_complexity_delta": features.get("shape_complexity_delta", 0),
+            # Numeric route matching (1)
+            "name_numeric_match": features.get("name_numeric_match", 0.5),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
@@ -830,9 +853,11 @@ def backfill_features(
             )
 
             # Update all feature columns in the dataframe
+            # Add new columns if they don't exist (for newly added features)
             for feat_name, feat_value in features.items():
-                if feat_name in df.columns:
-                    df.at[idx, feat_name] = feat_value
+                if feat_name not in df.columns:
+                    df[feat_name] = None  # Initialize new column
+                df.at[idx, feat_name] = feat_value
 
             # Update alignment fractions
             df.at[idx, "ref_start_pct"] = alignment.overture_start_frac

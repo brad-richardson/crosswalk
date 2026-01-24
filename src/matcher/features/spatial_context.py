@@ -1687,7 +1687,7 @@ def build_connector_graph(
     id_column: str = "id",
     connectors_column: str = "connectors",
     tolerance_m: float = 5.0,
-    degrees_only: bool = True,
+    degrees_only: bool = False,
 ) -> tuple[
     "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
 ]:
@@ -1817,7 +1817,7 @@ def build_inferred_connector_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
-    degrees_only: bool = True,
+    degrees_only: bool = False,
 ) -> tuple[
     "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
 ]:

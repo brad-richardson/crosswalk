@@ -10,7 +10,7 @@ class TestExcludeSemanticFlag:
 
     def test_semantic_features_defined_in_config(self):
         """SEMANTIC_FEATURES should be defined in config."""
-        assert len(SEMANTIC_FEATURES) == 10
+        assert len(SEMANTIC_FEATURES) == 11
         assert "name_levenshtein" in SEMANTIC_FEATURES
         assert "name_jaro_winkler" in SEMANTIC_FEATURES
         assert "name_token_sort" in SEMANTIC_FEATURES
@@ -21,6 +21,7 @@ class TestExcludeSemanticFlag:
         assert "name_is_generic" in SEMANTIC_FEATURES
         assert "cardinal_direction_mismatch" in SEMANTIC_FEATURES
         assert "class_similarity" in SEMANTIC_FEATURES
+        assert "name_numeric_match" in SEMANTIC_FEATURES
 
     def test_all_semantic_features_are_in_feature_columns(self):
         """All SEMANTIC_FEATURES should be subset of FEATURE_COLUMNS."""
@@ -191,7 +192,32 @@ class TestExcludeSemanticFlag:
         graphlet_count = sum(1 for f in geom_only_features if f in graphlet_features)
         assert graphlet_count == 2, "Should have 2 graphlet features"
 
-        # Total geometry-only features: 10 + 3 + 3 + 12 + 4 + 2 = 34
-        assert len(geom_only_features) == 34, (
-            f"Expected 34 geometry-only features, got {len(geom_only_features)}"
+        # New geometric features: sinuosity (3), heading_consistency (3),
+        # vertex_density (3), length_bin (4), shape_complexity (3)
+        sinuosity_count = sum(1 for f in geom_only_features if f.startswith("sinuosity"))
+        assert sinuosity_count == 3, "Should have 3 sinuosity features"
+
+        heading_consistency_count = sum(
+            1 for f in geom_only_features if f.startswith("heading_consistency")
+        )
+        assert heading_consistency_count == 3, "Should have 3 heading consistency features"
+
+        vertex_density_count = sum(1 for f in geom_only_features if f.startswith("vertex_density"))
+        assert vertex_density_count == 3, "Should have 3 vertex density features"
+
+        length_bin_count = sum(1 for f in geom_only_features if f.startswith("length_bin"))
+        length_bin_count += sum(1 for f in geom_only_features if f == "min_length_m")
+        assert length_bin_count == 4, "Should have 4 length bin features"
+
+        shape_complexity_count = sum(
+            1 for f in geom_only_features if f.startswith("shape_complexity")
+        )
+        assert shape_complexity_count == 3, "Should have 3 shape complexity features"
+
+        # Total geometry-only features:
+        # 10 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
+        # 2 (graphlet) + 3 (sinuosity) + 3 (heading_consistency) + 3 (vertex_density) +
+        # 4 (length_bin) + 3 (shape_complexity) = 50
+        assert len(geom_only_features) == 50, (
+            f"Expected 50 geometry-only features, got {len(geom_only_features)}"
         )
