@@ -6,7 +6,17 @@ This module ensures consistent naming across fetch, pipeline, and labeling code.
 
 from pathlib import Path
 
-from matcher.config import DATA_VERSION
+from matcher.config import DATA_VERSION, FEATURE_VERSION
+
+# ============================================================================
+# DIRECTORY PATHS
+# ============================================================================
+
+# Project root (src/matcher/filenames.py -> project root)
+PROJECT_ROOT = Path(__file__).parents[2]
+
+# Cache directory for labeling UI
+LABELING_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "labeling"
 
 # ============================================================================
 # FILENAME PATTERNS (with version suffix)
@@ -141,3 +151,43 @@ def find_target_file(data_dir: Path, dataset_name: str) -> Path | None:
     """
     path = data_dir / target_filename(dataset_name)
     return path if path.exists() else None
+
+
+# ============================================================================
+# CACHE PATHS (labeling UI)
+# ============================================================================
+
+
+def scored_cache_path(dataset_id: str) -> Path:
+    """Get path to scored candidates cache file.
+
+    The scored cache contains candidates with ML predictions (decision, confidence).
+
+    Args:
+        dataset_id: Dataset identifier (e.g., "us_boston_streets")
+
+    Returns:
+        Path to cache file (may not exist)
+
+    Example:
+        us_boston_streets -> data/cache/labeling/us_boston_streets_candidates.parquet
+    """
+    return LABELING_CACHE_DIR / f"{dataset_id}_candidates.parquet"
+
+
+def feature_cache_path(dataset_id: str) -> Path:
+    """Get path to versioned feature cache file.
+
+    The feature cache contains computed features WITHOUT ML predictions,
+    allowing fast re-scoring when the ML model changes.
+
+    Args:
+        dataset_id: Dataset identifier (e.g., "us_boston_streets")
+
+    Returns:
+        Path to cache file (may not exist)
+
+    Example:
+        us_boston_streets -> data/cache/labeling/us_boston_streets_features_v2026-01-24.parquet
+    """
+    return LABELING_CACHE_DIR / f"{dataset_id}_features_v{FEATURE_VERSION}.parquet"

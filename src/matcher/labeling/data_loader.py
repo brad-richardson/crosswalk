@@ -19,14 +19,11 @@ from ..blocking import generate_candidates
 from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..features.alignment import create_subline
 from ..features.semantic import _extract_name_string
+from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
 from ..utils import filter_to_linestrings
 
 logger = logging.getLogger(__name__)
-
-# Cache directory relative to project root (data/cache/labeling/)
-# Path: src/matcher/labeling/data_loader.py -> parents[3] = project root
-CACHE_DIR = Path(__file__).parents[3] / "data" / "cache" / "labeling"
 
 
 def get_cached_matcher() -> MLMatcher | None:
@@ -222,7 +219,7 @@ def get_cache_path(dataset_id: str) -> Path:
     Returns:
         Path to the cache parquet file
     """
-    return CACHE_DIR / f"{dataset_id}_candidates.parquet"
+    return scored_cache_path(dataset_id)
 
 
 def get_cache_info(
@@ -384,7 +381,7 @@ def get_feature_cache_path(dataset_id: str) -> Path:
     Returns:
         Path to the feature cache parquet file (versioned)
     """
-    return CACHE_DIR / f"{dataset_id}_features_v{FEATURE_VERSION}.parquet"
+    return feature_cache_path(dataset_id)
 
 
 def get_feature_cache_info(
