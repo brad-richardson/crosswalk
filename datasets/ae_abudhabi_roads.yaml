@@ -3,9 +3,12 @@ display_name: Abu Dhabi Roads
 type: road
 description: Road network from Abu Dhabi SDI with Arabic and English names
 source:
-  type: arcgis
-  url: https://arcgis.sdi.abudhabi.ae/arcgis/rest/services/Pub/CF_Transportation/MapServer/0
-  portal_url: https://sdi.abudhabi.ae/sdi/
+  type: manual
+  portal_url: https://sdi.gov.abudhabi/
+notes: |
+  ArcGIS REST services endpoint no longer publicly accessible (404 as of Jan 2026).
+  Portal has moved from sdi.abudhabi.ae to sdi.gov.abudhabi.
+  Contact SDI for data access or check portal for updated service URLs.
 fetch:
   id_prefix: ae_abudhabi
   name_column: null
