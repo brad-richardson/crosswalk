@@ -349,6 +349,190 @@ def _fetch_reference_impl(
         console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
 
 
+@fetch_app.command("overture")
+def fetch_overture(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset name to fetch Overture data for (uses bbox from config)",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Fetch Overture data for all datasets matching prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        help="Fetch Overture data for all datasets",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    bbox_buffer: float | None = typer.Option(
+        None,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters). Defaults to 1km.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
+    ),
+):
+    """Fetch Overture reference data for dataset(s).
+
+    Examples:
+        matcher fetch overture us_boston_streets      # Single dataset
+        matcher fetch overture --prefix us_           # All US datasets
+        matcher fetch overture --all                  # All datasets
+    """
+    from .datasets.schema import list_dataset_configs
+
+    # Determine which datasets to fetch
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    if not datasets:
+        console.print("[yellow]No datasets found[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Fetching Overture data for {len(datasets)} dataset(s)...[/blue]")
+
+    errors = []
+    for name in sorted(datasets):
+        try:
+            console.print(f"\n[blue]{'=' * 60}[/blue]")
+            console.print(f"[blue]Fetching Overture for: {name}[/blue]")
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources={"overture"},
+                bbox_buffer=bbox_buffer,
+                force=force,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            errors.append(name)
+
+    if errors:
+        console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
+        raise typer.Exit(1)
+    console.print(f"\n[green]Successfully fetched Overture data for {len(datasets)} dataset(s)[/green]")
+
+
+@fetch_app.command("osm")
+def fetch_osm(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset name to fetch OSM data for (uses bbox from config)",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Fetch OSM data for all datasets matching prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        help="Fetch OSM data for all datasets",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--output",
+        "-o",
+        help="Output directory for fetched data",
+    ),
+    cache_dir: Path | None = typer.Option(
+        None,
+        "--cache-dir",
+        help="Cache directory for PBF files (default: ~/.cache/matcher/pbf/)",
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Force fresh download, ignore cache",
+    ),
+    keep_pbf: bool = typer.Option(
+        False,
+        "--keep-pbf",
+        help="Keep extracted PBF file for debugging",
+    ),
+    bbox_buffer: float | None = typer.Option(
+        None,
+        "--bbox-buffer",
+        help="Expand bbox by this distance (meters). Defaults to 5km for OSM.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-fetch even if files already exist",
+    ),
+):
+    """Fetch OSM reference data for dataset(s).
+
+    Examples:
+        matcher fetch osm us_boston_streets      # Single dataset
+        matcher fetch osm --prefix us_           # All US datasets
+        matcher fetch osm --all                  # All datasets
+    """
+    from .datasets.schema import list_dataset_configs
+
+    # Determine which datasets to fetch
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    if not datasets:
+        console.print("[yellow]No datasets found[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Fetching OSM data for {len(datasets)} dataset(s)...[/blue]")
+
+    errors = []
+    for name in sorted(datasets):
+        try:
+            console.print(f"\n[blue]{'=' * 60}[/blue]")
+            console.print(f"[blue]Fetching OSM for: {name}[/blue]")
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources={"osm"},
+                cache_dir=cache_dir,
+                no_cache=no_cache,
+                keep_pbf=keep_pbf,
+                bbox_buffer=bbox_buffer,
+                force=force,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            errors.append(name)
+
+    if errors:
+        console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
+        raise typer.Exit(1)
+    console.print(f"\n[green]Successfully fetched OSM data for {len(datasets)} dataset(s)[/green]")
+
+
 @fetch_app.command("all")
 def fetch_all(
     dataset_name: str = typer.Argument(
