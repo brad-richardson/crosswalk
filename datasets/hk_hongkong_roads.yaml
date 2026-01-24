@@ -7,8 +7,9 @@ source:
   url: https://static.data.gov.hk/td/road-network/RoadNetwork2ndGeneration.zip
   file_format: gml
   portal_url: https://data.gov.hk/en-data/dataset/hk-td-tis_15-road-network-v2
+notes: GML format requires manual preprocessing before ingestion.
 fetch:
-  id_prefix: hk_road
+  id_prefix: hk_hongkong
   name_column: null
   class_column: null
   bbox:

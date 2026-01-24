@@ -6,6 +6,7 @@ source:
   type: arcgis
   url: https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_RoadBasic_01/MapServer/0
   portal_url: https://data-usfs.hub.arcgis.com/datasets/national-forest-system-roads-feature-layer/about
+notes: Bbox intentionally overlaps with us_montana_roads to compare federal vs state road data in same area.
 fetch:
   id_prefix: us_usfs
   name_column: NAME

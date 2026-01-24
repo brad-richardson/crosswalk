@@ -5,7 +5,8 @@ description: Korean road network with Hangul street names from Korea Public Data
 notes: |
   Option 1: V-World WFS (requires free API key from vworld.kr)
   Option 2: Direct download from data.go.kr (may require free registration)
-  Data uses EPSG:5179 (UTM-K) and EUC-KR encoding - requires conversion.
+  Source data uses EPSG:5179 (UTM-K) and EUC-KR encoding.
+  Preprocessing required: convert CRS to WGS84 and encoding to UTF-8.
 source:
   type: manual
   portal_url: https://www.data.go.kr/data/15146878/fileData.do

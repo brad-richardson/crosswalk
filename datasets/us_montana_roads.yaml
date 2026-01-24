@@ -1,11 +1,12 @@
 name: us_montana_roads
 display_name: Montana Transportation Framework
 type: road
-description: Rural road network with surface type attributes (~45% gravel/unpaved in rural counties)
+description: Rural road network with surface type attributes
 source:
   type: arcgis
   url: https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0
   portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
+notes: Bbox intentionally overlaps with us_usfs_roads to compare state vs federal road data in same area.
 fetch:
   id_prefix: us_montana
   name_column: null
