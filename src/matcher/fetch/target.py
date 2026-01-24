@@ -71,11 +71,29 @@ def _transform_download_data(
     if len(gdf) == 0:
         return gdf
 
-    # Filter to LineStrings only (drop MultiLineStrings, Points, etc.)
+    # Convert single-part MultiLineStrings to LineStrings
+    multi_mask = gdf.geometry.geom_type == "MultiLineString"
+    if multi_mask.any():
+        n_multi = multi_mask.sum()
+
+        def to_linestring(geom):
+            if geom.geom_type == "MultiLineString" and len(geom.geoms) == 1:
+                return geom.geoms[0]
+            return geom
+
+        gdf.geometry = gdf.geometry.apply(to_linestring)
+        n_converted = (gdf.geometry.geom_type == "LineString").sum() - (
+            ~multi_mask
+        ).sum()
+        logger.info(f"Converted {n_converted} single-part MultiLineStrings to LineStrings")
+
+    # Filter to LineStrings only (drop remaining MultiLineStrings, Points, etc.)
     linestring_mask = gdf.geometry.geom_type == "LineString"
     if not linestring_mask.all():
         n_filtered = (~linestring_mask).sum()
-        logger.warning(f"Filtering {n_filtered} non-LineString geometries from {source_name}")
+        logger.warning(
+            f"Filtering {n_filtered} non-LineString geometries from {source_name}"
+        )
         gdf = gdf[linestring_mask].copy()
 
     # Strip Z coordinates if present (force 2D)
@@ -487,6 +505,14 @@ def fetch_download(
                     if not geojson_files:
                         raise ValueError("No .geojson file found in zip")
                     data_file = geojson_files[0]
+                elif file_format == "gdb":
+                    # FileGDB is a folder with .gdb extension
+                    gdb_dirs = [
+                        d for d in tmpdir_path.rglob("*.gdb") if d.is_dir()
+                    ]
+                    if not gdb_dirs:
+                        raise ValueError("No .gdb folder found in zip")
+                    data_file = gdb_dirs[0]
                 else:
                     raise ValueError(f"Unsupported file format: {file_format}")
 
@@ -505,6 +531,28 @@ def fetch_download(
                 logger.info(f"Using encoding: {encoding}")
             if file_format == "gml":
                 read_kwargs["driver"] = "GML"
+
+            # For multi-layer formats (gdb, gpkg), select the road centerline layer
+            if file_format == "gdb":
+                import pyogrio
+
+                layers = pyogrio.list_layers(data_file)
+                layer_names = [layer_info[0] for layer_info in layers]
+                logger.debug(f"Available layers: {layer_names}")
+
+                # Prefer centerline/road layers
+                for preferred in [
+                    "CENTERLINE",
+                    "centerline",
+                    "road_link",
+                    "RoadLink",
+                    "roads",
+                    "road",
+                ]:
+                    if preferred in layer_names:
+                        read_kwargs["layer"] = preferred
+                        logger.info(f"Selected layer: {preferred}")
+                        break
 
             gdf = gpd.read_file(data_file, **read_kwargs)
             logger.info(f"Loaded {len(gdf)} features")
