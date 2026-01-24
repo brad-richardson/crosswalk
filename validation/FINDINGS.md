@@ -113,20 +113,20 @@ validation/
 
 ```bash
 # Random 5% drop with fast mode
-matcher validate data/raw/overture_segments.parquet \
+matcher validate-matching data/raw/overture_segments.parquet \
     --bbox "-71.19,42.21,-70.92,42.40" \
     --strategy random --fraction 0.05 \
     --output validation/random_5pct/ \
     --fast
 
 # TomTom holdout
-matcher validate data/raw/overture_segments.parquet \
+matcher validate-matching data/raw/overture_segments.parquet \
     --bbox "-71.19,42.21,-70.92,42.40" \
     --strategy source --source-dataset TomTom \
     --output validation/tomtom/
 
 # Residential roads holdout
-matcher validate data/raw/overture_segments.parquet \
+matcher validate-matching data/raw/overture_segments.parquet \
     --bbox "-71.19,42.21,-70.92,42.40" \
     --strategy class --road-class residential \
     --output validation/residential/

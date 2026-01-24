@@ -1,4 +1,4 @@
-"""Tests for the evaluate CLI command with ground truth evaluation."""
+"""Tests for the eval-bridge CLI command with ground truth evaluation."""
 
 import tempfile
 from pathlib import Path
@@ -10,8 +10,8 @@ from typer.testing import CliRunner
 from matcher.cli import app
 
 
-class TestEvaluateCommand:
-    """Tests for matcher evaluate command."""
+class TestEvalBridgeCommand:
+    """Tests for matcher eval-bridge command."""
 
     @pytest.fixture
     def runner(self):
@@ -50,19 +50,19 @@ class TestEvaluateCommand:
             yield Path(f.name)
             Path(f.name).unlink()
 
-    def test_evaluate_without_ground_truth(self, runner, bridge_file):
-        """Evaluate command shows basic stats without ground truth."""
-        result = runner.invoke(app, ["evaluate", str(bridge_file)])
+    def test_eval_bridge_without_ground_truth(self, runner, bridge_file):
+        """eval-bridge command shows basic stats without ground truth."""
+        result = runner.invoke(app, ["eval-bridge", str(bridge_file)])
 
         assert result.exit_code == 0
         assert "Total matches: 5" in result.output
         assert "Mean confidence:" in result.output
         assert "Confidence distribution:" in result.output
 
-    def test_evaluate_with_ground_truth(self, runner, bridge_file, ground_truth_file):
-        """Evaluate command computes precision/recall/F1 with ground truth."""
+    def test_eval_bridge_with_ground_truth(self, runner, bridge_file, ground_truth_file):
+        """eval-bridge command computes precision/recall/F1 with ground truth."""
         result = runner.invoke(
-            app, ["evaluate", str(bridge_file), "--ground-truth", str(ground_truth_file)]
+            app, ["eval-bridge", str(bridge_file), "--ground-truth", str(ground_truth_file)]
         )
 
         assert result.exit_code == 0
@@ -81,17 +81,17 @@ class TestEvaluateCommand:
         # F1 = 2 * 0.6 * 0.75 / (0.6 + 0.75) = 0.667
         assert "F1 Score: 0.667" in result.output
 
-    def test_evaluate_nonexistent_ground_truth(self, runner, bridge_file):
-        """Evaluate command errors on nonexistent ground truth file."""
+    def test_eval_bridge_nonexistent_ground_truth(self, runner, bridge_file):
+        """eval-bridge command errors on nonexistent ground truth file."""
         result = runner.invoke(
-            app, ["evaluate", str(bridge_file), "--ground-truth", "/nonexistent/file.csv"]
+            app, ["eval-bridge", str(bridge_file), "--ground-truth", "/nonexistent/file.csv"]
         )
 
         assert result.exit_code == 1
         assert "not found" in result.output
 
-    def test_evaluate_parquet_ground_truth(self, runner, bridge_file):
-        """Evaluate command can read parquet ground truth files."""
+    def test_eval_bridge_parquet_ground_truth(self, runner, bridge_file):
+        """eval-bridge command can read parquet ground truth files."""
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
             df = pd.DataFrame(
                 {
@@ -105,7 +105,7 @@ class TestEvaluateCommand:
 
         try:
             result = runner.invoke(
-                app, ["evaluate", str(bridge_file), "--ground-truth", str(gt_path)]
+                app, ["eval-bridge", str(bridge_file), "--ground-truth", str(gt_path)]
             )
 
             assert result.exit_code == 0
@@ -196,7 +196,7 @@ class TestEvaluateCommand:
 
         try:
             result = runner.invoke(
-                app, ["evaluate", str(bridge_path), "--ground-truth", str(gt_path)]
+                app, ["eval-bridge", str(bridge_path), "--ground-truth", str(gt_path)]
             )
 
             assert result.exit_code == 0

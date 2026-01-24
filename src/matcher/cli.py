@@ -425,8 +425,8 @@ def match(
     console.print(f"[green]Bridge file: {output}[/green]")
 
 
-@app.command()
-def evaluate(
+@app.command("eval-bridge")
+def eval_bridge(
     bridge_file: Path = typer.Argument(..., help="Bridge file to evaluate"),
     ground_truth: Path | None = typer.Option(
         None,
@@ -435,16 +435,19 @@ def evaluate(
         help="Ground truth labels CSV (columns: gers_id, target_id, label)",
     ),
 ):
-    """Evaluate match quality.
+    """Evaluate bridge file (matching output) quality.
 
-    If ground truth is provided, computes precision/recall/F1 metrics.
+    Shows confidence distribution and, if ground truth is provided,
+    computes precision/recall/F1 metrics.
+
+    Note: To evaluate ML model quality on training data, use 'eval-model' instead.
 
     Examples:
         # Basic bridge file stats
-        matcher evaluate data/output/us_boston_streets_bridge.parquet
+        matcher eval-bridge data/output/us_boston_streets_bridge.parquet
 
         # With ground truth evaluation
-        matcher evaluate data/output/us_boston_streets_bridge.parquet \\
+        matcher eval-bridge data/output/us_boston_streets_bridge.parquet \\
             --ground-truth labels/dataset=us_boston_streets/data.csv
     """
     import pandas as pd
@@ -1022,8 +1025,8 @@ def qa_integration(
         raise typer.Exit(result.returncode)
 
 
-@app.command()
-def validate(
+@app.command("validate-matching")
+def validate_matching(
     overture: Path = typer.Argument(
         ...,
         help="Path to Overture segments parquet file",
@@ -1081,27 +1084,29 @@ def validate(
 ):
     """Run a validation experiment using ground-truth from Overture provenance.
 
-    This command:
-    1. Drops segments from Overture based on the chosen strategy
-    2. Fetches fresh OSM data for the bounding box
-    3. Runs the matcher to see if dropped segments get matched back
-    4. Evaluates results and computes recall metrics
+    This command tests matching quality by:
+    1. Dropping segments from Overture based on the chosen strategy
+    2. Fetching fresh OSM data for the bounding box
+    3. Running the matcher to see if dropped segments get matched back
+    4. Evaluating results and computing recall metrics
+
+    Note: To validate data file versions, use 'validate-data' instead.
 
     Examples:
         # Drop 10% of OSM segments randomly
-        matcher validate data/raw/overture.parquet \\
+        matcher validate-matching data/raw/overture.parquet \\
             --bbox "-71.19,42.21,-70.92,42.40" \\
             --strategy random --fraction 0.1 \\
             --output validation/random_10pct/
 
         # Drop all TomTom segments
-        matcher validate data/raw/overture.parquet \\
+        matcher validate-matching data/raw/overture.parquet \\
             --bbox "-71.19,42.21,-70.92,42.40" \\
             --strategy source --source-dataset TomTom \\
             --output validation/tomtom_holdout/
 
         # Drop residential roads
-        matcher validate data/raw/overture.parquet \\
+        matcher validate-matching data/raw/overture.parquet \\
             --bbox "-71.19,42.21,-70.92,42.40" \\
             --strategy class --road-class residential \\
             --output validation/residential_holdout/
@@ -1380,10 +1385,14 @@ def generate_agent_batch(
         help="Random seed for reproducibility",
     ),
 ):
-    """Generate a batch of candidates for AI agent labeling.
+    """Generate NEW candidates for AI agent labeling.
 
-    Samples diverse candidates across confidence ranges and creates
-    packages with metadata YAML and images for each candidate.
+    Samples diverse candidates across confidence ranges from unlabeled pairs
+    and creates packages with metadata YAML and images for each candidate.
+    Use this to expand training data with agent-labeled examples.
+
+    Note: To test agent accuracy against existing human labels, use
+    'generate-agent-test-batch' instead.
 
     Examples:
         # Generate 100 candidates for us_boston_streets
@@ -1659,11 +1668,13 @@ def generate_agent_test_batch(
         help="Skip satellite imagery (faster, geometry-only images)",
     ),
 ):
-    """Generate a batch from existing human labels for agent agreement testing.
+    """Generate test batch from EXISTING human labels for agent accuracy testing.
 
-    Unlike generate-agent-batch which samples NEW candidates, this command
-    uses existing human-labeled pairs so you can measure agent agreement
-    with human ground truth.
+    Samples from existing human-labeled pairs so you can measure agent agreement
+    with human ground truth. Includes the ground truth labels in the output.
+
+    Note: To generate NEW unlabeled candidates for agent labeling, use
+    'generate-agent-batch' instead.
 
     Examples:
         # Generate 200 samples across all datasets
