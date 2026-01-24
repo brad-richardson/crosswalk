@@ -377,21 +377,32 @@ def separate_matched_unmatched(
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Separate target into matched and unmatched segments.
 
+    Only high-confidence MATCH decisions are considered matched. REVIEW decisions
+    (low confidence, needs human review) are treated as unmatched to prevent
+    incorrect conflation from flowing into integration output.
+
     Args:
         target: Target GeoDataFrame
-        match_results: List of match results (MatchResult or dict)
+        match_results: List of match results (MatchResult or dict from bridge file)
         target_id_column: ID column in target
 
     Returns:
         Tuple of (matched_segments, unmatched_segments)
     """
-    # Build set of matched IDs
+    from ..matching.rules import MatchDecision
+
+    # Build set of matched IDs - only include high-confidence MATCH decisions
     matched_ids = set()
     for result in match_results:
         if hasattr(result, "target_id"):
-            matched_ids.add(str(result.target_id))
+            # MatchResult object - check decision
+            if result.decision == MatchDecision.MATCH:
+                matched_ids.add(str(result.target_id))
         elif isinstance(result, dict):
-            matched_ids.add(str(result.get("local_id", "")))
+            # Dict from bridge file - check match_decision column
+            decision = result.get("match_decision", "match")
+            if decision == "match":
+                matched_ids.add(str(result.get("local_id", "")))
 
     # Split target
     if target_id_column in target.columns:

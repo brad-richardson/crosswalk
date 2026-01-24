@@ -290,7 +290,9 @@ def run_pipeline(
     )
 
     # Unmatched report
-    matched_target_ids = {m.target_id for m in optimized if m.decision != MatchDecision.NO_MATCH}
+    # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
+    # and should appear in unmatched.parquet so they can be labeled/reviewed.
+    matched_target_ids = {m.target_id for m in optimized if m.decision == MatchDecision.MATCH}
     unmatched_path = output_path.parent / "unmatched.parquet"
     generate_unmatched_report(
         target=target,

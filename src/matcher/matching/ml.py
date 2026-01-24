@@ -340,6 +340,17 @@ class MLMatcher:
             median_val = np.nanmedian(col_vals)
             self.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
 
+        # Verify all expected features have medians computed
+        # This catches bugs where new features are added to FEATURE_COLUMNS but
+        # not properly computed in the training data
+        missing_medians = set(self.feature_names) - set(self.feature_medians.keys())
+        if missing_medians:
+            raise ValueError(
+                f"Missing feature medians for {len(missing_medians)} features: {sorted(missing_medians)}. "
+                f"This usually means these features are not being computed during labeling. "
+                f"Check that label_store.py includes these features in LABEL_COLUMNS."
+            )
+
         # Apply imputation to both train and test using training medians
         X_train = self._impute_missing(X_train)
         X_test = self._impute_missing(X_test)

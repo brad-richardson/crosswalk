@@ -545,16 +545,6 @@ Modify `_add_target_segments` in `combiner.py` to:
 
 ## Known Issues & Technical Debt
 
-### CRITICAL: REVIEW Results Treated as Matched
-
-- **Problem**: REVIEW results (low-confidence pairs) are treated as matched in bridge/unmatched/integration
-- **Impact**: Low-confidence pairs flow into integration and are removed from "unmatched"
-- **Locations**:
-  - `src/matcher/resolution/bridge.py:62`
-  - `src/matcher/pipeline/runner.py:254`
-  - `src/matcher/integration/combiner.py:388`
-- **Solution**: Add explicit handling for REVIEW status; optionally keep in unmatched or require human review
-
 ### HIGH: ML Metrics Likely Optimistic (Data Leakage)
 
 - **Problem**: Train/test split is random by pair, so the same ref/target segments can appear in both sets
@@ -595,11 +585,6 @@ Modify `_add_target_segments` in `combiner.py` to:
 - **Problem**: `except Exception: return None` silently swallows errors
 - **Location**: `blocking/spatial_index.py`
 - **Solution**: Catch specific exceptions and log warnings
-
-#### Feature Imputation Skew Risk
-- **Problem**: New features added to FEATURE_COLUMNS but not in `feature_medians` default to 0.0
-- **Location**: `matching/ml.py:345-355`
-- **Solution**: Add assertion that `feature_medians` keys match `FEATURE_COLUMNS`
 
 #### Race Condition in Model Selection
 - **Problem**: Checks file existence but doesn't validate model is loadable/valid
@@ -646,7 +631,6 @@ Modify `_add_target_segments` in `combiner.py` to:
 | Vertex density | Geometric | Very Low |
 | Length binning | Geometric | Low |
 | Multi-stage blocking | Blocking | Low |
-| Feature medians assertion | Robustness | Very Low |
 
 ### Medium Priority
 
