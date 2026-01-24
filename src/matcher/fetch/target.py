@@ -527,6 +527,7 @@ def fetch_dataset(
     dataset_name: str,
     output_dir: Path | None = None,
     page_size: int | None = None,
+    force: bool = False,
 ) -> Path | None:
     """Fetch a single dataset based on its YAML configuration.
 
@@ -534,6 +535,7 @@ def fetch_dataset(
         dataset_name: Name of the dataset (matches YAML filename)
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches (default: use arcgis module default)
+        force: If False (default), skip if output file already exists
 
     Returns:
         Path to output file, or None if fetch failed or requires manual download
@@ -547,6 +549,13 @@ def fetch_dataset(
         return None
 
     output_path = output_dir / target_filename(dataset_name)
+
+    # Skip if file already exists (unless force=True)
+    if not force and output_path.exists():
+        logger.info(
+            f"Skipping {dataset_name}: {output_path.name} already exists (use --force to re-fetch)"
+        )
+        return output_path
 
     logger.info(f"Fetching dataset: {dataset_name}")
     if config.description:
@@ -693,6 +702,7 @@ def fetch_datasets_by_prefix(
     prefix: str,
     output_dir: Path | None = None,
     page_size: int | None = None,
+    force: bool = False,
 ) -> dict[str, Path | None]:
     """Fetch all datasets matching a prefix.
 
@@ -700,6 +710,7 @@ def fetch_datasets_by_prefix(
         prefix: Prefix to match (e.g., "us_boston")
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches
+        force: If False (default), skip datasets whose files already exist
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
@@ -716,7 +727,7 @@ def fetch_datasets_by_prefix(
 
     for name in sorted(matching):
         logger.info(f"\n{'=' * 60}")
-        results[name] = fetch_dataset(name, output_dir, page_size)
+        results[name] = fetch_dataset(name, output_dir, page_size, force)
 
     return results
 
@@ -724,12 +735,14 @@ def fetch_datasets_by_prefix(
 def fetch_all_datasets(
     output_dir: Path | None = None,
     page_size: int | None = None,
+    force: bool = False,
 ) -> dict[str, Path | None]:
     """Fetch all available datasets.
 
     Args:
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches
+        force: If False (default), skip datasets whose files already exist
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
@@ -742,7 +755,7 @@ def fetch_all_datasets(
         logger.info(f"Fetching {name}...")
         logger.info(f"{'=' * 60}")
         try:
-            results[name] = fetch_dataset(name, output_dir, page_size)
+            results[name] = fetch_dataset(name, output_dir, page_size, force)
         except Exception as e:
             logger.error(f"Failed to fetch {name}: {e}")
             results[name] = None
