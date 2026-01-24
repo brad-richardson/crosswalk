@@ -226,12 +226,14 @@ matcher qa-integration -o data/integrated
 | `matcher fetch` | Fetch Overture or OSM data for a bounding box |
 | `matcher match` | Run the matching pipeline |
 | `matcher train` | Train ML model on labeled data |
-| `matcher eval-model` | Evaluate model performance |
+| `matcher eval-model` | Evaluate model performance on training labels |
+| `matcher eval-bridge` | Evaluate bridge file (matching output) quality |
 | `matcher label` | Launch labeling UI |
 | `matcher integrate` | Integrate unmatched segments |
 | `matcher qa-integration` | Launch integration QA app |
 | `matcher discover-classes` | Analyze class mappings for new datasets |
-| `matcher validate` | Run validation experiments |
+| `matcher validate-matching` | Run validation experiments (Overture provenance) |
+| `matcher validate-data` | Validate data file versions |
 
 Run `matcher --help` or `matcher <command> --help` for detailed options.
 
