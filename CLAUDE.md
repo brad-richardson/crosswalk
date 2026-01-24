@@ -94,7 +94,7 @@ matcher discover-classes data/raw/new_dataset.parquet \
     --bridge data/output/new_dataset_bridge.parquet
 
 # Run validation experiments (ground-truth from Overture provenance)
-matcher validate data/raw/overture.parquet --bbox "-71.19,42.21,-70.92,42.40" --strategy random
+matcher validate-matching data/raw/overture.parquet --bbox "-71.19,42.21,-70.92,42.40" --strategy random
 ```
 
 ## Labeling App
