@@ -459,6 +459,12 @@ def fetch_download(
         resp = requests.get(url, headers=headers, timeout=600, stream=True)
         resp.raise_for_status()
 
+        # Get content length for progress reporting
+        total_size = int(resp.headers.get("content-length", 0))
+        downloaded = 0
+        last_progress_mb = 0
+        progress_interval_mb = 10  # Report every 10 MB
+
         # Save to temp file
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -470,6 +476,19 @@ def fetch_download(
                 with open(zip_path, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        # Report progress for large downloads
+                        current_mb = downloaded // (1024 * 1024)
+                        if current_mb >= last_progress_mb + progress_interval_mb:
+                            last_progress_mb = current_mb
+                            if total_size:
+                                pct = 100 * downloaded / total_size
+                                logger.info(
+                                    f"Download progress: {current_mb} MB / "
+                                    f"{total_size // (1024 * 1024)} MB ({pct:.0f}%)"
+                                )
+                            else:
+                                logger.info(f"Download progress: {current_mb} MB")
 
                 logger.info(f"Downloaded {zip_path.stat().st_size / 1024 / 1024:.1f} MB")
 
@@ -516,6 +535,20 @@ def fetch_download(
                 with open(data_file, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        # Report progress for large downloads
+                        current_mb = downloaded // (1024 * 1024)
+                        if current_mb >= last_progress_mb + progress_interval_mb:
+                            last_progress_mb = current_mb
+                            if total_size:
+                                pct = 100 * downloaded / total_size
+                                logger.info(
+                                    f"Download progress: {current_mb} MB / "
+                                    f"{total_size // (1024 * 1024)} MB ({pct:.0f}%)"
+                                )
+                            else:
+                                logger.info(f"Download progress: {current_mb} MB")
+                logger.info(f"Downloaded {data_file.stat().st_size / 1024 / 1024:.1f} MB")
 
             # Load with geopandas
             read_kwargs: dict[str, Any] = {}
@@ -1047,8 +1080,6 @@ def fetch_datasets_by_prefix(
     Returns:
         Dict mapping dataset names to output paths (None if failed)
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     all_datasets = list_dataset_configs()
     matching = [d for d in all_datasets if d.startswith(prefix)]
 
@@ -1059,14 +1090,80 @@ def fetch_datasets_by_prefix(
     logger.info(f"Found {len(matching)} datasets matching prefix '{prefix}'")
     logger.info(f"Fetching with {max_workers} parallel workers")
 
-    results: dict[str, Path | None] = {}
     tasks = [(name, output_dir, page_size, force) for name in sorted(matching)]
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_fetch_dataset_worker, task): task[0] for task in tasks}
-        for future in as_completed(futures):
-            name, result = future.result()
-            results[name] = result
+    return _parallel_fetch_with_progress(tasks, max_workers, len(matching))
+
+
+def _parallel_fetch_with_progress(
+    tasks: list[tuple],
+    max_workers: int,
+    total: int,
+    progress_interval: int = 30,
+) -> dict[str, Path | None]:
+    """Execute parallel fetches with periodic progress reporting.
+
+    Args:
+        tasks: List of (name, output_dir, page_size, force) tuples
+        max_workers: Maximum number of parallel workers
+        total: Total number of tasks
+        progress_interval: Seconds between progress reports (default: 30)
+
+    Returns:
+        Dict mapping dataset names to output paths (None if failed)
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict[str, Path | None] = {}
+    completed_count = 0
+    failed_count = 0
+    in_progress: set[str] = set()
+    lock = threading.Lock()
+    stop_event = threading.Event()
+
+    def progress_reporter():
+        """Report progress every N seconds."""
+        while not stop_event.wait(progress_interval):
+            with lock:
+                pending = total - completed_count - len(in_progress)
+                success = completed_count - failed_count
+                logger.info(
+                    f"Progress: {completed_count}/{total} complete "
+                    f"({success} success, {failed_count} failed), "
+                    f"{len(in_progress)} in progress, {pending} pending"
+                )
+                if in_progress:
+                    logger.info(f"  In progress: {', '.join(sorted(in_progress))}")
+
+    # Start progress reporter thread
+    progress_thread = threading.Thread(target=progress_reporter, daemon=True)
+    progress_thread.start()
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for task in tasks:
+                name = task[0]
+                with lock:
+                    in_progress.add(name)
+                futures[executor.submit(_fetch_dataset_worker, task)] = name
+
+            for future in as_completed(futures):
+                name, result = future.result()
+                with lock:
+                    in_progress.discard(name)
+                    completed_count += 1
+                    if result is None:
+                        failed_count += 1
+                results[name] = result
+    finally:
+        stop_event.set()
+        progress_thread.join(timeout=1)
+
+    # Final summary
+    success = completed_count - failed_count
+    logger.info(f"Completed: {success}/{total} successful, {failed_count} failed")
 
     return results
 
@@ -1088,21 +1185,12 @@ def fetch_all_datasets(
     Returns:
         Dict mapping dataset names to output paths (None if failed)
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     all_datasets = list_dataset_configs()
     logger.info(f"Fetching {len(all_datasets)} datasets with {max_workers} parallel workers")
 
-    results: dict[str, Path | None] = {}
     tasks = [(name, output_dir, page_size, force) for name in sorted(all_datasets)]
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_fetch_dataset_worker, task): task[0] for task in tasks}
-        for future in as_completed(futures):
-            name, result = future.result()
-            results[name] = result
-
-    return results
+    return _parallel_fetch_with_progress(tasks, max_workers, len(all_datasets))
 
 
 def list_datasets(prefix: str | None = None) -> list[dict[str, Any]]:
