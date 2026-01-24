@@ -2213,10 +2213,10 @@ def benchmark(
             ds_dir.mkdir(parents=True, exist_ok=True)
             ds_train.to_csv(ds_dir / "data.csv", index=False)
 
-        # Train model on train set only
+        # Train model on train set only (no internal split since we already split)
         console.print(f"\n[blue]Training model on {len(train_df)} samples...[/blue]")
         matcher = MLMatcher()
-        matcher.train(labels_dir=str(tmpdir), binary=True, test_size=0.2)
+        matcher.train(labels_dir=str(tmpdir), binary=True, test_size=0.0)
 
         # Save the model
         model_dir = Path("data/models")
@@ -2293,6 +2293,7 @@ def benchmark(
 
             fieldnames = [
                 "run_date",
+                "data_pull_date",
                 "dataset",
                 "n_train",
                 "n_test",
@@ -2329,6 +2330,7 @@ def benchmark(
                 for dataset_name, metrics in results.items():
                     row = {
                         "run_date": run_date.isoformat(),
+                        "data_pull_date": run_date.isoformat(),
                         "dataset": dataset_name,
                         "n_train": len(train_df),
                         "n_test": len(test_df),

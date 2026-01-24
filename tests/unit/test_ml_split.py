@@ -6,6 +6,7 @@ by ensuring no segment appears in both train and test sets.
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from matcher.matching.ml import create_segment_groups, segment_aware_split
 
@@ -264,3 +265,60 @@ class TestSegmentAwareSplitEdgeCases:
         # Single pair = single group, all goes to training
         assert len(train_idx) == 1
         assert len(test_idx) == 0
+
+    def test_test_size_zero_returns_all_train(self):
+        """test_size=0.0 should return all data in training set."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "C"],
+                "target_id": ["1", "2", "3"],
+                "label": ["match"] * 3,
+            }
+        )
+
+        train_idx, test_idx = segment_aware_split(df, test_size=0.0, random_state=42)
+
+        assert len(train_idx) == 3
+        assert len(test_idx) == 0
+
+    def test_invalid_test_size_raises_error(self):
+        """Invalid test_size values should raise ValueError."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A"],
+                "target_id": ["1"],
+                "label": ["match"],
+            }
+        )
+
+        with pytest.raises(ValueError, match="test_size must be between"):
+            segment_aware_split(df, test_size=-0.1, random_state=42)
+
+        with pytest.raises(ValueError, match="test_size must be between"):
+            segment_aware_split(df, test_size=1.5, random_state=42)
+
+    def test_null_gers_id_raises_error(self):
+        """Null gers_id values should raise ValueError."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", None, "C"],
+                "target_id": ["1", "2", "3"],
+                "label": ["match"] * 3,
+            }
+        )
+
+        with pytest.raises(ValueError, match="must not contain null"):
+            segment_aware_split(df, test_size=0.3, random_state=42)
+
+    def test_null_target_id_raises_error(self):
+        """Null target_id values should raise ValueError."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "C"],
+                "target_id": ["1", None, "3"],
+                "label": ["match"] * 3,
+            }
+        )
+
+        with pytest.raises(ValueError, match="must not contain null"):
+            segment_aware_split(df, test_size=0.3, random_state=42)

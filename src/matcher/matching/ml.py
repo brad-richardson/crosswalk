@@ -200,8 +200,15 @@ def create_segment_groups(df: pd.DataFrame) -> pd.Series:
 
     Returns:
         Series of group IDs (one per row in df)
+
+    Raises:
+        ValueError: If gers_id or target_id columns contain null values
     """
     from collections import defaultdict
+
+    # Validate no null values in segment ID columns
+    if df["gers_id"].isna().any() or df["target_id"].isna().any():
+        raise ValueError("gers_id and target_id columns must not contain null values")
 
     # Union-Find implementation
     parent = {}
@@ -252,10 +259,21 @@ def segment_aware_split(
 
     Returns:
         Tuple of (train_indices, test_indices) as numpy arrays
+
+    Raises:
+        ValueError: If test_size is not in range [0.0, 1.0]
     """
+    # Validate test_size
+    if not 0.0 <= test_size <= 1.0:
+        raise ValueError(f"test_size must be between 0.0 and 1.0, got {test_size}")
+
     # Handle empty DataFrame
     if len(df) == 0:
         return np.array([], dtype=int), np.array([], dtype=int)
+
+    # Handle test_size=0.0 (no split, all training)
+    if test_size == 0.0:
+        return np.arange(len(df)), np.array([], dtype=int)
 
     groups = create_segment_groups(df)
     n_groups = groups.nunique()
