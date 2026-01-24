@@ -201,10 +201,8 @@ from matcher.config import settings
 from matcher.labeling.comparison_view import render_comparison_view
 from matcher.labeling.data_loader import (
     CandidatePairView,
-    delete_cache,
     filter_by_confidence_band,
     filter_candidates,
-    generate_scored_candidates,
     generate_scored_candidates_with_cache,
     get_cache_info,
     load_cached_candidates,
@@ -478,15 +476,17 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             # Auto-load if cache exists
             if cache_info["exists"]:
                 st.session_state.is_loading = True
-                with st.spinner("Loading cached candidates..."):
-                    load_data(
-                        reference_path,
-                        target_path,
-                        dataset_id,
-                        use_cache=True,
-                        review_only=st.session_state.review_only,
-                    )
-                st.session_state.is_loading = False
+                try:
+                    with st.spinner("Loading cached candidates..."):
+                        load_data(
+                            reference_path,
+                            target_path,
+                            dataset_id,
+                            use_cache=True,
+                            review_only=st.session_state.review_only,
+                        )
+                finally:
+                    st.session_state.is_loading = False
                 st.rerun()
 
             # No cache - show manual load UI
@@ -506,9 +506,17 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
 
             if st.button("Load Data", type="primary", disabled=st.session_state.is_loading):
                 st.session_state.is_loading = True
-                with st.spinner("Loading and scoring candidates..."):
-                    load_data(reference_path, target_path, dataset_id, use_cache=True, review_only=review_only)
-                st.session_state.is_loading = False
+                try:
+                    with st.spinner("Loading and scoring candidates..."):
+                        load_data(
+                            reference_path,
+                            target_path,
+                            dataset_id,
+                            use_cache=True,
+                            review_only=review_only,
+                        )
+                finally:
+                    st.session_state.is_loading = False
                 st.rerun()
         else:
             # Show load status with filter indicator
@@ -799,7 +807,12 @@ def render_single_pair_mode(pair, filtered, label_store, session):
         if st.button("🤔 Unsure", use_container_width=True, key="btn_unsure"):
             record_label(pair, "unsure", label_store, **alignment_kwargs)
             st.rerun()
-        if st.button("↩️ Undo", disabled=len(session.undo_stack) == 0, use_container_width=True, key="btn_undo"):
+        if st.button(
+            "↩️ Undo",
+            disabled=len(session.undo_stack) == 0,
+            use_container_width=True,
+            key="btn_undo",
+        ):
             undo_last_label(label_store)
             st.rerun()
 
@@ -995,7 +1008,7 @@ def load_data(
 
     # Apply confidence band filter if requested and we have candidates
     if review_only and full_count > 0:
-        logger.info(f"Filtering to review band...")
+        logger.info("Filtering to review band...")
         candidates = filter_by_confidence_band(candidates, review_only=True)
         st.session_state.candidates_filtered = True
         logger.info(f"Filtered to {len(candidates):,} candidates in review band")

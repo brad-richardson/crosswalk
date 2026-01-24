@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Path: src/matcher/labeling/data_loader.py -> parents[3] = project root
 CACHE_DIR = Path(__file__).parents[3] / "data" / "cache" / "labeling"
 
+
 def get_cached_matcher() -> MLMatcher | None:
     """Get cached ML matcher, loading model if needed.
 
@@ -1183,11 +1184,14 @@ def _build_views_from_feature_df(
 
     # Create mask for review band
     import numpy as np
+
     probs_arr = np.array(probs)
     review_mask = (probs_arr >= review_lower) & (probs_arr <= review_upper)
     review_count = review_mask.sum()
 
-    logger.info(f"[3.5/5] Filtering to review band ({review_lower:.2f}-{review_upper:.2f}): {review_count:,}/{total:,} candidates")
+    logger.info(
+        f"[3.5/5] Filtering to review band ({review_lower:.2f}-{review_upper:.2f}): {review_count:,}/{total:,} candidates"
+    )
 
     # Filter records and probs
     records = feature_df.to_dict("records")
@@ -1196,7 +1200,9 @@ def _build_views_from_feature_df(
 
     # Update total for progress reporting
     total = len(filtered_records)
-    logger.info(f"[3.5/5] Will build views for {total:,} candidates (filtered from {len(records):,})")
+    logger.info(
+        f"[3.5/5] Will build views for {total:,} candidates (filtered from {len(records):,})"
+    )
 
     # Build fast dict lookups for geometry and attribute access (much faster than .loc)
     logger.info("[4/5] Building geometry lookup dictionaries...")
@@ -1216,6 +1222,7 @@ def _build_views_from_feature_df(
     has_target_class = target_class_column in target.columns
 
     views = []
+    skipped_count = 0
     logger.info(f"[5/5] Building {total:,} CandidatePairView objects with aligned geometries...")
     t_views = time.perf_counter()
 
@@ -1225,7 +1232,9 @@ def _build_views_from_feature_df(
             elapsed = time.perf_counter() - t_views
             rate = i / elapsed if elapsed > 0 else 0
             remaining = (total - i) / rate if rate > 0 else 0
-            logger.info(f"[5/5] Progress: {i:,}/{total:,} ({100*i/total:.0f}%) - {remaining:.0f}s remaining")
+            logger.info(
+                f"[5/5] Progress: {i:,}/{total:,} ({100 * i / total:.0f}%) - {remaining:.0f}s remaining"
+            )
         ref_id = row["ref_id"]
         target_id = row["target_id"]
         prob = filtered_probs[i]
@@ -1235,7 +1244,8 @@ def _build_views_from_feature_df(
         target_data = target_records.get(target_id)
 
         if ref_data is None or target_data is None:
-            continue  # Skip silently - missing geometries are expected for filtered data
+            skipped_count += 1
+            continue
 
         # Extract names and classes
         ref_name = _extract_name_string(ref_data.get(ref_name_column)) if has_ref_name else None
@@ -1273,10 +1283,10 @@ def _build_views_from_feature_df(
             ref_aligned = None
             target_aligned = None
 
-        # Determine decision from confidence
-        if prob >= 0.5:
+        # Determine decision from confidence using configurable thresholds
+        if prob >= settings.match_threshold:
             decision = "match"
-        elif prob >= 0.1:
+        elif prob >= settings.review_threshold:
             decision = "review"
         else:
             decision = "no_match"
@@ -1312,8 +1322,15 @@ def _build_views_from_feature_df(
 
     logger.info(f"[5/5] Built {len(views):,} views in {time.perf_counter() - t_views:.1f}s")
 
+    if skipped_count > 0:
+        logger.warning(
+            f"Skipped {skipped_count} candidates due to missing geometries in source data "
+            "(feature cache may be stale)"
+        )
+
     # Sort: REVIEW first, then by confidence descending
     logger.info("Sorting views by decision priority...")
+
     def sort_key(v):
         decision_order = {"review": 0, "match": 1, "no_match": 2}
         return (decision_order.get(v.decision, 3), -v.confidence)

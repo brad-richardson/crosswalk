@@ -1308,16 +1308,19 @@ def compute_features(
     fail_count = 0
 
     for dataset_id in datasets_to_process:
+        # Check cache BEFORE computation to distinguish skip vs compute
+        cache_info_before = get_feature_cache_info(dataset_id)
+        had_cache = cache_info_before.get("exists", False)
+
         result = compute_for_dataset(dataset_id)
-        if result:
-            # Check if it was skipped (cached) or newly computed
-            cache_info = get_feature_cache_info(dataset_id)
-            if cache_info["exists"] and not force:
-                skip_count += 1
-            else:
-                success_count += 1
-        else:
+        if not result:
             fail_count += 1
+        elif had_cache and not force:
+            # Had cache and didn't force recompute = skipped
+            skip_count += 1
+        else:
+            # Newly computed (or force recomputed)
+            success_count += 1
 
     # Summary
     console.print()
