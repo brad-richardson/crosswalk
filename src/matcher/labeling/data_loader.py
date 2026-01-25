@@ -1205,11 +1205,27 @@ def _build_views_from_feature_df(
     logger.info("[4/5] Building geometry lookup dictionaries...")
     t_lookup = time.perf_counter()
 
-    # Convert to dicts for O(1) lookup - take first occurrence if duplicates
-    ref_records = reference.set_index(ref_id_column).to_dict("index")
-    target_records = target.set_index(target_id_column).to_dict("index")
-    ref_proj_records = reference_proj.set_index(ref_id_column).to_dict("index")
-    target_proj_records = target_proj.set_index(target_id_column).to_dict("index")
+    # Convert to dicts for O(1) lookup - drop duplicates keeping first occurrence
+    ref_records = (
+        reference.drop_duplicates(subset=[ref_id_column], keep="first")
+        .set_index(ref_id_column)
+        .to_dict("index")
+    )
+    target_records = (
+        target.drop_duplicates(subset=[target_id_column], keep="first")
+        .set_index(target_id_column)
+        .to_dict("index")
+    )
+    ref_proj_records = (
+        reference_proj.drop_duplicates(subset=[ref_id_column], keep="first")
+        .set_index(ref_id_column)
+        .to_dict("index")
+    )
+    target_proj_records = (
+        target_proj.drop_duplicates(subset=[target_id_column], keep="first")
+        .set_index(target_id_column)
+        .to_dict("index")
+    )
 
     logger.info(f"[4/5] Built lookups in {time.perf_counter() - t_lookup:.1f}s")
 

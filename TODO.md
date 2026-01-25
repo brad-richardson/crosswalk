@@ -578,6 +578,24 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 
 ## Known Issues & Technical Debt
 
+### HIGH: Remove Rule-Based Matcher (rules.py)
+
+- **Problem**: `src/matcher/matching/rules.py` contains a legacy rule-based matcher that is no longer used
+- **Impact**: Dead code that adds confusion and maintenance burden
+- **Action needed**:
+  1. Move `MatchDecision` and `MatchResult` types to a separate module (e.g., `matching/types.py`)
+  2. Update all imports throughout the codebase
+  3. Delete `rules.py` and remove fallback code that references it
+- **Locations referencing rules.py**:
+  - `matching/__init__.py` - exports from rules
+  - `matching/ml.py` - imports types and has fallback
+  - `matching/optimizer.py` - imports types
+  - `pipeline/runner.py` - imports score_candidates
+  - `resolution/bridge.py` - imports types
+  - `labeling/data_loader.py` - has rule-based fallback
+  - `agent_labeling/sampler.py` - imports types and score_candidates
+  - `integration/combiner.py` - imports MatchDecision
+
 ### HIGH: Feature/Data Versioning Not Enforced
 
 - **Problem**: Models don't persist `feature_version`; training doesn't filter labels by feature/data version
@@ -603,7 +621,66 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 - **Problem**: `runner.py` uses `geopandas.read_parquet` which loads entire dataset into memory
 - **Impact**: Will fail on state-sized or larger datasets
 - **Location**: `src/matcher/pipeline/runner.py`
-- **Solution**: Switch to DuckDB streaming or chunked processing
+- **Solution**: Migrate to Spark/Sedona/GraphFrames (see research below)
+
+---
+
+## Spark Migration Research (Jan 2026)
+
+**Status**: Research complete, implementation deferred pending labeling improvements
+
+**Summary**: Feature computation pipeline can be migrated from GDF/NetworkX to Spark/Sedona/GraphFrames in 5 stages. This is NOT one large refactor - stages have clear boundaries and can be delivered independently.
+
+### Migration Stages
+
+| Stage | Scope | Sedona/GraphFrames Coverage |
+|-------|-------|----------------------------|
+| 1. Infrastructure | Session setup, GeoParquet I/O | Direct Sedona support |
+| 2. Blocking | STRtree → Sedona spatial join | `ST_Intersects(ST_Buffer(...))` |
+| 3. Geometric features | 11 features | 6 direct SQL, 5 Pandas UDFs |
+| 4. Topology features | 12 features via GraphFrames | `g.degrees`, `connectedComponents()` |
+| 5. Integration | Wire to ML scoring | Collect to driver for XGBoost |
+
+### Key Findings
+
+**Sedona coverage**: ~60% direct SQL equivalents, ~25% Pandas UDFs, ~15% custom
+- Direct: `ST_HausdorffDistance`, `ST_Buffer`, `ST_Distance`, `ST_Centroid`, `ST_Length`
+- UDFs needed: mean_hausdorff, perpendicular_offset, collinear_gap (vertex sampling)
+- Numba works in Pandas UDFs (existing alignment code ported FROM Spark originally)
+
+**GraphFrames coverage**: Most algorithms available
+- Direct: `g.degrees`, `connectedComponents()`, `triangleCount()`, `pageRank()`
+- Skip: articulation points, edge betweenness (already disabled for >10K nodes/edges)
+- Graph construction: `ST_StartPoint`/`ST_EndPoint` → `ST_DWithin` proximity → connected components
+
+**Local dev**: Docker-based Spark recommended to avoid Java dependency issues
+- Use `apache/sedona:latest` base image with GraphFrames JAR
+- Mount source/data volumes, set `SPARK_DRIVER_MEMORY=8g`
+
+**Cloud deployment** (future): AWS Glue/EMR
+- Session factory pattern to abstract local vs Glue SparkSession
+- S3 GeoParquet with bbox pushdown
+- Sedona/GraphFrames JARs via `--extra-jars`
+
+### Files Affected
+
+**Replace** (wholesale, no legacy paths):
+- `blocking/spatial_index.py` → `spark/blocking.py`
+- `features/geometric.py` → `spark/features/geometric.py`
+- `features/spatial_context.py` → `spark/features/topology.py`
+- `pipeline/runner.py` → `spark/pipeline.py`
+
+**Keep**: `config.py` (FEATURE_COLUMNS source of truth), `matching/ml.py` (adapt interface)
+
+### Risks
+
+| Risk | Mitigation |
+|------|-----------|
+| Sedona function gaps | Pandas UDFs wrapping existing Shapely/Numba code |
+| GraphFrames missing algorithms | Skip (already disabled for large graphs) |
+| Memory during collect | Filter to scored candidates before driver collect |
+
+Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 ### LOW: Datasets with Polygon Geometries (Need Re-fetch)
 
