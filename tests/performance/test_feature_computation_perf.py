@@ -16,6 +16,7 @@ from matcher.features.geometric import (
     _buffer_iou,
     _buffer_iou_from_buffers,
     clear_buffer_cache,
+    compute_collinear_gap_ratio,
     compute_geometric_features,
     get_buffer_cache_info,
 )
@@ -278,3 +279,29 @@ class TestFeatureComputationPerformance:
 
         # Clear cache after test
         clear_buffer_cache()
+
+    def test_collinear_gap_ratio_baseline(self, synthetic_lines):
+        """Baseline benchmark for compute_collinear_gap_ratio."""
+        n_pairs = N_PAIRS
+        pairs = [
+            (
+                synthetic_lines[i % len(synthetic_lines)],
+                synthetic_lines[(i + 1) % len(synthetic_lines)],
+            )
+            for i in range(n_pairs)
+        ]
+
+        start = time.perf_counter()
+        for line_a, line_b in pairs:
+            compute_collinear_gap_ratio(line_a, line_b)
+        elapsed = time.perf_counter() - start
+
+        throughput = n_pairs / elapsed
+        per_pair_us = (elapsed / n_pairs) * 1_000_000
+
+        print(
+            f"\nCollinear gap ratio: {throughput:.0f} pairs/sec, {per_pair_us:.1f} µs/pair ({elapsed:.2f}s total)"
+        )
+
+        # Current baseline - will tighten after JIT optimization
+        assert per_pair_us < 200, f"Collinear gap ratio too slow: {per_pair_us:.1f} µs/pair"
