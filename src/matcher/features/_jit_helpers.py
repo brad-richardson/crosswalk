@@ -124,3 +124,165 @@ def collinear_gap_ratio_numba(
         return 1.0
 
     return along_track_overlap / min_overlap_fraction
+
+
+@jit(nopython=True, cache=True)
+def compute_shape_complexity_numba(
+    coords: np.ndarray,
+    angle_threshold: float,
+) -> int:
+    """Count significant direction changes (turns) in a line.
+
+    Args:
+        coords: Nx2 array of coordinates
+        angle_threshold: Minimum angle change to count as a turn (degrees)
+
+    Returns:
+        Number of significant turns
+    """
+    n_points = coords.shape[0]
+    if n_points < 3:
+        return 0
+
+    turn_count = 0
+    for i in range(n_points - 2):
+        # Heading from point i to i+1
+        dx1 = coords[i + 1, 0] - coords[i, 0]
+        dy1 = coords[i + 1, 1] - coords[i, 1]
+        heading1 = compute_heading_numba(dx1, dy1)
+
+        # Heading from point i+1 to i+2
+        dx2 = coords[i + 2, 0] - coords[i + 1, 0]
+        dy2 = coords[i + 2, 1] - coords[i + 1, 1]
+        heading2 = compute_heading_numba(dx2, dy2)
+
+        # Compute angle difference (not bidirectional - actual turn)
+        angle_diff = abs(heading1 - heading2)
+        if angle_diff > 180.0:
+            angle_diff = 360.0 - angle_diff
+
+        if angle_diff > angle_threshold:
+            turn_count += 1
+
+    return turn_count
+
+
+@jit(nopython=True, cache=True)
+def compute_parallel_alignment_numba(
+    coords_a: np.ndarray,
+    coords_b: np.ndarray,
+) -> float:
+    """Compute how parallel two lines are (0-1).
+
+    Args:
+        coords_a: Nx2 array for line A
+        coords_b: Mx2 array for line B
+
+    Returns:
+        Alignment score (0-1) where 1 = parallel
+    """
+    # Compute overall headings
+    dx_a = coords_a[-1, 0] - coords_a[0, 0]
+    dy_a = coords_a[-1, 1] - coords_a[0, 1]
+    heading_a = compute_heading_numba(dx_a, dy_a)
+
+    dx_b = coords_b[-1, 0] - coords_b[0, 0]
+    dy_b = coords_b[-1, 1] - coords_b[0, 1]
+    heading_b = compute_heading_numba(dx_b, dy_b)
+
+    # Use angle_diff_numba which handles bidirectional
+    min_diff = angle_diff_numba(heading_a, heading_b)
+
+    # Convert to 0-1 score (0 degrees = 1.0, 90 degrees = 0.0)
+    return max(0.0, 1.0 - min_diff / 90.0)
+
+
+@jit(nopython=True, cache=True)
+def compute_endpoint_proximity_numba(
+    start: np.ndarray,
+    end: np.ndarray,
+    endpoint_coords: np.ndarray,
+    tolerance: float,
+) -> tuple:
+    """Compute endpoint proximity features.
+
+    Args:
+        start: 2D point (start of target)
+        end: 2D point (end of target)
+        endpoint_coords: Nx2 array of other endpoint coordinates
+        tolerance: Distance threshold for counting "shared" endpoints
+
+    Returns:
+        Tuple of (start_proximity, end_proximity, shared_count)
+    """
+    n = endpoint_coords.shape[0]
+    if n == 0:
+        return (np.inf, np.inf, 0)
+
+    start_min = np.inf
+    end_min = np.inf
+    within_start = 0
+    within_end = 0
+
+    for i in range(n):
+        # Distance from start to this endpoint
+        dx_s = endpoint_coords[i, 0] - start[0]
+        dy_s = endpoint_coords[i, 1] - start[1]
+        dist_s = np.sqrt(dx_s * dx_s + dy_s * dy_s)
+
+        if dist_s < start_min:
+            start_min = dist_s
+        if dist_s <= tolerance:
+            within_start += 1
+
+        # Distance from end to this endpoint
+        dx_e = endpoint_coords[i, 0] - end[0]
+        dy_e = endpoint_coords[i, 1] - end[1]
+        dist_e = np.sqrt(dx_e * dx_e + dy_e * dy_e)
+
+        if dist_e < end_min:
+            end_min = dist_e
+        if dist_e <= tolerance:
+            within_end += 1
+
+    return (start_min, end_min, within_start + within_end)
+
+
+@jit(nopython=True, cache=True)
+def compute_heading_consistency_numba(
+    points: np.ndarray,
+) -> float:
+    """Compute heading consistency from sampled points.
+
+    Args:
+        points: Nx2 array of sampled points along the line
+
+    Returns:
+        Consistency score (0-1) where 1 = perfectly straight
+    """
+    n_points = points.shape[0]
+    if n_points < 3:
+        return 1.0
+
+    # Compute headings between consecutive points
+    n_headings = n_points - 1
+    headings = np.empty(n_headings)
+
+    for i in range(n_headings):
+        dx = points[i + 1, 0] - points[i, 0]
+        dy = points[i + 1, 1] - points[i, 1]
+        headings[i] = compute_heading_numba(dx, dy)
+
+    if n_headings < 2:
+        return 1.0
+
+    # Compute heading differences
+    total_diff = 0.0
+    for i in range(n_headings - 1):
+        diff = angle_diff_numba(headings[i], headings[i + 1])
+        total_diff += diff
+
+    avg_diff = total_diff / (n_headings - 1)
+
+    # Normalize to 0-1 (0 degrees diff = 1.0, 90 degrees diff = 0.0)
+    return max(0.0, 1.0 - avg_diff / 90.0)

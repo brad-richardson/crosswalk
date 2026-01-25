@@ -11,9 +11,14 @@ from shapely import LineString
 from matcher.features._jit_helpers import (
     angle_diff_numba,
     collinear_gap_ratio_numba,
+    compute_endpoint_proximity_numba,
+    compute_heading_consistency_numba,
     compute_heading_numba,
+    compute_parallel_alignment_numba,
+    compute_shape_complexity_numba,
 )
-from matcher.features.geometric import compute_collinear_gap_ratio
+from matcher.features.geometric import compute_collinear_gap_ratio, compute_shape_complexity
+from matcher.features.relational import compute_endpoint_proximity, compute_parallel_alignment
 
 
 class TestComputeHeadingNumba:
@@ -222,3 +227,216 @@ class TestCollinearGapRatioConsistency:
         )
 
         assert result_auto == pytest.approx(result_pre)
+
+
+class TestComputeShapeComplexityNumba:
+    """Tests for compute_shape_complexity_numba function."""
+
+    def test_straight_line(self):
+        """Straight line should have 0 turns."""
+        coords = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 0
+
+    def test_single_90_degree_turn(self):
+        """90 degree turn should count as 1 turn."""
+        coords = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 50.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 1
+
+    def test_multiple_turns(self):
+        """Multiple turns should be counted."""
+        coords = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 50.0], [100.0, 50.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 2
+
+    def test_small_angle_below_threshold(self):
+        """Small angle changes below threshold should not count."""
+        coords = np.array([[0.0, 0.0], [50.0, 1.0], [100.0, 0.0]])
+        # Angle is ~2 degrees, below 10 degree threshold
+        assert compute_shape_complexity_numba(coords, 10.0) == 0
+
+    def test_too_few_points(self):
+        """Fewer than 3 points should return 0."""
+        coords = np.array([[0.0, 0.0], [100.0, 0.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 0
+
+    def test_wrapper_matches_numba(self):
+        """Wrapper function should return same result as JIT function."""
+        line = LineString([(0, 0), (50, 0), (50, 50), (100, 50)])
+        coords = np.array(line.coords)
+
+        result_wrapper = compute_shape_complexity(line)
+        result_numba = compute_shape_complexity_numba(coords, 10.0)
+
+        assert result_wrapper == result_numba
+
+    def test_wrapper_with_pre_extracted_coords(self):
+        """Wrapper should work with pre-extracted coordinates."""
+        line = LineString([(0, 0), (50, 0), (50, 50)])
+        coords = np.array(line.coords)
+
+        result = compute_shape_complexity(line, coords=coords)
+        assert result == 1
+
+
+class TestComputeParallelAlignmentNumba:
+    """Tests for compute_parallel_alignment_numba function."""
+
+    def test_parallel_lines(self):
+        """Parallel lines should return 1.0."""
+        coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
+        coords_b = np.array([[0.0, 10.0], [100.0, 10.0]])
+        assert compute_parallel_alignment_numba(coords_a, coords_b) == pytest.approx(1.0)
+
+    def test_opposite_direction_parallel(self):
+        """Opposite direction but parallel should return 1.0."""
+        coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
+        coords_b = np.array([[100.0, 10.0], [0.0, 10.0]])
+        assert compute_parallel_alignment_numba(coords_a, coords_b) == pytest.approx(1.0)
+
+    def test_perpendicular_lines(self):
+        """Perpendicular lines should return 0.0."""
+        coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
+        coords_b = np.array([[50.0, 0.0], [50.0, 100.0]])
+        assert compute_parallel_alignment_numba(coords_a, coords_b) == pytest.approx(0.0)
+
+    def test_45_degree_angle(self):
+        """45 degree angle should return 0.5."""
+        coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
+        coords_b = np.array([[0.0, 0.0], [100.0, 100.0]])
+        assert compute_parallel_alignment_numba(coords_a, coords_b) == pytest.approx(0.5)
+
+    def test_wrapper_matches_numba(self):
+        """Wrapper function should return same result as JIT function."""
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(0, 10), (100, 10)])
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
+
+        result_wrapper = compute_parallel_alignment(line_a, line_b)
+        result_numba = compute_parallel_alignment_numba(coords_a, coords_b)
+
+        assert result_wrapper == pytest.approx(result_numba)
+
+    def test_wrapper_with_pre_extracted_coords(self):
+        """Wrapper should work with pre-extracted coordinates."""
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(0, 10), (100, 10)])
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
+
+        result = compute_parallel_alignment(line_a, line_b, coords_a=coords_a, coords_b=coords_b)
+        assert result == pytest.approx(1.0)
+
+
+class TestComputeEndpointProximityNumba:
+    """Tests for compute_endpoint_proximity_numba function."""
+
+    def test_single_nearby_endpoint(self):
+        """Should find distance to single nearby endpoint."""
+        start = np.array([0.0, 0.0])
+        end = np.array([100.0, 0.0])
+        endpoints = np.array([[5.0, 0.0]])  # 5m from start
+
+        s_prox, e_prox, shared = compute_endpoint_proximity_numba(start, end, endpoints, 10.0)
+        assert s_prox == pytest.approx(5.0)
+        assert e_prox == pytest.approx(95.0)
+        assert shared == 1  # Only start is within tolerance
+
+    def test_multiple_endpoints(self):
+        """Should find minimum distance among multiple endpoints."""
+        start = np.array([0.0, 0.0])
+        end = np.array([100.0, 0.0])
+        endpoints = np.array(
+            [
+                [10.0, 0.0],  # 10m from start
+                [3.0, 0.0],  # 3m from start (closest)
+                [97.0, 0.0],  # 3m from end
+            ]
+        )
+
+        s_prox, e_prox, shared = compute_endpoint_proximity_numba(start, end, endpoints, 5.0)
+        assert s_prox == pytest.approx(3.0)
+        assert e_prox == pytest.approx(3.0)
+        assert shared == 2  # start and end each have 1 within tolerance
+
+    def test_empty_endpoints(self):
+        """Empty endpoint array should return inf."""
+        start = np.array([0.0, 0.0])
+        end = np.array([100.0, 0.0])
+        endpoints = np.empty((0, 2))
+
+        s_prox, e_prox, shared = compute_endpoint_proximity_numba(start, end, endpoints, 5.0)
+        assert s_prox == np.inf
+        assert e_prox == np.inf
+        assert shared == 0
+
+    def test_wrapper_matches_numba(self):
+        """Wrapper function should return same result as JIT function."""
+        target = LineString([(0, 0), (100, 0)])
+        endpoints = np.array([[5.0, 0.0], [95.0, 0.0]])
+
+        result_wrapper = compute_endpoint_proximity(target, endpoints, 10.0)
+        target_coords = np.array(target.coords)
+        result_numba = compute_endpoint_proximity_numba(
+            target_coords[0], target_coords[-1], endpoints, 10.0
+        )
+
+        assert result_wrapper[0] == pytest.approx(result_numba[0])
+        assert result_wrapper[1] == pytest.approx(result_numba[1])
+        assert result_wrapper[2] == result_numba[2]
+
+    def test_wrapper_with_pre_extracted_coords(self):
+        """Wrapper should work with pre-extracted coordinates."""
+        target = LineString([(0, 0), (100, 0)])
+        endpoints = np.array([[5.0, 0.0]])
+        target_coords = np.array(target.coords)
+
+        result = compute_endpoint_proximity(target, endpoints, 10.0, target_coords=target_coords)
+        assert result[0] == pytest.approx(5.0)
+
+
+class TestComputeHeadingConsistencyNumba:
+    """Tests for compute_heading_consistency_numba function."""
+
+    def test_straight_line(self):
+        """Straight line should return 1.0."""
+        points = np.array(
+            [
+                [0.0, 0.0],
+                [25.0, 0.0],
+                [50.0, 0.0],
+                [75.0, 0.0],
+                [100.0, 0.0],
+            ]
+        )
+        assert compute_heading_consistency_numba(points) == pytest.approx(1.0)
+
+    def test_90_degree_turn(self):
+        """90 degree turn should return ~0.0."""
+        points = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 50.0]])
+        # One heading diff of 90 degrees -> avg = 90 -> 1 - 90/90 = 0
+        assert compute_heading_consistency_numba(points) == pytest.approx(0.0)
+
+    def test_gentle_curve(self):
+        """Gentle curve should return high consistency."""
+        # Small deviations should result in high consistency
+        points = np.array(
+            [
+                [0.0, 0.0],
+                [25.0, 0.5],
+                [50.0, 1.5],
+                [75.0, 3.0],
+                [100.0, 5.0],
+            ]
+        )
+        result = compute_heading_consistency_numba(points)
+        assert result > 0.9  # Should be close to 1.0
+
+    def test_too_few_points(self):
+        """Fewer than 3 points should return 1.0."""
+        points = np.array([[0.0, 0.0], [100.0, 0.0]])
+        assert compute_heading_consistency_numba(points) == pytest.approx(1.0)
+
+    def test_single_point(self):
+        """Single point should return 1.0."""
+        points = np.array([[0.0, 0.0]])
+        assert compute_heading_consistency_numba(points) == pytest.approx(1.0)
