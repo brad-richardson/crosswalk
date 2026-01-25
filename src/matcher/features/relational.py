@@ -7,6 +7,17 @@ to their anchor roads, and for inferring connectivity from endpoint proximity.
 These features work without requiring explicit topology in the target data,
 making them suitable for raw "spaghetti" line datasets.
 
+CRS Requirements:
+-----------------
+**IMPORTANT**: All geometries passed to functions in this module MUST be in a
+projected CRS (e.g., UTM) where units are meters. Distance calculations use
+Euclidean geometry and will produce incorrect results if geometries are in a
+geographic CRS (lat/lon degrees).
+
+Projection should happen early in the pipeline (see runner.py). Since bare
+Shapely geometries don't carry CRS information, validation must occur at the
+caller level (e.g., in ml.py or rules.py).
+
 Key Features:
 ------------
 1. **Perpendicular offset features**: For matching parallel infrastructure
@@ -77,9 +88,12 @@ def compute_perpendicular_offset(
 
     Uses Shapely's vectorized functions for efficient batch computation.
 
+    IMPORTANT: Geometries MUST be in a projected CRS (meters).
+    Results will be incorrect if geometries are in geographic CRS (degrees).
+
     Args:
-        target_geom: Target geometry (sidewalk, bike lane)
-        anchor_geom: Anchor geometry (road centerline)
+        target_geom: Target geometry (sidewalk, bike lane) in projected CRS
+        anchor_geom: Anchor geometry (road centerline) in projected CRS
         sample_interval: Distance between sample points (meters)
 
     Returns:
@@ -261,13 +275,16 @@ def compute_relational_features(
 ) -> RelationalFeatures:
     """Compute all relational features for a target/anchor pair.
 
+    IMPORTANT: Geometries MUST be in a projected CRS (meters).
+    Results will be incorrect if geometries are in geographic CRS (degrees).
+
     Args:
-        target_geom: Target geometry (sidewalk, bike lane)
-        anchor_geom: Anchor geometry (road centerline)
-        sample_interval: Distance between sample points
+        target_geom: Target geometry (sidewalk, bike lane) in projected CRS
+        anchor_geom: Anchor geometry (road centerline) in projected CRS
+        sample_interval: Distance between sample points (meters)
 
     Returns:
-        RelationalFeatures named tuple
+        RelationalFeatures named tuple with distances in meters
     """
     # Perpendicular offset (now returns mean, iqr, p95)
     offset, offset_iqr, offset_p95 = compute_perpendicular_offset(

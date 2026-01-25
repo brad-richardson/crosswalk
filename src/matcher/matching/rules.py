@@ -48,6 +48,7 @@ from ..blocking.spatial_index import CandidatePair
 from ..config import CLASS_COLUMN, NAMES_COLUMN, settings
 from ..features.geometric import compute_geometric_features
 from ..features.semantic import compute_class_similarity, compute_name_similarity
+from ..utils.crs import validate_projected_crs
 
 
 class MatchDecision(Enum):
@@ -265,19 +266,16 @@ def score_candidates(
 
     weights = _get_weights(weights)
 
-    # Project to meter-based CRS for accurate distance computations
-    # All distance features will be in meters after this projection
-    working_ref = reference
-    working_target = target
+    # Validate that data is in projected CRS (meters)
+    # Projection should happen early in the pipeline (runner.py)
     if reference.crs is not None and reference.crs.is_geographic:
-        utm_crs = reference.estimate_utm_crs()
-        logger.debug(f"Projecting to {utm_crs} for meter-based feature computation")
-        working_ref = reference.to_crs(utm_crs)
-        working_target = target.to_crs(utm_crs)
+        validate_projected_crs(reference, "reference")
+    if target.crs is not None and target.crs.is_geographic:
+        validate_projected_crs(target, "target")
 
     # Pre-extract arrays for faster access (avoid repeated .iloc calls)
-    ref_geoms = working_ref.geometry.values
-    target_geoms = working_target.geometry.values
+    ref_geoms = reference.geometry.values
+    target_geoms = target.geometry.values
 
     ref_names = (
         reference[ref_name_column].values

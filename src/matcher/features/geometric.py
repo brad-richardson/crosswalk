@@ -14,6 +14,17 @@ road network data:
 3. **Positional accuracy**: Datasets have varying accuracy. Small offsets
    shouldn't prevent matching.
 
+CRS Requirements:
+-----------------
+**IMPORTANT**: All geometries passed to functions in this module MUST be in a
+projected CRS (e.g., UTM) where units are meters. Distance calculations assume
+Euclidean geometry and will produce incorrect results if geometries are in a
+geographic CRS (lat/lon degrees).
+
+Projection should happen early in the pipeline (see runner.py). Since bare
+Shapely geometries don't carry CRS information, validation must occur at the
+caller level (e.g., in ml.py or rules.py).
+
 Metric Selection Rationale:
 --------------------------
 - **hausdorff_distance**: Classic max-deviation metric. Sensitive to segmentation
@@ -193,12 +204,16 @@ def compute_geometric_features(
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
+    IMPORTANT: Both geometries MUST be in a projected CRS (meters).
+    If geometries are in a geographic CRS (degrees), all distance-based
+    features will be incorrect. Ensure projection happens before calling.
+
     Args:
-        line_a: First geometry (LineString, projected CRS)
-        line_b: Second geometry (LineString, projected CRS)
+        line_a: First geometry (LineString in projected CRS with meter units)
+        line_b: Second geometry (LineString in projected CRS with meter units)
 
     Returns:
-        GeometricFeatures tuple
+        GeometricFeatures tuple with distances in meters
     """
 
     coords_a = np.array(line_a.coords)

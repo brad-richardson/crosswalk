@@ -38,6 +38,7 @@ from ..config import (
     MAX_DISTANCE_METERS,
     SEMANTIC_FEATURES,
 )
+from ..utils.crs import validate_projected_crs
 from .rules import MatchDecision, MatchResult
 
 # Module-level globals for multiprocessing worker data
@@ -789,19 +790,17 @@ class MLMatcher:
         if not candidates:
             return []
 
-        # Project to meter-based CRS for accurate distance computations
-        # All distance features will be in meters after this projection
-        working_ref = reference
-        working_target = target
+        # Validate that data is in projected CRS (meters)
+        # Projection should happen early in the pipeline (runner.py)
+        # This validation catches misuse when score_candidates is called directly
         if reference.crs is not None and reference.crs.is_geographic:
-            utm_crs = reference.estimate_utm_crs()
-            logger.debug(f"Projecting to {utm_crs} for meter-based feature computation")
-            working_ref = reference.to_crs(utm_crs)
-            working_target = target.to_crs(utm_crs)
+            validate_projected_crs(reference, "reference")
+        if target.crs is not None and target.crs.is_geographic:
+            validate_projected_crs(target, "target")
 
         # Pre-extract data into NumPy arrays for memory efficiency
-        ref_geoms = working_ref.geometry.to_numpy()
-        target_geoms = working_target.geometry.to_numpy()
+        ref_geoms = reference.geometry.to_numpy()
+        target_geoms = target.geometry.to_numpy()
         ref_names = (
             reference[ref_name_column].to_numpy()
             if ref_name_column in reference.columns
@@ -850,10 +849,8 @@ class MLMatcher:
 
         # Filter target to only segments that appear in candidates
         # This dramatically speeds up spatial index building (e.g., 11k -> ~1k segments)
-        # IMPORTANT: Use working_target (projected CRS) not target (WGS84) to match the
-        # CRS of target_geoms which are used as query points in compute_endpoint_features
         sorted_target_indices = sorted(unique_target_indices)
-        target_candidates_only = working_target.iloc[sorted_target_indices].reset_index(drop=True)
+        target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
         logger.info(
             f"Filtered target to {len(target_candidates_only)} candidate segments "
             f"(from {len(target)} total)"
@@ -942,10 +939,8 @@ class MLMatcher:
         # For Overture reference data, use explicit connector positions for alignment-aware comparison
         # Filter to only candidate segments to reduce graph building overhead
         sorted_ref_indices = sorted(unique_ref_indices)
-        ref_candidates_only = working_ref.iloc[sorted_ref_indices].reset_index(drop=True)
-        target_candidates_only_proj = working_target.iloc[sorted_target_indices].reset_index(
-            drop=True
-        )
+        ref_candidates_only = reference.iloc[sorted_ref_indices].reset_index(drop=True)
+        target_candidates_only_proj = target.iloc[sorted_target_indices].reset_index(drop=True)
 
         logger.info(
             f"Computing graphlet features for {len(ref_candidates_only)} reference "
