@@ -16,12 +16,15 @@ from matcher.features._jit_helpers import (
     compute_heading_numba,
     compute_parallel_alignment_numba,
     compute_shape_complexity_numba,
+    query_nearby_endpoints_numba,
+    side_of_street_vote_numba,
 )
 from matcher.features.geometric import (
     _compute_hausdorff_stats,
     compute_collinear_gap_ratio,
     compute_shape_complexity,
     compute_sinuosity,
+    compute_vertex_density,
 )
 from matcher.features.relational import compute_endpoint_proximity, compute_parallel_alignment
 
@@ -537,3 +540,231 @@ class TestSinuosityOptionalCoords:
 
         result = compute_sinuosity(line, coords=coords)
         assert result == pytest.approx(100.0)
+
+
+class TestQueryNearbyEndpointsNumba:
+    """Tests for query_nearby_endpoints_numba function."""
+
+    def test_single_endpoint_within_radius(self):
+        """Should find single endpoint within radius."""
+        endpoint_coords = np.array([[10.0, 0.0], [100.0, 0.0], [200.0, 0.0]])
+        candidate_indices = np.array([0, 1, 2], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 15.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 1
+        assert result_indices[0] == 0
+        assert result_dists[0] == pytest.approx(10.0)
+
+    def test_multiple_endpoints_within_radius(self):
+        """Should find multiple endpoints within radius."""
+        endpoint_coords = np.array([[5.0, 0.0], [10.0, 0.0], [100.0, 0.0]])
+        candidate_indices = np.array([0, 1, 2], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 15.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 2
+        assert set(result_indices) == {0, 1}
+        assert result_dists[0] == pytest.approx(5.0)
+        assert result_dists[1] == pytest.approx(10.0)
+
+    def test_no_endpoints_within_radius(self):
+        """Should return empty arrays when no endpoints within radius."""
+        endpoint_coords = np.array([[100.0, 0.0], [200.0, 0.0]])
+        candidate_indices = np.array([0, 1], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 50.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 0
+        assert len(result_dists) == 0
+
+    def test_empty_candidates(self):
+        """Should handle empty candidate array."""
+        endpoint_coords = np.array([[10.0, 0.0]])
+        candidate_indices = np.array([], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 50.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 0
+        assert len(result_dists) == 0
+
+    def test_diagonal_distance(self):
+        """Should compute correct diagonal (Euclidean) distance."""
+        endpoint_coords = np.array([[3.0, 4.0]])  # Distance 5 from origin
+        candidate_indices = np.array([0], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 5.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 1
+        assert result_dists[0] == pytest.approx(5.0)
+
+    def test_subset_of_candidates(self):
+        """Should only check specified candidate indices."""
+        endpoint_coords = np.array([[5.0, 0.0], [10.0, 0.0], [1.0, 0.0]])
+        # Only check indices 0 and 1, not 2 (which is closest)
+        candidate_indices = np.array([0, 1], dtype=np.int64)
+        point_coords = np.array([0.0, 0.0])
+        radius = 15.0
+
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            endpoint_coords, candidate_indices, point_coords, radius
+        )
+
+        assert len(result_indices) == 2
+        # Index 2 (distance 1m) should NOT be in results
+        assert 2 not in result_indices
+
+
+class TestSideOfStreetVoteNumba:
+    """Tests for side_of_street_vote_numba function."""
+
+    def test_all_left(self):
+        """All points on left should return all left votes."""
+        # Target points are 5m to the left of a road going east
+        target_points = np.array([[0.0, 5.0], [50.0, 5.0], [100.0, 5.0]])
+        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
+        anchor_dir_norm = np.array([1.0, 0.0])  # East
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        assert left == 3
+        assert right == 0
+        assert undecided == 0
+
+    def test_all_right(self):
+        """All points on right should return all right votes."""
+        # Target points are 5m to the right of a road going east
+        target_points = np.array([[0.0, -5.0], [50.0, -5.0], [100.0, -5.0]])
+        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
+        anchor_dir_norm = np.array([1.0, 0.0])  # East
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        assert left == 0
+        assert right == 3
+        assert undecided == 0
+
+    def test_mixed_sides(self):
+        """Mixed points should return mixed votes."""
+        target_points = np.array([[0.0, 5.0], [50.0, -5.0], [100.0, 5.0]])
+        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
+        anchor_dir_norm = np.array([1.0, 0.0])  # East
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        assert left == 2
+        assert right == 1
+        assert undecided == 0
+
+    def test_undecided_when_on_line(self):
+        """Points very close to line should be undecided."""
+        # Points exactly on the anchor line (cross product ~0)
+        target_points = np.array([[0.0, 0.05], [50.0, 0.0], [100.0, -0.05]])
+        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
+        anchor_dir_norm = np.array([1.0, 0.0])  # East
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        # With threshold of 0.1, these should all be undecided
+        assert undecided == 3
+
+    def test_north_road_direction(self):
+        """Should work for roads going north."""
+        # Target points are to the left of a road going north (west side)
+        target_points = np.array([[-5.0, 0.0], [-5.0, 50.0], [-5.0, 100.0]])
+        anchor_points = np.array([[0.0, 0.0], [0.0, 50.0], [0.0, 100.0]])
+        anchor_dir_norm = np.array([0.0, 1.0])  # North
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        assert left == 3
+        assert right == 0
+
+    def test_south_road_direction(self):
+        """Should correctly flip sides for roads going south."""
+        # Same west-side points, but road going south
+        target_points = np.array([[-5.0, 0.0], [-5.0, 50.0], [-5.0, 100.0]])
+        anchor_points = np.array([[0.0, 0.0], [0.0, 50.0], [0.0, 100.0]])
+        anchor_dir_norm = np.array([0.0, -1.0])  # South
+
+        left, right, undecided = side_of_street_vote_numba(
+            target_points, anchor_points, anchor_dir_norm
+        )
+
+        # Now they should be on the right (road going opposite direction)
+        assert left == 0
+        assert right == 3
+
+
+class TestComputeVertexDensityOptionalCoords:
+    """Tests for compute_vertex_density with optional coords parameter."""
+
+    def test_basic_density(self):
+        """Should compute correct vertex density."""
+        # Line with 3 vertices over 100m = 0.03 vertices/meter
+        line = LineString([(0, 0), (50, 0), (100, 0)])
+        result = compute_vertex_density(line)
+        assert result == pytest.approx(3 / 100)
+
+    def test_with_pre_extracted_coords(self):
+        """Should work with pre-extracted coordinates."""
+        line = LineString([(0, 0), (50, 0), (100, 0)])
+        coords = np.array(line.coords)
+
+        result = compute_vertex_density(line, coords=coords)
+        assert result == pytest.approx(3 / 100)
+
+    def test_pre_extracted_matches_auto_extracted(self):
+        """Pre-extracted coords should give same result as auto-extraction."""
+        line = LineString([(0, 0), (25, 10), (50, 0), (75, 10), (100, 0)])
+
+        result_auto = compute_vertex_density(line)
+
+        coords = np.array(line.coords)
+        result_pre = compute_vertex_density(line, coords=coords)
+
+        assert result_auto == pytest.approx(result_pre)
+
+    def test_empty_line(self):
+        """Empty line should return 0."""
+        line = LineString()
+        result = compute_vertex_density(line)
+        assert result == 0.0
+
+    def test_high_density_line(self):
+        """Line with many vertices should have higher density."""
+        # 11 vertices over 100m = 0.11 vertices/meter
+        coords = [(i * 10, 0) for i in range(11)]
+        line = LineString(coords)
+        result = compute_vertex_density(line)
+        assert result == pytest.approx(11 / 100)

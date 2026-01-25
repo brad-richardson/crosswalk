@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 from matcher.config import MAX_DISTANCE_METERS
 
+from ._jit_helpers import query_nearby_endpoints_numba
 from .relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
@@ -393,16 +394,24 @@ class SpatialContextIndex:
         buffered = query_point.buffer(radius)
         candidate_indices = self._endpoint_tree.query(buffered)
 
-        results = []
+        if len(candidate_indices) == 0:
+            return []
+
         # Handle 3D coordinates by taking only x, y (first 2 dimensions)
         point_coords = np.array(query_point.coords[0])[:2]
 
-        for ep_idx in candidate_indices:
-            ep_coords = self.endpoint_coords[ep_idx]
-            dist = np.linalg.norm(ep_coords - point_coords)
-            if dist <= radius:
-                results.append((ep_idx, dist))
+        # Convert to numpy array for JIT function (STRtree returns numpy array)
+        candidate_indices_arr = np.asarray(candidate_indices, dtype=np.int64)
 
+        # Use JIT-compiled distance filtering (5-10x faster for large candidate sets)
+        result_indices, result_dists = query_nearby_endpoints_numba(
+            self.endpoint_coords, candidate_indices_arr, point_coords, radius
+        )
+
+        # Convert to list of tuples and sort by distance
+        results = [
+            (int(result_indices[i]), float(result_dists[i])) for i in range(len(result_indices))
+        ]
         return sorted(results, key=lambda x: x[1])
 
     def query_nearby_segments(

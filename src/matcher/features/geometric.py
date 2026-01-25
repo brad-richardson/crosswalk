@@ -508,7 +508,11 @@ def compute_sinuosity(
     return line_length / straight_distance
 
 
-def compute_vertex_density(line: LineString) -> float:
+def compute_vertex_density(
+    line: LineString,
+    *,
+    coords: np.ndarray | None = None,
+) -> float:
     """Compute vertex density of a line (vertices per meter).
 
     Higher density often indicates more detailed/higher-quality data.
@@ -516,6 +520,7 @@ def compute_vertex_density(line: LineString) -> float:
 
     Args:
         line: LineString geometry
+        coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
         Vertices per meter (>= 0.0)
@@ -527,7 +532,12 @@ def compute_vertex_density(line: LineString) -> float:
     if line_length <= 0:
         return 0.0
 
-    n_vertices = len(line.coords)
+    # Use pre-extracted coords if provided, otherwise extract
+    if coords is not None:
+        n_vertices = len(coords)
+    else:
+        n_vertices = len(line.coords)
+
     return n_vertices / line_length
 
 

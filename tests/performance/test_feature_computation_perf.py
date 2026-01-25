@@ -22,12 +22,14 @@ from matcher.features.geometric import (
     compute_heading_consistency,
     compute_shape_complexity,
     compute_sinuosity,
+    compute_vertex_density,
     get_buffer_cache_info,
 )
 from matcher.features.relational import (
     compute_endpoint_proximity,
     compute_parallel_alignment,
     compute_perpendicular_offset,
+    compute_side_of_street,
 )
 
 # Number of synthetic lines to generate
@@ -477,3 +479,93 @@ class TestFeatureComputationPerformance:
         print(f"  Reuse coords:  {per_pair_reuse_us:.2f} µs/pair")
         savings = per_pair_auto_us - per_pair_reuse_us
         print(f"  Savings when reusing: {savings:.2f} µs/pair")
+
+    def test_vertex_density_with_pre_extracted_coords(self, synthetic_lines):
+        """Benchmark compute_vertex_density with vs without pre-extracted coords."""
+        n_lines = len(synthetic_lines)
+
+        # Without pre-extracted coords
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            compute_vertex_density(line)
+        elapsed_auto = time.perf_counter() - start
+        per_line_auto_us = (elapsed_auto / n_lines) * 1_000_000
+
+        # With pre-extracted coords
+        coords_list = [np.array(line.coords) for line in synthetic_lines]
+        start = time.perf_counter()
+        for i, line in enumerate(synthetic_lines):
+            compute_vertex_density(line, coords=coords_list[i])
+        elapsed_reuse = time.perf_counter() - start
+        per_line_reuse_us = (elapsed_reuse / n_lines) * 1_000_000
+
+        print("\nVertex density timing:")
+        print(f"  Auto-extract:  {per_line_auto_us:.2f} µs/line")
+        print(f"  Reuse coords:  {per_line_reuse_us:.2f} µs/line")
+        savings = per_line_auto_us - per_line_reuse_us
+        print(f"  Savings when reusing: {savings:.2f} µs/line")
+
+    def test_side_of_street_throughput(self, synthetic_lines):
+        """Benchmark compute_side_of_street with JIT voting."""
+        n_pairs = min(N_PAIRS, 2000)  # Side of street is slower, use fewer pairs
+        pairs = [
+            (
+                synthetic_lines[i % len(synthetic_lines)],
+                synthetic_lines[(i + 1) % len(synthetic_lines)],
+            )
+            for i in range(n_pairs)
+        ]
+
+        start = time.perf_counter()
+        for target, anchor in pairs:
+            compute_side_of_street(target, anchor)
+        elapsed = time.perf_counter() - start
+
+        throughput = n_pairs / elapsed
+        per_pair_us = (elapsed / n_pairs) * 1_000_000
+
+        print(
+            f"\nSide of street: {throughput:.0f} pairs/sec, {per_pair_us:.1f} µs/pair ({elapsed:.2f}s total)"
+        )
+
+        # Target: < 500 µs per pair (Shapely bottleneck limits gains)
+        assert per_pair_us < 1000, f"Side of street too slow: {per_pair_us:.1f} µs/pair"
+
+    def test_query_nearby_endpoints_jit_throughput(self, synthetic_lines):
+        """Benchmark query_nearby_endpoints JIT function directly."""
+        from matcher.features._jit_helpers import query_nearby_endpoints_numba
+
+        # Create endpoint array from all line endpoints
+        all_endpoints = []
+        for line in synthetic_lines:
+            coords = np.array(line.coords)
+            all_endpoints.append(coords[0])
+            all_endpoints.append(coords[-1])
+        endpoint_array = np.array(all_endpoints)
+
+        n_endpoints = len(endpoint_array)
+        n_queries = 10000
+
+        # Generate random query points
+        np.random.seed(42)
+        query_points = np.random.rand(n_queries, 2) * 1000
+        radius = 50.0
+
+        # Create candidate indices (simulate STRtree returning ~100 candidates per query)
+        # In practice, STRtree filters to nearby candidates first
+        n_candidates_per_query = min(100, n_endpoints)
+        candidate_indices = np.arange(n_candidates_per_query, dtype=np.int64)
+
+        start = time.perf_counter()
+        for i in range(n_queries):
+            query_nearby_endpoints_numba(endpoint_array, candidate_indices, query_points[i], radius)
+        elapsed = time.perf_counter() - start
+
+        per_query_us = (elapsed / n_queries) * 1_000_000
+        print(
+            f"\nQuery nearby endpoints (JIT): {per_query_us:.2f} µs/query "
+            f"({n_candidates_per_query} candidates, {elapsed:.2f}s total)"
+        )
+
+        # Target: < 50 µs per query for 100 candidates
+        assert per_query_us < 100, f"Query nearby endpoints too slow: {per_query_us:.2f} µs/query"

@@ -8,10 +8,10 @@ JIT provides consistent performance for batch processing scenarios.
 """
 
 import numpy as np
-from numba import jit
+from numba import njit
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def compute_heading_numba(dx: float, dy: float) -> float:
     """Compute heading in degrees (0-360) from delta x/y.
 
@@ -26,7 +26,7 @@ def compute_heading_numba(dx: float, dy: float) -> float:
     return (heading + 360.0) % 360.0
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def angle_diff_numba(a: float, b: float) -> float:
     """Compute minimum angle difference in degrees (0-90).
 
@@ -50,7 +50,7 @@ def angle_diff_numba(a: float, b: float) -> float:
     return min(diff, opposite_diff)
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def collinear_gap_ratio_numba(
     coords_a: np.ndarray,
     coords_b: np.ndarray,
@@ -126,7 +126,7 @@ def collinear_gap_ratio_numba(
     return along_track_overlap / min_overlap_fraction
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def compute_shape_complexity_numba(
     coords: np.ndarray,
     angle_threshold: float,
@@ -167,7 +167,7 @@ def compute_shape_complexity_numba(
     return turn_count
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def compute_parallel_alignment_numba(
     coords_a: np.ndarray,
     coords_b: np.ndarray,
@@ -197,7 +197,7 @@ def compute_parallel_alignment_numba(
     return max(0.0, 1.0 - min_diff / 90.0)
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def compute_endpoint_proximity_numba(
     start: np.ndarray,
     end: np.ndarray,
@@ -248,7 +248,90 @@ def compute_endpoint_proximity_numba(
     return (start_min, end_min, within_start + within_end)
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
+def query_nearby_endpoints_numba(
+    endpoint_coords: np.ndarray,
+    candidate_indices: np.ndarray,
+    point_coords: np.ndarray,
+    radius: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """JIT-compiled endpoint distance filtering.
+
+    Filters candidate endpoints by Euclidean distance from query point.
+    Much faster than Python loop with np.linalg.norm calls.
+
+    Args:
+        endpoint_coords: (N, 2) array of all endpoint coordinates
+        candidate_indices: Array of candidate indices to check (from spatial index)
+        point_coords: (2,) query point coordinates
+        radius: Maximum distance threshold
+
+    Returns:
+        Tuple of (result_indices, result_distances) for endpoints within radius
+    """
+    n_candidates = len(candidate_indices)
+    result_indices = np.empty(n_candidates, dtype=np.int64)
+    result_dists = np.empty(n_candidates, dtype=np.float64)
+    count = 0
+
+    for i in range(n_candidates):
+        ep_idx = candidate_indices[i]
+        dx = endpoint_coords[ep_idx, 0] - point_coords[0]
+        dy = endpoint_coords[ep_idx, 1] - point_coords[1]
+        dist = np.sqrt(dx * dx + dy * dy)
+        if dist <= radius:
+            result_indices[count] = ep_idx
+            result_dists[count] = dist
+            count += 1
+
+    return result_indices[:count], result_dists[:count]
+
+
+@njit(cache=True)
+def side_of_street_vote_numba(
+    target_points: np.ndarray,
+    anchor_points: np.ndarray,
+    anchor_dir_norm: np.ndarray,
+) -> tuple[int, int, int]:
+    """JIT-compiled cross-product voting for side-of-street determination.
+
+    Computes which side of the anchor road each target point is on using
+    the cross product of the anchor direction and the vector from anchor
+    to target.
+
+    Args:
+        target_points: (N, 2) array of sampled target points
+        anchor_points: (N, 2) array of corresponding nearest anchor points
+        anchor_dir_norm: (2,) normalized direction vector of anchor line
+
+    Returns:
+        Tuple of (left_count, right_count, undecided_count)
+    """
+    n_points = len(target_points)
+    left_count = 0
+    right_count = 0
+    undecided_count = 0
+
+    for i in range(n_points):
+        # Vector from anchor to target
+        to_target_x = target_points[i, 0] - anchor_points[i, 0]
+        to_target_y = target_points[i, 1] - anchor_points[i, 1]
+
+        # Cross product z-component determines side
+        # Positive = left, Negative = right (using right-hand rule)
+        cross_z = anchor_dir_norm[0] * to_target_y - anchor_dir_norm[1] * to_target_x
+
+        if abs(cross_z) < 0.1:  # Too close to call
+            undecided_count += 1
+        elif cross_z > 0:
+            left_count += 1
+        else:
+            right_count += 1
+
+    return left_count, right_count, undecided_count
+
+
+@njit(cache=True)
 def compute_heading_consistency_numba(
     points: np.ndarray,
 ) -> float:
