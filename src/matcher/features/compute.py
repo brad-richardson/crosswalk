@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 import geopandas as gpd
+import numpy as np
 from loguru import logger
 
 from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
@@ -105,6 +106,11 @@ def compute_pair_features(
             geom_for_similarity_ref = ref_geom
             geom_for_similarity_target = target_geom
 
+        # Extract coords once for functions that accept optional coords parameter
+        # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
+        coords_ref = np.array(geom_for_similarity_ref.coords)
+        coords_target = np.array(geom_for_similarity_target.coords)
+
         # Compute geometric features on aligned sublines (or full geom if no alignment)
         geom_features = compute_geometric_features(
             geom_for_similarity_ref, geom_for_similarity_target
@@ -120,9 +126,9 @@ def compute_pair_features(
             geom_for_similarity_target, geom_for_similarity_ref
         )
 
-        # Compute sinuosity on aligned sublines
-        sinuosity_ref = compute_sinuosity(geom_for_similarity_ref)
-        sinuosity_target = compute_sinuosity(geom_for_similarity_target)
+        # Compute sinuosity on aligned sublines (pass pre-extracted coords)
+        sinuosity_ref = compute_sinuosity(geom_for_similarity_ref, coords=coords_ref)
+        sinuosity_target = compute_sinuosity(geom_for_similarity_target, coords=coords_target)
         sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
 
         # Compute heading consistency on aligned sublines
@@ -146,9 +152,11 @@ def compute_pair_features(
         target_length = geom_for_similarity_target.length
         min_length_m = min(ref_length, target_length)
 
-        # Compute shape complexity on aligned sublines
-        shape_complexity_ref = compute_shape_complexity(geom_for_similarity_ref)
-        shape_complexity_target = compute_shape_complexity(geom_for_similarity_target)
+        # Compute shape complexity on aligned sublines (pass pre-extracted coords)
+        shape_complexity_ref = compute_shape_complexity(geom_for_similarity_ref, coords=coords_ref)
+        shape_complexity_target = compute_shape_complexity(
+            geom_for_similarity_target, coords=coords_target
+        )
         shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
 
         # Compute name numeric match for numbered routes

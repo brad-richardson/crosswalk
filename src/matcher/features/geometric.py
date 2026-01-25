@@ -230,7 +230,10 @@ def compute_geometric_features(
     hausdorff = hausdorff_distance(line_a, line_b)
 
     # Mean and P95 Hausdorff (robust to segmentation)
-    mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(line_a, line_b)
+    # Pass pre-extracted coords to avoid redundant extraction
+    mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
+        line_a, line_b, coords_a=coords_a, coords_b=coords_b
+    )
 
     # Multi-scale Buffer IoU:
     # - 5m: Captures tight alignment (exact centerline matches)
@@ -337,7 +340,13 @@ def _angle_diff(a: float, b: float) -> float:
     return min(diff, opposite_diff)
 
 
-def _compute_hausdorff_stats(line_a: LineString, line_b: LineString) -> tuple[float, float]:
+def _compute_hausdorff_stats(
+    line_a: LineString,
+    line_b: LineString,
+    *,
+    coords_a: np.ndarray | None = None,
+    coords_b: np.ndarray | None = None,
+) -> tuple[float, float]:
     """Compute mean and P95 Hausdorff distances (from min distances).
 
     Standard Hausdorff uses max(min_distances), which is sensitive to
@@ -346,11 +355,19 @@ def _compute_hausdorff_stats(line_a: LineString, line_b: LineString) -> tuple[fl
     Uses Shapely's vectorized distance function for efficient computation
     of distances from all vertices to the opposite line.
 
+    Args:
+        line_a: First geometry (LineString)
+        line_b: Second geometry (LineString)
+        coords_a: Pre-extracted coordinates for line_a (optional, avoids redundant extraction)
+        coords_b: Pre-extracted coordinates for line_b (optional, avoids redundant extraction)
+
     Returns:
         Tuple of (mean_distance, p95_distance)
     """
-    coords_a = np.array(line_a.coords)
-    coords_b = np.array(line_b.coords)
+    if coords_a is None:
+        coords_a = np.array(line_a.coords)
+    if coords_b is None:
+        coords_b = np.array(line_b.coords)
 
     if len(coords_a) == 0 or len(coords_b) == 0:
         return float("inf"), float("inf")
@@ -448,7 +465,11 @@ def compute_heading_consistency(
     return compute_heading_consistency_numba(sampled_points)
 
 
-def compute_sinuosity(line: LineString) -> float:
+def compute_sinuosity(
+    line: LineString,
+    *,
+    coords: np.ndarray | None = None,
+) -> float:
     """Compute sinuosity of a line (ratio of path length to straight-line distance).
 
     Sinuosity = line_length / straight_distance
@@ -458,6 +479,7 @@ def compute_sinuosity(line: LineString) -> float:
 
     Args:
         line: LineString geometry
+        coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
         Sinuosity ratio (>= 1.0, or 100.0 for loops)
@@ -469,7 +491,8 @@ def compute_sinuosity(line: LineString) -> float:
     if line_length <= 0:
         return 1.0
 
-    coords = np.array(line.coords)
+    if coords is None:
+        coords = np.array(line.coords)
     if len(coords) < 2:
         return 1.0
 
