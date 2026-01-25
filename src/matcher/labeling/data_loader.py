@@ -531,13 +531,13 @@ def compute_features_only(
 
     import numpy as np
 
-    from ..config import DEFAULT_TOPOLOGY_FEATURES, MAX_DISTANCE_METERS
+    from ..config import DEFAULT_TOPOLOGY_FEATURES
     from ..features.alignment import compute_alignment_batch
     from ..features.compute import precompute_graphlet_features
     from ..features.spatial_context import (
         SpatialContextIndex,
+        compute_aligned_endpoint_features,
         compute_all_topology,
-        compute_endpoint_features,
     )
     from ..matching.ml import _compute_single_feature, _init_worker
 
@@ -609,25 +609,6 @@ def compute_features_only(
     target_index = SpatialContextIndex()
     target_index.build_from_gdf(target_candidates_only, id_column="id")
 
-    target_endpoint_features = {}
-    logger.info(
-        f"Pre-computing endpoint features for {len(unique_target_indices)} target segments..."
-    )
-    for target_idx in unique_target_indices:
-        target_geom = target_geoms[target_idx]
-        if target_geom is not None and not target_geom.is_empty:
-            filtered_idx = original_to_filtered[target_idx]
-            ep_feats = compute_endpoint_features(
-                target_geom, target_index, exclude_segment_idx=filtered_idx
-            )
-            target_endpoint_features[target_idx] = ep_feats
-        else:
-            target_endpoint_features[target_idx] = {
-                "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "shared_endpoint_count": 0,
-            }
-
     # Pre-compute topology features
     target_ids = target["id"].to_numpy()
     ref_ids = reference["id"].to_numpy()
@@ -692,6 +673,24 @@ def compute_features_only(
     logger.info("Computing linestring alignments...")
     alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
 
+    # Compute endpoint features using alignment fractions
+    # This uses aligned subline endpoints instead of full segment endpoints
+    aligned_endpoint_features = {}
+    if alignments:
+        logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
+        for (ref_idx, target_idx), alignment in alignments.items():
+            target_geom = target_geoms[target_idx]
+            if target_geom is not None and not target_geom.is_empty:
+                filtered_idx = original_to_filtered.get(target_idx)
+                aligned_ep = compute_aligned_endpoint_features(
+                    target_geom,
+                    target_index,
+                    start_frac=alignment.dataset_start_frac,
+                    end_frac=alignment.dataset_end_frac,
+                    exclude_segment_idx=filtered_idx,
+                )
+                aligned_endpoint_features[(ref_idx, target_idx)] = aligned_ep
+
     # Determine number of workers
     if n_jobs == -1:
         n_workers = max(1, mp.cpu_count() - 2)
@@ -713,13 +712,12 @@ def compute_features_only(
         "target_subclasses": target_subclasses,
         "ref_ids": ref_ids,
         "target_ids": target_ids,
-        "endpoint_features": target_endpoint_features,
+        "aligned_endpoint_features": aligned_endpoint_features,
         "ref_topology": ref_topology_features,
         "target_topology": target_topology_features,
         "ref_graphlet_data": ref_graphlet_data,
         "target_graphlet_data": target_graphlet_data,
         "alignments": alignments,
-        "use_aligned_features": settings.alignment_enabled,
     }
 
     work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
@@ -741,11 +739,29 @@ def compute_features_only(
             pct = processed / len(work_items) * 100
             logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
 
+    # Filter out rejected pairs (None results) - pairs without aligned endpoint features
+    valid_pairs = [
+        (cand, feat) for cand, feat in zip(candidates, features_list) if feat is not None
+    ]
+    rejected_count = len(candidates) - len(valid_pairs)
+    if rejected_count > 0:
+        rejection_rate = rejected_count / len(candidates)
+        logger.info(
+            f"Rejected {rejected_count} pairs without aligned endpoint features "
+            f"({len(valid_pairs)} remaining, {rejection_rate:.1%} rejection rate)"
+        )
+        # Fail if too many pairs rejected - indicates data or configuration problem
+        if rejection_rate > 0.01:
+            raise ValueError(
+                f"Alignment rejection rate {rejection_rate:.1%} exceeds 1% threshold. "
+                f"{rejected_count} of {len(candidates)} pairs failed to align. "
+                "This may indicate CRS issues, bad geometry data, or a bug."
+            )
+
     # Build DataFrame with identifiers, alignment fractions, and features
     records = []
-    for i, cand in enumerate(candidates):
+    for cand, features in valid_pairs:
         alignment = alignments.get((cand.ref_idx, cand.target_idx))
-        features = features_list[i]
 
         record = {
             "ref_id": str(cand.ref_id),

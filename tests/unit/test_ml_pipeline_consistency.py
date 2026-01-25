@@ -76,6 +76,7 @@ class TestPrecomputedFeaturePassthrough:
         """Pre-computed topology features should be used unchanged."""
         from matcher.features.compute import compute_pair_features
         from matcher.features.spatial_context import compute_all_topology
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         topology = compute_all_topology(
             t_network, id_column="id", tolerance_m=5.0, ids_to_compute={"main_w", "main_e"}
@@ -90,6 +91,7 @@ class TestPrecomputedFeaturePassthrough:
             target_class=None,
             ref_topology=topology["main_e"],
             target_topology=topology["main_w"],
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # Topology values should pass through
@@ -110,6 +112,7 @@ class TestPrecomputedFeaturePassthrough:
     ):
         """Pre-computed graphlet features should be used unchanged."""
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         features = compute_pair_features(
             ref_geom=t_network.geometry.iloc[0],
@@ -119,6 +122,7 @@ class TestPrecomputedFeaturePassthrough:
             ref_class=None,
             target_class=None,
             graphlet_features=graphlet_input,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         assert features["graphlet_similarity"] == expected_sim

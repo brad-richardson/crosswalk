@@ -124,6 +124,13 @@ class TestAlignmentIntegration:
         # Compute alignment
         alignment = linestring_alignment(ref_geom, target_geom)
 
+        # Mock endpoint features (required parameter - test is checking coverage features)
+        mock_endpoint_features = {
+            "min_endpoint_proximity_m": 0.0,
+            "max_endpoint_proximity_m": 0.0,
+            "shared_endpoint_count": 0,
+        }
+
         # Compute features with alignment
         features = compute_pair_features(
             ref_geom=ref_geom,
@@ -133,6 +140,7 @@ class TestAlignmentIntegration:
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
+            endpoint_features=mock_endpoint_features,
         )
 
         # Verify coverage features are present and valid
@@ -184,6 +192,13 @@ class TestAlignmentIntegration:
 
         alignment = linestring_alignment(ref, target)
 
+        # Mock endpoint features (required parameter - test is checking alignment behavior)
+        mock_endpoint_features = {
+            "min_endpoint_proximity_m": 0.0,
+            "max_endpoint_proximity_m": 0.0,
+            "shared_endpoint_count": 0,
+        }
+
         features_aligned = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
@@ -192,6 +207,7 @@ class TestAlignmentIntegration:
             ref_class=None,
             target_class=None,
             alignment=alignment,
+            endpoint_features=mock_endpoint_features,
         )
 
         features_unaligned = compute_pair_features(
@@ -202,6 +218,7 @@ class TestAlignmentIntegration:
             ref_class=None,
             target_class=None,
             alignment=None,
+            endpoint_features=mock_endpoint_features,
         )
 
         # Aligned features should have better hausdorff (comparing matching portions)

@@ -4,12 +4,113 @@ This module provides a unified interface for computing all features for candidat
 including geometric, semantic, relational, and topology features.
 """
 
+import os
+import threading
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
 import geopandas as gpd
 import numpy as np
 from loguru import logger
+
+# ============================================================================
+# Performance Profiling Infrastructure
+# ============================================================================
+# Enable with MATCHER_PROFILE=1 environment variable
+# Each worker accumulates timing stats and logs summaries periodically
+
+PROFILING_ENABLED = os.environ.get("MATCHER_PROFILE", "0") == "1"
+
+
+@dataclass
+class FeatureTimingStats:
+    """Accumulated timing stats for feature computation."""
+
+    counts: dict = field(default_factory=dict)
+    totals: dict = field(default_factory=dict)
+
+    def record(self, name: str, elapsed: float) -> None:
+        """Record a timing measurement."""
+        self.counts[name] = self.counts.get(name, 0) + 1
+        self.totals[name] = self.totals.get(name, 0.0) + elapsed
+
+    def summary(self) -> str:
+        """Generate a summary of timing stats."""
+        lines = ["Feature Timing Breakdown:"]
+        total = sum(self.totals.values())
+        for name, elapsed in sorted(self.totals.items(), key=lambda x: -x[1]):
+            count = self.counts[name]
+            pct = elapsed / total * 100 if total > 0 else 0
+            avg_us = elapsed / count * 1e6 if count > 0 else 0
+            lines.append(
+                f"  {name}: {elapsed:.2f}s ({pct:.1f}%) - {count} calls, {avg_us:.1f} us/call"
+            )
+        lines.append(f"  TOTAL: {total:.2f}s")
+        return "\n".join(lines)
+
+    def reset(self) -> None:
+        """Reset all stats."""
+        self.counts.clear()
+        self.totals.clear()
+
+
+# Thread-local storage for timing stats (each worker process has its own)
+_timing_stats = threading.local()
+_call_counter = threading.local()
+
+
+def get_timing_stats() -> FeatureTimingStats:
+    """Get the thread-local timing stats."""
+    if not hasattr(_timing_stats, "stats"):
+        _timing_stats.stats = FeatureTimingStats()
+    return _timing_stats.stats
+
+
+def get_call_count() -> int:
+    """Get the thread-local call counter."""
+    if not hasattr(_call_counter, "count"):
+        _call_counter.count = 0
+    return _call_counter.count
+
+
+def increment_call_count() -> int:
+    """Increment and return the call counter."""
+    if not hasattr(_call_counter, "count"):
+        _call_counter.count = 0
+    _call_counter.count += 1
+    return _call_counter.count
+
+
+@contextmanager
+def timed_section(name: str):
+    """Context manager to time a section and accumulate stats.
+
+    Only active when MATCHER_PROFILE=1 environment variable is set.
+    """
+    if not PROFILING_ENABLED:
+        yield
+        return
+
+    t0 = time.perf_counter()
+    yield
+    get_timing_stats().record(name, time.perf_counter() - t0)
+
+
+def log_timing_summary_if_needed(interval: int = 5000) -> None:
+    """Log timing summary every N calls (worker-side).
+
+    Call this after each compute_pair_features() invocation.
+    """
+    if not PROFILING_ENABLED:
+        return
+
+    count = increment_call_count()
+    if count % interval == 0:
+        stats = get_timing_stats()
+        logger.info(f"Worker timing after {count} pairs:\n{stats.summary()}")
+
 
 from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
@@ -27,12 +128,9 @@ from .semantic import (
     compute_name_similarity,
 )
 from .spatial_context import (
-    SpatialContextIndex,
     build_connector_graph,
-    compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
-    compute_endpoint_features,
     graphlet_similarity_with_alignment,
 )
 
@@ -92,164 +190,207 @@ def compute_pair_features(
         # If alignment is provided, extract sublines for computing similarity features
         # (hausdorff, buffer_iou, etc.) on comparable portions only.
         # Topology/endpoint features still use full geometries.
-        if alignment is not None:
-            ref_subline = create_subline(
-                ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
-            )
-            target_subline = create_subline(
-                target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
-            )
-            # Use sublines if valid, otherwise fall back to full geometry
-            geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
-            geom_for_similarity_target = target_subline if target_subline else target_geom
-        else:
-            geom_for_similarity_ref = ref_geom
-            geom_for_similarity_target = target_geom
+        #
+        # Optimization: Skip subline extraction when coverage is >95%.
+        # When alignment covers nearly the full geometry, extracting a subline
+        # just creates a nearly-identical geometry that defeats the buffer cache.
+        # Using the original geometry allows cache hits across pairs.
+        HIGH_COVERAGE_THRESHOLD = 0.95
+
+        with timed_section("subline_extraction"):
+            if alignment is not None:
+                # Calculate coverage for each geometry
+                ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
+                target_coverage = alignment.dataset_end_frac - alignment.dataset_start_frac
+
+                # Only extract subline if coverage is below threshold
+                if ref_coverage >= HIGH_COVERAGE_THRESHOLD:
+                    geom_for_similarity_ref = ref_geom  # Use original (cacheable)
+                else:
+                    ref_subline = create_subline(
+                        ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+                    )
+                    geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
+
+                if target_coverage >= HIGH_COVERAGE_THRESHOLD:
+                    geom_for_similarity_target = target_geom  # Use original (cacheable)
+                else:
+                    target_subline = create_subline(
+                        target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
+                    )
+                    geom_for_similarity_target = target_subline if target_subline else target_geom
+            else:
+                geom_for_similarity_ref = ref_geom
+                geom_for_similarity_target = target_geom
 
         # Extract coords once for functions that accept optional coords parameter
         # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
-        coords_ref = np.array(geom_for_similarity_ref.coords)
-        coords_target = np.array(geom_for_similarity_target.coords)
+        with timed_section("coord_extraction"):
+            coords_ref = np.array(geom_for_similarity_ref.coords)
+            coords_target = np.array(geom_for_similarity_target.coords)
 
         # Compute geometric features on aligned sublines (or full geom if no alignment)
-        geom_features = compute_geometric_features(
-            geom_for_similarity_ref, geom_for_similarity_target
-        )
+        with timed_section("geometric_features"):
+            geom_features = compute_geometric_features(
+                geom_for_similarity_ref, geom_for_similarity_target
+            )
 
         # Compute semantic features
-        name_sim = compute_name_similarity(ref_name, target_name)
-        class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
+        with timed_section("name_similarity"):
+            name_sim = compute_name_similarity(ref_name, target_name)
+
+        with timed_section("class_similarity"):
+            class_sim = compute_class_similarity(
+                ref_class, target_class, ref_subclass, target_subclass
+            )
 
         # Compute lateral offset on aligned sublines (not full geometries)
         # This prevents segments that extend beyond the overlap from inflating the offset
-        lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-            geom_for_similarity_target, geom_for_similarity_ref
-        )
+        with timed_section("perpendicular_offset"):
+            lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
+                geom_for_similarity_target, geom_for_similarity_ref
+            )
 
         # Compute sinuosity on aligned sublines (pass pre-extracted coords)
-        sinuosity_ref = compute_sinuosity(geom_for_similarity_ref, coords=coords_ref)
-        sinuosity_target = compute_sinuosity(geom_for_similarity_target, coords=coords_target)
-        sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
+        with timed_section("sinuosity"):
+            sinuosity_ref = compute_sinuosity(geom_for_similarity_ref, coords=coords_ref)
+            sinuosity_target = compute_sinuosity(geom_for_similarity_target, coords=coords_target)
+            sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
 
         # Compute heading consistency on aligned sublines
-        heading_consistency_ref = compute_heading_consistency(geom_for_similarity_ref)
-        heading_consistency_target = compute_heading_consistency(geom_for_similarity_target)
-        heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
+        with timed_section("heading_consistency"):
+            heading_consistency_ref = compute_heading_consistency(geom_for_similarity_ref)
+            heading_consistency_target = compute_heading_consistency(geom_for_similarity_target)
+            heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
 
         # Compute vertex density on aligned sublines (pass pre-extracted coords)
-        vertex_density_ref = compute_vertex_density(geom_for_similarity_ref, coords=coords_ref)
-        vertex_density_target = compute_vertex_density(
-            geom_for_similarity_target, coords=coords_target
-        )
-        # Ratio: min/max to get value in [0, 1]
-        if vertex_density_ref > 0 and vertex_density_target > 0:
-            vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
-                vertex_density_ref, vertex_density_target
+        with timed_section("vertex_density"):
+            vertex_density_ref = compute_vertex_density(geom_for_similarity_ref, coords=coords_ref)
+            vertex_density_target = compute_vertex_density(
+                geom_for_similarity_target, coords=coords_target
             )
-        else:
-            vertex_density_ratio = 0.0
+            # Ratio: min/max to get value in [0, 1]
+            if vertex_density_ref > 0 and vertex_density_target > 0:
+                vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
+                    vertex_density_ref, vertex_density_target
+                )
+            else:
+                vertex_density_ratio = 0.0
 
         # Compute min length using aligned subline lengths
-        ref_length = geom_for_similarity_ref.length
-        target_length = geom_for_similarity_target.length
-        min_length_m = min(ref_length, target_length)
+        with timed_section("length_computation"):
+            ref_length = geom_for_similarity_ref.length
+            target_length = geom_for_similarity_target.length
+            min_length_m = min(ref_length, target_length)
 
         # Compute shape complexity on aligned sublines (pass pre-extracted coords)
-        shape_complexity_ref = compute_shape_complexity(geom_for_similarity_ref, coords=coords_ref)
-        shape_complexity_target = compute_shape_complexity(
-            geom_for_similarity_target, coords=coords_target
-        )
-        shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
+        with timed_section("shape_complexity"):
+            shape_complexity_ref = compute_shape_complexity(
+                geom_for_similarity_ref, coords=coords_ref
+            )
+            shape_complexity_target = compute_shape_complexity(
+                geom_for_similarity_target, coords=coords_target
+            )
+            shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
 
         # Compute name numeric match for numbered routes
-        name_numeric_match = compute_name_numeric_match(ref_name, target_name)
+        with timed_section("name_numeric_match"):
+            name_numeric_match = compute_name_numeric_match(ref_name, target_name)
 
-        # Use provided or default endpoint features
-        if endpoint_features is None:
-            endpoint_features = {
-                "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "shared_endpoint_count": 0,
-            }
+        # Require endpoint features to be provided
+        # These should be computed on aligned subline endpoints, not full geometry
+        with timed_section("endpoint_features_lookup"):
+            if endpoint_features is None:
+                raise ValueError(
+                    "endpoint_features is required - must be computed on aligned subline endpoints"
+                )
 
         # Compute topology features - prefer alignment-aware when graphlet data is available
         # This is critical for partial overlaps where we need degrees at the aligned
         # subline endpoints, not at the full geometry endpoints.
-        use_aligned_topology = (
-            alignment is not None
-            and ref_graphlet_data is not None
-            and target_graphlet_data is not None
-            and ref_seg_id is not None
-            and target_seg_id is not None
-        )
-
-        if use_aligned_topology:
-            # Compute alignment-aware topology from graphlet connector data
-            from .spatial_context import compute_aligned_topology_features
-
-            # Unpack graphlet data (G, seg_to_connectors, node_features, use_connectors)
-            _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
-            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
-
-            # Compute aligned topology for reference
-            ref_aligned_topo = compute_aligned_topology_features(
-                ref_seg_id,
-                ref_seg_to_connectors,
-                ref_node_features,
-                alignment.overture_start_frac,
-                alignment.overture_end_frac,
+        with timed_section("aligned_topology"):
+            use_aligned_topology = (
+                alignment is not None
+                and ref_graphlet_data is not None
+                and target_graphlet_data is not None
+                and ref_seg_id is not None
+                and target_seg_id is not None
             )
 
-            # Compute aligned topology for target
-            target_aligned_topo = compute_aligned_topology_features(
-                target_seg_id,
-                target_seg_to_connectors,
-                target_node_features,
-                alignment.dataset_start_frac,
-                alignment.dataset_end_frac,
-            )
+            if use_aligned_topology:
+                # Compute alignment-aware topology from graphlet connector data
+                from .spatial_context import compute_aligned_topology_features
 
-            # Use aligned values
-            from_degree_ref = ref_aligned_topo["from_degree"]
-            to_degree_ref = ref_aligned_topo["to_degree"]
-            from_degree_target = target_aligned_topo["from_degree"]
-            to_degree_target = target_aligned_topo["to_degree"]
-            ref_topology = ref_aligned_topo
-            target_topology = target_aligned_topo
-        else:
-            # Fall back to pre-computed topology (for backward compatibility)
-            if ref_topology is None:
-                ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
-            if target_topology is None:
-                target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+                # Unpack graphlet data (G, seg_to_connectors, node_features, use_connectors)
+                _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
+                _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
 
-            # Extract degree values
-            from_degree_ref = ref_topology.get("from_degree", 1)
-            to_degree_ref = ref_topology.get("to_degree", 1)
-            from_degree_target = target_topology.get("from_degree", 1)
-            to_degree_target = target_topology.get("to_degree", 1)
+                # Compute aligned topology for reference
+                ref_aligned_topo = compute_aligned_topology_features(
+                    ref_seg_id,
+                    ref_seg_to_connectors,
+                    ref_node_features,
+                    alignment.overture_start_frac,
+                    alignment.overture_end_frac,
+                )
+
+                # Compute aligned topology for target
+                target_aligned_topo = compute_aligned_topology_features(
+                    target_seg_id,
+                    target_seg_to_connectors,
+                    target_node_features,
+                    alignment.dataset_start_frac,
+                    alignment.dataset_end_frac,
+                )
+
+                # Use aligned values
+                from_degree_ref = ref_aligned_topo["from_degree"]
+                to_degree_ref = ref_aligned_topo["to_degree"]
+                from_degree_target = target_aligned_topo["from_degree"]
+                to_degree_target = target_aligned_topo["to_degree"]
+                ref_topology = ref_aligned_topo
+                target_topology = target_aligned_topo
+            else:
+                # Fall back to pre-computed topology (for backward compatibility)
+                if ref_topology is None:
+                    ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+                if target_topology is None:
+                    target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+
+                # Extract degree values
+                from_degree_ref = ref_topology.get("from_degree", 1)
+                to_degree_ref = ref_topology.get("to_degree", 1)
+                from_degree_target = target_topology.get("from_degree", 1)
+                to_degree_target = target_topology.get("to_degree", 1)
 
         # Compute degree match score
-        degree_match = compute_degree_match_score(
-            from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
-        )
+        with timed_section("degree_match"):
+            degree_match = compute_degree_match_score(
+                from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
+            )
 
         # Compute degree signature similarity
-        ref_sig = ref_topology.get("degree_signature", (1,))
-        target_sig = target_topology.get("degree_signature", (1,))
-        sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
+        with timed_section("degree_signature"):
+            ref_sig = ref_topology.get("degree_signature", (1,))
+            target_sig = target_topology.get("degree_signature", (1,))
+            sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
 
         # Topology flags
-        is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
-        is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
-        dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
+        with timed_section("topology_flags"):
+            is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
+            is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
+            dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
 
-        is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
-        is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
-        intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
+            is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
+            is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
+            intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
         # Compute coverage features from alignment
-        coverage_feats = compute_coverage_features(alignment)
+        with timed_section("coverage_features"):
+            coverage_feats = compute_coverage_features(alignment)
+
+        # Log timing summary periodically (when MATCHER_PROFILE=1)
+        log_timing_summary_if_needed()
 
         return {
             # Geometric (distance features use _m suffix to indicate meters)
@@ -420,101 +561,6 @@ def _get_error_features() -> dict[str, float]:
         # Numeric route matching - 0.0 (no signal when neither has number)
         "name_numeric_match": 0.0,
     }
-
-
-def precompute_topology_and_endpoints(
-    reference: gpd.GeoDataFrame,
-    target: gpd.GeoDataFrame,
-    ref_indices: set[int],
-    target_indices: set[int],
-    id_column: str = "id",
-    tolerance_m: float = 5.0,
-) -> tuple[dict, dict, dict]:
-    """Pre-compute topology and endpoint features for efficiency.
-
-    Args:
-        reference: Reference GeoDataFrame
-        target: Target GeoDataFrame
-        ref_indices: Set of reference indices to compute features for
-        target_indices: Set of target indices to compute features for
-        id_column: Column name for segment IDs
-        tolerance_m: Distance tolerance for topology computation (meters)
-
-    Returns:
-        Tuple of (target_endpoint_features, ref_topology_features, target_topology_features)
-        Each is a dict mapping index -> feature dict
-    """
-    # Build spatial index for endpoint proximity features (target only)
-    t_start = time.perf_counter()
-    t0 = time.perf_counter()
-    logger.info("Building spatial index for endpoint features...")
-    target_index = SpatialContextIndex()
-    target_index.build_from_gdf(target, id_column=id_column)
-    logger.debug(f"[precompute] Built spatial index in {time.perf_counter() - t0:.2f}s")
-
-    # Pre-compute endpoint features for target segments
-    t0 = time.perf_counter()
-    target_endpoint_features = {}
-    logger.info(f"Pre-computing endpoint features for {len(target_indices)} target segments...")
-    for target_idx in target_indices:
-        target_geom = target.geometry.iloc[target_idx]
-        if target_geom is not None and not target_geom.is_empty:
-            ep_feats = compute_endpoint_features(
-                target_geom, target_index, exclude_segment_idx=target_idx
-            )
-            target_endpoint_features[target_idx] = ep_feats
-        else:
-            target_endpoint_features[target_idx] = {
-                "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                "shared_endpoint_count": 0,
-            }
-
-    logger.debug(f"[precompute] Endpoint features in {time.perf_counter() - t0:.2f}s")
-
-    # Get unique segment IDs
-    target_ids = target[id_column].to_numpy()
-    ref_ids = reference[id_column].to_numpy()
-    unique_target_ids = {str(target_ids[idx]) for idx in target_indices}
-    unique_ref_ids = {str(ref_ids[idx]) for idx in ref_indices}
-
-    logger.info(
-        f"Computing topology features for {len(unique_target_ids)} target "
-        f"and {len(unique_ref_ids)} reference segments..."
-    )
-
-    # Compute topology for target and reference
-    t0 = time.perf_counter()
-    logger.debug("[precompute] Computing target topology...")
-    target_topology_by_id = compute_all_topology(
-        target, id_column=id_column, tolerance_m=tolerance_m, ids_to_compute=unique_target_ids
-    )
-    logger.debug(f"[precompute] Target topology in {time.perf_counter() - t0:.2f}s")
-
-    t0 = time.perf_counter()
-    logger.debug("[precompute] Computing reference topology...")
-    ref_topology_by_id = compute_all_topology(
-        reference, id_column=id_column, tolerance_m=tolerance_m, ids_to_compute=unique_ref_ids
-    )
-    logger.debug(f"[precompute] Reference topology in {time.perf_counter() - t0:.2f}s")
-
-    # Map topology from segment IDs to DataFrame indices
-    target_topology_features = {}
-    for target_idx in target_indices:
-        seg_id = str(target_ids[target_idx])
-        target_topology_features[target_idx] = target_topology_by_id.get(
-            seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-        )
-
-    ref_topology_features = {}
-    for ref_idx in ref_indices:
-        seg_id = str(ref_ids[ref_idx])
-        ref_topology_features[ref_idx] = ref_topology_by_id.get(
-            seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-        )
-
-    logger.info(f"[precompute] Total precompute time: {time.perf_counter() - t_start:.2f}s")
-    return target_endpoint_features, ref_topology_features, target_topology_features
 
 
 def precompute_graphlet_features(

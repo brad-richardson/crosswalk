@@ -493,6 +493,7 @@ class TestComputePairFeaturesWithAlignment:
         """compute_pair_features should include coverage features when alignment provided."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -511,6 +512,7 @@ class TestComputePairFeaturesWithAlignment:
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # Should include coverage features
@@ -526,6 +528,7 @@ class TestComputePairFeaturesWithAlignment:
     def test_compute_pair_features_without_alignment(self):
         """compute_pair_features should work without alignment (backward compatible)."""
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -537,6 +540,7 @@ class TestComputePairFeaturesWithAlignment:
             target_name="Main Street",
             ref_class="residential",
             target_class="residential",
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # Should still include coverage features (zeros without alignment)
@@ -547,6 +551,7 @@ class TestComputePairFeaturesWithAlignment:
         """With alignment, similarity features should be computed on sublines."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         # Reference is longer than target, target matches second half
         ref = LineString([(0, 0), (100, 0)])
@@ -562,6 +567,7 @@ class TestComputePairFeaturesWithAlignment:
             ref_class=None,
             target_class=None,
             alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         features_unaligned = compute_pair_features(
@@ -572,6 +578,7 @@ class TestComputePairFeaturesWithAlignment:
             ref_class=None,
             target_class=None,
             alignment=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # Aligned features should have better (lower) hausdorff because
@@ -585,6 +592,7 @@ class TestComputePairFeaturesWithAlignment:
         """compute_pair_features should return all expected feature columns."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -603,6 +611,7 @@ class TestComputePairFeaturesWithAlignment:
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # All feature columns should be present
@@ -617,6 +626,7 @@ class TestComputePairFeaturesWithAlignment:
         """
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         # Reference: 100m segment
         ref = LineString([(0, 0), (100, 0)])
@@ -633,6 +643,7 @@ class TestComputePairFeaturesWithAlignment:
             ref_class=None,
             target_class=None,
             alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
 
         # Lateral offset should be ~3m (the offset in the overlapping region)
