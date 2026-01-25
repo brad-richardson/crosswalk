@@ -61,6 +61,8 @@ import numpy as np
 from shapely import LineString, hausdorff_distance, points
 from shapely import distance as shapely_distance
 
+from ._jit_helpers import collinear_gap_ratio_numba
+
 if TYPE_CHECKING:
     from shapely import Polygon
 
@@ -261,7 +263,10 @@ def compute_geometric_features(
     overlap_ratio = _overlap_ratio(line_a, buf_b_15m)
 
     # Collinear gap ratio (penalty for tip-to-tip segments)
-    collinear_gap_ratio = compute_collinear_gap_ratio(line_a, line_b)
+    # Pass pre-extracted coords to avoid redundant extraction
+    collinear_gap_ratio = compute_collinear_gap_ratio(
+        line_a, line_b, coords_a=coords_a, coords_b=coords_b
+    )
 
     return GeometricFeatures(
         hausdorff_distance=hausdorff,
@@ -573,6 +578,9 @@ def compute_collinear_gap_ratio(
     line_b: LineString,
     heading_threshold: float = 15.0,
     min_overlap_fraction: float = 0.1,
+    *,
+    coords_a: np.ndarray | None = None,
+    coords_b: np.ndarray | None = None,
 ) -> float:
     """Detect collinear segments that barely touch (tip-to-tip penalty).
 
@@ -593,6 +601,8 @@ def compute_collinear_gap_ratio(
         line_b: Second geometry (LineString, projected CRS)
         heading_threshold: Max heading difference to consider collinear (degrees)
         min_overlap_fraction: Minimum overlap to not penalize (fraction 0-1)
+        coords_a: Pre-extracted coordinates for line_a (optional, avoids redundant extraction)
+        coords_b: Pre-extracted coordinates for line_b (optional, avoids redundant extraction)
 
     Returns:
         1.0 = not collinear OR collinear with good overlap (no penalty)
@@ -613,59 +623,10 @@ def compute_collinear_gap_ratio(
     if line_a.length <= 0 or line_b.length <= 0:
         return 1.0
 
-    coords_a = np.array(line_a.coords)
-    coords_b = np.array(line_b.coords)
+    # Use pre-extracted coords if provided, otherwise extract
+    if coords_a is None:
+        coords_a = np.array(line_a.coords)
+    if coords_b is None:
+        coords_b = np.array(line_b.coords)
 
-    # Step 1: Check collinearity via heading
-    heading_a = _compute_heading(coords_a[0], coords_a[-1])
-    heading_b = _compute_heading(coords_b[0], coords_b[-1])
-    heading_diff = _angle_diff(heading_a, heading_b)
-
-    if heading_diff > heading_threshold:
-        # Not collinear - no penalty
-        return 1.0
-
-    # Step 2: Project onto common direction
-    # Use the average of both headings as the reference direction
-    # Handle bidirectional case: if headings differ by ~180°, align them first
-    if abs(heading_a - heading_b) > 90 and abs(heading_a - heading_b) < 270:
-        # They're roughly opposite, flip one
-        heading_b_aligned = (heading_b + 180) % 360
-    else:
-        heading_b_aligned = heading_b
-
-    avg_heading = (heading_a + heading_b_aligned) / 2
-    ref_angle = np.radians(avg_heading)
-    ref_dir = np.array([np.cos(ref_angle), np.sin(ref_angle)])
-
-    # Project all endpoints onto the reference direction
-    a_start_proj = np.dot(coords_a[0], ref_dir)
-    a_end_proj = np.dot(coords_a[-1], ref_dir)
-    b_start_proj = np.dot(coords_b[0], ref_dir)
-    b_end_proj = np.dot(coords_b[-1], ref_dir)
-
-    # Step 3: Compute 1D overlap
-    a_min, a_max = min(a_start_proj, a_end_proj), max(a_start_proj, a_end_proj)
-    b_min, b_max = min(b_start_proj, b_end_proj), max(b_start_proj, b_end_proj)
-
-    overlap_start = max(a_min, b_min)
-    overlap_end = min(a_max, b_max)
-    overlap_length = max(0, overlap_end - overlap_start)
-
-    # Use the smaller segment's extent as the denominator
-    # This matches the labeling guideline: "10% of shorter segment"
-    smaller_extent = min(a_max - a_min, b_max - b_min)
-    if smaller_extent <= 0:
-        # Degenerate case (point-like segment)
-        return 1.0
-
-    along_track_overlap = overlap_length / smaller_extent
-
-    # Step 4: Return score
-    if along_track_overlap >= min_overlap_fraction:
-        # Good overlap - no penalty
-        return 1.0
-
-    # Poor overlap - scale penalty based on how bad
-    # 0% overlap → 0.0, min_overlap_fraction% → 1.0
-    return along_track_overlap / min_overlap_fraction
+    return collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold, min_overlap_fraction)
