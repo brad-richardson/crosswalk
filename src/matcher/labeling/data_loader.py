@@ -21,7 +21,7 @@ from ..features.alignment import create_subline
 from ..features.semantic import _extract_name_string
 from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
-from ..utils import filter_to_linestrings
+from ..utils import ensure_projected_crs, filter_to_linestrings
 
 logger = logging.getLogger(__name__)
 
@@ -546,15 +546,11 @@ def compute_features_only(
         return pd.DataFrame()
 
     # Project to metric CRS for accurate distances
-    if reference.crs and reference.crs.is_geographic:
-        centroid = reference.unary_union.centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        projected_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
-        reference_proj = reference.to_crs(projected_crs)
-        target_proj = target.to_crs(projected_crs)
-    else:
-        reference_proj = reference
-        target_proj = target
+    projection_result = ensure_projected_crs(reference, target)
+    reference_proj = projection_result.reference
+    target_proj = projection_result.target
+    if projection_result.was_reprojected:
+        logger.info(f"Projected to {projection_result.projected_crs} for meter-based computations")
 
     # Generate candidates (blocking step)
     t0 = time.perf_counter()
@@ -827,22 +823,18 @@ def generate_scored_candidates(
         return []
 
     # Project to metric CRS for accurate distances
-    original_crs = reference.crs
-    projected_crs = None
-    if reference.crs and reference.crs.is_geographic:
-        centroid = reference.unary_union.centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        projected_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
-        reference_proj = reference.to_crs(projected_crs)
-        target_proj = target.to_crs(projected_crs)
-    else:
-        reference_proj = reference
-        target_proj = target
+    projection_result = ensure_projected_crs(reference, target)
+    reference_proj = projection_result.reference
+    target_proj = projection_result.target
+    if projection_result.was_reprojected:
+        logger.info(f"Projected to {projection_result.projected_crs} for meter-based computations")
 
     # Create transformer for converting aligned geometries back to WGS84
     proj_to_wgs84 = None
-    if projected_crs and original_crs:
-        proj_to_wgs84 = Transformer.from_crs(projected_crs, original_crs, always_xy=True).transform
+    if projection_result.original_crs and projection_result.projected_crs:
+        proj_to_wgs84 = Transformer.from_crs(
+            projection_result.projected_crs, projection_result.original_crs, always_xy=True
+        ).transform
 
     # Generate candidates (blocking step - already fast)
     t0 = time.perf_counter()
@@ -1137,21 +1129,15 @@ def build_views_from_feature_df(
     # Project to metric CRS for aligned geometry computation
     logger.info("[2/5] Projecting geometries to metric CRS...")
     t_proj = time.perf_counter()
-    original_crs = reference.crs
-    projected_crs = None
-    if reference.crs and reference.crs.is_geographic:
-        centroid = reference.unary_union.centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        projected_crs = f"EPSG:326{utm_zone:02d}" if centroid.y >= 0 else f"EPSG:327{utm_zone:02d}"
-        reference_proj = reference.to_crs(projected_crs)
-        target_proj = target.to_crs(projected_crs)
-    else:
-        reference_proj = reference
-        target_proj = target
+    projection_result = ensure_projected_crs(reference, target)
+    reference_proj = projection_result.reference
+    target_proj = projection_result.target
 
     proj_to_wgs84 = None
-    if projected_crs and original_crs:
-        proj_to_wgs84 = Transformer.from_crs(projected_crs, original_crs, always_xy=True).transform
+    if projection_result.original_crs and projection_result.projected_crs:
+        proj_to_wgs84 = Transformer.from_crs(
+            projection_result.projected_crs, projection_result.original_crs, always_xy=True
+        ).transform
     logger.info(f"[2/5] Projection completed in {time.perf_counter() - t_proj:.1f}s")
 
     # Convert features to list of dicts for ML prediction

@@ -14,6 +14,7 @@ from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
+from ..utils import ensure_projected_crs
 from ..utils.geometry import filter_to_linestrings
 
 
@@ -163,13 +164,15 @@ def run_pipeline(
     if progress_callback:
         progress_callback(10)
 
-    # Ensure both are in the same CRS
-    if reference.crs != target.crs:
-        logger.info(f"  Reprojecting target from {target.crs} to {reference.crs}")
-        target = target.to_crs(reference.crs)
-
-    # Note: We keep data in WGS84 for feature computation consistency with training labels.
-    # generate_candidates() handles projection internally for accurate buffer distances.
+    # Project to metric CRS early for consistent distance computations
+    # This ensures all downstream operations (blocking, features, scoring) use meters
+    projection_result = ensure_projected_crs(reference, target)
+    reference = projection_result.reference
+    target = projection_result.target
+    if projection_result.was_reprojected:
+        logger.info(
+            f"  Projected to {projection_result.projected_crs} for meter-based computations"
+        )
 
     if progress_callback:
         progress_callback(20)
