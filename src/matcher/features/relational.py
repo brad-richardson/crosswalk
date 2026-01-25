@@ -42,6 +42,8 @@ import numpy as np
 from shapely import LineString, Point, line_interpolate_point
 from shapely import distance as shapely_distance
 
+from ._jit_helpers import compute_endpoint_proximity_numba, compute_parallel_alignment_numba
+
 
 class RelationalFeatures(NamedTuple):
     """Relational features for a candidate pair.
@@ -221,6 +223,9 @@ def compute_side_of_street(
 def compute_parallel_alignment(
     line_a: LineString,
     line_b: LineString,
+    *,
+    coords_a: np.ndarray | None = None,
+    coords_b: np.ndarray | None = None,
 ) -> float:
     """Compute how parallel two lines are (0-1).
 
@@ -231,6 +236,8 @@ def compute_parallel_alignment(
     Args:
         line_a: First line geometry
         line_b: Second line geometry
+        coords_a: Pre-extracted coordinates for line_a (optional)
+        coords_b: Pre-extracted coordinates for line_b (optional)
 
     Returns:
         Alignment score (0-1) where 1 = parallel
@@ -238,26 +245,12 @@ def compute_parallel_alignment(
     if line_a.is_empty or line_b.is_empty:
         return 0.0
 
-    # Compute overall headings
-    coords_a = np.array(line_a.coords)
-    coords_b = np.array(line_b.coords)
+    if coords_a is None:
+        coords_a = np.array(line_a.coords)
+    if coords_b is None:
+        coords_b = np.array(line_b.coords)
 
-    heading_a = _compute_heading(coords_a[0], coords_a[-1])
-    heading_b = _compute_heading(coords_b[0], coords_b[-1])
-
-    # Compute minimum angle difference (accounting for bidirectional)
-    diff = abs(heading_a - heading_b)
-    if diff > 180:
-        diff = 360 - diff
-
-    # Consider opposite direction as parallel too
-    opposite_diff = abs(180 - diff)
-    min_diff = min(diff, opposite_diff)
-
-    # Convert to 0-1 score (0 degrees = 1.0, 90 degrees = 0.0)
-    alignment = max(0.0, 1.0 - min_diff / 90.0)
-
-    return alignment
+    return compute_parallel_alignment_numba(coords_a, coords_b)
 
 
 def _compute_heading(start: np.ndarray, end: np.ndarray) -> float:
@@ -311,6 +304,8 @@ def compute_endpoint_proximity(
     target_geom: LineString,
     endpoint_coords: np.ndarray,
     tolerance_m: float = 5.0,
+    *,
+    target_coords: np.ndarray | None = None,
 ) -> tuple[float, float, int]:
     """Compute endpoint proximity features.
 
@@ -321,6 +316,7 @@ def compute_endpoint_proximity(
         target_geom: Target geometry
         endpoint_coords: Array of shape (N, 2) with other endpoint coordinates
         tolerance_m: Distance threshold for counting "shared" endpoints (meters)
+        target_coords: Pre-extracted coordinates for target (optional)
 
     Returns:
         Tuple of (start_proximity, end_proximity, shared_count) where:
@@ -331,24 +327,14 @@ def compute_endpoint_proximity(
     if target_geom.is_empty or len(endpoint_coords) == 0:
         return float("inf"), float("inf"), 0
 
-    target_coords = np.array(target_geom.coords)
+    if target_coords is None:
+        target_coords = np.array(target_geom.coords)
+
     start = target_coords[0]
     end = target_coords[-1]
 
-    # Compute distances from start/end to all other endpoints
-    start_dists = np.linalg.norm(endpoint_coords - start, axis=1)
-    end_dists = np.linalg.norm(endpoint_coords - end, axis=1)
-
-    # Find minimum distances
-    start_proximity = float(np.min(start_dists)) if len(start_dists) > 0 else float("inf")
-    end_proximity = float(np.min(end_dists)) if len(end_dists) > 0 else float("inf")
-
-    # Count endpoints within tolerance of either end
-    within_start = np.sum(start_dists <= tolerance_m)
-    within_end = np.sum(end_dists <= tolerance_m)
-    shared_count = int(within_start + within_end)
-
-    return start_proximity, end_proximity, shared_count
+    result = compute_endpoint_proximity_numba(start, end, endpoint_coords, tolerance_m)
+    return float(result[0]), float(result[1]), int(result[2])
 
 
 def compute_neighbor_agreement(

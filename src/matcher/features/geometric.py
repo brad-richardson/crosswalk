@@ -61,7 +61,11 @@ import numpy as np
 from shapely import LineString, hausdorff_distance, points
 from shapely import distance as shapely_distance
 
-from ._jit_helpers import collinear_gap_ratio_numba
+from ._jit_helpers import (
+    collinear_gap_ratio_numba,
+    compute_heading_consistency_numba,
+    compute_shape_complexity_numba,
+)
 
 if TYPE_CHECKING:
     from shapely import Polygon
@@ -414,38 +418,34 @@ def compute_segment_heading(line: LineString) -> float:
     return _compute_heading(coords[0], coords[-1])
 
 
-def compute_heading_consistency(line: LineString, sample_interval: float = 10.0) -> float:
+def compute_heading_consistency(
+    line: LineString,
+    sample_interval: float = 10.0,
+    *,
+    sampled_points: np.ndarray | None = None,
+) -> float:
     """Compute how consistent the heading is along the line.
 
     Returns a value 0-1 where 1 means perfectly straight.
+
+    Args:
+        line: LineString geometry
+        sample_interval: Distance between sample points (meters)
+        sampled_points: Pre-extracted sampled points (optional, avoids redundant extraction)
+
+    Returns:
+        Consistency score (0-1) where 1 = perfectly straight
     """
     if line.length < sample_interval * 2:
         return 1.0
 
-    # Sample points along the line
-    n_samples = max(3, int(line.length / sample_interval))
-    distances = np.linspace(0, line.length, n_samples)
-    points = [np.array(line.interpolate(d).coords[0]) for d in distances]
+    if sampled_points is None:
+        # Sample points along the line (requires Shapely)
+        n_samples = max(3, int(line.length / sample_interval))
+        distances = np.linspace(0, line.length, n_samples)
+        sampled_points = np.array([line.interpolate(d).coords[0] for d in distances])
 
-    # Compute headings between consecutive points
-    headings = []
-    for i in range(len(points) - 1):
-        h = _compute_heading(points[i], points[i + 1])
-        headings.append(h)
-
-    if len(headings) < 2:
-        return 1.0
-
-    # Compute variance of headings (accounting for circular nature)
-    heading_diffs = []
-    for i in range(len(headings) - 1):
-        diff = _angle_diff(headings[i], headings[i + 1])
-        heading_diffs.append(diff)
-
-    avg_diff = np.mean(heading_diffs)
-
-    # Normalize to 0-1 (0 degrees diff = 1.0, 90 degrees diff = 0.0)
-    return max(0.0, 1.0 - avg_diff / 90.0)
+    return compute_heading_consistency_numba(sampled_points)
 
 
 def compute_sinuosity(line: LineString) -> float:
@@ -533,7 +533,12 @@ def compute_length_bin(length_m: float) -> int:
         return 3
 
 
-def compute_shape_complexity(line: LineString, angle_threshold: float = 10.0) -> int:
+def compute_shape_complexity(
+    line: LineString,
+    angle_threshold: float = 10.0,
+    *,
+    coords: np.ndarray | None = None,
+) -> int:
     """Count significant direction changes (turns) in a line.
 
     A "significant turn" is where the heading changes by more than
@@ -542,6 +547,7 @@ def compute_shape_complexity(line: LineString, angle_threshold: float = 10.0) ->
     Args:
         line: LineString geometry
         angle_threshold: Minimum angle change to count as a turn (degrees)
+        coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
         Number of significant turns (>= 0)
@@ -549,28 +555,13 @@ def compute_shape_complexity(line: LineString, angle_threshold: float = 10.0) ->
     if line is None or line.is_empty:
         return 0
 
-    coords = np.array(line.coords)
+    if coords is None:
+        coords = np.array(line.coords)
+
     if len(coords) < 3:
         return 0
 
-    turn_count = 0
-
-    # Compute headings between consecutive points
-    for i in range(len(coords) - 2):
-        # Heading from point i to i+1
-        heading1 = _compute_heading(coords[i], coords[i + 1])
-        # Heading from point i+1 to i+2
-        heading2 = _compute_heading(coords[i + 1], coords[i + 2])
-
-        # Compute angle difference
-        angle_diff = abs(heading1 - heading2)
-        if angle_diff > 180:
-            angle_diff = 360 - angle_diff
-
-        if angle_diff > angle_threshold:
-            turn_count += 1
-
-    return turn_count
+    return compute_shape_complexity_numba(coords, angle_threshold)
 
 
 def compute_collinear_gap_ratio(

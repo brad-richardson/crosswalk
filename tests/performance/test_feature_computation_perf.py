@@ -18,9 +18,15 @@ from matcher.features.geometric import (
     clear_buffer_cache,
     compute_collinear_gap_ratio,
     compute_geometric_features,
+    compute_heading_consistency,
+    compute_shape_complexity,
     get_buffer_cache_info,
 )
-from matcher.features.relational import compute_perpendicular_offset
+from matcher.features.relational import (
+    compute_endpoint_proximity,
+    compute_parallel_alignment,
+    compute_perpendicular_offset,
+)
 
 # Number of synthetic lines to generate
 N_LINES = 5000
@@ -305,3 +311,78 @@ class TestFeatureComputationPerformance:
 
         # Current baseline - will tighten after JIT optimization
         assert per_pair_us < 200, f"Collinear gap ratio too slow: {per_pair_us:.1f} µs/pair"
+
+    def test_shape_complexity_throughput(self, synthetic_lines):
+        """Benchmark compute_shape_complexity with JIT."""
+        n_lines = len(synthetic_lines)
+
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            compute_shape_complexity(line)
+        elapsed = time.perf_counter() - start
+
+        per_line_us = (elapsed / n_lines) * 1_000_000
+        print(f"\nShape complexity: {per_line_us:.1f} µs/line ({elapsed:.2f}s total)")
+
+        # Threshold allows for CI environment variability (~3-5x slower than local)
+        assert per_line_us < 150, f"Shape complexity too slow: {per_line_us:.1f} µs/line"
+
+    def test_parallel_alignment_throughput(self, synthetic_lines):
+        """Benchmark compute_parallel_alignment with JIT."""
+        n_pairs = N_PAIRS
+        pairs = [
+            (
+                synthetic_lines[i % len(synthetic_lines)],
+                synthetic_lines[(i + 1) % len(synthetic_lines)],
+            )
+            for i in range(n_pairs)
+        ]
+
+        start = time.perf_counter()
+        for line_a, line_b in pairs:
+            compute_parallel_alignment(line_a, line_b)
+        elapsed = time.perf_counter() - start
+
+        per_pair_us = (elapsed / n_pairs) * 1_000_000
+        print(f"\nParallel alignment: {per_pair_us:.1f} µs/pair ({elapsed:.2f}s total)")
+
+        # Threshold allows for CI environment variability (~3-5x slower than local)
+        assert per_pair_us < 100, f"Parallel alignment too slow: {per_pair_us:.1f} µs/pair"
+
+    def test_endpoint_proximity_throughput(self, synthetic_lines):
+        """Benchmark compute_endpoint_proximity with JIT."""
+        # Create endpoint array from all line endpoints
+        all_endpoints = []
+        for line in synthetic_lines:
+            coords = np.array(line.coords)
+            all_endpoints.append(coords[0])
+            all_endpoints.append(coords[-1])
+        endpoint_array = np.array(all_endpoints)
+
+        n_lines = len(synthetic_lines)
+
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            compute_endpoint_proximity(line, endpoint_array, 5.0)
+        elapsed = time.perf_counter() - start
+
+        per_line_us = (elapsed / n_lines) * 1_000_000
+        print(f"\nEndpoint proximity: {per_line_us:.1f} µs/line ({elapsed:.2f}s total)")
+
+        # Threshold allows for CI environment variability (~3-5x slower than local)
+        assert per_line_us < 200, f"Endpoint proximity too slow: {per_line_us:.1f} µs/line"
+
+    def test_heading_consistency_throughput(self, synthetic_lines):
+        """Benchmark compute_heading_consistency with JIT."""
+        n_lines = len(synthetic_lines)
+
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            compute_heading_consistency(line)
+        elapsed = time.perf_counter() - start
+
+        per_line_us = (elapsed / n_lines) * 1_000_000
+        print(f"\nHeading consistency: {per_line_us:.1f} µs/line ({elapsed:.2f}s total)")
+
+        # Threshold allows for CI environment variability (~3-5x slower than local)
+        assert per_line_us < 300, f"Heading consistency too slow: {per_line_us:.1f} µs/line"
