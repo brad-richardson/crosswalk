@@ -136,9 +136,11 @@ def compute_pair_features(
         heading_consistency_target = compute_heading_consistency(geom_for_similarity_target)
         heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
 
-        # Compute vertex density on aligned sublines
-        vertex_density_ref = compute_vertex_density(geom_for_similarity_ref)
-        vertex_density_target = compute_vertex_density(geom_for_similarity_target)
+        # Compute vertex density on aligned sublines (pass pre-extracted coords)
+        vertex_density_ref = compute_vertex_density(geom_for_similarity_ref, coords=coords_ref)
+        vertex_density_target = compute_vertex_density(
+            geom_for_similarity_target, coords=coords_target
+        )
         # Ratio: min/max to get value in [0, 1]
         if vertex_density_ref > 0 and vertex_density_target > 0:
             vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(

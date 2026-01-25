@@ -42,7 +42,11 @@ import numpy as np
 from shapely import LineString, Point, line_interpolate_point
 from shapely import distance as shapely_distance
 
-from ._jit_helpers import compute_endpoint_proximity_numba, compute_parallel_alignment_numba
+from ._jit_helpers import (
+    compute_endpoint_proximity_numba,
+    compute_parallel_alignment_numba,
+    side_of_street_vote_numba,
+)
 
 
 class RelationalFeatures(NamedTuple):
@@ -173,34 +177,20 @@ def compute_side_of_street(
     n_samples = max(3, int(target_geom.length / sample_interval))
     distances_along = np.linspace(0, target_geom.length, n_samples)
 
-    # For each sample point, determine which side it's on
-    sides = []
-    for d in distances_along:
-        target_point = np.array(target_geom.interpolate(d).coords[0])
+    # Pre-sample target points (Shapely, outside JIT boundary)
+    target_points = np.array([target_geom.interpolate(d).coords[0] for d in distances_along])
 
-        # Find nearest point on anchor
-        nearest_dist = anchor_geom.project(Point(target_point))
-        anchor_point = np.array(anchor_geom.interpolate(nearest_dist).coords[0])
+    # Pre-compute anchor projections (Shapely calls, outside JIT boundary)
+    anchor_points = np.empty((n_samples, 2), dtype=np.float64)
+    for i, tp in enumerate(target_points):
+        nearest_dist = anchor_geom.project(Point(tp))
+        anchor_points[i] = anchor_geom.interpolate(nearest_dist).coords[0][:2]
 
-        # Vector from anchor to target
-        to_target = target_point - anchor_point
+    # JIT-compiled voting (pure NumPy, fast)
+    left_count, right_count, _ = side_of_street_vote_numba(
+        target_points[:, :2], anchor_points, anchor_dir_norm
+    )
 
-        # Cross product z-component determines side
-        # Positive = left, Negative = right (using right-hand rule)
-        cross_z = anchor_dir_norm[0] * to_target[1] - anchor_dir_norm[1] * to_target[0]
-
-        if abs(cross_z) < 0.1:  # Too close to call
-            sides.append(0)
-        elif cross_z > 0:
-            sides.append(1)  # Left
-        else:
-            sides.append(-1)  # Right
-
-    sides = np.array(sides)
-
-    # Count votes
-    left_count = np.sum(sides > 0)
-    right_count = np.sum(sides < 0)
     total_decisive = left_count + right_count
 
     if total_decisive == 0:

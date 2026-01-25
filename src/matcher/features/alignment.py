@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from loguru import logger
-from numba import jit
+from numba import njit
 from pyproj import CRS, Geod, Transformer
 from shapely.geometry import LineString
 from shapely.ops import substring, transform
@@ -70,7 +70,7 @@ class AlignmentResult:
         return self.dataset_end_frac - self.dataset_start_frac
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _interpolate_along_line(
     coords: np.ndarray, distances: np.ndarray, t: float
 ) -> tuple[float, float]:
@@ -101,7 +101,7 @@ def _interpolate_along_line(
     return x, y
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _get_score_numba(
     overture_coords: np.ndarray,
     overture_distances: np.ndarray,
@@ -176,7 +176,7 @@ def _get_score_numba(
     return sqsum
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _detect_divergence_endpoints(
     ref_coords: np.ndarray,
     ref_distances: np.ndarray,
@@ -320,7 +320,7 @@ def _detect_divergence_endpoints(
     return new_start_frac, new_end_frac
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _find_best_alignment_numba(
     overture_coords: np.ndarray,
     overture_distances: np.ndarray,
@@ -596,7 +596,7 @@ def create_subline(line: LineString, start_frac: float, end_frac: float) -> Line
     return substring(line, start_dist, end_dist)
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _walk_distance_numba(
     L1_coords: np.ndarray,
     L1_distances: np.ndarray,
@@ -642,7 +642,7 @@ def walk_distance(L1: LineString, L2: LineString, samples: int = 16) -> float:
     )
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _walk_parallelness_numba(
     L1_coords: np.ndarray,
     L1_distances: np.ndarray,
