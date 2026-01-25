@@ -1378,6 +1378,182 @@ class TestAlignedTopologyFeatures:
         assert aligned_features["to_degree"] != full_features["to_degree"]
 
 
+class TestEndpointFeaturesCRSConsistency:
+    """Tests for CRS consistency in endpoint feature computation.
+
+    These tests verify that the spatial index CRS matches the query geometry CRS.
+    A CRS mismatch causes endpoint proximity features to return infinity because
+    the R-tree query coordinates are in different units (e.g., UTM meters vs WGS84 degrees).
+    """
+
+    def test_endpoint_features_with_projected_index_and_projected_query(self):
+        """Endpoint features should work when index and query use same projected CRS."""
+        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+
+        # Create segments in projected CRS (UTM)
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2", "seg3"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (100, 100)]),  # Shares endpoint with seg1
+                    LineString([(200, 200), (300, 200)]),  # Isolated
+                ],
+            },
+            crs="EPSG:32610",  # UTM zone 10N
+        )
+
+        # Build index from projected data
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
+
+        # Query with geometry from the same projected CRS
+        query_geom = gdf.geometry.iloc[0]  # seg1
+        features = compute_endpoint_features(query_geom, ctx, exclude_segment_idx=0)
+
+        # seg1 shares endpoint (100,0) with seg2, so min proximity should be ~0
+        assert features["min_endpoint_proximity_m"] < 1.0, (
+            f"Expected small proximity (shared endpoint), got {features['min_endpoint_proximity_m']}"
+        )
+        assert features["shared_endpoint_count"] >= 1
+
+    def test_endpoint_features_with_geographic_index_and_geographic_query(self):
+        """Endpoint features should work when index and query use same geographic CRS."""
+        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+
+        # Create segments in geographic CRS (WGS84)
+        # Boston area: ~42.36°N, ~-71.06°E
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(-71.06, 42.36), (-71.05, 42.36)]),  # ~800m segment
+                    LineString([(-71.05, 42.36), (-71.05, 42.37)]),  # Shares endpoint
+                ],
+            },
+            crs="EPSG:4326",  # WGS84
+        )
+
+        # Build index from geographic data (will internally project to UTM)
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
+
+        # Query with geometry from WGS84 (same as input)
+        query_geom = gdf.geometry.iloc[0]  # seg1
+        features = compute_endpoint_features(query_geom, ctx, exclude_segment_idx=0)
+
+        # seg1 shares endpoint with seg2, so min proximity should be ~0
+        assert features["min_endpoint_proximity_m"] < 5.0, (
+            f"Expected small proximity (shared endpoint), got {features['min_endpoint_proximity_m']}"
+        )
+        assert features["shared_endpoint_count"] >= 1
+
+    def test_endpoint_features_crs_mismatch_returns_infinity(self):
+        """CRS mismatch between index and query should be avoided by design.
+
+        This test documents the bug that was fixed: if the spatial index is built
+        from WGS84 data but queries use projected (UTM) coordinates, the R-tree
+        query fails because coordinates are in different units.
+
+        The fix ensures both index and query use the same CRS.
+        """
+
+        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+
+        # Build index from WGS84 data
+        gdf_wgs84 = gpd.GeoDataFrame(
+            {
+                "id": ["seg1", "seg2"],
+                "geometry": [
+                    LineString([(-71.06, 42.36), (-71.05, 42.36)]),
+                    LineString([(-71.05, 42.36), (-71.05, 42.37)]),
+                ],
+            },
+            crs="EPSG:4326",
+        )
+
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf_wgs84, id_column="id", snap_tolerance_m=5.0)
+
+        # Create a query geometry in UTM coordinates (wrong CRS!)
+        # These coordinates are what seg1's endpoint would be in UTM zone 19N
+        # If we accidentally query with UTM coords against a WGS84-based index,
+        # the query will find nothing because the numbers are in different scales
+        wrong_crs_geom = LineString([(330000, 4690000), (331000, 4690000)])
+
+        # This demonstrates the bug: querying with mismatched CRS returns infinity
+        # because the R-tree can't find any nearby points in the wrong coordinate space
+        features = compute_endpoint_features(wrong_crs_geom, ctx, exclude_segment_idx=None)
+
+        # With CRS mismatch, proximity should be infinity (no nearby endpoints found)
+        # This is the symptom of the bug - if you see infinity in production, check CRS!
+        assert features["min_endpoint_proximity_m"] > 9000, (
+            "CRS mismatch should result in very large proximity (no matches found)"
+        )
+
+    def test_compute_features_only_uses_consistent_crs(self):
+        """compute_features_only should use consistent CRS for index and query.
+
+        This is an integration test that verifies the fix in data_loader.py.
+        Before the fix, target_candidates_only was built from unprojected data
+        but queries used projected geometries, causing CRS mismatch.
+        """
+        from matcher.labeling.data_loader import compute_features_only
+
+        # Create small test datasets in WGS84
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["ref1", "ref2"],
+                "geometry": [
+                    LineString([(-71.06, 42.36), (-71.05, 42.36)]),
+                    LineString([(-71.05, 42.36), (-71.04, 42.36)]),
+                ],
+                "names": [{"primary": "Main St"}, {"primary": "Main St"}],
+                "class": ["primary", "primary"],
+            },
+            crs="EPSG:4326",
+        )
+
+        target = gpd.GeoDataFrame(
+            {
+                "id": ["target1", "target2"],
+                "geometry": [
+                    # Overlaps with ref1
+                    LineString([(-71.06, 42.3601), (-71.05, 42.3601)]),
+                    # Overlaps with ref2
+                    LineString([(-71.05, 42.3601), (-71.04, 42.3601)]),
+                ],
+                "names": [{"primary": "Main Street"}, {"primary": "Main Street"}],
+                "class": ["primary", "primary"],
+            },
+            crs="EPSG:4326",
+        )
+
+        # Generate features
+        df = compute_features_only(
+            reference=reference,
+            target=target,
+            ref_id_column="id",
+            target_id_column="id",
+            ref_name_column="names",
+            target_name_column="names",
+            ref_class_column="class",
+            target_class_column="class",
+        )
+
+        if len(df) > 0:
+            # Endpoint features should have reasonable values, not all infinity
+            # The targets share an endpoint at (-71.05, 42.3601)
+            finite_min = (df["min_endpoint_proximity_m"] < 9000).sum()
+            total = len(df)
+
+            # At least some pairs should have finite endpoint proximity
+            # (not all infinity, which would indicate CRS mismatch bug)
+            assert finite_min > 0 or total == 0, (
+                f"All {total} pairs have infinite endpoint proximity - CRS mismatch bug?"
+            )
+
+
 class TestComputeAllTopologyWithConnectors:
     """Tests for compute_all_topology with connectors_column parameter."""
 

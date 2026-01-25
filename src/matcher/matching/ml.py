@@ -850,8 +850,10 @@ class MLMatcher:
 
         # Filter target to only segments that appear in candidates
         # This dramatically speeds up spatial index building (e.g., 11k -> ~1k segments)
+        # IMPORTANT: Use working_target (projected CRS) not target (WGS84) to match the
+        # CRS of target_geoms which are used as query points in compute_endpoint_features
         sorted_target_indices = sorted(unique_target_indices)
-        target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
+        target_candidates_only = working_target.iloc[sorted_target_indices].reset_index(drop=True)
         logger.info(
             f"Filtered target to {len(target_candidates_only)} candidate segments "
             f"(from {len(target)} total)"

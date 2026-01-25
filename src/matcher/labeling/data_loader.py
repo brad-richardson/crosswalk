@@ -601,8 +601,11 @@ def compute_features_only(
     unique_ref_indices = set(cand.ref_idx for cand in candidates)
 
     # Pre-compute endpoint features
+    # IMPORTANT: Use target_proj (projected CRS) not target (WGS84) to match the
+    # CRS of target_geoms which are used as query points. Otherwise the spatial
+    # index expects WGS84 inputs but receives UTM coordinates → no matches.
     sorted_target_indices = sorted(unique_target_indices)
-    target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
+    target_candidates_only = target_proj.iloc[sorted_target_indices].reset_index(drop=True)
     original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
 
     logger.info("Building spatial index for endpoint features...")
