@@ -15,14 +15,12 @@ from .alignment import AlignmentResult, compute_coverage_features, create_sublin
 from .geometric import (
     compute_geometric_features,
     compute_heading_consistency,
-    compute_length_bin,
     compute_shape_complexity,
     compute_sinuosity,
     compute_vertex_density,
 )
 from .relational import compute_perpendicular_offset
 from .semantic import (
-    compute_cardinal_mismatch,
     compute_class_similarity,
     compute_name_numeric_match,
     compute_name_similarity,
@@ -143,12 +141,9 @@ def compute_pair_features(
         else:
             vertex_density_ratio = 0.0
 
-        # Compute length bins using aligned subline lengths
+        # Compute min length using aligned subline lengths
         ref_length = geom_for_similarity_ref.length
         target_length = geom_for_similarity_target.length
-        length_bin_ref = compute_length_bin(ref_length)
-        length_bin_target = compute_length_bin(target_length)
-        length_bin_match = 1.0 if length_bin_ref == length_bin_target else 0.0
         min_length_m = min(ref_length, target_length)
 
         # Compute shape complexity on aligned sublines
@@ -255,7 +250,6 @@ def compute_pair_features(
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
-            "projection_distance_m": geom_features.projection_distance,
             "centroid_distance_m": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             # Semantic - name
@@ -267,7 +261,6 @@ def compute_pair_features(
             "has_name_ref": name_sim["has_name_ref"],
             "has_name_target": name_sim["has_name_target"],
             "name_is_generic": name_sim["name_is_generic"],
-            "cardinal_direction_mismatch": compute_cardinal_mismatch(ref_name, target_name),
             # Semantic - class
             "class_similarity": class_sim,
             # Endpoint proximity (direction-invariant min/max)
@@ -323,10 +316,7 @@ def compute_pair_features(
             "vertex_density_ref": vertex_density_ref,
             "vertex_density_target": vertex_density_target,
             "vertex_density_ratio": vertex_density_ratio,
-            # Length binning features
-            "length_bin_ref": length_bin_ref,
-            "length_bin_target": length_bin_target,
-            "length_bin_match": length_bin_match,
+            # Length features
             "min_length_m": min_length_m,
             # Shape complexity features
             "shape_complexity_ref": shape_complexity_ref,
@@ -357,7 +347,6 @@ def _get_error_features() -> dict[str, float]:
         "buffer_iou_15m": 0.0,
         "heading_delta": 180.0,
         "length_ratio": 0.0,
-        "projection_distance_m": MAX_DISTANCE_METERS,
         "centroid_distance_m": MAX_DISTANCE_METERS,
         "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
         # Semantic features - name
@@ -369,7 +358,6 @@ def _get_error_features() -> dict[str, float]:
         "has_name_ref": 0.0,
         "has_name_target": 0.0,
         "name_is_generic": 0.0,
-        "cardinal_direction_mismatch": 0.0,  # No mismatch assumed in error case
         # Semantic features - class
         "class_similarity": 0.0,
         # Endpoint proximity
@@ -413,17 +401,14 @@ def _get_error_features() -> dict[str, float]:
         "vertex_density_ref": 0.0,
         "vertex_density_target": 0.0,
         "vertex_density_ratio": 0.0,
-        # Length binning features - default to short (0)
-        "length_bin_ref": 0,
-        "length_bin_target": 0,
-        "length_bin_match": 0.0,
+        # Length features
         "min_length_m": 0.0,
         # Shape complexity features - default to no turns
         "shape_complexity_ref": 0,
         "shape_complexity_target": 0,
         "shape_complexity_delta": 0,
-        # Numeric route matching - neutral (0.5)
-        "name_numeric_match": 0.5,
+        # Numeric route matching - 0.0 (no signal when neither has number)
+        "name_numeric_match": 0.0,
     }
 
 

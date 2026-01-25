@@ -792,17 +792,25 @@ def _project_geometry(geom, transformer):
     return transform(transformer.transform, geom)
 
 
-def _project_geometries(geoms: np.ndarray, target_crs: CRS) -> np.ndarray:
+def _project_geometries(
+    geoms: np.ndarray,
+    target_crs: CRS,
+    source_crs: CRS | None = None,
+) -> np.ndarray:
     """Project an array of geometries to a target CRS.
 
     Args:
-        geoms: Array of Shapely geometries (assumed to be in WGS84/EPSG:4326)
+        geoms: Array of Shapely geometries
         target_crs: Target CRS to project to
+        source_crs: Source CRS of geometries. If None, assumes WGS84/EPSG:4326
+                   for backward compatibility.
 
     Returns:
         Array of projected geometries
     """
-    transformer = Transformer.from_crs(CRS.from_epsg(4326), target_crs, always_xy=True)
+    if source_crs is None:
+        source_crs = CRS.from_epsg(4326)
+    transformer = Transformer.from_crs(source_crs, target_crs, always_xy=True)
     projected = np.empty(len(geoms), dtype=object)
     for i, geom in enumerate(geoms):
         projected[i] = _project_geometry(geom, transformer)

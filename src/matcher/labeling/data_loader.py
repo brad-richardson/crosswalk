@@ -102,7 +102,8 @@ def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[s
         "overlap_ratio": features.get("min_coverage", 0.0),
         "heading_norm": norm_heading(features.get("heading_delta", 90)),
         "length_ratio": norm_length_ratio(features.get("length_ratio", 0)),
-        "projection_norm": norm_distance(features.get("projection_distance_m", 50)),
+        # projection_norm uses mean_hausdorff (they were equivalent features)
+        "projection_norm": norm_distance(features.get("mean_hausdorff_distance_m", 50)),
         "name_similarity": features.get("name_jaro_winkler", 0.0),
         "class_similarity": features.get("class_similarity", 0.0),
     }

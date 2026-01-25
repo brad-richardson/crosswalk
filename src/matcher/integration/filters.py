@@ -39,15 +39,25 @@ def filter_short_segments(
 
     Returns:
         Tuple of (kept_segments, filtered_segments)
+
+    Raises:
+        ValueError: If CRS is None (length calculation requires known CRS)
     """
     min_length_m = min_length_m or settings.min_segment_length_m
 
     if gdf is None or len(gdf) == 0:
         return gdf, gpd.GeoDataFrame()
 
+    # Require CRS to be set - length calculation needs known units
+    if gdf.crs is None:
+        raise ValueError(
+            "GeoDataFrame has no CRS set. Cannot compute accurate lengths. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates."
+        )
+
     # Project to UTM for accurate length calculation if in geographic CRS
     working_gdf = gdf
-    if gdf.crs is not None and gdf.crs.is_geographic:
+    if gdf.crs.is_geographic:
         working_crs = gdf.estimate_utm_crs()
         working_gdf = gdf.to_crs(working_crs)
         logger.debug(f"Projected to {working_crs} for length calculation")
@@ -91,6 +101,9 @@ def detect_near_duplicates(
 
     Returns:
         Tuple of (clean_unmatched, potential_duplicates)
+
+    Raises:
+        ValueError: If CRS is None (buffer/distance calculations require known CRS)
     """
     distance_tolerance_m = distance_tolerance_m or settings.near_duplicate_tolerance_m
     overlap_threshold = overlap_threshold or settings.near_duplicate_overlap
@@ -101,20 +114,46 @@ def detect_near_duplicates(
     if matched is None or len(matched) == 0:
         return unmatched, gpd.GeoDataFrame()
 
+    # Require CRS to be set - buffer/distance calculations need known units
+    if unmatched.crs is None:
+        raise ValueError(
+            "unmatched GeoDataFrame has no CRS set. Cannot compute accurate distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates."
+        )
+    if matched.crs is None:
+        raise ValueError(
+            "matched GeoDataFrame has no CRS set. Cannot compute accurate distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates."
+        )
+
     logger.info(f"Detecting near-duplicates in {len(unmatched)} unmatched segments...")
 
-    # Build spatial index of matched segments
-    matched_geoms = matched.geometry.values
+    # Project to UTM if in geographic CRS to ensure buffer/IoU use meters
+    # Buffer(10) on WGS84 would create a 10-degree buffer (~1100km!) instead of 10m
+    working_unmatched = unmatched
+    working_matched = matched
+    if unmatched.crs.is_geographic:
+        utm_crs = unmatched.estimate_utm_crs()
+        logger.debug(f"Projecting to {utm_crs} for buffer/IoU calculations")
+        working_unmatched = unmatched.to_crs(utm_crs)
+        working_matched = matched.to_crs(utm_crs)
+
+    # Build spatial index of matched segments (using projected geometries)
+    matched_geoms = working_matched.geometry.values
     tree = STRtree(matched_geoms)
 
     potential_duplicates = []
     clean_indices = []
 
-    for idx, row in unmatched.iterrows():
-        geom = row.geometry
+    # Build arrays for projected geometries (for buffer/IoU in meters)
+    working_unmatched_geoms = working_unmatched.geometry.values
+
+    for i, (idx, row) in enumerate(unmatched.iterrows()):
+        # Use projected geometry for buffer/IoU calculations
+        geom = working_unmatched_geoms[i]
         _original_id = row.get(id_column, idx)  # noqa: F841 - reserved for debugging
 
-        # Find nearby matched segments
+        # Find nearby matched segments (using projected geometries)
         buffered = geom.buffer(distance_tolerance_m)
         candidate_indices = tree.query(buffered)
 
@@ -125,7 +164,7 @@ def detect_near_duplicates(
         for matched_idx in candidate_indices:
             matched_geom = matched_geoms[matched_idx]
 
-            # Compute overlap
+            # Compute overlap (using projected geometries for accurate IoU)
             iou = _compute_buffer_iou(geom, matched_geom, distance_tolerance_m)
 
             if iou > best_overlap:

@@ -213,8 +213,23 @@ def generate_candidates(
 
     Returns:
         CandidateBatch with candidate pairs stored as numpy arrays
+
+    Raises:
+        ValueError: If CRS is None (buffer calculations require known CRS)
     """
     buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
+
+    # Require CRS to be set - buffer calculations need known units
+    if reference.crs is None:
+        raise ValueError(
+            "reference has no CRS set. Cannot compute accurate buffer distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates."
+        )
+    if target.crs is None:
+        raise ValueError(
+            "target has no CRS set. Cannot compute accurate buffer distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates."
+        )
 
     logger.info(f"Generating candidates: {len(reference)} reference x {len(target)} target")
     logger.info(f"  buffer_distance_m: {buffer_distance_m}m")
@@ -222,14 +237,13 @@ def generate_candidates(
 
     # Check if data is in geographic CRS - need to handle buffer distance conversion
     is_geographic = False
-    if target.crs is not None:
-        try:
-            crs = CRS.from_user_input(target.crs)
-            is_geographic = crs.is_geographic
-        except (ValueError, TypeError):
-            # CRS parsing failed - assume projected CRS (safer for buffer distance)
-            # This can happen with malformed CRS strings or unsupported formats
-            pass
+    try:
+        crs = CRS.from_user_input(target.crs)
+        is_geographic = crs.is_geographic
+    except (ValueError, TypeError):
+        # CRS parsing failed - assume projected CRS (safer for buffer distance)
+        # This can happen with malformed CRS strings or unsupported formats
+        pass
 
     # For geographic CRS, convert buffer distance to approximate degrees
     # At equator: 1 degree ≈ 111km, so 50m ≈ 0.00045 degrees

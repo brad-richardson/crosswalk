@@ -100,7 +100,9 @@ def extract_version_from_filename(path: Path) -> str | None:
 def find_overture_segments(data_dir: Path, dataset_name: str) -> Path | None:
     """Find Overture segments file for a dataset.
 
-    Tries progressively shorter prefixes to find the matching Overture file.
+    Tries progressively shorter prefixes to find the matching Overture file
+    with the current DATA_VERSION. Does NOT fall back to glob matching to
+    ensure version consistency.
 
     Args:
         data_dir: Directory containing data files
@@ -115,7 +117,7 @@ def find_overture_segments(data_dir: Path, dataset_name: str) -> Path | None:
     """
     parts = dataset_name.split("_")
 
-    # Try progressively shorter prefixes (versioned only)
+    # Try progressively shorter prefixes with exact version match only
     for i in range(len(parts), 0, -1):
         region = "_".join(parts[:i])
         path = data_dir / overture_segments_filename(region)

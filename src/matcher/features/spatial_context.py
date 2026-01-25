@@ -256,13 +256,11 @@ class SpatialContextIndex:
         if gdf.crs is not None and gdf.crs.is_geographic:
             from pyproj import Transformer
 
-            centroid = gdf.geometry.union_all().centroid
-            utm_zone = int((centroid.x + 180) / 6) + 1
-            hemisphere = "north" if centroid.y >= 0 else "south"
-            epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-            work_gdf = gdf.to_crs(epsg=epsg)
+            # Use geopandas' estimate_utm_crs() for consistent UTM zone selection
+            utm_crs = gdf.estimate_utm_crs()
+            work_gdf = gdf.to_crs(utm_crs)
             # Store transformer to project query points
-            self._transformer = Transformer.from_crs(gdf.crs, f"EPSG:{epsg}", always_xy=True)
+            self._transformer = Transformer.from_crs(gdf.crs, utm_crs, always_xy=True)
 
         # Extract all endpoints using vectorized shapely operations
         geometries = work_gdf.geometry.values
@@ -1097,14 +1095,11 @@ def compute_all_topology(
     # This ensures tolerance is interpreted as meters
     work_gdf = gdf
     if gdf.crs is not None and gdf.crs.is_geographic:
-        # Estimate UTM zone from centroid
+        # Use geopandas' estimate_utm_crs() for consistent UTM zone selection
         t0 = time.perf_counter()
-        centroid = gdf.geometry.union_all().centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        hemisphere = "north" if centroid.y >= 0 else "south"
-        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-        work_gdf = gdf.to_crs(epsg=epsg)
-        logger.debug(f"[topology] Projected to EPSG:{epsg} in {time.perf_counter() - t0:.2f}s")
+        utm_crs = gdf.estimate_utm_crs()
+        work_gdf = gdf.to_crs(utm_crs)
+        logger.debug(f"[topology] Projected to {utm_crs} in {time.perf_counter() - t0:.2f}s")
 
     # Step 1: Extract endpoints from all geometries using vectorized shapely
     t0 = time.perf_counter()
@@ -1294,12 +1289,10 @@ def build_inferred_graph(
     # Project to local CRS if in geographic coordinates
     work_gdf = gdf
     if gdf.crs is not None and gdf.crs.is_geographic:
-        centroid = gdf.geometry.union_all().centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        hemisphere = "north" if centroid.y >= 0 else "south"
-        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-        work_gdf = gdf.to_crs(epsg=epsg)
-        logger.debug(f"[graphlet] Projected to EPSG:{epsg}")
+        # Use geopandas' estimate_utm_crs() for consistent UTM zone selection
+        utm_crs = gdf.estimate_utm_crs()
+        work_gdf = gdf.to_crs(utm_crs)
+        logger.debug(f"[graphlet] Projected to {utm_crs}")
 
     # Step 1: Extract endpoints using vectorized shapely (LineStrings only, filtered at ingest)
     import shapely
@@ -1859,12 +1852,10 @@ def build_inferred_connector_graph(
     # Project to local CRS if in geographic coordinates
     work_gdf = gdf
     if gdf.crs is not None and gdf.crs.is_geographic:
-        centroid = gdf.geometry.union_all().centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        hemisphere = "north" if centroid.y >= 0 else "south"
-        epsg = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-        work_gdf = gdf.to_crs(epsg=epsg)
-        logger.debug(f"[graphlet-infer] Projected to EPSG:{epsg}")
+        # Use geopandas' estimate_utm_crs() for consistent UTM zone selection
+        utm_crs = gdf.estimate_utm_crs()
+        work_gdf = gdf.to_crs(utm_crs)
+        logger.debug(f"[graphlet-infer] Projected to {utm_crs}")
 
     geometries = work_gdf.geometry.values
     segment_ids = work_gdf[id_column].astype(str).values

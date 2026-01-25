@@ -151,7 +151,6 @@ def compute_match_score(
             "buffer_iou_15m": precomputed_features.get("buffer_iou_15m", 0.0),
             "heading_delta": precomputed_features["heading_delta"],
             "length_ratio": precomputed_features["length_ratio"],
-            "projection_distance_m": precomputed_features["projection_distance_m"],
             "centroid_distance_m": precomputed_features["centroid_distance_m"],
             "collinear_gap_ratio": precomputed_features.get("collinear_gap_ratio", 1.0),
             "name_levenshtein": precomputed_features["name_levenshtein"],
@@ -175,7 +174,6 @@ def compute_match_score(
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
-            "projection_distance_m": geom_features.projection_distance,
             "centroid_distance_m": geom_features.centroid_distance,
             "collinear_gap_ratio": geom_features.collinear_gap_ratio,
             "name_levenshtein": name_sim["levenshtein_ratio"],
@@ -186,6 +184,7 @@ def compute_match_score(
 
     # Normalize geometric features to 0-1 (higher is better)
     # Use buffer_iou_5m for tight alignment scoring (backward compatible with old buffer_iou)
+    # NOTE: projection_norm uses mean_hausdorff (they were equivalent features)
     scores = {
         "hausdorff_norm": max(0, 1 - raw_features["hausdorff_distance_m"] / distance_threshold),
         "mean_hausdorff_norm": max(
@@ -195,7 +194,9 @@ def compute_match_score(
         "heading_norm": max(0, 1 - raw_features["heading_delta"] / 45.0),
         "collinear_gap_ratio": raw_features["collinear_gap_ratio"],  # Already 0-1
         "length_ratio": raw_features["length_ratio"],
-        "projection_norm": max(0, 1 - raw_features["projection_distance_m"] / distance_threshold),
+        "projection_norm": max(
+            0, 1 - raw_features["mean_hausdorff_distance_m"] / distance_threshold
+        ),
         "name_similarity": raw_features["name_token_sort"],
         "class_similarity": raw_features["class_similarity"],
     }
@@ -268,10 +269,9 @@ def score_candidates(
 
     # Validate that data is in projected CRS (meters)
     # Projection should happen early in the pipeline (runner.py)
-    if reference.crs is not None and reference.crs.is_geographic:
-        validate_projected_crs(reference, "reference")
-    if target.crs is not None and target.crs.is_geographic:
-        validate_projected_crs(target, "target")
+    # validate_projected_crs raises for both None CRS and geographic CRS
+    validate_projected_crs(reference, "reference")
+    validate_projected_crs(target, "target")
 
     # Pre-extract arrays for faster access (avoid repeated .iloc calls)
     ref_geoms = reference.geometry.values

@@ -29,7 +29,6 @@ RAW_FEATURE_UNITS = {
     "hausdorff_distance_m": "m",
     "mean_hausdorff_distance_m": "m",
     "hausdorff_p95_m": "m",
-    "projection_distance_m": "m",
     "centroid_distance_m": "m",
     "min_endpoint_proximity_m": "m",
     "max_endpoint_proximity_m": "m",
@@ -225,7 +224,6 @@ def render_raw_features(pair: CandidatePairView) -> None:
             "buffer_iou_15m",
             "heading_delta",
             "length_ratio",
-            "projection_distance_m",
             "centroid_distance_m",
             "collinear_gap_ratio",
         ],
@@ -238,7 +236,6 @@ def render_raw_features(pair: CandidatePairView) -> None:
             "has_name_ref",
             "has_name_target",
             "name_is_generic",
-            "cardinal_direction_mismatch",
         ],
         "Class": [
             "class_similarity",

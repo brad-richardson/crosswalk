@@ -57,7 +57,6 @@ class TestErrorFeaturesConsistency:
             "hausdorff_distance_m",
             "mean_hausdorff_distance_m",
             "hausdorff_p95_m",
-            "projection_distance_m",
             "centroid_distance_m",
             "min_endpoint_proximity_m",
             "max_endpoint_proximity_m",
@@ -80,7 +79,6 @@ class TestErrorFeaturesConsistency:
             "name_levenshtein",
             "name_jaro_winkler",
             "name_token_sort",
-            "cardinal_direction_mismatch",
             "class_similarity",
         ],
     )
@@ -135,7 +133,6 @@ class TestFeatureNaming:
             "hausdorff_distance_m",
             "mean_hausdorff_distance_m",
             "hausdorff_p95_m",
-            "projection_distance_m",
             "centroid_distance_m",
             "min_endpoint_proximity_m",
             "max_endpoint_proximity_m",
