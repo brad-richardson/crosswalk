@@ -11,6 +11,13 @@ fetch:
   id_prefix: sp_road
   name_column: nm_logradouro_completo
   class_column: dc_tipo_classificacao_viaria
+  class_mapping:
+    "Local": residential
+    "Coletora": tertiary
+    "Arterial": primary
+    "VTR": primary
+    "Rodovia": motorway
+    "Vias de pedestre": footway
   bbox:
   - -46.83
   - -24.0

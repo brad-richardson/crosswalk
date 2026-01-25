@@ -10,6 +10,16 @@ fetch:
   id_prefix: hel_road
   name_column: tienimi_su
   class_column: toiminn_lk
+  class_mapping:
+    1: motorway
+    2: trunk
+    3: primary
+    4: secondary
+    5: tertiary
+    6: residential
+    7: residential
+    8: service
+    9: service
   bbox:
   - 24.8
   - 60.1

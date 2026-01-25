@@ -11,6 +11,12 @@ fetch:
   id_prefix: ams_road
   name_column: stt_naam
   class_column: wegbehsrt
+  class_mapping:
+    "G": residential
+    "R": trunk
+    "P": secondary
+    "T": secondary
+    "W": tertiary
   bbox:
   - 4.75
   - 52.3

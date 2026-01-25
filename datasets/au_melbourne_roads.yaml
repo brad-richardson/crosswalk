@@ -9,8 +9,15 @@ source:
   portal_url: https://vicroadsopendata-vicroadsmaps.opendata.arcgis.com/
 fetch:
   id_prefix: au_melbourne
-  name_column: EZI_RDNAME
-  class_column: CLASS_CODE
+  name_column: ROADNAME
+  class_column: RMACLASS
+  class_mapping:
+    "Freeway": motorway
+    "Tollway": motorway
+    "Arterial Highway": primary
+    "Arterial Other": secondary
+    "Non Arterial State Road": tertiary
+    "Committed Proposed Road": unclassified
   bbox:
   - 144.55
   - -38.1

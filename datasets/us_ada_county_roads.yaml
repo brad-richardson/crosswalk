@@ -9,6 +9,17 @@ fetch:
   id_prefix: ada_road
   name_column: StName
   class_column: FuncClass
+  class_mapping:
+    "Interstate": motorway
+    "Principal Arterial": primary
+    "Minor Arterial": secondary
+    "Collector": tertiary
+    "Local": residential
+    "LOCAL": residential
+    "Driveway": service
+    "Ramp": motorway_link
+    "Alley": service
+    "Parks": path
   bbox:
   - -116.52
   - 43.12

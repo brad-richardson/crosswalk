@@ -1158,6 +1158,12 @@ def compute_features(
         "-w",
         help="Number of parallel workers for feature computation (-1 for auto)",
     ),
+    generate_candidates: bool = typer.Option(
+        False,
+        "--generate-candidates",
+        "-c",
+        help="Also generate scored candidates cache for labeling UI (runs ML scoring)",
+    ),
 ):
     """Compute and cache features for dataset(s) without ML scoring.
 
@@ -1168,19 +1174,26 @@ def compute_features(
     Features are versioned - when feature computation logic changes, bump FEATURE_VERSION
     in config.py and old caches will be ignored.
 
+    Use --generate-candidates to also run ML scoring and cache the final candidates,
+    making the labeling UI load instantly.
+
     Examples:
         matcher compute-features us_boston_streets           # Single dataset
         matcher compute-features --prefix us_                # All US datasets
         matcher compute-features --all                       # All datasets with data
         matcher compute-features --all --force               # Recompute all
         matcher compute-features us_boston_streets -w 4      # Limit workers
+        matcher compute-features --all --generate-candidates # Full precache for UI
     """
     from .datasets.schema import get_dataset_config, list_dataset_configs
     from .filenames import find_overture_segments, find_target_file
     from .labeling.data_loader import (
+        _build_views_from_feature_df,
         compute_features_only,
         get_feature_cache_info,
+        load_feature_cache,
         load_geodataframe,
+        save_candidates_to_cache,
         save_feature_cache,
     )
 
@@ -1215,7 +1228,9 @@ def compute_features(
 
         # Check cache
         cache_info = get_feature_cache_info(dataset_id, ref_path, target_path)
-        if cache_info["exists"] and not force:
+        feature_cache_exists = cache_info["exists"]
+
+        if feature_cache_exists and not force and not generate_candidates:
             console.print(
                 f"[blue]Skipping {dataset_id}: feature cache exists "
                 f"({cache_info['candidate_count']:,} candidates, "
@@ -1223,43 +1238,87 @@ def compute_features(
             )
             return True
 
-        console.print(f"[blue]Computing features for {dataset_id}...[/blue]")
+        # Use standardized Overture-format column names for parquet files
+        # (the fetch step transforms source columns to these during data ingestion)
+        from .config import CLASS_COLUMN, NAMES_COLUMN
+
+        ref_name_column = NAMES_COLUMN
+        target_name_column = NAMES_COLUMN
+        ref_class_column = CLASS_COLUMN
+        target_class_column = CLASS_COLUMN
 
         try:
-            # Load data
-            reference = load_geodataframe(ref_path)
-            target = load_geodataframe(target_path)
+            feature_df = None
+            reference = None
+            target = None
 
-            console.print(f"  Reference: {len(reference):,} segments")
-            console.print(f"  Target: {len(target):,} segments")
+            # Load or compute features
+            if feature_cache_exists and not force:
+                console.print(f"[blue]Loading cached features for {dataset_id}...[/blue]")
+                feature_df = load_feature_cache(dataset_id)
+            else:
+                console.print(f"[blue]Computing features for {dataset_id}...[/blue]")
 
-            # Get column names from dataset config
-            config = get_dataset_config(dataset_id)
-            ref_name_column = "names"
-            target_name_column = config.fetch.name_column if config and config.fetch else "names"
-            ref_class_column = "class"
-            target_class_column = config.fetch.class_column if config and config.fetch else "class"
+                # Load data
+                reference = load_geodataframe(ref_path)
+                target = load_geodataframe(target_path)
 
-            # Compute features
-            feature_df = compute_features_only(
-                reference=reference,
-                target=target,
-                ref_name_column=ref_name_column,
-                target_name_column=target_name_column,
-                ref_class_column=ref_class_column,
-                target_class_column=target_class_column,
-                n_jobs=workers,
-            )
+                console.print(f"  Reference: {len(reference):,} segments")
+                console.print(f"  Target: {len(target):,} segments")
 
-            if len(feature_df) == 0:
-                console.print(f"[yellow]  No candidates generated for {dataset_id}[/yellow]")
-                return False
+                # Compute features
+                feature_df = compute_features_only(
+                    reference=reference,
+                    target=target,
+                    ref_name_column=ref_name_column,
+                    target_name_column=target_name_column,
+                    ref_class_column=ref_class_column,
+                    target_class_column=target_class_column,
+                    n_jobs=workers,
+                )
 
-            # Save cache
-            cache_path = save_feature_cache(dataset_id, feature_df)
-            console.print(
-                f"[green]  Saved {len(feature_df):,} features to {cache_path.name}[/green]"
-            )
+                if len(feature_df) == 0:
+                    console.print(f"[yellow]  No candidates generated for {dataset_id}[/yellow]")
+                    return False
+
+                # Save feature cache
+                cache_path = save_feature_cache(dataset_id, feature_df)
+                console.print(
+                    f"[green]  Saved {len(feature_df):,} features to {cache_path.name}[/green]"
+                )
+
+            # Generate candidates cache if requested
+            if generate_candidates and feature_df is not None:
+                console.print(f"[blue]  Generating scored candidates for {dataset_id}...[/blue]")
+
+                # Load geodataframes if not already loaded (when using cached features)
+                if reference is None:
+                    reference = load_geodataframe(ref_path)
+                if target is None:
+                    target = load_geodataframe(target_path)
+
+                # Build views (runs ML scoring)
+                views = _build_views_from_feature_df(
+                    feature_df=feature_df,
+                    reference=reference,
+                    target=target,
+                    ref_id_column="id",
+                    target_id_column="id",
+                    ref_name_column=ref_name_column,
+                    target_name_column=target_name_column,
+                    ref_class_column=ref_class_column,
+                    target_class_column=target_class_column,
+                )
+
+                if views:
+                    candidates_path = save_candidates_to_cache(dataset_id, views)
+                    console.print(
+                        f"[green]  Saved {len(views):,} candidates to "
+                        f"{candidates_path.name}[/green]"
+                    )
+                else:
+                    console.print(f"[yellow]  No candidates to cache for {dataset_id}[/yellow]")
+
             return True
 
         except Exception as e:
