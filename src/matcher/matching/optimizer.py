@@ -23,7 +23,7 @@ from scipy.spatial import cKDTree
 from shapely import LineString
 
 from ..config import settings
-from .rules import MatchDecision, MatchResult
+from .types import MatchDecision, MatchResult
 
 
 @dataclass

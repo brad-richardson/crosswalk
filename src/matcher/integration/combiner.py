@@ -389,7 +389,7 @@ def separate_matched_unmatched(
     Returns:
         Tuple of (matched_segments, unmatched_segments)
     """
-    from ..matching.rules import MatchDecision
+    from ..matching.types import MatchDecision
 
     # Build set of matched IDs - only include high-confidence MATCH decisions
     matched_ids = set()

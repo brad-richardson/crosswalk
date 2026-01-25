@@ -876,10 +876,10 @@ def match(
         help="Output bridge file path",
     ),
     method: str = typer.Option(
-        "rule",
+        "xgboost",
         "--method",
         "-m",
-        help="Matching method: rule, xgboost",
+        help="Matching method: xgboost",
     ),
     buffer_distance_m: float = typer.Option(
         50.0,
@@ -1827,10 +1827,10 @@ def validate_matching(
         help="Drop strategy: random, bbox, source, class",
     ),
     method: str = typer.Option(
-        "rule",
+        "xgboost",
         "--method",
         "-m",
-        help="Matching method: rule, xgboost",
+        help="Matching method: xgboost",
     ),
     fraction: float = typer.Option(
         0.1,

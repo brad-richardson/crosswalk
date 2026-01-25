@@ -853,26 +853,16 @@ def generate_scored_candidates(
 
     # Use MLMatcher for optimized scoring (parallel feature computation + batch prediction)
     t0 = time.perf_counter()
-    matcher = MLMatcher(auto_select=True)
 
-    # Check if model exists, fall back to rules if not
+    # Check if model exists
     model_path = settings.model_path
     if not model_path.exists():
-        logger.warning(f"ML model not found at {model_path}, falling back to rule-based scoring")
-        return _generate_scored_candidates_rules(
-            reference=reference,
-            target=target,
-            reference_proj=reference_proj,
-            target_proj=target_proj,
-            candidates=candidates,
-            proj_to_wgs84=proj_to_wgs84,
-            ref_id_column=ref_id_column,
-            target_id_column=target_id_column,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
+        raise FileNotFoundError(
+            f"ML model not found at {model_path}. "
+            "Run 'matcher train --combined' to train the model."
         )
+
+    matcher = MLMatcher(auto_select=True)
 
     # Score all candidates using ML pipeline (parallelized)
     match_results = matcher.score_candidates(
@@ -1150,18 +1140,11 @@ def build_views_from_feature_df(
     t0 = time.perf_counter()
     matcher = get_cached_matcher()
     if matcher is None:
-        logger.warning("No ML model available, using rule-based thresholds")
-        # Fall back to simple thresholds based on key features
-        probs = []
-        for features in features_list:
-            # Simple heuristic based on buffer IoU and hausdorff distance
-            iou = features.get("buffer_iou_5m", 0.0)
-            hausdorff = features.get("hausdorff_distance_m", 50.0)
-            name_sim = features.get("name_jaro_winkler", 0.0)
-            prob = (iou * 0.5) + (max(0, 1 - hausdorff / 50) * 0.3) + (name_sim * 0.2)
-            probs.append(min(1.0, max(0.0, prob)))
-    else:
-        probs = matcher.predict(features_list)
+        raise ValueError(
+            "No ML model available. Train a model first with 'matcher train --combined'. "
+            "The labeling UI requires a trained model for scoring candidates."
+        )
+    probs = matcher.predict(features_list)
     logger.info(f"[3/5] ML prediction completed in {time.perf_counter() - t0:.1f}s")
 
     # Filter to review band BEFORE building views (huge speedup for large datasets)
@@ -1340,160 +1323,6 @@ def build_views_from_feature_df(
 
     views.sort(key=sort_key)
     logger.info(f"View building complete: {len(views):,} candidates ready")
-
-    return views
-
-
-def _generate_scored_candidates_rules(
-    reference: gpd.GeoDataFrame,
-    target: gpd.GeoDataFrame,
-    reference_proj: gpd.GeoDataFrame,
-    target_proj: gpd.GeoDataFrame,
-    candidates: list,
-    proj_to_wgs84,
-    ref_id_column: str,
-    target_id_column: str,
-    ref_name_column: str,
-    target_name_column: str,
-    ref_class_column: str,
-    target_class_column: str,
-) -> list[CandidatePairView]:
-    """Fallback: generate scored candidates using rule-based scoring.
-
-    Used when ML model is not available. This is the original sequential
-    implementation, which is slower but doesn't require a trained model.
-    """
-    from ..features.alignment import linestring_alignment
-    from ..features.compute import compute_pair_features, precompute_topology_and_endpoints
-    from ..matching.rules import compute_match_score
-
-    # Build lookups
-    ref_lookup = reference.set_index(ref_id_column)
-    target_lookup = target.set_index(target_id_column)
-    ref_proj_lookup = reference_proj.set_index(ref_id_column)
-    target_proj_lookup = target_proj.set_index(target_id_column)
-
-    has_ref_name = ref_name_column in reference.columns
-    has_target_name = target_name_column in target.columns
-    has_ref_class = ref_class_column in reference.columns
-    has_target_class = target_class_column in target.columns
-
-    def get_row(lookup, id_val):
-        result = lookup.loc[[id_val]]
-        if len(result) == 0:
-            raise KeyError(f"ID {id_val} not found in lookup")
-        return result.iloc[0]
-
-    # Pre-compute topology and endpoint features
-    logger.info("Pre-computing topology and endpoint features...")
-    unique_ref_indices = {cand.ref_idx for cand in candidates}
-    unique_target_indices = {cand.target_idx for cand in candidates}
-
-    target_endpoint_features, ref_topology_features, target_topology_features = (
-        precompute_topology_and_endpoints(
-            reference=reference_proj,
-            target=target_proj,
-            ref_indices=unique_ref_indices,
-            target_indices=unique_target_indices,
-            id_column=ref_id_column,
-            tolerance_m=5.0,
-        )
-    )
-
-    logger.info(f"Computing features for {len(candidates)} candidates (rule-based fallback)...")
-    views = []
-
-    for i, cand in enumerate(candidates):
-        if i > 0 and i % 10000 == 0:
-            logger.info(f"  Progress: {i}/{len(candidates)} ({100 * i / len(candidates):.0f}%)")
-
-        ref_row = get_row(ref_lookup, cand.ref_id)
-        target_row = get_row(target_lookup, cand.target_id)
-        ref_proj_row = get_row(ref_proj_lookup, cand.ref_id)
-        target_proj_row = get_row(target_proj_lookup, cand.target_id)
-
-        ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
-        target_name = (
-            _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
-        )
-        ref_class = ref_row.get(ref_class_column) if has_ref_class else None
-        target_class = target_row.get(target_class_column) if has_target_class else None
-
-        alignment = linestring_alignment(ref_proj_row.geometry, target_proj_row.geometry)
-
-        features = compute_pair_features(
-            ref_geom=ref_proj_row.geometry,
-            target_geom=target_proj_row.geometry,
-            ref_name=ref_name,
-            target_name=target_name,
-            ref_class=ref_class,
-            target_class=target_class,
-            endpoint_features=target_endpoint_features.get(cand.target_idx),
-            ref_topology=ref_topology_features.get(cand.ref_idx),
-            target_topology=target_topology_features.get(cand.target_idx),
-            alignment=alignment,
-        )
-
-        confidence, score_breakdown, _ = compute_match_score(
-            ref_geom=ref_proj_row.geometry,
-            target_geom=target_proj_row.geometry,
-            ref_name=ref_name,
-            target_name=target_name,
-            ref_class=ref_class,
-            target_class=target_class,
-            precomputed_features=features,
-        )
-
-        if confidence >= 0.5:
-            decision = "match"
-        elif confidence >= 0.1:
-            decision = "review"
-        else:
-            decision = "no_match"
-
-        ref_aligned_proj = create_subline(
-            ref_proj_row.geometry, alignment.overture_start_frac, alignment.overture_end_frac
-        )
-        target_aligned_proj = create_subline(
-            target_proj_row.geometry, alignment.dataset_start_frac, alignment.dataset_end_frac
-        )
-
-        if proj_to_wgs84:
-            ref_aligned = transform(proj_to_wgs84, ref_aligned_proj)
-            target_aligned = transform(proj_to_wgs84, target_aligned_proj)
-        else:
-            ref_aligned = ref_aligned_proj
-            target_aligned = target_aligned_proj
-
-        views.append(
-            CandidatePairView(
-                ref_id=str(cand.ref_id),
-                target_id=str(cand.target_id),
-                ref_geometry=ref_row.geometry,
-                target_geometry=target_row.geometry,
-                ref_name=ref_name,
-                target_name=target_name,
-                ref_class=ref_class,
-                target_class=target_class,
-                decision=decision,
-                confidence=confidence,
-                score_breakdown=score_breakdown,
-                features=features,
-                ref_aligned_geometry=ref_aligned,
-                target_aligned_geometry=target_aligned,
-                ref_start_frac=alignment.overture_start_frac,
-                ref_end_frac=alignment.overture_end_frac,
-                target_start_frac=alignment.dataset_start_frac,
-                target_end_frac=alignment.dataset_end_frac,
-            )
-        )
-
-    # Sort: REVIEW first, then by confidence descending
-    def sort_key(v):
-        decision_order = {"review": 0, "match": 1, "no_match": 2}
-        return (decision_order.get(v.decision, 3), -v.confidence)
-
-    views.sort(key=sort_key)
 
     return views
 

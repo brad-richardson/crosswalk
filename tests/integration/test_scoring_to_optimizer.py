@@ -15,7 +15,7 @@ from matcher.matching.optimizer import (
     resolve_conflicts,
     resolve_one_to_many,
 )
-from matcher.matching.rules import MatchDecision, MatchResult
+from matcher.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture

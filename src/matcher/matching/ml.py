@@ -39,7 +39,7 @@ from ..config import (
     SEMANTIC_FEATURES,
 )
 from ..utils.crs import validate_projected_crs
-from .rules import MatchDecision, MatchResult
+from .types import MatchDecision, MatchResult
 
 # Module-level globals for multiprocessing worker data
 _worker_data = None
@@ -781,10 +781,10 @@ class MLMatcher:
                 self.load_model(self.model_path)
 
         if self.model is None:
-            logger.warning("No ML model loaded, falling back to rules")
-            from .rules import score_candidates
-
-            return score_candidates(candidates, reference, target)
+            raise ValueError(
+                "No ML model loaded. Train a model first with 'matcher train --combined' "
+                "or provide a model path to MLMatcher(model_path=...)."
+            )
 
         # Handle empty candidates list
         if not candidates:

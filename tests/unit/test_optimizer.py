@@ -10,7 +10,7 @@ from matcher.matching.optimizer import (
     optimize_matches_auto,
     optimize_matches_greedy,
 )
-from matcher.matching.rules import MatchDecision, MatchResult
+from matcher.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture

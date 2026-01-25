@@ -14,7 +14,7 @@ from matcher.integration.combiner import (
     separate_matched_unmatched,
 )
 from matcher.integration.provenance import EdgeSource, TargetInput
-from matcher.matching.rules import MatchDecision, MatchResult
+from matcher.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture

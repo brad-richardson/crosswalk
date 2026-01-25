@@ -16,7 +16,7 @@ from ..blocking import generate_candidates
 from ..features.semantic import (
     _extract_name_string,
 )
-from ..matching.rules import MatchDecision, score_candidates
+from ..matching.types import MatchResult
 
 
 @dataclass
@@ -173,28 +173,23 @@ def sample_candidates(
 
     logger.info(f"Generated {len(candidates)} candidate pairs")
 
-    # Score candidates using ML model if available, otherwise use rules
-    if model_path and model_path.exists():
-        scored = _score_with_ml(
-            candidates,
-            reference_proj,
-            target_proj,
-            model_path,
-            ref_name_column,
-            target_name_column,
-            ref_class_column,
-            target_class_column,
+    # Score candidates using ML model
+    if not model_path or not model_path.exists():
+        raise FileNotFoundError(
+            f"ML model not found at {model_path}. "
+            "Run 'matcher train --combined' to train the model."
         )
-    else:
-        scored = score_candidates(
-            candidates=candidates,
-            reference=reference_proj,
-            target=target_proj,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
-        )
+
+    scored = _score_with_ml(
+        candidates,
+        reference_proj,
+        target_proj,
+        model_path,
+        ref_name_column,
+        target_name_column,
+        ref_class_column,
+        target_class_column,
+    )
 
     # Exclude already-labeled pairs
     if exclude_labeled:
@@ -312,93 +307,33 @@ def _score_with_ml(
     target_name_column: str,
     ref_class_column: str,
     target_class_column: str,
-) -> list:
+) -> list[MatchResult]:
     """Score candidates using ML model.
 
-    Falls back to rule-based scoring if ML scoring fails.
+    Args:
+        candidates: List of CandidatePair objects
+        reference: Reference GeoDataFrame (projected CRS)
+        target: Target GeoDataFrame (projected CRS)
+        model_path: Path to trained ML model
+        ref_name_column: Name column in reference
+        target_name_column: Name column in target
+        ref_class_column: Class column in reference
+        target_class_column: Class column in target
+
+    Returns:
+        List of MatchResult objects with ML-based scores
     """
-    try:
-        import joblib
+    from ..matching.ml import MLMatcher
 
-        from ..matching.ml import FEATURE_COLUMNS
+    matcher = MLMatcher(model_path=str(model_path))
+    logger.info(f"Loaded ML model from {model_path}")
 
-        model = joblib.load(model_path)
-        logger.info(f"Loaded ML model from {model_path}")
-
-        # First get rule-based scores to compute features
-        rule_results = score_candidates(
-            candidates=candidates,
-            reference=reference,
-            target=target,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
-        )
-
-        # Build feature matrix
-        import pandas as pd
-
-        feature_rows = []
-        for result in rule_results:
-            row = {col: result.features.get(col, 0.0) for col in FEATURE_COLUMNS}
-            feature_rows.append(row)
-
-        if not feature_rows:
-            return rule_results
-
-        X = pd.DataFrame(feature_rows)[FEATURE_COLUMNS]
-
-        # Handle missing columns
-        for col in FEATURE_COLUMNS:
-            if col not in X.columns:
-                X[col] = 0.0
-
-        # Replace infinities with large values
-        X = X.replace([np.inf, -np.inf], 9999.0)
-        X = X.fillna(0.0)
-
-        # Get predictions
-        probas = model.predict_proba(X)
-        if probas.shape[1] == 2:
-            confidences = probas[:, 1]  # Probability of match class
-        else:
-            confidences = probas.max(axis=1)
-
-        # Create new results with ML confidences
-        ml_results = []
-        for i, result in enumerate(rule_results):
-            conf = float(confidences[i])
-            if conf >= 0.5:
-                decision = MatchDecision.MATCH
-            elif conf >= 0.1:
-                decision = MatchDecision.REVIEW
-            else:
-                decision = MatchDecision.NO_MATCH
-
-            from ..matching.rules import MatchResult as RuleMatchResult
-
-            ml_results.append(
-                RuleMatchResult(
-                    ref_id=result.ref_id,
-                    target_id=result.target_id,
-                    decision=decision,
-                    confidence=conf,
-                    score_breakdown=result.score_breakdown,
-                    features=result.features,
-                )
-            )
-
-        return ml_results
-
-    except Exception as e:
-        logger.warning(f"ML scoring failed, falling back to rules: {e}")
-        return score_candidates(
-            candidates=candidates,
-            reference=reference,
-            target=target,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
-        )
+    return matcher.score_candidates(
+        candidates=candidates,
+        reference=reference,
+        target=target,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+    )

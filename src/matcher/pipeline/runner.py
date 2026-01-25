@@ -12,7 +12,6 @@ from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, NAMES_COLUMN
 from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
-from ..matching.rules import score_candidates
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.geometry import filter_to_linestrings
@@ -79,7 +78,7 @@ def run_pipeline(
     reference_path: Path,
     target_path: Path,
     output_path: Path,
-    method: str = "rule",
+    method: str = "xgboost",
     buffer_distance_m: float = 75.0,
     max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
     max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
@@ -227,14 +226,9 @@ def run_pipeline(
     logger.info("Step 3: Scoring candidates...")
 
     if method == "rule":
-        results = score_candidates(
-            candidates=candidates,
-            reference=reference,
-            target=target,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
+        raise ValueError(
+            "Rule-based matching has been removed. Use method='xgboost' instead. "
+            "Train a model first with 'matcher train --combined'."
         )
     elif method == "xgboost":
         from ..config import settings

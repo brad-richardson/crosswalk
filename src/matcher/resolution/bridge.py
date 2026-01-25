@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from loguru import logger
 
-from ..matching.rules import MatchDecision, MatchResult
+from ..matching.types import MatchDecision, MatchResult
 
 # Bridge file schema
 BRIDGE_SCHEMA = pa.schema(
