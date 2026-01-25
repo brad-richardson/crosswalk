@@ -1082,7 +1082,7 @@ def generate_scored_candidates_with_cache(
         logger.info(f"Feature cache hit: {len(feature_df):,} candidates")
 
     # Run ML scoring on features
-    views = _build_views_from_feature_df(
+    views = build_views_from_feature_df(
         feature_df=feature_df,
         reference=reference,
         target=target,
@@ -1098,7 +1098,7 @@ def generate_scored_candidates_with_cache(
     return views
 
 
-def _build_views_from_feature_df(
+def build_views_from_feature_df(
     feature_df: pd.DataFrame,
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,

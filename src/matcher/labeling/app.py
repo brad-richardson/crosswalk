@@ -710,7 +710,8 @@ def _add_keyboard_shortcuts():
             }
 
             const key = e.key.toLowerCase();
-            // Match button by data-testid or text content
+            // Match button by text content - use patterns that avoid ambiguity
+            // (e.g., 'Match' would match both 'Match' and 'No Match' with includes())
             let shortcutMatch = null;
 
             if (key === 'm') shortcutMatch = 'Match';
@@ -721,11 +722,12 @@ def _add_keyboard_shortcuts():
             else if (key === 'arrowright') shortcutMatch = '→';
 
             if (shortcutMatch) {
-                // Find button containing the text
+                // Find button matching the text
+                // Use endsWith to avoid 'Match' matching 'No Match' (buttons have emoji prefix)
                 const buttons = doc.querySelectorAll('button[kind="secondary"], button[kind="primary"], button');
                 for (const btn of buttons) {
-                    const text = btn.innerText || btn.textContent || '';
-                    if (text.includes(shortcutMatch) && !btn.disabled) {
+                    const text = (btn.innerText || btn.textContent || '').trim();
+                    if (text.endsWith(shortcutMatch) && !btn.disabled) {
                         btn.click();
                         e.preventDefault();
                         e.stopPropagation();

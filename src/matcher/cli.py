@@ -1188,7 +1188,7 @@ def compute_features(
     from .datasets.schema import get_dataset_config, list_dataset_configs
     from .filenames import find_overture_segments, find_target_file
     from .labeling.data_loader import (
-        _build_views_from_feature_df,
+        build_views_from_feature_df,
         compute_features_only,
         get_feature_cache_info,
         load_feature_cache,
@@ -1298,7 +1298,7 @@ def compute_features(
                     target = load_geodataframe(target_path)
 
                 # Build views (runs ML scoring)
-                views = _build_views_from_feature_df(
+                views = build_views_from_feature_df(
                     feature_df=feature_df,
                     reference=reference,
                     target=target,
