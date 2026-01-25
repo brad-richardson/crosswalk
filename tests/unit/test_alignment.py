@@ -810,3 +810,112 @@ class TestLocalEquidistantProjection:
 
         # Should be within 1% for small distances near center
         assert euclidean == pytest.approx(geodetic, rel=0.01)
+
+
+class TestDivergenceDetection:
+    """Tests for alignment truncation at divergence points."""
+
+    def test_diverging_end_truncates_alignment(self):
+        """Road that curves away at end should have truncated coverage.
+
+        The reference is a straight horizontal line.
+        The target follows the reference for most of its length, then
+        curves sharply upward at the end (50m divergence over 20m).
+        The alignment should truncate at the divergence point.
+        """
+        ref = LineString([(0, 0), (80, 0), (100, 0)])
+        target = LineString([(0, 0), (80, 0), (100, 50)])  # Sharp curve at end
+        result = linestring_alignment(ref, target)
+
+        # Should NOT report full coverage - divergence at end should truncate
+        assert result.overture_coverage < 0.95, (
+            f"Expected truncated coverage, got overture_coverage={result.overture_coverage}"
+        )
+        assert result.dataset_coverage < 0.95, (
+            f"Expected truncated coverage, got dataset_coverage={result.dataset_coverage}"
+        )
+
+    def test_diverging_start_truncates_alignment(self):
+        """Road that diverges at start should truncate there.
+
+        The reference is a straight horizontal line.
+        The target starts 50m above the reference start, then joins
+        the reference line at 20m and follows it to the end.
+        """
+        ref = LineString([(0, 0), (20, 0), (100, 0)])
+        target = LineString([(0, 50), (20, 0), (100, 0)])  # Divergent start
+        result = linestring_alignment(ref, target)
+
+        # Start should be truncated past the divergent portion
+        assert result.overture_start_frac > 0.05, (
+            f"Expected truncated start, got overture_start_frac={result.overture_start_frac}"
+        )
+
+    def test_parallel_offset_no_truncation(self):
+        """Consistent parallel offset should NOT truncate.
+
+        Two lines with a constant 10m lateral offset should maintain
+        full alignment - the offset is consistent, not diverging.
+        """
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 10), (100, 10)])  # 10m offset throughout
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage > 0.95, (
+            f"Parallel offset should not truncate, got overture_coverage={result.overture_coverage}"
+        )
+        assert result.dataset_coverage > 0.95, (
+            f"Parallel offset should not truncate, got dataset_coverage={result.dataset_coverage}"
+        )
+
+    def test_slight_curve_tolerated(self):
+        """Slight curvature should be tolerated, not truncated.
+
+        A small bulge (2m over 100m) should not trigger divergence detection.
+        """
+        ref = LineString([(0, 0), (50, 0), (100, 0)])
+        target = LineString([(0, 0), (50, 2), (100, 0)])  # Slight 2m bulge
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage > 0.9, (
+            f"Slight curve should not truncate, got overture_coverage={result.overture_coverage}"
+        )
+        assert result.dataset_coverage > 0.9, (
+            f"Slight curve should not truncate, got dataset_coverage={result.dataset_coverage}"
+        )
+
+    def test_symmetric_divergence_both_ends(self):
+        """Lines that diverge at both ends should truncate both.
+
+        A Y-shaped divergence at both the start and end.
+        """
+        ref = LineString([(0, 0), (50, 0), (100, 0)])
+        target = LineString([(0, 30), (50, 0), (100, 30)])  # Diverges at both ends
+        result = linestring_alignment(ref, target)
+
+        # Coverage should be reduced significantly (middle portion only)
+        assert result.overture_coverage < 0.8, (
+            f"Expected both ends truncated, got overture_coverage={result.overture_coverage}"
+        )
+
+    def test_gradual_divergence_not_truncated(self):
+        """Gradual divergence (small angle) should not truncate.
+
+        A line that gradually diverges at 5 degrees should be tolerated
+        since the directions are still mostly parallel.
+        """
+        import math
+
+        # 5 degree angle - over 100m, this is about 8.7m divergence
+        angle_rad = math.radians(5)
+        end_y = 100 * math.tan(angle_rad)  # ~8.7m
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, end_y)])
+        result = linestring_alignment(ref, target)
+
+        # Gradual divergence should still have high coverage
+        # The parallelness threshold is 0.5 (45 degrees), 5 degrees is well within
+        assert result.overture_coverage > 0.8, (
+            f"Gradual divergence should not truncate heavily, got {result.overture_coverage}"
+        )

@@ -29,6 +29,12 @@ ALIGNMENT_FULL_TOLERANCE = 0.01
 # typically ranges from 1-5 meters
 DEFAULT_SNAP_TOLERANCE_M = 5.0
 
+# Alignment divergence detection thresholds
+# Used to truncate alignment at points where roads diverge significantly
+DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance threshold
+DIVERGENCE_MIN_DISTANCE_M = 20.0  # Minimum absolute distance threshold (meters)
+DIVERGENCE_PARALLELNESS_THRESHOLD = 0.5  # dot2 < this = diverging (>45 degrees)
+
 # Standardized column names for parquet files (Overture format)
 # The fetch step transforms source columns (e.g., "name_1", "road_classification")
 # to these standardized names. Use these constants when reading parquet files.

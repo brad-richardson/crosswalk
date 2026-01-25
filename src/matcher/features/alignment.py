@@ -22,6 +22,12 @@ from pyproj import CRS, Geod, Transformer
 from shapely.geometry import LineString
 from shapely.ops import substring, transform
 
+from ..config import (
+    DIVERGENCE_DISTANCE_MULTIPLIER,
+    DIVERGENCE_MIN_DISTANCE_M,
+    DIVERGENCE_PARALLELNESS_THRESHOLD,
+)
+
 # WGS84 ellipsoid for geodetic calculations (consistent with Overture)
 _GEOD = Geod(ellps="WGS84")
 
@@ -171,6 +177,150 @@ def _get_score_numba(
 
 
 @jit(nopython=True, cache=True)
+def _detect_divergence_endpoints(
+    ref_coords: np.ndarray,
+    ref_distances: np.ndarray,
+    ref_length: float,
+    target_coords: np.ndarray,
+    target_distances: np.ndarray,
+    target_length: float,
+    offset: float,
+    buffer_distance: float,
+    num_samples: int = 32,
+    distance_multiplier: float = 3.0,
+    min_distance_threshold: float = 20.0,
+    parallelness_threshold: float = 0.5,
+) -> tuple[float, float]:
+    """Detect divergence points at both ends of the alignment.
+
+    This function scans along the aligned portion of two lines and detects
+    where they diverge significantly at the start and end, based on either:
+    1. Distance between corresponding points exceeding a threshold
+    2. Direction vectors diverging (dot product below threshold)
+
+    Args:
+        ref_coords: Reference line coordinates (Nx2)
+        ref_distances: Cumulative distances along reference
+        ref_length: Total length of reference
+        target_coords: Target line coordinates (Nx2)
+        target_distances: Cumulative distances along target
+        target_length: Total length of target
+        offset: Best alignment offset (from _find_best_alignment_numba)
+        buffer_distance: Scoring buffer distance
+        num_samples: Number of sample points to check
+        distance_multiplier: Multiply buffer_distance for distance threshold
+        min_distance_threshold: Minimum distance threshold (meters)
+        parallelness_threshold: Dot product below this indicates divergence
+
+    Returns:
+        Tuple of (start_frac, end_frac) as fractions along the reference line
+        representing the truncated alignment boundaries.
+    """
+    # Determine the overlapping region (same logic as _get_score_numba)
+    comparison_start = max(0.0, offset)
+    comparison_end = min(ref_length, target_length + offset)
+    comparison_length = comparison_end - comparison_start
+
+    # Require minimum overlap
+    min_overlap = 0.01 * min(ref_length, target_length)
+    if comparison_length <= min_overlap:
+        # No valid overlap, return defaults
+        return comparison_start / ref_length, comparison_end / ref_length
+
+    # Distance threshold: max of multiplier*buffer or minimum
+    distance_threshold = max(min_distance_threshold, distance_multiplier * buffer_distance)
+
+    # Ensure at least 4 samples for meaningful direction checks
+    if num_samples < 4:
+        num_samples = 4
+
+    # Compute all sample points and their properties
+    sample_fracs = np.zeros(num_samples)
+    sample_distances = np.zeros(num_samples)
+    sample_dot2 = np.zeros(num_samples)
+
+    pa_x, pa_y = 0.0, 0.0
+    pb_x, pb_y = 0.0, 0.0
+
+    for i in range(num_samples):
+        frac = i / (num_samples - 1)
+        t = comparison_start + comparison_length * frac
+
+        # Interpolate points
+        a_x, a_y = _interpolate_along_line(ref_coords, ref_distances, t)
+        b_x, b_y = _interpolate_along_line(target_coords, target_distances, t - offset)
+
+        # Store sample fraction on reference
+        sample_fracs[i] = t / ref_length if ref_length > 0 else 0.0
+
+        # Point distance
+        sample_distances[i] = np.sqrt((a_x - b_x) ** 2 + (a_y - b_y) ** 2)
+
+        # Direction parallelness
+        if i > 0:
+            va_x = a_x - pa_x
+            va_y = a_y - pa_y
+            vb_x = b_x - pb_x
+            vb_y = b_y - pb_y
+
+            va_norm = np.sqrt(va_x * va_x + va_y * va_y)
+            vb_norm = np.sqrt(vb_x * vb_x + vb_y * vb_y)
+
+            if va_norm > 1e-9 and vb_norm > 1e-9:
+                va_x /= va_norm
+                va_y /= va_norm
+                vb_x /= vb_norm
+                vb_y /= vb_norm
+                dot = va_x * vb_x + va_y * vb_y
+                sample_dot2[i] = max(0.0, dot)
+            else:
+                sample_dot2[i] = 1.0
+        else:
+            sample_dot2[i] = 1.0  # First point has no direction
+
+        pa_x, pa_y = a_x, a_y
+        pb_x, pb_y = b_x, b_y
+
+    # Find the first good sample from the start (for truncating divergent start)
+    # If samples 0,1,2 are divergent and 3 is good, first_good_from_start = 3
+    first_good_from_start = 0
+    for i in range(num_samples):
+        is_divergent = (
+            sample_distances[i] > distance_threshold or sample_dot2[i] < parallelness_threshold
+        )
+        if not is_divergent:
+            first_good_from_start = i
+            break
+        first_good_from_start = num_samples  # No good points found
+
+    # Find the last good sample from the end (for truncating divergent end)
+    # If samples N-1, N-2 are divergent and N-3 is good, last_good_from_end = N-3
+    last_good_from_end = num_samples - 1
+    for i in range(num_samples - 1, -1, -1):
+        is_divergent = (
+            sample_distances[i] > distance_threshold or sample_dot2[i] < parallelness_threshold
+        )
+        if not is_divergent:
+            last_good_from_end = i
+            break
+        last_good_from_end = -1  # No good points found
+
+    # If no good region exists, return original boundaries
+    if first_good_from_start >= num_samples or last_good_from_end < 0:
+        return comparison_start / ref_length, comparison_end / ref_length
+
+    # If the good start comes after the good end, there's no contiguous good region
+    if first_good_from_start > last_good_from_end:
+        return comparison_start / ref_length, comparison_end / ref_length
+
+    # The new boundaries are where the good region starts and ends
+    new_start_frac = sample_fracs[first_good_from_start]
+    new_end_frac = sample_fracs[last_good_from_end]
+
+    return new_start_frac, new_end_frac
+
+
+@jit(nopython=True, cache=True)
 def _find_best_alignment_numba(
     overture_coords: np.ndarray,
     overture_distances: np.ndarray,
@@ -280,12 +430,14 @@ def linestring_alignment(
     target: LineString,
     grid_samples: int = 16,
     refinement_steps: int = 8,
+    detect_divergence: bool = True,
 ) -> AlignmentResult:
     """
     Calculates the best alignment between two LineStrings.
 
     Compares reference with target, and reference with a reversed target,
-    to find the best possible match.
+    to find the best possible match. Optionally detects and truncates at
+    divergence points where roads split apart.
 
     NOTE: The ternary search refinement assumes the score function is unimodal
     (has a single peak). Complex geometries like switchbacks might have multiple
@@ -298,6 +450,7 @@ def linestring_alignment(
         target: Target LineString (e.g., local road segment)
         grid_samples: Number of samples for initial grid search
         refinement_steps: Number of ternary search refinement steps
+        detect_divergence: If True, post-process to truncate at divergence points
 
     Returns:
         AlignmentResult with fractional start/end positions on each line
@@ -343,13 +496,58 @@ def linestring_alignment(
     is_forward = forward_score >= backward_score
     offset = forward_offset if is_forward else backward_offset
 
-    # Calculate the fractional start/end of the alignment on reference
+    # Use the correct target coordinates based on direction
+    used_target_coords = target_coords if is_forward else target_coords_rev
+    used_target_distances = target_distances if is_forward else target_distances_rev
+
+    # Calculate buffer distance (same as scoring uses)
+    # Clamp grid_samples to at least 2 to avoid division by zero
+    clamped_grid_samples = max(grid_samples, 2)
+    buffer_distance = 0.5 * min(ref_length, target_length) / clamped_grid_samples
+
+    # Calculate the initial fractional start/end of the alignment on reference
     ref_start_frac = float(max(offset, 0) / ref_length)
     ref_end_frac = float(min(offset + target_length, ref_length) / ref_length)
 
-    # Calculate the fractional start/end of the alignment on target
+    # Calculate the initial fractional start/end of the alignment on target
     target_start_frac = float(max(-offset, 0) / target_length)
     target_end_frac = float(min(-offset + ref_length, target_length) / target_length)
+
+    # Post-process: detect and truncate at divergence points
+    if detect_divergence and (ref_end_frac - ref_start_frac) > 0.1:
+        new_ref_start, new_ref_end = _detect_divergence_endpoints(
+            ref_coords,
+            ref_distances,
+            ref_length,
+            used_target_coords,
+            used_target_distances,
+            target_length,
+            offset,
+            buffer_distance,
+            num_samples=32,
+            distance_multiplier=DIVERGENCE_DISTANCE_MULTIPLIER,
+            min_distance_threshold=DIVERGENCE_MIN_DISTANCE_M,
+            parallelness_threshold=DIVERGENCE_PARALLELNESS_THRESHOLD,
+        )
+
+        # Only apply truncation if it actually reduces coverage
+        if new_ref_start > ref_start_frac or new_ref_end < ref_end_frac:
+            # Calculate how much of the original overlap was truncated
+            original_ref_overlap = ref_end_frac - ref_start_frac
+            original_target_overlap = target_end_frac - target_start_frac
+
+            if original_ref_overlap > 0:
+                # Calculate the proportional truncation from start and end
+                start_truncation = (new_ref_start - ref_start_frac) / original_ref_overlap
+                end_truncation = (ref_end_frac - new_ref_end) / original_ref_overlap
+
+                # Apply same proportional truncation to target fractions
+                target_start_frac = target_start_frac + start_truncation * original_target_overlap
+                target_end_frac = target_end_frac - end_truncation * original_target_overlap
+
+                # Update reference fractions
+                ref_start_frac = new_ref_start
+                ref_end_frac = new_ref_end
 
     if is_forward:
         return AlignmentResult(
