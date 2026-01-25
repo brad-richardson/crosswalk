@@ -26,6 +26,44 @@ from loguru import logger
 from pyproj import CRS
 
 
+def require_crs(gdf: gpd.GeoDataFrame, name: str = "GeoDataFrame") -> None:
+    """Require that a GeoDataFrame has a CRS set.
+
+    This is a precondition check that should be called before any CRS-dependent
+    operations. It raises a clear error message explaining how to fix the issue.
+
+    Args:
+        gdf: GeoDataFrame to check
+        name: Name for error messages (e.g., "reference", "target")
+
+    Raises:
+        ValueError: If CRS is None
+    """
+    if gdf.crs is None:
+        raise ValueError(
+            f"{name} has no CRS set. Distance calculations require a CRS. "
+            f"Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates, "
+            f"or set_crs() with the appropriate EPSG code for your data."
+        )
+
+
+def is_geographic_crs(gdf: gpd.GeoDataFrame) -> bool:
+    """Check if a GeoDataFrame has a geographic (lat/lon) CRS.
+
+    Uses pyproj's CRS.is_geographic property for proper detection.
+    Returns False if CRS is None (caller should use require_crs() first).
+
+    Args:
+        gdf: GeoDataFrame to check
+
+    Returns:
+        True if CRS is geographic (lat/lon degrees), False otherwise
+    """
+    if gdf.crs is None:
+        return False
+    return gdf.crs.is_geographic
+
+
 class ProjectionResult(NamedTuple):
     """Result of projecting GeoDataFrames to a metric CRS."""
 
@@ -103,16 +141,30 @@ def ensure_projected_crs(
         >>> if result.original_crs:
         ...     output = output.to_crs(result.original_crs)
     """
+    # Check for None CRS first - this must happen BEFORE any alignment/projection
+    if reference.crs is None:
+        raise ValueError(
+            "reference has no CRS set. Cannot compute accurate distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates, "
+            "or set_crs() with the appropriate EPSG code for your data."
+        )
+    if target.crs is None:
+        raise ValueError(
+            "target has no CRS set. Cannot compute accurate distances. "
+            "Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates, "
+            "or set_crs() with the appropriate EPSG code for your data."
+        )
+
     # Store original CRS (from reference, which is typically the "master" CRS)
     original_crs = reference.crs
 
-    # Ensure target matches reference CRS first
+    # Ensure target matches reference CRS
     if target.crs != reference.crs:
         logger.debug(f"Aligning target CRS from {target.crs} to {reference.crs}")
         target = target.to_crs(reference.crs)
 
     # Check if already projected
-    if reference.crs is not None and not reference.crs.is_geographic:
+    if not reference.crs.is_geographic:
         logger.debug(f"Data already in projected CRS: {reference.crs}")
         return ProjectionResult(
             reference=reference,
@@ -154,8 +206,19 @@ def ensure_single_projected_crs(
     Returns:
         Tuple of (projected_gdf, original_crs)
         original_crs is None if no reprojection was needed
+
+    Raises:
+        ValueError: If CRS is None
     """
-    if gdf.crs is not None and not gdf.crs.is_geographic:
+    # Check for None CRS first
+    if gdf.crs is None:
+        raise ValueError(
+            f"{name} has no CRS set. Cannot compute accurate distances. "
+            f"Call gdf.set_crs('EPSG:4326') if data is in WGS84 coordinates, "
+            f"or set_crs() with the appropriate EPSG code for your data."
+        )
+
+    if not gdf.crs.is_geographic:
         return gdf, None
 
     original_crs = gdf.crs

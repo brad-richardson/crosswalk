@@ -793,10 +793,9 @@ class MLMatcher:
         # Validate that data is in projected CRS (meters)
         # Projection should happen early in the pipeline (runner.py)
         # This validation catches misuse when score_candidates is called directly
-        if reference.crs is not None and reference.crs.is_geographic:
-            validate_projected_crs(reference, "reference")
-        if target.crs is not None and target.crs.is_geographic:
-            validate_projected_crs(target, "target")
+        # validate_projected_crs raises for both None CRS and geographic CRS
+        validate_projected_crs(reference, "reference")
+        validate_projected_crs(target, "target")
 
         # Pre-extract data into NumPy arrays for memory efficiency
         ref_geoms = reference.geometry.to_numpy()

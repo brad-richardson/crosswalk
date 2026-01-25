@@ -647,8 +647,9 @@ def compute_name_numeric_match(name_a, name_b) -> float:
 
     Returns:
         1.0 if both have matching route numbers
-        0.5 if neither has a numeric suffix (neutral)
+        0.5 if neither has a number (neutral - no signal either way)
         0.0 if route numbers mismatch
+        0.5 if only one has a number (neutral - don't penalize)
     """
     # Extract name strings from dict if needed
     name_a = _extract_name_string(name_a)
@@ -658,7 +659,7 @@ def compute_name_numeric_match(name_a, name_b) -> float:
     num_a = extract_numeric_suffix(name_a)
     num_b = extract_numeric_suffix(name_b)
 
-    # Neither has a number - neutral score
+    # Neither has a number - neutral (no signal either way)
     if num_a is None and num_b is None:
         return 0.5
 

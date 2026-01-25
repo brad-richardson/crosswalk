@@ -85,13 +85,8 @@ def _ensure_projected_crs(gdf: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, CRS 
         original_crs = gdf.crs
 
     if original_crs.is_geographic:
-        # Auto-detect UTM zone from centroid
-        centroid = gdf.union_all().centroid
-        utm_zone = int((centroid.x + 180) / 6) + 1
-        hemisphere = "N" if centroid.y >= 0 else "S"
-        epsg_code = 32600 + utm_zone if hemisphere == "N" else 32700 + utm_zone
-        utm_crs = f"EPSG:{epsg_code}"
-
+        # Use geopandas' estimate_utm_crs() for consistent UTM zone selection
+        utm_crs = gdf.estimate_utm_crs()
         logger.info(f"Auto-projecting from {original_crs} to {utm_crs} for metric operations")
         gdf = gdf.to_crs(utm_crs)
 

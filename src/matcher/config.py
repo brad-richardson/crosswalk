@@ -46,8 +46,9 @@ SUBCLASS_COLUMN = "subclass"
 # DATA AND FEATURE VERSIONING
 # ============================================================================
 
-# Schema version (major) - tracks structural/breaking changes
-# Bump when: FEATURE_COLUMNS changes, label CSV schema changes, column renames
+# Schema version (major) - tracks structural/breaking changes to DATA FILES
+# Bump when: Parquet schema changes, column renames in data files, ID format changes
+# NOTE: Feature column changes go in FEATURE_VERSION, not here
 SCHEMA_VERSION = "1"
 
 # Transform version (minor) - tracks data transformation logic
@@ -60,7 +61,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-01-24"
+FEATURE_VERSION = "2026-01-25"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -71,7 +72,7 @@ FEATURE_VERSION = "2026-01-24"
 # All feature columns computed by the matcher
 # Distance/length features use _m suffix to indicate meters
 FEATURE_COLUMNS = [
-    # Geometric features (11)
+    # Geometric features (9)
     "hausdorff_distance_m",
     "mean_hausdorff_distance_m",
     "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
@@ -79,10 +80,9 @@ FEATURE_COLUMNS = [
     "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
     "heading_delta",
     "length_ratio",
-    "projection_distance_m",
     "centroid_distance_m",
     "collinear_gap_ratio",
-    # Semantic features - name (8)
+    # Semantic features - name (7)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
@@ -91,7 +91,6 @@ FEATURE_COLUMNS = [
     "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
     "has_name_target",  # 1.0 if target has non-empty name, else 0.0
     "name_is_generic",  # 1.0 if either name matches generic pattern
-    "cardinal_direction_mismatch",  # 1.0 if cardinal directions conflict (N vs S, E vs W)
     # Semantic features - class (1)
     "class_similarity",
     # Endpoint/connectivity (3) - direction-invariant
@@ -135,10 +134,7 @@ FEATURE_COLUMNS = [
     "vertex_density_ref",
     "vertex_density_target",
     "vertex_density_ratio",
-    # Length binning features (4) - different matching logic by segment length class
-    "length_bin_ref",
-    "length_bin_target",
-    "length_bin_match",
+    # Length features (1)
     "min_length_m",
     # Shape complexity features (3) - count of significant turns (>10 deg)
     "shape_complexity_ref",
@@ -158,7 +154,6 @@ SEMANTIC_FEATURES = [
     "has_name_ref",
     "has_name_target",
     "name_is_generic",
-    "cardinal_direction_mismatch",
     "class_similarity",
     "name_numeric_match",
 ]

@@ -342,7 +342,7 @@ class LabelStore:
             "ref_data_version": ref_data_version,
             "target_data_version": target_data_version,
             "feature_version": feature_version if feature_version else FEATURE_VERSION,
-            # Geometric features (11) - distance features use _m suffix for meters
+            # Geometric features (9)
             "hausdorff_distance_m": features.get("hausdorff_distance_m", 0.0),
             "mean_hausdorff_distance_m": features.get("mean_hausdorff_distance_m", 0.0),
             "hausdorff_p95_m": features.get("hausdorff_p95_m", 0.0),
@@ -350,10 +350,9 @@ class LabelStore:
             "buffer_iou_15m": features.get("buffer_iou_15m", 0.0),
             "heading_delta": features.get("heading_delta", 0.0),
             "length_ratio": features.get("length_ratio", 0.0),
-            "projection_distance_m": features.get("projection_distance_m", 0.0),
             "centroid_distance_m": features.get("centroid_distance_m", 0.0),
             "collinear_gap_ratio": features.get("collinear_gap_ratio", 1.0),
-            # Semantic features - name (8)
+            # Semantic features - name (7)
             "name_levenshtein": features.get("name_levenshtein", 0.0),
             "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
             "name_token_sort": features.get("name_token_sort", 0.0),
@@ -362,7 +361,6 @@ class LabelStore:
             "has_name_ref": features.get("has_name_ref", 0.0),
             "has_name_target": features.get("has_name_target", 0.0),
             "name_is_generic": features.get("name_is_generic", 0.0),
-            "cardinal_direction_mismatch": features.get("cardinal_direction_mismatch", 0.0),
             # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
             # Endpoint/connectivity features (3) - direction-invariant min/max
@@ -408,17 +406,14 @@ class LabelStore:
             "vertex_density_ref": features.get("vertex_density_ref", 0.0),
             "vertex_density_target": features.get("vertex_density_target", 0.0),
             "vertex_density_ratio": features.get("vertex_density_ratio", 0.0),
-            # Length binning features (4)
-            "length_bin_ref": features.get("length_bin_ref", 0),
-            "length_bin_target": features.get("length_bin_target", 0),
-            "length_bin_match": features.get("length_bin_match", 0.0),
+            # Length features (1)
             "min_length_m": features.get("min_length_m", 0.0),
             # Shape complexity features (3)
             "shape_complexity_ref": features.get("shape_complexity_ref", 0),
             "shape_complexity_target": features.get("shape_complexity_target", 0),
             "shape_complexity_delta": features.get("shape_complexity_delta", 0),
-            # Numeric route matching (1)
-            "name_numeric_match": features.get("name_numeric_match", 0.5),
+            # Numeric route matching (1) - default 0.0 when neither has number
+            "name_numeric_match": features.get("name_numeric_match", 0.0),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
@@ -638,6 +633,11 @@ def backfill_features(
             # Use find_overture_segments for progressive prefix matching
             # Handles versioned filenames and tries progressively shorter prefixes
             ref_path = find_overture_segments(data_dir, dataset_name)
+
+        # Handle case where find_overture_segments returns None
+        if ref_path is None:
+            logger.warning(f"  No Overture file found for dataset: {dataset_name}")
+            return None
 
         ref_path_str = str(ref_path)
         if ref_path_str in ref_cache:
@@ -916,6 +916,38 @@ def backfill_features(
         if not dry_run and (updated > 0 or (drop_orphaned and orphaned_indices)):
             temp_path = partition_path.with_suffix(".csv.tmp")
             backup_path = partition_path.with_suffix(".csv.bak")
+
+            # Remove deprecated feature columns (not in current FEATURE_COLUMNS)
+            # Keep: gers_id, target_id, label, notes, metadata columns, and current features
+            from matcher.config import FEATURE_COLUMNS
+
+            keep_columns = {
+                "gers_id",
+                "target_id",
+                "label",
+                "notes",
+                "dataset",
+                "labeled_at",
+                "labeler",
+                "session_id",
+                "original_confidence",
+                "original_decision",
+                "ref_start_pct",
+                "ref_end_pct",
+                "target_start_pct",
+                "target_end_pct",
+                "is_subsegment",
+                "ref_data_version",
+                "target_data_version",
+                "feature_version",
+            } | set(FEATURE_COLUMNS)
+
+            deprecated_cols = [c for c in df.columns if c not in keep_columns]
+            if deprecated_cols:
+                logger.info(
+                    f"  Removing {len(deprecated_cols)} deprecated columns: {deprecated_cols}"
+                )
+                df = df.drop(columns=deprecated_cols)
 
             # Write to temp file first
             df.to_csv(temp_path, index=False, float_format=lambda x: f"{x:.10g}")
