@@ -15,11 +15,13 @@ from shapely import LineString
 from matcher.features.geometric import (
     _buffer_iou,
     _buffer_iou_from_buffers,
+    _compute_hausdorff_stats,
     clear_buffer_cache,
     compute_collinear_gap_ratio,
     compute_geometric_features,
     compute_heading_consistency,
     compute_shape_complexity,
+    compute_sinuosity,
     get_buffer_cache_info,
 )
 from matcher.features.relational import (
@@ -386,3 +388,92 @@ class TestFeatureComputationPerformance:
 
         # Threshold allows for CI environment variability (~3-5x slower than local)
         assert per_line_us < 300, f"Heading consistency too slow: {per_line_us:.1f} µs/line"
+
+    def test_coordinate_extraction_overhead(self, synthetic_lines):
+        """Measure baseline cost of np.array(line.coords) extraction.
+
+        This establishes the per-extraction overhead that is saved by
+        extracting coords once and passing through to multiple functions.
+        """
+        n_lines = len(synthetic_lines)
+        n_extractions = n_lines * 4  # Simulate 4 extractions per line
+
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            # Simulate redundant extractions
+            _ = np.array(line.coords)
+            _ = np.array(line.coords)
+            _ = np.array(line.coords)
+            _ = np.array(line.coords)
+        elapsed = time.perf_counter() - start
+
+        per_extraction_us = (elapsed / n_extractions) * 1_000_000
+        print(f"\nCoord extraction: {per_extraction_us:.2f} µs/extraction ({elapsed:.2f}s total)")
+        print(f"  Potential savings: {per_extraction_us * 3:.2f} µs/line with coord unification")
+
+    def test_sinuosity_with_pre_extracted_coords(self, synthetic_lines):
+        """Benchmark compute_sinuosity with vs without pre-extracted coords."""
+        n_lines = len(synthetic_lines)
+
+        # Without pre-extracted coords
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            compute_sinuosity(line)
+        elapsed_auto = time.perf_counter() - start
+        per_line_auto_us = (elapsed_auto / n_lines) * 1_000_000
+
+        # With pre-extracted coords
+        start = time.perf_counter()
+        for line in synthetic_lines:
+            coords = np.array(line.coords)
+            compute_sinuosity(line, coords=coords)
+        elapsed_pre = time.perf_counter() - start
+        per_line_pre_us = (elapsed_pre / n_lines) * 1_000_000
+
+        # When coords are already extracted by caller
+        coords_list = [np.array(line.coords) for line in synthetic_lines]
+        start = time.perf_counter()
+        for i, line in enumerate(synthetic_lines):
+            compute_sinuosity(line, coords=coords_list[i])
+        elapsed_reuse = time.perf_counter() - start
+        per_line_reuse_us = (elapsed_reuse / n_lines) * 1_000_000
+
+        print("\nSinuosity timing:")
+        print(f"  Auto-extract:  {per_line_auto_us:.2f} µs/line")
+        print(f"  Pre-extract:   {per_line_pre_us:.2f} µs/line")
+        print(f"  Reuse coords:  {per_line_reuse_us:.2f} µs/line")
+        savings = per_line_auto_us - per_line_reuse_us
+        print(f"  Savings when reusing: {savings:.2f} µs/line")
+
+    def test_hausdorff_stats_with_pre_extracted_coords(self, synthetic_lines):
+        """Benchmark _compute_hausdorff_stats with vs without pre-extracted coords."""
+        n_pairs = min(N_PAIRS, 5000)  # Use fewer pairs for this test
+        pairs = [
+            (
+                synthetic_lines[i % len(synthetic_lines)],
+                synthetic_lines[(i + 1) % len(synthetic_lines)],
+            )
+            for i in range(n_pairs)
+        ]
+
+        # Without pre-extracted coords
+        start = time.perf_counter()
+        for line_a, line_b in pairs:
+            _compute_hausdorff_stats(line_a, line_b)
+        elapsed_auto = time.perf_counter() - start
+        per_pair_auto_us = (elapsed_auto / n_pairs) * 1_000_000
+
+        # With pre-extracted coords (reusing already extracted)
+        coords_pairs = [(np.array(a.coords), np.array(b.coords)) for a, b in pairs]
+        start = time.perf_counter()
+        for i, (line_a, line_b) in enumerate(pairs):
+            coords_a, coords_b = coords_pairs[i]
+            _compute_hausdorff_stats(line_a, line_b, coords_a=coords_a, coords_b=coords_b)
+        elapsed_reuse = time.perf_counter() - start
+        per_pair_reuse_us = (elapsed_reuse / n_pairs) * 1_000_000
+
+        print("\nHausdorff stats timing:")
+        print(f"  Auto-extract:  {per_pair_auto_us:.2f} µs/pair")
+        print(f"  Reuse coords:  {per_pair_reuse_us:.2f} µs/pair")
+        savings = per_pair_auto_us - per_pair_reuse_us
+        print(f"  Savings when reusing: {savings:.2f} µs/pair")

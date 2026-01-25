@@ -17,7 +17,12 @@ from matcher.features._jit_helpers import (
     compute_parallel_alignment_numba,
     compute_shape_complexity_numba,
 )
-from matcher.features.geometric import compute_collinear_gap_ratio, compute_shape_complexity
+from matcher.features.geometric import (
+    _compute_hausdorff_stats,
+    compute_collinear_gap_ratio,
+    compute_shape_complexity,
+    compute_sinuosity,
+)
 from matcher.features.relational import compute_endpoint_proximity, compute_parallel_alignment
 
 
@@ -440,3 +445,95 @@ class TestComputeHeadingConsistencyNumba:
         """Single point should return 1.0."""
         points = np.array([[0.0, 0.0]])
         assert compute_heading_consistency_numba(points) == pytest.approx(1.0)
+
+
+class TestHausdorffStatsOptionalCoords:
+    """Tests for _compute_hausdorff_stats with optional coords parameter."""
+
+    def test_with_pre_extracted_coords(self):
+        """Should work with pre-extracted coordinates."""
+        line_a = LineString([(0, 0), (50, 0), (100, 0)])
+        line_b = LineString([(0, 5), (50, 5), (100, 5)])
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
+
+        mean_dist, p95_dist = _compute_hausdorff_stats(
+            line_a, line_b, coords_a=coords_a, coords_b=coords_b
+        )
+        assert mean_dist == pytest.approx(5.0)
+        assert p95_dist == pytest.approx(5.0)
+
+    def test_pre_extracted_matches_auto_extracted(self):
+        """Pre-extracted coords should give same result as auto-extraction."""
+        line_a = LineString([(0, 0), (50, 10), (100, 0)])
+        line_b = LineString([(0, 20), (50, 30), (100, 20)])
+
+        # Auto-extraction (no coords passed)
+        mean_auto, p95_auto = _compute_hausdorff_stats(line_a, line_b)
+
+        # Pre-extracted
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
+        mean_pre, p95_pre = _compute_hausdorff_stats(
+            line_a, line_b, coords_a=coords_a, coords_b=coords_b
+        )
+
+        assert mean_auto == pytest.approx(mean_pre)
+        assert p95_auto == pytest.approx(p95_pre)
+
+    def test_partial_coords_provided(self):
+        """Should handle when only one set of coords is provided."""
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(0, 10), (100, 10)])
+        coords_a = np.array(line_a.coords)
+
+        # Only coords_a provided
+        mean_dist, p95_dist = _compute_hausdorff_stats(line_a, line_b, coords_a=coords_a)
+        assert mean_dist == pytest.approx(10.0)
+        assert p95_dist == pytest.approx(10.0)
+
+
+class TestSinuosityOptionalCoords:
+    """Tests for compute_sinuosity with optional coords parameter."""
+
+    def test_straight_line(self):
+        """Straight line should have sinuosity of 1.0."""
+        line = LineString([(0, 0), (100, 0)])
+        assert compute_sinuosity(line) == pytest.approx(1.0)
+
+    def test_with_pre_extracted_coords(self):
+        """Should work with pre-extracted coordinates."""
+        line = LineString([(0, 0), (100, 0)])
+        coords = np.array(line.coords)
+
+        result = compute_sinuosity(line, coords=coords)
+        assert result == pytest.approx(1.0)
+
+    def test_pre_extracted_matches_auto_extracted(self):
+        """Pre-extracted coords should give same result as auto-extraction."""
+        # Create a curvy line
+        line = LineString([(0, 0), (25, 10), (50, 0), (75, 10), (100, 0)])
+
+        result_auto = compute_sinuosity(line)
+
+        coords = np.array(line.coords)
+        result_pre = compute_sinuosity(line, coords=coords)
+
+        assert result_auto == pytest.approx(result_pre)
+
+    def test_curvy_line(self):
+        """Curvy line should have sinuosity > 1.0."""
+        # Create a line that curves up and back down
+        line = LineString([(0, 0), (50, 50), (100, 0)])
+        coords = np.array(line.coords)
+
+        result = compute_sinuosity(line, coords=coords)
+        assert result > 1.0  # Path is longer than straight-line distance
+
+    def test_loop_returns_high_value(self):
+        """Loop (start == end) should return 100.0."""
+        line = LineString([(0, 0), (50, 50), (100, 0), (50, -50), (0, 0)])
+        coords = np.array(line.coords)
+
+        result = compute_sinuosity(line, coords=coords)
+        assert result == pytest.approx(100.0)
