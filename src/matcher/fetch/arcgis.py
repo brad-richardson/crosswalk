@@ -101,6 +101,14 @@ def fetch_arcgis_layer(
         source_name=source_name,
     )
 
+    # Deduplicate by ID (ArcGIS pagination can return duplicates if data changes during fetch)
+    if len(gdf) > 0 and "id" in gdf.columns:
+        n_before = len(gdf)
+        gdf = gdf.drop_duplicates(subset=["id"], keep="first")
+        n_dropped = n_before - len(gdf)
+        if n_dropped > 0:
+            logger.warning(f"Dropped {n_dropped} duplicate IDs from ArcGIS fetch")
+
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)

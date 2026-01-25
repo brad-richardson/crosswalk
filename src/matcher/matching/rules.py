@@ -45,7 +45,7 @@ import pandas as pd
 from loguru import logger
 
 from ..blocking.spatial_index import CandidatePair
-from ..config import settings
+from ..config import CLASS_COLUMN, NAMES_COLUMN, settings
 from ..features.geometric import compute_geometric_features
 from ..features.semantic import compute_class_similarity, compute_name_similarity
 
@@ -236,10 +236,10 @@ def score_candidates(
     candidates: list[CandidatePair],
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    ref_name_column: str = "name",
-    target_name_column: str = "name",
-    ref_class_column: str = "class",
-    target_class_column: str = "road_class",
+    ref_name_column: str = NAMES_COLUMN,
+    target_name_column: str = NAMES_COLUMN,
+    ref_class_column: str = CLASS_COLUMN,
+    target_class_column: str = CLASS_COLUMN,
     ref_subclass_column: str = "subclass",
     target_subclass_column: str = "subclass",
     weights: dict[str, float] = None,

@@ -20,7 +20,7 @@ from pyproj import CRS
 from shapely import LineString
 from shapely.strtree import STRtree
 
-from ..config import settings
+from ..config import NAMES_COLUMN, settings
 
 
 def _create_local_projection_crs(gdf: gpd.GeoDataFrame) -> CRS | None:
@@ -433,8 +433,8 @@ def filter_candidates_by_name(
     candidates: list[CandidatePair],
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    ref_name_column: str = "name",
-    target_name_column: str = "name",
+    ref_name_column: str = NAMES_COLUMN,
+    target_name_column: str = NAMES_COLUMN,
     min_similarity: float = 0.5,
 ) -> list[CandidatePair]:
     """Filter candidates by name similarity.

@@ -393,7 +393,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                 next(iter(current_raw_files)) if current_raw_files else DEFAULT_DATASET
             )
 
-        dataset_keys = list(current_raw_files.keys())
+        dataset_keys = sorted(current_raw_files.keys())
 
         def get_dataset_display_name(key: str) -> str:
             """Get display name from registry or fallback to key.
@@ -672,43 +672,73 @@ def _add_keyboard_shortcuts():
     import streamlit.components.v1 as components
 
     # JavaScript to capture keypresses and trigger Streamlit buttons
+    # Uses multiple strategies to find the parent document for better desktop compatibility
     js_code = """
     <script>
-    const doc = window.parent.document;
+    (function() {
+        // Find the top-level Streamlit document
+        let doc = document;
+        try {
+            // Try to access parent document (works when not blocked by CORS)
+            if (window.parent && window.parent.document) {
+                doc = window.parent.document;
+            }
+            // Try top-level if available
+            if (window.top && window.top.document && window.top !== window.parent) {
+                doc = window.top.document;
+            }
+        } catch (e) {
+            // Cross-origin restriction, use current document
+            doc = document;
+        }
 
-    // Only add listener once
-    if (!doc.keyboardShortcutsAdded) {
-        doc.keyboardShortcutsAdded = true;
-        doc.addEventListener('keydown', function(e) {
-            // Ignore if typing in an input
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        // Clear any existing listener to avoid duplicates on rerun
+        if (doc._matcherKeyHandler) {
+            doc.removeEventListener('keydown', doc._matcherKeyHandler);
+        }
+
+        doc._matcherKeyHandler = function(e) {
+            // Ignore if typing in an input, textarea, or contenteditable
+            const tag = e.target.tagName.toUpperCase();
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) {
+                return;
+            }
+
+            // Ignore if modifier keys are pressed (except shift for arrows)
+            if (e.ctrlKey || e.metaKey || e.altKey) {
                 return;
             }
 
             const key = e.key.toLowerCase();
-            // Match button by emoji/text content
+            // Match button by text content - use patterns that avoid ambiguity
+            // (e.g., 'Match' would match both 'Match' and 'No Match' with includes())
             let shortcutMatch = null;
 
-            if (key === 'm') shortcutMatch = '✅';
-            else if (key === 'n') shortcutMatch = '❌';
-            else if (key === 'u') shortcutMatch = '🤔';
-            else if (key === 'z') shortcutMatch = '↩️';
+            if (key === 'm') shortcutMatch = 'Match';
+            else if (key === 'n') shortcutMatch = 'No Match';
+            else if (key === 'u') shortcutMatch = 'Unsure';
+            else if (key === 'z') shortcutMatch = 'Undo';
             else if (key === 'arrowleft') shortcutMatch = '←';
             else if (key === 'arrowright') shortcutMatch = '→';
 
             if (shortcutMatch) {
-                // Find button containing the emoji/text
-                const buttons = doc.querySelectorAll('button');
+                // Find button matching the text
+                // Use endsWith to avoid 'Match' matching 'No Match' (buttons have emoji prefix)
+                const buttons = doc.querySelectorAll('button[kind="secondary"], button[kind="primary"], button');
                 for (const btn of buttons) {
-                    if (btn.innerText.includes(shortcutMatch) && !btn.disabled) {
+                    const text = (btn.innerText || btn.textContent || '').trim();
+                    if (text.endsWith(shortcutMatch) && !btn.disabled) {
                         btn.click();
                         e.preventDefault();
+                        e.stopPropagation();
                         break;
                     }
                 }
             }
-        });
-    }
+        };
+
+        doc.addEventListener('keydown', doc._matcherKeyHandler);
+    })();
     </script>
     """
     components.html(js_code, height=0)
@@ -797,24 +827,29 @@ def render_single_pair_mode(pair, filtered, label_store, session):
         map_html = m.get_root().render()
         components.html(map_html, height=550)
 
-        # Action buttons - full width under the map
-        if st.button("✅ Match", type="primary", use_container_width=True, key="btn_match"):
-            record_label(pair, "match", label_store, **alignment_kwargs)
-            st.rerun()
-        if st.button("❌ No Match", use_container_width=True, key="btn_no_match"):
-            record_label(pair, "no_match", label_store, **alignment_kwargs)
-            st.rerun()
-        if st.button("🤔 Unsure", use_container_width=True, key="btn_unsure"):
-            record_label(pair, "unsure", label_store, **alignment_kwargs)
-            st.rerun()
-        if st.button(
-            "↩️ Undo",
-            disabled=len(session.undo_stack) == 0,
-            use_container_width=True,
-            key="btn_undo",
-        ):
-            undo_last_label(label_store)
-            st.rerun()
+        # Action buttons - four across under the map
+        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+        with btn_col1:
+            if st.button("✅ Match", type="primary", use_container_width=True, key="btn_match"):
+                record_label(pair, "match", label_store, **alignment_kwargs)
+                st.rerun()
+        with btn_col2:
+            if st.button("❌ No Match", use_container_width=True, key="btn_no_match"):
+                record_label(pair, "no_match", label_store, **alignment_kwargs)
+                st.rerun()
+        with btn_col3:
+            if st.button("🤔 Unsure", use_container_width=True, key="btn_unsure"):
+                record_label(pair, "unsure", label_store, **alignment_kwargs)
+                st.rerun()
+        with btn_col4:
+            if st.button(
+                "↩️ Undo",
+                disabled=len(session.undo_stack) == 0,
+                use_container_width=True,
+                key="btn_undo",
+            ):
+                undo_last_label(label_store)
+                st.rerun()
 
     with col_features:
         # Feature panel

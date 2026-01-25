@@ -9,7 +9,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..config import DATA_VERSION
+from ..config import CLASS_COLUMN, DATA_VERSION, NAMES_COLUMN
 from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..matching.rules import score_candidates
@@ -86,10 +86,10 @@ def run_pipeline(
     progress_callback: Callable[[int], None] | None = None,
     ref_id_column: str = "id",
     target_id_column: str = "id",
-    ref_name_column: str = "name",
-    target_name_column: str = "name",
-    ref_class_column: str = "class",
-    target_class_column: str = "road_class",
+    ref_name_column: str = NAMES_COLUMN,
+    target_name_column: str = NAMES_COLUMN,
+    ref_class_column: str = CLASS_COLUMN,
+    target_class_column: str = CLASS_COLUMN,
     n_jobs: int = -1,
 ) -> PipelineResult:
     """Run the full matching pipeline.

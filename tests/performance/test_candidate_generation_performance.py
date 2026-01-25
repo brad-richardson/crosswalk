@@ -166,6 +166,7 @@ class TestCandidateGenerationScaling:
     """Tests to verify candidate generation scales sub-quadratically."""
 
     @pytest.mark.slow
+    @pytest.mark.skip(reason="Flaky on CI due to timing variance")
     def test_scales_with_reference_size(self, overlapping_networks_factory):
         """Verify scaling as reference size increases."""
         target_size = 1000

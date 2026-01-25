@@ -29,6 +29,13 @@ ALIGNMENT_FULL_TOLERANCE = 0.01
 # typically ranges from 1-5 meters
 DEFAULT_SNAP_TOLERANCE_M = 5.0
 
+# Standardized column names for parquet files (Overture format)
+# The fetch step transforms source columns (e.g., "name_1", "road_classification")
+# to these standardized names. Use these constants when reading parquet files.
+NAMES_COLUMN = "names"
+CLASS_COLUMN = "class"
+SUBCLASS_COLUMN = "subclass"
+
 # ============================================================================
 # DATA AND FEATURE VERSIONING
 # ============================================================================

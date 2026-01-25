@@ -601,8 +601,11 @@ def compute_features_only(
     unique_ref_indices = set(cand.ref_idx for cand in candidates)
 
     # Pre-compute endpoint features
+    # IMPORTANT: Use target_proj (projected CRS) not target (WGS84) to match the
+    # CRS of target_geoms which are used as query points. Otherwise the spatial
+    # index expects WGS84 inputs but receives UTM coordinates → no matches.
     sorted_target_indices = sorted(unique_target_indices)
-    target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
+    target_candidates_only = target_proj.iloc[sorted_target_indices].reset_index(drop=True)
     original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
 
     logger.info("Building spatial index for endpoint features...")
@@ -1079,7 +1082,7 @@ def generate_scored_candidates_with_cache(
         logger.info(f"Feature cache hit: {len(feature_df):,} candidates")
 
     # Run ML scoring on features
-    views = _build_views_from_feature_df(
+    views = build_views_from_feature_df(
         feature_df=feature_df,
         reference=reference,
         target=target,
@@ -1095,7 +1098,7 @@ def generate_scored_candidates_with_cache(
     return views
 
 
-def _build_views_from_feature_df(
+def build_views_from_feature_df(
     feature_df: pd.DataFrame,
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
@@ -1205,11 +1208,27 @@ def _build_views_from_feature_df(
     logger.info("[4/5] Building geometry lookup dictionaries...")
     t_lookup = time.perf_counter()
 
-    # Convert to dicts for O(1) lookup - take first occurrence if duplicates
-    ref_records = reference.set_index(ref_id_column).to_dict("index")
-    target_records = target.set_index(target_id_column).to_dict("index")
-    ref_proj_records = reference_proj.set_index(ref_id_column).to_dict("index")
-    target_proj_records = target_proj.set_index(target_id_column).to_dict("index")
+    # Convert to dicts for O(1) lookup - drop duplicates keeping first occurrence
+    ref_records = (
+        reference.drop_duplicates(subset=[ref_id_column], keep="first")
+        .set_index(ref_id_column)
+        .to_dict("index")
+    )
+    target_records = (
+        target.drop_duplicates(subset=[target_id_column], keep="first")
+        .set_index(target_id_column)
+        .to_dict("index")
+    )
+    ref_proj_records = (
+        reference_proj.drop_duplicates(subset=[ref_id_column], keep="first")
+        .set_index(ref_id_column)
+        .to_dict("index")
+    )
+    target_proj_records = (
+        target_proj.drop_duplicates(subset=[target_id_column], keep="first")
+        .set_index(target_id_column)
+        .to_dict("index")
+    )
 
     logger.info(f"[4/5] Built lookups in {time.perf_counter() - t_lookup:.1f}s")
 
