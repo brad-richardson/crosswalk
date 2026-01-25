@@ -501,7 +501,9 @@ def linestring_alignment(
     used_target_distances = target_distances if is_forward else target_distances_rev
 
     # Calculate buffer distance (same as scoring uses)
-    buffer_distance = 0.5 * min(ref_length, target_length) / grid_samples
+    # Clamp grid_samples to at least 2 to avoid division by zero
+    clamped_grid_samples = max(grid_samples, 2)
+    buffer_distance = 0.5 * min(ref_length, target_length) / clamped_grid_samples
 
     # Calculate the initial fractional start/end of the alignment on reference
     ref_start_frac = float(max(offset, 0) / ref_length)
