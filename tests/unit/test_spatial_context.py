@@ -8,12 +8,14 @@ from matcher.features.spatial_context import (
     SpatialContextIndex,
     UnionFind,
     _cluster_endpoints_fast,
+    compute_aligned_endpoint_features,
     compute_aligned_topology_at_position,
     compute_aligned_topology_features,
     compute_all_topology,
     compute_degree_match_score,
     compute_degree_signature_similarity,
     compute_topology_features,
+    find_nearest_connector_position,
 )
 
 
@@ -1637,3 +1639,165 @@ class TestComputeAllTopologyWithConnectors:
         # Geometry inference finds the connection
         assert result["seg1"]["to_degree"] == 2
         assert result["seg2"]["from_degree"] == 2
+
+
+class TestFindNearestConnectorPosition:
+    """Tests for find_nearest_connector_position helper."""
+
+    def test_exact_match_returns_same_position(self):
+        """Exact match on a connector position returns that position."""
+        connectors = [(0.0, 1), (0.5, 2), (1.0, 3)]
+        result = find_nearest_connector_position(connectors, 0.5)
+        assert result == 0.5
+
+    def test_snap_to_nearest(self):
+        """Position 0.43 should snap to nearest connector at 0.42."""
+        connectors = [(0.0, 1), (0.42, 2), (1.0, 3)]
+        result = find_nearest_connector_position(connectors, 0.43)
+        assert result == 0.42
+
+    def test_empty_list_returns_none(self):
+        """Empty connector list returns None."""
+        result = find_nearest_connector_position([], 0.5)
+        assert result is None
+
+    def test_single_connector(self):
+        """Single connector is always the nearest."""
+        connectors = [(0.7, 42)]
+        result = find_nearest_connector_position(connectors, 0.1)
+        assert result == 0.7
+
+    def test_equidistant_picks_first(self):
+        """When equidistant to two connectors, picks the first encountered."""
+        connectors = [(0.4, 1), (0.6, 2)]
+        result = find_nearest_connector_position(connectors, 0.5)
+        # Both are 0.1 away; first encountered (0.4) wins
+        assert result == 0.4
+
+
+class TestAlignedEndpointFeaturesWithConnectors:
+    """Tests for compute_aligned_endpoint_features with connector snapping."""
+
+    @pytest.fixture
+    def simple_context(self):
+        """Build a SpatialContextIndex from a simple set of target segments."""
+        # Three segments forming a T-junction:
+        # seg_a: (0,0) -> (100,0)
+        # seg_b: (100,0) -> (200,0)
+        # seg_c: (100,0) -> (100,100)
+        segments = gpd.GeoDataFrame(
+            {
+                "id": ["a", "b", "c"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (200, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+            }
+        )
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(segments, id_column="id")
+        return ctx
+
+    def test_with_connectors_snaps_fraction(self, simple_context):
+        """When connector data is provided, fractions should snap to connector positions.
+
+        Geometry: seg_a is (0,0)->(200,0) with a connector at position 0.5 = (100,0).
+        The context has segment endpoints at (100,0) from seg_b and seg_c.
+        Raw fraction 0.43 interpolates to (86,0) which is far from any endpoint.
+        Snapped fraction 0.5 interpolates to (100,0) which is RIGHT at the junction.
+        """
+        # Use a 200m line so 0.5 = (100,0) which is at the T-junction
+        geom = LineString([(0, 0), (200, 0)])
+
+        # Without connectors: raw fraction 0.43 → point (86,0), not near any endpoint
+        result_raw = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.43,
+        )
+
+        # With connectors: 0.43 snaps to connector at 0.5 → point (100,0),
+        # which is right at the T-junction endpoint shared by seg_b and seg_c
+        connectors = {"seg_a": [(0.0, 1), (0.5, 2), (1.0, 3)]}
+        result_snapped = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.43,
+            seg_id="seg_a",
+            seg_to_connectors=connectors,
+        )
+
+        # The snapped version's end point (100,0) is at the junction, so
+        # max_endpoint_proximity should be much smaller than the raw version
+        assert result_snapped["max_endpoint_proximity_m"] < result_raw["max_endpoint_proximity_m"]
+
+    def test_without_connectors_backward_compatible(self, simple_context):
+        """Without connector data, behavior is unchanged (backward compatible)."""
+        geom = LineString([(0, 0), (100, 0)])
+
+        result_default = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.5,
+        )
+
+        # Explicitly passing None should give same result
+        result_none = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.5,
+            seg_id=None,
+            seg_to_connectors=None,
+        )
+
+        assert result_default == result_none
+
+    def test_no_connectors_for_seg_id(self, simple_context):
+        """When seg_id not in seg_to_connectors, no snapping occurs."""
+        geom = LineString([(0, 0), (100, 0)])
+
+        # Provide connectors but not for this seg_id
+        connectors = {"other_seg": [(0.0, 1), (0.5, 2), (1.0, 3)]}
+        result_with = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.43,
+            seg_id="seg_a",
+            seg_to_connectors=connectors,
+        )
+
+        result_without = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=0.43,
+        )
+
+        assert result_with == result_without
+
+    def test_full_segment_match_unaffected(self, simple_context):
+        """Full segment match (0.0, 1.0) is unaffected by connector snapping."""
+        geom = LineString([(0, 0), (100, 0)])
+
+        # Connectors at 0.0 and 1.0 match the raw fractions exactly
+        connectors = {"seg_a": [(0.0, 1), (0.5, 2), (1.0, 3)]}
+
+        result_without = compute_aligned_endpoint_features(
+            geom, simple_context, start_frac=0.0, end_frac=1.0
+        )
+        result_with = compute_aligned_endpoint_features(
+            geom,
+            simple_context,
+            start_frac=0.0,
+            end_frac=1.0,
+            seg_id="seg_a",
+            seg_to_connectors=connectors,
+        )
+
+        assert result_without == result_with

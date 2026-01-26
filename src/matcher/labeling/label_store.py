@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 from loguru import logger
+from shapely.geometry import LineString
 
 from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
 
@@ -603,6 +604,7 @@ def backfill_features(
         precompute_graphlet_features,
     )
     from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
+    from ..utils.geometry import filter_to_linestrings
 
     # Set default paths
     if data_dir is None:
@@ -649,6 +651,7 @@ def backfill_features(
 
         logger.info(f"  Loading Overture segments from {ref_path}...")
         ref_gdf = gpd.read_parquet(ref_path)
+        ref_gdf = filter_to_linestrings(ref_gdf, source_name="reference")
         ref_gdf["id"] = ref_gdf["id"].astype(str)
         ref_lookup = ref_gdf.set_index("id")
 
@@ -684,6 +687,15 @@ def backfill_features(
 
         # Load labels for this dataset
         df = pd.read_csv(partition_path)
+
+        # Cast feature columns to float64 to prevent FutureWarning when writing
+        # float values into columns that pandas inferred as int64 (e.g.,
+        # length_ratio stored as "1" in CSV gets read as int64, but backfill
+        # writes 0.9999... which is float64).
+        for col in FEATURE_COLUMNS:
+            if col in df.columns and df[col].dtype != "float64":
+                df[col] = df[col].astype("float64")
+
         original_count = len(df)
 
         if original_count == 0:
@@ -747,6 +759,7 @@ def backfill_features(
 
         logger.info(f"  Loading target data from {target_path}")
         target_gdf = gpd.read_parquet(target_path)
+        target_gdf = filter_to_linestrings(target_gdf, source_name="target")
         target_gdf["id"] = target_gdf["id"].astype(str)
         target_lookup = target_gdf.set_index("id")
 
@@ -765,6 +778,11 @@ def backfill_features(
         logger.info("  Building target graphlet data...")
         target_graphlet_data = precompute_graphlet_features(
             target_gdf_proj, id_column="id", tolerance_m=DEFAULT_SNAP_TOLERANCE_M
+        )
+
+        # Extract connector data for snapping endpoint fractions to real junctions
+        _, target_seg_to_connectors_ep, _, _ = (
+            target_graphlet_data if target_graphlet_data else (None, None, None, None)
         )
 
         # Get data versions for tracking
@@ -800,6 +818,14 @@ def backfill_features(
                 continue
             if target_geom is None or target_geom.is_empty:
                 continue
+            if not isinstance(ref_geom, LineString):
+                logger.debug(f"    Skipping {ref_id}: ref geometry is {ref_geom.geom_type}")
+                continue
+            if not isinstance(target_geom, LineString):
+                logger.debug(
+                    f"    Skipping {target_id}: target geometry is {target_geom.geom_type}"
+                )
+                continue
 
             # Compute alignment from scratch
             alignment = linestring_alignment(ref_geom, target_geom)
@@ -818,6 +844,8 @@ def backfill_features(
                 start_frac=alignment.dataset_start_frac,
                 end_frac=alignment.dataset_end_frac,
                 exclude_segment_idx=target_filtered_idx,
+                seg_id=target_id,
+                seg_to_connectors=target_seg_to_connectors_ep,
             )
 
             # Compute graphlet similarity
@@ -923,8 +951,6 @@ def backfill_features(
 
             # Remove deprecated feature columns (not in current FEATURE_COLUMNS)
             # Keep: gers_id, target_id, label, notes, metadata columns, and current features
-            from matcher.config import FEATURE_COLUMNS
-
             keep_columns = {
                 "gers_id",
                 "target_id",

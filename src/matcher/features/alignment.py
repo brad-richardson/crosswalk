@@ -589,11 +589,18 @@ def create_subline(line: LineString, start_frac: float, end_frac: float) -> Line
     if start_frac > end_frac:
         start_frac, end_frac = end_frac, start_frac
 
+    # Degenerate case: equal fractions produce a Point, not a LineString
+    if start_frac == end_frac:
+        return None
+
     # Calculate absolute distances along the line
     start_dist = line.length * start_frac
     end_dist = line.length * end_frac
 
-    return substring(line, start_dist, end_dist)
+    result = substring(line, start_dist, end_dist)
+    if not isinstance(result, LineString) or result.is_empty:
+        return None
+    return result
 
 
 @njit(cache=True)

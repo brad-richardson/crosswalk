@@ -536,7 +536,7 @@ def compute_features_only(
     from ..features.compute import precompute_graphlet_features
     from ..features.spatial_context import (
         SpatialContextIndex,
-        compute_aligned_endpoint_features,
+        compute_aligned_endpoint_features_batch,
         compute_all_topology,
     )
     from ..matching.ml import _compute_single_feature, _init_worker
@@ -675,21 +675,21 @@ def compute_features_only(
 
     # Compute endpoint features using alignment fractions
     # This uses aligned subline endpoints instead of full segment endpoints
+    # Extract connector data for snapping fractions to real network junctions
+    _, target_seg_to_connectors_ep, _, _ = (
+        target_graphlet_data if target_graphlet_data else (None, None, None, None)
+    )
     aligned_endpoint_features = {}
     if alignments:
         logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
-        for (ref_idx, target_idx), alignment in alignments.items():
-            target_geom = target_geoms[target_idx]
-            if target_geom is not None and not target_geom.is_empty:
-                filtered_idx = original_to_filtered.get(target_idx)
-                aligned_ep = compute_aligned_endpoint_features(
-                    target_geom,
-                    target_index,
-                    start_frac=alignment.dataset_start_frac,
-                    end_frac=alignment.dataset_end_frac,
-                    exclude_segment_idx=filtered_idx,
-                )
-                aligned_endpoint_features[(ref_idx, target_idx)] = aligned_ep
+        aligned_endpoint_features = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=target_geoms,
+            target_ids=target_ids,
+            target_index=target_index,
+            original_to_filtered=original_to_filtered,
+            seg_to_connectors=target_seg_to_connectors_ep,
+        )
 
     # Determine number of workers
     if n_jobs == -1:
