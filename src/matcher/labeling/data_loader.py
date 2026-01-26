@@ -124,6 +124,8 @@ class CandidatePairView:
     decision: str  # "match", "review", "no_match"
     confidence: float
     score_breakdown: dict[str, float] = field(default_factory=dict)
+    ref_subclass: str | None = None
+    target_subclass: str | None = None
     features: dict[str, float] = field(default_factory=dict)
     # Aligned/chopped geometries from the alignment algorithm
     # These represent the portions of each line that actually overlap
@@ -146,6 +148,8 @@ class CandidatePairView:
             "target_name": self.target_name,
             "ref_class": self.ref_class,
             "target_class": self.target_class,
+            "ref_subclass": self.ref_subclass,
+            "target_subclass": self.target_subclass,
             "decision": self.decision,
             "confidence": self.confidence,
             "score_breakdown_json": json.dumps(self.score_breakdown),
@@ -196,6 +200,8 @@ class CandidatePairView:
             target_name=data.get("target_name"),
             ref_class=data.get("ref_class"),
             target_class=data.get("target_class"),
+            ref_subclass=data.get("ref_subclass"),
+            target_subclass=data.get("target_subclass"),
             decision=data["decision"],
             confidence=data["confidence"],
             score_breakdown=json.loads(data.get("score_breakdown_json", "{}")),
@@ -905,6 +911,8 @@ def generate_scored_candidates(
     has_target_name = target_name_column in target.columns
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
+    has_ref_subclass = "subclass" in reference.columns
+    has_target_subclass = "subclass" in target.columns
 
     def get_row(lookup, id_val):
         """Get single row from lookup, handling duplicate IDs."""
@@ -928,6 +936,8 @@ def generate_scored_candidates(
         )
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
         target_class = target_row.get(target_class_column) if has_target_class else None
+        ref_subclass = ref_row.get("subclass") if has_ref_subclass else None
+        target_subclass = target_row.get("subclass") if has_target_subclass else None
 
         # Get alignment fractions from MatchResult
         ref_start_frac = result.gers_start_frac if result.gers_start_frac is not None else 0.0
@@ -969,6 +979,8 @@ def generate_scored_candidates(
                 target_name=target_name,
                 ref_class=ref_class,
                 target_class=target_class,
+                ref_subclass=ref_subclass,
+                target_subclass=target_subclass,
                 decision=decision,
                 confidence=result.confidence,
                 score_breakdown=score_breakdown,
@@ -1222,6 +1234,8 @@ def build_views_from_feature_df(
     has_target_name = target_name_column in target.columns
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
+    has_ref_subclass = "subclass" in reference.columns
+    has_target_subclass = "subclass" in target.columns
 
     views = []
     skipped_count = 0
@@ -1256,6 +1270,8 @@ def build_views_from_feature_df(
         )
         ref_class = ref_data.get(ref_class_column) if has_ref_class else None
         target_class = target_data.get(target_class_column) if has_target_class else None
+        ref_subclass = ref_data.get("subclass") if has_ref_subclass else None
+        target_subclass = target_data.get("subclass") if has_target_subclass else None
 
         # Get alignment fractions from cached data
         ref_start_frac = row.get("ref_start_frac", 0.0)
@@ -1309,6 +1325,8 @@ def build_views_from_feature_df(
                 target_name=target_name,
                 ref_class=ref_class,
                 target_class=target_class,
+                ref_subclass=ref_subclass,
+                target_subclass=target_subclass,
                 decision=decision,
                 confidence=prob,
                 score_breakdown=score_breakdown,

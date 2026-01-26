@@ -10,6 +10,7 @@ from loguru import logger
 from shapely.geometry import LineString
 
 from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
+from ..features.semantic import _extract_name_string
 
 
 class LabelLoadError(Exception):
@@ -299,6 +300,14 @@ class LabelStore:
         ref_data_version: str | None = None,
         target_data_version: str | None = None,
         feature_version: str | None = None,
+        ref_geometry: LineString | None = None,
+        target_geometry: LineString | None = None,
+        ref_name_raw: str | None = None,
+        target_name_raw: str | None = None,
+        ref_class_raw: str | None = None,
+        target_class_raw: str | None = None,
+        ref_subclass: str | None = None,
+        target_subclass: str | None = None,
     ) -> None:
         """Add a new label.
 
@@ -318,6 +327,14 @@ class LabelStore:
             ref_data_version: Version identifier for reference data file
             target_data_version: Version identifier for target data file
             feature_version: Feature computation version (defaults to FEATURE_VERSION)
+            ref_geometry: Reference geometry (WGS84) for persistence in companion file
+            target_geometry: Target geometry (WGS84) for persistence in companion file
+            ref_name_raw: Reference segment name for companion file
+            target_name_raw: Target segment name for companion file
+            ref_class_raw: Reference road class for companion file
+            target_class_raw: Target road class for companion file
+            ref_subclass: Reference road subclass for companion file
+            target_subclass: Target road subclass for companion file
         """
         # Determine if this is a sub-segment selection
         is_subseg = is_subsegment_selection(
@@ -419,6 +436,25 @@ class LabelStore:
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
+
+        # Persist geometries to companion file if provided
+        if ref_geometry is not None and target_geometry is not None:
+            from .geometry_store import GeometryStore
+
+            geo_store = GeometryStore(self.dataset_id)
+            geo_store.add(
+                gers_id=gers_id,
+                target_id=target_id,
+                ref_geometry=ref_geometry,
+                target_geometry=target_geometry,
+                ref_name=ref_name_raw,
+                target_name=target_name_raw,
+                ref_class=ref_class_raw,
+                target_class=target_class_raw,
+                ref_subclass=ref_subclass,
+                target_subclass=target_subclass,
+            )
+            geo_store.save()
 
     def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
@@ -789,121 +825,265 @@ def backfill_features(
         ref_data_version = get_data_version(ref_path)
         target_data_version = get_data_version(target_path)
 
+        # Load geometry store for persisted geometry recovery and persistence
+        from .geometry_store import GeometryStore
+
+        geo_store = GeometryStore(dataset_name)
+
+        # Context feature columns to preserve from existing CSV row when using
+        # persisted geometry (tier 2) — these require full dataset spatial index /
+        # graph construction and can't be recomputed from geometry alone
+        CONTEXT_FEATURES = {
+            "min_endpoint_proximity_m",
+            "max_endpoint_proximity_m",
+            "shared_endpoint_count",
+            "from_degree_ref",
+            "to_degree_ref",
+            "from_degree_target",
+            "to_degree_target",
+            "degree_match_score",
+            "degree_signature_similarity",
+            "is_dead_end_ref",
+            "is_dead_end_target",
+            "dead_end_match",
+            "is_intersection_ref",
+            "is_intersection_target",
+            "intersection_match",
+            "graphlet_similarity",
+            "endpoint_degree_similarity",
+        }
+
         # Process each label row
         updated = 0
+        recovered = 0
         orphaned_indices = []
         for idx, row in df.iterrows():
             # Handle both gers_id and ref_id naming
             ref_id = str(row.get("gers_id", row.get("ref_id", "")))
             target_id = str(row["target_id"])
 
-            # Track orphaned labels (IDs not found in current data)
-            if ref_id not in ref_lookup.index or target_id not in target_lookup.index:
-                orphaned_indices.append(idx)
-                if not report_only:
-                    logger.debug(f"    Orphaned: {ref_id}/{target_id} - geometry not found")
-                continue
+            ids_in_data = ref_id in ref_lookup.index and target_id in target_lookup.index
 
-            ref_row = ref_lookup.loc[ref_id]
-            target_row = target_lookup.loc[target_id]
+            if ids_in_data:
+                # === TIER 1: IDs found in current data — compute ALL features ===
+                ref_row = ref_lookup.loc[ref_id]
+                target_row = target_lookup.loc[target_id]
 
-            # Get projected geometries using label index (.loc), not positional (.iloc)
-            ref_idx_in_gdf = ref_gdf[ref_gdf["id"] == ref_id].index[0]
-            target_idx_in_gdf = target_gdf[target_gdf["id"] == target_id].index[0]
+                # Get projected geometries using label index (.loc), not positional (.iloc)
+                ref_idx_in_gdf = ref_gdf[ref_gdf["id"] == ref_id].index[0]
+                target_idx_in_gdf = target_gdf[target_gdf["id"] == target_id].index[0]
 
-            ref_geom = ref_gdf_proj.geometry.loc[ref_idx_in_gdf]
-            target_geom = target_gdf_proj.geometry.loc[target_idx_in_gdf]
+                ref_geom = ref_gdf_proj.geometry.loc[ref_idx_in_gdf]
+                target_geom = target_gdf_proj.geometry.loc[target_idx_in_gdf]
 
-            if ref_geom is None or ref_geom.is_empty:
-                continue
-            if target_geom is None or target_geom.is_empty:
-                continue
-            if not isinstance(ref_geom, LineString):
-                logger.debug(f"    Skipping {ref_id}: ref geometry is {ref_geom.geom_type}")
-                continue
-            if not isinstance(target_geom, LineString):
-                logger.debug(
-                    f"    Skipping {target_id}: target geometry is {target_geom.geom_type}"
+                if ref_geom is None or ref_geom.is_empty:
+                    continue
+                if target_geom is None or target_geom.is_empty:
+                    continue
+                if not isinstance(ref_geom, LineString):
+                    logger.debug(f"    Skipping {ref_id}: ref geometry is {ref_geom.geom_type}")
+                    continue
+                if not isinstance(target_geom, LineString):
+                    logger.debug(
+                        f"    Skipping {target_id}: target geometry is {target_geom.geom_type}"
+                    )
+                    continue
+
+                # Compute alignment from scratch
+                alignment = linestring_alignment(ref_geom, target_geom)
+
+                # Compute endpoint features using aligned subline endpoints
+                # This ensures endpoint proximity is measured at the alignment boundaries,
+                # not at the full geometry endpoints
+                target_filtered_idx = (
+                    target_gdf_proj[target_gdf_proj["id"] == target_id].index[0]
+                    if target_id in target_gdf_proj["id"].values
+                    else None
                 )
-                continue
+                endpoint_features = compute_aligned_endpoint_features(
+                    target_geom,
+                    target_context,
+                    start_frac=alignment.dataset_start_frac,
+                    end_frac=alignment.dataset_end_frac,
+                    exclude_segment_idx=target_filtered_idx,
+                    seg_id=target_id,
+                    seg_to_connectors=target_seg_to_connectors_ep,
+                )
 
-            # Compute alignment from scratch
-            alignment = linestring_alignment(ref_geom, target_geom)
+                # Compute graphlet similarity
+                graphlet_features = compute_graphlet_similarity(
+                    ref_id,
+                    target_id,
+                    ref_graphlet_data,
+                    target_graphlet_data,
+                    alignment,
+                )
 
-            # Compute endpoint features using aligned subline endpoints
-            # This ensures endpoint proximity is measured at the alignment boundaries,
-            # not at the full geometry endpoints
-            target_filtered_idx = (
-                target_gdf_proj[target_gdf_proj["id"] == target_id].index[0]
-                if target_id in target_gdf_proj["id"].values
-                else None
-            )
-            endpoint_features = compute_aligned_endpoint_features(
-                target_geom,
-                target_context,
-                start_frac=alignment.dataset_start_frac,
-                end_frac=alignment.dataset_end_frac,
-                exclude_segment_idx=target_filtered_idx,
-                seg_id=target_id,
-                seg_to_connectors=target_seg_to_connectors_ep,
-            )
+                # Get names and classes
+                ref_name = ref_row.get("names") if hasattr(ref_row, "get") else None
+                target_name = target_row.get("names") if hasattr(target_row, "get") else None
+                ref_class = ref_row.get("class") if hasattr(ref_row, "get") else None
+                target_class = target_row.get("class") if hasattr(target_row, "get") else None
+                ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
+                target_subclass = target_row.get("subclass") if hasattr(target_row, "get") else None
 
-            # Compute graphlet similarity
-            graphlet_features = compute_graphlet_similarity(
-                ref_id,
-                target_id,
-                ref_graphlet_data,
-                target_graphlet_data,
-                alignment,
-            )
+                # Compute ALL features using the authoritative function
+                features = compute_pair_features(
+                    ref_geom,
+                    target_geom,
+                    ref_name,
+                    target_name,
+                    ref_class,
+                    target_class,
+                    ref_subclass,
+                    target_subclass,
+                    endpoint_features=endpoint_features,
+                    alignment=alignment,
+                    graphlet_features=graphlet_features,
+                    ref_graphlet_data=ref_graphlet_data,
+                    target_graphlet_data=target_graphlet_data,
+                    ref_seg_id=ref_id,
+                    target_seg_id=target_id,
+                )
 
-            # Get names and classes
-            ref_name = ref_row.get("names") if hasattr(ref_row, "get") else None
-            target_name = target_row.get("names") if hasattr(target_row, "get") else None
-            ref_class = ref_row.get("class") if hasattr(ref_row, "get") else None
-            target_class = target_row.get("class") if hasattr(target_row, "get") else None
-            ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
-            target_subclass = target_row.get("subclass") if hasattr(target_row, "get") else None
+                # Update all feature columns in the dataframe
+                # Add new columns if they don't exist (for newly added features)
+                for feat_name, feat_value in features.items():
+                    if feat_name not in df.columns:
+                        df[feat_name] = None  # Initialize new column
+                    df.at[idx, feat_name] = feat_value
 
-            # Compute ALL features using the authoritative function
-            features = compute_pair_features(
-                ref_geom,
-                target_geom,
-                ref_name,
-                target_name,
-                ref_class,
-                target_class,
-                ref_subclass,
-                target_subclass,
-                endpoint_features=endpoint_features,
-                alignment=alignment,
-                graphlet_features=graphlet_features,
-                ref_graphlet_data=ref_graphlet_data,
-                target_graphlet_data=target_graphlet_data,
-                ref_seg_id=ref_id,
-                target_seg_id=target_id,
-            )
+                # Update alignment fractions
+                df.at[idx, "ref_start_pct"] = alignment.overture_start_frac
+                df.at[idx, "ref_end_pct"] = alignment.overture_end_frac
+                df.at[idx, "target_start_pct"] = alignment.dataset_start_frac
+                df.at[idx, "target_end_pct"] = alignment.dataset_end_frac
+                df.at[idx, "is_subsegment"] = is_subsegment_selection(
+                    alignment.overture_start_frac,
+                    alignment.overture_end_frac,
+                    alignment.dataset_start_frac,
+                    alignment.dataset_end_frac,
+                )
 
-            # Update all feature columns in the dataframe
-            # Add new columns if they don't exist (for newly added features)
-            for feat_name, feat_value in features.items():
-                if feat_name not in df.columns:
-                    df[feat_name] = None  # Initialize new column
-                df.at[idx, feat_name] = feat_value
+                # Persist geometry to companion file (WGS84)
+                ref_geom_wgs84 = ref_gdf.geometry.loc[ref_idx_in_gdf]
+                target_geom_wgs84 = target_gdf.geometry.loc[target_idx_in_gdf]
+                geo_store.add(
+                    gers_id=ref_id,
+                    target_id=target_id,
+                    ref_geometry=ref_geom_wgs84,
+                    target_geometry=target_geom_wgs84,
+                    ref_name=_extract_name_string(ref_name),
+                    target_name=_extract_name_string(target_name),
+                    ref_class=str(ref_class) if ref_class is not None else None,
+                    target_class=str(target_class) if target_class is not None else None,
+                    ref_subclass=str(ref_subclass) if ref_subclass is not None else None,
+                    target_subclass=str(target_subclass) if target_subclass is not None else None,
+                )
 
-            # Update alignment fractions
-            df.at[idx, "ref_start_pct"] = alignment.overture_start_frac
-            df.at[idx, "ref_end_pct"] = alignment.overture_end_frac
-            df.at[idx, "target_start_pct"] = alignment.dataset_start_frac
-            df.at[idx, "target_end_pct"] = alignment.dataset_end_frac
-            df.at[idx, "is_subsegment"] = is_subsegment_selection(
-                alignment.overture_start_frac,
-                alignment.overture_end_frac,
-                alignment.dataset_start_frac,
-                alignment.dataset_end_frac,
-            )
+            else:
+                # === TIER 2: IDs not in current data — try persisted geometry ===
+                persisted = geo_store.get_pair(ref_id, target_id)
+                if persisted is None:
+                    # === TIER 3: Truly orphaned — no recovery possible ===
+                    orphaned_indices.append(idx)
+                    if not report_only:
+                        logger.debug(
+                            f"    Orphaned: {ref_id}/{target_id} - "
+                            f"not in current data and no persisted geometry"
+                        )
+                    continue
 
-            # Update version columns
+                # Recover using persisted WGS84 geometry
+                ref_geom_wgs84 = persisted["ref_geometry"]
+                target_geom_wgs84 = persisted["target_geometry"]
+
+                if not isinstance(ref_geom_wgs84, LineString) or not isinstance(
+                    target_geom_wgs84, LineString
+                ):
+                    orphaned_indices.append(idx)
+                    logger.debug(
+                        f"    Orphaned: {ref_id}/{target_id} - persisted geometry is not LineString"
+                    )
+                    continue
+
+                # Project persisted WGS84 geometries to UTM for feature computation
+                import pyproj
+                from shapely.ops import transform
+
+                project = pyproj.Transformer.from_crs(
+                    "EPSG:4326", utm_crs, always_xy=True
+                ).transform
+                ref_geom = transform(project, ref_geom_wgs84)
+                target_geom = transform(project, target_geom_wgs84)
+
+                if ref_geom.is_empty or target_geom.is_empty:
+                    orphaned_indices.append(idx)
+                    continue
+
+                # Compute pairwise features from persisted geometry
+                # Context features (endpoint, topology, graphlet) cannot be
+                # recomputed without the full dataset, so they will get defaults
+                ref_name = persisted["ref_name"]
+                target_name = persisted["target_name"]
+                ref_class = persisted["ref_class"]
+                target_class = persisted["target_class"]
+                ref_subclass = persisted["ref_subclass"]
+                target_subclass = persisted["target_subclass"]
+
+                features = compute_pair_features(
+                    ref_geom,
+                    target_geom,
+                    ref_name,
+                    target_name,
+                    ref_class,
+                    target_class,
+                    ref_subclass,
+                    target_subclass,
+                    # No endpoint/topology/graphlet features — will use defaults
+                )
+
+                # Preserve previous CSV values for context features
+                # (topology, endpoint, graphlet) that can't be recomputed
+                from ..features.compute import _get_error_features
+
+                error_defaults = _get_error_features()
+                for feat in CONTEXT_FEATURES:
+                    prev_value = row.get(feat)
+                    if prev_value is not None and not (
+                        isinstance(prev_value, float) and pd.isna(prev_value)
+                    ):
+                        features[feat] = prev_value
+                    else:
+                        features[feat] = error_defaults.get(feat, 0.5)
+
+                # Update all feature columns in the dataframe
+                for feat_name, feat_value in features.items():
+                    if feat_name not in df.columns:
+                        df[feat_name] = None
+                    df.at[idx, feat_name] = feat_value
+
+                # Alignment fractions: compute from persisted geometry
+                alignment = linestring_alignment(ref_geom, target_geom)
+                df.at[idx, "ref_start_pct"] = alignment.overture_start_frac
+                df.at[idx, "ref_end_pct"] = alignment.overture_end_frac
+                df.at[idx, "target_start_pct"] = alignment.dataset_start_frac
+                df.at[idx, "target_end_pct"] = alignment.dataset_end_frac
+                df.at[idx, "is_subsegment"] = is_subsegment_selection(
+                    alignment.overture_start_frac,
+                    alignment.overture_end_frac,
+                    alignment.dataset_start_frac,
+                    alignment.dataset_end_frac,
+                )
+
+                recovered += 1
+                logger.warning(
+                    f"  {ref_id}/{target_id}: IDs not in current data, "
+                    f"pairwise features recovered from persisted geometry, "
+                    f"context features preserved from previous values"
+                )
+
+            # Update version columns (shared by tier 1 and tier 2)
             if "ref_data_version" not in df.columns:
                 df["ref_data_version"] = None
             if "target_data_version" not in df.columns:
@@ -920,11 +1100,21 @@ def backfill_features(
                 logger.info(f"    Processed {updated}/{original_count} labels...")
 
         orphaned_count = len(orphaned_indices)
-        logger.info(f"  Updated {updated}/{original_count} labels, {orphaned_count} orphaned")
+        logger.info(
+            f"  Updated {updated}/{original_count} labels "
+            f"({recovered} recovered from persisted geometry), "
+            f"{orphaned_count} orphaned"
+        )
+
+        # Save geometry store once per partition (batch save)
+        if not dry_run and not report_only:
+            geo_store.save()
+            logger.info(f"  Saved geometry store to {geo_store.csv_path}")
 
         # Store detailed results
         results[dataset_name] = {
             "updated": updated,
+            "recovered": recovered,
             "orphaned": orphaned_count,
             "total": original_count,
         }
@@ -993,9 +1183,11 @@ def backfill_features(
 
     # Summary
     total_updated = sum(r["updated"] for r in results.values())
+    total_recovered = sum(r.get("recovered", 0) for r in results.values())
     total_orphaned = sum(r["orphaned"] for r in results.values())
     logger.info(
-        f"\nBackfill complete: {total_updated} labels updated, "
+        f"\nBackfill complete: {total_updated} labels updated "
+        f"({total_recovered} recovered from persisted geometry), "
         f"{total_orphaned} orphaned across {len(results)} datasets"
     )
 
