@@ -445,3 +445,129 @@ class TestDroppedOverlapsTracking:
         if len(dropped) > 0:
             # All drops should be due to overlap
             assert all(dropped["dropped_reason"] == "overlap_lower_priority")
+
+
+class TestSubSegmentSlicing:
+    """Tests for sub-segment geometry slicing during integration."""
+
+    def test_partial_fractions_trim_geometry(self, reference_network):
+        """Partial fractions (0.25-0.75) should produce geometry ~50% of original length."""
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t_slice"],
+                "names": ["Sliced Road"],
+                "geometry": [LineString([(500, 500), (600, 500)])],  # 100m line
+            },
+            crs="EPSG:32610",
+        )
+        empty_gdf = gpd.GeoDataFrame({"local_id": [], "geometry": []}, crs="EPSG:32610")
+
+        match_results = [
+            MatchResult(
+                "ref_1",
+                "t_slice",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.25,
+                local_end_frac=0.75,
+            ),
+        ]
+
+        target_inputs = [
+            TargetInput(
+                name="sliced",
+                matched=target,
+                unmatched=empty_gdf,
+                match_results=match_results,
+                priority=1,
+            ),
+        ]
+
+        combined, _ = combine_networks(reference_network, target_inputs)
+
+        # Find the sliced segment
+        sliced_row = combined[combined["_original_id"] == "t_slice"]
+        assert len(sliced_row) == 1
+
+        sliced_geom = sliced_row.iloc[0].geometry
+        original_length = 100.0  # 100m line
+        # 50% of original (0.25 to 0.75)
+        assert sliced_geom.length == pytest.approx(original_length * 0.5, rel=0.05)
+
+    def test_full_fractions_leave_geometry_unchanged(self, reference_network):
+        """Full fractions (0.0-1.0) should leave geometry unchanged."""
+        original_line = LineString([(500, 500), (600, 500)])
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t_full"],
+                "names": ["Full Road"],
+                "geometry": [original_line],
+            },
+            crs="EPSG:32610",
+        )
+        empty_gdf = gpd.GeoDataFrame({"local_id": [], "geometry": []}, crs="EPSG:32610")
+
+        match_results = [
+            MatchResult(
+                "ref_1",
+                "t_full",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.0,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        target_inputs = [
+            TargetInput(
+                name="full",
+                matched=target,
+                unmatched=empty_gdf,
+                match_results=match_results,
+                priority=1,
+            ),
+        ]
+
+        combined, _ = combine_networks(reference_network, target_inputs)
+
+        full_row = combined[combined["_original_id"] == "t_full"]
+        assert len(full_row) == 1
+        assert full_row.iloc[0].geometry.length == pytest.approx(original_line.length, rel=0.01)
+
+    def test_missing_fractions_leave_geometry_unchanged(self, reference_network):
+        """Missing fractions (backward compat) should leave geometry unchanged."""
+        original_line = LineString([(500, 500), (600, 500)])
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t_nofrac"],
+                "names": ["No Frac Road"],
+                "geometry": [original_line],
+            },
+            crs="EPSG:32610",
+        )
+        empty_gdf = gpd.GeoDataFrame({"local_id": [], "geometry": []}, crs="EPSG:32610")
+
+        # MatchResult with default None fractions
+        match_results = [
+            MatchResult("ref_1", "t_nofrac", MatchDecision.MATCH, 0.9, {}, {}),
+        ]
+
+        target_inputs = [
+            TargetInput(
+                name="nofrac",
+                matched=target,
+                unmatched=empty_gdf,
+                match_results=match_results,
+                priority=1,
+            ),
+        ]
+
+        combined, _ = combine_networks(reference_network, target_inputs)
+
+        nofrac_row = combined[combined["_original_id"] == "t_nofrac"]
+        assert len(nofrac_row) == 1
+        assert nofrac_row.iloc[0].geometry.length == pytest.approx(original_line.length, rel=0.01)
