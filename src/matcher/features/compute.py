@@ -642,7 +642,7 @@ def precompute_graphlet_features(
         n_nodes = len(node_features) if node_features else 0
         logger.debug(
             f"[precompute] Built connector graph with {n_nodes} nodes "
-            f"in {time.perf_counter() - t0:.2f}s (degrees only)"
+            f"in {time.perf_counter() - t0:.2f}s"
         )
         return G, seg_to_connectors, node_features, True
     else:
@@ -657,7 +657,7 @@ def precompute_graphlet_features(
         n_nodes = len(node_features) if node_features else 0
         logger.debug(
             f"[precompute] Built inferred connector graph with {n_nodes} nodes "
-            f"in {time.perf_counter() - t0:.2f}s (degrees only)"
+            f"in {time.perf_counter() - t0:.2f}s"
         )
         # Return True for use_connectors since we now have connector format
         return G, seg_to_connectors, node_features, True
