@@ -495,7 +495,8 @@ def compute_pair_features(
         }
 
     except Exception as e:
-        logger.warning(f"Feature computation failed: {e}", exc_info=True)
+        # Log at debug level to avoid noise - errors are counted and reported in ml.py
+        logger.debug(f"Feature computation failed: {e}")
         # Return error values
         return _get_error_features()
 

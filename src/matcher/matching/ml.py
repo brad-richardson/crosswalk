@@ -1048,10 +1048,19 @@ class MLMatcher:
             "alignments": alignments,
         }
 
-        # Prepare work items as simple tuples
-        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+        # Prepare work items as simple tuples, sorted by ref_idx for cache locality
+        # Grouping by ref_idx improves buffer cache hit rate since reference
+        # geometries appear in multiple candidate pairs
+        work_items_with_idx = [
+            (cand.ref_idx, cand.target_idx, i) for i, cand in enumerate(candidates)
+        ]
+        work_items_with_idx.sort(key=lambda x: (x[0], x[1]))  # Sort by ref_idx, then target_idx
 
-        # Process with map for ordered results
+        # Extract sorted work items and keep track of original indices for result ordering
+        work_items = [(item[0], item[1]) for item in work_items_with_idx]
+        original_indices = [item[2] for item in work_items_with_idx]
+
+        # Process with map for ordered results (in sorted order)
         # Use smaller chunks for more frequent progress updates
         chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
         features_list = []
@@ -1071,6 +1080,13 @@ class MLMatcher:
                 processed = min(i + len(batch), len(work_items))
                 pct = processed / len(work_items) * 100
                 logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
+
+        # Reorder results back to original candidate order
+        # (we sorted by spatial locality for cache efficiency)
+        features_list_reordered = [None] * len(features_list)
+        for sorted_idx, orig_idx in enumerate(original_indices):
+            features_list_reordered[orig_idx] = features_list[sorted_idx]
+        features_list = features_list_reordered
 
         # Filter out rejected pairs (None results) and track valid candidates
         # Pairs are rejected when they don't have aligned endpoint features
@@ -1096,10 +1112,23 @@ class MLMatcher:
         valid_candidates = [p[0] for p in valid_pairs]
         valid_features = [p[1] for p in valid_pairs]
 
-        # Log any errors encountered during feature computation
-        errors = [f for f in valid_features if f.get("_error")]
-        if errors:
-            logger.warning(f"{len(errors)} candidates had feature computation errors")
+        # Check for degenerate geometry errors (aligned sublines becoming points/empty)
+        # These pairs get error default features but may indicate data quality issues
+        error_features = [f for f in valid_features if f.get("_error")]
+        if error_features:
+            error_rate = len(error_features) / len(valid_features)
+            logger.warning(
+                f"{len(error_features)} candidates had feature computation errors "
+                f"({error_rate:.1%} of valid pairs)"
+            )
+            # Fail if too many pairs have degenerate geometries
+            if error_rate > 0.20:
+                raise ValueError(
+                    f"Feature computation error rate {error_rate:.1%} exceeds 20% threshold. "
+                    f"{len(error_features)} of {len(valid_features)} pairs had errors "
+                    "(likely degenerate aligned sublines). "
+                    "This may indicate poor alignment coverage or bad geometry data."
+                )
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
