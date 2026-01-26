@@ -86,7 +86,6 @@ def perfect_match_features():
         "graphlet_similarity": 1.0,
         "endpoint_degree_similarity": 1.0,
         # New features (PR #74) - neutral/matching values
-        "cardinal_direction_mismatch": 0.0,  # No mismatch
         "sinuosity_ref": 1.0,  # Straight line
         "sinuosity_target": 1.0,
         "sinuosity_delta": 0.0,
@@ -166,7 +165,6 @@ def terrible_match_features():
         "graphlet_similarity": 0.1,
         "endpoint_degree_similarity": 0.1,
         # New features (PR #74) - mismatched values
-        "cardinal_direction_mismatch": 1.0,  # Cardinal directions conflict
         "sinuosity_ref": 1.0,  # Straight
         "sinuosity_target": 2.5,  # Very curvy
         "sinuosity_delta": 1.5,
@@ -248,7 +246,6 @@ def borderline_match_features():
         "graphlet_similarity": 0.6,
         "endpoint_degree_similarity": 0.7,
         # New features (PR #74) - borderline/mixed values (some good, some bad)
-        "cardinal_direction_mismatch": 0.0,  # No mismatch
         "sinuosity_ref": 1.1,
         "sinuosity_target": 1.5,  # More different
         "sinuosity_delta": 0.4,

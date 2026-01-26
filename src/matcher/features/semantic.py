@@ -126,53 +126,6 @@ def get_traffic_tier(road_class: str | None) -> str | None:
     return TRAFFIC_TIERS.get(road_class.lower().strip())
 
 
-# Cardinal direction prefixes - used to detect direction mismatches
-# e.g., "North Main St" should not match "South Main St"
-CARDINAL_PREFIXES = {
-    "north",
-    "south",
-    "east",
-    "west",
-    "n",
-    "s",
-    "e",
-    "w",
-    "ne",
-    "nw",
-    "se",
-    "sw",
-    "northeast",
-    "northwest",
-    "southeast",
-    "southwest",
-}
-
-# Cardinal direction pairs that conflict (opposite directions)
-# Include all combinations of full and abbreviated forms, so that e.g.
-# ("n", "south") and ("north", "s") are both treated as conflicting.
-_NORTH = {"north", "n"}
-_SOUTH = {"south", "s"}
-_EAST = {"east", "e"}
-_WEST = {"west", "w"}
-_NORTHEAST = {"northeast", "ne"}
-_SOUTHWEST = {"southwest", "sw"}
-_NORTHWEST = {"northwest", "nw"}
-_SOUTHEAST = {"southeast", "se"}
-
-CONFLICTING_CARDINALS: set[tuple[str, str]] = set()
-
-# Cardinal axis opposites (N/S and E/W)
-CONFLICTING_CARDINALS.update({(a, b) for a in _NORTH for b in _SOUTH})
-CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTH for b in _NORTH})
-CONFLICTING_CARDINALS.update({(a, b) for a in _EAST for b in _WEST})
-CONFLICTING_CARDINALS.update({(a, b) for a in _WEST for b in _EAST})
-
-# Diagonal opposites (NE/SW and NW/SE)
-CONFLICTING_CARDINALS.update({(a, b) for a in _NORTHEAST for b in _SOUTHWEST})
-CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTHWEST for b in _NORTHEAST})
-CONFLICTING_CARDINALS.update({(a, b) for a in _NORTHWEST for b in _SOUTHEAST})
-CONFLICTING_CARDINALS.update({(a, b) for a in _SOUTHEAST for b in _NORTHWEST})
-
 # Common street name abbreviations
 # Note: Keys must include trailing space to avoid matching inside words
 # (e.g., " st " won't match inside "street")
@@ -232,37 +185,6 @@ _MISSING_NAMES_RESULT = {
     "has_name_target": 0.0,
     "name_is_generic": 0.0,
 }
-
-
-def _extract_cardinal_prefix(name: str | None) -> str | None:
-    """Extract cardinal direction prefix from a street name.
-
-    Handles both abbreviated (N, S, E, W) and full forms (North, South, etc.)
-    at the beginning of a name, ignoring periods.
-
-    Args:
-        name: Street name to analyze
-
-    Returns:
-        Lowercase cardinal prefix if found, None otherwise
-    """
-    if not name:
-        return None
-
-    # Normalize: lowercase, remove periods, strip whitespace
-    normalized = name.lower().replace(".", "").strip()
-
-    if not normalized:
-        return None
-
-    # Get first word
-    first_word = normalized.split()[0]
-
-    # Check if it's a cardinal prefix
-    if first_word in CARDINAL_PREFIXES:
-        return first_word
-
-    return None
 
 
 def _is_generic_name(name: str | None) -> bool:
@@ -409,45 +331,6 @@ def compute_name_similarity(
         "has_name_target": has_name_target,
         "name_is_generic": name_is_generic,
     }
-
-
-def compute_cardinal_mismatch(name_a, name_b) -> float:
-    """Detect if two names have conflicting cardinal direction prefixes.
-
-    This catches false positives like "North Main St" vs "South Main St",
-    which are geometrically similar but refer to different roads.
-
-    Args:
-        name_a: First street name (reference) - string or dict
-        name_b: Second street name (target) - string or dict
-
-    Returns:
-        1.0 if cardinal directions conflict (N vs S, E vs W, etc.)
-        0.5 if different but non-conflicting directions (N vs NE)
-        0.0 if no conflict (same direction, no direction, or only one has direction)
-    """
-    # Extract name strings from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
-
-    # Extract cardinal prefixes
-    cardinal_a = _extract_cardinal_prefix(name_a)
-    cardinal_b = _extract_cardinal_prefix(name_b)
-
-    # No mismatch if either doesn't have a cardinal prefix
-    if cardinal_a is None or cardinal_b is None:
-        return 0.0
-
-    # Same cardinal is not a mismatch
-    if cardinal_a == cardinal_b:
-        return 0.0
-
-    # Check for conflicting cardinals (N vs S, E vs W, etc.)
-    if (cardinal_a, cardinal_b) in CONFLICTING_CARDINALS:
-        return 1.0
-
-    # Different cardinals but not conflicting (e.g., N vs NE) - slight mismatch
-    return 0.5
 
 
 def _normalize_street_name(name: str) -> str:

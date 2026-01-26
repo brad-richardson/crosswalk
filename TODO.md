@@ -45,14 +45,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 
 ## Semantic Features
 
-### Cardinal Direction Mismatch
-- **Status**: NOT IN FEATURE_COLUMNS (function exists but not used)
-- **Feature**: `cardinal_direction_mismatch`
-- **Purpose**: Catch "North Main St" vs "South Main St" false positives
-- **Computation**: Function exists in `semantic.py` but NOT in `FEATURE_COLUMNS` config
-- **Gap**: Feature is computed by `compute_name_similarity()` but not exposed to ML
-- **Action needed**: Add to `FEATURE_COLUMNS` in `config.py` and wire through `compute_pair_features()`
-
 ### Name Abbreviation Normalization
 - **Feature**: Enhancement to existing name similarity
 - **Purpose**: Better matching when datasets use different abbreviations
