@@ -623,6 +623,8 @@ def compute_aligned_endpoint_features(
     end_frac: float = 1.0,
     exclude_segment_idx: int | None = None,
     tolerance_m: float = 5.0,
+    seg_id: str | None = None,
+    seg_to_connectors: dict[str, list[tuple[float, int]]] | None = None,
 ) -> dict[str, float]:
     """Compute endpoint proximity at aligned subline endpoints.
 
@@ -660,6 +662,19 @@ def compute_aligned_endpoint_features(
     # Clamp fractions to [0.0, 1.0] to avoid undefined behavior
     start_frac = min(1.0, max(0.0, start_frac))
     end_frac = min(1.0, max(0.0, end_frac))
+
+    # Snap fractions to nearest connector positions (real network junctions)
+    # when connector data is available. For full-segment matches (0.0/1.0),
+    # connectors at endpoints recover the old behavior.
+    if seg_to_connectors is not None and seg_id is not None:
+        connectors = seg_to_connectors.get(seg_id)
+        if connectors:
+            snapped = find_nearest_connector_position(connectors, start_frac)
+            if snapped is not None:
+                start_frac = snapped
+            snapped = find_nearest_connector_position(connectors, end_frac)
+            if snapped is not None:
+                end_frac = snapped
 
     # Interpolate to get aligned endpoint coordinates
     start_point = geom.interpolate(start_frac, normalized=True)
@@ -702,6 +717,48 @@ def compute_aligned_endpoint_features(
         "max_endpoint_proximity_m": max_proximity,
         "shared_endpoint_count": len(shared_segments),
     }
+
+
+def compute_aligned_endpoint_features_batch(
+    alignments: dict,
+    target_geoms: "np.ndarray",
+    target_ids: "np.ndarray",
+    target_index: "SpatialContextIndex",
+    original_to_filtered: dict,
+    seg_to_connectors: dict | None = None,
+) -> dict[tuple[int, int], dict[str, float]]:
+    """Batch-compute aligned endpoint features for all alignment pairs.
+
+    Shared implementation used by both the ML scoring path and the labeling
+    data loader path to avoid code duplication.
+
+    Args:
+        alignments: Dict mapping (ref_idx, target_idx) -> AlignmentResult
+        target_geoms: Array of target geometries indexed by position
+        target_ids: Array of target IDs indexed by position
+        target_index: SpatialContextIndex built from target segments
+        original_to_filtered: Dict mapping original index -> filtered index
+        seg_to_connectors: Optional connector data for snapping fractions
+
+    Returns:
+        Dict mapping (ref_idx, target_idx) -> endpoint feature dict
+    """
+    result = {}
+    for (ref_idx, target_idx), alignment in alignments.items():
+        target_geom = target_geoms[target_idx]
+        if target_geom is not None and not target_geom.is_empty:
+            filtered_idx = original_to_filtered.get(target_idx)
+            aligned_ep = compute_aligned_endpoint_features(
+                target_geom,
+                target_index,
+                start_frac=alignment.dataset_start_frac,
+                end_frac=alignment.dataset_end_frac,
+                exclude_segment_idx=filtered_idx,
+                seg_id=str(target_ids[target_idx]),
+                seg_to_connectors=seg_to_connectors,
+            )
+            result[(ref_idx, target_idx)] = aligned_ep
+    return result
 
 
 def compute_topology_features(
@@ -2049,6 +2106,38 @@ def find_nearest_connector(
             best_node = node_id
 
     return best_node
+
+
+def find_nearest_connector_position(
+    seg_connectors: list[tuple[float, int]],
+    position: float,
+) -> float | None:
+    """Find the position of the connector nearest to a given position along a segment.
+
+    Like find_nearest_connector() but returns the connector's at_position
+    instead of the node_id. Used to snap alignment fractions to real
+    network junctions for endpoint proximity computation.
+
+    Args:
+        seg_connectors: List of (at_position, node_id) tuples, sorted by position
+        position: Linear position along segment (0.0 to 1.0)
+
+    Returns:
+        at_position of nearest connector, or None if no connectors
+    """
+    if not seg_connectors:
+        return None
+
+    best_pos = None
+    best_dist = float("inf")
+
+    for at_pos, _node_id in seg_connectors:
+        dist = abs(at_pos - position)
+        if dist < best_dist:
+            best_dist = dist
+            best_pos = at_pos
+
+    return best_pos
 
 
 def compute_aligned_topology_at_position(

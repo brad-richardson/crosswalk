@@ -194,11 +194,15 @@ def compute_pair_features(
         # (hausdorff, buffer_iou, etc.) on comparable portions only.
         # Topology/endpoint features still use full geometries.
         #
-        # Optimization: Skip subline extraction when coverage is >95%.
+        # Optimization: Skip subline extraction when coverage is >99.5%.
         # When alignment covers nearly the full geometry, extracting a subline
         # just creates a nearly-identical geometry that defeats the buffer cache.
         # Using the original geometry allows cache hits across pairs.
-        HIGH_COVERAGE_THRESHOLD = 0.95
+        # Note: This threshold must be very high (>99%) to avoid conflicting
+        # with divergence detection (PR #81) which trims alignment at 95-99%
+        # coverage — using full geometry at those levels re-introduces the
+        # divergent portions that were deliberately trimmed.
+        HIGH_COVERAGE_THRESHOLD = 0.995
 
         with timed_section("subline_extraction"):
             if alignment is not None:

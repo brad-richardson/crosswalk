@@ -311,6 +311,27 @@ class TestCreateSubline:
         result = create_subline(point_line, 0.0, 1.0)
         assert result is None
 
+    def test_equal_fractions_returns_none(self, reference_line):
+        """Equal start and end fractions should return None (would produce a Point)."""
+        result = create_subline(reference_line, 0.5, 0.5)
+        assert result is None
+
+    def test_result_is_always_linestring_or_none(self, reference_line):
+        """Return type is always LineString or None, never Point or other geometry."""
+        fractions = [
+            (0.0, 1.0),
+            (0.0, 0.5),
+            (0.3, 0.7),
+            (0.5, 0.5),  # degenerate
+            (0.0, 0.0),  # degenerate
+            (1.0, 1.0),  # degenerate
+        ]
+        for start, end in fractions:
+            result = create_subline(reference_line, start, end)
+            assert result is None or isinstance(result, LineString), (
+                f"create_subline({start}, {end}) returned {type(result)}"
+            )
+
 
 class TestWalkDistance:
     """Tests for walk_distance integrated Euclidean distance."""
