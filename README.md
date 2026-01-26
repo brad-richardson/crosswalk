@@ -2,31 +2,57 @@
 
 Road network conflation pipeline for linking local road datasets to [Overture Maps](https://overturemaps.org/) GERS (Global Entity Reference System) identifiers.
 
-## Overview
+## What is this matching?
 
-Matcher enables organizations to link their local road datasets to Overture's global reference network, enabling:
+This project determines which local road segments correspond to Overture GERS segments, producing a **bridge file** that links local IDs to GERS IDs with confidence scores.
+
+- **Primary goal**: Link local road features to their Overture counterparts, enabling data interoperability and update tracking
+- **Secondary goal**: Identify unmatched local segments as candidates for addition to the Overture transportation theme
+- **Framing**: The tool is a funnel for surfacing meaningful new road features that don't yet exist in Overture
+
+The bridge file enables:
 
 - **Data interoperability** - Join local attributes with Overture's standardized schema
 - **Update tracking** - Detect changes by comparing GERS matches over time
 - **Network integration** - Merge local roads into the Overture network while preserving provenance
 
-### How It Works
+## What Is a Match?
+
+A **match** means: this fraction of this GERS segment best represents this fraction of this local segment. They are the same physical road, even if the datasets differ in segmentation, naming, or classification.
+
+A **no match** means: either a better option exists for this local segment, or no corresponding Overture feature exists at all (the local segment is genuinely new).
+
+### Common Edge Cases
+
+| Scenario | Result | Why |
+|----------|--------|-----|
+| Different segmentation points | Match | Same road, just split differently between datasets |
+| Split carriageways vs single centerline | 1:N match | One Overture centerline corresponds to multiple local segments (e.g., divided highway) |
+| Road vs parallel sidewalk | No match | Different physical features, even if close together |
+| Same road, different names | Match | Names are a signal, not a requirement |
+| Opposite carriageways of divided road | Match (each to its own GERS segment) | Each carriageway matches independently |
+
+### 1:N Matching
+
+A single Overture segment can correctly correspond to multiple local segments. This happens with split highways where the local dataset has separate segments for each direction but Overture has a single centerline. The optimizer handles this via the Hungarian algorithm.
+
+## How It Works
 
 The pipeline uses a machine learning approach to identify corresponding road segments between datasets, even when geometries don't align perfectly or naming conventions differ.
 
 ```mermaid
 flowchart TB
     subgraph Data["1. Data Acquisition"]
-        A[Identify Data Source] --> B[Create Fetch Script]
+        A[Identify Data Source] --> B[Create Dataset Config]
         B --> C[Fetch Local Dataset]
         C --> D[Fetch Overture Reference]
     end
 
     subgraph Match["2. Matching Pipeline"]
-        D --> E[Generate Candidates]
-        E --> F[Compute Features]
-        F --> G[Score with ML Model]
-        G --> H[Optimize 1:N Matches]
+        D --> E[Generate Candidates<br/>Spatial indexing + filters]
+        E --> F[Compute 56 Features<br/>Geometric, semantic, topological]
+        F --> G[Score with XGBoost<br/>Binary classifier]
+        G --> H[Optimize 1:N Matches<br/>Hungarian algorithm]
         H --> I{Quality<br/>Acceptable?}
     end
 
@@ -38,8 +64,8 @@ flowchart TB
     end
 
     subgraph Output["4. Integration"]
-        I -->|Yes| M[Generate Bridge File]
-        M --> N[Run Integration]
+        I -->|Yes| M[Generate Bridge File<br/>local_id → GERS_id + confidence]
+        M --> N[Integrate Unmatched Segments]
         N --> O[QA Review]
         O --> P[Final Network]
     end
@@ -56,8 +82,30 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
-| **Features** | Geometric (Hausdorff, IoU), semantic (name similarity, road class), and topological metrics |
+| **Features** | 56 features across 14 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via Streamlit UI |
+
+## Quick Start
+
+After installation, here's the typical workflow for matching a new dataset:
+
+```bash
+# 1. Fetch all data (target + Overture reference) for a dataset
+matcher fetch all us_boston_streets
+
+# 2. Train the ML model (required after fresh clone)
+matcher train
+
+# 3. Run matching
+matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+    -m xgboost -o data/output/us_boston_streets_bridge.parquet
+
+# 4. If match quality needs improvement, label more examples (auto-discovers datasets)
+streamlit run src/matcher/labeling/app.py
+
+# 5. Retrain and re-match until satisfied
+matcher train && matcher match ...
+```
 
 ## Installation
 
@@ -76,6 +124,8 @@ brew install osmium-tool
 apt install osmium-tool
 ```
 
+If not available, the system falls back to pyosmium (slower but no system deps).
+
 ### Optional Dependencies
 
 ```bash
@@ -89,9 +139,14 @@ pip install -e ".[label]"
 pip install -e ".[dev,ml,label]"
 ```
 
-## Usage
+## Workflow Details
 
-### Fetch data
+### Step 1: Data Acquisition
+
+Fetch Overture reference data and your local dataset. Local data typically comes from:
+- State/county GIS portals (ArcGIS FeatureServers)
+- OpenStreetMap extracts
+- Internal road databases
 
 ```bash
 # Fetch all data (target + Overture reference) for a configured dataset
@@ -109,83 +164,35 @@ matcher fetch reference us_boston_streets --source osm  # Use OSM instead
 matcher fetch list
 ```
 
-### Run topology reconstruction
-
-```bash
-matcher topology data/raw/overture_segments.parquet
-```
-
-### Run matching
-
-```bash
-matcher match data/processed/edges.parquet data/raw/local_roads.parquet
-```
-
-### Dataset Classification
-
-Discover class mappings for new datasets:
-
-```bash
-# Basic discovery - analyzes dataset structure
-matcher discover-classes data/raw/new_dataset.parquet
-
-# With match-based analysis (more accurate)
-matcher discover-classes data/raw/new_dataset.parquet \
-    --reference data/raw/overture_segments.parquet \
-    --bridge data/output/new_dataset_bridge.parquet
-
-# List available dataset configurations
-matcher fetch list
-```
-
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions on adding new datasets.
-
-## Quick Start
-
-After installation, here's the typical workflow for matching a new dataset:
-
-```bash
-# 1. Fetch all data (target + Overture reference) for a dataset
-matcher fetch all us_boston_streets
-# Or fetch all datasets for a region:
-matcher fetch target --prefix us_boston
-matcher fetch reference us_boston_streets
-
-# 2. Train the ML model (required after fresh clone)
-matcher train
-
-# 3. Run matching
-matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
-    -m xgboost -o data/output/us_boston_streets_bridge.parquet
-
-# 4. If match quality needs improvement, label more examples (auto-discovers datasets)
-streamlit run src/matcher/labeling/app.py
-
-# 5. Retrain and re-match until satisfied
-matcher train && matcher match ...
-```
-
-## Workflow Details
-
-### Step 1: Data Acquisition
-
-Fetch Overture reference data and your local dataset. Local data typically comes from:
-- State/county GIS portals (ArcGIS FeatureServers)
-- OpenStreetMap extracts
-- Internal road databases
-
-See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions.
 
 ### Step 2: Feature Computation & Matching
 
-The matcher computes ~40 features for each candidate pair:
+The matcher computes 56 features for each candidate pair across 14 categories:
 
-| Category | Features |
-|----------|----------|
-| **Geometric** | Hausdorff distance, buffer IoU, heading delta, length ratio, centroid distance |
-| **Semantic** | Name similarity (Levenshtein, Jaro-Winkler, Soundex), road class match |
-| **Topological** | Endpoint proximity, degree match, dead-end/intersection flags |
-| **Alignment** | Coverage ratios for partial segment matches |
+| Category | Count | Examples |
+|----------|-------|----------|
+| Geometric | 9 | Hausdorff distance, buffer IoU (5m/15m), heading delta, length ratio |
+| Semantic - Name | 8 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags |
+| Semantic - Class | 1 | Road class similarity |
+| Endpoint/Connectivity | 3 | Min/max endpoint proximity, shared endpoint count |
+| Lateral Offset | 3 | Median, IQR, 95th percentile |
+| Topology | 12 | Degree features, dead-end/intersection flags and matches |
+| Alignment Coverage | 4 | Ref/target/min coverage, coverage ratio |
+| Graphlet | 2 | Network topology similarity, endpoint degree similarity |
+| Sinuosity | 3 | Ref/target sinuosity, delta |
+| Heading Consistency | 3 | Ref/target consistency, delta |
+| Vertex Density | 3 | Ref/target density, ratio |
+| Length | 1 | Minimum length |
+| Shape Complexity | 3 | Ref/target complexity (significant turns), delta |
+| Numeric Route | 1 | Route number matching (I-90, US-101) |
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
+
+```bash
+matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+    -m xgboost -o data/output/us_boston_streets_bridge.parquet
+```
 
 ### Step 3: Labeling Loop
 
@@ -219,6 +226,20 @@ Review integration results with the QA app:
 matcher qa-integration -o data/integrated
 ```
 
+### Dataset Classification
+
+Discover class mappings for new datasets:
+
+```bash
+# Basic discovery - analyzes dataset structure
+matcher discover-classes data/raw/new_dataset.parquet
+
+# With match-based analysis (more accurate)
+matcher discover-classes data/raw/new_dataset.parquet \
+    --reference data/raw/overture_segments.parquet \
+    --bridge data/output/new_dataset_bridge.parquet
+```
+
 ## CLI Reference
 
 | Command | Description |
@@ -232,30 +253,18 @@ matcher qa-integration -o data/integrated
 | `matcher integrate` | Integrate unmatched segments |
 | `matcher qa-integration` | Launch integration QA app |
 | `matcher discover-classes` | Analyze class mappings for new datasets |
+| `matcher topology` | Reconstruct network topology |
 | `matcher validate-matching` | Run validation experiments (Overture provenance) |
 | `matcher validate-data` | Validate data file versions |
 
 Run `matcher --help` or `matcher <command> --help` for detailed options.
-
-## Development
-
-```bash
-# Run tests
-pytest tests/
-
-# Format code
-ruff format src/ tests/
-
-# Lint
-ruff check src/ tests/
-```
 
 ## Project Structure
 
 ```
 src/matcher/
 ├── cli.py              # Typer CLI application
-├── config.py           # Pydantic settings & feature definitions
+├── config.py           # Pydantic settings & feature definitions (source of truth)
 ├── fetch/              # Data fetching (Overture, OSM, ArcGIS)
 ├── features/           # Feature computation (geometric, semantic, topological)
 ├── blocking/           # Candidate generation via spatial indexing
@@ -264,9 +273,30 @@ src/matcher/
 ├── resolution/         # Bridge file generation
 ├── topology/           # Network topology reconstruction
 ├── labeling/           # Streamlit labeling UI
+├── datasets/           # Dataset configuration discovery
 ├── integration/        # Unmatched segment integration
-└── integration_qa/     # QA app for integration review
+├── integration_qa/     # QA app for integration review
+├── validation/         # Ground-truth validation experiments
+├── agent_labeling/     # AI agent labeling batch generation
+└── utils/              # Shared utilities
+
+datasets/               # YAML dataset configs (us_boston_streets.yaml, etc.)
+labels/                 # Hive-partitioned training labels (dataset=*/data.csv)
+docs/                   # Architecture docs, dataset ingestion guide, benchmarks
+research/               # Point-in-time research documents
 ```
+
+## Development
+
+```bash
+# Run tests
+pytest tests/
+
+# Format and lint
+ruff format src/ tests/ && ruff check src/ tests/
+```
+
+See [CLAUDE.md](CLAUDE.md) for development workflow, commit conventions, and feature addition checklist.
 
 ## License
 

@@ -228,7 +228,7 @@ def run_pipeline(
     if method == "rule":
         raise ValueError(
             "Rule-based matching has been removed. Use method='xgboost' instead. "
-            "Train a model first with 'matcher train --combined'."
+            "Train a model first with 'matcher train'."
         )
     elif method == "xgboost":
         from ..config import settings
@@ -239,7 +239,7 @@ def run_pipeline(
         if not model_path.exists():
             raise FileNotFoundError(
                 f"ML model not found at {model_path}. "
-                "Run 'matcher train --combined' to train the model on labeled data from data/labels/."
+                "Run 'matcher train' to train the model on labeled data from data/labels/."
             )
         matcher = MLMatcher(model_path=str(model_path))
         results = matcher.score_candidates(

@@ -802,7 +802,7 @@ class MLMatcher:
 
         if self.model is None:
             raise ValueError(
-                "No ML model loaded. Train a model first with 'matcher train --combined' "
+                "No ML model loaded. Train a model first with 'matcher train' "
                 "or provide a model path to MLMatcher(model_path=...)."
             )
 
@@ -1146,9 +1146,9 @@ class MLMatcher:
 
             # Use confidence thresholds instead of class prediction
             # This makes the ML model behave more like a confidence scorer
-            if prob >= 0.5:
+            if prob >= settings.scoring_match_threshold:
                 decision = MatchDecision.MATCH
-            elif prob >= 0.1:
+            elif prob >= settings.scoring_review_threshold:
                 decision = MatchDecision.REVIEW  # Low confidence but possible
             else:
                 decision = MatchDecision.NO_MATCH

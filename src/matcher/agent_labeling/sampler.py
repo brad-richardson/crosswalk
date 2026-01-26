@@ -176,8 +176,7 @@ def sample_candidates(
     # Score candidates using ML model
     if not model_path or not model_path.exists():
         raise FileNotFoundError(
-            f"ML model not found at {model_path}. "
-            "Run 'matcher train --combined' to train the model."
+            f"ML model not found at {model_path}. Run 'matcher train' to train the model."
         )
 
     scored = _score_with_ml(
