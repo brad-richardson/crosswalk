@@ -225,11 +225,27 @@ def _add_target_segments(
     for idx, row in target.iterrows():
         geom = row.geometry
         original_id = str(row.get(id_column, idx))
+        match_info = match_lookup.get(original_id, {})
+
+        # Apply sub-segment slicing before overlap check so both overlap
+        # detection and the added segment use the same (possibly trimmed) geometry
+        segment_geom = geom
+        start_frac = match_info.get("local_start_frac")
+        end_frac = match_info.get("local_end_frac")
+        if start_frac is not None and end_frac is not None:
+            is_partial = (
+                abs(start_frac) > ALIGNMENT_FULL_TOLERANCE
+                or abs(end_frac - 1.0) > ALIGNMENT_FULL_TOLERANCE
+            )
+            if is_partial:
+                sliced = create_subline(geom, start_frac, end_frac)
+                if sliced is not None and not sliced.is_empty:
+                    segment_geom = sliced
 
         # Check for overlap with existing segments
         if existing_tree is not None:
             overlapping_idx, overlap_iou = _find_overlapping_segment(
-                geom,
+                segment_geom,
                 existing_geoms,
                 existing_tree,
                 overlap_buffer_m,
@@ -243,7 +259,7 @@ def _add_target_segments(
                         original_id=original_id,
                         source_dataset=dataset_name,
                         source_type=source_type,
-                        geometry=geom,
+                        geometry=segment_geom,
                         dropped_reason="overlap_lower_priority",
                         overlapping_edge_id=overlapping_idx,
                         overlap_iou=overlap_iou,
@@ -251,23 +267,6 @@ def _add_target_segments(
                     )
                 )
                 continue
-
-        # No overlap - add segment
-        match_info = match_lookup.get(original_id, {})
-
-        # Apply sub-segment slicing if alignment fractions indicate partial coverage
-        segment_geom = geom
-        start_frac = match_info.get("local_start_frac")
-        end_frac = match_info.get("local_end_frac")
-        if start_frac is not None and end_frac is not None:
-            is_partial = (
-                abs(start_frac) > ALIGNMENT_FULL_TOLERANCE
-                or abs(end_frac - 1.0) > ALIGNMENT_FULL_TOLERANCE
-            )
-            if is_partial:
-                sliced = create_subline(geom, start_frac, end_frac)
-                if sliced is not None and not sliced.is_empty:
-                    segment_geom = sliced
 
         segment = {
             "geometry": segment_geom,

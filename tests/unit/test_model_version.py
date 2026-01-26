@@ -15,8 +15,9 @@ from matcher.matching.ml import MLMatcher
 
 def _make_simple_model():
     """Create a simple picklable model for testing."""
+    rng = np.random.default_rng(42)
     clf = DecisionTreeClassifier(random_state=42)
-    X = np.random.rand(20, len(FEATURE_COLUMNS))
+    X = rng.random((20, len(FEATURE_COLUMNS)))
     y = np.array([0] * 10 + [1] * 10)
     clf.fit(X, y)
     return clf
@@ -116,8 +117,9 @@ class TestTrainVersionChecks:
             "label": ["match"] * (n_samples // 2) + ["no_match"] * (n_samples - n_samples // 2),
             "feature_version": feature_versions,
         }
+        rng = np.random.default_rng(123)
         for col in FEATURE_COLUMNS:
-            data[col] = np.random.rand(n_samples).tolist()
+            data[col] = rng.random(n_samples).tolist()
 
         df = pd.DataFrame(data)
         df.to_csv(ds_dir / "data.csv", index=False)
