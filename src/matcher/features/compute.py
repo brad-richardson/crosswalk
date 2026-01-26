@@ -156,6 +156,7 @@ def compute_pair_features(
     target_graphlet_data: tuple | None = None,
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
+    precomputed_buffers: dict | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -181,6 +182,8 @@ def compute_pair_features(
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
         ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
+        precomputed_buffers: Pre-computed buffers for full geometries (optional).
+            Only used when alignment coverage is high (>95%), otherwise subline buffers are computed.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -230,10 +233,24 @@ def compute_pair_features(
             coords_target = np.array(geom_for_similarity_target.coords)
 
         # Compute geometric features on aligned sublines (or full geom if no alignment)
+        # Pass pre-computed buffers when using full geometries (high coverage)
         with timed_section("geometric_features"):
-            geom_features = compute_geometric_features(
-                geom_for_similarity_ref, geom_for_similarity_target
+            # Determine if we can use pre-computed buffers (full geometry, not sublines)
+            use_precomputed = (
+                precomputed_buffers is not None
+                and geom_for_similarity_ref is ref_geom
+                and geom_for_similarity_target is target_geom
             )
+            if use_precomputed:
+                geom_features = compute_geometric_features(
+                    geom_for_similarity_ref,
+                    geom_for_similarity_target,
+                    precomputed_buffers=precomputed_buffers,
+                )
+            else:
+                geom_features = compute_geometric_features(
+                    geom_for_similarity_ref, geom_for_similarity_target
+                )
 
         # Compute semantic features
         with timed_section("name_similarity"):

@@ -102,6 +102,15 @@ def _compute_single_feature(args):
                 ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
             )
 
+        # Get pre-computed buffers for full geometries
+        # These are only used when alignment coverage is high (>95%)
+        precomputed_buffers = {
+            "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
+            "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
+            "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
+            "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
+        }
+
         # Delegate to shared compute_pair_features function
         # This ensures consistency with backfill pipeline (training data generation)
         # Pass graphlet_data for alignment-aware topology computation (partial overlaps)
@@ -123,6 +132,7 @@ def _compute_single_feature(args):
             target_graphlet_data=target_graphlet_data,
             ref_seg_id=ref_seg_id,
             target_seg_id=target_seg_id,
+            precomputed_buffers=precomputed_buffers,
         )
         features["_error"] = None
         return features
@@ -970,6 +980,38 @@ class MLMatcher:
                         exclude_segment_idx=filtered_idx,
                     )
                     aligned_endpoint_features[(ref_idx, target_idx)] = aligned_ep
+            logger.info(
+                f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
+            )
+
+        # Pre-compute buffers for full geometries (5m and 15m)
+        # This avoids redundant buffer computation in workers since each geometry
+        # may appear in multiple candidate pairs
+        logger.info(
+            f"Pre-computing buffers for {len(unique_ref_indices)} ref and "
+            f"{len(unique_target_indices)} target geometries..."
+        )
+
+        ref_buffers_5m = {}
+        ref_buffers_15m = {}
+        for idx in unique_ref_indices:
+            geom = ref_geoms[idx]
+            if geom is not None and not geom.is_empty:
+                ref_buffers_5m[idx] = geom.buffer(5.0)
+                ref_buffers_15m[idx] = geom.buffer(15.0)
+
+        target_buffers_5m = {}
+        target_buffers_15m = {}
+        for idx in unique_target_indices:
+            geom = target_geoms[idx]
+            if geom is not None and not geom.is_empty:
+                target_buffers_5m[idx] = geom.buffer(5.0)
+                target_buffers_15m[idx] = geom.buffer(15.0)
+
+        logger.info(
+            f"Pre-computed {len(ref_buffers_5m) + len(target_buffers_5m)} buffers at 5m, "
+            f"{len(ref_buffers_15m) + len(target_buffers_15m)} at 15m"
+        )
 
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
@@ -986,6 +1028,10 @@ class MLMatcher:
         worker_data = {
             "ref_geoms": ref_geoms,
             "target_geoms": target_geoms,
+            "ref_buffers_5m": ref_buffers_5m,
+            "ref_buffers_15m": ref_buffers_15m,
+            "target_buffers_5m": target_buffers_5m,
+            "target_buffers_15m": target_buffers_15m,
             "ref_names": ref_names,
             "target_names": target_names,
             "ref_classes": ref_classes,

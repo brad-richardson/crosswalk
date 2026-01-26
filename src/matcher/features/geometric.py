@@ -207,6 +207,7 @@ class GeometricFeatures(NamedTuple):
 def compute_geometric_features(
     line_a: LineString,
     line_b: LineString,
+    precomputed_buffers: dict | None = None,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
@@ -217,6 +218,11 @@ def compute_geometric_features(
     Args:
         line_a: First geometry (LineString in projected CRS with meter units)
         line_b: Second geometry (LineString in projected CRS with meter units)
+        precomputed_buffers: Optional dict with pre-computed buffers:
+            {"ref_5m": Polygon, "ref_15m": Polygon, "target_5m": Polygon, "target_15m": Polygon}
+            If provided, skips buffer computation. Keys should correspond to:
+            - ref_* for line_a buffers
+            - target_* for line_b buffers
 
     Returns:
         GeometricFeatures tuple with distances in meters
@@ -242,14 +248,25 @@ def compute_geometric_features(
     # Multi-scale Buffer IoU:
     # - 5m: Captures tight alignment (exact centerline matches)
     # - 15m: Captures offset alignment (sidewalks, bike lanes parallel to roads)
-    # Use cached buffers when possible for repeated geometries
+    #
+    # Optimization: Use pre-computed buffers when available (for full geometries).
+    # When using aligned sublines, buffers are computed on-demand with caching.
     #
     # Optimization: Compute 15m first, skip 5m if 15m IoU is low.
     # If geometries don't overlap at 15m, they definitely won't at 5m.
     # This saves ~2 buffer creations for distant pairs (majority of candidates).
     with timed_section("geom_buffer_15m"):
-        buf_a_15m = get_cached_buffer(line_a, 15.0)
-        buf_b_15m = get_cached_buffer(line_b, 15.0)
+        if precomputed_buffers is not None:
+            buf_a_15m = precomputed_buffers.get("ref_15m")
+            buf_b_15m = precomputed_buffers.get("target_15m")
+            # Fall back to cached computation if precomputed not available
+            if buf_a_15m is None:
+                buf_a_15m = get_cached_buffer(line_a, 15.0)
+            if buf_b_15m is None:
+                buf_b_15m = get_cached_buffer(line_b, 15.0)
+        else:
+            buf_a_15m = get_cached_buffer(line_a, 15.0)
+            buf_b_15m = get_cached_buffer(line_b, 15.0)
         buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
 
     # Short-circuit: skip 5m buffer if 15m IoU is low
@@ -257,8 +274,17 @@ def compute_geometric_features(
     # 5m buffers (which are 3x smaller) will have near-zero IoU.
     with timed_section("geom_buffer_5m"):
         if buffer_iou_15m > 0.3:
-            buf_a_5m = get_cached_buffer(line_a, 5.0)
-            buf_b_5m = get_cached_buffer(line_b, 5.0)
+            if precomputed_buffers is not None:
+                buf_a_5m = precomputed_buffers.get("ref_5m")
+                buf_b_5m = precomputed_buffers.get("target_5m")
+                # Fall back to cached computation if precomputed not available
+                if buf_a_5m is None:
+                    buf_a_5m = get_cached_buffer(line_a, 5.0)
+                if buf_b_5m is None:
+                    buf_b_5m = get_cached_buffer(line_b, 5.0)
+            else:
+                buf_a_5m = get_cached_buffer(line_a, 5.0)
+                buf_b_5m = get_cached_buffer(line_b, 5.0)
             buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
         else:
             buffer_iou_5m = 0.0
