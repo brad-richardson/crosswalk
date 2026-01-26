@@ -880,8 +880,7 @@ def generate_scored_candidates(
     model_path = settings.model_path
     if not model_path.exists():
         raise FileNotFoundError(
-            f"ML model not found at {model_path}. "
-            "Run 'matcher train --combined' to train the model."
+            f"ML model not found at {model_path}. Run 'matcher train' to train the model."
         )
 
     matcher = MLMatcher(auto_select=True)
@@ -1169,7 +1168,7 @@ def build_views_from_feature_df(
     matcher = get_cached_matcher()
     if matcher is None:
         raise ValueError(
-            "No ML model available. Train a model first with 'matcher train --combined'. "
+            "No ML model available. Train a model first with 'matcher train'. "
             "The labeling UI requires a trained model for scoring candidates."
         )
     probs = matcher.predict(features_list)
@@ -1177,8 +1176,8 @@ def build_views_from_feature_df(
 
     # Filter to review band BEFORE building views (huge speedup for large datasets)
     # Review band: review_threshold - 0.05 to match_threshold + 0.05
-    review_lower = settings.review_threshold - 0.05
-    review_upper = settings.match_threshold + 0.05
+    review_lower = settings.optimizer_review_threshold - 0.05
+    review_upper = settings.optimizer_match_threshold + 0.05
 
     # Create mask for review band
     import numpy as np
@@ -1302,9 +1301,9 @@ def build_views_from_feature_df(
             target_aligned = None
 
         # Determine decision from confidence using configurable thresholds
-        if prob >= settings.match_threshold:
+        if prob >= settings.optimizer_match_threshold:
             decision = "match"
-        elif prob >= settings.review_threshold:
+        elif prob >= settings.optimizer_review_threshold:
             decision = "review"
         else:
             decision = "no_match"
@@ -1421,7 +1420,7 @@ def filter_by_confidence_band(
         return views
 
     # Use production thresholds from settings
-    lower = settings.review_threshold - buffer  # e.g., 0.50 - 0.05 = 0.45
-    upper = settings.match_threshold + buffer  # e.g., 0.75 + 0.05 = 0.80
+    lower = settings.optimizer_review_threshold - buffer  # e.g., 0.50 - 0.05 = 0.45
+    upper = settings.optimizer_match_threshold + buffer  # e.g., 0.75 + 0.05 = 0.80
 
     return [v for v in views if lower <= v.confidence <= upper]

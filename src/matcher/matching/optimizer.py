@@ -439,7 +439,7 @@ def resolve_one_to_many(
                         ref_id=ref_id,
                         target_ids=target_ids,
                         decision=MatchDecision.MATCH
-                        if avg_confidence >= settings.review_threshold
+                        if avg_confidence >= settings.optimizer_review_threshold
                         else MatchDecision.REVIEW,
                         confidence=avg_confidence,
                         match_type="1:N",

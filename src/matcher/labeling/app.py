@@ -494,8 +494,8 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             st.caption(f"Target: {target_path.name}")
 
             # Confidence band filter
-            lower_bound = settings.review_threshold - 0.05
-            upper_bound = settings.match_threshold + 0.05
+            lower_bound = settings.optimizer_review_threshold - 0.05
+            upper_bound = settings.optimizer_match_threshold + 0.05
             review_only = st.checkbox(
                 f"Review band ({lower_bound:.2f}-{upper_bound:.2f})",
                 value=st.session_state.review_only,

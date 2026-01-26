@@ -17,28 +17,27 @@ The trained model is not committed to git. After cloning, run `matcher train` be
 
 ## Decision Thresholds
 
-Two separate threshold systems exist:
+All thresholds are configurable in `config.py`.
 
-### ML Scoring (hardcoded in `ml.py`)
+### Scoring Thresholds (per-candidate, bridge file output)
 
-Applied per-candidate during scoring:
+Applied by the ML scorer when classifying each candidate pair:
 
-| Confidence | Decision |
-|------------|----------|
-| `>= 0.5` | MATCH |
-| `>= 0.1` | REVIEW |
-| `< 0.1` | NO_MATCH |
+| Setting | Default | Decision |
+|---------|---------|----------|
+| `scoring_match_threshold` | 0.5 | `>= this` -> MATCH |
+| `scoring_review_threshold` | 0.1 | `>= this` -> REVIEW, below -> NO_MATCH |
 
-### Optimizer Settings (configurable in `config.py`)
+### Optimizer/Labeling Thresholds (1:N groups and labeling UI)
 
-Applied during 1:N group optimization:
+Applied during 1:N group optimization and to define the labeling UI review band:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `match_threshold` | 0.75 | Confidence for automatic match in optimizer |
-| `review_threshold` | 0.5 | Below this = no match in optimizer |
+| `optimizer_match_threshold` | 0.75 | Confident match in optimizer; upper bound of labeling review band |
+| `optimizer_review_threshold` | 0.5 | Below this = no match in optimizer; lower bound of labeling review band |
 
-1:N groups: `avg_confidence >= review_threshold` -> MATCH
+1:N groups: `avg_confidence >= optimizer_review_threshold` -> MATCH
 
 ## Model Evaluation
 

@@ -224,14 +224,25 @@ class MatcherSettings(BaseSettings):
         description="Maximum length ratio for candidates",
     )
 
-    # Matching settings
-    match_threshold: float = Field(
-        default=0.75,
-        description="Confidence threshold for automatic match",
-    )
-    review_threshold: float = Field(
+    # Scoring thresholds (per-candidate, used by ML scorer for bridge file output)
+    scoring_match_threshold: float = Field(
         default=0.5,
-        description="Confidence threshold for review (below this = no match)",
+        description="Confidence threshold for MATCH decision in ML scoring",
+    )
+    scoring_review_threshold: float = Field(
+        default=0.1,
+        description="Confidence threshold for REVIEW decision in ML scoring (below = NO_MATCH)",
+    )
+
+    # Optimizer/labeling thresholds (used by 1:N optimizer and labeling UI)
+    optimizer_match_threshold: float = Field(
+        default=0.75,
+        description="Confidence threshold for automatic match in optimizer and labeling UI",
+    )
+    optimizer_review_threshold: float = Field(
+        default=0.5,
+        description="Confidence threshold for review in optimizer and labeling UI "
+        "(below this = no match)",
     )
     optimizer_memory_limit_gb: float = Field(
         default=8.0,
