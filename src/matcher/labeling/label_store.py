@@ -10,6 +10,7 @@ from loguru import logger
 from shapely.geometry import LineString
 
 from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
+from ..features.semantic import _extract_name_string
 
 
 class LabelLoadError(Exception):
@@ -972,12 +973,12 @@ def backfill_features(
                     target_id=target_id,
                     ref_geometry=ref_geom_wgs84,
                     target_geometry=target_geom_wgs84,
-                    ref_name=ref_name,
-                    target_name=target_name,
-                    ref_class=ref_class,
-                    target_class=target_class,
-                    ref_subclass=ref_subclass,
-                    target_subclass=target_subclass,
+                    ref_name=_extract_name_string(ref_name),
+                    target_name=_extract_name_string(target_name),
+                    ref_class=str(ref_class) if ref_class is not None else None,
+                    target_class=str(target_class) if target_class is not None else None,
+                    ref_subclass=str(ref_subclass) if ref_subclass is not None else None,
+                    target_subclass=str(target_subclass) if target_subclass is not None else None,
                 )
 
             else:
