@@ -21,6 +21,7 @@ from matcher.features.compute import (
     _get_error_features,
     compute_pair_features,
 )
+from tests.conftest import MOCK_ENDPOINT_FEATURES
 
 
 @pytest.fixture
@@ -119,6 +120,7 @@ class TestComputePairFeaturesConsistency:
             "residential",
             "residential",
             graphlet_features=graphlet_features,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
         )
         assert features["graphlet_similarity"] == expected_sim
         assert features["endpoint_degree_similarity"] == expected_deg

@@ -238,13 +238,6 @@ class MatcherSettings(BaseSettings):
         description="Memory limit for sparse match optimization in GB. "
         "If estimated memory exceeds this, greedy algorithm is used instead.",
     )
-    alignment_enabled: bool = Field(
-        default=True,
-        description="Enable pre-match linestring alignment for computing features on "
-        "aligned sublines. When enabled, similarity features (hausdorff, buffer_iou, "
-        "etc.) are computed on comparable portions of geometries rather than full "
-        "geometries. Coverage features are always computed regardless of this setting.",
-    )
     auto_select_model: bool = Field(
         default=True,
         description="Automatically select between full and geometry-only models based on "

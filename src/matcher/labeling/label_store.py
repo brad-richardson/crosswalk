@@ -602,7 +602,7 @@ def backfill_features(
         compute_pair_features,
         precompute_graphlet_features,
     )
-    from ..features.spatial_context import SpatialContextIndex, compute_endpoint_features
+    from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
 
     # Set default paths
     if data_dir is None:
@@ -804,15 +804,19 @@ def backfill_features(
             # Compute alignment from scratch
             alignment = linestring_alignment(ref_geom, target_geom)
 
-            # Compute endpoint features (using target context)
+            # Compute endpoint features using aligned subline endpoints
+            # This ensures endpoint proximity is measured at the alignment boundaries,
+            # not at the full geometry endpoints
             target_filtered_idx = (
                 target_gdf_proj[target_gdf_proj["id"] == target_id].index[0]
                 if target_id in target_gdf_proj["id"].values
                 else None
             )
-            endpoint_features = compute_endpoint_features(
+            endpoint_features = compute_aligned_endpoint_features(
                 target_geom,
                 target_context,
+                start_frac=alignment.dataset_start_frac,
+                end_frac=alignment.dataset_end_frac,
                 exclude_segment_idx=target_filtered_idx,
             )
 

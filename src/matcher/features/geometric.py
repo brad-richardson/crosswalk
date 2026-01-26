@@ -207,6 +207,7 @@ class GeometricFeatures(NamedTuple):
 def compute_geometric_features(
     line_a: LineString,
     line_b: LineString,
+    precomputed_buffers: dict | None = None,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
@@ -217,63 +218,109 @@ def compute_geometric_features(
     Args:
         line_a: First geometry (LineString in projected CRS with meter units)
         line_b: Second geometry (LineString in projected CRS with meter units)
+        precomputed_buffers: Optional dict with pre-computed buffers:
+            {"ref_5m": Polygon, "ref_15m": Polygon, "target_5m": Polygon, "target_15m": Polygon}
+            If provided, skips buffer computation. Keys should correspond to:
+            - ref_* for line_a buffers
+            - target_* for line_b buffers
 
     Returns:
         GeometricFeatures tuple with distances in meters
     """
+    from .compute import timed_section
 
-    coords_a = np.array(line_a.coords)
-    coords_b = np.array(line_b.coords)
+    with timed_section("geom_coord_extraction"):
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
 
     # Hausdorff distance (max deviation) - using Shapely's implementation
     # Hausdorff is symmetric, so digitization direction doesn't matter
-    hausdorff = hausdorff_distance(line_a, line_b)
+    with timed_section("geom_hausdorff"):
+        hausdorff = hausdorff_distance(line_a, line_b)
 
     # Mean and P95 Hausdorff (robust to segmentation)
     # Pass pre-extracted coords to avoid redundant extraction
-    mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
-        line_a, line_b, coords_a=coords_a, coords_b=coords_b
-    )
+    with timed_section("geom_hausdorff_stats"):
+        mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
+            line_a, line_b, coords_a=coords_a, coords_b=coords_b
+        )
 
     # Multi-scale Buffer IoU:
     # - 5m: Captures tight alignment (exact centerline matches)
     # - 15m: Captures offset alignment (sidewalks, bike lanes parallel to roads)
-    # Use cached buffers when possible for repeated geometries
-    buf_a_5m = get_cached_buffer(line_a, 5.0)
-    buf_b_5m = get_cached_buffer(line_b, 5.0)
-    buf_a_15m = get_cached_buffer(line_a, 15.0)
-    buf_b_15m = get_cached_buffer(line_b, 15.0)
+    #
+    # Optimization: Use pre-computed buffers when available (for full geometries).
+    # When using aligned sublines, buffers are computed on-demand with caching.
+    #
+    # Optimization: Compute 15m first, skip 5m if 15m IoU is low.
+    # If geometries don't overlap at 15m, they definitely won't at 5m.
+    # This saves ~2 buffer creations for distant pairs (majority of candidates).
+    with timed_section("geom_buffer_15m"):
+        if precomputed_buffers is not None:
+            buf_a_15m = precomputed_buffers.get("ref_15m")
+            buf_b_15m = precomputed_buffers.get("target_15m")
+            # Fall back to cached computation if precomputed not available
+            if buf_a_15m is None:
+                buf_a_15m = get_cached_buffer(line_a, 15.0)
+            if buf_b_15m is None:
+                buf_b_15m = get_cached_buffer(line_b, 15.0)
+        else:
+            buf_a_15m = get_cached_buffer(line_a, 15.0)
+            buf_b_15m = get_cached_buffer(line_b, 15.0)
+        buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
 
-    buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
-    buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
+    # Short-circuit: skip 5m buffer if 15m IoU is low
+    # Threshold 0.3 chosen because: if 15m buffers barely overlap,
+    # 5m buffers (which are 3x smaller) will have near-zero IoU.
+    with timed_section("geom_buffer_5m"):
+        if buffer_iou_15m > 0.3:
+            if precomputed_buffers is not None:
+                buf_a_5m = precomputed_buffers.get("ref_5m")
+                buf_b_5m = precomputed_buffers.get("target_5m")
+                # Fall back to cached computation if precomputed not available
+                if buf_a_5m is None:
+                    buf_a_5m = get_cached_buffer(line_a, 5.0)
+                if buf_b_5m is None:
+                    buf_b_5m = get_cached_buffer(line_b, 5.0)
+            else:
+                buf_a_5m = get_cached_buffer(line_a, 5.0)
+                buf_b_5m = get_cached_buffer(line_b, 5.0)
+            buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
+        else:
+            buffer_iou_5m = 0.0
 
     # Heading delta (overall direction)
-    heading_a = _compute_heading(coords_a[0], coords_a[-1])
-    heading_b = _compute_heading(coords_b[0], coords_b[-1])
-    heading_delta = _angle_diff(heading_a, heading_b)
+    with timed_section("geom_heading_delta"):
+        heading_a = _compute_heading(coords_a[0], coords_a[-1])
+        heading_b = _compute_heading(coords_b[0], coords_b[-1])
+        heading_delta = _angle_diff(heading_a, heading_b)
 
     # Length ratio
-    len_a, len_b = line_a.length, line_b.length
-    length_ratio = min(len_a, len_b) / max(len_a, len_b) if max(len_a, len_b) > 0 else 0.0
+    with timed_section("geom_length_ratio"):
+        len_a, len_b = line_a.length, line_b.length
+        length_ratio = min(len_a, len_b) / max(len_a, len_b) if max(len_a, len_b) > 0 else 0.0
 
     # Average projection distance (mathematically equivalent to mean_hausdorff)
     # Reuse already-computed value to avoid redundant computation
     projection_distance = mean_hausdorff
 
     # Centroid distance
-    centroid_distance = line_a.centroid.distance(line_b.centroid)
+    with timed_section("geom_centroid_distance"):
+        centroid_distance = line_a.centroid.distance(line_b.centroid)
 
     # Overlap ratio - NOTE: Changed from 10m to 15m buffer for performance.
     # This is a semantic change but overlap_ratio is typically ~1.0 anyway
     # due to blocking bias (candidates already spatially filtered).
     # Using 15m buffer avoids creating an additional buffer geometry.
-    overlap_ratio = _overlap_ratio(line_a, buf_b_15m)
+    with timed_section("geom_overlap_ratio"):
+        overlap_ratio = _overlap_ratio(line_a, buf_b_15m)
 
     # Collinear gap ratio (penalty for tip-to-tip segments)
     # Pass pre-extracted coords to avoid redundant extraction
-    collinear_gap_ratio = compute_collinear_gap_ratio(
-        line_a, line_b, coords_a=coords_a, coords_b=coords_b
-    )
+    with timed_section("geom_collinear_gap"):
+        collinear_gap_ratio = compute_collinear_gap_ratio(
+            line_a, line_b, coords_a=coords_a, coords_b=coords_b
+        )
 
     return GeometricFeatures(
         hausdorff_distance=hausdorff,

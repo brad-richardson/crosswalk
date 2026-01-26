@@ -47,11 +47,12 @@ This document consolidates all future feature ideas, technical debt, and improve
 ## Semantic Features
 
 ### Cardinal Direction Mismatch
-- **Status**: IMPLEMENTED (in current feature set per CLAUDE.md)
+- **Status**: NOT IN FEATURE_COLUMNS (function exists but not used)
 - **Feature**: `cardinal_direction_mismatch`
 - **Purpose**: Catch "North Main St" vs "South Main St" false positives
-- **Computation**: Extract direction prefix (N/S/E/W/NE/NW/SE/SW) and compare
-- **Use case**: Prevent matching different ends of the same named road
+- **Computation**: Function exists in `semantic.py` but NOT in `FEATURE_COLUMNS` config
+- **Gap**: Feature is computed by `compute_name_similarity()` but not exposed to ML
+- **Action needed**: Add to `FEATURE_COLUMNS` in `config.py` and wire through `compute_pair_features()`
 
 ### Name Abbreviation Normalization
 - **Feature**: Enhancement to existing name similarity
@@ -106,16 +107,6 @@ Features derived from road attributes beyond names and classes.
 ---
 
 ## Topology Features
-
-### Endpoint Proximity with Aligned Sublines
-- **Status**: TODO
-- **Problem**: `min_endpoint_proximity_m`, `max_endpoint_proximity_m`, and `shared_endpoint_count` are computed on full segment endpoints, not aligned subline endpoints
-- **Impact**: For partial overlaps, we're measuring distance to endpoints that may not be part of the matched portion
-- **Location**: `src/matcher/features/compute.py` - `precompute_topology_and_endpoints()` and endpoint feature computation
-- **Solution**:
-  1. When alignment is available, compute endpoint features using aligned subline endpoints
-  2. Use `create_subline()` to extract aligned portions, then measure endpoint distances
-- **Priority**: Medium-High (consistency with other aligned features)
 
 ### Junction Angle Similarity
 - **Feature**: `junction_angle_similarity`
@@ -331,13 +322,6 @@ with loader.session():
 
 **Priority**: Medium-High (reduces code duplication and bug surface area)
 
-### Automatic Model Routing
-- **Status**: IMPLEMENTED (`auto_select_model` in settings)
-- **Solution**: Automatic routing based on attribute availability
-- **Models Available**:
-  - `matcher_model_combined.joblib` - Full model with names
-  - `matcher_model_geom_only.joblib` - Geometry-only
-
 ---
 
 ## Label Data Management
@@ -490,12 +474,6 @@ Considerations:
 2. **More no_match examples**: Especially cases with similar names but different geometry
 3. **Relabeling pass**: Focus on geometry alignment, ignore names during labeling
 
-### Class Similarity Investigation
-- **Status**: ADDRESSED (Jan 2026)
-- Expanded `ROAD_CLASS_HIERARCHY` to include link roads, pedestrian/bike infrastructure
-- Updated default rank for unknown classes
-- Added `get_class_info()` diagnostic function
-
 ---
 
 ## Integration Gap: Sub-Segment Geometry Application
@@ -587,24 +565,6 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 ---
 
 ## Known Issues & Technical Debt
-
-### HIGH: Remove Rule-Based Matcher (rules.py)
-
-- **Problem**: `src/matcher/matching/rules.py` contains a legacy rule-based matcher that is no longer used
-- **Impact**: Dead code that adds confusion and maintenance burden
-- **Action needed**:
-  1. Move `MatchDecision` and `MatchResult` types to a separate module (e.g., `matching/types.py`)
-  2. Update all imports throughout the codebase
-  3. Delete `rules.py` and remove fallback code that references it
-- **Locations referencing rules.py**:
-  - `matching/__init__.py` - exports from rules
-  - `matching/ml.py` - imports types and has fallback
-  - `matching/optimizer.py` - imports types
-  - `pipeline/runner.py` - imports score_candidates
-  - `resolution/bridge.py` - imports types
-  - `labeling/data_loader.py` - has rule-based fallback
-  - `agent_labeling/sampler.py` - imports types and score_candidates
-  - `integration/combiner.py` - imports MatchDecision
 
 ### HIGH: Feature/Data Versioning Not Enforced
 
@@ -749,7 +709,6 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
 | Multi-stage blocking | Blocking | Low |
-| Endpoint proximity with aligned sublines | Features | Medium |
 
 ### Medium Priority
 

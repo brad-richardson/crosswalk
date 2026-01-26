@@ -57,15 +57,18 @@ def _compute_single_feature(args):
     This function delegates to compute_pair_features() to ensure consistency
     between the ML scoring pipeline and the backfill pipeline (training data).
 
-    Returns a dict of features, or a dict with error defaults if computation fails.
+    Returns a dict of features, None if pair is rejected (missing aligned endpoint
+    features), or a dict with error defaults if computation fails.
     """
     from ..features.compute import (
         _get_error_features,
         compute_graphlet_similarity,
         compute_pair_features,
+        timed_section,
     )
 
     ref_idx, target_idx = args
+    pair_key = (ref_idx, target_idx)
 
     try:
         # Extract data from worker globals
@@ -73,10 +76,16 @@ def _compute_single_feature(args):
         target_geom = _worker_data["target_geoms"][target_idx]
 
         # Get pre-computed alignment if available
-        alignment = _worker_data.get("alignments", {}).get((ref_idx, target_idx))
+        alignment = _worker_data.get("alignments", {}).get(pair_key)
 
-        # Get pre-computed endpoint features for target segment
-        endpoint_features = _worker_data.get("endpoint_features", {}).get(target_idx)
+        # Get pre-computed aligned endpoint features for this pair
+        # These are computed at aligned subline endpoints, not full segment endpoints
+        # If missing, reject this pair (no fallback to full-geometry features)
+        endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
+        if endpoint_features is None:
+            # Pair doesn't have aligned endpoint features - reject it
+            # This happens when alignment failed for this pair
+            return None
 
         # Get pre-computed topology features
         ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
@@ -88,9 +97,19 @@ def _compute_single_feature(args):
         target_graphlet_data = _worker_data.get("target_graphlet_data")
         ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
         target_seg_id = str(_worker_data["target_ids"][target_idx])
-        graphlet_features = compute_graphlet_similarity(
-            ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
-        )
+        with timed_section("graphlet_similarity"):
+            graphlet_features = compute_graphlet_similarity(
+                ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
+            )
+
+        # Get pre-computed buffers for full geometries
+        # These are only used when alignment coverage is high (>95%)
+        precomputed_buffers = {
+            "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
+            "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
+            "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
+            "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
+        }
 
         # Delegate to shared compute_pair_features function
         # This ensures consistency with backfill pipeline (training data generation)
@@ -113,6 +132,7 @@ def _compute_single_feature(args):
             target_graphlet_data=target_graphlet_data,
             ref_seg_id=ref_seg_id,
             target_seg_id=target_seg_id,
+            precomputed_buffers=precomputed_buffers,
         )
         features["_error"] = None
         return features
@@ -839,7 +859,6 @@ class MLMatcher:
         from ..features.spatial_context import (
             SpatialContextIndex,
             compute_all_topology,
-            compute_endpoint_features,
         )
 
         # Get unique indices from candidates to avoid recomputation
@@ -863,27 +882,6 @@ class MLMatcher:
         logger.info("Building spatial index for endpoint features...")
         target_index = SpatialContextIndex()
         target_index.build_from_gdf(target_candidates_only, id_column="id")
-
-        # Pre-compute endpoint features for target segments
-        target_endpoint_features = {}
-        logger.info(
-            f"Pre-computing endpoint features for {len(unique_target_indices)} target segments..."
-        )
-        for target_idx in unique_target_indices:
-            target_geom = target_geoms[target_idx]
-            if target_geom is not None and not target_geom.is_empty:
-                # Map original index to filtered index for spatial context lookup
-                filtered_idx = original_to_filtered[target_idx]
-                ep_feats = compute_endpoint_features(
-                    target_geom, target_index, exclude_segment_idx=filtered_idx
-                )
-                target_endpoint_features[target_idx] = ep_feats
-            else:
-                target_endpoint_features[target_idx] = {
-                    "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                    "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-                    "shared_endpoint_count": 0,
-                }
 
         # Pre-compute topology features using efficient Union-Find batch computation
         # Get unique segment IDs for only the candidates we need
@@ -957,15 +955,63 @@ class MLMatcher:
             target_candidates_only_proj, id_column="id", tolerance_m=5.0
         )
 
-        # Pre-compute linestring alignments if enabled
+        # Pre-compute linestring alignments
         # Alignments are used to compute similarity features on aligned sublines
-        alignments = {}
-        use_aligned_features = settings.alignment_enabled
-        if use_aligned_features:
-            logger.info("Computing linestring alignments...")
-            alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
-        else:
-            logger.info("Alignment disabled, computing features on full geometries")
+        logger.info("Computing linestring alignments...")
+        alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
+
+        # Recompute endpoint features using alignment fractions
+        # This uses aligned subline endpoints instead of full segment endpoints,
+        # which is critical for partial overlaps
+        aligned_endpoint_features = {}
+        if alignments:
+            from ..features.spatial_context import compute_aligned_endpoint_features
+
+            logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
+            for (ref_idx, target_idx), alignment in alignments.items():
+                target_geom = target_geoms[target_idx]
+                if target_geom is not None and not target_geom.is_empty:
+                    filtered_idx = original_to_filtered.get(target_idx)
+                    aligned_ep = compute_aligned_endpoint_features(
+                        target_geom,
+                        target_index,
+                        start_frac=alignment.dataset_start_frac,
+                        end_frac=alignment.dataset_end_frac,
+                        exclude_segment_idx=filtered_idx,
+                    )
+                    aligned_endpoint_features[(ref_idx, target_idx)] = aligned_ep
+            logger.info(
+                f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
+            )
+
+        # Pre-compute buffers for full geometries (5m and 15m)
+        # This avoids redundant buffer computation in workers since each geometry
+        # may appear in multiple candidate pairs
+        logger.info(
+            f"Pre-computing buffers for {len(unique_ref_indices)} ref and "
+            f"{len(unique_target_indices)} target geometries..."
+        )
+
+        ref_buffers_5m = {}
+        ref_buffers_15m = {}
+        for idx in unique_ref_indices:
+            geom = ref_geoms[idx]
+            if geom is not None and not geom.is_empty:
+                ref_buffers_5m[idx] = geom.buffer(5.0)
+                ref_buffers_15m[idx] = geom.buffer(15.0)
+
+        target_buffers_5m = {}
+        target_buffers_15m = {}
+        for idx in unique_target_indices:
+            geom = target_geoms[idx]
+            if geom is not None and not geom.is_empty:
+                target_buffers_5m[idx] = geom.buffer(5.0)
+                target_buffers_15m[idx] = geom.buffer(15.0)
+
+        logger.info(
+            f"Pre-computed {len(ref_buffers_5m) + len(target_buffers_5m)} buffers at 5m, "
+            f"{len(ref_buffers_15m) + len(target_buffers_15m)} at 15m"
+        )
 
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
@@ -982,6 +1028,10 @@ class MLMatcher:
         worker_data = {
             "ref_geoms": ref_geoms,
             "target_geoms": target_geoms,
+            "ref_buffers_5m": ref_buffers_5m,
+            "ref_buffers_15m": ref_buffers_15m,
+            "target_buffers_5m": target_buffers_5m,
+            "target_buffers_15m": target_buffers_15m,
             "ref_names": ref_names,
             "target_names": target_names,
             "ref_classes": ref_classes,
@@ -990,19 +1040,27 @@ class MLMatcher:
             "target_subclasses": target_subclasses,
             "ref_ids": ref_ids,
             "target_ids": target_ids,
-            "endpoint_features": target_endpoint_features,
+            "aligned_endpoint_features": aligned_endpoint_features,
             "ref_topology": ref_topology_features,
             "target_topology": target_topology_features,
             "ref_graphlet_data": ref_graphlet_data,
             "target_graphlet_data": target_graphlet_data,
             "alignments": alignments,
-            "use_aligned_features": use_aligned_features,
         }
 
-        # Prepare work items as simple tuples
-        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+        # Prepare work items as simple tuples, sorted by ref_idx for cache locality
+        # Grouping by ref_idx improves buffer cache hit rate since reference
+        # geometries appear in multiple candidate pairs
+        work_items_with_idx = [
+            (cand.ref_idx, cand.target_idx, i) for i, cand in enumerate(candidates)
+        ]
+        work_items_with_idx.sort(key=lambda x: (x[0], x[1]))  # Sort by ref_idx, then target_idx
 
-        # Process with map for ordered results
+        # Extract sorted work items and keep track of original indices for result ordering
+        work_items = [(item[0], item[1]) for item in work_items_with_idx]
+        original_indices = [item[2] for item in work_items_with_idx]
+
+        # Process with map for ordered results (in sorted order)
         # Use smaller chunks for more frequent progress updates
         chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
         features_list = []
@@ -1023,23 +1081,67 @@ class MLMatcher:
                 pct = processed / len(work_items) * 100
                 logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
 
-        # Log any errors encountered during feature computation
-        errors = [f for f in features_list if f.get("_error")]
-        if errors:
-            logger.warning(f"{len(errors)} candidates had feature computation errors")
+        # Reorder results back to original candidate order
+        # (we sorted by spatial locality for cache efficiency)
+        features_list_reordered = [None] * len(features_list)
+        for sorted_idx, orig_idx in enumerate(original_indices):
+            features_list_reordered[orig_idx] = features_list[sorted_idx]
+        features_list = features_list_reordered
+
+        # Filter out rejected pairs (None results) and track valid candidates
+        # Pairs are rejected when they don't have aligned endpoint features
+        valid_pairs = [
+            (cand, feat) for cand, feat in zip(candidates, features_list) if feat is not None
+        ]
+        rejected_count = len(candidates) - len(valid_pairs)
+        if rejected_count > 0:
+            rejection_rate = rejected_count / len(candidates)
+            logger.info(
+                f"Rejected {rejected_count} pairs without aligned endpoint features "
+                f"({len(valid_pairs)} remaining, {rejection_rate:.1%} rejection rate)"
+            )
+            # Fail if too many pairs rejected - indicates data or configuration problem
+            if rejection_rate > 0.01:
+                raise ValueError(
+                    f"Alignment rejection rate {rejection_rate:.1%} exceeds 1% threshold. "
+                    f"{rejected_count} of {len(candidates)} pairs failed to align. "
+                    "This may indicate CRS issues, bad geometry data, or a bug."
+                )
+
+        # Extract valid features and candidates
+        valid_candidates = [p[0] for p in valid_pairs]
+        valid_features = [p[1] for p in valid_pairs]
+
+        # Check for degenerate geometry errors (aligned sublines becoming points/empty)
+        # These pairs get error default features but may indicate data quality issues
+        error_features = [f for f in valid_features if f.get("_error")]
+        if error_features:
+            error_rate = len(error_features) / len(valid_features)
+            logger.warning(
+                f"{len(error_features)} candidates had feature computation errors "
+                f"({error_rate:.1%} of valid pairs)"
+            )
+            # Fail if too many pairs have degenerate geometries
+            if error_rate > 0.20:
+                raise ValueError(
+                    f"Feature computation error rate {error_rate:.1%} exceeds 20% threshold. "
+                    f"{len(error_features)} of {len(valid_features)} pairs had errors "
+                    "(likely degenerate aligned sublines). "
+                    "This may indicate poor alignment coverage or bad geometry data."
+                )
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
-        logger.info(f"Running XGBoost prediction on {len(features_list):,} candidates...")
-        probs = self.predict(features_list)
+        logger.info(f"Running XGBoost prediction on {len(valid_features):,} candidates...")
+        probs = self.predict(valid_features)
         logger.info("XGBoost prediction complete")
 
         # Build results - use confidence-based decision, not class-based
         # This ensures high-confidence matches aren't filtered just because
         # the model's decision boundary puts them in "no_match" class
-        logger.info(f"Building {len(candidates):,} MatchResult objects...")
+        logger.info(f"Building {len(valid_candidates):,} MatchResult objects...")
         results = []
-        for i, cand in enumerate(candidates):
+        for i, cand in enumerate(valid_candidates):
             prob = probs[i]
 
             # Use confidence thresholds instead of class prediction
@@ -1061,7 +1163,7 @@ class MLMatcher:
                     decision=decision,
                     confidence=prob,
                     score_breakdown={},  # ML doesn't have component scores
-                    features=features_list[i],
+                    features=valid_features[i],
                     gers_start_frac=alignment.overture_start_frac if alignment else None,
                     gers_end_frac=alignment.overture_end_frac if alignment else None,
                     local_start_frac=alignment.dataset_start_frac if alignment else None,

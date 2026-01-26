@@ -255,3 +255,26 @@ def match_results():
     return [
         MockMatchResult("ref_1", "t_1", 0.9),
     ]
+
+
+@pytest.fixture
+def mock_endpoint_features():
+    """Mock endpoint features for tests that don't focus on endpoint proximity.
+
+    Since compute_pair_features() now requires endpoint_features to be provided
+    (computed on aligned subline endpoints), tests that aren't specifically testing
+    endpoint features can use this fixture.
+    """
+    return {
+        "min_endpoint_proximity_m": 0.0,
+        "max_endpoint_proximity_m": 0.0,
+        "shared_endpoint_count": 0,
+    }
+
+
+# Make the mock available as a constant for tests that don't use fixtures
+MOCK_ENDPOINT_FEATURES = {
+    "min_endpoint_proximity_m": 0.0,
+    "max_endpoint_proximity_m": 0.0,
+    "shared_endpoint_count": 0,
+}
