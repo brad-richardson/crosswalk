@@ -344,9 +344,12 @@ def _build_match_lookup(match_results: list) -> dict:
         if hasattr(result, "local_start_frac"):
             local_start_frac = result.local_start_frac
             local_end_frac = result.local_end_frac
-        else:
+        elif isinstance(result, dict):
             local_start_frac = result.get("local_start_frac")
             local_end_frac = result.get("local_end_frac")
+        else:
+            local_start_frac = None
+            local_end_frac = None
 
         lookup[target_id] = {
             "gers_id": gers_id,

@@ -804,6 +804,8 @@ class MLMatcher:
         target_class_column: str = "class",
         ref_subclass_column: str = "subclass",
         target_subclass_column: str = "subclass",
+        ref_id_column: str = "id",
+        target_id_column: str = "id",
         n_jobs: int = -1,
     ) -> list[MatchResult]:
         """Score candidates using the ML model.
@@ -818,6 +820,8 @@ class MLMatcher:
             target_class_column: Column name for target class
             ref_subclass_column: Column name for reference subclass
             target_subclass_column: Column name for target subclass
+            ref_id_column: Column name for reference IDs
+            target_id_column: Column name for target IDs
             n_jobs: Number of parallel jobs (-1 for all cores)
 
         Returns:
@@ -920,12 +924,12 @@ class MLMatcher:
         # Build spatial index for endpoint proximity features (filtered target only)
         logger.info("Building spatial index for endpoint features...")
         target_index = SpatialContextIndex()
-        target_index.build_from_gdf(target_candidates_only, id_column="id")
+        target_index.build_from_gdf(target_candidates_only, id_column=target_id_column)
 
         # Pre-compute topology features using efficient Union-Find batch computation
         # Get unique segment IDs for only the candidates we need
-        target_ids = target["id"].to_numpy()
-        ref_ids = reference["id"].to_numpy()
+        target_ids = target[target_id_column].to_numpy()
+        ref_ids = reference[ref_id_column].to_numpy()
         unique_target_ids = {str(target_ids[idx]) for idx in unique_target_indices}
         unique_ref_ids = {str(ref_ids[idx]) for idx in unique_ref_indices}
 
@@ -943,14 +947,14 @@ class MLMatcher:
         # Uses explicit connectors when available, falls back to geometry inference
         target_topology_by_id = compute_all_topology(
             target,
-            id_column="id",
+            id_column=target_id_column,
             tolerance_m=5.0,
             ids_to_compute=unique_target_ids,
             connectors_column="connectors" if target_has_connectors else None,
         )
         ref_topology_by_id = compute_all_topology(
             reference,
-            id_column="id",
+            id_column=ref_id_column,
             tolerance_m=5.0,
             ids_to_compute=unique_ref_ids,
             connectors_column="connectors" if ref_has_connectors else None,
@@ -985,13 +989,13 @@ class MLMatcher:
         # ref_has_connectors already defined earlier for topology computation
         ref_graphlet_data = precompute_graphlet_features(
             ref_candidates_only,
-            id_column="id",
+            id_column=ref_id_column,
             tolerance_m=5.0,
             connectors_column="connectors" if ref_has_connectors else None,
         )
         # Target data typically doesn't have explicit connectors, use endpoint-based inference
         target_graphlet_data = precompute_graphlet_features(
-            target_candidates_only_proj, id_column="id", tolerance_m=5.0
+            target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
         )
 
         # Pre-compute linestring alignments
