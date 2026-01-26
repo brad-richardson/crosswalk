@@ -35,6 +35,7 @@ from sklearn.model_selection import GroupShuffleSplit, cross_val_score
 from ..config import (
     DEFAULT_TOPOLOGY_FEATURES,
     FEATURE_COLUMNS,
+    FEATURE_VERSION,
     MAX_DISTANCE_METERS,
     SEMANTIC_FEATURES,
 )
@@ -337,6 +338,7 @@ class MLMatcher:
         self.label_encoder = {"match": 1, "no_match": 0, "associated": 2}
         self.label_decoder = {1: "match", 0: "no_match", 2: "associated"}
         self.is_binary = True  # Track if model is binary or multiclass
+        self.feature_version = None
         self._auto_select = auto_select
 
         if model_path and not auto_select:
@@ -359,6 +361,18 @@ class MLMatcher:
         self.label_encoder = data.get("label_encoder", self.label_encoder)
         self.label_decoder = data.get("label_decoder", self.label_decoder)
         self.is_binary = data.get("is_binary", True)
+        self.feature_version = data.get("feature_version")
+        if self.feature_version is None:
+            logger.warning(
+                f"Model {path} has no feature_version (pre-versioning model). "
+                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}."
+            )
+        elif self.feature_version != FEATURE_VERSION:
+            logger.warning(
+                f"Model feature_version={self.feature_version} does not match "
+                f"current code FEATURE_VERSION={FEATURE_VERSION}. "
+                "Consider retraining the model."
+            )
         logger.info(f"Loaded model from {path}")
 
     def save_model(self, path: str) -> None:
@@ -380,6 +394,7 @@ class MLMatcher:
             "label_encoder": self.label_encoder,
             "label_decoder": self.label_decoder,
             "is_binary": self.is_binary,
+            "feature_version": self.feature_version,
         }
         joblib.dump(data, path)
         logger.info(f"Saved model to {path}")
@@ -435,6 +450,30 @@ class MLMatcher:
         logger.info(
             f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets"
         )
+
+        # Check feature_version consistency across labels
+        if "feature_version" in df.columns:
+            version_counts = df["feature_version"].value_counts(dropna=False)
+            n_versions = len(version_counts)
+            if n_versions > 1:
+                logger.warning(
+                    f"Labels contain {n_versions} different feature versions: "
+                    f"{version_counts.to_dict()}"
+                )
+            n_current = (df["feature_version"] == FEATURE_VERSION).sum()
+            n_total = len(df)
+            logger.info(
+                f"Label feature versions: {n_current}/{n_total} match current "
+                f"FEATURE_VERSION={FEATURE_VERSION}"
+            )
+        else:
+            logger.warning(
+                "Labels have no feature_version column (pre-versioning labels). "
+                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}."
+            )
+
+        # Set feature_version for this trained model
+        self.feature_version = FEATURE_VERSION
 
         # Exclude specified datasets (for leave-one-out evaluation)
         if exclude_datasets:
