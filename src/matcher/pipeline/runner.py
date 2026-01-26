@@ -250,6 +250,8 @@ def run_pipeline(
             target_name_column=target_name_column,
             ref_class_column=ref_class_column,
             target_class_column=target_class_column,
+            ref_id_column=ref_id_column,
+            target_id_column=target_id_column,
             n_jobs=n_jobs,
         )
     else:

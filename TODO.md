@@ -16,8 +16,7 @@ This document consolidates all future feature ideas, technical debt, and improve
 8. [Infrastructure & Tooling](#infrastructure--tooling)
 9. [Label Data Management](#label-data-management)
 10. [Other Ideas](#other-ideas)
-11. [Integration Gap](#integration-gap-sub-segment-geometry-application)
-12. [Known Issues & Technical Debt](#known-issues--technical-debt)
+11. [Known Issues & Technical Debt](#known-issues--technical-debt)
 
 ---
 
@@ -45,14 +44,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 ---
 
 ## Semantic Features
-
-### Cardinal Direction Mismatch
-- **Status**: NOT IN FEATURE_COLUMNS (function exists but not used)
-- **Feature**: `cardinal_direction_mismatch`
-- **Purpose**: Catch "North Main St" vs "South Main St" false positives
-- **Computation**: Function exists in `semantic.py` but NOT in `FEATURE_COLUMNS` config
-- **Gap**: Feature is computed by `compute_name_similarity()` but not exposed to ML
-- **Action needed**: Add to `FEATURE_COLUMNS` in `config.py` and wire through `compute_pair_features()`
 
 ### Name Abbreviation Normalization
 - **Feature**: Enhancement to existing name similarity
@@ -213,16 +204,6 @@ Current topology features are hand-crafted and limited to local neighborhood. Gr
 ---
 
 ## Blocking & Candidate Generation Optimization
-
-### Multi-Stage Blocking Funnel
-- **Problem**: Current blocking generates too many false positives using only spatial proximity
-- **Proposed stages**:
-  1. Stage 1 (existing): STRtree with 50m buffer
-  2. Stage 2 (new): Pre-compute quick Hausdorff (use Douglas-Peucker simplified versions)
-  3. Stage 3 (new): Filter candidates by sinuosity ratio difference
-- **Impact**: 10-15% speedup, 20-30% fewer false candidates before expensive feature computation
-- **Academic basis**: Two-stage blocking used in Hootenanny and academic conflation literature
-- **Priority**: High (quick win)
 
 ### Adaptive Buffer Distance
 - **Problem**: Fixed 50m buffer may be too loose or too tight for different datasets
@@ -476,36 +457,6 @@ Considerations:
 
 ---
 
-## Integration Gap: Sub-Segment Geometry Application
-
-**Priority:** High
-**Status:** Identified gap
-
-### Current State
-
-- **Feature Computation (`compute.py`)**: YES - properly trims geometries to aligned portion using `create_subline`
-- **Bridge File (`resolution/bridge.py`)**: YES - writes alignment fractions (`gers_start_frac`, `local_start_frac`, etc.)
-- **Integration (`integration/combiner.py`)**: NO - does not apply fractions to slice geometry
-
-### Problem
-
-In `_add_target_segments`, the code takes the original full geometry (`row.geometry`) and adds it to output. It does NOT apply `local_start_frac` / `local_end_frac` from the bridge file.
-
-**Result**: If a 1km road matches a 300m segment with bridge saying "match at 0.0-0.3", the final map will contain the full 1km road, potentially overlapping other valid segments.
-
-### Solution
-
-Modify `_add_target_segments` in `combiner.py` to:
-1. Look up `local_start_frac` and `local_end_frac` from match result
-2. Use `shapely.substring` (or existing `create_subline` utility) to trim target geometry
-3. Add trimmed geometry to `combined_gdf`
-
-### Location
-
-`src/matcher/integration/combiner.py` - `_add_target_segments` function
-
----
-
 ## Integration: Connectivity-Based Gating
 
 **Priority:** Medium
@@ -565,26 +516,6 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 ---
 
 ## Known Issues & Technical Debt
-
-### HIGH: Feature/Data Versioning Not Enforced
-
-- **Problem**: Models don't persist `feature_version`; training doesn't filter labels by feature/data version
-- **Impact**: Mixed or stale labels can silently corrupt models
-- **Locations**:
-  - `src/matcher/labeling/label_store.py:66` (version recorded)
-  - `src/matcher/config.py:35` (version defined)
-  - `src/matcher/matching/ml.py:254, :311` (not checked)
-- **Solution**: Store feature_version in model metadata; filter/warn on version mismatch during training
-
-### HIGH: ML Scoring Hardcodes ID Column
-
-- **Problem**: Topology/graphlet features hardcode `id` column, ignoring caller ID columns
-- **Impact**: Datasets using `local_id` or other fields will mis-compute or error
-- **Locations**:
-  - `src/matcher/matching/ml.py:793`
-  - `src/matcher/matching/ml.py:818`
-  - `src/matcher/matching/ml.py:879`
-- **Solution**: Use configurable ID column names throughout scoring pipeline
 
 ### HIGH: Scalability - Large Dataset Support
 
@@ -704,20 +635,12 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 ## Implementation Priority Summary
 
-### High Priority (Quick Wins)
-
-| Feature/Fix | Category | Effort |
-|-------------|----------|--------|
-| Multi-stage blocking | Blocking | Low |
-
 ### Medium Priority
 
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
 | Junction angle distribution | Topology | Medium |
 | Local clustering coefficient | Topology | Low |
-| Integration gap fix | Integration | Medium |
-| ID column hardcoding | ML | Medium |
 
 ### Lower Priority (Research)
 

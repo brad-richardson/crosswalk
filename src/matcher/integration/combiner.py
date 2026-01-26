@@ -9,7 +9,8 @@ from loguru import logger
 from shapely import LineString
 from shapely.strtree import STRtree
 
-from ..config import settings
+from ..config import ALIGNMENT_FULL_TOLERANCE, settings
+from ..features.alignment import create_subline
 from .provenance import DroppedSegment, EdgeSource, TargetInput
 
 
@@ -224,11 +225,27 @@ def _add_target_segments(
     for idx, row in target.iterrows():
         geom = row.geometry
         original_id = str(row.get(id_column, idx))
+        match_info = match_lookup.get(original_id, {})
+
+        # Apply sub-segment slicing before overlap check so both overlap
+        # detection and the added segment use the same (possibly trimmed) geometry
+        segment_geom = geom
+        start_frac = match_info.get("local_start_frac")
+        end_frac = match_info.get("local_end_frac")
+        if start_frac is not None and end_frac is not None:
+            is_partial = (
+                abs(start_frac) > ALIGNMENT_FULL_TOLERANCE
+                or abs(end_frac - 1.0) > ALIGNMENT_FULL_TOLERANCE
+            )
+            if is_partial:
+                sliced = create_subline(geom, start_frac, end_frac)
+                if sliced is not None and not sliced.is_empty:
+                    segment_geom = sliced
 
         # Check for overlap with existing segments
         if existing_tree is not None:
             overlapping_idx, overlap_iou = _find_overlapping_segment(
-                geom,
+                segment_geom,
                 existing_geoms,
                 existing_tree,
                 overlap_buffer_m,
@@ -242,7 +259,7 @@ def _add_target_segments(
                         original_id=original_id,
                         source_dataset=dataset_name,
                         source_type=source_type,
-                        geometry=geom,
+                        geometry=segment_geom,
                         dropped_reason="overlap_lower_priority",
                         overlapping_edge_id=overlapping_idx,
                         overlap_iou=overlap_iou,
@@ -251,11 +268,8 @@ def _add_target_segments(
                 )
                 continue
 
-        # No overlap - add segment
-        match_info = match_lookup.get(original_id, {})
-
         segment = {
-            "geometry": geom,
+            "geometry": segment_geom,
             "_source": source_type.value,
             "_original_id": original_id,
             "_source_dataset": dataset_name,
@@ -310,7 +324,7 @@ def _find_overlapping_segment(
 
 
 def _build_match_lookup(match_results: list) -> dict:
-    """Build lookup from target_id to match info."""
+    """Build lookup from target_id to match info including alignment fractions."""
     lookup = {}
     for result in match_results:
         target_id = (
@@ -325,9 +339,22 @@ def _build_match_lookup(match_results: list) -> dict:
             result.confidence if hasattr(result, "confidence") else result.get("confidence", 0.0)
         )
 
+        # Extract local alignment fractions for sub-segment slicing
+        if hasattr(result, "local_start_frac"):
+            local_start_frac = result.local_start_frac
+            local_end_frac = result.local_end_frac
+        elif isinstance(result, dict):
+            local_start_frac = result.get("local_start_frac")
+            local_end_frac = result.get("local_end_frac")
+        else:
+            local_start_frac = None
+            local_end_frac = None
+
         lookup[target_id] = {
             "gers_id": gers_id,
             "confidence": confidence,
+            "local_start_frac": local_start_frac,
+            "local_end_frac": local_end_frac,
         }
     return lookup
 

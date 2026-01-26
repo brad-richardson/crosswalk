@@ -64,7 +64,6 @@ REAL_LABELED_EXAMPLES = {
             "graphlet_similarity": 1.0,
             "endpoint_degree_similarity": 1.0,
             # New features (PR #74)
-            "cardinal_direction_mismatch": 0.0,
             "sinuosity_ref": 1.0,
             "sinuosity_target": 1.0,
             "sinuosity_delta": 0.0,
@@ -135,7 +134,6 @@ REAL_LABELED_EXAMPLES = {
             "graphlet_similarity": 0.4,
             "endpoint_degree_similarity": 0.5,
             # New features (PR #74) - no_match values
-            "cardinal_direction_mismatch": 1.0,  # Mismatch
             "sinuosity_ref": 1.0,
             "sinuosity_target": 1.8,
             "sinuosity_delta": 0.8,
@@ -206,7 +204,6 @@ REAL_LABELED_EXAMPLES = {
             "graphlet_similarity": 0.6,
             "endpoint_degree_similarity": 0.7,
             # New features (PR #74) - borderline values (mixed signals)
-            "cardinal_direction_mismatch": 0.0,
             "sinuosity_ref": 1.1,
             "sinuosity_target": 1.4,
             "sinuosity_delta": 0.3,
@@ -278,7 +275,6 @@ REAL_LABELED_EXAMPLES = {
             "graphlet_similarity": 0.4,
             "endpoint_degree_similarity": 0.4,
             # New features (PR #74) - good geometry but other mismatches
-            "cardinal_direction_mismatch": 0.0,
             "sinuosity_ref": 1.05,
             "sinuosity_target": 1.4,  # Different curvature
             "sinuosity_delta": 0.35,
