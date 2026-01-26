@@ -82,7 +82,7 @@ FEATURE_COLUMNS = [
     "length_ratio",
     "centroid_distance_m",
     "collinear_gap_ratio",
-    # Semantic features - name (7)
+    # Semantic features - name (8)
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
