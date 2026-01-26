@@ -1,7 +1,9 @@
 """Tests for label store and feature parity."""
 
+from shapely.geometry import LineString
+
 from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
-from matcher.labeling.label_store import LABEL_COLUMNS
+from matcher.labeling.label_store import LABEL_COLUMNS, LabelStore
 from matcher.matching.ml import FEATURE_COLUMNS
 
 
@@ -126,3 +128,83 @@ class TestFeatureParity:
             f"ML model uses features that are not computed: {sorted(extra_in_ml)}\n"
             f"Either add these to ALL_FEATURE_COLUMNS in compute.py or remove from ml.py."
         )
+
+
+class TestGeometryPersistence:
+    """Test that LabelStore.add() with geometry params creates companion file."""
+
+    def test_add_with_geometry_creates_companion_file(self, tmp_path):
+        """Adding a label with geometry params persists to label_geometries/."""
+        import shutil
+
+        from matcher.labeling.geometry_store import DEFAULT_GEOMETRIES_DIR, GeometryStore
+
+        labels_dir = tmp_path / "labels"
+
+        store = LabelStore("test_dataset_geo_persist", labels_dir=labels_dir)
+
+        ref_geom = LineString([(0.0, 0.0), (1.0, 1.0)])
+        target_geom = LineString([(0.0, 0.1), (1.0, 1.1)])
+
+        try:
+            store.add(
+                gers_id="ref-001",
+                target_id="target-001",
+                label="match",
+                labeler="tester",
+                session_id="sess-001",
+                original_decision="review",
+                original_confidence=0.75,
+                features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+                ref_geometry=ref_geom,
+                target_geometry=target_geom,
+                ref_name_raw="Main St",
+                target_name_raw="Main Street",
+                ref_class_raw="residential",
+                target_class_raw="residential",
+                ref_subclass="urban",
+                target_subclass="urban",
+            )
+
+            # Label should be saved
+            assert len(store.df) == 1
+            assert store.df.iloc[0]["gers_id"] == "ref-001"
+
+            # Companion file should exist in the default geometry dir
+            geo_store = GeometryStore("test_dataset_geo_persist")
+            geo_path = DEFAULT_GEOMETRIES_DIR / "dataset=test_dataset_geo_persist" / "data.csv"
+            assert geo_path.exists(), f"Companion file not created at {geo_path}"
+
+            # Verify geometry was persisted correctly
+            result = geo_store.get_pair("ref-001", "target-001")
+            assert result is not None
+            assert result["ref_name"] == "Main St"
+            assert isinstance(result["ref_geometry"], LineString)
+        finally:
+            # Clean up companion file created in CWD
+            geo_partition = DEFAULT_GEOMETRIES_DIR / "dataset=test_dataset_geo_persist"
+            if geo_partition.exists():
+                shutil.rmtree(geo_partition)
+            # Remove parent dir if empty
+            if DEFAULT_GEOMETRIES_DIR.exists() and not any(DEFAULT_GEOMETRIES_DIR.iterdir()):
+                DEFAULT_GEOMETRIES_DIR.rmdir()
+
+    def test_add_without_geometry_no_error(self, tmp_path):
+        """Adding a label without geometry params does not raise an error."""
+        labels_dir = tmp_path / "labels"
+
+        store = LabelStore("test_dataset", labels_dir=labels_dir)
+
+        store.add(
+            gers_id="ref-001",
+            target_id="target-001",
+            label="match",
+            labeler="tester",
+            session_id="sess-001",
+            original_decision="review",
+            original_confidence=0.75,
+            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+        )
+
+        # No error should be raised, label should be saved
+        assert len(store.df) == 1

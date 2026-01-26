@@ -974,6 +974,15 @@ def record_one_to_n_label(
                 # Data version tracking
                 ref_data_version=st.session_state.get("ref_data_version"),
                 target_data_version=st.session_state.get("target_data_version"),
+                # Geometry persistence for reproducible backfill
+                ref_geometry=cand.ref_geometry,
+                target_geometry=cand.target_geometry,
+                ref_name_raw=cand.ref_name,
+                target_name_raw=cand.target_name,
+                ref_class_raw=cand.ref_class,
+                target_class_raw=cand.target_class,
+                ref_subclass=cand.ref_subclass,
+                target_subclass=cand.target_subclass,
             )
             push_undo(cand.ref_id, cand.target_id, "match_1n")
 
@@ -1098,6 +1107,15 @@ def record_label(
         # Data version tracking (captured when data was loaded)
         ref_data_version=st.session_state.get("ref_data_version"),
         target_data_version=st.session_state.get("target_data_version"),
+        # Geometry persistence for reproducible backfill
+        ref_geometry=pair.ref_geometry,
+        target_geometry=pair.target_geometry,
+        ref_name_raw=pair.ref_name,
+        target_name_raw=pair.target_name,
+        ref_class_raw=pair.ref_class,
+        target_class_raw=pair.target_class,
+        ref_subclass=pair.ref_subclass,
+        target_subclass=pair.target_subclass,
     )
 
     # Push to undo stack
