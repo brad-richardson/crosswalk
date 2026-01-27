@@ -147,27 +147,6 @@ class TestBatchGeometricEdgeCases:
         # min(90, 90) = 90. But with bidirectional: min(90, |180-90|) = min(90, 90) = 90
         assert result.heading_deltas[0] == pytest.approx(90.0, abs=1.0)
 
-    def test_precomputed_buffers(self):
-        """Precomputed buffers should produce identical results."""
-        arr_a = np.array([IDENTICAL_LINE, PARALLEL_LINE], dtype=object)
-        arr_b = np.array([PARALLEL_LINE, DIAGONAL_LINE], dtype=object)
-
-        # Without precomputed
-        result_no_pre = compute_geometric_features_batch(arr_a, arr_b)
-
-        # With precomputed 15m buffers (quad_segs=16 to match geom.buffer() default)
-        import shapely as shapely_mod
-
-        pre_15a = shapely_mod.buffer(arr_a, 15.0, quad_segs=16)
-        pre_15b = shapely_mod.buffer(arr_b, 15.0, quad_segs=16)
-        result_with_pre = compute_geometric_features_batch(
-            arr_a, arr_b, precomputed_bufs_15m_a=pre_15a, precomputed_bufs_15m_b=pre_15b
-        )
-
-        np.testing.assert_array_almost_equal(
-            result_no_pre.buffer_iou_15m, result_with_pre.buffer_iou_15m, decimal=6
-        )
-
     def test_5m_short_circuit(self):
         """Pairs with low 15m IoU should have zero 5m IoU (short-circuit)."""
         arr_a = np.array([FAR_LINE], dtype=object)

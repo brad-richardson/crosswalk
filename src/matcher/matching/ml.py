@@ -215,10 +215,19 @@ def _compute_feature_chunk(chunk):
     # Batch line_interpolate_point + distance across all pairs in the chunk
     # instead of calling per-pair in _compute_non_geometric_features.
     # arr_b = targets, arr_a = anchors (refs) — matches single-pair call order.
-    with timed_section("perpendicular_offset"):
-        batch_mean_offsets, batch_iqr_offsets, batch_p95_offsets = (
-            compute_perpendicular_offset_batch(arr_b, arr_a)
-        )
+    try:
+        with timed_section("perpendicular_offset"):
+            batch_mean_offsets, batch_iqr_offsets, batch_p95_offsets = (
+                compute_perpendicular_offset_batch(arr_b, arr_a)
+            )
+    except Exception as e:
+        error_features = _get_error_features()
+        error_features["_error"] = str(e)
+        if is_profiling_enabled():
+            get_timing_stats().reset()
+        for pd_item in pair_data:
+            results[pd_item["chunk_idx"]] = error_features
+        return results
 
     # ---- Pass 3: Per-pair non-batchable features + assembly ----
     for i, pd_item in enumerate(pair_data):

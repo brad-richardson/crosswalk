@@ -168,10 +168,7 @@ def compute_perpendicular_offset_batch(
     if N == 0:
         return mean_offsets, iqr_offsets, p95_offsets
 
-    # Compute lengths for all targets in one call
-    lengths = shapely.length(target_geoms)
-
-    # Determine valid pairs and sample counts
+    # Determine valid pairs first (before calling Shapely ufuncs that can't handle None)
     valid_mask = np.array(
         [
             t is not None and a is not None and not shapely.is_empty(t) and not shapely.is_empty(a)
@@ -183,7 +180,7 @@ def compute_perpendicular_offset_batch(
         return mean_offsets, iqr_offsets, p95_offsets
 
     valid_indices = np.where(valid_mask)[0]
-    valid_lengths = lengths[valid_indices]
+    valid_lengths = shapely.length(target_geoms[valid_indices])
     n_samples_per = np.maximum(3, (valid_lengths / sample_interval).astype(int))
 
     # Boundaries for splitting results back per pair
