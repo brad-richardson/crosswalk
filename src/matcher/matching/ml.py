@@ -791,7 +791,6 @@ class MLMatcher:
         arr = df.to_numpy(dtype=np.float32)
         inf_mask = np.isinf(arr)
         if inf_mask.any():
-            arr = arr.copy()
             arr[inf_mask] = MAX_DISTANCE_METERS
         return arr
 
