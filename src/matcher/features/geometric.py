@@ -208,7 +208,6 @@ class GeometricFeatures(NamedTuple):
 def compute_geometric_features(
     line_a: LineString,
     line_b: LineString,
-    precomputed_buffers: dict | None = None,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
@@ -223,11 +222,6 @@ def compute_geometric_features(
     Args:
         line_a: First geometry (LineString in projected CRS with meter units)
         line_b: Second geometry (LineString in projected CRS with meter units)
-        precomputed_buffers: Optional dict with pre-computed buffers:
-            {"ref_5m": Polygon, "ref_15m": Polygon, "target_5m": Polygon, "target_15m": Polygon}
-            If provided, skips buffer computation. Keys should correspond to:
-            - ref_* for line_a buffers
-            - target_* for line_b buffers
 
     Returns:
         GeometricFeatures tuple with distances in meters
@@ -236,29 +230,7 @@ def compute_geometric_features(
     arr_a = np.array([line_a], dtype=object)
     arr_b = np.array([line_b], dtype=object)
 
-    # Pack precomputed buffers into arrays if available
-    pre_15a = (
-        np.array([precomputed_buffers["ref_15m"]], dtype=object)
-        if precomputed_buffers and precomputed_buffers.get("ref_15m")
-        else None
-    )
-    pre_15b = (
-        np.array([precomputed_buffers["target_15m"]], dtype=object)
-        if precomputed_buffers and precomputed_buffers.get("target_15m")
-        else None
-    )
-    pre_5a = (
-        np.array([precomputed_buffers["ref_5m"]], dtype=object)
-        if precomputed_buffers and precomputed_buffers.get("ref_5m")
-        else None
-    )
-    pre_5b = (
-        np.array([precomputed_buffers["target_5m"]], dtype=object)
-        if precomputed_buffers and precomputed_buffers.get("target_5m")
-        else None
-    )
-
-    batch = compute_geometric_features_batch(arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b)
+    batch = compute_geometric_features_batch(arr_a, arr_b)
 
     # Non-batchable per-pair ops
     coords_a = np.array(line_a.coords)
@@ -354,10 +326,6 @@ class BatchGeometricResult(NamedTuple):
 def compute_geometric_features_batch(
     lines_a: np.ndarray,
     lines_b: np.ndarray,
-    precomputed_bufs_15m_a: np.ndarray | None = None,
-    precomputed_bufs_15m_b: np.ndarray | None = None,
-    precomputed_bufs_5m_a: np.ndarray | None = None,
-    precomputed_bufs_5m_b: np.ndarray | None = None,
 ) -> BatchGeometricResult:
     """Compute batchable geometric features using vectorized Shapely 2.0 operations.
 
@@ -367,11 +335,6 @@ def compute_geometric_features_batch(
     Args:
         lines_a: Array of LineString geometries (N,), dtype=object
         lines_b: Array of LineString geometries (N,), dtype=object
-        precomputed_bufs_15m_a: Pre-computed 15m buffers for lines_a (optional).
-            Elements may be None where buffers need to be computed.
-        precomputed_bufs_15m_b: Pre-computed 15m buffers for lines_b (optional).
-        precomputed_bufs_5m_a: Pre-computed 5m buffers for lines_a (optional).
-        precomputed_bufs_5m_b: Pre-computed 5m buffers for lines_b (optional).
 
     Returns:
         BatchGeometricResult with all batchable geometric features.
@@ -395,9 +358,9 @@ def compute_geometric_features_batch(
     centroids_b = shapely_mod.centroid(lines_b)
     centroid_dists = shapely_mod.distance(centroids_a, centroids_b)
 
-    # 5. Build 15m buffer arrays, computing only where precomputed is None
-    bufs_a_15m = _merge_precomputed_buffers(lines_a, precomputed_bufs_15m_a, 15.0)
-    bufs_b_15m = _merge_precomputed_buffers(lines_b, precomputed_bufs_15m_b, 15.0)
+    # 5. Build 15m buffer arrays — vectorized
+    bufs_a_15m = shapely_mod.buffer(lines_a, 15.0, quad_segs=16)
+    bufs_b_15m = shapely_mod.buffer(lines_b, 15.0, quad_segs=16)
 
     # 6. Buffer IoU 15m - vectorized
     iou_15m = compute_buffer_iou_batch(bufs_a_15m, bufs_b_15m)
@@ -406,16 +369,8 @@ def compute_geometric_features_batch(
     iou_5m = np.zeros(N, dtype=np.float64)
     qualifying_mask = iou_15m > 0.3
     if qualifying_mask.any():
-        bufs_a_5m_q = _merge_precomputed_buffers(
-            lines_a[qualifying_mask],
-            precomputed_bufs_5m_a[qualifying_mask] if precomputed_bufs_5m_a is not None else None,
-            5.0,
-        )
-        bufs_b_5m_q = _merge_precomputed_buffers(
-            lines_b[qualifying_mask],
-            precomputed_bufs_5m_b[qualifying_mask] if precomputed_bufs_5m_b is not None else None,
-            5.0,
-        )
+        bufs_a_5m_q = shapely_mod.buffer(lines_a[qualifying_mask], 5.0, quad_segs=16)
+        bufs_b_5m_q = shapely_mod.buffer(lines_b[qualifying_mask], 5.0, quad_segs=16)
         iou_5m[qualifying_mask] = compute_buffer_iou_batch(bufs_a_5m_q, bufs_b_5m_q)
 
     # 8. Overlap ratio: length(intersection(lines_a, bufs_b_15m)) / lengths_a
@@ -437,33 +392,6 @@ def compute_geometric_features_batch(
         lengths_a=lengths_a,
         lengths_b=lengths_b,
     )
-
-
-def _merge_precomputed_buffers(
-    lines: np.ndarray,
-    precomputed: np.ndarray | None,
-    radius: float,
-) -> np.ndarray:
-    """Build buffer array, computing only where precomputed is None.
-
-    Args:
-        lines: Array of LineString geometries
-        precomputed: Array of pre-computed buffers (may contain None elements), or None
-        radius: Buffer radius
-
-    Returns:
-        Array of buffer polygons
-    """
-    # quad_segs=16 matches the default of geom.buffer() (resolution=16),
-    # which differs from shapely.buffer()'s default of quad_segs=8.
-    if precomputed is None:
-        return shapely_mod.buffer(lines, radius, quad_segs=16)
-
-    result = precomputed.copy()
-    needs_compute = np.array([b is None for b in result])
-    if needs_compute.any():
-        result[needs_compute] = shapely_mod.buffer(lines[needs_compute], radius, quad_segs=16)
-    return result
 
 
 def _compute_heading_deltas_batch(

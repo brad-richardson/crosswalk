@@ -91,6 +91,7 @@ def _compute_feature_chunk(chunk):
         timed_section,
     )
     from ..features.geometric import compute_geometric_features_batch
+    from ..features.relational import compute_perpendicular_offset_batch
 
     HIGH_COVERAGE_THRESHOLD = 0.995
 
@@ -131,14 +132,6 @@ def _compute_feature_chunk(chunk):
                     alignment,
                 )
 
-            with timed_section("worker_overhead"):
-                precomputed_buffers = {
-                    "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
-                    "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
-                    "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
-                    "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
-                }
-
             # Subline extraction (same logic as compute_pair_features)
             with timed_section("subline_extraction"):
                 if alignment is not None:
@@ -166,13 +159,6 @@ def _compute_feature_chunk(chunk):
                     geom_sim_ref = ref_geom
                     geom_sim_target = target_geom
 
-            # Determine if precomputed buffers apply (full geom, not sublines)
-            use_precomputed = (
-                precomputed_buffers is not None
-                and geom_sim_ref is ref_geom
-                and geom_sim_target is target_geom
-            )
-
             pair_data.append(
                 {
                     "chunk_idx": chunk_idx,
@@ -195,7 +181,6 @@ def _compute_feature_chunk(chunk):
                     "target_graphlet_data": target_graphlet_data,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
-                    "precomputed_buffers": precomputed_buffers if use_precomputed else None,
                 }
             )
             valid_indices.append(chunk_idx)
@@ -211,32 +196,29 @@ def _compute_feature_chunk(chunk):
         return results
 
     # ---- Pass 2: Batch geometric computation ----
-    N = len(pair_data)
     arr_a = np.array([pd["geom_sim_ref"] for pd in pair_data], dtype=object)
     arr_b = np.array([pd["geom_sim_target"] for pd in pair_data], dtype=object)
 
-    # Build precomputed buffer arrays
-    pre_15a = np.empty(N, dtype=object)
-    pre_15b = np.empty(N, dtype=object)
-    pre_5a = np.empty(N, dtype=object)
-    pre_5b = np.empty(N, dtype=object)
-    for i, pd_item in enumerate(pair_data):
-        pb = pd_item["precomputed_buffers"]
-        if pb is not None:
-            pre_15a[i] = pb.get("ref_15m")
-            pre_15b[i] = pb.get("target_15m")
-            pre_5a[i] = pb.get("ref_5m")
-            pre_5b[i] = pb.get("target_5m")
-        else:
-            pre_15a[i] = None
-            pre_15b[i] = None
-            pre_5a[i] = None
-            pre_5b[i] = None
-
     try:
         with timed_section("batch_geometric"):
-            batch_result = compute_geometric_features_batch(
-                arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b
+            batch_result = compute_geometric_features_batch(arr_a, arr_b)
+    except Exception as e:
+        error_features = _get_error_features()
+        error_features["_error"] = str(e)
+        if is_profiling_enabled():
+            get_timing_stats().reset()
+        for pd_item in pair_data:
+            results[pd_item["chunk_idx"]] = error_features
+        return results
+
+    # ---- Pass 2.5: Batch perpendicular offset ----
+    # Batch line_interpolate_point + distance across all pairs in the chunk
+    # instead of calling per-pair in _compute_non_geometric_features.
+    # arr_b = targets, arr_a = anchors (refs) — matches single-pair call order.
+    try:
+        with timed_section("perpendicular_offset"):
+            batch_mean_offsets, batch_iqr_offsets, batch_p95_offsets = (
+                compute_perpendicular_offset_batch(arr_b, arr_a)
             )
     except Exception as e:
         error_features = _get_error_features()
@@ -293,6 +275,11 @@ def _compute_feature_chunk(chunk):
                 ref_seg_id=pd_item["ref_seg_id"],
                 target_seg_id=pd_item["target_seg_id"],
                 geom_features=geom_features,
+                precomputed_lateral_offset=(
+                    batch_mean_offsets[i],
+                    batch_iqr_offsets[i],
+                    batch_p95_offsets[i],
+                ),
             )
 
             # Assemble full feature dict
@@ -1247,38 +1234,6 @@ class MLMatcher:
                 f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
             )
 
-        # Pre-compute buffers for full geometries (5m and 15m)
-        # This avoids redundant buffer computation in workers since each geometry
-        # may appear in multiple candidate pairs
-        logger.info(
-            f"Pre-computing buffers for {len(unique_ref_indices)} ref and "
-            f"{len(unique_target_indices)} target geometries..."
-        )
-
-        t0 = time.perf_counter()
-        ref_buffers_5m = {}
-        ref_buffers_15m = {}
-        for idx in unique_ref_indices:
-            geom = ref_geoms[idx]
-            if geom is not None and not geom.is_empty:
-                ref_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
-                ref_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
-
-        target_buffers_5m = {}
-        target_buffers_15m = {}
-        for idx in unique_target_indices:
-            geom = target_geoms[idx]
-            if geom is not None and not geom.is_empty:
-                target_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
-                target_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
-
-        timings["buffer_precomputation"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] buffer_precomputation: {timings['buffer_precomputation']:.2f}s")
-        logger.info(
-            f"Pre-computed {len(ref_buffers_5m) + len(target_buffers_5m)} buffers at 5m, "
-            f"{len(ref_buffers_15m) + len(target_buffers_15m)} at 15m"
-        )
-
         # Determine number of workers (leave 2 cores for system)
         if n_jobs == -1:
             n_workers = max(1, mp.cpu_count() - 2)
@@ -1294,10 +1249,6 @@ class MLMatcher:
         worker_data = {
             "ref_geoms": ref_geoms,
             "target_geoms": target_geoms,
-            "ref_buffers_5m": ref_buffers_5m,
-            "ref_buffers_15m": ref_buffers_15m,
-            "target_buffers_5m": target_buffers_5m,
-            "target_buffers_15m": target_buffers_15m,
             "ref_names": ref_names,
             "target_names": target_names,
             "ref_classes": ref_classes,

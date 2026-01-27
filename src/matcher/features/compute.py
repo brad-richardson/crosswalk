@@ -165,6 +165,7 @@ def _compute_non_geometric_features(
     ref_seg_id: str | None,
     target_seg_id: str | None,
     geom_features: GeometricFeatures,
+    precomputed_lateral_offset: tuple[float, float, float] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -201,6 +202,7 @@ def _compute_non_geometric_features(
         ref_seg_id: Reference segment ID
         target_seg_id: Target segment ID
         geom_features: Pre-computed geometric features (batchable fields filled in)
+        precomputed_lateral_offset: Optional pre-computed (mean, iqr, p95) from batch.
 
     Returns:
         Dictionary of non-geometric feature name -> value, plus per-pair geometric
@@ -226,9 +228,12 @@ def _compute_non_geometric_features(
 
     # Lateral offset
     with timed_section("perpendicular_offset"):
-        lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-            geom_sim_target, geom_sim_ref
-        )
+        if precomputed_lateral_offset is not None:
+            lateral_offset, lateral_iqr, lateral_p95 = precomputed_lateral_offset
+        else:
+            lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
+                geom_sim_target, geom_sim_ref
+            )
 
     # Sinuosity
     with timed_section("sinuosity"):
@@ -447,7 +452,6 @@ def compute_pair_features(
     target_graphlet_data: tuple | None = None,
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
-    precomputed_buffers: dict | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -473,8 +477,6 @@ def compute_pair_features(
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
         ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
-        precomputed_buffers: Pre-computed buffers for full geometries (optional).
-            Only used when alignment coverage is high (>95%), otherwise subline buffers are computed.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -487,8 +489,7 @@ def compute_pair_features(
         #
         # Optimization: Skip subline extraction when coverage is >99.5%.
         # When alignment covers nearly the full geometry, extracting a subline
-        # just creates a nearly-identical geometry that defeats the buffer cache.
-        # Using the original geometry allows cache hits across pairs.
+        # just creates a nearly-identical geometry with unnecessary overhead.
         # Note: This threshold must be very high (>99%) to avoid conflicting
         # with divergence detection (PR #81) which trims alignment at 95-99%
         # coverage — using full geometry at those levels re-introduces the
@@ -528,25 +529,11 @@ def compute_pair_features(
             coords_target = np.array(geom_for_similarity_target.coords)
 
         # Compute geometric features on aligned sublines (or full geom if no alignment)
-        # Pass pre-computed buffers when using full geometries (high coverage)
         with timed_section("geometric_features"):
-            # Determine if we can use pre-computed buffers (full geometry, not sublines)
-            use_precomputed = (
-                precomputed_buffers is not None
-                and geom_for_similarity_ref is ref_geom
-                and geom_for_similarity_target is target_geom
+            geom_features = compute_geometric_features(
+                geom_for_similarity_ref,
+                geom_for_similarity_target,
             )
-            if use_precomputed:
-                geom_features = compute_geometric_features(
-                    geom_for_similarity_ref,
-                    geom_for_similarity_target,
-                    precomputed_buffers=precomputed_buffers,
-                )
-            else:
-                geom_features = compute_geometric_features(
-                    geom_for_similarity_ref,
-                    geom_for_similarity_target,
-                )
 
         # Compute non-geometric features (semantic, topology, etc.)
         non_geom = _compute_non_geometric_features(

@@ -9,6 +9,7 @@ from matcher.features.relational import (
     compute_endpoint_proximity,
     compute_parallel_alignment,
     compute_perpendicular_offset,
+    compute_perpendicular_offset_batch,
     compute_side_of_street,
 )
 from matcher.features.spatial_context import (
@@ -335,3 +336,78 @@ class TestTopologyFeatures:
 
         assert compute_degree_signature_similarity((), (1, 2)) == 0.0
         assert compute_degree_signature_similarity((1, 2), ()) == 0.0
+
+
+class TestPerpendicularOffsetBatch:
+    """Tests that batch perpendicular offset matches single-pair results."""
+
+    def test_parallel_lines(self):
+        """Batch results match single-pair for parallel lines at known offset."""
+        road = LineString([(0, 0), (100, 0)])
+        sidewalk = LineString([(0, 3), (100, 3)])
+
+        # Single-pair
+        mean_s, iqr_s, p95_s = compute_perpendicular_offset(sidewalk, road)
+
+        # Batch (size 1)
+        targets = np.array([sidewalk], dtype=object)
+        anchors = np.array([road], dtype=object)
+        means_b, iqrs_b, p95s_b = compute_perpendicular_offset_batch(targets, anchors)
+
+        assert means_b[0] == pytest.approx(mean_s, abs=1e-6)
+        assert iqrs_b[0] == pytest.approx(iqr_s, abs=1e-6)
+        assert p95s_b[0] == pytest.approx(p95_s, abs=1e-6)
+
+    def test_multiple_pairs(self):
+        """Batch results match single-pair for multiple diverse geometries."""
+        pairs = [
+            # Parallel close
+            (LineString([(0, 5), (100, 5)]), LineString([(0, 0), (100, 0)])),
+            # Parallel far
+            (LineString([(0, 20), (100, 20)]), LineString([(0, 0), (100, 0)])),
+            # Angled
+            (LineString([(0, 0), (100, 50)]), LineString([(0, 0), (100, 0)])),
+            # Short segment
+            (LineString([(0, 3), (10, 3)]), LineString([(0, 0), (10, 0)])),
+        ]
+
+        targets = np.array([p[0] for p in pairs], dtype=object)
+        anchors = np.array([p[1] for p in pairs], dtype=object)
+        means_b, iqrs_b, p95s_b = compute_perpendicular_offset_batch(targets, anchors)
+
+        for i, (target, anchor) in enumerate(pairs):
+            mean_s, iqr_s, p95_s = compute_perpendicular_offset(target, anchor)
+            assert means_b[i] == pytest.approx(mean_s, abs=1e-6), f"Pair {i} mean mismatch"
+            assert iqrs_b[i] == pytest.approx(iqr_s, abs=1e-6), f"Pair {i} IQR mismatch"
+            assert p95s_b[i] == pytest.approx(p95_s, abs=1e-6), f"Pair {i} p95 mismatch"
+
+    def test_empty_geometries(self):
+        """Empty geometries return inf values."""
+        empty = LineString()
+        road = LineString([(0, 0), (100, 0)])
+
+        targets = np.array([empty, road], dtype=object)
+        anchors = np.array([road, empty], dtype=object)
+        means, iqrs, p95s = compute_perpendicular_offset_batch(targets, anchors)
+
+        assert means[0] == float("inf")
+        assert means[1] == float("inf")
+
+    def test_none_geometries(self):
+        """None geometries return inf values without raising."""
+        road = LineString([(0, 0), (100, 0)])
+        sidewalk = LineString([(0, 3), (100, 3)])
+
+        targets = np.array([None, sidewalk], dtype=object)
+        anchors = np.array([road, None], dtype=object)
+        means, iqrs, p95s = compute_perpendicular_offset_batch(targets, anchors)
+
+        assert means[0] == float("inf")
+        assert means[1] == float("inf")
+
+    def test_empty_batch(self):
+        """Empty arrays return empty results."""
+        means, iqrs, p95s = compute_perpendicular_offset_batch(
+            np.array([], dtype=object), np.array([], dtype=object)
+        )
+        assert len(means) == 0
