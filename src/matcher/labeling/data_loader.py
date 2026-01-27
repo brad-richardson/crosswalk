@@ -545,7 +545,7 @@ def compute_features_only(
         compute_aligned_endpoint_features_batch,
         compute_all_topology,
     )
-    from ..matching.ml import _compute_single_feature, _init_worker
+    from ..matching.ml import _compute_feature_chunk, _init_worker
 
     # Filter to LineStrings only
     if len(reference) == 0 or len(target) == 0:
@@ -706,10 +706,36 @@ def compute_features_only(
     n_candidates = len(candidates)
     logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
 
+    # Pre-compute buffers for full geometries (5m and 15m)
+    # Avoids redundant buffer computation since each geometry may appear in multiple pairs
+    logger.info(
+        f"Pre-computing buffers for {len(unique_ref_indices)} ref and "
+        f"{len(unique_target_indices)} target geometries..."
+    )
+    ref_buffers_5m = {}
+    ref_buffers_15m = {}
+    for idx in unique_ref_indices:
+        geom = ref_geoms[idx]
+        if geom is not None and not geom.is_empty:
+            ref_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+            ref_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
+
+    target_buffers_5m = {}
+    target_buffers_15m = {}
+    for idx in unique_target_indices:
+        geom = target_geoms[idx]
+        if geom is not None and not geom.is_empty:
+            target_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+            target_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
+
     # Prepare worker data
     worker_data = {
         "ref_geoms": ref_geoms,
         "target_geoms": target_geoms,
+        "ref_buffers_5m": ref_buffers_5m,
+        "ref_buffers_15m": ref_buffers_15m,
+        "target_buffers_5m": target_buffers_5m,
+        "target_buffers_15m": target_buffers_15m,
         "ref_names": ref_names,
         "target_names": target_names,
         "ref_classes": ref_classes,
@@ -734,14 +760,15 @@ def compute_features_only(
 
     from concurrent.futures import ProcessPoolExecutor
 
+    # Split work into chunks for batch geometric computation
+    chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
+
     with ProcessPoolExecutor(
         max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
     ) as executor:
-        for i in range(0, len(work_items), chunk_size * n_workers):
-            batch = work_items[i : i + chunk_size * n_workers]
-            batch_results = list(executor.map(_compute_single_feature, batch, chunksize=chunk_size))
-            features_list.extend(batch_results)
-            processed = min(i + len(batch), len(work_items))
+        for chunk_results in executor.map(_compute_feature_chunk, chunks):
+            features_list.extend(chunk_results)
+            processed = len(features_list)
             pct = processed / len(work_items) * 100
             logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
 

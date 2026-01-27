@@ -23,7 +23,6 @@ from matcher.features.geometric import (
     compute_shape_complexity,
     compute_sinuosity,
     compute_vertex_density,
-    get_buffer_cache_info,
 )
 from matcher.features.relational import (
     compute_endpoint_proximity,
@@ -224,71 +223,54 @@ class TestFeatureComputationPerformance:
         # Note: Speed assertion removed - too flaky on CI due to environment variability.
         # The correctness assertion above (line 187) is the important check.
 
-    def test_buffer_cache_effectiveness(self, synthetic_lines):
-        """Test that buffer caching provides speedup for repeated geometries.
+    def test_batch_vs_single_pair_performance(self, synthetic_lines):
+        """Test that batch geometric computation is efficient.
 
         Simulates the ML scoring scenario where each segment appears in
-        multiple candidate pairs (e.g., each reference segment matched
-        against multiple target segments).
+        multiple candidate pairs. The batch path uses vectorized Shapely 2.0
+        operations to avoid per-pair Python dispatch overhead.
         """
-        # Clear cache before test
-        clear_buffer_cache()
+        from matcher.features.geometric import compute_geometric_features_batch
 
         # Create pairs where the same geometries appear multiple times
-        # Each of the first 100 lines is paired with 50 different lines
         n_base_lines = 100
         n_pairs_per_line = 50
-        pairs = []
+        lines_a = []
+        lines_b = []
         for i in range(n_base_lines):
-            line_a = synthetic_lines[i]
             for j in range(n_pairs_per_line):
-                # Pair with different target lines
                 target_idx = (i + j + 1) % len(synthetic_lines)
-                pairs.append((line_a, synthetic_lines[target_idx]))
+                lines_a.append(synthetic_lines[i])
+                lines_b.append(synthetic_lines[target_idx])
 
-        n_pairs = len(pairs)
+        n_pairs = len(lines_a)
         print(
-            f"\nTesting {n_pairs} pairs with {n_base_lines} base geometries (avg {n_pairs_per_line} reuses each)"
+            f"\nTesting {n_pairs} pairs with {n_base_lines} base geometries "
+            f"(avg {n_pairs_per_line} reuses each)"
         )
 
-        # First run - cold cache
-        clear_buffer_cache()
+        # Per-pair path
         start = time.perf_counter()
-        for line_a, line_b in pairs:
-            compute_geometric_features(line_a, line_b)
-        elapsed_cold = time.perf_counter() - start
-        cache_info_after_cold = get_buffer_cache_info()
+        for la, lb in zip(lines_a, lines_b):
+            compute_geometric_features(la, lb)
+        elapsed_single = time.perf_counter() - start
 
-        # Second run - warm cache (same pairs)
+        # Batch path
+        arr_a = np.array(lines_a, dtype=object)
+        arr_b = np.array(lines_b, dtype=object)
         start = time.perf_counter()
-        for line_a, line_b in pairs:
-            compute_geometric_features(line_a, line_b)
-        elapsed_warm = time.perf_counter() - start
-        cache_info_after_warm = get_buffer_cache_info()
+        compute_geometric_features_batch(arr_a, arr_b)
+        elapsed_batch = time.perf_counter() - start
 
-        speedup = elapsed_cold / elapsed_warm if elapsed_warm > 0 else 1.0
+        speedup = elapsed_single / elapsed_batch if elapsed_batch > 0 else 1.0
 
-        print("\nBuffer cache results:")
-        print(f"  Cold cache: {elapsed_cold:.3f}s ({n_pairs / elapsed_cold:.0f} pairs/sec)")
-        print(f"  Warm cache: {elapsed_warm:.3f}s ({n_pairs / elapsed_warm:.0f} pairs/sec)")
+        print("\nBatch vs single-pair results:")
+        print(f"  Single-pair: {elapsed_single:.3f}s ({n_pairs / elapsed_single:.0f} pairs/sec)")
+        print(f"  Batch: {elapsed_batch:.3f}s ({n_pairs / elapsed_batch:.0f} pairs/sec)")
         print(f"  Speedup: {speedup:.2f}x")
-        print(f"  Cache after cold run: {cache_info_after_cold}")
-        print(f"  Cache after warm run: {cache_info_after_warm}")
 
-        # Expect significant cache hits on warm run
-        # Each unique geometry should be cached with 2 radii (5m and 15m)
-        # With 100 base lines × 2 radii = 200 unique buffers for line_a
-        # Plus varying line_b buffers
-        assert cache_info_after_warm.hits > cache_info_after_cold.hits, (
-            "Warm cache should have more hits than cold cache"
-        )
-
-        # Warm run should be faster due to cache hits
-        # (relaxed assertion since cache benefits depend on geometry complexity)
-        assert speedup >= 0.9, f"Warm cache should be at least as fast: speedup={speedup:.2f}x"
-
-        # Clear cache after test
-        clear_buffer_cache()
+        # Batch should be at least as fast as single-pair (typically 2-5x faster)
+        assert speedup >= 0.9, f"Batch path should be at least as fast: speedup={speedup:.2f}x"
 
     def test_collinear_gap_ratio_baseline(self, synthetic_lines):
         """Baseline benchmark for compute_collinear_gap_ratio."""

@@ -118,6 +118,9 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
 from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import (
+    GeometricFeatures,
+    _compute_hausdorff_stats,
+    compute_collinear_gap_ratio,
     compute_geometric_features,
     compute_heading_consistency,
     compute_shape_complexity,
@@ -141,6 +144,291 @@ from .spatial_context import (
 ALL_FEATURE_COLUMNS = FEATURE_COLUMNS
 
 
+def _compute_non_geometric_features(
+    geom_sim_ref,
+    geom_sim_target,
+    coords_ref: "np.ndarray",
+    coords_target: "np.ndarray",
+    ref_name: str | None,
+    target_name: str | None,
+    ref_class: str | None,
+    target_class: str | None,
+    ref_subclass: str | None,
+    target_subclass: str | None,
+    endpoint_features: dict[str, float],
+    ref_topology: dict | None,
+    target_topology: dict | None,
+    alignment: AlignmentResult | None,
+    graphlet_features: dict[str, float] | None,
+    ref_graphlet_data: tuple | None,
+    target_graphlet_data: tuple | None,
+    ref_seg_id: str | None,
+    target_seg_id: str | None,
+    geom_features: GeometricFeatures,
+) -> dict[str, float]:
+    """Compute all non-batchable features for a single candidate pair.
+
+    This extracts the per-pair features that cannot be vectorized:
+    - Hausdorff stats (mean/p95) - different vertex counts per pair
+    - Collinear gap ratio - Numba JIT
+    - Semantic features (name/class similarity)
+    - Lateral offset
+    - Sinuosity, heading consistency, vertex density, shape complexity
+    - Endpoint proximity
+    - Topology features
+    - Graphlet features
+    - Coverage features
+    - Min length
+
+    Args:
+        geom_sim_ref: Reference geometry for similarity (may be subline)
+        geom_sim_target: Target geometry for similarity (may be subline)
+        coords_ref: Pre-extracted coordinates for geom_sim_ref
+        coords_target: Pre-extracted coordinates for geom_sim_target
+        ref_name: Reference segment name
+        target_name: Target segment name
+        ref_class: Reference road class
+        target_class: Target road class
+        ref_subclass: Reference road subclass
+        target_subclass: Target road subclass
+        endpoint_features: Pre-computed endpoint proximity features
+        ref_topology: Topology features for reference
+        target_topology: Topology features for target
+        alignment: Alignment result
+        graphlet_features: Pre-computed graphlet similarity features
+        ref_graphlet_data: Graphlet data for reference
+        target_graphlet_data: Graphlet data for target
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        geom_features: Pre-computed geometric features (batchable fields filled in)
+
+    Returns:
+        Dictionary of non-geometric feature name -> value, plus per-pair geometric
+        fields (mean_hausdorff, p95, collinear_gap) merged in.
+    """
+    # Per-pair geometric features that can't be batched
+    with timed_section("geom_hausdorff_stats"):
+        mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
+            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+        )
+
+    with timed_section("geom_collinear_gap"):
+        collinear_gap_ratio = compute_collinear_gap_ratio(
+            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+        )
+
+    # Semantic features
+    with timed_section("name_similarity"):
+        name_sim = compute_name_similarity(ref_name, target_name)
+
+    with timed_section("class_similarity"):
+        class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
+
+    # Lateral offset
+    with timed_section("perpendicular_offset"):
+        lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
+            geom_sim_target, geom_sim_ref
+        )
+
+    # Sinuosity
+    with timed_section("sinuosity"):
+        sinuosity_ref = compute_sinuosity(geom_sim_ref, coords=coords_ref)
+        sinuosity_target = compute_sinuosity(geom_sim_target, coords=coords_target)
+        sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
+
+    # Heading consistency
+    with timed_section("heading_consistency"):
+        heading_consistency_ref = compute_heading_consistency(geom_sim_ref)
+        heading_consistency_target = compute_heading_consistency(geom_sim_target)
+        heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
+
+    # Vertex density
+    with timed_section("vertex_density"):
+        vertex_density_ref = compute_vertex_density(geom_sim_ref, coords=coords_ref)
+        vertex_density_target = compute_vertex_density(geom_sim_target, coords=coords_target)
+        if vertex_density_ref > 0 and vertex_density_target > 0:
+            vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
+                vertex_density_ref, vertex_density_target
+            )
+        else:
+            vertex_density_ratio = 0.0
+
+    # Min length
+    with timed_section("length_computation"):
+        ref_length = geom_sim_ref.length
+        target_length = geom_sim_target.length
+        min_length_m = min(ref_length, target_length)
+
+    # Shape complexity
+    with timed_section("shape_complexity"):
+        shape_complexity_ref = compute_shape_complexity(geom_sim_ref, coords=coords_ref)
+        shape_complexity_target = compute_shape_complexity(geom_sim_target, coords=coords_target)
+        shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
+
+    # Name numeric match
+    with timed_section("name_numeric_match"):
+        name_numeric_match = compute_name_numeric_match(ref_name, target_name)
+
+    # Endpoint features
+    with timed_section("endpoint_features_lookup"):
+        if endpoint_features is None:
+            raise ValueError(
+                "endpoint_features is required - must be computed on aligned subline endpoints"
+            )
+
+    # Topology features
+    with timed_section("aligned_topology"):
+        use_aligned_topology = (
+            alignment is not None
+            and ref_graphlet_data is not None
+            and target_graphlet_data is not None
+            and ref_seg_id is not None
+            and target_seg_id is not None
+        )
+
+        if use_aligned_topology:
+            from .spatial_context import compute_aligned_topology_features
+
+            _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
+            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
+
+            ref_aligned_topo = compute_aligned_topology_features(
+                ref_seg_id,
+                ref_seg_to_connectors,
+                ref_node_features,
+                alignment.overture_start_frac,
+                alignment.overture_end_frac,
+            )
+            target_aligned_topo = compute_aligned_topology_features(
+                target_seg_id,
+                target_seg_to_connectors,
+                target_node_features,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+
+            from_degree_ref = ref_aligned_topo["from_degree"]
+            to_degree_ref = ref_aligned_topo["to_degree"]
+            from_degree_target = target_aligned_topo["from_degree"]
+            to_degree_target = target_aligned_topo["to_degree"]
+            ref_topology = ref_aligned_topo
+            target_topology = target_aligned_topo
+        else:
+            if ref_topology is None:
+                ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+            if target_topology is None:
+                target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+
+            from_degree_ref = ref_topology.get("from_degree", 1)
+            to_degree_ref = ref_topology.get("to_degree", 1)
+            from_degree_target = target_topology.get("from_degree", 1)
+            to_degree_target = target_topology.get("to_degree", 1)
+
+    # Degree match score
+    with timed_section("degree_match"):
+        degree_match = compute_degree_match_score(
+            from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
+        )
+
+    # Degree signature similarity
+    with timed_section("degree_signature"):
+        ref_sig = ref_topology.get("degree_signature", (1,))
+        target_sig = target_topology.get("degree_signature", (1,))
+        sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
+
+    # Topology flags
+    with timed_section("topology_flags"):
+        is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
+        is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
+        dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
+
+        is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
+        is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
+        intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
+
+    # Coverage features
+    with timed_section("coverage_features"):
+        coverage_feats = compute_coverage_features(alignment)
+
+    # Log timing summary periodically
+    log_timing_summary_if_needed()
+
+    return {
+        # Per-pair geometric features (not batchable)
+        "mean_hausdorff_distance_m": mean_hausdorff,
+        "hausdorff_p95_m": p95_hausdorff,
+        "collinear_gap_ratio": collinear_gap_ratio,
+        # Semantic - name
+        "name_levenshtein": name_sim["levenshtein_ratio"],
+        "name_jaro_winkler": name_sim["jaro_winkler"],
+        "name_token_sort": name_sim["token_sort_ratio"],
+        "name_soundex": name_sim["soundex_match"],
+        "name_metaphone": name_sim["metaphone_similarity"],
+        "has_name_ref": name_sim["has_name_ref"],
+        "has_name_target": name_sim["has_name_target"],
+        "name_is_generic": name_sim["name_is_generic"],
+        # Semantic - class
+        "class_similarity": class_sim,
+        # Endpoint proximity
+        "min_endpoint_proximity_m": endpoint_features.get(
+            "min_endpoint_proximity_m", MAX_DISTANCE_METERS
+        ),
+        "max_endpoint_proximity_m": endpoint_features.get(
+            "max_endpoint_proximity_m", MAX_DISTANCE_METERS
+        ),
+        "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
+        # Lateral offset
+        "lateral_offset_m": min(lateral_offset, MAX_DISTANCE_METERS),
+        "lateral_offset_iqr_m": min(lateral_iqr, MAX_DISTANCE_METERS),
+        "lateral_offset_p95_m": min(lateral_p95, MAX_DISTANCE_METERS),
+        # Topology
+        "from_degree_ref": from_degree_ref,
+        "to_degree_ref": to_degree_ref,
+        "from_degree_target": from_degree_target,
+        "to_degree_target": to_degree_target,
+        "degree_match_score": degree_match,
+        "degree_signature_similarity": sig_similarity,
+        "is_dead_end_ref": is_dead_end_ref,
+        "is_dead_end_target": is_dead_end_target,
+        "dead_end_match": dead_end_match,
+        "is_intersection_ref": is_intersection_ref,
+        "is_intersection_target": is_intersection_target,
+        "intersection_match": intersection_match,
+        # Alignment coverage
+        "ref_coverage": coverage_feats["ref_coverage"],
+        "target_coverage": coverage_feats["target_coverage"],
+        "min_coverage": coverage_feats["min_coverage"],
+        "coverage_ratio": coverage_feats["coverage_ratio"],
+        # Graphlet features
+        "graphlet_similarity": (
+            graphlet_features.get("graphlet_similarity", 0.5) if graphlet_features else 0.5
+        ),
+        "endpoint_degree_similarity": (
+            graphlet_features.get("endpoint_degree_similarity", 0.5) if graphlet_features else 0.5
+        ),
+        # Sinuosity
+        "sinuosity_ref": sinuosity_ref,
+        "sinuosity_target": sinuosity_target,
+        "sinuosity_delta": sinuosity_delta,
+        # Heading consistency
+        "heading_consistency_ref": heading_consistency_ref,
+        "heading_consistency_target": heading_consistency_target,
+        "heading_consistency_delta": heading_consistency_delta,
+        # Vertex density
+        "vertex_density_ref": vertex_density_ref,
+        "vertex_density_target": vertex_density_target,
+        "vertex_density_ratio": vertex_density_ratio,
+        # Length
+        "min_length_m": min_length_m,
+        # Shape complexity
+        "shape_complexity_ref": shape_complexity_ref,
+        "shape_complexity_target": shape_complexity_target,
+        "shape_complexity_delta": shape_complexity_delta,
+        # Numeric route matching
+        "name_numeric_match": name_numeric_match,
+    }
+
+
 def compute_pair_features(
     ref_geom,
     target_geom,
@@ -160,7 +448,6 @@ def compute_pair_features(
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
     precomputed_buffers: dict | None = None,
-    buffer_output: dict | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -188,9 +475,6 @@ def compute_pair_features(
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
         precomputed_buffers: Pre-computed buffers for full geometries (optional).
             Only used when alignment coverage is high (>95%), otherwise subline buffers are computed.
-        buffer_output: If provided, store buffer polygons here and skip IoU
-            intersection (deferred mode for batch computation). The caller
-            is responsible for computing IoU from the stored buffers.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -257,255 +541,48 @@ def compute_pair_features(
                     geom_for_similarity_ref,
                     geom_for_similarity_target,
                     precomputed_buffers=precomputed_buffers,
-                    buffer_output=buffer_output,
                 )
             else:
                 geom_features = compute_geometric_features(
                     geom_for_similarity_ref,
                     geom_for_similarity_target,
-                    buffer_output=buffer_output,
                 )
 
-        # Compute semantic features
-        with timed_section("name_similarity"):
-            name_sim = compute_name_similarity(ref_name, target_name)
+        # Compute non-geometric features (semantic, topology, etc.)
+        non_geom = _compute_non_geometric_features(
+            geom_sim_ref=geom_for_similarity_ref,
+            geom_sim_target=geom_for_similarity_target,
+            coords_ref=coords_ref,
+            coords_target=coords_target,
+            ref_name=ref_name,
+            target_name=target_name,
+            ref_class=ref_class,
+            target_class=target_class,
+            ref_subclass=ref_subclass,
+            target_subclass=target_subclass,
+            endpoint_features=endpoint_features,
+            ref_topology=ref_topology,
+            target_topology=target_topology,
+            alignment=alignment,
+            graphlet_features=graphlet_features,
+            ref_graphlet_data=ref_graphlet_data,
+            target_graphlet_data=target_graphlet_data,
+            ref_seg_id=ref_seg_id,
+            target_seg_id=target_seg_id,
+            geom_features=geom_features,
+        )
 
-        with timed_section("class_similarity"):
-            class_sim = compute_class_similarity(
-                ref_class, target_class, ref_subclass, target_subclass
-            )
-
-        # Compute lateral offset on aligned sublines (not full geometries)
-        # This prevents segments that extend beyond the overlap from inflating the offset
-        with timed_section("perpendicular_offset"):
-            lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-                geom_for_similarity_target, geom_for_similarity_ref
-            )
-
-        # Compute sinuosity on aligned sublines (pass pre-extracted coords)
-        with timed_section("sinuosity"):
-            sinuosity_ref = compute_sinuosity(geom_for_similarity_ref, coords=coords_ref)
-            sinuosity_target = compute_sinuosity(geom_for_similarity_target, coords=coords_target)
-            sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
-
-        # Compute heading consistency on aligned sublines
-        with timed_section("heading_consistency"):
-            heading_consistency_ref = compute_heading_consistency(geom_for_similarity_ref)
-            heading_consistency_target = compute_heading_consistency(geom_for_similarity_target)
-            heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
-
-        # Compute vertex density on aligned sublines (pass pre-extracted coords)
-        with timed_section("vertex_density"):
-            vertex_density_ref = compute_vertex_density(geom_for_similarity_ref, coords=coords_ref)
-            vertex_density_target = compute_vertex_density(
-                geom_for_similarity_target, coords=coords_target
-            )
-            # Ratio: min/max to get value in [0, 1]
-            if vertex_density_ref > 0 and vertex_density_target > 0:
-                vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
-                    vertex_density_ref, vertex_density_target
-                )
-            else:
-                vertex_density_ratio = 0.0
-
-        # Compute min length using aligned subline lengths
-        with timed_section("length_computation"):
-            ref_length = geom_for_similarity_ref.length
-            target_length = geom_for_similarity_target.length
-            min_length_m = min(ref_length, target_length)
-
-        # Compute shape complexity on aligned sublines (pass pre-extracted coords)
-        with timed_section("shape_complexity"):
-            shape_complexity_ref = compute_shape_complexity(
-                geom_for_similarity_ref, coords=coords_ref
-            )
-            shape_complexity_target = compute_shape_complexity(
-                geom_for_similarity_target, coords=coords_target
-            )
-            shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
-
-        # Compute name numeric match for numbered routes
-        with timed_section("name_numeric_match"):
-            name_numeric_match = compute_name_numeric_match(ref_name, target_name)
-
-        # Require endpoint features to be provided
-        # These should be computed on aligned subline endpoints, not full geometry
-        with timed_section("endpoint_features_lookup"):
-            if endpoint_features is None:
-                raise ValueError(
-                    "endpoint_features is required - must be computed on aligned subline endpoints"
-                )
-
-        # Compute topology features - prefer alignment-aware when graphlet data is available
-        # This is critical for partial overlaps where we need degrees at the aligned
-        # subline endpoints, not at the full geometry endpoints.
-        with timed_section("aligned_topology"):
-            use_aligned_topology = (
-                alignment is not None
-                and ref_graphlet_data is not None
-                and target_graphlet_data is not None
-                and ref_seg_id is not None
-                and target_seg_id is not None
-            )
-
-            if use_aligned_topology:
-                # Compute alignment-aware topology from graphlet connector data
-                from .spatial_context import compute_aligned_topology_features
-
-                # Unpack graphlet data (G, seg_to_connectors, node_features, use_connectors)
-                _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
-                _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
-
-                # Compute aligned topology for reference
-                ref_aligned_topo = compute_aligned_topology_features(
-                    ref_seg_id,
-                    ref_seg_to_connectors,
-                    ref_node_features,
-                    alignment.overture_start_frac,
-                    alignment.overture_end_frac,
-                )
-
-                # Compute aligned topology for target
-                target_aligned_topo = compute_aligned_topology_features(
-                    target_seg_id,
-                    target_seg_to_connectors,
-                    target_node_features,
-                    alignment.dataset_start_frac,
-                    alignment.dataset_end_frac,
-                )
-
-                # Use aligned values
-                from_degree_ref = ref_aligned_topo["from_degree"]
-                to_degree_ref = ref_aligned_topo["to_degree"]
-                from_degree_target = target_aligned_topo["from_degree"]
-                to_degree_target = target_aligned_topo["to_degree"]
-                ref_topology = ref_aligned_topo
-                target_topology = target_aligned_topo
-            else:
-                # Fall back to pre-computed topology (for backward compatibility)
-                if ref_topology is None:
-                    ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
-                if target_topology is None:
-                    target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
-
-                # Extract degree values
-                from_degree_ref = ref_topology.get("from_degree", 1)
-                to_degree_ref = ref_topology.get("to_degree", 1)
-                from_degree_target = target_topology.get("from_degree", 1)
-                to_degree_target = target_topology.get("to_degree", 1)
-
-        # Compute degree match score
-        with timed_section("degree_match"):
-            degree_match = compute_degree_match_score(
-                from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
-            )
-
-        # Compute degree signature similarity
-        with timed_section("degree_signature"):
-            ref_sig = ref_topology.get("degree_signature", (1,))
-            target_sig = target_topology.get("degree_signature", (1,))
-            sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
-
-        # Topology flags
-        with timed_section("topology_flags"):
-            is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
-            is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
-            dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
-
-            is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
-            is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
-            intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
-
-        # Compute coverage features from alignment
-        with timed_section("coverage_features"):
-            coverage_feats = compute_coverage_features(alignment)
-
-        # Log timing summary periodically (when MATCHER_PROFILE=1)
-        log_timing_summary_if_needed()
-
+        # Merge batchable geometric features with non-geometric features
         features = {
-            # Geometric (distance features use _m suffix to indicate meters)
+            # Batchable geometric features (from compute_geometric_features)
             "hausdorff_distance_m": geom_features.hausdorff_distance,
-            "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
-            "hausdorff_p95_m": geom_features.hausdorff_p95_distance,
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
             "length_ratio": geom_features.length_ratio,
             "centroid_distance_m": geom_features.centroid_distance,
-            "collinear_gap_ratio": geom_features.collinear_gap_ratio,
-            # Semantic - name
-            "name_levenshtein": name_sim["levenshtein_ratio"],
-            "name_jaro_winkler": name_sim["jaro_winkler"],
-            "name_token_sort": name_sim["token_sort_ratio"],
-            "name_soundex": name_sim["soundex_match"],
-            "name_metaphone": name_sim["metaphone_similarity"],
-            "has_name_ref": name_sim["has_name_ref"],
-            "has_name_target": name_sim["has_name_target"],
-            "name_is_generic": name_sim["name_is_generic"],
-            # Semantic - class
-            "class_similarity": class_sim,
-            # Endpoint proximity (direction-invariant min/max)
-            "min_endpoint_proximity_m": endpoint_features.get(
-                "min_endpoint_proximity_m", MAX_DISTANCE_METERS
-            ),
-            "max_endpoint_proximity_m": endpoint_features.get(
-                "max_endpoint_proximity_m", MAX_DISTANCE_METERS
-            ),
-            "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
-            # Lateral offset (mean, IQR, P95 - robust to outliers)
-            "lateral_offset_m": min(lateral_offset, MAX_DISTANCE_METERS),
-            "lateral_offset_iqr_m": min(lateral_iqr, MAX_DISTANCE_METERS),
-            "lateral_offset_p95_m": min(lateral_p95, MAX_DISTANCE_METERS),
-            # Topology - Tier 1: Degree features
-            "from_degree_ref": from_degree_ref,
-            "to_degree_ref": to_degree_ref,
-            "from_degree_target": from_degree_target,
-            "to_degree_target": to_degree_target,
-            "degree_match_score": degree_match,
-            # Topology - Tier 2: Degree signature similarity
-            "degree_signature_similarity": sig_similarity,
-            # Topology - Tier 3: Topology flags
-            "is_dead_end_ref": is_dead_end_ref,
-            "is_dead_end_target": is_dead_end_target,
-            "dead_end_match": dead_end_match,
-            "is_intersection_ref": is_intersection_ref,
-            "is_intersection_target": is_intersection_target,
-            "intersection_match": intersection_match,
-            # Alignment coverage features
-            "ref_coverage": coverage_feats["ref_coverage"],
-            "target_coverage": coverage_feats["target_coverage"],
-            "min_coverage": coverage_feats["min_coverage"],
-            "coverage_ratio": coverage_feats["coverage_ratio"],
-            # Graphlet features (network topology similarity)
-            "graphlet_similarity": (
-                graphlet_features.get("graphlet_similarity", 0.5) if graphlet_features else 0.5
-            ),
-            "endpoint_degree_similarity": (
-                graphlet_features.get("endpoint_degree_similarity", 0.5)
-                if graphlet_features
-                else 0.5
-            ),
-            # Sinuosity features
-            "sinuosity_ref": sinuosity_ref,
-            "sinuosity_target": sinuosity_target,
-            "sinuosity_delta": sinuosity_delta,
-            # Heading consistency features
-            "heading_consistency_ref": heading_consistency_ref,
-            "heading_consistency_target": heading_consistency_target,
-            "heading_consistency_delta": heading_consistency_delta,
-            # Vertex density features
-            "vertex_density_ref": vertex_density_ref,
-            "vertex_density_target": vertex_density_target,
-            "vertex_density_ratio": vertex_density_ratio,
-            # Length features
-            "min_length_m": min_length_m,
-            # Shape complexity features
-            "shape_complexity_ref": shape_complexity_ref,
-            "shape_complexity_target": shape_complexity_target,
-            "shape_complexity_delta": shape_complexity_delta,
-            # Numeric route matching
-            "name_numeric_match": name_numeric_match,
+            # Non-geometric and per-pair geometric features
+            **non_geom,
         }
 
         # Embed per-pair timing data in the feature dict for main-process aggregation

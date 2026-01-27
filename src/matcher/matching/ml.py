@@ -56,116 +56,24 @@ def _init_worker(data):
 def _compute_single_feature(args):
     """Compute features for a single candidate pair (worker function).
 
-    This function delegates to compute_pair_features() to ensure consistency
-    between the ML scoring pipeline and the backfill pipeline (training data).
+    Thin wrapper around _compute_feature_chunk for single-pair callers.
 
     Returns a dict of features, None if pair is rejected (missing aligned endpoint
     features), or a dict with error defaults if computation fails.
     """
-    from ..features.compute import (
-        _get_error_features,
-        compute_graphlet_similarity,
-        compute_pair_features,
-        is_profiling_enabled,
-        timed_section,
-    )
-
-    ref_idx, target_idx = args
-    pair_key = (ref_idx, target_idx)
-
-    try:
-        with timed_section("worker_overhead"):
-            # Extract data from worker globals
-            ref_geom = _worker_data["ref_geoms"][ref_idx]
-            target_geom = _worker_data["target_geoms"][target_idx]
-
-            # Get pre-computed alignment if available
-            alignment = _worker_data.get("alignments", {}).get(pair_key)
-
-            # Get pre-computed aligned endpoint features for this pair
-            # These are computed at aligned subline endpoints, not full segment endpoints
-            # If missing, reject this pair (no fallback to full-geometry features)
-            endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
-            if endpoint_features is None:
-                # Pair doesn't have aligned endpoint features - reject it
-                # This happens when alignment failed for this pair
-                return None
-
-            # Get pre-computed topology features
-            ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
-            target_topology = _worker_data.get("target_topology", {}).get(target_idx)
-
-            # Compute graphlet similarity using precomputed graph data
-            # Pass alignment for alignment-aware connector lookup
-            ref_graphlet_data = _worker_data.get("ref_graphlet_data")
-            target_graphlet_data = _worker_data.get("target_graphlet_data")
-            ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
-            target_seg_id = str(_worker_data["target_ids"][target_idx])
-
-        with timed_section("graphlet_similarity"):
-            graphlet_features = compute_graphlet_similarity(
-                ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
-            )
-
-        with timed_section("worker_overhead"):
-            # Get pre-computed buffers for full geometries
-            # These are only used when alignment coverage is high (>95%)
-            precomputed_buffers = {
-                "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
-                "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
-                "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
-                "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
-            }
-
-        # Delegate to shared compute_pair_features function
-        # This ensures consistency with backfill pipeline (training data generation)
-        # Pass graphlet_data for alignment-aware topology computation (partial overlaps)
-        features = compute_pair_features(
-            ref_geom,
-            target_geom,
-            _worker_data["ref_names"][ref_idx],
-            _worker_data["target_names"][target_idx],
-            _worker_data["ref_classes"][ref_idx],
-            _worker_data["target_classes"][target_idx],
-            _worker_data["ref_subclasses"][ref_idx],
-            _worker_data["target_subclasses"][target_idx],
-            endpoint_features=endpoint_features,
-            ref_topology=ref_topology,
-            target_topology=target_topology,
-            alignment=alignment,
-            graphlet_features=graphlet_features,
-            ref_graphlet_data=ref_graphlet_data,
-            target_graphlet_data=target_graphlet_data,
-            ref_seg_id=ref_seg_id,
-            target_seg_id=target_seg_id,
-            precomputed_buffers=precomputed_buffers,
-        )
-        features["_error"] = None
-        return features
-
-    except Exception as e:
-        # Return error marker with default values (will result in low confidence)
-        error_features = _get_error_features()
-        error_features["_error"] = str(e)
-
-        # Reset timing stats on error to avoid leaking into next pair
-        if is_profiling_enabled():
-            from ..features.compute import get_timing_stats
-
-            get_timing_stats().reset()
-
-        return error_features
+    results = _compute_feature_chunk([args])
+    return results[0] if results else None
 
 
 def _compute_feature_chunk(chunk):
-    """Process a chunk of pairs with batched buffer IoU computation.
+    """Process a chunk of pairs with 3-pass batch architecture.
 
-    Instead of computing buffer intersection per-pair (Python loop overhead),
-    this function defers buffer IoU to a batch phase using vectorized Shapely
-    operations (shapely.intersection / shapely.area on arrays).
+    Pass 1: Collect geometry pairs, extract sublines, gather per-pair data
+    Pass 2: Batch geometric computation via compute_geometric_features_batch()
+    Pass 3: Per-pair non-batchable features + assembly
 
-    The per-pair feature computation is identical to _compute_single_feature
-    except buffer_iou_5m and buffer_iou_15m are computed in batch at the end.
+    This eliminates per-pair Python dispatch for all batchable Shapely operations
+    (hausdorff, buffer, centroid, length, overlap, heading delta).
 
     Args:
         chunk: List of (ref_idx, target_idx) tuples
@@ -173,21 +81,27 @@ def _compute_feature_chunk(chunk):
     Returns:
         List of feature dicts (or None for rejected pairs)
     """
+    from ..features.alignment import create_subline
     from ..features.compute import (
+        _compute_non_geometric_features,
         _get_error_features,
         compute_graphlet_similarity,
-        compute_pair_features,
         get_timing_stats,
         is_profiling_enabled,
         timed_section,
     )
-    from ..features.geometric import compute_buffer_iou_batch
+    from ..features.geometric import compute_geometric_features_batch
 
-    results = []
-    # (result_index, buffer_output_dict) for pairs that need batch IoU
-    buffer_data = []
+    HIGH_COVERAGE_THRESHOLD = 0.995
 
-    for ref_idx, target_idx in chunk:
+    # ---- Pass 1: Collect geometry pairs and per-pair data ----
+    # Store per-pair data for valid pairs only
+    pair_data = []  # list of dicts with per-pair data
+    # Track result positions: results[i] = None for rejected, or filled in pass 3
+    results = [None] * len(chunk)
+    valid_indices = []  # indices into results for valid pairs
+
+    for chunk_idx, (ref_idx, target_idx) in enumerate(chunk):
         pair_key = (ref_idx, target_idx)
 
         try:
@@ -198,7 +112,7 @@ def _compute_feature_chunk(chunk):
 
                 endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
                 if endpoint_features is None:
-                    results.append(None)
+                    # results[chunk_idx] stays None
                     continue
 
                 ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
@@ -225,86 +139,192 @@ def _compute_feature_chunk(chunk):
                     "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
                 }
 
-            buf_output = {}
-            features = compute_pair_features(
-                ref_geom,
-                target_geom,
-                _worker_data["ref_names"][ref_idx],
-                _worker_data["target_names"][target_idx],
-                _worker_data["ref_classes"][ref_idx],
-                _worker_data["target_classes"][target_idx],
-                _worker_data["ref_subclasses"][ref_idx],
-                _worker_data["target_subclasses"][target_idx],
-                endpoint_features=endpoint_features,
-                ref_topology=ref_topology,
-                target_topology=target_topology,
-                alignment=alignment,
-                graphlet_features=graphlet_features,
-                ref_graphlet_data=ref_graphlet_data,
-                target_graphlet_data=target_graphlet_data,
-                ref_seg_id=ref_seg_id,
-                target_seg_id=target_seg_id,
-                precomputed_buffers=precomputed_buffers,
-                buffer_output=buf_output,
+            # Subline extraction (same logic as compute_pair_features)
+            with timed_section("subline_extraction"):
+                if alignment is not None:
+                    ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
+                    target_coverage = alignment.dataset_end_frac - alignment.dataset_start_frac
+
+                    if ref_coverage >= HIGH_COVERAGE_THRESHOLD:
+                        geom_sim_ref = ref_geom
+                    else:
+                        ref_subline = create_subline(
+                            ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+                        )
+                        geom_sim_ref = ref_subline if ref_subline else ref_geom
+
+                    if target_coverage >= HIGH_COVERAGE_THRESHOLD:
+                        geom_sim_target = target_geom
+                    else:
+                        target_subline = create_subline(
+                            target_geom,
+                            alignment.dataset_start_frac,
+                            alignment.dataset_end_frac,
+                        )
+                        geom_sim_target = target_subline if target_subline else target_geom
+                else:
+                    geom_sim_ref = ref_geom
+                    geom_sim_target = target_geom
+
+            # Determine if precomputed buffers apply (full geom, not sublines)
+            use_precomputed = (
+                precomputed_buffers is not None
+                and geom_sim_ref is ref_geom
+                and geom_sim_target is target_geom
             )
-            features["_error"] = None
-            results.append(features)
-            buffer_data.append((len(results) - 1, buf_output))
+
+            pair_data.append(
+                {
+                    "chunk_idx": chunk_idx,
+                    "ref_idx": ref_idx,
+                    "target_idx": target_idx,
+                    "geom_sim_ref": geom_sim_ref,
+                    "geom_sim_target": geom_sim_target,
+                    "ref_name": _worker_data["ref_names"][ref_idx],
+                    "target_name": _worker_data["target_names"][target_idx],
+                    "ref_class": _worker_data["ref_classes"][ref_idx],
+                    "target_class": _worker_data["target_classes"][target_idx],
+                    "ref_subclass": _worker_data["ref_subclasses"][ref_idx],
+                    "target_subclass": _worker_data["target_subclasses"][target_idx],
+                    "endpoint_features": endpoint_features,
+                    "ref_topology": ref_topology,
+                    "target_topology": target_topology,
+                    "alignment": alignment,
+                    "graphlet_features": graphlet_features,
+                    "ref_graphlet_data": ref_graphlet_data,
+                    "target_graphlet_data": target_graphlet_data,
+                    "ref_seg_id": ref_seg_id,
+                    "target_seg_id": target_seg_id,
+                    "precomputed_buffers": precomputed_buffers if use_precomputed else None,
+                }
+            )
+            valid_indices.append(chunk_idx)
 
         except Exception as e:
             error_features = _get_error_features()
             error_features["_error"] = str(e)
             if is_profiling_enabled():
                 get_timing_stats().reset()
-            results.append(error_features)
+            results[chunk_idx] = error_features
 
-    # ---- Batch buffer IoU computation ----
-    if buffer_data:
-        with timed_section("batch_buffer_iou_15m"):
-            indices = [bd[0] for bd in buffer_data]
-            buf_a_15m = np.array([bd[1]["ref_buf_15m"] for bd in buffer_data], dtype=object)
-            buf_b_15m = np.array([bd[1]["target_buf_15m"] for bd in buffer_data], dtype=object)
+    if not pair_data:
+        return results
 
-            iou_15m = compute_buffer_iou_batch(buf_a_15m, buf_b_15m)
+    # ---- Pass 2: Batch geometric computation ----
+    N = len(pair_data)
+    arr_a = np.array([pd["geom_sim_ref"] for pd in pair_data], dtype=object)
+    arr_b = np.array([pd["geom_sim_target"] for pd in pair_data], dtype=object)
 
-            for i, idx in enumerate(indices):
-                results[idx]["buffer_iou_15m"] = float(iou_15m[i])
+    # Build precomputed buffer arrays
+    pre_15a = np.empty(N, dtype=object)
+    pre_15b = np.empty(N, dtype=object)
+    pre_5a = np.empty(N, dtype=object)
+    pre_5b = np.empty(N, dtype=object)
+    for i, pd_item in enumerate(pair_data):
+        pb = pd_item["precomputed_buffers"]
+        if pb is not None:
+            pre_15a[i] = pb.get("ref_15m")
+            pre_15b[i] = pb.get("target_15m")
+            pre_5a[i] = pb.get("ref_5m")
+            pre_5b[i] = pb.get("target_5m")
+        else:
+            pre_15a[i] = None
+            pre_15b[i] = None
+            pre_5a[i] = None
+            pre_5b[i] = None
 
-        # 5m IoU: only for pairs where 15m IoU > 0.3 (short-circuit)
-        with timed_section("batch_buffer_iou_5m"):
-            qualifying = [(i, buffer_data[i]) for i in range(len(buffer_data)) if iou_15m[i] > 0.3]
+    try:
+        with timed_section("batch_geometric"):
+            batch_result = compute_geometric_features_batch(
+                arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b
+            )
+    except Exception as e:
+        error_features = _get_error_features()
+        error_features["_error"] = str(e)
+        if is_profiling_enabled():
+            get_timing_stats().reset()
+        for pd_item in pair_data:
+            results[pd_item["chunk_idx"]] = error_features
+        return results
 
-            if qualifying:
-                bufs_a_5m = []
-                bufs_b_5m = []
-                q_result_indices = []
+    # ---- Pass 3: Per-pair non-batchable features + assembly ----
+    for i, pd_item in enumerate(pair_data):
+        chunk_idx = pd_item["chunk_idx"]
+        try:
+            with timed_section("coord_extraction"):
+                coords_ref = np.array(pd_item["geom_sim_ref"].coords)
+                coords_target = np.array(pd_item["geom_sim_target"].coords)
 
-                for _qi, (result_idx, buf_dict) in qualifying:
-                    q_result_indices.append(result_idx)
-                    a5 = buf_dict["ref_buf_5m"]
-                    b5 = buf_dict["target_buf_5m"]
-                    if a5 is None:
-                        a5 = buf_dict["ref_geom"].buffer(5.0)
-                    if b5 is None:
-                        b5 = buf_dict["target_geom"].buffer(5.0)
-                    bufs_a_5m.append(a5)
-                    bufs_b_5m.append(b5)
+            # Build a GeometricFeatures stub with batch values for _compute_non_geometric_features
+            from ..features.geometric import GeometricFeatures
 
-                buf_a_5m_arr = np.array(bufs_a_5m, dtype=object)
-                buf_b_5m_arr = np.array(bufs_b_5m, dtype=object)
-                iou_5m = compute_buffer_iou_batch(buf_a_5m_arr, buf_b_5m_arr)
+            geom_features = GeometricFeatures(
+                hausdorff_distance=float(batch_result.hausdorff_distances[i]),
+                mean_hausdorff_distance=0.0,  # Filled by _compute_non_geometric_features
+                hausdorff_p95_distance=0.0,  # Filled by _compute_non_geometric_features
+                buffer_iou_5m=float(batch_result.buffer_iou_5m[i]),
+                buffer_iou_15m=float(batch_result.buffer_iou_15m[i]),
+                heading_delta=float(batch_result.heading_deltas[i]),
+                length_ratio=float(batch_result.length_ratios[i]),
+                projection_distance=0.0,  # Filled by _compute_non_geometric_features
+                centroid_distance=float(batch_result.centroid_distances[i]),
+                overlap_ratio=float(batch_result.overlap_ratios[i]),
+                collinear_gap_ratio=0.0,  # Filled by _compute_non_geometric_features
+            )
 
-                for j, idx in enumerate(q_result_indices):
-                    results[idx]["buffer_iou_5m"] = float(iou_5m[j])
+            non_geom = _compute_non_geometric_features(
+                geom_sim_ref=pd_item["geom_sim_ref"],
+                geom_sim_target=pd_item["geom_sim_target"],
+                coords_ref=coords_ref,
+                coords_target=coords_target,
+                ref_name=pd_item["ref_name"],
+                target_name=pd_item["target_name"],
+                ref_class=pd_item["ref_class"],
+                target_class=pd_item["target_class"],
+                ref_subclass=pd_item["ref_subclass"],
+                target_subclass=pd_item["target_subclass"],
+                endpoint_features=pd_item["endpoint_features"],
+                ref_topology=pd_item["ref_topology"],
+                target_topology=pd_item["target_topology"],
+                alignment=pd_item["alignment"],
+                graphlet_features=pd_item["graphlet_features"],
+                ref_graphlet_data=pd_item["ref_graphlet_data"],
+                target_graphlet_data=pd_item["target_graphlet_data"],
+                ref_seg_id=pd_item["ref_seg_id"],
+                target_seg_id=pd_item["target_seg_id"],
+                geom_features=geom_features,
+            )
+
+            # Assemble full feature dict
+            features = {
+                # Batchable geometric features
+                "hausdorff_distance_m": float(batch_result.hausdorff_distances[i]),
+                "buffer_iou_5m": float(batch_result.buffer_iou_5m[i]),
+                "buffer_iou_15m": float(batch_result.buffer_iou_15m[i]),
+                "heading_delta": float(batch_result.heading_deltas[i]),
+                "length_ratio": float(batch_result.length_ratios[i]),
+                "centroid_distance_m": float(batch_result.centroid_distances[i]),
+                # Non-geometric and per-pair geometric features
+                **non_geom,
+                "_error": None,
+            }
+            results[chunk_idx] = features
+
+        except Exception as e:
+            error_features = _get_error_features()
+            error_features["_error"] = str(e)
+            if is_profiling_enabled():
+                get_timing_stats().reset()
+            results[chunk_idx] = error_features
 
     # Distribute batch timing evenly across pairs for profiling aggregation
-    if is_profiling_enabled() and buffer_data:
+    if is_profiling_enabled() and pair_data:
         stats = get_timing_stats()
-        n_buf = len(buffer_data)
+        n_pairs = len(pair_data)
         for name, total in stats.totals.items():
-            per_pair = total / n_buf
-            for idx, _ in buffer_data:
-                feat = results[idx]
+            per_pair = total / n_pairs
+            for pd_item in pair_data:
+                feat = results[pd_item["chunk_idx"]]
                 if feat is not None:
                     feat[f"_t_{name}"] = per_pair
         stats.reset()
@@ -1241,16 +1261,16 @@ class MLMatcher:
         for idx in unique_ref_indices:
             geom = ref_geoms[idx]
             if geom is not None and not geom.is_empty:
-                ref_buffers_5m[idx] = geom.buffer(5.0)
-                ref_buffers_15m[idx] = geom.buffer(15.0)
+                ref_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+                ref_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
         target_buffers_5m = {}
         target_buffers_15m = {}
         for idx in unique_target_indices:
             geom = target_geoms[idx]
             if geom is not None and not geom.is_empty:
-                target_buffers_5m[idx] = geom.buffer(5.0)
-                target_buffers_15m[idx] = geom.buffer(15.0)
+                target_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+                target_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
         timings["buffer_precomputation"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] buffer_precomputation: {timings['buffer_precomputation']:.2f}s")

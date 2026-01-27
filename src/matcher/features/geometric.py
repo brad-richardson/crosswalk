@@ -58,7 +58,8 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
-from shapely import LineString, get_coordinates, hausdorff_distance, line_interpolate_point, points
+import shapely as shapely_mod
+from shapely import LineString, get_coordinates, line_interpolate_point, points
 from shapely import distance as shapely_distance
 
 from ._jit_helpers import (
@@ -208,13 +209,16 @@ def compute_geometric_features(
     line_a: LineString,
     line_b: LineString,
     precomputed_buffers: dict | None = None,
-    buffer_output: dict | None = None,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
     IMPORTANT: Both geometries MUST be in a projected CRS (meters).
     If geometries are in a geographic CRS (degrees), all distance-based
     features will be incorrect. Ensure projection happens before calling.
+
+    This is a thin wrapper around compute_geometric_features_batch() for
+    single-pair callers. Non-batchable features (hausdorff stats, collinear
+    gap) are computed per-pair after the batch call.
 
     Args:
         line_a: First geometry (LineString in projected CRS with meter units)
@@ -224,146 +228,56 @@ def compute_geometric_features(
             If provided, skips buffer computation. Keys should correspond to:
             - ref_* for line_a buffers
             - target_* for line_b buffers
-        buffer_output: If provided, store buffer polygons here and skip IoU
-            intersection (deferred mode for batch computation). The caller
-            is responsible for computing IoU from the stored buffers.
 
     Returns:
         GeometricFeatures tuple with distances in meters
     """
-    from .compute import timed_section
+    # Batch path (size-1 arrays)
+    arr_a = np.array([line_a], dtype=object)
+    arr_b = np.array([line_b], dtype=object)
 
-    with timed_section("geom_coord_extraction"):
-        coords_a = np.array(line_a.coords)
-        coords_b = np.array(line_b.coords)
+    # Pack precomputed buffers into arrays if available
+    pre_15a = (
+        np.array([precomputed_buffers["ref_15m"]], dtype=object)
+        if precomputed_buffers and precomputed_buffers.get("ref_15m")
+        else None
+    )
+    pre_15b = (
+        np.array([precomputed_buffers["target_15m"]], dtype=object)
+        if precomputed_buffers and precomputed_buffers.get("target_15m")
+        else None
+    )
+    pre_5a = (
+        np.array([precomputed_buffers["ref_5m"]], dtype=object)
+        if precomputed_buffers and precomputed_buffers.get("ref_5m")
+        else None
+    )
+    pre_5b = (
+        np.array([precomputed_buffers["target_5m"]], dtype=object)
+        if precomputed_buffers and precomputed_buffers.get("target_5m")
+        else None
+    )
 
-    # Hausdorff distance (max deviation) - using Shapely's implementation
-    # Hausdorff is symmetric, so digitization direction doesn't matter
-    with timed_section("geom_hausdorff"):
-        hausdorff = hausdorff_distance(line_a, line_b)
+    batch = compute_geometric_features_batch(arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b)
 
-    # Mean and P95 Hausdorff (robust to segmentation)
-    # Pass pre-extracted coords to avoid redundant extraction
-    with timed_section("geom_hausdorff_stats"):
-        mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
-            line_a, line_b, coords_a=coords_a, coords_b=coords_b
-        )
-
-    # Multi-scale Buffer IoU:
-    # - 5m: Captures tight alignment (exact centerline matches)
-    # - 15m: Captures offset alignment (sidewalks, bike lanes parallel to roads)
-    #
-    # Optimization: Use pre-computed buffers when available (for full geometries).
-    # When using aligned sublines, buffers are computed on-demand with caching.
-    #
-    # Optimization: Compute 15m first, skip 5m if 15m IoU is low.
-    # If geometries don't overlap at 15m, they definitely won't at 5m.
-    # This saves ~2 buffer creations for distant pairs (majority of candidates).
-    with timed_section("geom_buffer_15m"):
-        if buffer_output is not None:
-            # DEFERRED MODE: compute/lookup buffers, skip intersection
-            # Use precomputed if available, otherwise compute directly (no WKB cache)
-            if precomputed_buffers is not None:
-                buf_a_15m = precomputed_buffers.get("ref_15m") or line_a.buffer(15.0)
-                buf_b_15m = precomputed_buffers.get("target_15m") or line_b.buffer(15.0)
-            else:
-                buf_a_15m = line_a.buffer(15.0)
-                buf_b_15m = line_b.buffer(15.0)
-            buffer_output["ref_buf_15m"] = buf_a_15m
-            buffer_output["target_buf_15m"] = buf_b_15m
-            buffer_iou_15m = 0.0  # Placeholder - set by batch caller
-        else:
-            # IMMEDIATE MODE: original per-pair behavior
-            if precomputed_buffers is not None:
-                buf_a_15m = precomputed_buffers.get("ref_15m")
-                buf_b_15m = precomputed_buffers.get("target_15m")
-                if buf_a_15m is None:
-                    buf_a_15m = get_cached_buffer(line_a, 15.0)
-                if buf_b_15m is None:
-                    buf_b_15m = get_cached_buffer(line_b, 15.0)
-            else:
-                buf_a_15m = get_cached_buffer(line_a, 15.0)
-                buf_b_15m = get_cached_buffer(line_b, 15.0)
-            buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
-
-    # Short-circuit: skip 5m buffer if 15m IoU is low
-    # Threshold 0.3 chosen because: if 15m buffers barely overlap,
-    # 5m buffers (which are 3x smaller) will have near-zero IoU.
-    with timed_section("geom_buffer_5m"):
-        if buffer_output is not None:
-            # DEFERRED MODE: store info for batch 5m computation
-            if precomputed_buffers is not None:
-                buffer_output["ref_buf_5m"] = precomputed_buffers.get("ref_5m")
-                buffer_output["target_buf_5m"] = precomputed_buffers.get("target_5m")
-            else:
-                buffer_output["ref_buf_5m"] = None
-                buffer_output["target_buf_5m"] = None
-            # Store geometries for 5m buffer creation if needed later
-            buffer_output["ref_geom"] = line_a
-            buffer_output["target_geom"] = line_b
-            buffer_iou_5m = 0.0  # Placeholder - set by batch caller
-        else:
-            # IMMEDIATE MODE: original per-pair behavior with short-circuit
-            if buffer_iou_15m > 0.3:
-                if precomputed_buffers is not None:
-                    buf_a_5m = precomputed_buffers.get("ref_5m")
-                    buf_b_5m = precomputed_buffers.get("target_5m")
-                    if buf_a_5m is None:
-                        buf_a_5m = get_cached_buffer(line_a, 5.0)
-                    if buf_b_5m is None:
-                        buf_b_5m = get_cached_buffer(line_b, 5.0)
-                else:
-                    buf_a_5m = get_cached_buffer(line_a, 5.0)
-                    buf_b_5m = get_cached_buffer(line_b, 5.0)
-                buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
-            else:
-                buffer_iou_5m = 0.0
-
-    # Heading delta (overall direction)
-    with timed_section("geom_heading_delta"):
-        heading_a = _compute_heading(coords_a[0], coords_a[-1])
-        heading_b = _compute_heading(coords_b[0], coords_b[-1])
-        heading_delta = _angle_diff(heading_a, heading_b)
-
-    # Length ratio
-    with timed_section("geom_length_ratio"):
-        len_a, len_b = line_a.length, line_b.length
-        length_ratio = min(len_a, len_b) / max(len_a, len_b) if max(len_a, len_b) > 0 else 0.0
-
-    # Average projection distance (mathematically equivalent to mean_hausdorff)
-    # Reuse already-computed value to avoid redundant computation
-    projection_distance = mean_hausdorff
-
-    # Centroid distance
-    with timed_section("geom_centroid_distance"):
-        centroid_distance = line_a.centroid.distance(line_b.centroid)
-
-    # Overlap ratio - NOTE: Changed from 10m to 15m buffer for performance.
-    # This is a semantic change but overlap_ratio is typically ~1.0 anyway
-    # due to blocking bias (candidates already spatially filtered).
-    # Using 15m buffer avoids creating an additional buffer geometry.
-    with timed_section("geom_overlap_ratio"):
-        overlap_ratio = _overlap_ratio(line_a, buf_b_15m)
-
-    # Collinear gap ratio (penalty for tip-to-tip segments)
-    # Pass pre-extracted coords to avoid redundant extraction
-    with timed_section("geom_collinear_gap"):
-        collinear_gap_ratio = compute_collinear_gap_ratio(
-            line_a, line_b, coords_a=coords_a, coords_b=coords_b
-        )
+    # Non-batchable per-pair ops
+    coords_a = np.array(line_a.coords)
+    coords_b = np.array(line_b.coords)
+    mean_h, p95_h = _compute_hausdorff_stats(line_a, line_b, coords_a=coords_a, coords_b=coords_b)
+    collinear = compute_collinear_gap_ratio(line_a, line_b, coords_a=coords_a, coords_b=coords_b)
 
     return GeometricFeatures(
-        hausdorff_distance=hausdorff,
-        mean_hausdorff_distance=mean_hausdorff,
-        hausdorff_p95_distance=p95_hausdorff,
-        buffer_iou_5m=buffer_iou_5m,
-        buffer_iou_15m=buffer_iou_15m,
-        heading_delta=heading_delta,
-        length_ratio=length_ratio,
-        projection_distance=projection_distance,
-        centroid_distance=centroid_distance,
-        overlap_ratio=overlap_ratio,
-        collinear_gap_ratio=collinear_gap_ratio,
+        hausdorff_distance=float(batch.hausdorff_distances[0]),
+        mean_hausdorff_distance=mean_h,
+        hausdorff_p95_distance=p95_h,
+        buffer_iou_5m=float(batch.buffer_iou_5m[0]),
+        buffer_iou_15m=float(batch.buffer_iou_15m[0]),
+        heading_delta=float(batch.heading_deltas[0]),
+        length_ratio=float(batch.length_ratios[0]),
+        projection_distance=mean_h,
+        centroid_distance=float(batch.centroid_distances[0]),
+        overlap_ratio=float(batch.overlap_ratios[0]),
+        collinear_gap_ratio=collinear,
     )
 
 
@@ -418,6 +332,186 @@ def compute_buffer_iou_batch(
     b_areas = shapely_mod.area(buf_b_array)
     union_areas = a_areas + b_areas - int_areas
     return np.where(union_areas > 0, int_areas / union_areas, 0.0)
+
+
+class BatchGeometricResult(NamedTuple):
+    """Results from batch geometric computation.
+
+    All arrays are shape (N,) where N is the number of pairs.
+    """
+
+    hausdorff_distances: np.ndarray  # (N,) float64
+    buffer_iou_15m: np.ndarray  # (N,) float64
+    buffer_iou_5m: np.ndarray  # (N,) float64
+    heading_deltas: np.ndarray  # (N,) float64
+    length_ratios: np.ndarray  # (N,) float64
+    centroid_distances: np.ndarray  # (N,) float64
+    overlap_ratios: np.ndarray  # (N,) float64
+    lengths_a: np.ndarray  # (N,) float64 - needed downstream
+    lengths_b: np.ndarray  # (N,) float64 - needed downstream
+
+
+def compute_geometric_features_batch(
+    lines_a: np.ndarray,
+    lines_b: np.ndarray,
+    precomputed_bufs_15m_a: np.ndarray | None = None,
+    precomputed_bufs_15m_b: np.ndarray | None = None,
+    precomputed_bufs_5m_a: np.ndarray | None = None,
+    precomputed_bufs_5m_b: np.ndarray | None = None,
+) -> BatchGeometricResult:
+    """Compute batchable geometric features using vectorized Shapely 2.0 operations.
+
+    This function performs all geometry operations that can be vectorized across
+    arrays of LineStrings, avoiding per-pair Python dispatch overhead.
+
+    Args:
+        lines_a: Array of LineString geometries (N,), dtype=object
+        lines_b: Array of LineString geometries (N,), dtype=object
+        precomputed_bufs_15m_a: Pre-computed 15m buffers for lines_a (optional).
+            Elements may be None where buffers need to be computed.
+        precomputed_bufs_15m_b: Pre-computed 15m buffers for lines_b (optional).
+        precomputed_bufs_5m_a: Pre-computed 5m buffers for lines_a (optional).
+        precomputed_bufs_5m_b: Pre-computed 5m buffers for lines_b (optional).
+
+    Returns:
+        BatchGeometricResult with all batchable geometric features.
+    """
+    N = len(lines_a)
+
+    # 1. Hausdorff distance - single vectorized call
+    hausdorff_dists = shapely_mod.hausdorff_distance(lines_a, lines_b)
+
+    # 2. Lengths - vectorized
+    lengths_a = shapely_mod.length(lines_a)
+    lengths_b = shapely_mod.length(lines_b)
+
+    # 3. Length ratios via numpy
+    max_lengths = np.maximum(lengths_a, lengths_b)
+    min_lengths = np.minimum(lengths_a, lengths_b)
+    length_ratios = np.where(max_lengths > 0, min_lengths / max_lengths, 0.0)
+
+    # 4. Centroid distance - vectorized centroids + distance
+    centroids_a = shapely_mod.centroid(lines_a)
+    centroids_b = shapely_mod.centroid(lines_b)
+    centroid_dists = shapely_mod.distance(centroids_a, centroids_b)
+
+    # 5. Build 15m buffer arrays, computing only where precomputed is None
+    bufs_a_15m = _merge_precomputed_buffers(lines_a, precomputed_bufs_15m_a, 15.0)
+    bufs_b_15m = _merge_precomputed_buffers(lines_b, precomputed_bufs_15m_b, 15.0)
+
+    # 6. Buffer IoU 15m - vectorized
+    iou_15m = compute_buffer_iou_batch(bufs_a_15m, bufs_b_15m)
+
+    # 7. Buffer IoU 5m with short-circuit: only process pairs where iou_15m > 0.3
+    iou_5m = np.zeros(N, dtype=np.float64)
+    qualifying_mask = iou_15m > 0.3
+    if qualifying_mask.any():
+        bufs_a_5m_q = _merge_precomputed_buffers(
+            lines_a[qualifying_mask],
+            precomputed_bufs_5m_a[qualifying_mask] if precomputed_bufs_5m_a is not None else None,
+            5.0,
+        )
+        bufs_b_5m_q = _merge_precomputed_buffers(
+            lines_b[qualifying_mask],
+            precomputed_bufs_5m_b[qualifying_mask] if precomputed_bufs_5m_b is not None else None,
+            5.0,
+        )
+        iou_5m[qualifying_mask] = compute_buffer_iou_batch(bufs_a_5m_q, bufs_b_5m_q)
+
+    # 8. Overlap ratio: length(intersection(lines_a, bufs_b_15m)) / lengths_a
+    intersections = shapely_mod.intersection(lines_a, bufs_b_15m)
+    intersection_lengths = shapely_mod.length(intersections)
+    overlap_ratios = np.where(lengths_a > 0, intersection_lengths / lengths_a, 0.0)
+
+    # 9. Heading delta - vectorized via get_point + get_x/get_y + numpy arctan2
+    heading_deltas = _compute_heading_deltas_batch(lines_a, lines_b)
+
+    return BatchGeometricResult(
+        hausdorff_distances=hausdorff_dists,
+        buffer_iou_15m=iou_15m,
+        buffer_iou_5m=iou_5m,
+        heading_deltas=heading_deltas,
+        length_ratios=length_ratios,
+        centroid_distances=centroid_dists,
+        overlap_ratios=overlap_ratios,
+        lengths_a=lengths_a,
+        lengths_b=lengths_b,
+    )
+
+
+def _merge_precomputed_buffers(
+    lines: np.ndarray,
+    precomputed: np.ndarray | None,
+    radius: float,
+) -> np.ndarray:
+    """Build buffer array, computing only where precomputed is None.
+
+    Args:
+        lines: Array of LineString geometries
+        precomputed: Array of pre-computed buffers (may contain None elements), or None
+        radius: Buffer radius
+
+    Returns:
+        Array of buffer polygons
+    """
+    # quad_segs=16 matches the default of geom.buffer() (resolution=16),
+    # which differs from shapely.buffer()'s default of quad_segs=8.
+    if precomputed is None:
+        return shapely_mod.buffer(lines, radius, quad_segs=16)
+
+    result = precomputed.copy()
+    needs_compute = np.array([b is None for b in result])
+    if needs_compute.any():
+        result[needs_compute] = shapely_mod.buffer(lines[needs_compute], radius, quad_segs=16)
+    return result
+
+
+def _compute_heading_deltas_batch(
+    lines_a: np.ndarray,
+    lines_b: np.ndarray,
+) -> np.ndarray:
+    """Compute heading deltas for arrays of LineStrings using vectorized Shapely.
+
+    Uses shapely.get_point to extract first/last points, then numpy for
+    arctan2 and angle difference computation.
+
+    Args:
+        lines_a: Array of LineString geometries (N,)
+        lines_b: Array of LineString geometries (N,)
+
+    Returns:
+        Array of heading deltas in degrees (0-90), accounting for bidirectional roads.
+    """
+    # Get first and last points of each line
+    start_a = shapely_mod.get_point(lines_a, 0)
+    end_a = shapely_mod.get_point(lines_a, -1)
+    start_b = shapely_mod.get_point(lines_b, 0)
+    end_b = shapely_mod.get_point(lines_b, -1)
+
+    # Extract x, y coordinates
+    sx_a = shapely_mod.get_x(start_a)
+    sy_a = shapely_mod.get_y(start_a)
+    ex_a = shapely_mod.get_x(end_a)
+    ey_a = shapely_mod.get_y(end_a)
+
+    sx_b = shapely_mod.get_x(start_b)
+    sy_b = shapely_mod.get_y(start_b)
+    ex_b = shapely_mod.get_x(end_b)
+    ey_b = shapely_mod.get_y(end_b)
+
+    # Compute headings (0-360 degrees)
+    heading_a = np.degrees(np.arctan2(ey_a - sy_a, ex_a - sx_a))
+    heading_a = (heading_a + 360) % 360
+    heading_b = np.degrees(np.arctan2(ey_b - sy_b, ex_b - sx_b))
+    heading_b = (heading_b + 360) % 360
+
+    # Angle difference (0-180)
+    diff = np.abs(heading_a - heading_b)
+    diff = np.where(diff > 180, 360 - diff, diff)
+
+    # Account for bidirectional roads (0 and 180 both indicate alignment)
+    opposite_diff = np.abs(180 - diff)
+    return np.minimum(diff, opposite_diff)
 
 
 def _compute_heading(start: np.ndarray, end: np.ndarray) -> float:
