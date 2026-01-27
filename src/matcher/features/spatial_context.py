@@ -225,6 +225,17 @@ class SpatialContextIndex:
     _geometries: gpd.GeoSeries | None = field(default=None, repr=False)
     _transformer: "Transformer | None" = field(default=None, repr=False)
     """Transformer to project query points from source CRS to endpoint CRS."""
+    _kdtree: object = field(default=None, repr=False)
+    """Cached scipy cKDTree for batch radius queries."""
+
+    @property
+    def kdtree(self):
+        """Lazily build and cache a scipy cKDTree from endpoint coordinates."""
+        if self._kdtree is None and self.endpoint_coords.size > 0:
+            from scipy.spatial import cKDTree
+
+            self._kdtree = cKDTree(self.endpoint_coords)
+        return self._kdtree
 
     def build_from_gdf(
         self,
@@ -636,6 +647,8 @@ def compute_aligned_endpoint_features(
     [0%, 43%], we want to measure endpoint proximity at the 43% position,
     not at the 100% position (the actual segment end).
 
+    Delegates to compute_aligned_endpoint_features_batch with a single pair.
+
     Args:
         geom: Full segment geometry
         context: SpatialContextIndex with all segments
@@ -643,6 +656,8 @@ def compute_aligned_endpoint_features(
         end_frac: End of aligned region (0.0 to 1.0)
         exclude_segment_idx: Segment index to exclude (self)
         tolerance_m: Distance threshold for "shared" endpoints (meters)
+        seg_id: Segment ID for connector lookup
+        seg_to_connectors: Optional connector data for snapping fractions
 
     Returns:
         Dictionary with:
@@ -650,73 +665,37 @@ def compute_aligned_endpoint_features(
         - max_endpoint_proximity_m: Maximum of start/end proximities (meters)
         - shared_endpoint_count: Number of segments with shared endpoints
     """
-    if geom is None or geom.is_empty or context.endpoint_coords.size == 0:
-        # Use MAX_DISTANCE_METERS instead of float("inf") for consistency
-        # with _get_error_features() and ml.py fallback defaults
-        return {
-            "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-            "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-            "shared_endpoint_count": 0,
-        }
+    from dataclasses import dataclass as _dataclass
 
-    # Clamp fractions to [0.0, 1.0] to avoid undefined behavior
-    start_frac = min(1.0, max(0.0, start_frac))
-    end_frac = min(1.0, max(0.0, end_frac))
+    @_dataclass
+    class _SingleAlignment:
+        dataset_start_frac: float
+        dataset_end_frac: float
 
-    # Snap fractions to nearest connector positions (real network junctions)
-    # when connector data is available. For full-segment matches (0.0/1.0),
-    # connectors at endpoints recover the old behavior.
-    if seg_to_connectors is not None and seg_id is not None:
-        connectors = seg_to_connectors.get(seg_id)
-        if connectors:
-            snapped = find_nearest_connector_position(connectors, start_frac)
-            if snapped is not None:
-                start_frac = snapped
-            snapped = find_nearest_connector_position(connectors, end_frac)
-            if snapped is not None:
-                end_frac = snapped
-
-    # Interpolate to get aligned endpoint coordinates
-    start_point = geom.interpolate(start_frac, normalized=True)
-    end_point = geom.interpolate(end_frac, normalized=True)
-
-    # Query nearby endpoints at these positions
-    start_nearby = context.query_nearby_endpoints(start_point, tolerance_m * 2)
-    end_nearby = context.query_nearby_endpoints(end_point, tolerance_m * 2)
-
-    # Filter out endpoints from excluded segment
-    if exclude_segment_idx is not None and exclude_segment_idx in context.segment_endpoints:
-        excluded_eps = set(context.segment_endpoints[exclude_segment_idx])
-        start_nearby = [(ep, d) for ep, d in start_nearby if ep not in excluded_eps]
-        end_nearby = [(ep, d) for ep, d in end_nearby if ep not in excluded_eps]
-
-    # Get minimum distances for start and end
-    start_proximity = start_nearby[0][1] if start_nearby else float("inf")
-    end_proximity = end_nearby[0][1] if end_nearby else float("inf")
-
-    # Direction-invariant: use min/max instead of start/end
-    min_proximity = min(start_proximity, end_proximity)
-    max_proximity = max(start_proximity, end_proximity)
-
-    # Count shared endpoints (within tolerance)
-    shared_segments = set()
-    for ep_idx, dist in start_nearby:
-        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
-            shared_segments.update(context.endpoint_to_segment[ep_idx])
-
-    for ep_idx, dist in end_nearby:
-        if dist <= tolerance_m and ep_idx in context.endpoint_to_segment:
-            shared_segments.update(context.endpoint_to_segment[ep_idx])
-
-    # Remove excluded segment
-    if exclude_segment_idx is not None:
-        shared_segments.discard(exclude_segment_idx)
-
-    return {
-        "min_endpoint_proximity_m": min_proximity,
-        "max_endpoint_proximity_m": max_proximity,
-        "shared_endpoint_count": len(shared_segments),
+    default_result = {
+        "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
+        "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
+        "shared_endpoint_count": 0,
     }
+
+    if geom is None or geom.is_empty:
+        return default_result
+
+    alignments = {(0, 0): _SingleAlignment(start_frac, end_frac)}
+    target_geoms = np.array([geom])
+    target_ids = np.array([seg_id or ""])
+    original_to_filtered = {0: exclude_segment_idx} if exclude_segment_idx is not None else {}
+
+    result = compute_aligned_endpoint_features_batch(
+        alignments=alignments,
+        target_geoms=target_geoms,
+        target_ids=target_ids,
+        target_index=context,
+        original_to_filtered=original_to_filtered,
+        seg_to_connectors=seg_to_connectors,
+    )
+
+    return result.get((0, 0), default_result)
 
 
 def compute_aligned_endpoint_features_batch(
@@ -751,7 +730,6 @@ def compute_aligned_endpoint_features_batch(
         return {}
 
     import shapely
-    from scipy.spatial import cKDTree
 
     tolerance_m = 5.0
     radius = tolerance_m * 2  # Same search radius as compute_aligned_endpoint_features
@@ -807,12 +785,18 @@ def compute_aligned_endpoint_features_batch(
     start_coords = shapely.get_coordinates(start_points)
     end_coords = shapely.get_coordinates(end_points)
 
-    # 4. Build cKDTree from endpoint coordinates for batch queries
+    # 4. Get cKDTree from endpoint coordinates for batch queries (cached on index)
     endpoint_coords = target_index.endpoint_coords
     if endpoint_coords.size == 0:
-        return {}
+        # No endpoints: return defaults for all valid pairs
+        default = {
+            "min_endpoint_proximity_m": float(MAX_DISTANCE_METERS),
+            "max_endpoint_proximity_m": float(MAX_DISTANCE_METERS),
+            "shared_endpoint_count": 0,
+        }
+        return {keys[valid_indices[j]]: default.copy() for j in range(len(valid_indices))}
 
-    tree = cKDTree(endpoint_coords)
+    tree = target_index.kdtree
 
     # 5. Batch radius queries (single C call each, replaces 2N individual STRtree queries)
     start_neighbors_list = tree.query_ball_point(start_coords, r=radius)

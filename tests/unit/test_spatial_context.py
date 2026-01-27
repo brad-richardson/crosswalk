@@ -1,6 +1,7 @@
 """Tests for spatial context indexing and topology computation."""
 
 import geopandas as gpd
+import numpy as np
 import pytest
 from shapely import LineString
 
@@ -9,6 +10,7 @@ from matcher.features.spatial_context import (
     UnionFind,
     _cluster_endpoints_fast,
     compute_aligned_endpoint_features,
+    compute_aligned_endpoint_features_batch,
     compute_aligned_topology_at_position,
     compute_aligned_topology_features,
     compute_all_topology,
@@ -1801,3 +1803,192 @@ class TestAlignedEndpointFeaturesWithConnectors:
         )
 
         assert result_without == result_with
+
+
+class TestAlignedEndpointFeaturesBatch:
+    """Tests for compute_aligned_endpoint_features_batch vectorized implementation."""
+
+    @pytest.fixture
+    def t_junction_context(self):
+        """Build a SpatialContextIndex from a T-junction of three segments."""
+        # seg_a: (0,0) -> (100,0)
+        # seg_b: (100,0) -> (200,0)
+        # seg_c: (100,0) -> (100,100)
+        segments = gpd.GeoDataFrame(
+            {
+                "id": ["a", "b", "c"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (200, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+            }
+        )
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(segments, id_column="id")
+        return ctx
+
+    def _make_alignment(self, start_frac, end_frac):
+        """Create a minimal alignment-like object for testing."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Alignment:
+            dataset_start_frac: float
+            dataset_end_frac: float
+
+        return _Alignment(start_frac, end_frac)
+
+    def test_batch_matches_per_pair(self, t_junction_context):
+        """Batch output should match per-pair compute_aligned_endpoint_features."""
+        geom = LineString([(0, 0), (100, 0)])
+        ctx = t_junction_context
+
+        # Per-pair result
+        per_pair = compute_aligned_endpoint_features(
+            geom, ctx, start_frac=0.0, end_frac=1.0, exclude_segment_idx=0
+        )
+
+        # Batch result
+        alignments = {(0, 0): self._make_alignment(0.0, 1.0)}
+        batch_result = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=np.array([geom]),
+            target_ids=np.array(["a"]),
+            target_index=ctx,
+            original_to_filtered={0: 0},
+        )
+
+        assert (0, 0) in batch_result
+        for key in (
+            "min_endpoint_proximity_m",
+            "max_endpoint_proximity_m",
+            "shared_endpoint_count",
+        ):
+            assert batch_result[(0, 0)][key] == pytest.approx(per_pair[key], abs=1e-6), (
+                f"{key}: batch={batch_result[(0, 0)][key]} != per_pair={per_pair[key]}"
+            )
+
+    def test_batch_multiple_pairs(self, t_junction_context):
+        """Batch should process multiple pairs correctly."""
+        ctx = t_junction_context
+        geoms = np.array(
+            [
+                LineString([(0, 0), (100, 0)]),
+                LineString([(100, 0), (200, 0)]),
+            ]
+        )
+        target_ids = np.array(["a", "b"])
+
+        alignments = {
+            (0, 0): self._make_alignment(0.0, 1.0),
+            (1, 1): self._make_alignment(0.0, 1.0),
+        }
+        result = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=geoms,
+            target_ids=target_ids,
+            target_index=ctx,
+            original_to_filtered={0: 0, 1: 1},
+        )
+
+        assert len(result) == 2
+        assert (0, 0) in result
+        assert (1, 1) in result
+        for key in result:
+            assert "min_endpoint_proximity_m" in result[key]
+            assert "max_endpoint_proximity_m" in result[key]
+            assert "shared_endpoint_count" in result[key]
+
+    def test_batch_empty_alignments(self, t_junction_context):
+        """Empty alignments should return empty dict."""
+        result = compute_aligned_endpoint_features_batch(
+            alignments={},
+            target_geoms=np.array([]),
+            target_ids=np.array([]),
+            target_index=t_junction_context,
+            original_to_filtered={},
+        )
+        assert result == {}
+
+    def test_batch_empty_endpoint_index(self):
+        """Empty endpoint index should return defaults for all pairs."""
+        from matcher.config import MAX_DISTANCE_METERS
+
+        empty_ctx = SpatialContextIndex()
+        geom = LineString([(0, 0), (100, 0)])
+
+        alignments = {(0, 0): self._make_alignment(0.0, 1.0)}
+        result = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=np.array([geom]),
+            target_ids=np.array(["a"]),
+            target_index=empty_ctx,
+            original_to_filtered={},
+        )
+
+        assert (0, 0) in result
+        assert result[(0, 0)]["min_endpoint_proximity_m"] == MAX_DISTANCE_METERS
+        assert result[(0, 0)]["max_endpoint_proximity_m"] == MAX_DISTANCE_METERS
+        assert result[(0, 0)]["shared_endpoint_count"] == 0
+
+    def test_batch_with_connectors(self, t_junction_context):
+        """Batch with connectors should match per-pair with connectors."""
+        geom = LineString([(0, 0), (200, 0)])
+        ctx = t_junction_context
+        connectors = {"seg_a": [(0.0, 1), (0.5, 2), (1.0, 3)]}
+
+        # Per-pair
+        per_pair = compute_aligned_endpoint_features(
+            geom,
+            ctx,
+            start_frac=0.0,
+            end_frac=0.43,
+            seg_id="seg_a",
+            seg_to_connectors=connectors,
+        )
+
+        # Batch
+        alignments = {(0, 0): self._make_alignment(0.0, 0.43)}
+        batch_result = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=np.array([geom]),
+            target_ids=np.array(["seg_a"]),
+            target_index=ctx,
+            original_to_filtered={},
+            seg_to_connectors=connectors,
+        )
+
+        for key in (
+            "min_endpoint_proximity_m",
+            "max_endpoint_proximity_m",
+            "shared_endpoint_count",
+        ):
+            assert batch_result[(0, 0)][key] == pytest.approx(per_pair[key], abs=1e-6), (
+                f"{key}: batch={batch_result[(0, 0)][key]} != per_pair={per_pair[key]}"
+            )
+
+    def test_batch_invalid_geometry_skipped(self, t_junction_context):
+        """Invalid/empty geometries should be skipped in batch results."""
+        ctx = t_junction_context
+        geoms = np.array(
+            [
+                LineString([(0, 0), (100, 0)]),
+                LineString(),  # empty
+            ]
+        )
+
+        alignments = {
+            (0, 0): self._make_alignment(0.0, 1.0),
+            (1, 1): self._make_alignment(0.0, 1.0),
+        }
+        result = compute_aligned_endpoint_features_batch(
+            alignments=alignments,
+            target_geoms=geoms,
+            target_ids=np.array(["a", "b"]),
+            target_index=ctx,
+            original_to_filtered={0: 0},
+        )
+
+        assert (0, 0) in result
+        assert (1, 1) not in result

@@ -1291,8 +1291,16 @@ def build_views_from_feature_df(
             )
 
             if proj_to_wgs84:
-                ref_aligned = transform(proj_to_wgs84, ref_aligned_proj) if ref_aligned_proj is not None else None
-                target_aligned = transform(proj_to_wgs84, target_aligned_proj) if target_aligned_proj is not None else None
+                ref_aligned = (
+                    transform(proj_to_wgs84, ref_aligned_proj)
+                    if ref_aligned_proj is not None
+                    else None
+                )
+                target_aligned = (
+                    transform(proj_to_wgs84, target_aligned_proj)
+                    if target_aligned_proj is not None
+                    else None
+                )
             else:
                 ref_aligned = ref_aligned_proj
                 target_aligned = target_aligned_proj
