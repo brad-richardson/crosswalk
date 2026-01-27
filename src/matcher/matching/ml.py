@@ -279,8 +279,7 @@ def _compute_feature_chunk(chunk):
                 bufs_b_5m = []
                 q_result_indices = []
 
-                for _qi, (orig_i, buf_dict) in qualifying:
-                    result_idx = buffer_data[orig_i][0]
+                for _qi, (result_idx, buf_dict) in qualifying:
                     q_result_indices.append(result_idx)
                     a5 = buf_dict["ref_buf_5m"]
                     b5 = buf_dict["target_buf_5m"]
