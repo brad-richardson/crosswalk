@@ -21,7 +21,7 @@ Model Architecture:
 
 import multiprocessing as mp
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -1178,32 +1178,40 @@ class MLMatcher:
             f"Computing graphlet features for {len(ref_candidates_only)} reference "
             f"and {len(target_candidates_only_proj)} target segments..."
         )
-        # ref_has_connectors already defined earlier for topology computation
-        t0 = time.perf_counter()
-        ref_graphlet_data = precompute_graphlet_features(
-            ref_candidates_only,
-            id_column=ref_id_column,
-            tolerance_m=5.0,
-            connectors_column="connectors" if ref_has_connectors else None,
-        )
-        timings["graphlet_ref"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] graphlet_ref: {timings['graphlet_ref']:.2f}s")
 
-        # Target data typically doesn't have explicit connectors, use endpoint-based inference
-        t0 = time.perf_counter()
-        target_graphlet_data = precompute_graphlet_features(
-            target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
-        )
-        timings["graphlet_target"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] graphlet_target: {timings['graphlet_target']:.2f}s")
+        # Launch alignment in background thread while graphlets compute on main thread.
+        # compute_alignment_batch spawns its own ProcessPoolExecutor internally,
+        # so the thread just orchestrates child processes — no GIL contention.
+        with ThreadPoolExecutor(max_workers=1) as bg_executor:
+            logger.info("Computing linestring alignments (background)...")
+            t0_align = time.perf_counter()
+            alignment_future = bg_executor.submit(
+                compute_alignment_batch, candidates, ref_geoms, target_geoms, n_jobs=n_jobs
+            )
 
-        # Pre-compute linestring alignments
-        # Alignments are used to compute similarity features on aligned sublines
-        logger.info("Computing linestring alignments...")
-        t0 = time.perf_counter()
-        alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
-        timings["alignment_batch"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
+            # ref_has_connectors already defined earlier for topology computation
+            t0 = time.perf_counter()
+            ref_graphlet_data = precompute_graphlet_features(
+                ref_candidates_only,
+                id_column=ref_id_column,
+                tolerance_m=5.0,
+                connectors_column="connectors" if ref_has_connectors else None,
+            )
+            timings["graphlet_ref"] = time.perf_counter() - t0
+            logger.debug(f"[TIMING] graphlet_ref: {timings['graphlet_ref']:.2f}s")
+
+            # Target data typically doesn't have explicit connectors, use endpoint-based inference
+            t0 = time.perf_counter()
+            target_graphlet_data = precompute_graphlet_features(
+                target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
+            )
+            timings["graphlet_target"] = time.perf_counter() - t0
+            logger.debug(f"[TIMING] graphlet_target: {timings['graphlet_target']:.2f}s")
+
+            # Wait for alignment result (should already be done — alignment ~21s < graphlets ~35s)
+            alignments = alignment_future.result()
+            timings["alignment_batch"] = time.perf_counter() - t0_align
+            logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
 
         # Recompute endpoint features using alignment fractions
         # This uses aligned subline endpoints instead of full segment endpoints,
