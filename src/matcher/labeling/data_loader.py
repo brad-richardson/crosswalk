@@ -717,16 +717,16 @@ def compute_features_only(
     for idx in unique_ref_indices:
         geom = ref_geoms[idx]
         if geom is not None and not geom.is_empty:
-            ref_buffers_5m[idx] = geom.buffer(5.0)
-            ref_buffers_15m[idx] = geom.buffer(15.0)
+            ref_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+            ref_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
     target_buffers_5m = {}
     target_buffers_15m = {}
     for idx in unique_target_indices:
         geom = target_geoms[idx]
         if geom is not None and not geom.is_empty:
-            target_buffers_5m[idx] = geom.buffer(5.0)
-            target_buffers_15m[idx] = geom.buffer(15.0)
+            target_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+            target_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
     # Prepare worker data
     worker_data = {

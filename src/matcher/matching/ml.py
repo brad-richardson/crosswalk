@@ -233,10 +233,19 @@ def _compute_feature_chunk(chunk):
             pre_5a[i] = None
             pre_5b[i] = None
 
-    with timed_section("batch_geometric"):
-        batch_result = compute_geometric_features_batch(
-            arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b
-        )
+    try:
+        with timed_section("batch_geometric"):
+            batch_result = compute_geometric_features_batch(
+                arr_a, arr_b, pre_15a, pre_15b, pre_5a, pre_5b
+            )
+    except Exception as e:
+        error_features = _get_error_features()
+        error_features["_error"] = str(e)
+        if is_profiling_enabled():
+            get_timing_stats().reset()
+        for pd_item in pair_data:
+            results[pd_item["chunk_idx"]] = error_features
+        return results
 
     # ---- Pass 3: Per-pair non-batchable features + assembly ----
     for i, pd_item in enumerate(pair_data):
@@ -1252,16 +1261,16 @@ class MLMatcher:
         for idx in unique_ref_indices:
             geom = ref_geoms[idx]
             if geom is not None and not geom.is_empty:
-                ref_buffers_5m[idx] = geom.buffer(5.0)
-                ref_buffers_15m[idx] = geom.buffer(15.0)
+                ref_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+                ref_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
         target_buffers_5m = {}
         target_buffers_15m = {}
         for idx in unique_target_indices:
             geom = target_geoms[idx]
             if geom is not None and not geom.is_empty:
-                target_buffers_5m[idx] = geom.buffer(5.0)
-                target_buffers_15m[idx] = geom.buffer(15.0)
+                target_buffers_5m[idx] = geom.buffer(5.0, resolution=16)
+                target_buffers_15m[idx] = geom.buffer(15.0, resolution=16)
 
         timings["buffer_precomputation"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] buffer_precomputation: {timings['buffer_precomputation']:.2f}s")
