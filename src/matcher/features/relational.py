@@ -39,6 +39,7 @@ Key Features:
 from typing import NamedTuple
 
 import numpy as np
+import shapely
 from shapely import LineString, Point, line_interpolate_point
 from shapely import distance as shapely_distance
 
@@ -137,6 +138,91 @@ def compute_perpendicular_offset(
     offset_p95 = float(np.percentile(offsets, 95))
 
     return mean_offset, offset_iqr, offset_p95
+
+
+def compute_perpendicular_offset_batch(
+    target_geoms: np.ndarray,
+    anchor_geoms: np.ndarray,
+    sample_interval: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Batch perpendicular offset for multiple pairs.
+
+    Concatenates sample points across all pairs into single vectorized
+    line_interpolate_point and distance calls, reducing Python dispatch
+    overhead from O(N) to O(1).
+
+    Args:
+        target_geoms: Array of target geometries (shape N).
+        anchor_geoms: Array of anchor geometries (shape N).
+        sample_interval: Distance between sample points (meters).
+
+    Returns:
+        Tuple of (mean_offsets, iqr_offsets, p95_offsets), each shape (N,).
+        Invalid pairs (empty/None geometries) get inf values.
+    """
+    N = len(target_geoms)
+    mean_offsets = np.full(N, float("inf"))
+    iqr_offsets = np.full(N, float("inf"))
+    p95_offsets = np.full(N, float("inf"))
+
+    if N == 0:
+        return mean_offsets, iqr_offsets, p95_offsets
+
+    # Compute lengths for all targets in one call
+    lengths = shapely.length(target_geoms)
+
+    # Determine valid pairs and sample counts
+    valid_mask = np.array(
+        [
+            t is not None and a is not None and not shapely.is_empty(t) and not shapely.is_empty(a)
+            for t, a in zip(target_geoms, anchor_geoms)
+        ]
+    )
+
+    if not valid_mask.any():
+        return mean_offsets, iqr_offsets, p95_offsets
+
+    valid_indices = np.where(valid_mask)[0]
+    valid_lengths = lengths[valid_indices]
+    n_samples_per = np.maximum(3, (valid_lengths / sample_interval).astype(int))
+
+    # Boundaries for splitting results back per pair
+    boundaries = np.empty(len(valid_indices) + 1, dtype=int)
+    boundaries[0] = 0
+    np.cumsum(n_samples_per, out=boundaries[1:])
+    total_points = int(boundaries[-1])
+
+    # Build repeated geometry arrays using np.repeat (avoids Python loop)
+    valid_targets = target_geoms[valid_indices]
+    valid_anchors = anchor_geoms[valid_indices]
+    repeated_targets = np.repeat(valid_targets, n_samples_per)
+    repeated_anchors = np.repeat(valid_anchors, n_samples_per)
+
+    # Build distance array — each pair needs linspace(0, length, n_samples).
+    # Construct normalized fractions [0..1] per pair, then scale by length.
+    all_distances = np.empty(total_points)
+    for j in range(len(valid_indices)):
+        start = boundaries[j]
+        end = boundaries[j + 1]
+        ns = n_samples_per[j]
+        all_distances[start:end] = np.linspace(0, valid_lengths[j], ns)
+
+    # Two vectorized Shapely calls for all points across all pairs
+    all_points = line_interpolate_point(repeated_targets, all_distances, normalized=False)
+    all_dists = shapely_distance(all_points, repeated_anchors)
+
+    # Split by pair and compute per-pair statistics
+    for j, vi in enumerate(valid_indices):
+        start = boundaries[j]
+        end = boundaries[j + 1]
+        offsets = all_dists[start:end]
+
+        mean_offsets[vi] = float(np.mean(offsets))
+        p25, p75 = np.percentile(offsets, [25, 75])
+        iqr_offsets[vi] = float(p75 - p25)
+        p95_offsets[vi] = float(np.percentile(offsets, 95))
+
+    return mean_offsets, iqr_offsets, p95_offsets
 
 
 def compute_side_of_street(

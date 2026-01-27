@@ -165,6 +165,7 @@ def _compute_non_geometric_features(
     ref_seg_id: str | None,
     target_seg_id: str | None,
     geom_features: GeometricFeatures,
+    precomputed_lateral_offset: tuple[float, float, float] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -201,6 +202,7 @@ def _compute_non_geometric_features(
         ref_seg_id: Reference segment ID
         target_seg_id: Target segment ID
         geom_features: Pre-computed geometric features (batchable fields filled in)
+        precomputed_lateral_offset: Optional pre-computed (mean, iqr, p95) from batch.
 
     Returns:
         Dictionary of non-geometric feature name -> value, plus per-pair geometric
@@ -226,9 +228,12 @@ def _compute_non_geometric_features(
 
     # Lateral offset
     with timed_section("perpendicular_offset"):
-        lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-            geom_sim_target, geom_sim_ref
-        )
+        if precomputed_lateral_offset is not None:
+            lateral_offset, lateral_iqr, lateral_p95 = precomputed_lateral_offset
+        else:
+            lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
+                geom_sim_target, geom_sim_ref
+            )
 
     # Sinuosity
     with timed_section("sinuosity"):
