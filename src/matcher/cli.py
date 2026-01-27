@@ -1185,46 +1185,25 @@ def compute_features(
         matcher compute-features us_boston_streets -w 4      # Limit workers
         matcher compute-features --all --generate-candidates # Full precache for UI
     """
-    from .datasets.schema import get_dataset_config, list_dataset_configs
-    from .filenames import find_overture_segments, find_target_file
+    from .datasets.loader import DatasetLoader
     from .labeling.data_loader import (
         build_views_from_feature_df,
         compute_features_only,
         get_feature_cache_info,
         load_feature_cache,
-        load_geodataframe,
         save_candidates_to_cache,
         save_feature_cache,
     )
 
-    raw_dir = Path("data/raw")
-
-    def get_dataset_files(dataset_id: str) -> tuple[Path, Path] | None:
-        """Get reference and target file paths for a dataset."""
-        config = get_dataset_config(dataset_id)
-        if config is None:
-            return None
-
-        # Target file (with version suffix)
-        target_path = find_target_file(raw_dir, dataset_id)
-        if target_path is None:
-            return None
-
-        # Reference file (Overture, with version suffix)
-        ref_path = find_overture_segments(raw_dir, dataset_id)
-        if ref_path is None:
-            return None
-
-        return ref_path, target_path
+    loader = DatasetLoader()
 
     def compute_for_dataset(dataset_id: str) -> bool:
         """Compute features for a single dataset. Returns True if successful."""
-        files = get_dataset_files(dataset_id)
-        if files is None:
+        ref_path = loader.find_reference_path(dataset_id)
+        target_path = loader.find_target_path(dataset_id)
+        if ref_path is None or target_path is None:
             console.print(f"[yellow]Skipping {dataset_id}: missing data files[/yellow]")
             return False
-
-        ref_path, target_path = files
 
         # Check cache
         cache_info = get_feature_cache_info(dataset_id, ref_path, target_path)
@@ -1260,8 +1239,8 @@ def compute_features(
                 console.print(f"[blue]Computing features for {dataset_id}...[/blue]")
 
                 # Load data
-                reference = load_geodataframe(ref_path)
-                target = load_geodataframe(target_path)
+                reference = loader._load_gdf(ref_path)
+                target = loader._load_gdf(target_path)
 
                 console.print(f"  Reference: {len(reference):,} segments")
                 console.print(f"  Target: {len(target):,} segments")
@@ -1293,9 +1272,9 @@ def compute_features(
 
                 # Load geodataframes if not already loaded (when using cached features)
                 if reference is None:
-                    reference = load_geodataframe(ref_path)
+                    reference = loader._load_gdf(ref_path)
                 if target is None:
-                    target = load_geodataframe(target_path)
+                    target = loader._load_gdf(target_path)
 
                 # Build views (runs ML scoring)
                 views = build_views_from_feature_df(
@@ -1330,9 +1309,7 @@ def compute_features(
 
     if all_datasets:
         # Find all datasets with both target and reference data
-        for dataset_id in sorted(list_dataset_configs()):
-            if get_dataset_files(dataset_id) is not None:
-                datasets_to_process.append(dataset_id)
+        datasets_to_process = loader.list_available()
 
         if not datasets_to_process:
             console.print("[yellow]No datasets found with fetched data[/yellow]")
@@ -1342,8 +1319,8 @@ def compute_features(
 
     elif prefix:
         # Find datasets matching prefix
-        for dataset_id in sorted(list_dataset_configs()):
-            if dataset_id.startswith(prefix) and get_dataset_files(dataset_id) is not None:
+        for dataset_id in loader.list_available():
+            if dataset_id.startswith(prefix):
                 datasets_to_process.append(dataset_id)
 
         if not datasets_to_process:

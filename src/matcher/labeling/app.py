@@ -32,94 +32,26 @@ PROJECT_ROOT = Path(__file__).parents[3]
 DEFAULT_DATASET = "us_boston_streets"
 
 
-def _find_overture_reference(dataset_name: str, raw_dir: Path) -> str | None:
-    """Find the Overture reference file for a dataset.
+def _get_loader():
+    """Get a DatasetLoader instance for the project data directory."""
+    from matcher.datasets.loader import DatasetLoader
 
-    Uses the centralized find_overture_segments() which tries progressively
-    shorter region prefixes with versioned filenames.
-
-    Examples:
-        us_boston_streets -> us_boston_overture_segments_v1.0.parquet
-        us_fort_collins_streets -> us_fort_collins_overture_segments_v1.0.parquet
-    """
-    from matcher.filenames import find_overture_segments
-
-    path = find_overture_segments(raw_dir, dataset_name)
-    return path.name if path else None
-
-
-def _discover_datasets_from_yaml() -> dict[str, tuple[str, str]]:
-    """Auto-discover datasets from yaml config files in datasets/ directory.
-
-    Returns:
-        Dict mapping dataset_name to (target_file, reference_file)
-    """
-    from matcher.datasets.schema import list_dataset_configs
-    from matcher.filenames import find_target_file
-
-    datasets = {}
-    raw_dir = PROJECT_ROOT / "data/raw"
-
-    for dataset_name in list_dataset_configs():
-        # Find versioned target file
-        target_path = find_target_file(raw_dir, dataset_name)
-        if not target_path:
-            continue
-
-        # Find corresponding Overture reference file
-        reference_file = _find_overture_reference(dataset_name, raw_dir)
-        if reference_file:
-            datasets[dataset_name] = (target_path.name, reference_file)
-
-    return datasets
-
-
-def _discover_osm_datasets() -> dict[str, tuple[str, str]]:
-    """Auto-discover OSM datasets from data/raw/ directory.
-
-    Looks for versioned files matching pattern: {region}_osm_segments_v*.parquet
-    Maps them to corresponding Overture reference files.
-    """
-    from matcher.filenames import extract_version_from_filename
-
-    raw_dir = PROJECT_ROOT / "data/raw"
-    if not raw_dir.exists():
-        return {}
-
-    osm_datasets = {}
-
-    # Find all *_osm_segments*.parquet files
-    for osm_file in raw_dir.glob("*_osm_segments*.parquet"):
-        # Only process versioned files
-        version = extract_version_from_filename(osm_file)
-        if version is None:
-            continue
-
-        filename = osm_file.stem  # e.g., "us_boston_streets_osm_segments_v1.0"
-
-        # Extract region from filename by removing version suffix
-        base_name = filename.rsplit("_v", 1)[0]  # "us_boston_streets_osm_segments"
-
-        if not base_name.endswith("_osm_segments"):
-            continue
-
-        region = base_name.replace("_osm_segments", "")  # "us_boston_streets"
-        dataset_id = f"{region}_osm"  # "us_boston_streets_osm"
-
-        # Find corresponding Overture reference
-        overture_ref = _find_overture_reference(region, raw_dir)
-        if overture_ref:
-            osm_datasets[dataset_id] = (osm_file.name, overture_ref)
-
-    return osm_datasets
+    return DatasetLoader(PROJECT_ROOT / "data/raw")
 
 
 def _get_dataset_config() -> dict[str, tuple[str, str]]:
-    """Get combined dataset config from yaml configs and auto-discovered OSM datasets."""
-    # Start with datasets discovered from yaml configs
-    config = _discover_datasets_from_yaml()
-    # Add auto-discovered OSM datasets
-    config.update(_discover_osm_datasets())
+    """Get combined dataset config from yaml configs and auto-discovered OSM datasets.
+
+    Uses DatasetLoader for unified discovery, then resolves filenames for
+    backwards compatibility with code that expects (target_filename, reference_filename).
+    """
+    loader = _get_loader()
+    config = {}
+    for dataset_id in loader.list_available():
+        ref_path = loader.find_reference_path(dataset_id)
+        target_path = loader.find_target_path(dataset_id)
+        if ref_path and target_path:
+            config[dataset_id] = (target_path.name, ref_path.name)
     return config
 
 
@@ -206,7 +138,6 @@ from matcher.labeling.data_loader import (
     generate_scored_candidates_with_cache,
     get_cache_info,
     load_cached_candidates,
-    load_geodataframe,
     save_candidates_to_cache,
 )
 from matcher.labeling.dataset_registry import DatasetRegistry
@@ -1021,10 +952,11 @@ def load_data(
     # Generate fresh candidates if cache miss
     if candidates is None:
         logger.info("Scored cache miss - loading from feature cache...")
+        loader = _get_loader()
         logger.info(f"Loading reference: {reference_path}")
-        reference = load_geodataframe(reference_path)
+        reference = loader._load_gdf(reference_path)
         logger.info(f"Loading target: {target_path}")
-        target = load_geodataframe(target_path)
+        target = loader._load_gdf(target_path)
 
         # Use feature cache for faster loading (skips feature computation if cached)
         candidates = generate_scored_candidates_with_cache(

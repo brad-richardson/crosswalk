@@ -9,6 +9,11 @@ Example usage:
 
     config = load_dataset_config("boston_streets")
     gdf = apply_class_mapping(gdf, config)
+
+    from matcher.datasets import DatasetLoader
+
+    loader = DatasetLoader()
+    pair = loader.load_pair("us_boston_streets")
 """
 
 from .config import (
@@ -18,10 +23,13 @@ from .config import (
     list_dataset_configs,
     load_dataset_config,
 )
+from .loader import DatasetLoader, LoadedPair
 
 __all__ = [
     "DatasetConfig",
     "ClassMappingRule",
+    "DatasetLoader",
+    "LoadedPair",
     "load_dataset_config",
     "list_dataset_configs",
     "apply_class_mapping",
