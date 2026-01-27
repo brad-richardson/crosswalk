@@ -1,9 +1,12 @@
 """Tests for feature extraction."""
 
+import numpy as np
 import pytest
 from shapely import LineString
 
 from matcher.features.geometric import (
+    _buffer_iou_from_buffers,
+    compute_buffer_iou_batch,
     compute_collinear_gap_ratio,
     compute_geometric_features,
     compute_segment_heading,
@@ -83,6 +86,40 @@ class TestGeometricFeatures:
         # With 5m/15m buffers, 100m apart lines should not overlap
         assert features.buffer_iou_5m < 0.1
         assert features.buffer_iou_15m < 0.1
+
+    def test_buffer_iou_batch_matches_per_pair(self):
+        """Batch buffer IoU should produce identical results to per-pair computation."""
+        lines_a = [
+            LineString([(0, 0), (100, 0)]),
+            LineString([(0, 0), (100, 0)]),
+            LineString([(0, 0), (50, 0)]),
+        ]
+        lines_b = [
+            LineString([(0, 5), (100, 5)]),  # Close parallel
+            LineString([(0, 100), (100, 100)]),  # Far apart
+            LineString([(25, 3), (75, 3)]),  # Partial overlap
+        ]
+        radius = 15.0
+
+        # Per-pair results
+        per_pair = []
+        bufs_a = []
+        bufs_b = []
+        for la, lb in zip(lines_a, lines_b):
+            ba = la.buffer(radius)
+            bb = lb.buffer(radius)
+            bufs_a.append(ba)
+            bufs_b.append(bb)
+            per_pair.append(_buffer_iou_from_buffers(ba, bb))
+
+        # Batch results
+        batch = compute_buffer_iou_batch(
+            np.array(bufs_a, dtype=object),
+            np.array(bufs_b, dtype=object),
+        )
+
+        for i in range(len(lines_a)):
+            assert batch[i] == pytest.approx(per_pair[i], abs=1e-10)
 
 
 class TestSemanticFeatures:

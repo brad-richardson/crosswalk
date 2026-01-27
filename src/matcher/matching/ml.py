@@ -66,6 +66,7 @@ def _compute_single_feature(args):
         _get_error_features,
         compute_graphlet_similarity,
         compute_pair_features,
+        is_profiling_enabled,
         timed_section,
     )
 
@@ -73,45 +74,48 @@ def _compute_single_feature(args):
     pair_key = (ref_idx, target_idx)
 
     try:
-        # Extract data from worker globals
-        ref_geom = _worker_data["ref_geoms"][ref_idx]
-        target_geom = _worker_data["target_geoms"][target_idx]
+        with timed_section("worker_overhead"):
+            # Extract data from worker globals
+            ref_geom = _worker_data["ref_geoms"][ref_idx]
+            target_geom = _worker_data["target_geoms"][target_idx]
 
-        # Get pre-computed alignment if available
-        alignment = _worker_data.get("alignments", {}).get(pair_key)
+            # Get pre-computed alignment if available
+            alignment = _worker_data.get("alignments", {}).get(pair_key)
 
-        # Get pre-computed aligned endpoint features for this pair
-        # These are computed at aligned subline endpoints, not full segment endpoints
-        # If missing, reject this pair (no fallback to full-geometry features)
-        endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
-        if endpoint_features is None:
-            # Pair doesn't have aligned endpoint features - reject it
-            # This happens when alignment failed for this pair
-            return None
+            # Get pre-computed aligned endpoint features for this pair
+            # These are computed at aligned subline endpoints, not full segment endpoints
+            # If missing, reject this pair (no fallback to full-geometry features)
+            endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
+            if endpoint_features is None:
+                # Pair doesn't have aligned endpoint features - reject it
+                # This happens when alignment failed for this pair
+                return None
 
-        # Get pre-computed topology features
-        ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
-        target_topology = _worker_data.get("target_topology", {}).get(target_idx)
+            # Get pre-computed topology features
+            ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
+            target_topology = _worker_data.get("target_topology", {}).get(target_idx)
 
-        # Compute graphlet similarity using precomputed graph data
-        # Pass alignment for alignment-aware connector lookup
-        ref_graphlet_data = _worker_data.get("ref_graphlet_data")
-        target_graphlet_data = _worker_data.get("target_graphlet_data")
-        ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
-        target_seg_id = str(_worker_data["target_ids"][target_idx])
+            # Compute graphlet similarity using precomputed graph data
+            # Pass alignment for alignment-aware connector lookup
+            ref_graphlet_data = _worker_data.get("ref_graphlet_data")
+            target_graphlet_data = _worker_data.get("target_graphlet_data")
+            ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
+            target_seg_id = str(_worker_data["target_ids"][target_idx])
+
         with timed_section("graphlet_similarity"):
             graphlet_features = compute_graphlet_similarity(
                 ref_seg_id, target_seg_id, ref_graphlet_data, target_graphlet_data, alignment
             )
 
-        # Get pre-computed buffers for full geometries
-        # These are only used when alignment coverage is high (>95%)
-        precomputed_buffers = {
-            "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
-            "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
-            "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
-            "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
-        }
+        with timed_section("worker_overhead"):
+            # Get pre-computed buffers for full geometries
+            # These are only used when alignment coverage is high (>95%)
+            precomputed_buffers = {
+                "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
+                "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
+                "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
+                "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
+            }
 
         # Delegate to shared compute_pair_features function
         # This ensures consistency with backfill pipeline (training data generation)
@@ -143,7 +147,169 @@ def _compute_single_feature(args):
         # Return error marker with default values (will result in low confidence)
         error_features = _get_error_features()
         error_features["_error"] = str(e)
+
+        # Reset timing stats on error to avoid leaking into next pair
+        if is_profiling_enabled():
+            from ..features.compute import get_timing_stats
+
+            get_timing_stats().reset()
+
         return error_features
+
+
+def _compute_feature_chunk(chunk):
+    """Process a chunk of pairs with batched buffer IoU computation.
+
+    Instead of computing buffer intersection per-pair (Python loop overhead),
+    this function defers buffer IoU to a batch phase using vectorized Shapely
+    operations (shapely.intersection / shapely.area on arrays).
+
+    The per-pair feature computation is identical to _compute_single_feature
+    except buffer_iou_5m and buffer_iou_15m are computed in batch at the end.
+
+    Args:
+        chunk: List of (ref_idx, target_idx) tuples
+
+    Returns:
+        List of feature dicts (or None for rejected pairs)
+    """
+    from ..features.compute import (
+        _get_error_features,
+        compute_graphlet_similarity,
+        compute_pair_features,
+        get_timing_stats,
+        is_profiling_enabled,
+        timed_section,
+    )
+    from ..features.geometric import compute_buffer_iou_batch
+
+    results = []
+    # (result_index, buffer_output_dict) for pairs that need batch IoU
+    buffer_data = []
+
+    for ref_idx, target_idx in chunk:
+        pair_key = (ref_idx, target_idx)
+
+        try:
+            with timed_section("worker_overhead"):
+                ref_geom = _worker_data["ref_geoms"][ref_idx]
+                target_geom = _worker_data["target_geoms"][target_idx]
+                alignment = _worker_data.get("alignments", {}).get(pair_key)
+
+                endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
+                if endpoint_features is None:
+                    results.append(None)
+                    continue
+
+                ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
+                target_topology = _worker_data.get("target_topology", {}).get(target_idx)
+                ref_graphlet_data = _worker_data.get("ref_graphlet_data")
+                target_graphlet_data = _worker_data.get("target_graphlet_data")
+                ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
+                target_seg_id = str(_worker_data["target_ids"][target_idx])
+
+            with timed_section("graphlet_similarity"):
+                graphlet_features = compute_graphlet_similarity(
+                    ref_seg_id,
+                    target_seg_id,
+                    ref_graphlet_data,
+                    target_graphlet_data,
+                    alignment,
+                )
+
+            with timed_section("worker_overhead"):
+                precomputed_buffers = {
+                    "ref_5m": _worker_data.get("ref_buffers_5m", {}).get(ref_idx),
+                    "ref_15m": _worker_data.get("ref_buffers_15m", {}).get(ref_idx),
+                    "target_5m": _worker_data.get("target_buffers_5m", {}).get(target_idx),
+                    "target_15m": _worker_data.get("target_buffers_15m", {}).get(target_idx),
+                }
+
+            buf_output = {}
+            features = compute_pair_features(
+                ref_geom,
+                target_geom,
+                _worker_data["ref_names"][ref_idx],
+                _worker_data["target_names"][target_idx],
+                _worker_data["ref_classes"][ref_idx],
+                _worker_data["target_classes"][target_idx],
+                _worker_data["ref_subclasses"][ref_idx],
+                _worker_data["target_subclasses"][target_idx],
+                endpoint_features=endpoint_features,
+                ref_topology=ref_topology,
+                target_topology=target_topology,
+                alignment=alignment,
+                graphlet_features=graphlet_features,
+                ref_graphlet_data=ref_graphlet_data,
+                target_graphlet_data=target_graphlet_data,
+                ref_seg_id=ref_seg_id,
+                target_seg_id=target_seg_id,
+                precomputed_buffers=precomputed_buffers,
+                buffer_output=buf_output,
+            )
+            features["_error"] = None
+            results.append(features)
+            buffer_data.append((len(results) - 1, buf_output))
+
+        except Exception as e:
+            error_features = _get_error_features()
+            error_features["_error"] = str(e)
+            if is_profiling_enabled():
+                get_timing_stats().reset()
+            results.append(error_features)
+
+    # ---- Batch buffer IoU computation ----
+    if buffer_data:
+        with timed_section("batch_buffer_iou_15m"):
+            indices = [bd[0] for bd in buffer_data]
+            buf_a_15m = np.array([bd[1]["ref_buf_15m"] for bd in buffer_data], dtype=object)
+            buf_b_15m = np.array([bd[1]["target_buf_15m"] for bd in buffer_data], dtype=object)
+
+            iou_15m = compute_buffer_iou_batch(buf_a_15m, buf_b_15m)
+
+            for i, idx in enumerate(indices):
+                results[idx]["buffer_iou_15m"] = float(iou_15m[i])
+
+        # 5m IoU: only for pairs where 15m IoU > 0.3 (short-circuit)
+        with timed_section("batch_buffer_iou_5m"):
+            qualifying = [(i, buffer_data[i]) for i in range(len(buffer_data)) if iou_15m[i] > 0.3]
+
+            if qualifying:
+                bufs_a_5m = []
+                bufs_b_5m = []
+                q_result_indices = []
+
+                for _qi, (result_idx, buf_dict) in qualifying:
+                    q_result_indices.append(result_idx)
+                    a5 = buf_dict["ref_buf_5m"]
+                    b5 = buf_dict["target_buf_5m"]
+                    if a5 is None:
+                        a5 = buf_dict["ref_geom"].buffer(5.0)
+                    if b5 is None:
+                        b5 = buf_dict["target_geom"].buffer(5.0)
+                    bufs_a_5m.append(a5)
+                    bufs_b_5m.append(b5)
+
+                buf_a_5m_arr = np.array(bufs_a_5m, dtype=object)
+                buf_b_5m_arr = np.array(bufs_b_5m, dtype=object)
+                iou_5m = compute_buffer_iou_batch(buf_a_5m_arr, buf_b_5m_arr)
+
+                for j, idx in enumerate(q_result_indices):
+                    results[idx]["buffer_iou_5m"] = float(iou_5m[j])
+
+    # Distribute batch timing evenly across pairs for profiling aggregation
+    if is_profiling_enabled() and buffer_data:
+        stats = get_timing_stats()
+        n_buf = len(buffer_data)
+        for name, total in stats.totals.items():
+            per_pair = total / n_buf
+            for idx, _ in buffer_data:
+                feat = results[idx]
+                if feat is not None:
+                    feat[f"_t_{name}"] = per_pair
+        stats.reset()
+
+    return results
 
 
 def select_model_for_dataset(
@@ -1140,32 +1306,82 @@ class MLMatcher:
         work_items = [(item[0], item[1]) for item in work_items_with_idx]
         original_indices = [item[2] for item in work_items_with_idx]
 
-        # Process with map for ordered results (in sorted order)
-        # Use smaller chunks for more frequent progress updates
+        # Split work into chunks for batch buffer IoU computation
+        # Each chunk is processed by one worker, which defers buffer IoU to a
+        # vectorized batch phase at the end of the chunk (avoids per-pair
+        # Python overhead for shapely intersection/area calls).
         chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
+        chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
         features_list = []
 
-        logger.info(f"Starting parallel feature computation (chunk_size={chunk_size})...")
+        logger.info(
+            f"Starting parallel feature computation "
+            f"(chunk_size={chunk_size}, {len(chunks)} chunks)..."
+        )
         t0 = time.perf_counter()
 
         with ProcessPoolExecutor(
             max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
         ) as executor:
-            # Process in chunks to show progress
-            for i in range(0, len(work_items), chunk_size * n_workers):
-                batch = work_items[i : i + chunk_size * n_workers]
-                batch_results = list(
-                    executor.map(_compute_single_feature, batch, chunksize=chunk_size)
-                )
-                features_list.extend(batch_results)
-                processed = min(i + len(batch), len(work_items))
+            # Submit chunks in batches for progress reporting
+            for i in range(0, len(chunks), n_workers):
+                batch_chunks = chunks[i : i + n_workers]
+                for chunk_results in executor.map(_compute_feature_chunk, batch_chunks):
+                    features_list.extend(chunk_results)
+                processed = len(features_list)
                 pct = processed / len(work_items) * 100
                 logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
 
-        timings["parallel_feature_computation"] = time.perf_counter() - t0
-        logger.info(
-            f"[TIMING] parallel_feature_computation: {timings['parallel_feature_computation']:.2f}s"
-        )
+        wall_clock = time.perf_counter() - t0
+        timings["parallel_feature_computation"] = wall_clock
+        logger.info(f"[TIMING] parallel_feature_computation: {wall_clock:.2f}s")
+
+        # Aggregate per-feature timing from worker results (when profiling enabled)
+        from ..features.compute import is_profiling_enabled
+
+        if is_profiling_enabled():
+            timing_agg: dict[str, float] = {}
+            n_timed = 0
+            for feat_dict in features_list:
+                if feat_dict is None:
+                    continue
+                has_timing = False
+                for k, v in list(feat_dict.items()):
+                    if k.startswith("_t_"):
+                        name = k[3:]  # strip "_t_" prefix
+                        timing_agg[name] = timing_agg.get(name, 0.0) + v
+                        has_timing = True
+                if has_timing:
+                    n_timed += 1
+
+            if n_timed > 0:
+                cpu_total = sum(timing_agg.values())
+                throughput = n_timed / wall_clock if wall_clock > 0 else 0
+
+                logger.info("[PROFILING] ===== Feature Computation Breakdown =====")
+                logger.info(f"[PROFILING] {'Section':<35} {'Time (s)':>9} {'%':>7} {'us/pair':>9}")
+                logger.info(f"[PROFILING] {'-' * 35} {'-' * 9} {'-' * 7} {'-' * 9}")
+                for name, total in sorted(timing_agg.items(), key=lambda x: -x[1]):
+                    pct = total / cpu_total * 100 if cpu_total > 0 else 0
+                    us_per_pair = total / n_timed * 1e6
+                    logger.info(
+                        f"[PROFILING] {name:<35} {total:>9.2f} {pct:>6.1f}% {us_per_pair:>9.0f}"
+                    )
+                logger.info(f"[PROFILING] {'-' * 35} {'-' * 9} {'-' * 7} {'-' * 9}")
+                logger.info(f"[PROFILING] {'SUM OF SECTIONS (cpu-time)':<35} {cpu_total:>9.2f}")
+                logger.info(f"[PROFILING] {'WALL CLOCK':<35} {wall_clock:>9.2f}")
+                logger.info(
+                    f"[PROFILING] Pairs: {n_timed:,} | Workers: {n_workers} "
+                    f"| Throughput: {throughput:,.0f} pairs/s"
+                )
+
+            # Strip _t_* keys from feature dicts before ML prediction
+            for feat_dict in features_list:
+                if feat_dict is None:
+                    continue
+                timing_keys = [k for k in feat_dict if k.startswith("_t_")]
+                for k in timing_keys:
+                    del feat_dict[k]
 
         # Reorder results back to original candidate order
         # (we sorted by spatial locality for cache efficiency)

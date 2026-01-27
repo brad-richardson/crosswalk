@@ -893,11 +893,21 @@ def match(
         "-w",
         help="Number of parallel workers (-1 for auto). Reduce for large datasets to save memory.",
     ),
+    profile: bool = typer.Option(
+        False,
+        "--profile",
+        help="Enable per-feature timing breakdown (sets MATCHER_PROFILE=1)",
+    ),
 ):
     """Run the full matching pipeline."""
+    import os
+
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
     from .pipeline import run_pipeline
+
+    if profile:
+        os.environ["MATCHER_PROFILE"] = "1"
 
     console.print("[blue]Running matching pipeline...[/blue]")
     console.print(f"  Reference: {reference}")

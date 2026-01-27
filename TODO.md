@@ -16,7 +16,8 @@ This document consolidates all future feature ideas, technical debt, and improve
 8. [Infrastructure & Tooling](#infrastructure--tooling)
 9. [Label Data Management](#label-data-management)
 10. [Other Ideas](#other-ideas)
-11. [Known Issues & Technical Debt](#known-issues--technical-debt)
+11. [Performance: Batch Geometric Operations](#performance-batch-geometric-operations)
+12. [Known Issues & Technical Debt](#known-issues--technical-debt)
 
 ---
 
@@ -512,6 +513,46 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 ### Location
 
 `src/matcher/integration/orphan_detector.py`
+
+---
+
+## Performance: Batch Geometric Operations
+
+**Status**: Partially implemented (buffer IoU batched, heading consistency vectorized)
+
+The `parallel_feature_computation` stage processes ~55K candidate pairs through `ProcessPoolExecutor` workers. Profiling (via `--profile`) revealed buffer IoU as the top bottleneck, which was addressed by batching with vectorized Shapely 2.0 array operations (`shapely.intersection`, `shapely.area`). This yielded a 1.8x speedup (158s → 88s wall clock).
+
+The same pattern can be extended to batch more geometric operations across pairs within each chunk worker.
+
+### Level 2: Batch across pairs in chunk worker
+
+Extend the deferred/batch pattern (already used for buffer IoU) to more operations. After the per-pair loop collects geometry pairs, compute in batch using Shapely 2.0 array functions:
+
+| Operation | Per-pair call today | Batched equivalent | CPU-time (from profiling) |
+|-----------|--------------------|--------------------|--------------------------|
+| Buffer creation | `line.buffer(15.0)` x N | `shapely.buffer(geom_array, 15.0)` | 138s |
+| Hausdorff distance | `hausdorff_distance(a, b)` x N | `shapely.hausdorff_distance(arr_a, arr_b)` | 139s (stats) |
+| Centroid distance | `a.centroid.distance(b.centroid)` x N | `shapely.distance(shapely.centroid(arr_a), shapely.centroid(arr_b))` | included in geometric |
+| Overlap ratio | `a.intersection(buf_b).length` x N | `shapely.length(shapely.intersection(arr_a, arr_b))` | included in geometric |
+
+**Implementation**: Same pattern as buffer IoU — add deferred mode flags to `compute_geometric_features()`, collect geometry arrays in chunk worker, batch-compute after the loop.
+
+**Files**: `geometric.py` (add deferred modes), `ml.py` (`_compute_feature_chunk` batch phases)
+
+### Level 3: Full restructure — extract all geometry computation from per-pair loop
+
+Pull ALL geometric computation out of the per-pair loop:
+1. First pass: extract sublines + collect geometry pairs into arrays
+2. Second pass: batch-compute hausdorff, centroid, overlap, buffers, IoU using vectorized Shapely
+3. Third pass: assemble feature dicts with non-geometric features (name similarity, topology, etc.)
+
+This eliminates per-pair Shapely method dispatch overhead for every operation but requires significant refactoring of the `compute_pair_features()` → `compute_geometric_features()` call chain.
+
+### Not batchable
+
+- `shapely.ops.substring()` (subline extraction) — no array version in Shapely 2.0
+- Hausdorff stats (mean/p95) — each pair has different vertex count, can't trivially flatten
+- Collinear gap ratio — already Numba JIT compiled, pure numpy
 
 ---
 
