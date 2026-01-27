@@ -126,7 +126,7 @@ def convert_to_osm(
                    where the value is the original ID (e.g., 'ref' or 'tgt')
     """
     cmd = [
-        "python",
+        sys.executable,
         str(Path(__file__).parent / "convert_to_osm.py"),
         str(input_path),
         "-o",
