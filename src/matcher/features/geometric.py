@@ -58,7 +58,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
-from shapely import LineString, hausdorff_distance, points
+from shapely import LineString, get_coordinates, hausdorff_distance, line_interpolate_point, points
 from shapely import distance as shapely_distance
 
 from ._jit_helpers import (
@@ -208,6 +208,7 @@ def compute_geometric_features(
     line_a: LineString,
     line_b: LineString,
     precomputed_buffers: dict | None = None,
+    buffer_output: dict | None = None,
 ) -> GeometricFeatures:
     """Compute geometric similarity features between two LineStrings.
 
@@ -223,6 +224,9 @@ def compute_geometric_features(
             If provided, skips buffer computation. Keys should correspond to:
             - ref_* for line_a buffers
             - target_* for line_b buffers
+        buffer_output: If provided, store buffer polygons here and skip IoU
+            intersection (deferred mode for batch computation). The caller
+            is responsible for computing IoU from the stored buffers.
 
     Returns:
         GeometricFeatures tuple with distances in meters
@@ -256,38 +260,64 @@ def compute_geometric_features(
     # If geometries don't overlap at 15m, they definitely won't at 5m.
     # This saves ~2 buffer creations for distant pairs (majority of candidates).
     with timed_section("geom_buffer_15m"):
-        if precomputed_buffers is not None:
-            buf_a_15m = precomputed_buffers.get("ref_15m")
-            buf_b_15m = precomputed_buffers.get("target_15m")
-            # Fall back to cached computation if precomputed not available
-            if buf_a_15m is None:
-                buf_a_15m = get_cached_buffer(line_a, 15.0)
-            if buf_b_15m is None:
-                buf_b_15m = get_cached_buffer(line_b, 15.0)
+        if buffer_output is not None:
+            # DEFERRED MODE: compute/lookup buffers, skip intersection
+            # Use precomputed if available, otherwise compute directly (no WKB cache)
+            if precomputed_buffers is not None:
+                buf_a_15m = precomputed_buffers.get("ref_15m") or line_a.buffer(15.0)
+                buf_b_15m = precomputed_buffers.get("target_15m") or line_b.buffer(15.0)
+            else:
+                buf_a_15m = line_a.buffer(15.0)
+                buf_b_15m = line_b.buffer(15.0)
+            buffer_output["ref_buf_15m"] = buf_a_15m
+            buffer_output["target_buf_15m"] = buf_b_15m
+            buffer_iou_15m = 0.0  # Placeholder - set by batch caller
         else:
-            buf_a_15m = get_cached_buffer(line_a, 15.0)
-            buf_b_15m = get_cached_buffer(line_b, 15.0)
-        buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
+            # IMMEDIATE MODE: original per-pair behavior
+            if precomputed_buffers is not None:
+                buf_a_15m = precomputed_buffers.get("ref_15m")
+                buf_b_15m = precomputed_buffers.get("target_15m")
+                if buf_a_15m is None:
+                    buf_a_15m = get_cached_buffer(line_a, 15.0)
+                if buf_b_15m is None:
+                    buf_b_15m = get_cached_buffer(line_b, 15.0)
+            else:
+                buf_a_15m = get_cached_buffer(line_a, 15.0)
+                buf_b_15m = get_cached_buffer(line_b, 15.0)
+            buffer_iou_15m = _buffer_iou_from_buffers(buf_a_15m, buf_b_15m)
 
     # Short-circuit: skip 5m buffer if 15m IoU is low
     # Threshold 0.3 chosen because: if 15m buffers barely overlap,
     # 5m buffers (which are 3x smaller) will have near-zero IoU.
     with timed_section("geom_buffer_5m"):
-        if buffer_iou_15m > 0.3:
+        if buffer_output is not None:
+            # DEFERRED MODE: store info for batch 5m computation
             if precomputed_buffers is not None:
-                buf_a_5m = precomputed_buffers.get("ref_5m")
-                buf_b_5m = precomputed_buffers.get("target_5m")
-                # Fall back to cached computation if precomputed not available
-                if buf_a_5m is None:
-                    buf_a_5m = get_cached_buffer(line_a, 5.0)
-                if buf_b_5m is None:
-                    buf_b_5m = get_cached_buffer(line_b, 5.0)
+                buffer_output["ref_buf_5m"] = precomputed_buffers.get("ref_5m")
+                buffer_output["target_buf_5m"] = precomputed_buffers.get("target_5m")
             else:
-                buf_a_5m = get_cached_buffer(line_a, 5.0)
-                buf_b_5m = get_cached_buffer(line_b, 5.0)
-            buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
+                buffer_output["ref_buf_5m"] = None
+                buffer_output["target_buf_5m"] = None
+            # Store geometries for 5m buffer creation if needed later
+            buffer_output["ref_geom"] = line_a
+            buffer_output["target_geom"] = line_b
+            buffer_iou_5m = 0.0  # Placeholder - set by batch caller
         else:
-            buffer_iou_5m = 0.0
+            # IMMEDIATE MODE: original per-pair behavior with short-circuit
+            if buffer_iou_15m > 0.3:
+                if precomputed_buffers is not None:
+                    buf_a_5m = precomputed_buffers.get("ref_5m")
+                    buf_b_5m = precomputed_buffers.get("target_5m")
+                    if buf_a_5m is None:
+                        buf_a_5m = get_cached_buffer(line_a, 5.0)
+                    if buf_b_5m is None:
+                        buf_b_5m = get_cached_buffer(line_b, 5.0)
+                else:
+                    buf_a_5m = get_cached_buffer(line_a, 5.0)
+                    buf_b_5m = get_cached_buffer(line_b, 5.0)
+                buffer_iou_5m = _buffer_iou_from_buffers(buf_a_5m, buf_b_5m)
+            else:
+                buffer_iou_5m = 0.0
 
     # Heading delta (overall direction)
     with timed_section("geom_heading_delta"):
@@ -362,6 +392,32 @@ def _buffer_iou_from_buffers(buf_a: "Polygon", buf_b: "Polygon") -> float:
     union_area = buf_a.area + buf_b.area - intersection_area
 
     return intersection_area / union_area if union_area > 0 else 0.0
+
+
+def compute_buffer_iou_batch(
+    buf_a_array: np.ndarray,
+    buf_b_array: np.ndarray,
+) -> np.ndarray:
+    """Compute buffer IoU for arrays of buffer polygons using vectorized Shapely.
+
+    Uses shapely.intersection and shapely.area on arrays to avoid per-element
+    Python overhead. Typically 1.5-3x faster than looping _buffer_iou_from_buffers.
+
+    Args:
+        buf_a_array: Array of buffer polygons (dtype=object)
+        buf_b_array: Array of buffer polygons (dtype=object)
+
+    Returns:
+        Array of IoU values (0-1)
+    """
+    import shapely as shapely_mod
+
+    intersections = shapely_mod.intersection(buf_a_array, buf_b_array)
+    int_areas = shapely_mod.area(intersections)
+    a_areas = shapely_mod.area(buf_a_array)
+    b_areas = shapely_mod.area(buf_b_array)
+    union_areas = a_areas + b_areas - int_areas
+    return np.where(union_areas > 0, int_areas / union_areas, 0.0)
 
 
 def _compute_heading(start: np.ndarray, end: np.ndarray) -> float:
@@ -504,10 +560,11 @@ def compute_heading_consistency(
         return 1.0
 
     if sampled_points is None:
-        # Sample points along the line (requires Shapely)
+        # Sample points along the line using vectorized Shapely interpolation
         n_samples = max(3, int(line.length / sample_interval))
         distances = np.linspace(0, line.length, n_samples)
-        sampled_points = np.array([line.interpolate(d).coords[0] for d in distances])
+        pts = line_interpolate_point(line, distances)
+        sampled_points = get_coordinates(pts)
 
     return compute_heading_consistency_numba(sampled_points)
 

@@ -21,7 +21,10 @@ from loguru import logger
 # Enable with MATCHER_PROFILE=1 environment variable
 # Each worker accumulates timing stats and logs summaries periodically
 
-PROFILING_ENABLED = os.environ.get("MATCHER_PROFILE", "0") == "1"
+
+def is_profiling_enabled() -> bool:
+    """Check if profiling is enabled via MATCHER_PROFILE env var."""
+    return os.environ.get("MATCHER_PROFILE", "0") == "1"
 
 
 @dataclass
@@ -89,7 +92,7 @@ def timed_section(name: str):
 
     Only active when MATCHER_PROFILE=1 environment variable is set.
     """
-    if not PROFILING_ENABLED:
+    if not is_profiling_enabled():
         yield
         return
 
@@ -103,7 +106,7 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
 
     Call this after each compute_pair_features() invocation.
     """
-    if not PROFILING_ENABLED:
+    if not is_profiling_enabled():
         return
 
     count = increment_call_count()
@@ -157,6 +160,7 @@ def compute_pair_features(
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
     precomputed_buffers: dict | None = None,
+    buffer_output: dict | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -184,6 +188,9 @@ def compute_pair_features(
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
         precomputed_buffers: Pre-computed buffers for full geometries (optional).
             Only used when alignment coverage is high (>95%), otherwise subline buffers are computed.
+        buffer_output: If provided, store buffer polygons here and skip IoU
+            intersection (deferred mode for batch computation). The caller
+            is responsible for computing IoU from the stored buffers.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -250,10 +257,13 @@ def compute_pair_features(
                     geom_for_similarity_ref,
                     geom_for_similarity_target,
                     precomputed_buffers=precomputed_buffers,
+                    buffer_output=buffer_output,
                 )
             else:
                 geom_features = compute_geometric_features(
-                    geom_for_similarity_ref, geom_for_similarity_target
+                    geom_for_similarity_ref,
+                    geom_for_similarity_target,
+                    buffer_output=buffer_output,
                 )
 
         # Compute semantic features
@@ -413,7 +423,7 @@ def compute_pair_features(
         # Log timing summary periodically (when MATCHER_PROFILE=1)
         log_timing_summary_if_needed()
 
-        return {
+        features = {
             # Geometric (distance features use _m suffix to indicate meters)
             "hausdorff_distance_m": geom_features.hausdorff_distance,
             "mean_hausdorff_distance_m": geom_features.mean_hausdorff_distance,
@@ -497,6 +507,15 @@ def compute_pair_features(
             # Numeric route matching
             "name_numeric_match": name_numeric_match,
         }
+
+        # Embed per-pair timing data in the feature dict for main-process aggregation
+        if is_profiling_enabled():
+            stats = get_timing_stats()
+            for name, total in stats.totals.items():
+                features[f"_t_{name}"] = total
+            stats.reset()
+
+        return features
 
     except Exception as e:
         # Log at debug level to avoid noise - errors are counted and reported in ml.py
