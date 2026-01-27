@@ -130,8 +130,8 @@ class DatasetLoader:
         """
         available: list[str] = []
 
-        # 1. Datasets from YAML configs
-        from .config import list_dataset_configs as _list_yaml
+        # 1. Datasets from YAML configs (use schema module — same source as CLI/UI)
+        from .schema import list_dataset_configs as _list_yaml
 
         for name in _list_yaml():
             ref = find_overture_segments(self._data_dir, name)
@@ -198,7 +198,7 @@ class DatasetLoader:
         if ref_path is None:
             base = self._strip_osm_suffix(dataset_id)
             raise FileNotFoundError(
-                f"Reference file not found for '{dataset_id}'. Run: matcher fetch {base}"
+                f"Reference file not found for '{dataset_id}'. Run: matcher fetch overture {base}"
             )
         return self._load_gdf(ref_path)
 
@@ -210,9 +210,12 @@ class DatasetLoader:
         """
         target_path = self.find_target_path(dataset_id)
         if target_path is None:
-            raise FileNotFoundError(
-                f"Target file not found for '{dataset_id}'. Run: matcher fetch {dataset_id}"
-            )
+            base = self._strip_osm_suffix(dataset_id)
+            if dataset_id.endswith("_osm"):
+                hint = f"Run: matcher fetch osm {base}"
+            else:
+                hint = f"Run: matcher fetch target {dataset_id}"
+            raise FileNotFoundError(f"Target file not found for '{dataset_id}'. {hint}")
         return self._load_gdf(target_path)
 
     def load_pair(
@@ -269,12 +272,14 @@ class DatasetLoader:
 
         if ref_path is None:
             raise FileNotFoundError(
-                f"Reference file not found for '{dataset_id}'. Run: matcher fetch {base}"
+                f"Reference file not found for '{dataset_id}'. Run: matcher fetch overture {base}"
             )
         if target_path is None:
-            raise FileNotFoundError(
-                f"Target file not found for '{dataset_id}'. Run: matcher fetch {dataset_id}"
-            )
+            if dataset_id.endswith("_osm"):
+                hint = f"Run: matcher fetch osm {base}"
+            else:
+                hint = f"Run: matcher fetch target {dataset_id}"
+            raise FileNotFoundError(f"Target file not found for '{dataset_id}'. {hint}")
         return ref_path, target_path
 
     def _load_gdf(self, path: Path) -> gpd.GeoDataFrame:
@@ -286,11 +291,13 @@ class DatasetLoader:
             3. Default CRS to WGS84 (EPSG:4326) if missing.
             4. Filter to LineString geometries.
             5. Drop null geometries.
-            6. Warn on missing expected columns.
-            7. Cache in session if active.
+            6. Validate required columns (raise on missing ``id``).
+            7. Log missing optional columns at debug level.
+            8. Validate that the result is non-empty.
+            9. Cache in session if active.
 
         Raises:
-            ValueError: If the result is empty after geometry filtering.
+            ValueError: If required columns are missing or result is empty.
         """
         resolved = path.resolve()
 
@@ -318,24 +325,28 @@ class DatasetLoader:
         if null_mask.any():
             gdf = gdf[~null_mask].copy()
 
-        # 6. Validate columns
+        # 6. Validate required columns
         present = set(gdf.columns)
         missing_required = _REQUIRED_COLUMNS - present - {"geometry"}  # geometry is always present
         if missing_required:
-            logger.warning(f"{path.name}: missing required columns {missing_required}")
+            raise ValueError(
+                f"{path.name}: missing required columns {missing_required}. "
+                "These columns are required for downstream processing."
+            )
 
+        # 7. Log missing optional columns
         missing_optional = _EXPECTED_COLUMNS - present
         if missing_optional:
             logger.debug(f"{path.name}: missing optional columns {missing_optional}")
 
-        # 7. Validate non-empty
+        # 8. Validate non-empty
         if gdf.empty:
             raise ValueError(
                 f"No LineString geometries remaining after filtering {path.name}. "
                 f"Check the source data."
             )
 
-        # 8. Cache if session active
+        # 9. Cache if session active
         if self._cache is not None:
             self._cache[resolved] = gdf
 

@@ -1,10 +1,7 @@
 """Tests for the DatasetLoader utility."""
 
-import io
-
 import geopandas as gpd
 import pytest
-from loguru import logger
 from shapely.geometry import LineString, MultiLineString, Point
 
 from matcher.config import DATA_VERSION
@@ -166,8 +163,8 @@ class TestLoadGdf:
         with pytest.raises(ValueError, match="No LineString geometries remaining"):
             loader._load_gdf(path)
 
-    def test_load_gdf_warns_missing_columns(self, tmp_path):
-        """Warning logged when expected column 'id' is missing."""
+    def test_load_gdf_raises_missing_required_columns(self, tmp_path):
+        """ValueError raised when required column 'id' is missing."""
         gdf = gpd.GeoDataFrame(
             {
                 "other": ["a"],
@@ -178,16 +175,9 @@ class TestLoadGdf:
         path = tmp_path / "no_id.parquet"
         gdf.to_parquet(path)
 
-        # Capture loguru output via a temporary sink
-        sink = io.StringIO()
-        handler_id = logger.add(sink, format="{message}", level="WARNING")
-        try:
-            loader = DatasetLoader(tmp_path)
-            loaded = loader._load_gdf(path)
-            assert "missing required columns" in sink.getvalue()
-            assert len(loaded) == 1
-        finally:
-            logger.remove(handler_id)
+        loader = DatasetLoader(tmp_path)
+        with pytest.raises(ValueError, match="missing required columns"):
+            loader._load_gdf(path)
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +244,10 @@ class TestSessionCaching:
 class TestListAvailable:
     def test_list_available(self, data_dir_osm, monkeypatch):
         """list_available includes both standard and OSM datasets."""
-        # list_available() does: from .config import list_dataset_configs as _list_yaml
-        # so we monkeypatch the function on the config module itself
+        # list_available() does: from .schema import list_dataset_configs as _list_yaml
+        # so we monkeypatch the function on the schema module
         monkeypatch.setattr(
-            "matcher.datasets.config.list_dataset_configs",
+            "matcher.datasets.schema.list_dataset_configs",
             lambda: ["us_boston_streets"],
         )
         loader = DatasetLoader(data_dir_osm)
