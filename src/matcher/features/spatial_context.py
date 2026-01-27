@@ -732,6 +732,10 @@ def compute_aligned_endpoint_features_batch(
     Shared implementation used by both the ML scoring path and the labeling
     data loader path to avoid code duplication.
 
+    Uses vectorized Shapely interpolation and scipy cKDTree batch queries
+    instead of per-pair spatial index lookups for significantly better
+    performance on large candidate sets.
+
     Args:
         alignments: Dict mapping (ref_idx, target_idx) -> AlignmentResult
         target_geoms: Array of target geometries indexed by position
@@ -743,21 +747,137 @@ def compute_aligned_endpoint_features_batch(
     Returns:
         Dict mapping (ref_idx, target_idx) -> endpoint feature dict
     """
+    if not alignments:
+        return {}
+
+    import shapely
+    from scipy.spatial import cKDTree
+
+    tolerance_m = 5.0
+    radius = tolerance_m * 2  # Same search radius as compute_aligned_endpoint_features
+
+    # 1. Extract alignment data into arrays
+    keys = list(alignments.keys())
+    n = len(keys)
+    target_indices = np.empty(n, dtype=np.intp)
+    start_fracs = np.empty(n, dtype=np.float64)
+    end_fracs = np.empty(n, dtype=np.float64)
+
+    for i, key in enumerate(keys):
+        target_indices[i] = key[1]
+        alignment = alignments[key]
+        start_fracs[i] = alignment.dataset_start_frac
+        end_fracs[i] = alignment.dataset_end_frac
+
+    # Clamp fractions to [0.0, 1.0]
+    np.clip(start_fracs, 0.0, 1.0, out=start_fracs)
+    np.clip(end_fracs, 0.0, 1.0, out=end_fracs)
+
+    # Connector snapping (per-pair but cheap — just float comparisons)
+    if seg_to_connectors is not None:
+        for i in range(n):
+            sid = str(target_ids[target_indices[i]])
+            connectors = seg_to_connectors.get(sid)
+            if connectors:
+                snapped = find_nearest_connector_position(connectors, start_fracs[i])
+                if snapped is not None:
+                    start_fracs[i] = snapped
+                snapped = find_nearest_connector_position(connectors, end_fracs[i])
+                if snapped is not None:
+                    end_fracs[i] = snapped
+
+    # 2. Filter to valid geometries
+    geoms = target_geoms[target_indices]
+    valid_mask = np.array(
+        [g is not None and not shapely.is_missing(g) and not g.is_empty for g in geoms]
+    )
+
+    if not valid_mask.any():
+        return {}
+
+    valid_indices = np.where(valid_mask)[0]
+    valid_geoms = geoms[valid_mask]
+    valid_start_fracs = start_fracs[valid_mask]
+    valid_end_fracs = end_fracs[valid_mask]
+
+    # 3. Vectorized interpolation (single C call for all pairs)
+    start_points = shapely.line_interpolate_point(valid_geoms, valid_start_fracs, normalized=True)
+    end_points = shapely.line_interpolate_point(valid_geoms, valid_end_fracs, normalized=True)
+
+    start_coords = shapely.get_coordinates(start_points)
+    end_coords = shapely.get_coordinates(end_points)
+
+    # 4. Build cKDTree from endpoint coordinates for batch queries
+    endpoint_coords = target_index.endpoint_coords
+    if endpoint_coords.size == 0:
+        return {}
+
+    tree = cKDTree(endpoint_coords)
+
+    # 5. Batch radius queries (single C call each, replaces 2N individual STRtree queries)
+    start_neighbors_list = tree.query_ball_point(start_coords, r=radius)
+    end_neighbors_list = tree.query_ball_point(end_coords, r=radius)
+
+    # 6. Process results — compute distances and shared counts per pair
+    endpoint_to_segment = target_index.endpoint_to_segment
+    segment_endpoints = target_index.segment_endpoints
+
     result = {}
-    for (ref_idx, target_idx), alignment in alignments.items():
-        target_geom = target_geoms[target_idx]
-        if target_geom is not None and not target_geom.is_empty:
-            filtered_idx = original_to_filtered.get(target_idx)
-            aligned_ep = compute_aligned_endpoint_features(
-                target_geom,
-                target_index,
-                start_frac=alignment.dataset_start_frac,
-                end_frac=alignment.dataset_end_frac,
-                exclude_segment_idx=filtered_idx,
-                seg_id=str(target_ids[target_idx]),
-                seg_to_connectors=seg_to_connectors,
-            )
-            result[(ref_idx, target_idx)] = aligned_ep
+    for j in range(len(valid_indices)):
+        i = valid_indices[j]  # Index into original keys array
+        key = keys[i]
+        target_idx = target_indices[i]
+        filtered_idx = original_to_filtered.get(int(target_idx))
+
+        # Get excluded endpoints for this segment
+        excluded_eps = None
+        if filtered_idx is not None and filtered_idx in segment_endpoints:
+            excluded_eps = segment_endpoints[filtered_idx]
+
+        s_x, s_y = start_coords[j, 0], start_coords[j, 1]
+        e_x, e_y = end_coords[j, 0], end_coords[j, 1]
+
+        start_min_dist = float("inf")
+        end_min_dist = float("inf")
+        shared_segments = set()
+
+        # Process start-point neighbors
+        for ep_idx in start_neighbors_list[j]:
+            if excluded_eps is not None and (
+                ep_idx == excluded_eps[0] or ep_idx == excluded_eps[1]
+            ):
+                continue
+            dx = endpoint_coords[ep_idx, 0] - s_x
+            dy = endpoint_coords[ep_idx, 1] - s_y
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < start_min_dist:
+                start_min_dist = dist
+            if dist <= tolerance_m and ep_idx in endpoint_to_segment:
+                shared_segments.update(endpoint_to_segment[ep_idx])
+
+        # Process end-point neighbors
+        for ep_idx in end_neighbors_list[j]:
+            if excluded_eps is not None and (
+                ep_idx == excluded_eps[0] or ep_idx == excluded_eps[1]
+            ):
+                continue
+            dx = endpoint_coords[ep_idx, 0] - e_x
+            dy = endpoint_coords[ep_idx, 1] - e_y
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < end_min_dist:
+                end_min_dist = dist
+            if dist <= tolerance_m and ep_idx in endpoint_to_segment:
+                shared_segments.update(endpoint_to_segment[ep_idx])
+
+        if filtered_idx is not None:
+            shared_segments.discard(filtered_idx)
+
+        result[key] = {
+            "min_endpoint_proximity_m": min(start_min_dist, end_min_dist),
+            "max_endpoint_proximity_m": max(start_min_dist, end_min_dist),
+            "shared_endpoint_count": len(shared_segments),
+        }
+
     return result
 
 
