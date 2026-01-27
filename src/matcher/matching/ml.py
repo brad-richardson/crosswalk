@@ -731,14 +731,14 @@ class MLMatcher:
                 X[inf_mask, i] = MAX_DISTANCE_METERS
         return X
 
-    def predict(self, features: list[dict[str, float]]) -> list[float]:
+    def predict(self, features: list[dict[str, float]]) -> np.ndarray:
         """Predict match probabilities.
 
         Args:
             features: List of feature dictionaries
 
         Returns:
-            List of match probabilities (0-1)
+            Array of match probabilities (0-1)
         """
         if self.model is None:
             raise ValueError("No model loaded - call train() or load_model() first")
@@ -755,7 +755,7 @@ class MLMatcher:
             # Fallback for binary where classes are [0, 1]
             match_idx = 1
 
-        return probs[:, match_idx].tolist()
+        return probs[:, match_idx]
 
     def predict_class(self, features: list[dict[str, float]]) -> list[str]:
         """Predict class labels.
@@ -779,20 +779,21 @@ class MLMatcher:
         Also handles infinite values by replacing them with MAX_DISTANCE_METERS,
         which prevents XGBoost from producing NaN predictions.
         """
-        rows = []
-        for feat_dict in features:
-            row = []
-            for col in self.feature_names:
-                val = feat_dict.get(col, np.nan)
-                # Use stored median if value is missing or NaN
-                if pd.isna(val):
-                    val = self.feature_medians.get(col, 0.0)
-                # Replace infinite values with MAX_DISTANCE_METERS to avoid XGBoost issues
-                elif np.isinf(val):
-                    val = MAX_DISTANCE_METERS
-                row.append(val)
-            rows.append(row)
-        return np.array(rows, dtype=np.float32)
+        # pd.DataFrame(list-of-dicts) uses C-optimized path — orders of magnitude
+        # faster than per-element Python dict lookups
+        df = pd.DataFrame(features)
+        # Reorder columns to match model's expected feature order; adds NaN
+        # for any feature columns missing entirely from all dicts
+        df = df.reindex(columns=self.feature_names)
+        # Impute NaN (missing dict keys or explicit NaN values) with training medians
+        df = df.fillna(self.feature_medians).fillna(0.0)
+        # Replace infinities with cap value
+        arr = df.to_numpy(dtype=np.float32)
+        inf_mask = np.isinf(arr)
+        if inf_mask.any():
+            arr = arr.copy()
+            arr[inf_mask] = MAX_DISTANCE_METERS
+        return arr
 
     def score_candidates(
         self,
