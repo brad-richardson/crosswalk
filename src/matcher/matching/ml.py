@@ -20,6 +20,7 @@ Model Architecture:
 """
 
 import multiprocessing as mp
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -860,7 +861,11 @@ class MLMatcher:
         validate_projected_crs(reference, "reference")
         validate_projected_crs(target, "target")
 
+        # Timing instrumentation for pipeline profiling (visible at DEBUG log level)
+        timings = {}
+
         # Pre-extract data into NumPy arrays for memory efficiency
+        t0 = time.perf_counter()
         ref_geoms = reference.geometry.to_numpy()
         target_geoms = target.geometry.to_numpy()
         ref_names = (
@@ -894,6 +899,9 @@ class MLMatcher:
             else np.full(len(target), None, dtype=object)
         )
 
+        timings["data_extraction"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
+
         # Pre-compute endpoint, topology, and graphlet features for both reference and target
         # These capture network connectivity without requiring explicit topology
         from ..config import settings
@@ -905,6 +913,7 @@ class MLMatcher:
         )
 
         # Get unique indices from candidates to avoid recomputation
+        t0 = time.perf_counter()
         unique_target_indices = set(cand.target_idx for cand in candidates)
         unique_ref_indices = set(cand.ref_idx for cand in candidates)
 
@@ -921,10 +930,17 @@ class MLMatcher:
         # SpatialContextIndex uses 0-indexed positions within the GDF passed to build_from_gdf()
         original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
 
+        timings["segment_filtering"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] segment_filtering: {timings['segment_filtering']:.2f}s")
+        logger.debug(f"[TIMING] candidate_count: {len(candidates)}")
+
         # Build spatial index for endpoint proximity features (filtered target only)
         logger.info("Building spatial index for endpoint features...")
+        t0 = time.perf_counter()
         target_index = SpatialContextIndex()
         target_index.build_from_gdf(target_candidates_only, id_column=target_id_column)
+        timings["spatial_index_build"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] spatial_index_build: {timings['spatial_index_build']:.2f}s")
 
         # Pre-compute topology features using efficient Union-Find batch computation
         # Get unique segment IDs for only the candidates we need
@@ -945,6 +961,7 @@ class MLMatcher:
 
         # Compute topology for target and reference
         # Uses explicit connectors when available, falls back to geometry inference
+        t0 = time.perf_counter()
         target_topology_by_id = compute_all_topology(
             target,
             id_column=target_id_column,
@@ -974,6 +991,8 @@ class MLMatcher:
             ref_topology_features[ref_idx] = ref_topology_by_id.get(
                 seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
             )
+        timings["topology_computation"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] topology_computation: {timings['topology_computation']:.2f}s")
 
         # Pre-compute graphlet features for network topology similarity
         # For Overture reference data, use explicit connector positions for alignment-aware comparison
@@ -987,21 +1006,31 @@ class MLMatcher:
             f"and {len(target_candidates_only_proj)} target segments..."
         )
         # ref_has_connectors already defined earlier for topology computation
+        t0 = time.perf_counter()
         ref_graphlet_data = precompute_graphlet_features(
             ref_candidates_only,
             id_column=ref_id_column,
             tolerance_m=5.0,
             connectors_column="connectors" if ref_has_connectors else None,
         )
+        timings["graphlet_ref"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] graphlet_ref: {timings['graphlet_ref']:.2f}s")
+
         # Target data typically doesn't have explicit connectors, use endpoint-based inference
+        t0 = time.perf_counter()
         target_graphlet_data = precompute_graphlet_features(
             target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
         )
+        timings["graphlet_target"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] graphlet_target: {timings['graphlet_target']:.2f}s")
 
         # Pre-compute linestring alignments
         # Alignments are used to compute similarity features on aligned sublines
         logger.info("Computing linestring alignments...")
+        t0 = time.perf_counter()
         alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
+        timings["alignment_batch"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
 
         # Recompute endpoint features using alignment fractions
         # This uses aligned subline endpoints instead of full segment endpoints,
@@ -1015,6 +1044,7 @@ class MLMatcher:
             from ..features.spatial_context import compute_aligned_endpoint_features_batch
 
             logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
+            t0 = time.perf_counter()
             aligned_endpoint_features = compute_aligned_endpoint_features_batch(
                 alignments=alignments,
                 target_geoms=target_geoms,
@@ -1022,6 +1052,10 @@ class MLMatcher:
                 target_index=target_index,
                 original_to_filtered=original_to_filtered,
                 seg_to_connectors=target_seg_to_connectors_ep,
+            )
+            timings["aligned_endpoint_features"] = time.perf_counter() - t0
+            logger.info(
+                f"[TIMING] aligned_endpoint_features: {timings['aligned_endpoint_features']:.2f}s"
             )
             logger.info(
                 f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
@@ -1035,6 +1069,7 @@ class MLMatcher:
             f"{len(unique_target_indices)} target geometries..."
         )
 
+        t0 = time.perf_counter()
         ref_buffers_5m = {}
         ref_buffers_15m = {}
         for idx in unique_ref_indices:
@@ -1051,6 +1086,8 @@ class MLMatcher:
                 target_buffers_5m[idx] = geom.buffer(5.0)
                 target_buffers_15m[idx] = geom.buffer(15.0)
 
+        timings["buffer_precomputation"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] buffer_precomputation: {timings['buffer_precomputation']:.2f}s")
         logger.info(
             f"Pre-computed {len(ref_buffers_5m) + len(target_buffers_5m)} buffers at 5m, "
             f"{len(ref_buffers_15m) + len(target_buffers_15m)} at 15m"
@@ -1109,6 +1146,7 @@ class MLMatcher:
         features_list = []
 
         logger.info(f"Starting parallel feature computation (chunk_size={chunk_size})...")
+        t0 = time.perf_counter()
 
         with ProcessPoolExecutor(
             max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
@@ -1123,6 +1161,11 @@ class MLMatcher:
                 processed = min(i + len(batch), len(work_items))
                 pct = processed / len(work_items) * 100
                 logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
+
+        timings["parallel_feature_computation"] = time.perf_counter() - t0
+        logger.info(
+            f"[TIMING] parallel_feature_computation: {timings['parallel_feature_computation']:.2f}s"
+        )
 
         # Reorder results back to original candidate order
         # (we sorted by spatial locality for cache efficiency)
@@ -1176,13 +1219,16 @@ class MLMatcher:
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
         logger.info(f"Running XGBoost prediction on {len(valid_features):,} candidates...")
+        t0 = time.perf_counter()
         probs = self.predict(valid_features)
-        logger.info("XGBoost prediction complete")
+        timings["xgboost_prediction"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] xgboost_prediction: {timings['xgboost_prediction']:.2f}s")
 
         # Build results - use confidence-based decision, not class-based
         # This ensures high-confidence matches aren't filtered just because
         # the model's decision boundary puts them in "no_match" class
         logger.info(f"Building {len(valid_candidates):,} MatchResult objects...")
+        t0 = time.perf_counter()
         results = []
         for i, cand in enumerate(valid_candidates):
             prob = probs[i]
@@ -1218,7 +1264,23 @@ class MLMatcher:
             if (i + 1) % 100000 == 0:
                 logger.info(f"Built {i + 1:,}/{len(candidates):,} MatchResult objects...")
 
+        timings["result_building"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] result_building: {timings['result_building']:.2f}s")
+
         logger.info(f"Built {len(results):,} MatchResult objects")
+
+        # Log timing summary table
+        total = sum(timings.values())
+        logger.debug("[TIMING] ===== Pipeline Stage Summary =====")
+        logger.debug(f"[TIMING] {'Stage':<35} {'Time (s)':>10} {'%':>6}")
+        logger.debug(f"[TIMING] {'-' * 35} {'-' * 10} {'-' * 6}")
+        for stage, elapsed in timings.items():
+            pct = elapsed / total * 100 if total > 0 else 0
+            logger.debug(f"[TIMING] {stage:<35} {elapsed:>10.2f} {pct:>5.1f}%")
+        logger.debug(f"[TIMING] {'-' * 35} {'-' * 10} {'-' * 6}")
+        logger.debug(f"[TIMING] {'TOTAL':<35} {total:>10.2f} {'100.0':>6}%")
+        logger.debug(f"[TIMING] candidates={len(candidates):,}")
+
         return results
 
 
