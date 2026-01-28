@@ -10,10 +10,12 @@ from typing import Any
 
 import mercantile
 import requests
-import svgwrite
 from loguru import logger
 from PIL import Image, ImageDraw
 from shapely.geometry import LineString, MultiLineString, Polygon, box
+
+# Note: svgwrite is imported lazily in render_geometry_svg() to avoid
+# requiring it for PNG-only usage (it's in the [label] extra)
 
 # Esri World Imagery (free, no API key required)
 ESRI_TILE_URL = (
@@ -1286,7 +1288,7 @@ def _svg_geo_to_pixel(
 
 
 def _svg_draw_linestring(
-    dwg: svgwrite.Drawing,
+    dwg,  # svgwrite.Drawing - lazy import
     line: LineString,
     bbox: tuple[float, float, float, float],
     size: tuple[int, int],
@@ -1386,6 +1388,8 @@ def render_geometry_svg(
     Returns:
         SVG markup string
     """
+    import svgwrite
+
     ref_line = _to_linestring(ref_geom)
     target_line = _to_linestring(target_geom)
 
