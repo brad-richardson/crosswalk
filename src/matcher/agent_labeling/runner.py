@@ -294,11 +294,15 @@ def _invoke_gemini(
         if model:
             cmd.extend(["-m", model])
 
-        img_name = image_path.name if image_path else "image.png"
-        cmd.append(f"Analyze {img_name} using instructions in prompt.txt")
-        cmd.append("prompt.txt")
+        # Build command differently depending on whether an image is available
         if image_path and (sandbox_path / image_path.name).exists():
+            cmd.append(f"Analyze {image_path.name} using instructions in prompt.txt")
+            cmd.append("prompt.txt")
             cmd.append(str(sandbox_path / image_path.name))
+        else:
+            # Text-only mode (e.g., SVG variants where content is inlined in prompt)
+            cmd.append("Use instructions in prompt.txt")
+            cmd.append("prompt.txt")
 
         result = subprocess.run(
             cmd,

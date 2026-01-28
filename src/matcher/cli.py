@@ -2877,7 +2877,7 @@ def generate_basemap_sweep(
                     ref_name = attrs.get("name")
                     ref_class = attrs.get("class")
                 except Exception:
-                    pass
+                    pass  # Malformed JSON attributes - continue with None values
             if "target_attributes" in geom_row.index:
                 try:
                     import json
@@ -2886,7 +2886,7 @@ def generate_basemap_sweep(
                     target_name = attrs.get("name")
                     target_class = attrs.get("class")
                 except Exception:
-                    pass
+                    pass  # Malformed JSON attributes - continue with None values
 
             # Read alignment fractions from labels CSV (NaN → defaults)
             def _safe_frac(val, default):
@@ -3025,8 +3025,8 @@ def run_agent_cmd(
     Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
 
     Examples:
-        matcher run-agent claude --batch agent_labels/batches/sweep_* --model sonnet --variant subline_geometry_only
-        matcher run-agent gemini --batch agent_labels/batches/sweep_* --model flash --variant road_context
+        matcher run-agent claude --batch agent_labels/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
+        matcher run-agent gemini --batch agent_labels/batches/sweep_2026-01-28 --model flash --variant road_context
     """
     from .agent_labeling.runner import run_agent_batch
 
@@ -3059,7 +3059,7 @@ def eval_agent_sweep(
         matcher eval-agent-sweep agent_labels/batches/sweep_2026-01-28_120000
 
         # Include reasoning text
-        matcher eval-agent-sweep agent_labels/batches/sweep_* --reasoning
+        matcher eval-agent-sweep agent_labels/batches/sweep_2026-01-28_120000 --reasoning
     """
     import pandas as pd
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
