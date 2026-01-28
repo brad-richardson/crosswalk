@@ -259,9 +259,14 @@ def _invoke_claude(
         timeout=60,
         cwd=cwd,
     )
-    return (
-        result.stdout + result.stderr if result.returncode == 0 else result.stdout + result.stderr
-    )
+    if result.returncode != 0:
+        logger.warning(
+            "Claude CLI returned non-zero exit code: {}. stderr: {}",
+            result.returncode,
+            result.stderr[:200] if result.stderr else "(empty)",
+        )
+        return None
+    return result.stdout + result.stderr
 
 
 def _invoke_gemini(
@@ -319,7 +324,8 @@ def _invoke_codex(prompt: str, image_path: Path | None) -> str | None:
     subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     try:
         return Path(tmpout).read_text()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not read codex output file: {e}")
         return None
     finally:
         Path(tmpout).unlink(missing_ok=True)
@@ -465,12 +471,13 @@ def run_agent_batch(
                 for row in reader:
                     if len(row) >= 2:
                         existing_pairs.add((row[0], row[1]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not read existing output file for resume: {e}")
         logger.info(f"Resuming: found {len(existing_pairs)} existing labels")
     else:
         output_file.write_text(LABEL_HEADER + "\n")
         raw_output_file.write_text("")
+        log_file.write_text("")  # Truncate log on overwrite
 
     _log(log_file, f"=== {agent} Run Started: {datetime.now(UTC).isoformat()} ===")
 
