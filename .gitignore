@@ -69,3 +69,4 @@ models/
 # Agent labeling raw outputs (keep only processed CSVs)
 agent_labels/**/raw_output.txt
 agent_labels/**/agent_prompt.md
+agent_labels/batches/

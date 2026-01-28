@@ -83,6 +83,10 @@ class SampledCandidate:
     features: dict[str, float]
     dataset: str
     confidence_bucket: str
+    ref_start_frac: float = 0.0
+    ref_end_frac: float = 1.0
+    target_start_frac: float = 0.0
+    target_end_frac: float = 1.0
 
 
 def load_geodataframe(path: Path) -> gpd.GeoDataFrame:

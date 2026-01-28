@@ -12,12 +12,20 @@ Components:
 """
 
 from .agent_store import AgentLabelStore
-from .context_generator import generate_metadata_yaml, write_candidate_package
+from .context_generator import (
+    generate_metadata_yaml,
+    write_candidate_package,
+    write_candidate_sweep_package,
+)
 from .image_renderer import (
     fetch_satellite_tile,
+    render_candidate_variant,
     render_geometry_only,
+    render_subline_geometry_only,
+    render_subline_road_context,
     render_with_overlay,
 )
+from .runner import run_agent_batch
 from .sampler import SamplingConfig, sample_candidates
 
 __all__ = [
@@ -26,7 +34,12 @@ __all__ = [
     "fetch_satellite_tile",
     "render_with_overlay",
     "render_geometry_only",
+    "render_subline_geometry_only",
+    "render_subline_road_context",
+    "render_candidate_variant",
     "generate_metadata_yaml",
     "write_candidate_package",
+    "write_candidate_sweep_package",
     "AgentLabelStore",
+    "run_agent_batch",
 ]

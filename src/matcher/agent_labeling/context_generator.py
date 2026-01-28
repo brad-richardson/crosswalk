@@ -12,7 +12,7 @@ import yaml
 from loguru import logger
 from shapely.ops import transform
 
-from .image_renderer import render_candidate_images
+from .image_renderer import render_candidate_images, render_candidate_variant
 from .sampler import SampledCandidate
 
 
@@ -203,6 +203,94 @@ def write_candidate_package(
     if satellite_img:
         satellite_path = candidate_dir / "satellite.png"
         satellite_img.save(satellite_path)
+
+    return candidate_dir
+
+
+def write_candidate_sweep_package(
+    output_dir: Path,
+    candidate: SampledCandidate,
+    batch_id: str,
+    variants: list[dict[str, str]],
+    context_roads: list | None = None,
+) -> Path:
+    """Write candidate package with multiple image variants for basemap sweep.
+
+    Each variant dict should have "basemap" and "format" keys specifying the
+    rendering style and output format.
+
+    Args:
+        output_dir: Base output directory (will create subdirectory for candidate)
+        candidate: Sampled candidate
+        batch_id: Batch identifier
+        variants: List of variant dicts, e.g.
+            [{"basemap": "geometry_only", "format": "png"},
+             {"basemap": "road_context", "format": "svg"}]
+        context_roads: List of nearby road geometries (for road_context variants)
+
+    Returns:
+        Path to candidate directory
+    """
+    # Create candidate directory
+    candidate_dir_name = f"{candidate.ref_id}__{candidate.target_id}"
+    candidate_dir_name = candidate_dir_name.replace("/", "_").replace("\\", "_")
+    candidate_dir = output_dir / candidate_dir_name
+    candidate_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate all variant images
+    image_entries = {}
+    first_size = None
+
+    # Build alignment fractions for subline variants
+    alignment_fracs = {
+        "ref_start_frac": candidate.ref_start_frac,
+        "ref_end_frac": candidate.ref_end_frac,
+        "target_start_frac": candidate.target_start_frac,
+        "target_end_frac": candidate.target_end_frac,
+    }
+
+    for variant in variants:
+        basemap = variant["basemap"]
+        fmt = variant["format"]
+        filename = f"{basemap}.{fmt}"
+
+        needs_context = basemap in ("road_context", "subline_road_context")
+        needs_alignment = basemap.startswith("subline_")
+
+        result, meta = render_candidate_variant(
+            ref_geom=candidate.ref_geometry,
+            target_geom=candidate.target_geometry,
+            basemap=basemap,
+            output_format=fmt,
+            context_roads=context_roads if needs_context else None,
+            size=None,
+            alignment_fracs=alignment_fracs if needs_alignment else None,
+        )
+
+        if fmt == "svg":
+            (candidate_dir / filename).write_text(result)
+        else:
+            result.save(candidate_dir / filename)
+
+        image_entries[filename] = list(meta["size"])
+        if first_size is None:
+            first_size = meta["size"]
+
+    # Generate metadata YAML with variant image info
+    image_size = {"geometry": first_size or (128, 128), "satellite": first_size or (128, 128)}
+    yaml_content = generate_metadata_yaml(candidate, batch_id, image_size=image_size)
+
+    # Patch the images section to list all variants
+    metadata = yaml.safe_load(yaml_content)
+    metadata["images"] = {
+        "variants": {name: {"size": sz} for name, sz in image_entries.items()},
+    }
+    yaml_content = yaml.dump(
+        metadata, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
+
+    metadata_path = candidate_dir / "metadata.yaml"
+    metadata_path.write_text(yaml_content)
 
     return candidate_dir
 
