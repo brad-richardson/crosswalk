@@ -1,0 +1,45 @@
+name: us_philadelphia_sidewalks
+display_name: Philadelphia Sidewalks
+type: sidewalk
+description: Regional pedestrian network from DVRPC (sidewalks, crosswalks, curb ramps)
+source:
+  type: arcgis
+  url: https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedestriannetwork_lines/FeatureServer/0
+  portal_url: https://walk.dvrpc.org/
+fetch:
+  id_prefix: phila_sidewalk
+  class_column: feat_type
+  class_mapping:
+    Sidewalk: footway
+    Crosswalk: footway
+    sidewalk: footway
+    crosswalk: footway
+  subclass_column: feat_type
+  subclass_mapping:
+    Sidewalk: sidewalk
+    Crosswalk: crosswalk
+    sidewalk: sidewalk
+    crosswalk: crosswalk
+  bbox:
+  - -75.28
+  - 39.87
+  - -74.96
+  - 40.14
+  crs: EPSG:4326
+last_fetch:
+  fetched_at: '2026-01-29T03:28:27.363902+00:00'
+  bbox:
+  - -75.28
+  - 39.87
+  - -74.96
+  - 40.14
+  bbox_buffered:
+  - -75.29172747835149
+  - 39.861016888250084
+  - -74.9482725216485
+  - 40.148983111749914
+  bbox_buffer_m: 1000.0
+  feature_count: 189229
+  geometry_types:
+  - LineString
+  output_path: data/raw
