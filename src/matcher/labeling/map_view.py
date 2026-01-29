@@ -1,11 +1,36 @@
 """Map visualization component using folium."""
 
+import html
+
 import folium
 from shapely.geometry import LineString, mapping
 
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
 from .imagery import get_best_satellite_layer
+
+
+def _sanitize_attribution(text: str, url: str | None) -> str:
+    """Sanitize attribution text and URL to prevent XSS.
+
+    Args:
+        text: Attribution text to display
+        url: Optional URL for the attribution link
+
+    Returns:
+        Safe HTML string for attribution
+    """
+    # Escape the text to prevent XSS
+    safe_text = html.escape(text)
+
+    # Only allow http/https URLs to prevent javascript: injection
+    if url and url.lower().startswith(("http://", "https://")):
+        # Escape the URL as well
+        safe_url = html.escape(url)
+        return f'<a href="{safe_url}">{safe_text}</a>'
+
+    return safe_text
+
 
 # Colors for visualization - aligned portions are bright, full geometries are faded
 REFERENCE_COLOR = "#2196F3"  # Blue (aligned/matched portion)
@@ -78,10 +103,8 @@ def _add_dynamic_satellite_layer(m: folium.Map) -> None:
         ).add_to(m)
         return
 
-    # Build attribution string
-    attr = layer.attribution
-    if layer.attribution_url:
-        attr = f'<a href="{layer.attribution_url}">{layer.attribution}</a>'
+    # Build attribution string (sanitized to prevent XSS)
+    attr = _sanitize_attribution(layer.attribution, layer.attribution_url)
 
     tile_layer_kwargs = {
         "tiles": layer.url,

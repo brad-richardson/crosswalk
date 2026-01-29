@@ -4,6 +4,11 @@ This module provides access to satellite/aerial imagery from the OSM Editor Laye
 which aggregates imagery sources from various providers including ESRI, Mapbox, and
 regional orthoimagery services.
 
+Note: Mapbox API keys (public tokens) are embedded in tile URLs and will be visible
+in rendered HTML. This is expected behavior for client-side mapping - Mapbox public
+tokens are designed to be used this way and can be restricted by URL referrer in
+the Mapbox dashboard.
+
 See: https://github.com/osmlab/editor-layer-index
 """
 
@@ -12,7 +17,8 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.request import urlopen
+
+import requests
 
 # Cache directory for ELI data
 CACHE_DIR = Path.home() / ".cache" / "matcher"
@@ -91,6 +97,10 @@ def load_eli_data(force_refresh: bool = False) -> list[dict]:
 
     Returns:
         List of layer dictionaries from ELI.
+
+    Raises:
+        requests.RequestException: If download fails and no cache is available.
+        json.JSONDecodeError: If the response is not valid JSON.
     """
     # Check cache first
     if not force_refresh and ELI_CACHE_FILE.exists():
@@ -102,8 +112,9 @@ def load_eli_data(force_refresh: bool = False) -> list[dict]:
 
     # Download fresh data
     try:
-        with urlopen(ELI_URL, timeout=30) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        response = requests.get(ELI_URL, timeout=30)
+        response.raise_for_status()
+        data = response.json()
 
         # Cache for future use
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,7 +122,7 @@ def load_eli_data(force_refresh: bool = False) -> list[dict]:
             json.dump(data, f)
 
         return data
-    except Exception:
+    except (requests.RequestException, json.JSONDecodeError, OSError):
         # If download fails, try to use stale cache
         if ELI_CACHE_FILE.exists():
             with open(ELI_CACHE_FILE) as f:
