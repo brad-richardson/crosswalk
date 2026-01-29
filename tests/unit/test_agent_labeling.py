@@ -1,5 +1,6 @@
 """Tests for agent_labeling module."""
 
+import numpy as np
 import pytest
 from PIL import Image
 from shapely.geometry import LineString
@@ -11,11 +12,18 @@ from matcher.agent_labeling import (
 )
 from matcher.agent_labeling.context_generator import _round_value
 from matcher.agent_labeling.image_renderer import (
+    BACKGROUND_COLOR,
+    REFERENCE_COLOR,
+    ROAD_CONTEXT_COLOR,
+    _draw_dashed_linestring,
     _expand_bbox,
     _geo_to_pixel,
     _get_combined_bbox,
     _to_linestring,
+    render_candidate_variant,
     render_geometry_only,
+    render_subline_geometry_only,
+    render_subline_road_context,
 )
 from matcher.agent_labeling.sampler import SampledCandidate
 
@@ -235,3 +243,295 @@ class TestAgentLabelStore:
         assert row["consensus_label"] == "match"
         assert row["agreement_ratio"] == pytest.approx(2 / 3)
         assert row["num_agents"] == 3
+
+
+class TestDashedLinestring:
+    """Tests for dashed line drawing."""
+
+    def test_dashed_line_produces_image(self):
+        """Dashed line on white image should produce non-white pixels."""
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (256, 256), BACKGROUND_COLOR)
+        draw = ImageDraw.Draw(img)
+        line = LineString([(0, 0), (10, 0)])
+        bbox = (-1, -1, 11, 1)
+        _draw_dashed_linestring(draw, line, bbox, (256, 256), REFERENCE_COLOR, 2)
+
+        pixels = np.array(img)
+        non_white = np.any(pixels != 255, axis=2)
+        assert non_white.sum() > 0, "Expected some dashed pixels drawn"
+
+    def test_dashed_line_has_gaps(self):
+        """A dashed line should have alternating colored/white regions."""
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (400, 50), BACKGROUND_COLOR)
+        draw = ImageDraw.Draw(img)
+        line = LineString([(0, 0.5), (10, 0.5)])
+        bbox = (0, 0, 10, 1)
+        _draw_dashed_linestring(draw, line, bbox, (400, 50), REFERENCE_COLOR, 2, (20, 10))
+
+        # Sample the middle row
+        pixels = np.array(img)
+        mid_row = pixels[25, :, :]
+        is_colored = np.any(mid_row != 255, axis=1)
+
+        # Should have at least one transition from colored to white
+        transitions = np.diff(is_colored.astype(int))
+        assert np.sum(transitions != 0) > 0, "Expected dash/gap transitions"
+
+    def test_dashed_line_empty_geometry(self):
+        """Empty geometry should not crash."""
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (100, 100), BACKGROUND_COLOR)
+        draw = ImageDraw.Draw(img)
+        _draw_dashed_linestring(draw, None, (0, 0, 1, 1), (100, 100), REFERENCE_COLOR, 2)
+        # Should not raise
+
+    def test_dashed_line_empty_linestring(self):
+        """Empty LineString should not crash."""
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (100, 100), BACKGROUND_COLOR)
+        draw = ImageDraw.Draw(img)
+        line = LineString()
+        _draw_dashed_linestring(draw, line, (0, 0, 1, 1), (100, 100), REFERENCE_COLOR, 2)
+        # Should not raise
+
+
+class TestSublineRendering:
+    """Tests for subline rendering functions."""
+
+    def test_subline_geometry_only_partial_alignment(self):
+        """Partial alignment should render both faded and bright layers."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        img = render_subline_geometry_only(
+            ref,
+            target,
+            ref_start_frac=0.0,
+            ref_end_frac=0.5,
+            target_start_frac=0.2,
+            target_end_frac=1.0,
+            size=(256, 256),
+        )
+
+        assert isinstance(img, Image.Image)
+        assert img.size == (256, 256)
+
+        # Should have non-white pixels (geometry drawn)
+        pixels = np.array(img)
+        non_white = np.any(pixels != 255, axis=2)
+        assert non_white.sum() > 0
+
+    def test_subline_geometry_only_full_alignment(self):
+        """Full alignment fracs (0.0-1.0) should fall back to standard rendering."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        padding = 0.3
+        subline_img = render_subline_geometry_only(
+            ref,
+            target,
+            ref_start_frac=0.0,
+            ref_end_frac=1.0,
+            target_start_frac=0.0,
+            target_end_frac=1.0,
+            size=(256, 256),
+            padding_ratio=padding,
+        )
+        standard_img = render_geometry_only(
+            ref,
+            target,
+            size=(256, 256),
+            padding_ratio=padding,
+        )
+
+        # Both should produce identical images (same padding → same bbox)
+        subline_arr = np.array(subline_img)
+        standard_arr = np.array(standard_img)
+        assert np.array_equal(subline_arr, standard_arr)
+
+    def test_subline_road_context_with_roads(self):
+        """Road context variant should render gray context road pixels."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+        ctx = [LineString([(0, -1), (10, -1)])]
+
+        img = render_subline_road_context(
+            ref,
+            target,
+            ref_start_frac=0.0,
+            ref_end_frac=0.5,
+            target_start_frac=0.2,
+            target_end_frac=1.0,
+            context_roads=ctx,
+            size=(256, 256),
+        )
+
+        assert isinstance(img, Image.Image)
+        pixels = np.array(img)
+
+        # Check for gray pixels (context road color is (200, 200, 200))
+        gray_mask = (
+            (pixels[:, :, 0] == ROAD_CONTEXT_COLOR[0])
+            & (pixels[:, :, 1] == ROAD_CONTEXT_COLOR[1])
+            & (pixels[:, :, 2] == ROAD_CONTEXT_COLOR[2])
+        )
+        assert gray_mask.sum() > 0, "Expected gray context road pixels"
+
+    def test_subline_road_context_no_roads(self):
+        """No context roads should produce same output as geometry-only subline."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        img_ctx = render_subline_road_context(
+            ref,
+            target,
+            ref_start_frac=0.0,
+            ref_end_frac=0.5,
+            target_start_frac=0.2,
+            target_end_frac=1.0,
+            context_roads=None,
+            size=(256, 256),
+        )
+        img_geo = render_subline_geometry_only(
+            ref,
+            target,
+            ref_start_frac=0.0,
+            ref_end_frac=0.5,
+            target_start_frac=0.2,
+            target_end_frac=1.0,
+            size=(256, 256),
+        )
+
+        # Without context roads, both should render identically
+        assert np.array_equal(np.array(img_ctx), np.array(img_geo))
+
+    def test_subline_degenerate_fracs(self):
+        """start==end fracs should gracefully fall back to full segment rendering."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        # Degenerate: start == end
+        img = render_subline_geometry_only(
+            ref,
+            target,
+            ref_start_frac=0.5,
+            ref_end_frac=0.5,
+            target_start_frac=0.3,
+            target_end_frac=0.3,
+            size=(256, 256),
+        )
+
+        assert isinstance(img, Image.Image)
+        assert img.size == (256, 256)
+        # Should still render (falls back to full segment)
+        pixels = np.array(img)
+        non_white = np.any(pixels != 255, axis=2)
+        assert non_white.sum() > 0
+
+
+class TestRenderCandidateVariantSubline:
+    """Tests for render_candidate_variant with subline basemaps."""
+
+    def test_dispatch_subline_geometry_only(self):
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        result, meta = render_candidate_variant(
+            ref,
+            target,
+            basemap="subline_geometry_only",
+            alignment_fracs={
+                "ref_start_frac": 0.0,
+                "ref_end_frac": 0.5,
+                "target_start_frac": 0.2,
+                "target_end_frac": 1.0,
+            },
+        )
+
+        assert isinstance(result, Image.Image)
+        assert meta["basemap"] == "subline_geometry_only"
+        assert meta["format"] == "png"
+
+    def test_dispatch_subline_road_context(self):
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+        ctx = [LineString([(0, -1), (10, -1)])]
+
+        result, meta = render_candidate_variant(
+            ref,
+            target,
+            basemap="subline_road_context",
+            context_roads=ctx,
+            alignment_fracs={
+                "ref_start_frac": 0.1,
+                "ref_end_frac": 0.9,
+                "target_start_frac": 0.0,
+                "target_end_frac": 1.0,
+            },
+        )
+
+        assert isinstance(result, Image.Image)
+        assert meta["basemap"] == "subline_road_context"
+
+    def test_alignment_fracs_none_default(self):
+        """alignment_fracs=None should not crash, treats as full alignment."""
+        ref = LineString([(0, 0), (10, 0)])
+        target = LineString([(0, 1), (10, 1)])
+
+        result, meta = render_candidate_variant(
+            ref,
+            target,
+            basemap="subline_geometry_only",
+            alignment_fracs=None,
+        )
+
+        assert isinstance(result, Image.Image)
+        assert meta["basemap"] == "subline_geometry_only"
+
+
+class TestSampledCandidateAlignment:
+    """Tests for alignment fraction fields on SampledCandidate."""
+
+    def _make_candidate(self, **kwargs):
+        defaults = dict(
+            ref_id="ref_1",
+            target_id="target_1",
+            ref_geometry=LineString([(0, 0), (10, 0)]),
+            target_geometry=LineString([(0, 1), (10, 1)]),
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            ml_confidence=0.5,
+            ml_decision="review",
+            features={},
+            dataset="test",
+            confidence_bucket="medium",
+        )
+        defaults.update(kwargs)
+        return SampledCandidate(**defaults)
+
+    def test_default_fracs(self):
+        c = self._make_candidate()
+        assert c.ref_start_frac == 0.0
+        assert c.ref_end_frac == 1.0
+        assert c.target_start_frac == 0.0
+        assert c.target_end_frac == 1.0
+
+    def test_custom_fracs(self):
+        c = self._make_candidate(
+            ref_start_frac=0.1,
+            ref_end_frac=0.9,
+            target_start_frac=0.2,
+            target_end_frac=0.8,
+        )
+        assert c.ref_start_frac == 0.1
+        assert c.ref_end_frac == 0.9
+        assert c.target_start_frac == 0.2
+        assert c.target_end_frac == 0.8

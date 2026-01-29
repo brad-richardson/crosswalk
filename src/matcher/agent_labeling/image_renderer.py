@@ -14,15 +14,32 @@ from loguru import logger
 from PIL import Image, ImageDraw
 from shapely.geometry import LineString, MultiLineString, Polygon, box
 
+# Note: svgwrite is imported lazily in render_geometry_svg() to avoid
+# requiring it for PNG-only usage (it's in the [label] extra)
+
 # Esri World Imagery (free, no API key required)
 ESRI_TILE_URL = (
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 )
 
+# CartoDB Positron (light basemap, free)
+CARTO_POSITRON_TILE_URL = "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+
+# Road context styling
+ROAD_CONTEXT_COLOR = (200, 200, 200)  # Light gray
+ROAD_CONTEXT_WIDTH = 1
+
 # Colors for rendering (RGB)
 REFERENCE_COLOR = (33, 150, 243)  # Blue #2196F3
 TARGET_COLOR = (244, 67, 54)  # Red #F44336
 BACKGROUND_COLOR = (255, 255, 255)  # White
+
+# Faded colors for full-segment dashed lines in subline rendering
+REFERENCE_FADED_COLOR = (144, 202, 249)  # #90CAF9
+TARGET_FADED_COLOR = (255, 205, 210)  # #FFCDD2
+FADED_LINE_WIDTH = 2
+DASH_PATTERN = (8, 6)  # 8px dash, 6px gap
+CONTEXT_ROAD_DASH = (4, 4)  # 4px dash, 4px gap
 
 # Line widths
 OVERLAY_LINE_WIDTH = 4
@@ -497,6 +514,92 @@ def _draw_linestring(
             total_dist += segment_length
 
 
+def _draw_dashed_linestring(
+    draw: ImageDraw.ImageDraw,
+    line: LineString,
+    bbox: tuple[float, float, float, float],
+    size: tuple[int, int],
+    color: tuple[int, int, int],
+    width: int,
+    dash_pattern: tuple[int, int] = DASH_PATTERN,
+):
+    """Draw a dashed LineString on an image.
+
+    PIL has no native dashed line support, so we walk pixel coordinates
+    alternating dash/gap segments.
+
+    Args:
+        draw: PIL ImageDraw object
+        line: Shapely LineString geometry
+        bbox: Bounding box for coordinate transformation
+        size: Image size (width, height)
+        color: RGB color tuple
+        width: Line width in pixels
+        dash_pattern: (dash_length, gap_length) in pixels
+    """
+    if line is None or line.is_empty:
+        return
+
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return
+
+    pixel_coords = [_geo_to_pixel(lon, lat, bbox, size) for lon, lat in coords]
+
+    dash_len, gap_len = dash_pattern
+    cycle_len = dash_len + gap_len
+
+    # Walk the polyline accumulating pixel distance
+    accumulated = 0.0
+    drawing = True  # Start with a dash
+
+    for i in range(len(pixel_coords) - 1):
+        x1, y1 = pixel_coords[i]
+        x2, y2 = pixel_coords[i + 1]
+
+        dx = x2 - x1
+        dy = y2 - y1
+        seg_len = math.sqrt(dx * dx + dy * dy)
+        if seg_len == 0:
+            continue
+
+        ndx = dx / seg_len
+        ndy = dy / seg_len
+
+        pos = 0.0  # position along this segment
+        while pos < seg_len:
+            # Distance remaining in current dash or gap phase
+            phase_offset = accumulated % cycle_len
+            if drawing:
+                remaining_in_phase = dash_len - phase_offset
+            else:
+                remaining_in_phase = gap_len - (phase_offset - dash_len)
+
+            # How far can we go along this segment?
+            step = min(remaining_in_phase, seg_len - pos)
+
+            if drawing:
+                sx = x1 + ndx * pos
+                sy = y1 + ndy * pos
+                ex = x1 + ndx * (pos + step)
+                ey = y1 + ndy * (pos + step)
+                draw.line(
+                    [(int(sx), int(sy)), (int(ex), int(ey))],
+                    fill=color,
+                    width=width,
+                )
+
+            pos += step
+            accumulated += step
+
+            # Check if we crossed a phase boundary
+            new_phase_offset = accumulated % cycle_len
+            if new_phase_offset < dash_len:
+                drawing = True
+            else:
+                drawing = False
+
+
 def render_with_overlay(
     satellite: Image.Image,
     ref_geom: LineString | MultiLineString,
@@ -725,3 +828,765 @@ def _render_geometry_with_bbox(
         )
 
     return result
+
+
+def fetch_raster_tiles(
+    bbox: tuple[float, float, float, float],
+    tile_url: str,
+    zoom: int | None = None,
+    size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
+) -> Image.Image | None:
+    """Fetch raster tiles from any tile server for a bounding box.
+
+    Args:
+        bbox: Bounding box (minx, miny, maxx, maxy) in EPSG:4326
+        tile_url: Tile URL template with {z}, {x}, {y} placeholders
+        zoom: Zoom level (auto-calculated if not provided)
+        size: Output image size (width, height)
+
+    Returns:
+        PIL Image or None if fetch fails
+    """
+    if zoom is None:
+        zoom = _choose_zoom(bbox, min(size))
+
+    minx, miny, maxx, maxy = bbox
+
+    # Get tiles that cover the bbox
+    tiles = list(mercantile.tiles(minx, miny, maxx, maxy, zoom))
+
+    if not tiles:
+        logger.warning(f"No tiles found for bbox {bbox} at zoom {zoom}")
+        return None
+
+    if len(tiles) > 16:
+        logger.warning(f"Too many tiles ({len(tiles)}), reducing zoom")
+        return fetch_raster_tiles(bbox, tile_url, zoom - 1, size)
+
+    # Calculate tile bounds
+    min_tile_x = min(t.x for t in tiles)
+    max_tile_x = max(t.x for t in tiles)
+    min_tile_y = min(t.y for t in tiles)
+    max_tile_y = max(t.y for t in tiles)
+
+    # Create composite image
+    tile_width = max_tile_x - min_tile_x + 1
+    tile_height = max_tile_y - min_tile_y + 1
+    composite = Image.new("RGB", (tile_width * 256, tile_height * 256))
+
+    # Fetch and composite tiles
+    session = requests.Session()
+    for tile in tiles:
+        try:
+            url = tile_url.format(z=tile.z, x=tile.x, y=tile.y)
+            response = session.get(url, timeout=10)
+            response.raise_for_status()
+
+            tile_img = Image.open(io.BytesIO(response.content))
+            # Convert to RGB if necessary (some tile servers return RGBA)
+            if tile_img.mode != "RGB":
+                tile_img = tile_img.convert("RGB")
+            x_offset = (tile.x - min_tile_x) * 256
+            y_offset = (tile.y - min_tile_y) * 256
+            composite.paste(tile_img, (x_offset, y_offset))
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch tile {tile}: {e}")
+            x_offset = (tile.x - min_tile_x) * 256
+            y_offset = (tile.y - min_tile_y) * 256
+            gray = Image.new("RGB", (256, 256), (128, 128, 128))
+            composite.paste(gray, (x_offset, y_offset))
+
+    # Crop to exact bbox bounds
+    top_left_tile = mercantile.Tile(min_tile_x, min_tile_y, zoom)
+    tl_bounds = mercantile.bounds(top_left_tile)
+
+    tile_lon_span = tl_bounds.east - tl_bounds.west
+    tile_lat_span = tl_bounds.north - tl_bounds.south
+    px_per_lon = 256 / tile_lon_span
+    px_per_lat = 256 / tile_lat_span
+
+    left_px = int((minx - tl_bounds.west) * px_per_lon)
+    top_px = int((tl_bounds.north - maxy) * px_per_lat)
+    right_px = int((maxx - tl_bounds.west) * px_per_lon)
+    bottom_px = int((tl_bounds.north - miny) * px_per_lat)
+
+    left_px = max(0, left_px)
+    top_px = max(0, top_px)
+    right_px = min(composite.width, right_px)
+    bottom_px = min(composite.height, bottom_px)
+
+    if right_px <= left_px or bottom_px <= top_px:
+        logger.warning("Invalid crop bounds, returning full composite")
+        return composite.resize(size, Image.Resampling.LANCZOS)
+
+    cropped = composite.crop((left_px, top_px, right_px, bottom_px))
+    return cropped.resize(size, Image.Resampling.LANCZOS)
+
+
+def render_with_road_context(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    context_roads: list[LineString] | None = None,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+) -> Image.Image:
+    """Render candidate pair with nearby roads as context.
+
+    White background with light gray context roads, then candidate pair on top.
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        context_roads: List of nearby road geometries to draw as gray lines
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+
+    Returns:
+        PIL Image with road context
+    """
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    if not ref_line or not target_line:
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        return Image.new("RGB", size, BACKGROUND_COLOR)
+
+    # Get bbox based on target geometry with padding
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+    bbox = _make_bbox_square(bbox)
+
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    # Create white background
+    result = Image.new("RGB", size, BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(result)
+
+    # Draw context roads first (underneath everything)
+    if context_roads:
+        for road in context_roads:
+            road_line = _to_linestring(road)
+            if road_line:
+                _draw_linestring(
+                    draw, road_line, bbox, size, ROAD_CONTEXT_COLOR, ROAD_CONTEXT_WIDTH
+                )
+
+    # Draw candidate pair on top
+    if ref_line:
+        _draw_linestring(
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+    if target_line:
+        _draw_linestring(
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+
+    return result
+
+
+def _is_full_alignment(
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+    tolerance: float | None = None,
+) -> bool:
+    """Check if alignment fractions indicate full alignment (no subline needed)."""
+    if tolerance is None:
+        from ..config import ALIGNMENT_FULL_TOLERANCE
+
+        tolerance = ALIGNMENT_FULL_TOLERANCE
+    return (
+        abs(ref_start_frac) <= tolerance
+        and abs(ref_end_frac - 1.0) <= tolerance
+        and abs(target_start_frac) <= tolerance
+        and abs(target_end_frac - 1.0) <= tolerance
+    )
+
+
+def render_subline_geometry_only(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    ref_start_frac: float = 0.0,
+    ref_end_frac: float = 1.0,
+    target_start_frac: float = 0.0,
+    target_end_frac: float = 1.0,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+) -> Image.Image:
+    """Render subline alignment view on white background.
+
+    If alignment is full (fractions at 0/1 within tolerance), falls back to
+    standard solid rendering. Otherwise draws:
+    - Faded dashed full segments
+    - Bright solid aligned sublines with circle decorations
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        ref_start_frac: Start fraction on reference line (0.0-1.0)
+        ref_end_frac: End fraction on reference line (0.0-1.0)
+        target_start_frac: Start fraction on target line (0.0-1.0)
+        target_end_frac: End fraction on target line (0.0-1.0)
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+
+    Returns:
+        PIL Image with subline visualization
+    """
+    from ..features.alignment import create_subline
+
+    # Full alignment → standard rendering
+    if _is_full_alignment(ref_start_frac, ref_end_frac, target_start_frac, target_end_frac):
+        return render_geometry_only(
+            ref_geom, target_geom, size=size or DEFAULT_IMAGE_SIZE, padding_ratio=padding_ratio
+        )
+
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    if not ref_line or not target_line:
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        return Image.new("RGB", size, BACKGROUND_COLOR)
+
+    # Compute bbox from full geometries
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+    bbox = _make_bbox_square(bbox)
+
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    result = Image.new("RGB", size, BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(result)
+
+    # Layer 1: Faded dashed full segments
+    _draw_dashed_linestring(draw, ref_line, bbox, size, REFERENCE_FADED_COLOR, FADED_LINE_WIDTH)
+    _draw_dashed_linestring(draw, target_line, bbox, size, TARGET_FADED_COLOR, FADED_LINE_WIDTH)
+
+    # Layer 2: Bright solid aligned sublines
+    ref_sub = create_subline(ref_line, ref_start_frac, ref_end_frac)
+    target_sub = create_subline(target_line, target_start_frac, target_end_frac)
+
+    if ref_sub:
+        _draw_linestring(
+            draw,
+            ref_sub,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+    else:
+        # Fallback: draw full segment solid if subline is degenerate
+        _draw_linestring(
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+
+    if target_sub:
+        _draw_linestring(
+            draw,
+            target_sub,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+    else:
+        _draw_linestring(
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+
+    return result
+
+
+def render_subline_road_context(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    ref_start_frac: float = 0.0,
+    ref_end_frac: float = 1.0,
+    target_start_frac: float = 0.0,
+    target_end_frac: float = 1.0,
+    context_roads: list[LineString] | None = None,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+) -> Image.Image:
+    """Render subline alignment view with road context.
+
+    Same as render_subline_geometry_only but with gray dashed context roads
+    drawn underneath.
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        ref_start_frac: Start fraction on reference line
+        ref_end_frac: End fraction on reference line
+        target_start_frac: Start fraction on target line
+        target_end_frac: End fraction on target line
+        context_roads: List of nearby road geometries
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+
+    Returns:
+        PIL Image with subline + road context visualization
+    """
+    from ..features.alignment import create_subline
+
+    # Full alignment → standard road_context rendering
+    if _is_full_alignment(ref_start_frac, ref_end_frac, target_start_frac, target_end_frac):
+        return render_with_road_context(
+            ref_geom,
+            target_geom,
+            context_roads=context_roads,
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    if not ref_line or not target_line:
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        return Image.new("RGB", size, BACKGROUND_COLOR)
+
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+    bbox = _make_bbox_square(bbox)
+
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    result = Image.new("RGB", size, BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(result)
+
+    # Layer 0: Context roads (gray dashed)
+    if context_roads:
+        for road in context_roads:
+            road_line = _to_linestring(road)
+            if road_line:
+                _draw_dashed_linestring(
+                    draw,
+                    road_line,
+                    bbox,
+                    size,
+                    ROAD_CONTEXT_COLOR,
+                    ROAD_CONTEXT_WIDTH,
+                    CONTEXT_ROAD_DASH,
+                )
+
+    # Layer 1: Faded dashed full segments
+    _draw_dashed_linestring(draw, ref_line, bbox, size, REFERENCE_FADED_COLOR, FADED_LINE_WIDTH)
+    _draw_dashed_linestring(draw, target_line, bbox, size, TARGET_FADED_COLOR, FADED_LINE_WIDTH)
+
+    # Layer 2: Bright solid aligned sublines
+    ref_sub = create_subline(ref_line, ref_start_frac, ref_end_frac)
+    target_sub = create_subline(target_line, target_start_frac, target_end_frac)
+
+    if ref_sub:
+        _draw_linestring(
+            draw,
+            ref_sub,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+    else:
+        _draw_linestring(
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+
+    if target_sub:
+        _draw_linestring(
+            draw,
+            target_sub,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+    else:
+        _draw_linestring(
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+
+    return result
+
+
+def _svg_geo_to_pixel(
+    lon: float,
+    lat: float,
+    bbox: tuple[float, float, float, float],
+    size: tuple[int, int],
+) -> tuple[float, float]:
+    """Convert geographic coordinates to SVG pixel coordinates (float precision)."""
+    minx, miny, maxx, maxy = bbox
+    width, height = size
+
+    norm_x = (lon - minx) / (maxx - minx) if maxx != minx else 0.5
+    norm_y = (lat - miny) / (maxy - miny) if maxy != miny else 0.5
+
+    px = norm_x * width
+    py = (1 - norm_y) * height
+
+    return round(px, 2), round(py, 2)
+
+
+def _svg_draw_linestring(
+    dwg,  # svgwrite.Drawing - lazy import
+    line: LineString,
+    bbox: tuple[float, float, float, float],
+    size: tuple[int, int],
+    color: str,
+    width: float,
+    decoration: str | None = None,
+    decoration_spacing: int = 30,
+):
+    """Draw a LineString as SVG path with optional decorations.
+
+    Args:
+        dwg: svgwrite Drawing object
+        line: Shapely LineString geometry
+        bbox: Bounding box for coordinate transformation
+        size: Image size (width, height)
+        color: CSS color string (e.g., "#2196F3")
+        width: Line width
+        decoration: Type of decoration ('circle' or None)
+        decoration_spacing: Pixels between decorations
+    """
+    if line is None or line.is_empty:
+        return
+
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return
+
+    pixel_coords = [_svg_geo_to_pixel(lon, lat, bbox, size) for lon, lat in coords]
+
+    # Draw main line as polyline
+    dwg.add(
+        dwg.polyline(
+            pixel_coords,
+            stroke=color,
+            stroke_width=width,
+            fill="none",
+            stroke_linecap="round",
+            stroke_linejoin="round",
+        )
+    )
+
+    # Draw circle decorations along the line
+    if decoration == "circle":
+        total_dist = 0
+        next_decoration_at = decoration_spacing / 2
+        radius = (width + 4) / 2
+
+        for i in range(len(pixel_coords) - 1):
+            x1, y1 = pixel_coords[i]
+            x2, y2 = pixel_coords[i + 1]
+
+            dx = x2 - x1
+            dy = y2 - y1
+            segment_length = math.sqrt(dx * dx + dy * dy)
+
+            if segment_length == 0:
+                continue
+
+            ndx = dx / segment_length
+            ndy = dy / segment_length
+
+            segment_start = total_dist
+            segment_end = total_dist + segment_length
+
+            while next_decoration_at < segment_end:
+                pos_in_segment = next_decoration_at - segment_start
+                px = x1 + ndx * pos_in_segment
+                py = y1 + ndy * pos_in_segment
+
+                dwg.add(dwg.circle(center=(round(px, 2), round(py, 2)), r=radius, fill=color))
+                next_decoration_at += decoration_spacing
+
+            total_dist += segment_length
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    """Convert RGB tuple to hex color string."""
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def render_geometry_svg(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    context_roads: list[LineString] | None = None,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+) -> str:
+    """Render candidate pair as SVG string.
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        context_roads: Optional list of nearby road geometries (gray lines)
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+
+    Returns:
+        SVG markup string
+    """
+    import svgwrite
+
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    if not ref_line or not target_line:
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        dwg = svgwrite.Drawing(size=(f"{size[0]}px", f"{size[1]}px"))
+        dwg.add(dwg.rect(insert=(0, 0), size=size, fill="white"))
+        return dwg.tostring()
+
+    # Get bbox based on target geometry with padding
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+    bbox = _make_bbox_square(bbox)
+
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    dwg = svgwrite.Drawing(size=(f"{size[0]}px", f"{size[1]}px"))
+    dwg.add(dwg.rect(insert=(0, 0), size=size, fill="white"))
+
+    # Draw context roads first
+    if context_roads:
+        road_color = _rgb_to_hex(ROAD_CONTEXT_COLOR)
+        for road in context_roads:
+            road_line = _to_linestring(road)
+            if road_line:
+                _svg_draw_linestring(dwg, road_line, bbox, size, road_color, ROAD_CONTEXT_WIDTH)
+
+    # Draw candidate pair
+    ref_color = _rgb_to_hex(REFERENCE_COLOR)
+    target_color = _rgb_to_hex(TARGET_COLOR)
+
+    _svg_draw_linestring(
+        dwg,
+        ref_line,
+        bbox,
+        size,
+        ref_color,
+        GEOMETRY_LINE_WIDTH,
+        decoration="circle",
+        decoration_spacing=25,
+    )
+    _svg_draw_linestring(
+        dwg,
+        target_line,
+        bbox,
+        size,
+        target_color,
+        GEOMETRY_LINE_WIDTH,
+        decoration="circle",
+        decoration_spacing=40,
+    )
+
+    return dwg.tostring()
+
+
+def render_candidate_variant(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    basemap: str = "geometry_only",
+    output_format: str = "png",
+    context_roads: list[LineString] | None = None,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+    alignment_fracs: dict[str, float] | None = None,
+) -> tuple[Image.Image | str, dict]:
+    """Render a candidate pair with a specific basemap style and output format.
+
+    Unified entry point that dispatches to the appropriate render function.
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        basemap: Basemap style - "geometry_only", "carto_positron", "road_context",
+            "subline_geometry_only", or "subline_road_context"
+        output_format: Output format - "png" or "svg"
+        context_roads: List of nearby road geometries (used by road_context basemap)
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+        alignment_fracs: Dict with keys "ref_start_frac", "ref_end_frac",
+            "target_start_frac", "target_end_frac" for subline variants.
+            Defaults to full alignment if None.
+
+    Returns:
+        Tuple of (image_or_svg_string, metadata_dict).
+        For PNG: PIL Image. For SVG: string of SVG markup.
+        metadata_dict contains {"size": (w, h), "basemap": str, "format": str}.
+    """
+    if output_format == "svg":
+        svg_str = render_geometry_svg(
+            ref_geom,
+            target_geom,
+            context_roads=context_roads if basemap == "road_context" else None,
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+        # Determine actual size used
+        if size is None:
+            ref_line = _to_linestring(ref_geom)
+            target_line = _to_linestring(target_geom)
+            if ref_line and target_line:
+                target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+                bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+                bbox = _make_bbox_square(bbox)
+                size = _calculate_size_from_bbox(bbox)
+            else:
+                size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        return svg_str, {"size": size, "basemap": basemap, "format": "svg"}
+
+    # PNG output
+    if basemap == "geometry_only":
+        ref_line = _to_linestring(ref_geom)
+        target_line = _to_linestring(target_geom)
+
+        if not ref_line or not target_line:
+            if size is None:
+                size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+            img = Image.new("RGB", size, BACKGROUND_COLOR)
+            return img, {"size": size, "basemap": basemap, "format": "png"}
+
+        target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+        bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+        bbox = _make_bbox_square(bbox)
+
+        if size is None:
+            size = _calculate_size_from_bbox(bbox)
+
+        img = _render_geometry_with_bbox(ref_geom, target_geom, bbox, size)
+        return img, {"size": size, "basemap": basemap, "format": "png"}
+
+    elif basemap == "carto_positron":
+        ref_line = _to_linestring(ref_geom)
+        target_line = _to_linestring(target_geom)
+
+        if not ref_line or not target_line:
+            if size is None:
+                size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+            img = Image.new("RGB", size, BACKGROUND_COLOR)
+            return img, {"size": size, "basemap": basemap, "format": "png"}
+
+        target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+        bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+        bbox = _make_bbox_square(bbox)
+
+        if size is None:
+            size = _calculate_size_from_bbox(bbox)
+
+        # Fetch CartoDB Positron tiles as background
+        bg = fetch_raster_tiles(bbox, CARTO_POSITRON_TILE_URL, size=size)
+        if bg is None:
+            bg = Image.new("RGB", size, BACKGROUND_COLOR)
+
+        img = render_with_overlay(bg, ref_geom, target_geom, bbox)
+        return img, {"size": size, "basemap": basemap, "format": "png"}
+
+    elif basemap == "road_context":
+        img = render_with_road_context(
+            ref_geom,
+            target_geom,
+            context_roads=context_roads,
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+        return img, {"size": img.size, "basemap": basemap, "format": "png"}
+
+    elif basemap == "subline_geometry_only":
+        fracs = alignment_fracs or {}
+        img = render_subline_geometry_only(
+            ref_geom,
+            target_geom,
+            ref_start_frac=fracs.get("ref_start_frac", 0.0),
+            ref_end_frac=fracs.get("ref_end_frac", 1.0),
+            target_start_frac=fracs.get("target_start_frac", 0.0),
+            target_end_frac=fracs.get("target_end_frac", 1.0),
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+        return img, {"size": img.size, "basemap": basemap, "format": "png"}
+
+    elif basemap == "subline_road_context":
+        fracs = alignment_fracs or {}
+        img = render_subline_road_context(
+            ref_geom,
+            target_geom,
+            ref_start_frac=fracs.get("ref_start_frac", 0.0),
+            ref_end_frac=fracs.get("ref_end_frac", 1.0),
+            target_start_frac=fracs.get("target_start_frac", 0.0),
+            target_end_frac=fracs.get("target_end_frac", 1.0),
+            context_roads=context_roads,
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+        return img, {"size": img.size, "basemap": basemap, "format": "png"}
+
+    else:
+        raise ValueError(
+            f"Unknown basemap: {basemap}. Use 'geometry_only', 'carto_positron', "
+            f"'road_context', 'subline_geometry_only', or 'subline_road_context'."
+        )

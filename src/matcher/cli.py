@@ -2643,6 +2643,551 @@ def generate_agent_test_batch(
     console.print(f"  3. Compare: matcher agent-consensus {batch_dir}")
 
 
+@app.command("generate-basemap-sweep")
+def generate_basemap_sweep(
+    datasets: list[str] = typer.Option(
+        ...,
+        "--dataset",
+        "-d",
+        help="Datasets to include (can specify multiple)",
+    ),
+    n_per_dataset: int = typer.Option(
+        4,
+        "--n",
+        "-n",
+        help="Number of candidates per dataset (half match, half no_match)",
+    ),
+    seed: int = typer.Option(
+        42,
+        "--seed",
+        help="Random seed for reproducibility",
+    ),
+    output_dir: Path = typer.Option(
+        Path("agent_labels"),
+        "--output",
+        "-o",
+        help="Output directory for agent labeling batches",
+    ),
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Directory containing human labels (Hive-partitioned)",
+    ),
+    geom_dir: Path = typer.Option(
+        Path("label_geometries"),
+        "--geometries",
+        "-g",
+        help="Directory containing label geometries (Hive-partitioned WKT)",
+    ),
+    data_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--data-dir",
+        help="Directory containing data files (for Overture segments)",
+    ),
+):
+    """Generate basemap sweep batch for comparing AI agent accuracy across visualization variants.
+
+    Samples stratified match/no_match candidates from existing human labels,
+    then generates 6 image variants per candidate:
+      - geometry_only.png: white background with geometry lines
+      - carto_positron.png: CartoDB light map basemap
+      - road_context.png: nearby Overture roads as gray context lines
+      - road_context.svg: same as above in SVG format
+      - subline_geometry_only.png: faded dashed full segments + solid bright aligned sublines
+      - subline_road_context.png: same + gray dashed context roads
+
+    Examples:
+        matcher generate-basemap-sweep \\
+            -d us_boston_streets -d us_boston_sidewalks \\
+            -d us_boston_bike_network -d us_frisco_trails \\
+            -n 25 --seed 42
+    """
+    from datetime import UTC, datetime
+
+    import geopandas as gpd
+    import numpy as np
+    import pandas as pd
+    from shapely import wkt
+    from shapely.geometry import box as shapely_box
+
+    from .agent_labeling.context_generator import write_candidate_sweep_package
+    from .agent_labeling.sampler import SampledCandidate
+    from .filenames import find_overture_segments
+
+    # Validate directories
+    if not labels_dir.exists():
+        console.print(f"[red]Error: Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    if not geom_dir.exists():
+        console.print(f"[red]Error: Geometries directory not found: {geom_dir}[/red]")
+        raise typer.Exit(1)
+
+    rng = np.random.default_rng(seed)
+
+    # Sweep variants
+    variants = [
+        {"basemap": "geometry_only", "format": "png"},
+        {"basemap": "carto_positron", "format": "png"},
+        {"basemap": "road_context", "format": "png"},
+        {"basemap": "road_context", "format": "svg"},
+        {"basemap": "subline_geometry_only", "format": "png"},
+        {"basemap": "subline_road_context", "format": "png"},
+    ]
+
+    # Load labels and geometries per dataset, sample candidates
+    all_candidates = []
+    all_ground_truth = []
+
+    for dataset in datasets:
+        label_file = labels_dir / f"dataset={dataset}" / "data.csv"
+        geom_file = geom_dir / f"dataset={dataset}" / "data.csv"
+
+        if not label_file.exists():
+            console.print(f"[yellow]Warning: No labels for {dataset}, skipping[/yellow]")
+            continue
+        if not geom_file.exists():
+            console.print(f"[yellow]Warning: No geometries for {dataset}, skipping[/yellow]")
+            continue
+
+        # Load labels
+        labels_df = pd.read_csv(label_file)
+        labels_df = labels_df[labels_df["label"].isin(["match", "no_match"])]
+
+        if len(labels_df) == 0:
+            console.print(f"[yellow]Warning: No match/no_match labels for {dataset}[/yellow]")
+            continue
+
+        # Deduplicate by (gers_id, target_id) - take first occurrence
+        labels_df = labels_df.drop_duplicates(subset=["gers_id", "target_id"], keep="first")
+
+        # Stratified sample: n/2 match + n/2 no_match
+        n_match = n_per_dataset // 2
+        n_no_match = n_per_dataset - n_match
+
+        match_df = labels_df[labels_df["label"] == "match"]
+        no_match_df = labels_df[labels_df["label"] == "no_match"]
+
+        n_match = min(n_match, len(match_df))
+        n_no_match = min(n_no_match, len(no_match_df))
+
+        if n_match == 0 and n_no_match == 0:
+            console.print(f"[yellow]Warning: Insufficient labels for {dataset}[/yellow]")
+            continue
+
+        sampled_match = match_df.iloc[rng.choice(len(match_df), size=n_match, replace=False)]
+        sampled_no_match = no_match_df.iloc[
+            rng.choice(len(no_match_df), size=n_no_match, replace=False)
+        ]
+        sampled = pd.concat([sampled_match, sampled_no_match], ignore_index=True)
+
+        # Load geometries
+        geom_df = pd.read_csv(geom_file)
+        geom_lookup = {}
+        for _, row in geom_df.iterrows():
+            key = (str(row["gers_id"]), str(row["target_id"]))
+            geom_lookup[key] = row
+
+        # Load Overture segments for road context
+        overture_path = find_overture_segments(data_dir, dataset)
+        ref_gdf = None
+        if overture_path and overture_path.exists():
+            try:
+                ref_gdf = gpd.read_parquet(overture_path)
+                if "id" in ref_gdf.columns:
+                    ref_gdf = ref_gdf.set_index("id")
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: Could not load Overture segments for {dataset}: {e}[/yellow]"
+                )
+
+        console.print(f"[blue]{dataset}: sampled {len(sampled)} candidates[/blue]")
+
+        for _, row in sampled.iterrows():
+            ref_id = str(row["gers_id"])
+            target_id = str(row["target_id"])
+            key = (ref_id, target_id)
+
+            if key not in geom_lookup:
+                console.print(f"  [yellow]Skipping {ref_id}: geometry not found[/yellow]")
+                continue
+
+            geom_row = geom_lookup[key]
+            try:
+                ref_geom = wkt.loads(geom_row["ref_geometry_wkt"])
+                target_geom = wkt.loads(geom_row["target_geometry_wkt"])
+            except Exception:
+                console.print(f"  [yellow]Skipping {ref_id}: invalid WKT geometry[/yellow]")
+                continue
+
+            # Find nearby roads for road_context variant
+            context_roads = []
+            if ref_gdf is not None:
+                try:
+                    combined = ref_geom.union(target_geom)
+                    minx, miny, maxx, maxy = combined.bounds
+                    # Expand bbox by ~50m in degrees (rough)
+                    expand = 0.0005
+                    expanded_bbox = (minx - expand, miny - expand, maxx + expand, maxy + expand)
+                    bbox_poly = shapely_box(*expanded_bbox)
+
+                    if hasattr(ref_gdf, "sindex"):
+                        possible_idx = list(ref_gdf.sindex.intersection(expanded_bbox))
+                        nearby = ref_gdf.iloc[possible_idx]
+                    else:
+                        nearby = ref_gdf[ref_gdf.geometry.intersects(bbox_poly)]
+
+                    # Exclude the reference geometry itself
+                    if ref_id in nearby.index:
+                        nearby = nearby.drop(ref_id, errors="ignore")
+
+                    context_roads = nearby.geometry.tolist()
+                except Exception:
+                    pass  # Non-critical, proceed without context roads
+
+            # Extract features from label row
+            feature_cols = [
+                "hausdorff_distance",
+                "buffer_iou",
+                "heading_delta",
+                "length_ratio",
+                "name_levenshtein",
+                "name_jaro_winkler",
+                "class_similarity",
+                "centroid_distance",
+                "overlap_ratio",
+                "mean_hausdorff_distance",
+                "degree_match_score",
+                "dead_end_match",
+                "intersection_match",
+            ]
+            features = {col: row.get(col, 0.0) for col in feature_cols if col in row.index}
+
+            # Parse names/classes from geometry attributes if available
+            ref_name = None
+            target_name = None
+            ref_class = None
+            target_class = None
+            if "ref_attributes" in geom_row.index:
+                try:
+                    import json
+
+                    attrs = json.loads(geom_row["ref_attributes"])
+                    ref_name = attrs.get("name")
+                    ref_class = attrs.get("class")
+                except Exception:
+                    pass  # Malformed JSON attributes - continue with None values
+            if "target_attributes" in geom_row.index:
+                try:
+                    import json
+
+                    attrs = json.loads(geom_row["target_attributes"])
+                    target_name = attrs.get("name")
+                    target_class = attrs.get("class")
+                except Exception:
+                    pass  # Malformed JSON attributes - continue with None values
+
+            # Read alignment fractions from labels CSV (NaN → defaults)
+            def _safe_frac(val, default):
+                try:
+                    f = float(val)
+                    return default if pd.isna(f) else f
+                except (TypeError, ValueError):
+                    return default
+
+            ref_start_frac = _safe_frac(row.get("ref_start_pct", None), 0.0)
+            ref_end_frac = _safe_frac(row.get("ref_end_pct", None), 1.0)
+            target_start_frac = _safe_frac(row.get("target_start_pct", None), 0.0)
+            target_end_frac = _safe_frac(row.get("target_end_pct", None), 1.0)
+
+            candidate = SampledCandidate(
+                ref_id=ref_id,
+                target_id=target_id,
+                ref_geometry=ref_geom,
+                target_geometry=target_geom,
+                ref_name=ref_name,
+                target_name=target_name,
+                ref_class=ref_class,
+                target_class=target_class,
+                ml_confidence=row.get("original_confidence", 0.5),
+                ml_decision=row.get("original_decision", "review"),
+                features=features,
+                dataset=dataset,
+                confidence_bucket="ground_truth",
+                ref_start_frac=ref_start_frac,
+                ref_end_frac=ref_end_frac,
+                target_start_frac=target_start_frac,
+                target_end_frac=target_end_frac,
+            )
+            all_candidates.append((candidate, context_roads))
+            all_ground_truth.append(
+                {
+                    "ref_id": ref_id,
+                    "target_id": target_id,
+                    "label": row["label"],
+                    "dataset": dataset,
+                }
+            )
+
+    if not all_candidates:
+        console.print("[red]Error: No candidates generated[/red]")
+        raise typer.Exit(1)
+
+    # Create batch
+    import yaml
+
+    batch_id = f"sweep_{datetime.now(UTC).strftime('%Y-%m-%d_%H%M%S')}"
+    batch_dir = output_dir / "batches" / batch_id
+    candidates_dir = batch_dir / "candidates"
+    labels_out_dir = batch_dir / "labels"
+
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    labels_out_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"\n[blue]Generating sweep batch: {batch_id}[/blue]")
+    console.print(f"  Total candidates: {len(all_candidates)}")
+    console.print(f"  Variants per candidate: {len(variants)}")
+
+    for i, (candidate, ctx_roads) in enumerate(all_candidates):
+        write_candidate_sweep_package(
+            output_dir=candidates_dir,
+            candidate=candidate,
+            batch_id=batch_id,
+            variants=variants,
+            context_roads=ctx_roads,
+        )
+        if (i + 1) % 4 == 0:
+            console.print(f"  Progress: {i + 1}/{len(all_candidates)}")
+
+    # Write ground truth
+    ground_truth_path = labels_out_dir / "ground_truth" / "data.csv"
+    ground_truth_path.parent.mkdir(parents=True, exist_ok=True)
+    gt_df = pd.DataFrame(all_ground_truth)
+    gt_df.to_csv(ground_truth_path, index=False)
+
+    # Write manifest
+    manifest = {
+        "batch_id": batch_id,
+        "batch_type": "basemap_sweep",
+        "created_at": datetime.now(UTC).isoformat(),
+        "total_candidates": len(all_candidates),
+        "datasets": datasets,
+        "n_per_dataset": n_per_dataset,
+        "seed": seed,
+        "variants": [f"{v['basemap']}.{v['format']}" for v in variants],
+        "ground_truth": {
+            "file": "labels/ground_truth/data.csv",
+            "total": len(gt_df),
+            "by_label": gt_df["label"].value_counts().to_dict(),
+            "by_dataset": gt_df["dataset"].value_counts().to_dict(),
+        },
+        "candidates": [
+            {"ref_id": c.ref_id, "target_id": c.target_id, "dataset": c.dataset}
+            for c, _ in all_candidates
+        ],
+    }
+    (batch_dir / "manifest.yaml").write_text(
+        yaml.dump(manifest, default_flow_style=False, sort_keys=False)
+    )
+
+    console.print()
+    console.print(f"[green]Sweep batch generated at {batch_dir}[/green]")
+    console.print(f"  Candidates: {len(all_candidates)}")
+    console.print(f"  Ground truth: {ground_truth_path}")
+    console.print(f"  Variants: {', '.join(v['basemap'] + '.' + v['format'] for v in variants)}")
+    console.print()
+    console.print("Next steps:")
+    console.print(f"  matcher run-agent claude --batch {batch_dir} --variant geometry_only")
+    console.print(f"  matcher eval-agent-sweep {batch_dir}")
+
+
+@app.command("run-agent")
+def run_agent_cmd(
+    agent: str = typer.Argument(help="Agent: claude, gemini, codex, ollama"),
+    batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch directory"),
+    model: str = typer.Option("", "--model", "-m", help="Model variant (e.g., sonnet, flash)"),
+    variant: str = typer.Option("", "--variant", "-v", help="Image variant name"),
+    limit: int = typer.Option(0, "--limit", "-l", help="Max candidates to process (0=no limit)"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Start fresh, discard existing labels"
+    ),
+    bail_after: int = typer.Option(
+        2, "--bail-after", help="Stop after N consecutive failures (0=never bail)"
+    ),
+):
+    """Run an AI agent on a batch of labeling candidates.
+
+    Invokes the specified agent CLI on each candidate in the batch directory,
+    collecting structured label responses (match/no_match/unsure with confidence).
+
+    Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
+
+    Examples:
+        matcher run-agent claude --batch agent_labels/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
+        matcher run-agent gemini --batch agent_labels/batches/sweep_2026-01-28 --model flash --variant road_context
+    """
+    from .agent_labeling.runner import run_agent_batch
+
+    run_agent_batch(
+        agent=agent,
+        model=model,
+        variant=variant,
+        batch_dir=batch_dir,
+        limit=limit,
+        overwrite=overwrite,
+        bail_after=bail_after,
+    )
+
+
+@app.command("eval-agent-sweep")
+def eval_agent_sweep(
+    batch_dir: Path = typer.Argument(..., help="Sweep batch directory"),
+    show_reasoning: bool = typer.Option(
+        False,
+        "--reasoning",
+        help="Show per-candidate reasoning for qualitative review",
+    ),
+):
+    """Evaluate agent sweep results against ground truth.
+
+    Discovers all agent label directories in the batch, joins with ground
+    truth, and computes accuracy/precision/recall/F1 per variant and dataset.
+
+    Examples:
+        matcher eval-agent-sweep agent_labels/batches/sweep_2026-01-28_120000
+
+        # Include reasoning text
+        matcher eval-agent-sweep agent_labels/batches/sweep_2026-01-28_120000 --reasoning
+    """
+    import pandas as pd
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+    if not batch_dir.exists():
+        console.print(f"[red]Error: Batch directory not found: {batch_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Load ground truth
+    gt_path = batch_dir / "labels" / "ground_truth" / "data.csv"
+    if not gt_path.exists():
+        console.print(f"[red]Error: Ground truth not found: {gt_path}[/red]")
+        raise typer.Exit(1)
+
+    gt_df = pd.read_csv(gt_path, dtype=str)
+    gt_df["key"] = gt_df["ref_id"] + "__" + gt_df["target_id"]
+    console.print(f"[blue]Ground truth: {len(gt_df)} candidates[/blue]")
+    console.print(f"  Labels: {gt_df['label'].value_counts().to_dict()}")
+    console.print()
+
+    # Discover agent label directories
+    labels_base = batch_dir / "labels"
+    agent_dirs = [
+        d
+        for d in labels_base.iterdir()
+        if d.is_dir() and d.name != "ground_truth" and (d / "data.csv").exists()
+    ]
+
+    if not agent_dirs:
+        console.print("[yellow]No agent labels found in batch[/yellow]")
+        return
+
+    # Evaluate each agent/variant
+    results = []
+    for agent_dir in sorted(agent_dirs):
+        agent_name = agent_dir.name
+        agent_df = pd.read_csv(agent_dir / "data.csv", dtype={"ref_id": str, "target_id": str})
+
+        if "ref_id" not in agent_df.columns or "label" not in agent_df.columns:
+            console.print(f"  [yellow]{agent_name}: invalid CSV format, skipping[/yellow]")
+            continue
+
+        agent_df["key"] = agent_df["ref_id"].astype(str) + "__" + agent_df["target_id"].astype(str)
+
+        # Join with ground truth
+        merged = gt_df.merge(agent_df[["key", "label"]], on="key", suffixes=("_gt", "_pred"))
+        merged = merged[merged["label_pred"].isin(["match", "no_match"])]
+
+        if len(merged) == 0:
+            console.print(f"  [yellow]{agent_name}: no overlapping labels[/yellow]")
+            continue
+
+        y_true = (merged["label_gt"] == "match").astype(int)
+        y_pred = (merged["label_pred"] == "match").astype(int)
+
+        acc = accuracy_score(y_true, y_pred)
+        prec = precision_score(y_true, y_pred, zero_division=0)
+        rec = recall_score(y_true, y_pred, zero_division=0)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+
+        results.append(
+            {
+                "agent_variant": agent_name,
+                "n_evaluated": len(merged),
+                "accuracy": acc,
+                "precision": prec,
+                "recall": rec,
+                "f1": f1,
+            }
+        )
+
+        console.print(f"[bold]{agent_name}[/bold]  (n={len(merged)})")
+        console.print(
+            f"  Accuracy: {acc:.3f}  Precision: {prec:.3f}  Recall: {rec:.3f}  F1: {f1:.3f}"
+        )
+
+        # Per-dataset breakdown
+        for dataset in sorted(merged["dataset"].unique()):
+            ds = merged[merged["dataset"] == dataset]
+            ds_true = (ds["label_gt"] == "match").astype(int)
+            ds_pred = (ds["label_pred"] == "match").astype(int)
+            ds_acc = accuracy_score(ds_true, ds_pred)
+            console.print(f"    {dataset}: {ds_acc:.3f} ({len(ds)} candidates)")
+
+        console.print()
+
+    if not results:
+        console.print("[yellow]No results to display[/yellow]")
+        return
+
+    # Summary comparison table
+    console.print("[bold]Summary Comparison[/bold]")
+    console.print(f"{'Variant':<40} {'Acc':>6} {'Prec':>6} {'Rec':>6} {'F1':>6} {'N':>4}")
+    console.print("-" * 70)
+    for r in results:
+        console.print(
+            f"{r['agent_variant']:<40} {r['accuracy']:>6.3f} {r['precision']:>6.3f} "
+            f"{r['recall']:>6.3f} {r['f1']:>6.3f} {r['n_evaluated']:>4}"
+        )
+
+    # Show per-candidate reasoning if requested
+    if show_reasoning:
+        console.print()
+        console.print("[bold]Per-Candidate Reasoning[/bold]")
+        for agent_dir in sorted(agent_dirs):
+            agent_name = agent_dir.name
+            agent_df = pd.read_csv(agent_dir / "data.csv", dtype={"ref_id": str, "target_id": str})
+            if "reasoning" not in agent_df.columns:
+                continue
+
+            console.print(f"\n[bold]{agent_name}[/bold]")
+            agent_df["key"] = (
+                agent_df["ref_id"].astype(str) + "__" + agent_df["target_id"].astype(str)
+            )
+            merged = gt_df.merge(
+                agent_df[["key", "label", "reasoning"]], on="key", suffixes=("_gt", "_pred")
+            )
+
+            for _, row in merged.iterrows():
+                correct = row["label_gt"] == row["label_pred"]
+                status = "[green]CORRECT[/green]" if correct else "[red]WRONG[/red]"
+                console.print(
+                    f"  {row['ref_id']}: gt={row['label_gt']}, pred={row['label_pred']} {status}"
+                )
+                if pd.notna(row.get("reasoning")):
+                    console.print(f"    Reasoning: {row['reasoning']}")
+
+
 @app.command("backfill-labels")
 def backfill_labels(
     labels_dir: Path = typer.Option(
