@@ -5,7 +5,7 @@ from shapely.geometry import LineString, mapping
 
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
-from .imagery import get_best_satellite_layer, get_mapbox_api_key
+from .imagery import get_best_satellite_layer
 
 # Colors for visualization - aligned portions are bright, full geometries are faded
 REFERENCE_COLOR = "#2196F3"  # Blue (aligned/matched portion)
@@ -437,10 +437,7 @@ def create_multi_reference_map(
     all_bounds = [target_geometry.bounds]
     for cand in related_candidates:
         # Use aligned geometry if available, otherwise fall back to full geometry
-        if (
-            cand.ref_aligned_geometry is not None
-            and not cand.ref_aligned_geometry.is_empty
-        ):
+        if cand.ref_aligned_geometry is not None and not cand.ref_aligned_geometry.is_empty:
             all_bounds.append(cand.ref_aligned_geometry.bounds)
         else:
             all_bounds.append(cand.ref_geometry.bounds)

@@ -12,7 +12,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 from urllib.request import urlopen
 
 # Cache directory for ELI data
@@ -32,19 +31,19 @@ class ImageryLayer:
     name: str
     url: str
     max_zoom: int
-    max_native_zoom: Optional[int]
+    max_native_zoom: int | None
     attribution: str
-    attribution_url: Optional[str]
-    subdomains: Optional[list[str]]
+    attribution_url: str | None
+    subdomains: list[str] | None
     tms: bool  # True if y-axis is flipped
 
 
-def get_mapbox_api_key() -> Optional[str]:
+def get_mapbox_api_key() -> str | None:
     """Get Mapbox API key from environment variable."""
     return os.environ.get(MAPBOX_API_KEY_ENV)
 
 
-def _convert_eli_url(url: str) -> tuple[str, Optional[list[str]], bool]:
+def _convert_eli_url(url: str) -> tuple[str, list[str] | None, bool]:
     """Convert ELI URL template to Leaflet/Folium format.
 
     Args:
@@ -70,7 +69,7 @@ def _convert_eli_url(url: str) -> tuple[str, Optional[list[str]], bool]:
     return url, subdomains, tms
 
 
-def _substitute_api_key(url: str, api_key: Optional[str]) -> Optional[str]:
+def _substitute_api_key(url: str, api_key: str | None) -> str | None:
     """Substitute API key placeholder in URL.
 
     Returns None if API key is required but not provided.
@@ -185,7 +184,7 @@ def get_global_satellite_layers(include_mapbox: bool = True) -> list[ImageryLaye
     return layers if layers else _get_fallback_layers(mapbox_key if include_mapbox else None)
 
 
-def _get_native_zoom(layer_id: str, max_zoom: int) -> Optional[int]:
+def _get_native_zoom(layer_id: str, max_zoom: int) -> int | None:
     """Get the actual native zoom level for a layer.
 
     Some providers advertise higher max_zoom than they actually have data for.
@@ -200,7 +199,7 @@ def _get_native_zoom(layer_id: str, max_zoom: int) -> Optional[int]:
     return native_zoom_overrides.get(layer_id, max_zoom)
 
 
-def _get_fallback_layers(mapbox_key: Optional[str] = None) -> list[ImageryLayer]:
+def _get_fallback_layers(mapbox_key: str | None = None) -> list[ImageryLayer]:
     """Get hardcoded fallback layers if ELI is unavailable."""
     layers = [
         ImageryLayer(
@@ -235,7 +234,7 @@ def _get_fallback_layers(mapbox_key: Optional[str] = None) -> list[ImageryLayer]
     return layers
 
 
-def get_best_satellite_layer() -> Optional[ImageryLayer]:
+def get_best_satellite_layer() -> ImageryLayer | None:
     """Get the best available satellite layer.
 
     Returns Mapbox if API key is available, otherwise ESRI.
