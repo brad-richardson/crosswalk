@@ -737,14 +737,18 @@ def compute_features_only(
     # Split work into chunks for batch geometric computation
     chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
 
+    # Log progress every 5% to avoid noise
+    last_logged_pct = 0
     with ProcessPoolExecutor(
         max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
     ) as executor:
         for chunk_results in executor.map(_compute_feature_chunk, chunks):
             features_list.extend(chunk_results)
             processed = len(features_list)
-            pct = processed / len(work_items) * 100
-            logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
+            pct = int(processed / len(work_items) * 100)
+            if pct >= last_logged_pct + 5:
+                logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct}%)")
+                last_logged_pct = pct
 
     # Filter out rejected pairs (None results) - pairs without aligned endpoint features
     valid_pairs = [

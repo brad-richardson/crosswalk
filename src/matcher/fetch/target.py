@@ -138,9 +138,9 @@ def _transform_download_data(
     # Class
     if class_column and class_column in gdf.columns:
         if class_mapping:
-            data["class"] = gdf[class_column].map(class_mapping).fillna("unclassified").values
+            data["class"] = gdf[class_column].map(class_mapping).fillna("unknown").values
         else:
-            data["class"] = gdf[class_column].fillna("unclassified").astype(str).values
+            data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
         data["class"] = ["footway"] * len(gdf)  # Default for sidewalks
 

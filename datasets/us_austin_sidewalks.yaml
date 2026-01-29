@@ -12,16 +12,12 @@ fetch:
   name_column: ADDRESS_DESCRIPTION
   class_column: PEDESTRIAN_FACILITY_TYPE
   class_mapping:
-    Sidewalk: footway
-    Crosswalk: footway
-    sidewalk: footway
-    crosswalk: footway
+    EXISTING_SIDEWALK: footway
+    DRIVEWAY: footway
   subclass_column: PEDESTRIAN_FACILITY_TYPE
   subclass_mapping:
-    Sidewalk: sidewalk
-    Crosswalk: crosswalk
-    sidewalk: sidewalk
-    crosswalk: crosswalk
+    EXISTING_SIDEWALK: sidewalk
+    DRIVEWAY: sidewalk
   bbox:
   - -97.94
   - 30.13

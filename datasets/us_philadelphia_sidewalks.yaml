@@ -10,16 +10,31 @@ fetch:
   id_prefix: phila_sidewalk
   class_column: feat_type
   class_mapping:
-    Sidewalk: footway
-    Crosswalk: footway
-    sidewalk: footway
-    crosswalk: footway
+    PATH: footway
+    UNMARKED: footway
+    PARALLEL: footway
+    CONTINENTAL: footway
+    LADDER: footway
+    DIAGONAL: footway
+    GRADE_SEPARATED: footway
+    SOLID: footway
+    DECORATIVE: footway
+    BAR_PAIRS: footway
+    DASHED: footway
+    UNKNOWN: footway
   subclass_column: feat_type
   subclass_mapping:
-    Sidewalk: sidewalk
-    Crosswalk: crosswalk
-    sidewalk: sidewalk
-    crosswalk: crosswalk
+    PATH: sidewalk
+    UNMARKED: crosswalk
+    PARALLEL: crosswalk
+    CONTINENTAL: crosswalk
+    LADDER: crosswalk
+    DIAGONAL: crosswalk
+    GRADE_SEPARATED: crosswalk
+    SOLID: crosswalk
+    DECORATIVE: crosswalk
+    BAR_PAIRS: crosswalk
+    DASHED: crosswalk
   bbox:
   - -75.28
   - 39.87

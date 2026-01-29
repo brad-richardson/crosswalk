@@ -407,6 +407,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
             # Auto-load if cache exists
             if cache_info["exists"]:
                 st.session_state.is_loading = True
+                load_error = None
                 try:
                     with st.spinner("Loading cached candidates..."):
                         load_data(
@@ -416,8 +417,14 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                             use_cache=True,
                             review_only=st.session_state.review_only,
                         )
+                except Exception as e:
+                    load_error = e
+                    logger.exception("Failed to load cached data")
                 finally:
                     st.session_state.is_loading = False
+                if load_error:
+                    st.error(f"Failed to load data: {load_error}")
+                    st.stop()
                 st.rerun()
 
             # No cache - show manual load UI
@@ -437,6 +444,7 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
 
             if st.button("Load Data", type="primary", disabled=st.session_state.is_loading):
                 st.session_state.is_loading = True
+                load_error = None
                 try:
                     with st.spinner("Loading and scoring candidates..."):
                         load_data(
@@ -446,8 +454,14 @@ def render_sidebar(reference_path: Path, target_path: Path, dataset_id: str) -> 
                             use_cache=True,
                             review_only=review_only,
                         )
+                except Exception as e:
+                    load_error = e
+                    logger.exception("Failed to load and score candidates")
                 finally:
                     st.session_state.is_loading = False
+                if load_error:
+                    st.error(f"Failed to load data: {load_error}")
+                    st.stop()
                 st.rerun()
         else:
             # Show load status with filter indicator
