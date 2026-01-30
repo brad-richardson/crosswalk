@@ -20,6 +20,7 @@ from .base import (
     get_test,
     register_test,
 )
+from .runner import FalsificationReport, run_falsification
 
 __all__ = [
     # Base classes
@@ -31,4 +32,7 @@ __all__ = [
     "register_test",
     "get_registered_tests",
     "get_test",
+    # Runner
+    "run_falsification",
+    "FalsificationReport",
 ]

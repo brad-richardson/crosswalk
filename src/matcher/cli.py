@@ -3667,6 +3667,106 @@ def benchmark(
 
 
 @app.command()
+def falsify(
+    bridge_path: Path = typer.Argument(
+        ...,
+        help="Path to bridge parquet file with matches",
+    ),
+    ref_path: Path = typer.Argument(
+        ...,
+        help="Path to reference parquet file (Overture)",
+    ),
+    target_path: Path = typer.Argument(
+        ...,
+        help="Path to target parquet file",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output path for filtered bridge file (default: adds _falsified suffix)",
+    ),
+    tests: list[str] | None = typer.Option(
+        None,
+        "--test",
+        "-t",
+        help="Specific test(s) to run (default: all). Options: water_body, building",
+    ),
+    report_only: bool = typer.Option(
+        False,
+        "--report-only",
+        help="Generate report without modifying bridge file",
+    ),
+    report_output: Path | None = typer.Option(
+        None,
+        "--report",
+        "-r",
+        help="Output path for JSON report",
+    ),
+):
+    """Run falsification tests on a bridge file.
+
+    Falsification tests detect invalid matches that slip through ML scoring
+    by checking against external context (water bodies, buildings, etc.).
+    Matches that fail falsification are removed from the output.
+
+    Examples:
+        matcher falsify bridge.parquet ref.parquet target.parquet
+        matcher falsify bridge.parquet ref.parquet target.parquet -t water_body
+        matcher falsify bridge.parquet ref.parquet target.parquet --report-only
+    """
+    import json
+
+    from .falsification import run_falsification
+
+    # Determine output path
+    if output is None and not report_only:
+        output = bridge_path.parent / f"{bridge_path.stem}_falsified.parquet"
+
+    console.print(f"[blue]Running falsification on {bridge_path}[/blue]")
+
+    try:
+        filtered_gdf, report = run_falsification(
+            bridge_path=bridge_path,
+            ref_path=ref_path,
+            target_path=target_path,
+            test_names=tests,
+            output_path=output,
+            report_only=report_only,
+        )
+
+        # Print summary
+        console.print("\n[bold]Falsification Results:[/bold]")
+        console.print(f"  Total matches: {report.total_matches}")
+        console.print(f"  Passed: [green]{report.passed}[/green]")
+        console.print(f"  Failed: [red]{report.failed}[/red] ({report.fail_rate:.2%})")
+        console.print(f"  Warned: [yellow]{report.warned}[/yellow] ({report.warn_rate:.2%})")
+
+        # Per-test breakdown
+        if report.test_results:
+            console.print("\n[bold]Per-test breakdown:[/bold]")
+            for test_name, counts in report.test_results.items():
+                console.print(
+                    f"  {test_name}: pass={counts['pass']}, fail={counts['fail']}, "
+                    f"warn={counts['warn']}, skip={counts['skip']}"
+                )
+
+        # Save report if requested
+        if report_output:
+            report_output.parent.mkdir(parents=True, exist_ok=True)
+            with open(report_output, "w") as f:
+                json.dump(report.to_dict(), f, indent=2)
+            console.print(f"\n[green]Report saved to {report_output}[/green]")
+
+        if output and not report_only:
+            console.print(f"\n[green]Filtered bridge file saved to {output}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Falsification failed: {e}[/red]")
+        raise typer.Exit(1) from None
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__
