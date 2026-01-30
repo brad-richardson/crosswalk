@@ -146,7 +146,7 @@ from matcher.labeling.feature_panel import (
     render_feature_panel,
 )
 from matcher.labeling.label_store import LabelLoadError, LabelStore, get_data_version
-from matcher.labeling.map_view import create_comparison_map
+from matcher.labeling.map_view import create_comparison_map, get_available_tile_layers
 from matcher.labeling.state import (
     advance_to_next,
     get_session,
@@ -752,7 +752,8 @@ def render_single_pair_mode(pair, filtered, label_store, session):
 
     with col_map:
         # Basemap selector - compact horizontal radio
-        tile_options = ["Light", "Satellite", "OpenStreetMap"]
+        # "Satellite (Best)" uses Mapbox if MAPBOX_ACCESS_TOKEN is set, otherwise ESRI
+        tile_options = get_available_tile_layers()
         current_tile = st.session_state.get("tile_layer_choice", "Light")
         tile_index = tile_options.index(current_tile) if current_tile in tile_options else 0
         tile_layer = st.radio(

@@ -1,10 +1,36 @@
 """Map visualization component using folium."""
 
+import html
+
 import folium
 from shapely.geometry import LineString, mapping
 
 from ..config import ALIGNMENT_FULL_TOLERANCE
 from .data_loader import CandidatePairView
+from .imagery import get_best_satellite_layer
+
+
+def _sanitize_attribution(text: str, url: str | None) -> str:
+    """Sanitize attribution text and URL to prevent XSS.
+
+    Args:
+        text: Attribution text to display
+        url: Optional URL for the attribution link
+
+    Returns:
+        Safe HTML string for attribution
+    """
+    # Escape the text to prevent XSS
+    safe_text = html.escape(text)
+
+    # Only allow http/https URLs to prevent javascript: injection
+    if url and url.lower().startswith(("http://", "https://")):
+        # Escape the URL as well
+        safe_url = html.escape(url)
+        return f'<a href="{safe_url}">{safe_text}</a>'
+
+    return safe_text
+
 
 # Colors for visualization - aligned portions are bright, full geometries are faded
 REFERENCE_COLOR = "#2196F3"  # Blue (aligned/matched portion)
@@ -15,25 +41,88 @@ REFERENCE_WEIGHT = 5
 TARGET_WEIGHT = 4
 
 
+# Static tile layers (non-dynamic)
 TILE_LAYERS = {
     "Light": "cartodbpositron",
     "Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "OpenStreetMap": "openstreetmap",
 }
 
+# Max native zoom levels per tile layer - the highest zoom available from the server
+# (ArcGIS World Imagery returns blank tiles above zoom 19 in many regions)
+# Tiles will be scaled up when zooming past this level
+TILE_MAX_NATIVE_ZOOM = {
+    "Light": None,  # Use default
+    "Satellite": 19,
+    "OpenStreetMap": None,  # Use default
+}
+
+# Dynamic layer name - uses Editor Layer Index for best available imagery
+# Silently uses Mapbox if MAPBOX_ACCESS_TOKEN is set, otherwise falls back to ESRI
+DYNAMIC_SATELLITE_LAYER = "Satellite (Best)"
+
+
+def get_available_tile_layers() -> list[str]:
+    """Get list of available tile layer names."""
+    return ["Light", DYNAMIC_SATELLITE_LAYER, "Satellite", "OpenStreetMap"]
+
 
 def _add_tile_layer(m: folium.Map, layer_name: str = "Light") -> None:
     """Add a single tile layer to the map."""
+    # Check if this is the dynamic satellite layer
+    if layer_name.startswith(DYNAMIC_SATELLITE_LAYER):
+        _add_dynamic_satellite_layer(m)
+        return
+
     tiles = TILE_LAYERS.get(layer_name, "cartodbpositron")
+    max_native_zoom = TILE_MAX_NATIVE_ZOOM.get(layer_name)
     if layer_name == "Satellite":
         folium.TileLayer(
             tiles=tiles,
             attr="Esri",
             max_zoom=21,
+            max_native_zoom=max_native_zoom,
             name=layer_name,
         ).add_to(m)
     else:
         folium.TileLayer(tiles=tiles, max_zoom=21).add_to(m)
+
+
+def _add_dynamic_satellite_layer(m: folium.Map) -> None:
+    """Add the best available satellite layer from Editor Layer Index."""
+    layer = get_best_satellite_layer()
+
+    if layer is None:
+        # Fallback to static ESRI if ELI unavailable
+        folium.TileLayer(
+            tiles=TILE_LAYERS["Satellite"],
+            attr="Esri",
+            max_zoom=21,
+            max_native_zoom=19,
+            name="Satellite",
+        ).add_to(m)
+        return
+
+    # Build attribution string (sanitized to prevent XSS)
+    attr = _sanitize_attribution(layer.attribution, layer.attribution_url)
+
+    tile_layer_kwargs = {
+        "tiles": layer.url,
+        "attr": attr,
+        "max_zoom": 21,
+        "name": layer.name,
+    }
+
+    if layer.max_native_zoom:
+        tile_layer_kwargs["max_native_zoom"] = layer.max_native_zoom
+
+    if layer.subdomains:
+        tile_layer_kwargs["subdomains"] = layer.subdomains
+
+    if layer.tms:
+        tile_layer_kwargs["tms"] = True
+
+    folium.TileLayer(**tile_layer_kwargs).add_to(m)
 
 
 def create_comparison_map(
@@ -53,9 +142,21 @@ def create_comparison_map(
     Returns:
         Configured folium Map object
     """
-    # Calculate bounds for auto-zoom
-    ref_bounds = pair.ref_geometry.bounds
-    target_bounds = pair.target_geometry.bounds
+    # Calculate bounds for auto-zoom - prefer aligned geometries if available
+    # This focuses the viewport on the matched portions rather than full segments
+    has_aligned = (
+        pair.ref_aligned_geometry is not None
+        and pair.target_aligned_geometry is not None
+        and not pair.ref_aligned_geometry.is_empty
+        and not pair.target_aligned_geometry.is_empty
+    )
+
+    if has_aligned:
+        ref_bounds = pair.ref_aligned_geometry.bounds
+        target_bounds = pair.target_aligned_geometry.bounds
+    else:
+        ref_bounds = pair.ref_geometry.bounds
+        target_bounds = pair.target_geometry.bounds
 
     minx = min(ref_bounds[0], target_bounds[0])
     miny = min(ref_bounds[1], target_bounds[1])
@@ -354,10 +455,15 @@ def create_multi_reference_map(
     Returns:
         Configured folium Map object
     """
-    # Calculate bounds from all geometries
+    # Calculate bounds from geometries - prefer aligned portions if available
+    # This focuses the viewport on the matched portions rather than full segments
     all_bounds = [target_geometry.bounds]
     for cand in related_candidates:
-        all_bounds.append(cand.ref_geometry.bounds)
+        # Use aligned geometry if available, otherwise fall back to full geometry
+        if cand.ref_aligned_geometry is not None and not cand.ref_aligned_geometry.is_empty:
+            all_bounds.append(cand.ref_aligned_geometry.bounds)
+        else:
+            all_bounds.append(cand.ref_geometry.bounds)
 
     minx = min(b[0] for b in all_bounds)
     miny = min(b[1] for b in all_bounds)
