@@ -6,6 +6,11 @@ that slip through the ML scoring pipeline. Tests use external context
 plausible but semantically impossible.
 """
 
+# Import tests to register them
+from . import tests as _tests  # noqa: F401
+
+del _tests  # Avoid unused variable warning; import is only for side effects
+
 from .base import (
     FalsificationOutcome,
     FalsificationResult,
