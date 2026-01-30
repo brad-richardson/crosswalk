@@ -73,6 +73,10 @@ class PipelineResult:
     bridge_file: Path
     unmatched_file: Path | None
 
+    # Falsification results (if run)
+    n_falsification_failed: int | None = None
+    n_falsification_warned: int | None = None
+
 
 def run_pipeline(
     reference_path: Path,
@@ -91,6 +95,8 @@ def run_pipeline(
     ref_class_column: str = CLASS_COLUMN,
     target_class_column: str = CLASS_COLUMN,
     n_jobs: int = -1,
+    run_falsification: bool = False,
+    falsification_tests: list[str] | None = None,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -107,6 +113,8 @@ def run_pipeline(
         target_name_column: Name column in target
         ref_class_column: Class column in reference
         target_class_column: Class column in target
+        run_falsification: Whether to run falsification tests after matching
+        falsification_tests: Specific falsification tests to run (None = all)
 
     Returns:
         PipelineResult with statistics
@@ -288,6 +296,39 @@ def run_pipeline(
         match_method=method,
     )
 
+    # Step 5.5: Optional falsification (after bridge file, before integration)
+    n_falsification_failed = None
+    n_falsification_warned = None
+
+    if run_falsification:
+        logger.info("Step 5.5: Running falsification tests...")
+        from ..falsification import run_falsification as _run_falsification
+
+        # Run falsification on the bridge file
+        falsified_path = output_path.parent / f"{output_path.stem}_falsified.parquet"
+        _, falsification_report = _run_falsification(
+            bridge_path=output_path,
+            ref_path=reference_path,
+            target_path=target_path,
+            test_names=falsification_tests,
+            output_path=falsified_path,
+            report_only=False,
+        )
+
+        n_falsification_failed = falsification_report.failed
+        n_falsification_warned = falsification_report.warned
+
+        logger.info(
+            f"  Falsification: {falsification_report.passed} passed, "
+            f"{falsification_report.failed} failed, {falsification_report.warned} warned"
+        )
+
+        # Update the bridge file path to point to the falsified version
+        # if any matches were rejected
+        if falsification_report.failed > 0:
+            output_path = falsified_path
+            logger.info(f"  Using falsified bridge file: {output_path}")
+
     # Unmatched report
     # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
     # and should appear in unmatched.parquet so they can be labeled/reviewed.
@@ -315,6 +356,9 @@ def run_pipeline(
     logger.info(f"  Matched: {n_matched}")
     logger.info(f"  Review: {n_review}")
     logger.info(f"  Unmatched: {n_unmatched}")
+    if n_falsification_failed is not None:
+        logger.info(f"  Falsification failed: {n_falsification_failed}")
+        logger.info(f"  Falsification warned: {n_falsification_warned}")
     logger.info("=" * 60)
 
     return PipelineResult(
@@ -326,6 +370,8 @@ def run_pipeline(
         n_unmatched=n_unmatched,
         bridge_file=output_path,
         unmatched_file=unmatched_path,
+        n_falsification_failed=n_falsification_failed,
+        n_falsification_warned=n_falsification_warned,
     )
 
 

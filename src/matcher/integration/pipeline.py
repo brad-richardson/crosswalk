@@ -58,6 +58,9 @@ def run_integration_pipeline(
     debug_connectivity: bool = False,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
+    run_post_analysis: bool = False,
+    repair_topology: bool = False,
+    snap_tolerance_m: float = 5.0,
 ) -> IntegrationResult:
     """Run the full integration pipeline.
 
@@ -96,6 +99,9 @@ def run_integration_pipeline(
         debug_connectivity: Enable debug logging for transitive connectivity analysis.
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
+        run_post_analysis: Run post-integration analysis (island detection, GPS drift)
+        repair_topology: Run topology repair (snap endpoints, remove islands)
+        snap_tolerance_m: Tolerance for endpoint snapping during repair (meters)
 
     Returns:
         IntegrationResult with edges, orphans, and statistics
@@ -209,6 +215,47 @@ def run_integration_pipeline(
     stats.main_component_edges = len(main_edges)
     stats.orphan_edges = len(orphan_edges)
     stats.orphan_components = len(orphan_edges)  # Each orphan is its own "component"
+
+    # Step 4.5: Optional post-integration analysis
+    island_result = None
+    drift_result = None
+
+    if run_post_analysis:
+        logger.info("Step 4.5: Running post-integration analysis...")
+        from ..post_integration import detect_gps_drift, detect_islands
+
+        # Island detection
+        island_result = detect_islands(
+            main_edges,
+            snap_tolerance_m=snap_tolerance_m,
+        )
+        logger.info(
+            f"  Islands: {island_result.critical_count} critical, "
+            f"{island_result.warning_count} warning, {island_result.info_count} info"
+        )
+
+        # GPS drift detection
+        drift_result = detect_gps_drift(main_edges)
+        logger.info(
+            f"  GPS drift patterns: {drift_result.zigzag_count} zigzag, "
+            f"{drift_result.spike_count} spike, {drift_result.loop_count} loop"
+        )
+
+    # Step 4.6: Optional topology repair
+    if repair_topology:
+        logger.info("Step 4.6: Repairing topology...")
+        from ..post_integration import repair_topology as _repair_topology
+
+        main_edges, repair_result = _repair_topology(
+            main_edges,
+            snap_tolerance_m=snap_tolerance_m,
+            remove_critical_islands=True,
+        )
+        logger.info(
+            f"  Repair: {repair_result.edges_snapped} snapped, "
+            f"{repair_result.edges_removed} removed"
+        )
+        stats.main_component_edges = len(main_edges)
 
     # Step 5: Build result
     logger.info("Step 5: Building result...")

@@ -643,6 +643,29 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 ---
 
+## Validation & Falsification
+
+### Post-Scoring Falsification
+- [x] `falsification/` module scaffold
+- [x] Water body falsification test
+- [x] Building footprint falsification test
+- [x] Falsification runner + CLI command
+- [x] Override high-confidence matches
+
+### Post-Integration Analysis
+- [x] Island detector (connected components)
+- [x] GPS drift detector (zigzag, spike, loop patterns)
+- [ ] Conflict detector (duplicate matches) - deferred
+- [x] Topology repair (snap endpoints, remove islands)
+
+### Quality Fingerprint
+- [x] QualityFingerprint dataclass
+- [x] Metric computations (vertex density, topology, coverage)
+- [x] JSON report generation
+- [x] CLI command
+
+---
+
 ## Implementation Priority Summary
 
 ### Medium Priority
