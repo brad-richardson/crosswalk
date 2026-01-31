@@ -4689,15 +4689,17 @@ def update_class_mappings_cmd(
     for dataset_id in sorted(dataset_list):
         console.print(f"\n[bold]Dataset: {dataset_id}[/bold]")
 
-        # Check if dataset already has class_mapping - skip if so
+        # Load dataset config
         config = get_dataset_config(dataset_id)
-        if config and config.fetch and config.fetch.class_mapping:
-            console.print(
-                "  [yellow]⚠️ SKIPPED: Dataset has existing class_mapping. "
-                "Geometry store contains mapped values, not raw source.[/yellow]"
-            )
-            results["no_changes"].append(dataset_id)
+        if not config:
+            console.print("  [red]No dataset config found[/red]")
+            results["no_data"].append(dataset_id)
             continue
+
+        # Get the raw class column name from config
+        class_column = config.fetch.class_column if config.fetch else None
+        if not class_column:
+            console.print("  [yellow]No class_column configured, using geometry store[/yellow]")
 
         labels_path = labels_dir / f"dataset={dataset_id}" / "data.csv"
         if not labels_path.exists():
@@ -4713,8 +4715,38 @@ def update_class_mappings_cmd(
             results["no_data"].append(dataset_id)
             continue
 
-        # Load geometry store and build data
+        # Load geometry store for ref class (Overture class is always correct)
         geo_store = GeometryStore(dataset_id=dataset_id, geometries_dir=geometries_dir)
+
+        # Try to load raw target data for source class
+        from glob import glob
+
+        import geopandas as gpd
+
+        target_files = glob(f"data/raw/{dataset_id}*.parquet")
+        # Filter out overture and osm files, prefer exact dataset match
+        target_files = [f for f in target_files if "overture" not in f.lower()]
+        # Prefer exact match (dataset_id_v*.parquet) over variants (dataset_id_osm_*.parquet)
+        exact_matches = [f for f in target_files if f"/{dataset_id}_v" in f or f"/{dataset_id}.parquet" in f]
+        if exact_matches:
+            target_files = exact_matches
+
+        raw_class_lookup = {}
+        if target_files and class_column:
+            try:
+                target_gdf = gpd.read_parquet(target_files[0])
+                # Build lookup from id -> raw class value from source_tags
+                for _, row in target_gdf.iterrows():
+                    target_id = row.get("id")
+                    source_tags = row.get("source_tags", {})
+                    if isinstance(source_tags, dict) and class_column in source_tags:
+                        raw_class_lookup[target_id] = source_tags[class_column]
+                console.print(
+                    f"  Loaded {len(raw_class_lookup)} raw class values from source_tags.{class_column}"
+                )
+            except Exception as e:
+                console.print(f"  [yellow]Could not load raw data: {e}[/yellow]")
+
         source_classes = []
         overture_classes = []
 
@@ -4722,14 +4754,23 @@ def update_class_mappings_cmd(
             pair = geo_store.get_pair(row["gers_id"], row["target_id"])
             if pair is None:
                 continue
-            src_class = pair.get("target_class")
+
+            # Get Overture class (ref class is always correct in geometry store)
             ref_class = pair.get("ref_class")
+
+            # Get raw source class - prefer raw lookup, fallback to geometry store
+            target_id = row["target_id"]
+            if target_id in raw_class_lookup:
+                src_class = raw_class_lookup[target_id]
+            else:
+                src_class = pair.get("target_class")
+
             if src_class and ref_class:
                 source_classes.append(str(src_class).lower().strip())
                 overture_classes.append(str(ref_class).lower().strip())
 
         if len(source_classes) < 10:
-            console.print("  Not enough class data in geometry store")
+            console.print("  Not enough class data")
             results["no_data"].append(dataset_id)
             continue
 
