@@ -168,6 +168,137 @@ class TestParseNamesLr:
         assert result.ranges[0].value == "Main St"
 
 
+class TestParseNamesLrRealWorldPatterns:
+    """Tests based on real Overture data patterns observed in production."""
+
+    def test_alternate_full_segment_with_common_ranges(self):
+        """Test: alternate covers full segment, common variants have specific ranges.
+
+        Real example from br_sao_paulo_roads (GERS: 53baf988-3a99-4a35-9088-b5cb63b57876):
+        - primary: 'Radial Leste'
+        - rules[0]: variant=alternate, between=None (full segment)
+        - rules[1]: variant=common, between=[0.0, 0.154]
+        - rules[2]: variant=common, between=[0.154, 1.0]
+
+        Expected: common variants should win over alternate.
+        """
+        names = {
+            "primary": "Radial Leste",
+            "rules": [
+                {"value": "Radial Leste", "variant": "alternate", "between": None},
+                {"value": "Avenida Alcântara Machado", "variant": "common", "between": [0.0, 0.154]},
+                {"value": "Viaduto Alcântara Machado", "variant": "common", "between": [0.154, 1.0]},
+            ],
+        }
+        result = parse_names_lr(names)
+
+        # Common variants should win, alternate should be ignored
+        assert len(result.ranges) == 2
+        assert result.ranges[0].value == "Avenida Alcântara Machado"
+        assert result.ranges[0].start == 0.0
+        assert abs(result.ranges[0].end - 0.154) < 0.001
+        assert result.ranges[1].value == "Viaduto Alcântara Machado"
+        assert abs(result.ranges[1].start - 0.154) < 0.001
+        assert result.ranges[1].end == 1.0
+
+    def test_gap_filled_with_primary(self):
+        """Test: rules don't cover full segment, gap filled with primary.
+
+        Real example from br_sao_paulo_roads (GERS: 1da06405-d1aa-4f26-8fdf-6f5ad7bcddb3):
+        - primary: 'Ciclovia Avenida Educador Paulo Freire'
+        - rules[0]: between=[0.0, 0.493]
+        - rules[1]: between=[0.493, 0.948]
+        - Gap: [0.948, 1.0] should be filled with primary
+
+        Expected: 3 ranges with gap filled by primary.
+        """
+        names = {
+            "primary": "Ciclovia Avenida Educador Paulo Freire",
+            "rules": [
+                {"value": "Ciclovia Avenida Educador Paulo Freire", "variant": "common", "between": [0.0, 0.493]},
+                {"value": "Ciclovia Ponte Aricanduva", "variant": "common", "between": [0.493, 0.948]},
+            ],
+        }
+        result = parse_names_lr(names)
+
+        assert len(result.ranges) == 3
+        assert result.ranges[0].value == "Ciclovia Avenida Educador Paulo Freire"
+        assert result.ranges[1].value == "Ciclovia Ponte Aricanduva"
+        assert result.ranges[2].value == "Ciclovia Avenida Educador Paulo Freire"  # Gap filled
+        assert abs(result.ranges[2].start - 0.948) < 0.001
+        assert result.ranges[2].end == 1.0
+
+    def test_three_name_segments(self):
+        """Test: segment with three different names along its length.
+
+        Real example from us_fort_collins_streets (GERS: 67c4dea6-0017-49ae-b87d-269c7177d665):
+        - Cross Creek Drive [0.0, 0.379]
+        - Owl Creek Drive [0.379, 0.644]
+        - Yellow Creek Drive [0.644, 1.0]
+        """
+        names = {
+            "primary": "Cross Creek Drive",
+            "rules": [
+                {"value": "Cross Creek Drive", "variant": "common", "between": [0.0, 0.379]},
+                {"value": "Owl Creek Drive", "variant": "common", "between": [0.379, 0.644]},
+                {"value": "Yellow Creek Drive", "variant": "common", "between": [0.644, 1.0]},
+            ],
+        }
+        result = parse_names_lr(names)
+
+        assert len(result.ranges) == 3
+        assert result.ranges[0].value == "Cross Creek Drive"
+        assert result.ranges[1].value == "Owl Creek Drive"
+        assert result.ranges[2].value == "Yellow Creek Drive"
+
+    def test_duplicate_rules_different_variants(self):
+        """Test: same value with both common and alternate variants.
+
+        Real example from co_bogota_roads (GERS: 448332d5-91fc-4bbb-823d-cf4e44639fa0):
+        - rules has 'Calle 54D Sur' with variant=common AND variant=alternate
+          for the same range [0.763, 1.0]
+
+        Expected: common wins, no duplicate ranges.
+        """
+        names = {
+            "primary": "Carrera 5 Este",
+            "rules": [
+                {"value": "Carrera 5 Este", "variant": "common", "between": [0.0, 0.763]},
+                {"value": "Calle 54D Sur", "variant": "common", "between": [0.763, 1.0]},
+                {"value": "Calle 54D Sur", "variant": "alternate", "between": [0.763, 1.0]},
+            ],
+        }
+        result = parse_names_lr(names)
+
+        # Should have 2 ranges, not 3 (common wins, alternate ignored)
+        assert len(result.ranges) == 2
+        assert result.ranges[0].value == "Carrera 5 Este"
+        assert result.ranges[1].value == "Calle 54D Sur"
+
+    def test_bogota_calle_carrera_pattern(self):
+        """Test: typical Bogota pattern with Calle/Carrera name changes.
+
+        Real example from co_bogota_roads (GERS: 7c144478-3966-4c87-9b7d-31095d73ba16):
+        - Diagonal 37C Sur [0.0, 0.352]
+        - Calle 37B Sur [0.352, 1.0]
+        """
+        names = {
+            "primary": "Calle 37B Sur",
+            "rules": [
+                {"value": "Diagonal 37C Sur", "variant": "common", "between": [0.0, 0.352]},
+                {"value": "Calle 37B Sur", "variant": "common", "between": [0.352, 1.0]},
+            ],
+        }
+        result = parse_names_lr(names)
+
+        assert len(result.ranges) == 2
+        assert result.ranges[0].value == "Diagonal 37C Sur"
+        assert result.ranges[1].value == "Calle 37B Sur"
+        # Verify the boundary
+        assert abs(result.ranges[0].end - 0.352) < 0.001
+        assert abs(result.ranges[1].start - 0.352) < 0.001
+
+
 class TestParseSubclassRulesLr:
     """Tests for parse_subclass_rules_lr function."""
 
