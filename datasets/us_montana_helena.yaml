@@ -9,6 +9,10 @@ source:
 fetch:
   id_prefix: us_montana_helena
   class_column: SurfaceType
+  class_mapping:
+    gravel: residential
+    unknown: service
+    paved: residential
   bbox:
   - -112.25
   - 46.45

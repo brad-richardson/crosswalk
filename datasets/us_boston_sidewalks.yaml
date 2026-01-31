@@ -10,13 +10,13 @@ fetch:
   id_prefix: boston_sidewalk
   class_column: TYPE
   class_mapping:
-    SWALK-CL: footway
-    CWALK-CL: footway
-    CWALK-CL-UM: footway
-    PWALK-CL: footway
-    Sidewalk centerline: footway
-    Crosswalk centerline: footway
-    Privatewalk centerline: footway
+    swalk-cl: footway
+    cwalk-cl: footway
+    cwalk-cl-um: footway
+    pwalk-cl: footway
+    sidewalk centerline: footway
+    crosswalk centerline: footway
+    privatewalk centerline: footway
   subclass_column: TYPE
   subclass_mapping:
     SWALK-CL: sidewalk

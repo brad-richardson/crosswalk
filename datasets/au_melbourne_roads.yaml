@@ -12,12 +12,12 @@ fetch:
   name_column: ROADNAME
   class_column: RMACLASS
   class_mapping:
-    "Freeway": motorway
-    "Tollway": motorway
-    "Arterial Highway": primary
-    "Arterial Other": secondary
-    "Non Arterial State Road": tertiary
-    "Committed Proposed Road": unclassified
+    freeway: motorway
+    tollway: motorway
+    arterial highway: trunk
+    arterial other: primary
+    non arterial state road: tertiary
+    committed proposed road: unclassified
   bbox:
   - 144.55
   - -38.1

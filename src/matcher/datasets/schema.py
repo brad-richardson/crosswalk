@@ -47,6 +47,17 @@ class FetchConfig(BaseModel):
     crs: str = "EPSG:4326"  # Coordinate reference system
     source_crs: str | None = None  # Source data CRS if different (e.g., "EPSG:5179")
     encoding: str | None = None  # File encoding if non-UTF8 (e.g., "EUC-KR")
+    # Non-road feature detection
+    non_road_type_codes: list[str] | None = (
+        None  # Type codes to filter as non-roads (e.g., ['PC', 'PQ'])
+    )
+    filter_closed_loops: bool = False  # Enable geometry-based closed loop filtering
+
+
+class MatchingConfig(BaseModel):
+    """Configuration for matching behavior."""
+
+    block_cross_tier: bool = False  # Hard block vehicle↔pedestrian candidate pairs
 
 
 class LastFetch(BaseModel):
@@ -105,6 +116,9 @@ class DatasetConfig(BaseModel):
     # Source & fetch configuration
     source: SourceConfig | None = None
     fetch: FetchConfig | None = None
+
+    # Matching configuration
+    matching: MatchingConfig | None = None
 
     # Fetch provenance (auto-updated by fetch commands)
     last_fetch: LastFetch | None = None

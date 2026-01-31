@@ -12,10 +12,10 @@ fetch:
   class_column: strassenklasse1
   class_mapping:
     '0': motorway
-    I: primary
-    II: secondary
-    III: tertiary
-    IV: residential
+    i: motorway
+    ii: secondary
+    iii: secondary
+    iv: residential
   bbox:
   - 13.088
   - 52.34

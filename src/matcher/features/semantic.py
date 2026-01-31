@@ -126,6 +126,55 @@ def get_traffic_tier(road_class: str | None) -> str | None:
     return TRAFFIC_TIERS.get(road_class.lower().strip())
 
 
+def compute_tier_match(ref_class: str | None, target_class: str | None) -> float:
+    """Compute whether reference and target are in the same traffic tier.
+
+    This binary feature allows the ML model to learn hard penalties for
+    cross-tier mismatches (e.g., residential road matching sidewalk).
+
+    Args:
+        ref_class: Reference road class
+        target_class: Target road class
+
+    Returns:
+        1.0 if same traffic tier, 0.0 if different tiers, 0.5 if either unknown
+    """
+    ref_tier = get_traffic_tier(ref_class)
+    target_tier = get_traffic_tier(target_class)
+
+    # Unknown tier -> neutral score
+    if ref_tier is None or target_tier is None:
+        return 0.5
+
+    # Neutral tier -> neutral score
+    if ref_tier == "neutral" or target_tier == "neutral":
+        return 0.5
+
+    return 1.0 if ref_tier == target_tier else 0.0
+
+
+def compute_tier_incompatible(ref_class: str | None, target_class: str | None) -> float:
+    """Compute whether reference and target are vehicle↔pedestrian mismatch.
+
+    This specific binary feature flags the most problematic cross-tier matches:
+    vehicular roads matched with pedestrian infrastructure (sidewalks, footways).
+
+    Args:
+        ref_class: Reference road class
+        target_class: Target road class
+
+    Returns:
+        1.0 if vehicle↔pedestrian mismatch, 0.0 otherwise
+    """
+    ref_tier = get_traffic_tier(ref_class)
+    target_tier = get_traffic_tier(target_class)
+
+    if ref_tier is None or target_tier is None:
+        return 0.0
+
+    return 1.0 if {ref_tier, target_tier} == {"vehicle", "pedestrian"} else 0.0
+
+
 # Common street name abbreviations
 # Note: Keys must include trailing space to avoid matching inside words
 # (e.g., " st " won't match inside "street")
