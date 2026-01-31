@@ -15,16 +15,9 @@ from ..base import (
     ScreenTest,
     register_test,
 )
+from ..constants import WATER_BUFFER_M
 from ..context.overture_water import fetch_overture_water, get_water_union
 from .travel_mode import get_travel_mode
-
-# Buffer distances by travel mode (meters)
-# Water needs larger buffers - roads shouldn't be right at water's edge
-WATER_BUFFER_M = {
-    "vehicle": 5.0,
-    "bike": 2.0,
-    "pedestrian": 1.0,
-}
 
 
 @register_test
@@ -79,7 +72,7 @@ class WaterBodyTest(ScreenTest):
 
         # Get buffer distance based on road class
         mode = get_travel_mode(ctx.road_class)
-        buffer_m = self.buffers[mode]
+        buffer_m = self.buffers.get(mode, self.buffers["vehicle"])
 
         # Buffer water in metric CRS
         water_series = gpd.GeoSeries([self.water_union], crs="EPSG:4326")

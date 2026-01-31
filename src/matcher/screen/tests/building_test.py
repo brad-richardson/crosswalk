@@ -15,16 +15,9 @@ from ..base import (
     ScreenTest,
     register_test,
 )
+from ..constants import BUILDING_BUFFER_M
 from ..context.overture_buildings import fetch_overture_buildings, get_building_union
 from .travel_mode import get_travel_mode
-
-# Buffer distances by travel mode (meters)
-# Buildings can have smaller buffers - covered passages, arcades exist
-BUILDING_BUFFER_M = {
-    "vehicle": 3.0,
-    "bike": 1.5,
-    "pedestrian": 0.5,
-}
 
 
 @register_test
@@ -79,7 +72,7 @@ class BuildingTest(ScreenTest):
 
         # Get buffer distance based on road class
         mode = get_travel_mode(ctx.road_class)
-        buffer_m = self.buffers[mode]
+        buffer_m = self.buffers.get(mode, self.buffers["vehicle"])
 
         # Buffer buildings in metric CRS
         building_series = gpd.GeoSeries([self.building_union], crs="EPSG:4326")

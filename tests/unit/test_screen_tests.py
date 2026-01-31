@@ -16,8 +16,8 @@ class TestTravelMode:
         assert get_travel_mode("residential") == "vehicle"
         assert get_travel_mode("service") == "vehicle"
 
-    def test_bike_classes(self):
-        assert get_travel_mode("cycleway") == "bike"
+    def test_bicycle_classes(self):
+        assert get_travel_mode("cycleway") == "bicycle"
 
     def test_pedestrian_classes(self):
         assert get_travel_mode("footway") == "pedestrian"

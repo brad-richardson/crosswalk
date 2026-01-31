@@ -15,16 +15,9 @@ from ..base import (
     ScreenTest,
     register_test,
 )
+from ..constants import LANDCOVER_BUFFER_M
 from ..context.overture_landcover import fetch_overture_landcover, get_landcover_union
 from .travel_mode import get_travel_mode
-
-# Buffer distances by travel mode (meters)
-# Wetlands need buffers like water; sports fields less so
-LANDCOVER_BUFFER_M = {
-    "vehicle": 3.0,
-    "bike": 1.5,
-    "pedestrian": 0.5,
-}
 
 
 @register_test
@@ -82,7 +75,7 @@ class LandcoverTest(ScreenTest):
 
         # Get buffer distance based on road class
         mode = get_travel_mode(ctx.road_class)
-        buffer_m = self.buffers[mode]
+        buffer_m = self.buffers.get(mode, self.buffers["vehicle"])
 
         # Buffer landcover in metric CRS
         landcover_series = gpd.GeoSeries([self.landcover_union], crs="EPSG:4326")

@@ -10,27 +10,14 @@ from overturemaps.core import geodataframe, get_latest_release
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
-# Landcover subtypes that roads should never cross
-RESTRICTED_SUBTYPES = {
-    # Wetlands - similar to water bodies
-    "wetland",
-    "marsh",
-    "swamp",
-    "bog",
-    # Sports surfaces - no roads through playing fields
-    "pitch",
-    "sports_centre",
-    "stadium",
-    "track",
-    "golf_course",  # fairways/greens, not cart paths
-}
+from ..constants import MIN_LANDCOVER_AREA_M2, RESTRICTED_LANDCOVER_SUBTYPES
 
 
 def fetch_overture_landcover(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
     subtypes: set[str] | None = None,
-    min_area_m2: float = 50.0,
+    min_area_m2: float = MIN_LANDCOVER_AREA_M2,
 ) -> gpd.GeoDataFrame:
     """Fetch landcover polygons from Overture Maps.
 
@@ -48,7 +35,7 @@ def fetch_overture_landcover(
         logger.debug(f"Using latest Overture release: {release}")
 
     if subtypes is None:
-        subtypes = RESTRICTED_SUBTYPES
+        subtypes = RESTRICTED_LANDCOVER_SUBTYPES
 
     logger.info(f"Fetching Overture landcover for bbox: {bbox}")
 
