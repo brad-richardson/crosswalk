@@ -4,7 +4,9 @@ Uses the overturemaps-py library to query Overture GeoParquet files
 and automatically handles release version detection.
 """
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 from loguru import logger
@@ -553,6 +555,64 @@ def parse_names_lr(names_dict: dict | None) -> LinearReferencedAttribute:
     return normalize_ranges(rule_tuples, default_value)
 
 
+def _parse_simple_rules_lr(
+    rules: list | None,
+    default_value: Any,
+    value_extractor: Callable[[dict], Any | None],
+) -> LinearReferencedAttribute:
+    """Generic parser for simple LR rules (subclass, level, road_flags).
+
+    This handles the common pattern of:
+    1. None/empty check with numpy array conversion
+    2. Looping through rules to extract values
+    3. Building rule_tuples with index-based priority
+    4. Normalizing ranges
+
+    Args:
+        rules: Array of rule dicts (may be numpy array)
+        default_value: Default value for gaps and empty input
+        value_extractor: Function that extracts value from a rule dict,
+                        returns None to skip the rule
+
+    Returns:
+        LinearReferencedAttribute with normalized ranges
+    """
+    if rules is None:
+        return create_trivial_lr(default_value)
+
+    # Convert numpy array to list if needed
+    if hasattr(rules, "tolist"):
+        rules = rules.tolist()
+
+    if not isinstance(rules, list) or len(rules) == 0:
+        return create_trivial_lr(default_value)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, Any, int]] = []
+
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            continue
+
+        value = value_extractor(rule)
+        if value is None:
+            continue
+
+        range_tuple = _extract_range_from_rule(rule)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Use index as priority (earlier rules win)
+        rule_tuples.append((start, end, value, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(default_value)
+
+    return normalize_ranges(rule_tuples, default_value)
+
+
 def parse_subclass_rules_lr(
     subclass_rules: list | None, default_subclass: str | None = None
 ) -> LinearReferencedAttribute:
@@ -569,38 +629,12 @@ def parse_subclass_rules_lr(
     Returns:
         LinearReferencedAttribute with normalized subclass ranges
     """
-    if subclass_rules is None:
-        return create_trivial_lr(default_subclass)
-    # Convert numpy array to list if needed
-    if hasattr(subclass_rules, "tolist"):
-        subclass_rules = subclass_rules.tolist()
-    if not isinstance(subclass_rules, list) or len(subclass_rules) == 0:
-        return create_trivial_lr(default_subclass)
 
-    # Build list of (start, end, value, priority) tuples
-    rule_tuples: list[tuple[float, float, str, int]] = []
-
-    for i, rule in enumerate(subclass_rules):
-        if not isinstance(rule, dict):
-            continue
-
+    def extract_subclass(rule: dict) -> str | None:
         value = rule.get("value")
-        if not isinstance(value, str):
-            continue
+        return value if isinstance(value, str) else None
 
-        range_tuple = _extract_range_from_rule(rule)
-        if range_tuple:
-            start, end = range_tuple
-        else:
-            start, end = 0.0, 1.0
-
-        # Use index as priority (earlier rules win)
-        rule_tuples.append((start, end, value, i))
-
-    if not rule_tuples:
-        return create_trivial_lr(default_subclass)
-
-    return normalize_ranges(rule_tuples, default_subclass)
+    return _parse_simple_rules_lr(subclass_rules, default_subclass, extract_subclass)
 
 
 def parse_level_rules_lr(level_rules: list | None) -> LinearReferencedAttribute:
@@ -616,44 +650,18 @@ def parse_level_rules_lr(level_rules: list | None) -> LinearReferencedAttribute:
     Returns:
         LinearReferencedAttribute with normalized level ranges
     """
-    default_level = 0  # Ground level
 
-    if level_rules is None:
-        return create_trivial_lr(default_level)
-    # Convert numpy array to list if needed
-    if hasattr(level_rules, "tolist"):
-        level_rules = level_rules.tolist()
-    if not isinstance(level_rules, list) or len(level_rules) == 0:
-        return create_trivial_lr(default_level)
-
-    # Build list of (start, end, value, priority) tuples
-    rule_tuples: list[tuple[float, float, int, int]] = []
-
-    for i, rule in enumerate(level_rules):
-        if not isinstance(rule, dict):
-            continue
-
+    def extract_level(rule: dict) -> int | None:
         value = rule.get("value")
-        if not isinstance(value, int):
-            # Try to convert
-            try:
-                value = int(value)
-            except (TypeError, ValueError):
-                continue
+        if isinstance(value, int):
+            return value
+        # Try to convert
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
-        range_tuple = _extract_range_from_rule(rule)
-        if range_tuple:
-            start, end = range_tuple
-        else:
-            start, end = 0.0, 1.0
-
-        # Use index as priority (earlier rules win)
-        rule_tuples.append((start, end, value, i))
-
-    if not rule_tuples:
-        return create_trivial_lr(default_level)
-
-    return normalize_ranges(rule_tuples, default_level)
+    return _parse_simple_rules_lr(level_rules, 0, extract_level)  # 0 = ground level
 
 
 def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
@@ -671,48 +679,20 @@ def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
     Returns:
         LinearReferencedAttribute with normalized flag ranges
     """
-    default_flags: frozenset[str] = frozenset()
 
-    if road_flags is None:
-        return create_trivial_lr(default_flags)
-    # Convert numpy array to list if needed
-    if hasattr(road_flags, "tolist"):
-        road_flags = road_flags.tolist()
-    if not isinstance(road_flags, list) or len(road_flags) == 0:
-        return create_trivial_lr(default_flags)
-
-    # Build list of (start, end, value, priority) tuples
-    rule_tuples: list[tuple[float, float, frozenset[str], int]] = []
-
-    for i, rule in enumerate(road_flags):
-        if not isinstance(rule, dict):
-            continue
-
+    def extract_flags(rule: dict) -> frozenset[str] | None:
         values = rule.get("values")
         if values is None:
-            continue
+            return None
         # Convert numpy array to list if needed
         if hasattr(values, "tolist"):
             values = values.tolist()
         if not isinstance(values, list):
-            continue
-
+            return None
         # Convert to frozenset of strings
-        flag_set = frozenset(str(v) for v in values if v)
+        return frozenset(str(v) for v in values if v)
 
-        range_tuple = _extract_range_from_rule(rule)
-        if range_tuple:
-            start, end = range_tuple
-        else:
-            start, end = 0.0, 1.0
-
-        # Use index as priority (earlier rules win)
-        rule_tuples.append((start, end, flag_set, i))
-
-    if not rule_tuples:
-        return create_trivial_lr(default_flags)
-
-    return normalize_ranges(rule_tuples, default_flags)
+    return _parse_simple_rules_lr(road_flags, frozenset(), extract_flags)
 
 
 def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

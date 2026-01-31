@@ -29,6 +29,7 @@ def backfill_lr_data(
     target_path: Path | None = None,
     geometries_dir: Path | None = None,
     dry_run: bool = False,
+    target_is_osm: bool = False,
 ) -> dict[str, int]:
     """Backfill LR data to existing label_geometries entries.
 
@@ -36,18 +37,30 @@ def backfill_lr_data(
     Overture data and adds the LR attributes (names_lr, subclass_lr, etc.)
     to the geometry store.
 
+    For Overture → OSM datasets (where target_is_osm=True):
+    - Reference LR comes from Overture data (looked up by gers_id)
+    - Target LR comes from OSM data (looked up by target_id which is an OSM ID)
+    - The OSM data has LR-capable structure and will have extract_lr_attributes run
+
     Args:
         dataset_id: Dataset identifier for the label partition
         overture_path: Path to current Overture segments parquet file
         target_path: Optional path to target data (for target LR attributes)
         geometries_dir: Directory for geometry stores (default: label_geometries)
         dry_run: If True, don't save changes, just report counts
+        target_is_osm: If True, target is OSM data with LR-capable structure.
+            Use this for Overture → OSM matching datasets.
 
     Returns:
         Dict with counts: {"updated": n, "not_found": n, "total": n}
     """
     if geometries_dir is None:
         geometries_dir = Path("label_geometries")
+
+    # Auto-detect OSM datasets based on naming convention
+    if not target_is_osm and dataset_id.endswith("_osm"):
+        logger.info(f"Auto-detected OSM dataset from name: {dataset_id}")
+        target_is_osm = True
 
     logger.info(f"Backfilling LR data for dataset: {dataset_id}")
 
@@ -79,8 +92,13 @@ def backfill_lr_data(
         logger.info(f"Loading target data from {target_path}")
         target_gdf = gpd.read_parquet(target_path)
         if "names_lr" not in target_gdf.columns:
-            # Target data typically doesn't have native LR, but check anyway
-            logger.info("Target data doesn't have LR columns - using trivial LR")
+            if target_is_osm:
+                # OSM data has LR-capable structure (names.rules, etc.)
+                logger.info("Extracting LR attributes from OSM target data...")
+                target_gdf = extract_lr_attributes(target_gdf)
+            else:
+                # Regular target data typically doesn't have native LR
+                logger.info("Target data doesn't have LR columns - using trivial LR")
         target_id_col = "id" if "id" in target_gdf.columns else target_gdf.columns[0]
         target_gdf[target_id_col] = target_gdf[target_id_col].astype(str)
         target_by_id = target_gdf.set_index(target_id_col)
