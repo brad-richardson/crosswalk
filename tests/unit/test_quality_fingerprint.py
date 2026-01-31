@@ -1,7 +1,6 @@
 """Tests for quality fingerprint module."""
 
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 import geopandas as gpd
@@ -39,7 +38,7 @@ class TestQualityFingerprint:
         """Test creation from dictionary."""
         data = {
             "dataset_name": "test",
-            "timestamp": "2025-01-01T12:00:00",
+            "timestamp": "2025-01-01T12:00:00+00:00",
             "total_segments": 50,
             "total_length_m": 2500.0,
             "island_count": 2,
@@ -88,7 +87,10 @@ class TestComputeQualityMetrics:
     def test_basic_metrics(self):
         """Test basic metric computation."""
         edges = gpd.GeoDataFrame(
-            {"name": ["Main St", "Oak Ave", None]},
+            {
+                "id": [1, 2, 3],
+                "name": ["Main St", "Oak Ave", None],
+            },
             geometry=[
                 LineString([(0, 0), (0.001, 0)]),
                 LineString([(0.001, 0), (0.001, 0.001)]),

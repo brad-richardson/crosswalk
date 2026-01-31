@@ -70,7 +70,7 @@ def save_quality_report(
 
     data = fingerprint.to_dict()
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent)
 
     logger.info(f"Saved quality report to {output_path}")
@@ -86,7 +86,7 @@ def load_quality_report(path: Path) -> QualityFingerprint:
     Returns:
         QualityFingerprint loaded from file
     """
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     return QualityFingerprint.from_dict(data)
