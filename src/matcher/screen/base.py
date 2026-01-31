@@ -51,10 +51,6 @@ class CandidateContext:
     target_attrs: dict[str, Any] = field(default_factory=dict)
 
 
-# Backwards compatibility alias
-MatchContext = CandidateContext
-
-
 # Registry of all screen tests
 _SCREEN_TESTS: dict[str, type["ScreenTest"]] = {}
 

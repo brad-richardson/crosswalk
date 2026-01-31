@@ -7,7 +7,6 @@ Screen tests identify segments that should not be added to the network.
 
 from .base import (
     CandidateContext,
-    MatchContext,  # Backwards compatibility alias
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -32,7 +31,6 @@ __all__ = [
     "ScreenResult",
     "ScreenTest",
     "CandidateContext",
-    "MatchContext",  # Backwards compatibility alias
     # Registry
     "register_test",
     "get_registered_tests",
