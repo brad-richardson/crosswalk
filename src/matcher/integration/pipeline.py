@@ -17,7 +17,7 @@ from loguru import logger
 
 from ..config import settings
 from ..resolution.bridge import load_bridge_file
-from ..screen.constants import FRINGE_BUFFER_M
+from ..screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
 from ..screen.tests.fringe_test import filter_fringe_segments
 from .combiner import combine_networks, separate_matched_unmatched
 from .filters import detect_near_duplicates, filter_short_segments
@@ -163,7 +163,7 @@ def run_integration_pipeline(
                 target_edges=unmatched,
                 reference_edges=reference,
                 buffer_distance_m=fringe_buffer_m,
-                min_inside_length_m=10.0,
+                min_inside_length_m=FRINGE_MIN_INSIDE_LENGTH_M,
             )
             if len(fringe_segments) > 0:
                 logger.info(f"    Pre-screened {len(fringe_segments)} fringe segments")
