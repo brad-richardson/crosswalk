@@ -1,0 +1,21 @@
+ref_id,target_id,label,confidence,reasoning,labeler,dataset
+17e238f7-3de2-4d36-ad4a-929d9b112065,boston_streets_2584,no_match,0.95,Segments are on parallel but separate roads with significant offset,claude_sonnet,unknown
+27ac3e11-cb6b-4ac7-9e4d-ea12ca97dd37,boston_streets_2021,match,0.95,Blue segment is subsegment of red on same curved road,claude_sonnet,unknown
+351f73aa-db85-4c3e-a050-e056a650da4c,boston_streets_8268,match,0.85,Blue segment is subsegment of red segment on same curved road,claude_sonnet,unknown
+364e3ae5-c0f2-4d0c-a7e6-af9318eb97f2,boston_streets_6334,no_match,0.95,Segments are on different perpendicular/separate roads with no overlap,claude_sonnet,unknown
+3bf2f29e-d87f-4935-95e1-5ef8caff3d4e,boston_streets_10192,unsure,0.3,Reference segment not visible in provided images,claude_sonnet,unknown
+4810b029-c2b2-4211-89c2-1e33e6cb53e3,boston_streets_9719,match,0.95,Collinear segments on same continuous residential street,claude_sonnet,unknown
+67da6444-0792-4a52-a0ac-36ed70af5fa2,boston_streets_2911,no_match,0.95,Segments are perpendicular and on different roads (footway vs street),claude_sonnet,unknown
+688d3808-cb07-4252-bfb3-71735638b007,boston_streets_1659,no_match,0.85,Parallel lanes on divided roadway not same segment,claude_sonnet,unknown
+82c5ce83-be79-4cca-a7b6-7ae709781a0d,boston_streets_3931,match,0.95,Both segments trace the same diagonal road; nearly identical alignment with minor endpoint differences,claude_sonnet,unknown
+88c439e0-e925-4443-b944-ed44f4a63c95,boston_streets_6007,no_match,0.95,Different roads with different alignments that meet at intersection,claude_sonnet,unknown
+89767bd5-e887-493d-9978-c486e58f5f7f,boston_streets_487,match,0.95,Blue subsegment fully contained within red segment on same residential street,claude_sonnet,unknown
+8aa37390-7208-44b7-9d32-dfa723b91d63,boston_streets_5421,match,0.95,Red segment is subsegment of blue along same curved residential street; blue extends further east,claude_sonnet,unknown
+9fda925d-8633-49b3-ab7c-06addaadf30a,boston_streets_6328,no_match,0.85,Blue cycleway and red residential street are parallel but separate roads,claude_sonnet,unknown
+baf32705-78dc-43cd-87cf-4fed3eed43cf,boston_streets_9780,match,0.95,Red segment is subsegment of blue on same curved road,claude_sonnet,unknown
+ccfa0897-60e1-4bf9-a6a5-e9fd201ee6b8,boston_streets_5071,match,0.95,Both segments follow same alley/service road between buildings with high spatial overlap,claude_sonnet,unknown
+cee40b99-ae55-4521-ad4e-fa24ab68ce48,boston_streets_5547,match,0.9,Blue segment is subsegment of red segment on same road,claude_sonnet,unknown
+d279f8ac-cce9-4c78-abff-4e95872c22f0,boston_streets_3862,no_match,1.0,Parallel streets - blue on northern road and red on southern road,claude_sonnet,unknown
+e6cb5447-5b4a-457b-a69d-6ce3b36d6ef1,boston_streets_5301,match,0.95,Blue segment is subsegment of red on same diagonal street,claude_sonnet,unknown
+eb2129a9-666f-47e5-8ef4-9244982d249b,boston_streets_8524,match,0.95,Blue and red segments closely overlap on the same diagonal road with similar length and alignment,claude_sonnet,unknown
+ed74bedb-d07b-4cae-a04d-b76fb54c32df,boston_streets_3290,no_match,0.95,Parallel roads clearly separated not overlapping same physical path,claude_sonnet,unknown

@@ -1,0 +1,109 @@
+ref_id,target_id,label,confidence,reasoning,labeler,dataset
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Red segment is sidewalk offset from blue street; parallel but different features,claude_sonnet,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.9,Red segment (sidewalk) parallel to but offset from blue road segment with significant spatial separation,claude_sonnet,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.9,Segments are parallel but spatially separated (~10m apart) representing different physical sidewalks,claude_sonnet,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.85,Segments are parallel but offset ~18m with different classes (primary road vs sidewalk),claude_sonnet,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.85,Segments are parallel but spatially separated with significant offset,claude_sonnet,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.85,Blue segment shows Y-junction while red segment only covers one arm,claude_sonnet,boston_sidewalks
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,no_match,0.85,Blue segment is 4x longer than red; red covers only small portion near middle,claude_sonnet,boston_sidewalks
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.85,Different parallel segments with significant spatial offset and length mismatch,claude_sonnet,boston_sidewalks
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.85,Different geometries - blue L-shaped segment vs red diagonal segment with minimal overlap,claude_sonnet,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.95,Different segments with different orientations and positions; red segment is curved and much longer than blue straight segment,claude_sonnet,boston_sidewalks
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Parallel segments with significant offset and different functional classes,gemini,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.95,Segments have significant spatial offset and different orientations representing different feature classes.,gemini,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.95,Parallel segments with significant lateral separation of over 10 meters indicating distinct physical paths.,gemini,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Parallel segments with 18m offset representing distinct road and sidewalk features,gemini,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.95,Segments are parallel with a large spatial offset indicating separate physical footways.,gemini,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.9,Target segment only covers one branch of the L-shaped reference segment geometry,gemini,boston_sidewalks
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,match,0.95,Target segment is a subset perfectly aligned with the reference segment.,gemini,boston_sidewalks
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.9,Segments are spatially disjoint with significant offset and no overlap.,gemini,boston_sidewalks
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.95,Segments intersect at a high angle and have completely different geometric shapes.,gemini,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.95,Segments are spatially disjoint with significant geometric separation and different lengths.,gemini,boston_sidewalks
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.92,Road and sidewalk are separate physical features with different grades and surfaces,claude_haiku,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.92,Road and sidewalk are different feature types with parallel but offset geometries,claude_haiku,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.92,Parallel sidewalk segments offset by 10m; minimal geometric overlap,claude_haiku,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Road and adjacent sidewalk are physically separate features with 15-20m parallel offset,claude_haiku,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.88,Parallel footways with 15-20m offset and poor geometric overlap (buffer_iou=0.22),claude_haiku,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.92,Significant angular offset and 45m separation between segments despite same feature type,claude_haiku,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.92,Reference and target are offset and misaligned; reference is 8.7m while target is 39.1m with poor spatial overlap,claude_haiku,boston_sidewalks
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,no_match,0.92,Target is partial subset with poor overlap and 26m centroid offset despite same feature type,claude_haiku,boston_sidewalks
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.92,Reference is road centerline; target is adjacent sidewalk/footway - different feature type and separate physical surfaces,claude_haiku,boston_sidewalks
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.92,Footways align with same direction; high overlap and endpoint connectivity,claude_haiku,boston_sidewalks
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,no_match,0.85,Different heading (28.7°) indicates separate footway segments not same feature,claude_haiku,boston_sidewalks
+716892e5-bd7b-4fd9-9007-81df587bd4b9,boston_sidewalk_861,no_match,0.95,Motorway centerline vs adjacent footway are different features,claude_haiku,boston_sidewalks
+74b7fb7e-31b9-4163-8fbb-114b300fbfe9,boston_sidewalk_12671,no_match,0.92,Different footway sections with minimal overlap and diverging paths,claude_haiku,boston_sidewalks
+7c3f02f6-f96c-44b5-bf71-926ed10eedc4,boston_sidewalk_103996,match,0.92,Same footway with strong geometric alignment; target is segmented subset,claude_haiku,boston_sidewalks
+7d978f23-01d2-413b-8025-2663a76ca5e8,boston_sidewalk_2188,no_match,0.88,Parallel footways with 25m offset; insufficient geometric alignment,claude_haiku,boston_sidewalks
+81f5dc3d-9704-4527-bed6-386138834ec3,boston_sidewalk_2197,no_match,0.92,Segments separated by ~27m with poor overlap; distinct footway features,claude_haiku,boston_sidewalks
+8337829c-0029-4926-9946-52d64f26ede2,boston_sidewalk_12349,no_match,0.92,Segments are spatially offset (22m apart) with low buffer_iou (0.19) and hausdorff distance 26.7m; different footway segments,claude_haiku,boston_sidewalks
+863d2f1d-9f7e-4a6c-a95e-6acf8c43c8d7,boston_sidewalk_43221,no_match,0.92,Segments are offset with poor geometric alignment (hausdorff 20.75m buffer_iou 0.28) despite both being footways,claude_haiku,boston_sidewalks
+97fcb960-9c60-4c6d-a903-e66da83f5f07,boston_sidewalk_74821,no_match,0.92,Different paths with 20.7m offset and 29.5° heading difference indicate separate sidewalk segments,claude_haiku,boston_sidewalks
+99e3e5fd-87c8-43c0-9bac-e22fa664d82a,boston_sidewalk_72951,no_match,0.95,Road centerline vs adjacent sidewalk are different features,claude_haiku,boston_sidewalks
+9dfd0359-876c-4728-8543-fd40c1fb6c0d,boston_sidewalk_1633,no_match,0.92,Segments offset by 25m; parallel but separate footways on opposite sides of structure,claude_haiku,boston_sidewalks
+9fda925d-8633-49b3-ab7c-06addaadf30a,boston_sidewalk_40452,no_match,0.85,Cycleway and footway are distinct physical features with 5-8m offset and different headings,claude_haiku,boston_sidewalks
+a09c706b-15b3-4481-9343-93838c20ab45,boston_sidewalk_103326,no_match,0.92,Large spatial offset (38m) and poor geometric alignment despite same footway class,claude_haiku,boston_sidewalks
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.95,Road vs adjacent sidewalk - different feature types with parallel offset,claude_haiku_lowres,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.92,Road centerline vs adjacent sidewalk - different feature types,claude_haiku_lowres,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.88,Parallel footways with 10m+ offset; buffer_iou 0.26 indicates poor geometric alignment,claude_haiku_lowres,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.92,Road centerline vs adjacent parallel sidewalk; different feature types,claude_haiku_lowres,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.92,Parallel segments with large offset (27.9m) and poor geometric alignment; separate footway features,claude_haiku_lowres,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.85,Reference extends much further; different path trajectory with 40° heading difference,claude_haiku_lowres,boston_sidewalks
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,no_match,0.88,Significant geometric misalignment: hausdorff distance 39.86m exceeds threshold; target is only 25% of reference length with poor buffer overlap (0.37),claude_haiku_lowres,boston_sidewalks
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.85,Poor geometric overlap (buffer_iou 0.30) and 16m offset despite same feature type,claude_haiku_lowres,boston_sidewalks
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.92,Segments diverge significantly; poor spatial overlap and 23m centroid offset despite same class,claude_haiku_lowres,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.92,Segments are spatially separated with poor geometric overlap and vastly different lengths,claude_haiku_lowres,boston_sidewalks
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,no_match,0.82,Target segment only partially overlaps reference; 50.9m Hausdorff distance and 0.42 length ratio indicate different features,claude_haiku_lowres,boston_sidewalks
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.95,Road and sidewalk are parallel but physically distinct features with different grades,claude_haiku_lowres,boston_sidewalks
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.92,Excellent geometric alignment with matching footway class; 91% overlap ratio and strong topological match,claude_haiku_lowres,boston_sidewalks
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,no_match,0.75,Different orientations (28.7° heading delta) suggest distinct sidewalk segments,claude_haiku_lowres,boston_sidewalks
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.82,Parallel offset path likely sidewalk not same road segment,codex,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.82,Segments are parallel but clearly offset and different extent,codex,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.88,segments are far apart and on opposite sides of intersection,codex,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.85,Segments are parallel but clearly offset and represent different features road versus sidewalk,codex,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.8,Parallel offset and different endpoints suggest different sidewalks,codex,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.72,Blue includes an extra leg past the corner while red only covers the upper segment,codex,boston_sidewalks
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,match,0.77,red segment is a shorter subset aligned with blue on same physical path,codex,boston_sidewalks
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.74,Segments are spatially separated with different alignment and no clear connection in either view,codex,boston_sidewalks
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.78,Segments have different geometry and orientation and only meet at a point so they are different physical paths,codex,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.84,segments are separated and have different geometry alignment,codex,boston_sidewalks
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,match,0.62,Red is a shorter segment aligned and overlapping the blue diagonal path near the end with similar heading and topology,codex,boston_sidewalks
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.83,Segments are parallel but consistently offset and different endpoints suggesting sidewalk vs roadway not same physical segment,codex,boston_sidewalks
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.9,Strong geometric overlap with same endpoints and alignment in both views,codex,boston_sidewalks
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,match,0.78,Segments are very close with strong spatial overlap despite moderate heading difference,codex,boston_sidewalks
+716892e5-bd7b-4fd9-9007-81df587bd4b9,boston_sidewalk_861,no_match,0.93,Shapes and locations differ with blue curved arc and red straight segment offset apart,codex,boston_sidewalks
+74b7fb7e-31b9-4163-8fbb-114b300fbfe9,boston_sidewalk_12671,no_match,0.78,Red is short curved segment while blue is long straight diagonal with limited overlap,codex,boston_sidewalks
+7c3f02f6-f96c-44b5-bf71-926ed10eedc4,boston_sidewalk_103996,match,0.85,segments are nearly collinear and overlap along the same sidewalk alignment with only minor offset and length difference,codex,boston_sidewalks
+7d978f23-01d2-413b-8025-2663a76ca5e8,boston_sidewalk_2188,no_match,0.78,segments are aligned but appear as adjacent non overlapping pieces of the same corridor,codex,boston_sidewalks
+81f5dc3d-9704-4527-bed6-386138834ec3,boston_sidewalk_2197,no_match,0.9,Red is a short horizontal segment while blue is a longer mostly vertical then diagonal segment sharing only an endpoint,codex,boston_sidewalks
+8337829c-0029-4926-9946-52d64f26ede2,boston_sidewalk_12349,no_match,0.9,Segments are far apart and follow different paths,codex,boston_sidewalks
+863d2f1d-9f7e-4a6c-a95e-6acf8c43c8d7,boston_sidewalk_43221,no_match,0.78,Segments are offset with clear gap and do not connect or align,codex,boston_sidewalks
+97fcb960-9c60-4c6d-a903-e66da83f5f07,boston_sidewalk_74821,match,0.5,parsed,codex,boston_sidewalks
+99e3e5fd-87c8-43c0-9bac-e22fa664d82a,boston_sidewalk_72951,match,0.5,parsed,codex,boston_sidewalks
+9dfd0359-876c-4728-8543-fd40c1fb6c0d,boston_sidewalk_1633,match,0.5,parsed,codex,boston_sidewalks
+9fda925d-8633-49b3-ab7c-06addaadf30a,boston_sidewalk_40452,match,0.5,parsed,codex,boston_sidewalks
+a09c706b-15b3-4481-9343-93838c20ab45,boston_sidewalk_103326,match,0.5,parsed,codex,boston_sidewalks
+a40b572a-2bff-43cf-a473-19998ee1526a,boston_sidewalk_22823,match,0.5,parsed,codex,boston_sidewalks
+b3888cbc-fbec-4386-9995-efc7a9ffe5bb,boston_sidewalk_27956,match,0.5,parsed,codex,boston_sidewalks
+b9e0b42c-5968-40fc-9f34-e2cc5ce1ef65,boston_sidewalk_96945,match,0.5,parsed,codex,boston_sidewalks
+baf32705-78dc-43cd-87cf-4fed3eed43cf,boston_sidewalk_103229,match,0.5,parsed,codex,boston_sidewalks
+bca16fe2-c568-42b5-aecd-250280181439,boston_sidewalk_1264,match,0.5,parsed,codex,boston_sidewalks
+c71b9627-6687-4b3a-8900-157ee1c03412,boston_sidewalk_12464,match,0.5,parsed,codex,boston_sidewalks
+c765792c-ffd7-49bf-97ad-5405a3b4b88d,boston_sidewalk_102890,match,0.5,parsed,codex,boston_sidewalks
+d506d3a1-717b-4f8f-a356-a5849928b9c9,boston_sidewalk_14022,match,0.5,parsed,codex,boston_sidewalks
+efbcdfd7-af04-4ba6-a495-a753e546ee95,boston_sidewalk_103038,match,0.5,parsed,codex,boston_sidewalks
+faa68d1d-da12-4388-ae97-78601cf7cd1f,boston_sidewalk_1647,match,0.5,parsed,codex,boston_sidewalks
+fcd22110-6916-4d59-b782-41d75e60bb25,boston_sidewalk_103113,match,0.5,parsed,codex,boston_sidewalks
+10297911-dcd0-4af2-9887-14cf1949d60c,boston_sidewalk_74135,no_match,0.92,Road centerline and parallel sidewalk are different physical features,claude_haiku_gray,boston_sidewalks
+16c27c80-7650-4534-b22b-c924be7b420e,boston_sidewalk_1672,no_match,0.92,Sidewalk and road are parallel but distinct features on different grades,claude_haiku_gray,boston_sidewalks
+23748250-8f17-4083-bcee-5723cf3904f5,boston_sidewalk_87525,no_match,0.85,Poor geometric overlap despite topological connection; likely separate footway segments,claude_haiku_gray,boston_sidewalks
+29dced94-0730-40b9-884d-498a77d70c02,boston_sidewalk_102743,no_match,0.95,Road centerline vs adjacent parallel sidewalk; distinct features,claude_haiku_gray,boston_sidewalks
+2ab59c60-b870-47cc-ba59-2feedad33fd6,boston_sidewalk_75585,no_match,0.92,Parallel sidewalk segments on opposite sides of street with 16m centroid offset,claude_haiku_gray,boston_sidewalks
+2b708efa-c340-4546-868f-9bf2fcd1d8ea,boston_sidewalk_103393,no_match,0.85,Target segment only partially overlaps with significant directional deviation (39.7 degrees),claude_haiku_gray,boston_sidewalks
+3c147e0f-5247-4d93-848c-46e110d5401f,boston_sidewalk_13177,no_match,0.85,Target is only 25% of reference length; poor spatial overlap despite same direction,claude_haiku_gray,boston_sidewalks
+3f4afbac-5224-42be-a24f-514a91d6c0d4,boston_sidewalk_22809,no_match,0.72,Poor overlap (IOU=0.30) and 16m centroid distance suggest different/parallel sidewalk segments,claude_haiku_gray,boston_sidewalks
+44460971-d2b2-474d-b5a3-8b2d821a7f48,boston_sidewalk_2126,no_match,0.88,Red line diverges significantly from blue line with 29.8m hausdorff distance and poor overlap metrics indicating different sidewalk segments,claude_haiku_gray,boston_sidewalks
+4c0e948d-3fd1-4dea-b295-a5ca6fe4bef9,boston_sidewalk_105974,no_match,0.92,Geometries completely misaligned; hausdorff_distance 39m indicates different segments,claude_haiku_gray,boston_sidewalks
+51011124-ccb6-43f5-9589-52421c14c7af,boston_sidewalk_22963,no_match,0.85,Large geometric offset (26.8m centroid distance) and poor overlap (0.49 IOU) despite matching class,claude_haiku_gray,boston_sidewalks
+6723ebf7-f30a-45f9-8aac-9dc6ec013f52,boston_sidewalk_22328,no_match,0.95,Road vs sidewalk: different feature types running parallel,claude_haiku_gray,boston_sidewalks
+68eca339-2396-4352-bdd2-59baccd51e8c,boston_sidewalk_103845,match,0.92,Strong geometric and topological alignment; same footway feature type; minor length difference due to segmentation,claude_haiku_gray,boston_sidewalks
+6a435460-f827-47eb-bdc2-85f71b2540e9,boston_sidewalk_41015,no_match,0.88,Parallel segments with 28.7° heading difference; geometrically offset not overlapping,claude_haiku_gray,boston_sidewalks
