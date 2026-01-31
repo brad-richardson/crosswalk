@@ -163,13 +163,6 @@ Features derived from road attributes beyond names and classes.
   - Per-dataset breakdown of graphlet feature impact
 - **Priority**: Low-Medium (incremental improvement)
 
-### Graphlet Signature / Lateral Offset (Partial)
-- **Status**: PARTIALLY IMPLEMENTED (Jan 2026)
-- **Implemented**: `lateral_offset_m`, `lateral_offset_iqr_m`, `lateral_offset_p95_m` features
-- **Measures**: Perpendicular distance between candidate segments
-- **Use case**: Same-side sidewalks have low lateral offset (< 5m), opposite-side have high (10-30m)
-- **Gap**: Junction angles and intersection connectivity signature not yet implemented
-
 ---
 
 ## Graph Embeddings (Research)
@@ -406,53 +399,6 @@ Considerations:
 - Bike/sidewalk have different geometry patterns (narrower, more curves)
 - Often lack names entirely
 - May benefit from geometry-only model approach
-
-### LLM-Assisted Labeling
-
-**Priority:** Medium
-**Status:** Implemented and benchmarked (Jan 2026)
-
-**Problem**: Manual labeling is time-consuming and doesn't scale.
-
-**Implementation**: `matcher run-agent` CLI command dispatches to AI agent CLIs (Claude Code, Gemini CLI) with rendered candidate images + metadata YAML. Agents return structured CSV labels. See `src/matcher/agent_labeling/runner.py`.
-
-**Image variants**: `geometry_only.png`, `subline_geometry_only.png` (faint dashed full segments + bright solid aligned sublines), `road_context.png`, `subline_road_context.png`, `carto_positron.png`, `road_context.svg`
-
-**Benchmark results** (100-candidate sweep, n=25/dataset, 4 datasets, Jan 28 2026):
-
-| Method | Acc | Prec | Rec | F1 | N |
-|---|---|---|---|---|---|
-| XGBoost (holdout) | **0.930** | **0.936** | 0.917 | **0.926** | 100 |
-| Gemini Flash / subline_geometry_only | 0.885 | 0.875 | 0.894 | 0.884 | 96 |
-| Gemini Flash / subline_road_context | 0.867 | 0.854 | 0.872 | 0.863 | 98 |
-| Claude Opus / subline_geometry_only | 0.830 | 0.844 | 0.792 | 0.817 | 100 |
-| Claude Sonnet / subline_geometry_only | 0.760 | 0.700 | 0.875 | 0.778 | 100 |
-| Claude Sonnet / subline_road_context | 0.670 | 0.603 | 0.917 | 0.727 | 100 |
-
-**Key findings**:
-- The ML model (93% accuracy) outperforms all agents on these candidates
-- Gemini Flash is the best agent (88.5% accuracy)
-- Claude Opus with improved prompt reaches 83% (vs Sonnet's 76%) — model capability helps but prompt engineering matters more
-- `subline_geometry_only` outperforms `subline_road_context` for both agents (road context adds noise)
-- Claude has high recall but low precision with default prompts (over-predicts "match"); improved prompts fix this
-- Hardest dataset across the board: `us_boston_streets`
-
-**Error rate by model confidence zone** (5-fold CV on full 2032-label set):
-
-| Confidence Zone | N | Errors | Error Rate |
-|---|---|---|---|
-| High confidence no-match (<0.1) | 904 | 83 | 9.2% |
-| **Uncertain (0.1-0.9)** | **294** | **109** | **37.1%** |
-| High confidence match (>0.9) | 834 | 128 | 15.3% |
-| Narrow uncertain (0.3-0.7) | 103 | 52 | **50.5%** |
-
-**Recommendation**: Focus agent labeling on the **0.1-0.9 confidence zone** where the model error rate is 37%. The 0.3-0.7 zone is essentially a coin flip (50.5% error). High-confidence predictions (<0.1 and >0.9) already have ~10-15% error rates that agents also struggle with. Use agents to generate draft labels, then do a quick Y/N human review pass to clean up the ~12% agent error rate before feeding into training.
-
-**Next steps**:
-- Sample specifically from the 0.1-0.9 confidence zone for agent labeling batches
-- Build Y/N review UI flow for agent-generated labels
-- Evaluate whether agent labels from the uncertain zone improve model accuracy after retraining
-- **Try few-shot prompting**: Adding 2-3 labeled examples (with images) to the prompt may help more than adding rules. Claude Opus with rule-based prompts plateaued at 83% accuracy; more nuanced rules actually decreased performance (over-generalized). Few-shot examples could provide clearer decision boundaries without over-fitting to specific patterns.
 
 ### Improve Geometry-Only Model
 
