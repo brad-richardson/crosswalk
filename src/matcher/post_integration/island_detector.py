@@ -123,11 +123,6 @@ def detect_islands(
     # Determine ID column
     id_col = id_column or _get_id_column(edges_gdf)
 
-    # If no ID column exists, create one from index
-    if id_col == "__idx__":
-        edges_metric = edges_metric.reset_index(drop=True)
-        edges_metric["__idx__"] = edges_metric.index
-
     # Build graph from edge geometries
     logger.info(f"Building graph from {len(edges_metric)} edges")
     G = _build_graph(edges_metric, id_col, snap_tolerance_m)
@@ -334,5 +329,9 @@ def _get_id_column(gdf: gpd.GeoDataFrame) -> str:
     for col in ["id", "ID", "edge_id"]:
         if col in gdf.columns:
             return col
-    # If no ID column found, use the index by resetting it to a column
-    return "__idx__"
+    if gdf.index.name and gdf.index.name in gdf.columns:
+        return gdf.index.name
+    raise ValueError(
+        f"Could not determine ID column. Expected one of ['id', 'ID', 'edge_id']. "
+        f"Available columns: {list(gdf.columns)}"
+    )

@@ -1,12 +1,9 @@
 """Tests for post-integration analysis modules."""
 
 import geopandas as gpd
-import pytest
 from shapely.geometry import LineString
 
 from matcher.post_integration import (
-    DriftPattern,
-    DriftSeverity,
     IslandSeverity,
     detect_gps_drift,
     detect_islands,
@@ -124,8 +121,8 @@ class TestGpsDriftDetector:
 
         result = detect_gps_drift(edges, zigzag_vertex_density=0.1)
 
-        # Should detect zigzag due to alternating turns
-        assert result.edges_with_drift >= 0  # May or may not detect depending on thresholds
+        # Result should be valid (may or may not detect depending on thresholds)
+        assert result.total_edges == 1
 
     def test_empty_dataframe(self):
         """Test handling of empty dataframe."""
