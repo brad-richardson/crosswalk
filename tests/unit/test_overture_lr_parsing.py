@@ -222,8 +222,16 @@ class TestParseNamesLrRealWorldPatterns:
             "primary": "Radial Leste",
             "rules": [
                 {"value": "Radial Leste", "variant": "alternate", "between": None},
-                {"value": "Avenida Alcântara Machado", "variant": "common", "between": [0.0, 0.154]},
-                {"value": "Viaduto Alcântara Machado", "variant": "common", "between": [0.154, 1.0]},
+                {
+                    "value": "Avenida Alcântara Machado",
+                    "variant": "common",
+                    "between": [0.0, 0.154],
+                },
+                {
+                    "value": "Viaduto Alcântara Machado",
+                    "variant": "common",
+                    "between": [0.154, 1.0],
+                },
             ],
         }
         result = parse_names_lr(names)
@@ -251,8 +259,16 @@ class TestParseNamesLrRealWorldPatterns:
         names = {
             "primary": "Ciclovia Avenida Educador Paulo Freire",
             "rules": [
-                {"value": "Ciclovia Avenida Educador Paulo Freire", "variant": "common", "between": [0.0, 0.493]},
-                {"value": "Ciclovia Ponte Aricanduva", "variant": "common", "between": [0.493, 0.948]},
+                {
+                    "value": "Ciclovia Avenida Educador Paulo Freire",
+                    "variant": "common",
+                    "between": [0.0, 0.493],
+                },
+                {
+                    "value": "Ciclovia Ponte Aricanduva",
+                    "variant": "common",
+                    "between": [0.493, 0.948],
+                },
             ],
         }
         result = parse_names_lr(names)

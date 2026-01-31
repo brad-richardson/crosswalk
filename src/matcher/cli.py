@@ -3649,11 +3649,13 @@ def benchmark(
                         "split_seed": seed,
                         "model_name": model_path.name,
                         **{
-                            f"top{i+1}_feature": top_features[i][0] if len(top_features) > i else ""
+                            f"top{i + 1}_feature": top_features[i][0]
+                            if len(top_features) > i
+                            else ""
                             for i in range(10)
                         },
                         **{
-                            f"top{i+1}_importance": f"{top_features[i][1]:.4f}"
+                            f"top{i + 1}_importance": f"{top_features[i][1]:.4f}"
                             if len(top_features) > i
                             else ""
                             for i in range(10)
