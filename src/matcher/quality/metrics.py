@@ -54,9 +54,17 @@ def compute_quality_metrics(
     vertex_density_mean, vertex_density_std = _compute_vertex_density(edges_metric)
     invalid_geometry_count = _count_invalid_geometries(edges_gdf)
 
+    # Filter to LineString geometries for topology analysis
+    line_mask = edges_gdf.geometry.apply(lambda g: isinstance(g, LineString) if g else False)
+    if not line_mask.all():
+        non_line_count = (~line_mask).sum()
+        logger.warning(f"Filtering {non_line_count} non-LineString geometries for topology analysis")
+    edges_lines = edges_gdf[line_mask]
+    edges_metric_lines = edges_metric.loc[edges_lines.index]
+
     # Topology metrics
-    island_result = detect_islands(edges_gdf, snap_tolerance_m=snap_tolerance_m)
-    dead_end_count, dead_end_ratio = _compute_dead_ends(edges_metric, snap_tolerance_m)
+    island_result = detect_islands(edges_lines, snap_tolerance_m=snap_tolerance_m)
+    dead_end_count, dead_end_ratio = _compute_dead_ends(edges_metric_lines, snap_tolerance_m)
 
     # Attribute metrics (use standardized column names from fetch step)
     name_col = name_column or NAMES_COLUMN

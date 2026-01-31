@@ -5,8 +5,13 @@ and completeness for comparison and tracking.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time (for default_factory)."""
+    return datetime.now(UTC)
 
 
 @dataclass
@@ -18,12 +23,12 @@ class QualityFingerprint:
     - Geometry: vertex density, invalid geometries
     - Topology: connectivity, dead ends, components
     - Attributes: name coverage, class distribution
-    - Falsification: results from screen tests (if run)
+    - Screen: results from screen tests (if run)
     """
 
     # Dataset identification
     dataset_name: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=_utc_now)
 
     # Basic statistics
     total_segments: int = 0
@@ -45,7 +50,7 @@ class QualityFingerprint:
     name_coverage_ratio: float = 0.0
     class_distribution: dict[str, int] = field(default_factory=dict)
 
-    # Falsification metrics (populated if screen was run)
+    # Screen metrics (populated if screen tests were run)
     screen_fail_count: int = 0
     screen_fail_rate: float = 0.0
     screen_warn_count: int = 0

@@ -643,14 +643,14 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 ---
 
-## Validation & Falsification
+## Validation & Screening
 
-### Post-Scoring Falsification
-- [x] `falsification/` module scaffold
-- [x] Water body falsification test
-- [x] Building footprint falsification test
-- [x] Falsification runner + CLI command
-- [x] Override high-confidence matches
+### Screen Module (Pre-Match Filtering)
+- [x] `screen/` module scaffold
+- [x] Water body screen test
+- [x] Building footprint screen test
+- [x] Fringe detection screen test
+- [x] Screen runner + CLI command
 
 ### Post-Integration Analysis
 - [x] Island detector (connected components)

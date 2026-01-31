@@ -73,7 +73,7 @@ class PipelineResult:
     bridge_file: Path
     unmatched_file: Path | None
 
-    # Falsification results (if run)
+    # Screen test results (if run)
     n_screen_failed: int | None = None
     n_screen_warned: int | None = None
 
@@ -331,8 +331,8 @@ def run_pipeline(
     logger.info(f"  Review: {n_review}")
     logger.info(f"  Unmatched: {n_unmatched}")
     if n_screen_failed is not None:
-        logger.info(f"  Falsification failed: {n_screen_failed}")
-        logger.info(f"  Falsification warned: {n_screen_warned}")
+        logger.info(f"  Screen failed: {n_screen_failed}")
+        logger.info(f"  Screen warned: {n_screen_warned}")
     logger.info("=" * 60)
 
     return PipelineResult(
