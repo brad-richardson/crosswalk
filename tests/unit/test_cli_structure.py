@@ -352,29 +352,35 @@ class TestOldCommandsRemoved:
         """Old 'matcher fetch' should not work directly."""
         result = runner.invoke(app, ["fetch", "--help"])
         # Should fail since fetch is now under data
-        assert result.exit_code != 0 or "No such command 'fetch'" in result.output
+        assert result.exit_code != 0
+        assert "No such command 'fetch'" in result.output
 
     def test_old_eval_model_not_at_top_level(self):
         """Old 'matcher eval-model' should not work."""
         result = runner.invoke(app, ["eval-model", "--help"])
-        assert result.exit_code != 0 or "No such command" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
     def test_old_eval_bridge_not_at_top_level(self):
         """Old 'matcher eval-bridge' should not work (now match-eval)."""
         result = runner.invoke(app, ["eval-bridge", "--help"])
-        assert result.exit_code != 0 or "No such command" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
     def test_old_topology_not_at_top_level(self):
         """Old 'matcher topology' should not work (now data topology)."""
         result = runner.invoke(app, ["topology", "--help"])
-        assert result.exit_code != 0 or "No such command" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
     def test_old_discover_classes_not_at_top_level(self):
         """Old 'matcher discover-classes' should not work (now class discover)."""
         result = runner.invoke(app, ["discover-classes", "--help"])
-        assert result.exit_code != 0 or "No such command" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
     def test_old_qa_integration_not_at_top_level(self):
         """Old 'matcher qa-integration' should not work (now integrate qa)."""
         result = runner.invoke(app, ["qa-integration", "--help"])
-        assert result.exit_code != 0 or "No such command" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output

@@ -171,7 +171,7 @@ def integrate_run(
                 net_new_buffer_m=net_new_buffer_m,
                 max_hops=max_hops,
                 fringe_buffer_m=fringe_buffer_m,
-                enable_fringe_detection=not no_fringe_filter,
+                enable_fringe_screening=not no_fringe_filter,
                 transitive_tolerance_m=transitive_tolerance_m,
                 debug_connectivity=debug_connectivity,
             )

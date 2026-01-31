@@ -754,4 +754,4 @@ def backfill_labels(
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1) from e
+        raise typer.Exit(1) from None
