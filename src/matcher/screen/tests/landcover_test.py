@@ -28,32 +28,41 @@ class LandcoverTest(ScreenTest):
     - Wetlands (marsh, swamp, bog) - roads shouldn't pass through
     - Sports fields (pitch, track, stadium) - no roads on playing surfaces
 
-    Buffers based on road type like other tests.
+    Buffers are pre-computed in prepare() for efficiency.
     """
 
     name = "landcover"
 
     def __init__(self, buffer_overrides: dict[str, float] | None = None) -> None:
-        """Initialize the landcover test.
-
-        Args:
-            buffer_overrides: Optional override buffer distances by mode
-        """
         self.buffers = {**LANDCOVER_BUFFER_M, **(buffer_overrides or {})}
         self.landcover_gdf: gpd.GeoDataFrame | None = None
         self.landcover_union: Polygon | MultiPolygon | None = None
-        self._metric_crs: str | None = None
+        # Pre-computed buffered geometries by travel mode (in EPSG:4326)
+        self._buffered: dict[str, Polygon | MultiPolygon] = {}
 
     def prepare(self, bbox: tuple[float, float, float, float]) -> None:
-        """Fetch restricted landcover polygons for the bounding box."""
+        """Fetch restricted landcover polygons and pre-compute buffered versions."""
         self.landcover_gdf = fetch_overture_landcover(bbox)
+        self._buffered = {}
 
-        if len(self.landcover_gdf) > 0:
-            self.landcover_union = get_landcover_union(self.landcover_gdf)
-            self._metric_crs = str(self.landcover_gdf.estimate_utm_crs())
-        else:
+        if len(self.landcover_gdf) == 0:
             self.landcover_union = None
-            self._metric_crs = None
+            logger.info("LandcoverTest prepared with 0 restricted areas")
+            return
+
+        self.landcover_union = get_landcover_union(self.landcover_gdf)
+        if self.landcover_union is None:
+            logger.info("LandcoverTest prepared with 0 valid restricted areas")
+            return
+
+        # Pre-compute buffered geometries for each travel mode
+        metric_crs = str(self.landcover_gdf.estimate_utm_crs())
+        landcover_series = gpd.GeoSeries([self.landcover_union], crs="EPSG:4326")
+        landcover_metric = landcover_series.to_crs(metric_crs)
+
+        for mode, buffer_m in self.buffers.items():
+            buffered_metric = landcover_metric.buffer(buffer_m)
+            self._buffered[mode] = buffered_metric.to_crs("EPSG:4326").iloc[0]
 
         logger.info(f"LandcoverTest prepared with {len(self.landcover_gdf)} restricted areas")
 
@@ -66,24 +75,17 @@ class LandcoverTest(ScreenTest):
                 reason="No restricted landcover in area",
             )
 
-        if self._metric_crs is None:
+        mode = get_travel_mode(ctx.road_class)
+        buffered = self._buffered.get(mode)
+        if buffered is None:
             return ScreenResult(
                 outcome=ScreenOutcome.SKIP,
                 test_name=self.name,
-                reason="Could not determine CRS for buffering",
+                reason=f"No buffer computed for mode: {mode}",
             )
 
-        # Get buffer distance based on road class
-        mode = get_travel_mode(ctx.road_class)
         buffer_m = self.buffers.get(mode, self.buffers["vehicle"])
 
-        # Buffer landcover in metric CRS
-        landcover_series = gpd.GeoSeries([self.landcover_union], crs="EPSG:4326")
-        landcover_metric = landcover_series.to_crs(self._metric_crs)
-        buffered_metric = landcover_metric.buffer(buffer_m)
-        buffered = buffered_metric.to_crs("EPSG:4326").iloc[0]
-
-        # Check intersection
         target_geom = ctx.target_geom
         if not target_geom.intersects(buffered):
             return ScreenResult(outcome=ScreenOutcome.PASS, test_name=self.name)

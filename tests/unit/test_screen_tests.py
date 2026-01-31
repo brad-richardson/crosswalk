@@ -3,11 +3,19 @@
 import geopandas as gpd
 from shapely.geometry import LineString, Polygon
 
-from matcher.screen import MatchContext, ScreenOutcome, get_registered_tests
+from matcher.screen import MatchContext, ScreenOutcome
 from matcher.screen.tests.building_test import BuildingTest
 from matcher.screen.tests.landcover_test import LandcoverTest
 from matcher.screen.tests.travel_mode import get_travel_mode
 from matcher.screen.tests.water_body_test import WaterBodyTest
+
+
+def _buffer_polygon(poly: Polygon, buffer_m: float, crs: str = "EPSG:32618") -> Polygon:
+    """Helper to buffer a polygon in metric CRS and return in EPSG:4326."""
+    series = gpd.GeoSeries([poly], crs="EPSG:4326")
+    metric = series.to_crs(crs)
+    buffered = metric.buffer(buffer_m)
+    return buffered.to_crs("EPSG:4326").iloc[0]
 
 
 class TestTravelMode:
@@ -38,7 +46,9 @@ class TestWaterBodyTest:
         water = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
         test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
         test.water_union = water
-        test._metric_crs = "EPSG:32618"
+        # Pre-compute buffered geometries
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(water, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
@@ -58,7 +68,8 @@ class TestWaterBodyTest:
         water = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
         test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
         test.water_union = water
-        test._metric_crs = "EPSG:32618"
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(water, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
@@ -93,7 +104,6 @@ class TestWaterBodyTest:
 
     def test_buffer_varies_by_road_class(self):
         test = WaterBodyTest()
-        # Check that buffers are set correctly
         assert test.buffers["vehicle"] > test.buffers["pedestrian"]
 
 
@@ -103,7 +113,8 @@ class TestBuildingTest:
         building = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
         test.building_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
         test.building_union = building
-        test._metric_crs = "EPSG:32618"
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
@@ -123,7 +134,8 @@ class TestBuildingTest:
         building = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
         test.building_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
         test.building_union = building
-        test._metric_crs = "EPSG:32618"
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
@@ -167,7 +179,8 @@ class TestLandcoverTest:
         wetland = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
         test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
         test.landcover_union = wetland
-        test._metric_crs = "EPSG:32618"
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
@@ -187,7 +200,8 @@ class TestLandcoverTest:
         wetland = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
         test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
         test.landcover_union = wetland
-        test._metric_crs = "EPSG:32618"
+        for mode, buffer_m in test.buffers.items():
+            test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
         ctx = MatchContext(
             match_id="1",
