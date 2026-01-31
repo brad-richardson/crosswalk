@@ -103,7 +103,10 @@ def run_tuning(
 
     # Run optimization
     logger.info(f"Starting optimization with {n_trials} trials...")
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=42),  # Reproducible search
+    )
 
     study.optimize(
         lambda trial: objective(trial, X, y, groups),
