@@ -1,15 +1,11 @@
 """Streamlit app for integration QA."""
 
 import os
-import sys
 from pathlib import Path
 
 import geopandas as gpd
 import streamlit as st
 from streamlit_folium import st_folium
-
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from matcher.integration.output import load_integration_result
 from matcher.integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
@@ -23,78 +19,71 @@ from matcher.integration_qa.map_view import create_integration_map
 from matcher.integration_qa.state import QASession, load_reviewer_name, save_reviewer_name
 
 
-def main():
-    """Main app entry point."""
-    st.set_page_config(
-        page_title="Integration QA",
-        page_icon="🗺️",
-        layout="wide",
-        initial_sidebar_state="collapsed",
+def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
+    """Render integration QA sidebar controls.
+
+    Returns:
+        Tuple of (integration_dir, session)
+    """
+    # Initialize session state for QA
+    if "qa_session" not in st.session_state:
+        st.session_state.qa_session = QASession()
+        st.session_state.qa_session.reviewer_name = load_reviewer_name()
+
+    session = st.session_state.qa_session
+
+    # Integration output directory
+    integration_dir = st.text_input(
+        "Integration Output Directory",
+        value=os.environ.get("INTEGRATION_DIR", "data/integrated"),
+        help="Directory containing edges.parquet, orphans.parquet, etc.",
+        key="qa_integration_dir",
     )
 
-    # Reduce padding/margins for more map space
-    st.markdown(
-        """
-        <style>
-        .block-container {
-            padding-top: 1rem;
-            padding-bottom: 0rem;
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    # Reviewer name
+    reviewer = st.text_input(
+        "Reviewer Name",
+        value=session.reviewer_name,
+        help="Your name for tracking decisions",
+        key="qa_reviewer_name",
+    )
+    if reviewer != session.reviewer_name:
+        session.reviewer_name = reviewer
+        save_reviewer_name(reviewer)
+
+    # Load data button (forces a rerun when clicked)
+    st.button(
+        "Load Integration Data",
+        type="primary",
+        key="qa_load_integration_data",
     )
 
-    # Initialize session state
-    if "session" not in st.session_state:
-        st.session_state.session = QASession()
-        st.session_state.session.reviewer_name = load_reviewer_name()
+    st.divider()
 
-    session = st.session_state.session
+    # View selection
+    view = st.radio(
+        "View",
+        ["Orphans", "Merged Edges"],
+        index=0 if session.current_view == "orphans" else 1,
+        key="qa_view_selector",
+    )
+    new_view = "orphans" if view == "Orphans" else "merged"
+    if new_view != session.current_view:
+        session.current_view = new_view
+        # Reset index and clear click state when view changes
+        session.current_index = 0
+        st.session_state.pop("qa_last_processed_click", None)
 
-    # Sidebar configuration
-    with st.sidebar:
-        st.title("Integration QA")
-        st.header("Configuration")
+    return integration_dir, session
 
-        # Integration output directory
-        integration_dir = st.text_input(
-            "Integration Output Directory",
-            value=os.environ.get("INTEGRATION_DIR", "data/integrated"),
-            help="Directory containing edges.parquet, orphans.parquet, etc.",
-        )
 
-        # Reviewer name
-        reviewer = st.text_input(
-            "Reviewer Name",
-            value=session.reviewer_name,
-            help="Your name for tracking decisions",
-        )
-        if reviewer != session.reviewer_name:
-            session.reviewer_name = reviewer
-            save_reviewer_name(reviewer)
+def render_integration_qa_content(integration_dir: str, session: "QASession") -> None:
+    """Render the main integration QA content area.
 
-        # Load data button
-        if st.button("Load Data", type="primary"):
-            st.session_state.data_loaded = False
-
-        st.divider()
-
-        # View selection
-        view = st.radio(
-            "View",
-            ["Orphans", "Merged Edges"],
-            index=0 if session.current_view == "orphans" else 1,
-        )
-        new_view = "orphans" if view == "Orphans" else "merged"
-        if new_view != session.current_view:
-            session.current_view = new_view
-            # Reset index and clear click state when view changes
-            session.current_index = 0
-            st.session_state.pop("last_processed_click", None)
-
+    Args:
+        integration_dir: Path to integration output directory
+        session: QA session state
+    """
     # Load data
     integration_path = Path(integration_dir)
     if not integration_path.exists():
@@ -218,7 +207,7 @@ def main():
                 click_key = f"{click_lat:.6f},{click_lon:.6f}"
 
                 # Only process if this is a new click (not the same as last processed)
-                last_click = st.session_state.get("last_processed_click")
+                last_click = st.session_state.get("qa_last_processed_click")
                 if click_key != last_click:
                     # Find nearest edge in display_edges
                     from shapely.geometry import Point
@@ -237,13 +226,13 @@ def main():
                     # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
                     if nearest_pos is not None and min_dist < 0.001:
                         # Always update the processed click to prevent re-processing
-                        st.session_state.last_processed_click = click_key
+                        st.session_state.qa_last_processed_click = click_key
                         if nearest_pos != session.current_index:
                             session.current_index = nearest_pos
                             st.rerun()
                     else:
                         # Click was not near any edge - still update to prevent re-processing
-                        st.session_state.last_processed_click = click_key
+                        st.session_state.qa_last_processed_click = click_key
 
             # Navigation controls (below map)
             col_prev, col_idx, col_next = st.columns([1, 2, 1])
@@ -253,7 +242,7 @@ def main():
             at_end = session.current_index >= len(display_edges) - 1
 
             with col_prev:
-                if st.button("← Previous", disabled=at_start):
+                if st.button("← Previous", disabled=at_start, key="qa_prev"):
                     session.current_index = max(0, session.current_index - 1)
                     st.rerun()
 
@@ -266,14 +255,14 @@ def main():
                     max_value=len(display_edges) - 1,
                     value=session.current_index,
                     label_visibility="collapsed",
-                    key="edge_index_input",
+                    key="qa_edge_index_input",
                 )
                 if new_index != session.current_index:
                     session.current_index = new_index
                     st.rerun()
 
             with col_next:
-                if st.button("Next →", disabled=at_end):
+                if st.button("Next →", disabled=at_end, key="qa_next"):
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)
                     st.rerun()
 
@@ -359,7 +348,7 @@ def main():
                 render_decision_buttons(is_orphan, on_decision)
 
                 # Undo button
-                if st.button("Undo (Z)"):
+                if st.button("Undo (Z)", key="qa_undo"):
                     undo_action = session.pop_undo()
                     if undo_action:
                         if undo_action["type"] == "orphan":
@@ -374,13 +363,13 @@ def main():
                 # Filters in expander
                 with st.expander("Filters", expanded=False):
                     new_show_reviewed = st.checkbox(
-                        "Show reviewed", value=session.show_reviewed, key="filter_show_reviewed"
+                        "Show reviewed", value=session.show_reviewed, key="qa_filter_show_reviewed"
                     )
                     if new_show_reviewed != session.show_reviewed:
                         session.show_reviewed = new_show_reviewed
                         # Reset index and clear click state when filter changes
                         session.current_index = 0
-                        st.session_state.pop("last_processed_click", None)
+                        st.session_state.pop("qa_last_processed_click", None)
                         st.rerun()
 
                     if is_orphan:
@@ -388,14 +377,14 @@ def main():
                             "Priority",
                             ["All", "High", "Medium", "Low"],
                             index=0,
-                            key="filter_priority",
+                            key="qa_filter_priority",
                         )
                         new_priority = None if priority_filter == "All" else priority_filter.lower()
                         if new_priority != session.filter_by_priority:
                             session.filter_by_priority = new_priority
                             # Reset index and clear click state when filter changes
                             session.current_index = 0
-                            st.session_state.pop("last_processed_click", None)
+                            st.session_state.pop("qa_last_processed_click", None)
                             st.rerun()
 
                         if (
@@ -408,7 +397,7 @@ def main():
                                 "Component",
                                 ["All"] + [str(c) for c in component_ids],
                                 index=0,
-                                key="filter_component",
+                                key="qa_filter_component",
                             )
                             new_component = (
                                 None if component_filter == "All" else int(component_filter)
@@ -417,7 +406,7 @@ def main():
                                 session.filter_by_component = new_component
                                 # Reset index and clear click state when filter changes
                                 session.current_index = 0
-                                st.session_state.pop("last_processed_click", None)
+                                st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
                     else:
                         if edges is not None and len(edges) > 0:
@@ -426,14 +415,14 @@ def main():
                                 "Source Dataset",
                                 ["All"] + list(datasets),
                                 index=0,
-                                key="filter_dataset",
+                                key="qa_filter_dataset",
                             )
                             new_source = None if dataset_filter == "All" else dataset_filter
                             if new_source != session.filter_by_source:
                                 session.filter_by_source = new_source
                                 # Reset index and clear click state when filter changes
                                 session.current_index = 0
-                                st.session_state.pop("last_processed_click", None)
+                                st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
 
                 # Statistics in expander
@@ -482,5 +471,43 @@ def main():
     )
 
 
+def main():
+    """Main app entry point (standalone mode)."""
+    st.set_page_config(
+        page_title="Integration QA",
+        page_icon="🗺️",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+
+    # Reduce padding/margins for more map space
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 0rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Sidebar configuration
+    with st.sidebar:
+        st.title("Integration QA")
+        st.header("Configuration")
+        integration_dir, session = render_integration_qa_sidebar()
+
+    # Render main content
+    render_integration_qa_content(integration_dir, session)
+
+
 if __name__ == "__main__":
+    # Add parent to path for standalone execution
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     main()
