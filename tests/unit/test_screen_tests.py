@@ -5,6 +5,7 @@ from shapely.geometry import LineString, Polygon
 
 from matcher.screen import MatchContext, ScreenOutcome, get_registered_tests
 from matcher.screen.tests.building_test import BuildingTest
+from matcher.screen.tests.landcover_test import LandcoverTest
 from matcher.screen.tests.travel_mode import get_travel_mode
 from matcher.screen.tests.water_body_test import WaterBodyTest
 
@@ -160,6 +161,70 @@ class TestBuildingTest:
         assert test.buffers["vehicle"] > test.buffers["pedestrian"]
 
 
+class TestLandcoverTest:
+    def test_road_not_in_landcover_passes(self):
+        test = LandcoverTest()
+        wetland = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
+        test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
+        test.landcover_union = wetland
+        test._metric_crs = "EPSG:32618"
+
+        ctx = MatchContext(
+            match_id="1",
+            ref_id="ref_1",
+            target_id="target_1",
+            ref_geom=LineString([(0, 0), (1, 1)]),
+            target_geom=LineString([(0, 0), (1, 1)]),
+            confidence=0.95,
+            road_class="residential",
+        )
+
+        result = test.test_match(ctx)
+        assert result.outcome == ScreenOutcome.PASS
+
+    def test_road_through_wetland_fails(self):
+        test = LandcoverTest()
+        wetland = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
+        test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
+        test.landcover_union = wetland
+        test._metric_crs = "EPSG:32618"
+
+        ctx = MatchContext(
+            match_id="1",
+            ref_id="ref_1",
+            target_id="target_1",
+            ref_geom=LineString([(0, 0), (1, 1)]),
+            target_geom=LineString([(0, 0), (1, 1)]),
+            confidence=0.95,
+            road_class="residential",
+        )
+
+        result = test.test_match(ctx)
+        assert result.outcome == ScreenOutcome.FAIL
+        assert "landcover" in result.reason.lower()
+
+    def test_no_landcover_skips(self):
+        test = LandcoverTest()
+        test.landcover_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        test.landcover_union = None
+
+        ctx = MatchContext(
+            match_id="1",
+            ref_id="ref_1",
+            target_id="target_1",
+            ref_geom=LineString([(0, 0), (1, 1)]),
+            target_geom=LineString([(0, 0), (1, 1)]),
+            confidence=0.95,
+        )
+
+        result = test.test_match(ctx)
+        assert result.outcome == ScreenOutcome.SKIP
+
+    def test_buffer_varies_by_road_class(self):
+        test = LandcoverTest()
+        assert test.buffers["vehicle"] > test.buffers["pedestrian"]
+
+
 class TestRegistration:
     def test_water_test_registered(self):
         tests = get_registered_tests()
@@ -168,3 +233,7 @@ class TestRegistration:
     def test_building_test_registered(self):
         tests = get_registered_tests()
         assert "building" in tests
+
+    def test_landcover_test_registered(self):
+        tests = get_registered_tests()
+        assert "landcover" in tests
