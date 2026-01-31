@@ -36,9 +36,10 @@ class TestSamplingConfig:
         assert config.n_candidates == 100
         assert config.seed == 42
         assert config.buffer_distance_m == 50.0
-        assert "low" in config.confidence_buckets
-        assert "medium" in config.confidence_buckets
-        assert "high" in config.confidence_buckets
+        # Default focuses on uncertain zone (0.1-0.9) where agent labels add most value
+        assert "uncertain" in config.confidence_buckets
+        assert config.confidence_buckets["uncertain"] == (0.1, 0.9)
+        assert config.bucket_proportions["uncertain"] == 1.0
 
     def test_custom_config(self):
         config = SamplingConfig(

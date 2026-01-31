@@ -32,18 +32,19 @@ class SamplingConfig:
     """
 
     n_candidates: int = 100
+    # Focus sampling on the uncertain zone (0.1-0.9) where the model struggles
+    # and agent labels add the most value. Based on error analysis:
+    # - <0.1 confident no-match: 9.2% error (model reliable)
+    # - 0.1-0.9 uncertain: 37.1% error (coin-flip zone, most valuable)
+    # - >0.9 confident match: 15.3% error (model reliable)
     confidence_buckets: dict[str, tuple[float, float]] = field(
         default_factory=lambda: {
-            "low": (0.0, 0.3),
-            "medium": (0.3, 0.7),
-            "high": (0.7, 1.0),
+            "uncertain": (0.1, 0.9),
         }
     )
     bucket_proportions: dict[str, float] = field(
         default_factory=lambda: {
-            "low": 0.25,
-            "medium": 0.50,
-            "high": 0.25,
+            "uncertain": 1.0,
         }
     )
     seed: int = 42

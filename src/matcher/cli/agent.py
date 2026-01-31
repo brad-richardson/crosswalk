@@ -26,7 +26,7 @@ def generate_agent_batch(
         help="Number of candidates to sample",
     ),
     output_dir: Path = typer.Option(
-        Path("agent_labels"),
+        Path("data/agents"),
         "--output",
         "-o",
         help="Output directory for agent labeling batches",
@@ -50,9 +50,9 @@ def generate_agent_batch(
         help="ML model for confidence scoring (uses rules if not provided)",
     ),
     no_satellite: bool = typer.Option(
-        False,
-        "--no-satellite",
-        help="Skip satellite imagery (faster, geometry-only images)",
+        True,
+        "--no-satellite/--satellite",
+        help="Skip satellite imagery (default: geometry-only, which performs equally well and is faster)",
     ),
     seed: int = typer.Option(
         42,
@@ -77,7 +77,7 @@ def generate_agent_batch(
         matcher agent batch us_boston_streets -n 50 \\
             -r data/raw/us_boston_overture_segments.parquet \\
             -t data/raw/us_boston_streets.parquet \\
-            -o agent_labels
+            -o data/agents
 
         # Use ML model for confidence scoring
         matcher agent batch us_boston_streets \\
@@ -166,7 +166,7 @@ def generate_agent_test_batch(
         help="Number of labeled pairs to sample for testing",
     ),
     output_dir: Path = typer.Option(
-        Path("agent_labels"),
+        Path("data/agents"),
         "--output",
         "-o",
         help="Output directory for agent labeling batches",
@@ -200,9 +200,9 @@ def generate_agent_test_batch(
         help="Random seed for reproducibility",
     ),
     no_satellite: bool = typer.Option(
-        False,
-        "--no-satellite",
-        help="Skip satellite imagery (faster, geometry-only images)",
+        True,
+        "--no-satellite/--satellite",
+        help="Skip satellite imagery (default: geometry-only, which performs equally well and is faster)",
     ),
 ):
     """Generate test batch from EXISTING human labels for agent accuracy testing.
@@ -449,7 +449,7 @@ def generate_basemap_sweep(
         help="Random seed for reproducibility",
     ),
     output_dir: Path = typer.Option(
-        Path("agent_labels"),
+        Path("data/agents"),
         "--output",
         "-o",
         help="Output directory for agent labeling batches",
@@ -788,14 +788,16 @@ def generate_basemap_sweep(
 def run_agent(
     agent: str = typer.Argument(help="Agent: claude, gemini, codex, ollama"),
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch directory"),
-    model: str = typer.Option("", "--model", "-m", help="Model variant (e.g., sonnet, flash)"),
+    model: str = typer.Option(
+        "opus", "--model", "-m", help="Model variant (default: opus for claude, flash for gemini)"
+    ),
     variant: str = typer.Option("", "--variant", "-v", help="Image variant name"),
     limit: int = typer.Option(0, "--limit", "-l", help="Max candidates to process (0=no limit)"),
     overwrite: bool = typer.Option(
         False, "--overwrite", help="Start fresh, discard existing labels"
     ),
     bail_after: int = typer.Option(
-        2, "--bail-after", help="Stop after N consecutive failures (0=never bail)"
+        10, "--bail-after", help="Stop after N consecutive failures (0=never bail)"
     ),
 ):
     """Run an AI agent on a batch of labeling candidates.
@@ -806,8 +808,8 @@ def run_agent(
     Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
 
     Examples:
-        matcher agent run claude --batch agent_labels/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
-        matcher agent run gemini --batch agent_labels/batches/sweep_2026-01-28 --model flash --variant road_context
+        matcher agent run claude --batch data/agents/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
+        matcher agent run gemini --batch data/agents/batches/sweep_2026-01-28 --model flash --variant road_context
     """
     from ..agent_labeling.runner import run_agent_batch
 
@@ -845,11 +847,11 @@ def import_agent_labels(
 
     Examples:
         # Import Claude's labels
-        matcher agent import agent_labels/batches/batch_2026-01-18_001 \\
+        matcher agent import data/agents/batches/batch_2026-01-18_001 \\
             --agent-id claude --labels claude_labels.csv
 
         # Import with confidence and reasoning
-        matcher agent import agent_labels/batches/batch_* \\
+        matcher agent import data/agents/batches/batch_* \\
             -a gpt4 -l gpt4_labels.csv
     """
     from ..agent_labeling.agent_store import import_labels_csv
@@ -894,10 +896,10 @@ def agent_consensus(
 
     Examples:
         # Show consensus summary
-        matcher agent consensus agent_labels/batches/batch_2026-01-18_001
+        matcher agent consensus data/agents/batches/batch_2026-01-18_001
 
         # Show disagreements only
-        matcher agent consensus agent_labels/batches/batch_* --disagreements
+        matcher agent consensus data/agents/batches/batch_* --disagreements
     """
     from ..agent_labeling.agent_store import AgentLabelStore
 
@@ -975,10 +977,10 @@ def eval_agent_sweep(
     truth, and computes accuracy/precision/recall/F1 per variant and dataset.
 
     Examples:
-        matcher agent eval-sweep agent_labels/batches/sweep_2026-01-28_120000
+        matcher agent eval-sweep data/agents/batches/sweep_2026-01-28_120000
 
         # Include reasoning text
-        matcher agent eval-sweep agent_labels/batches/sweep_2026-01-28_120000 --reasoning
+        matcher agent eval-sweep data/agents/batches/sweep_2026-01-28_120000 --reasoning
     """
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
@@ -1104,3 +1106,159 @@ def eval_agent_sweep(
                 )
                 if pd.notna(row.get("reasoning")):
                     console.print(f"    Reasoning: {row['reasoning']}")
+
+
+@agent_app.command("export")
+def export_agent_labels(
+    batches_dir: Path = typer.Option(
+        Path("data/agents/batches"),
+        "--batches",
+        "-b",
+        help="Directory containing agent batches",
+    ),
+    output_dir: Path = typer.Option(
+        Path("labels_agent"),
+        "--output",
+        "-o",
+        help="Output directory for consolidated labels (Hive-partitioned)",
+    ),
+    agent_filter: str | None = typer.Option(
+        None,
+        "--agent",
+        "-a",
+        help="Filter to specific agent (e.g., 'gemini-flash')",
+    ),
+    append: bool = typer.Option(
+        False,
+        "--append",
+        help="Append to existing labels instead of replacing",
+    ),
+):
+    """Export agent labels from batches to tracked Hive-partitioned directory.
+
+    Consolidates labels from data/agents/batches/*/labels/*/data.csv into
+    labels_agent/dataset=X/data.csv with labeler field set to agent name.
+
+    Examples:
+        # Export all agent labels
+        matcher agent export
+
+        # Export only gemini-flash labels
+        matcher agent export --agent gemini-flash
+
+        # Append to existing labels
+        matcher agent export --append
+    """
+    if not batches_dir.exists():
+        console.print(f"[red]Error: Batches directory not found: {batches_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Find all agent label files
+    label_files = list(batches_dir.glob("*/labels/*/data.csv"))
+    # Exclude ground_truth
+    label_files = [f for f in label_files if "ground_truth" not in str(f)]
+
+    if not label_files:
+        console.print("[yellow]No agent labels found in batches[/yellow]")
+        return
+
+    console.print(f"[blue]Found {len(label_files)} agent label files[/blue]")
+
+    # Collect all labels with metadata
+    all_labels = []
+    for label_file in label_files:
+        agent_name = label_file.parent.name  # e.g., "gemini-flash"
+
+        if agent_filter and agent_name != agent_filter:
+            continue
+
+        try:
+            df = pd.read_csv(label_file, dtype={"ref_id": str, "target_id": str})
+        except Exception as e:
+            console.print(f"  [yellow]Skipping {label_file}: {e}[/yellow]")
+            continue
+
+        if "label" not in df.columns:
+            console.print(f"  [yellow]Skipping {label_file}: no label column[/yellow]")
+            continue
+
+        # Add/override labeler column
+        df["labeler"] = agent_name
+
+        # Try to get dataset from the batch manifest
+        batch_dir = label_file.parent.parent.parent
+        manifest_path = batch_dir / "manifest.yaml"
+        if manifest_path.exists():
+            import yaml
+
+            try:
+                manifest = yaml.safe_load(manifest_path.read_text())
+                # If candidates have dataset info, use it
+                if "candidates" in manifest:
+                    candidate_datasets = {
+                        (c["ref_id"], c["target_id"]): c.get("dataset")
+                        for c in manifest["candidates"]
+                    }
+                    df["dataset"] = df.apply(
+                        lambda row, cd=candidate_datasets: cd.get(
+                            (row["ref_id"], row["target_id"]), "unknown"
+                        ),
+                        axis=1,
+                    )
+            except (yaml.YAMLError, KeyError, TypeError) as e:
+                console.print(f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]")
+
+        # If no dataset column, try to infer from batch name or mark as unknown
+        if "dataset" not in df.columns:
+            df["dataset"] = "unknown"
+
+        all_labels.append(df)
+        console.print(f"  {agent_name}: {len(df)} labels from {batch_dir.name}")
+
+    if not all_labels:
+        console.print("[yellow]No labels to export after filtering[/yellow]")
+        return
+
+    # Combine all labels
+    combined = pd.concat(all_labels, ignore_index=True)
+
+    # Deduplicate: keep latest label per (ref_id, target_id, labeler)
+    combined = combined.drop_duplicates(
+        subset=["ref_id", "target_id", "labeler"], keep="last"
+    )
+
+    console.print(f"\n[blue]Exporting {len(combined)} labels[/blue]")
+
+    # Group by dataset and write Hive-partitioned output
+    output_dir.mkdir(parents=True, exist_ok=True)
+    datasets_written = []
+
+    for dataset, group in combined.groupby("dataset"):
+        partition_dir = output_dir / f"dataset={dataset}"
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = partition_dir / "data.csv"
+
+        if append and csv_path.exists():
+            existing = pd.read_csv(csv_path, dtype={"ref_id": str, "target_id": str})
+            # Combine and dedupe
+            merged = pd.concat([existing, group], ignore_index=True)
+            merged = merged.drop_duplicates(
+                subset=["ref_id", "target_id", "labeler"], keep="last"
+            )
+            merged.to_csv(csv_path, index=False)
+            console.print(
+                f"  {dataset}: appended {len(group)} → {len(merged)} total labels"
+            )
+        else:
+            group.to_csv(csv_path, index=False)
+            console.print(f"  {dataset}: wrote {len(group)} labels")
+
+        datasets_written.append(dataset)
+
+    console.print()
+    console.print(f"[green]Exported to {output_dir}[/green]")
+    console.print(f"  Datasets: {', '.join(datasets_written)}")
+    console.print()
+    console.print("Labels are now tracked in git. Run:")
+    console.print(f"  git add {output_dir}")
+    console.print("  git commit -m 'Add agent labels'")
