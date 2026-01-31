@@ -23,6 +23,14 @@ fetch_app = typer.Typer(
 )
 app.add_typer(fetch_app, name="fetch")
 
+# Create dataset subcommand group
+dataset_app = typer.Typer(
+    name="dataset",
+    help="Dataset management and analysis commands",
+    no_args_is_help=True,
+)
+app.add_typer(dataset_app, name="dataset")
+
 
 @fetch_app.command("target")
 def fetch_target(
@@ -3772,23 +3780,17 @@ def screen(
         raise typer.Exit(1) from None
 
 
-@app.command()
-def quality(
-    data_path: Path = typer.Argument(
+@dataset_app.command("quality")
+def dataset_quality(
+    dataset: str = typer.Argument(
         ...,
-        help="Path to GeoParquet file with road edges",
+        help="Dataset name from datasets/*.yaml",
     ),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
         help="Output path for JSON quality report",
-    ),
-    dataset_name: str | None = typer.Option(
-        None,
-        "--name",
-        "-n",
-        help="Dataset name (default: filename stem)",
     ),
     name_column: str | None = typer.Option(
         None,
@@ -3800,29 +3802,80 @@ def quality(
         "--class-column",
         help="Column containing road class (auto-detected if not specified)",
     ),
+    save_yaml: bool = typer.Option(
+        False,
+        "--save-yaml",
+        "-s",
+        help="Save fingerprint to the dataset's YAML config file",
+    ),
+    skip_drift: bool = typer.Option(
+        False,
+        "--skip-drift",
+        help="Skip GPS drift detection (faster)",
+    ),
+    skip_duplicates: bool = typer.Option(
+        False,
+        "--skip-duplicates",
+        help="Skip near-duplicate detection (faster)",
+    ),
 ):
-    """Generate a quality fingerprint for a road network dataset.
+    """Generate a quality fingerprint for a dataset.
 
     Computes comprehensive quality metrics including:
     - Basic statistics (segment count, total length)
-    - Geometry metrics (vertex density, invalid geometries)
+    - Length distribution (min, max, median, percentiles)
+    - Geometry quality (vertex density, sharp turns, sinuosity)
+    - GPS drift detection (zigzag, spike, loop patterns)
+    - Near-duplicate detection
     - Topology metrics (islands, dead ends, connectivity)
-    - Attribute metrics (name coverage, class distribution)
+    - Attribute metrics (name/class coverage, distribution)
 
     Examples:
-        matcher quality data/raw/streets.parquet -o quality.json
-        matcher quality integrated.parquet --name "Boston Streets"
+        matcher dataset quality us_boston_streets
+        matcher dataset quality us_boston_streets --save-yaml
+        matcher dataset quality us_boston_streets -o quality.json -s
     """
-    from .quality import generate_quality_report, save_quality_report
+    from .config import CLASS_COLUMN, NAMES_COLUMN
+    from .datasets.loader import DatasetLoader
+    from .datasets.schema import (
+        fingerprint_from_quality,
+        get_dataset_config,
+        update_quality_fingerprint,
+    )
+    from .quality import save_quality_report
+    from .quality.metrics import compute_quality_metrics
 
-    console.print(f"[blue]Generating quality fingerprint for {data_path}[/blue]")
+    # Load from dataset config
+    config = get_dataset_config(dataset)
+    if config is None:
+        console.print(f"[red]Dataset not found: {dataset}[/red]")
+        raise typer.Exit(1)
 
+    # Load data
     try:
-        fingerprint = generate_quality_report(
-            data_path=data_path,
-            dataset_name=dataset_name,
+        console.print(f"[blue]Loading data for dataset: {dataset}[/blue]")
+        loader = DatasetLoader()
+        gdf = loader.load_target(dataset)
+
+        # Use standardized column names from config module
+        if name_column is None:
+            name_column = NAMES_COLUMN
+        if class_column is None:
+            class_column = CLASS_COLUMN
+    except FileNotFoundError as e:
+        console.print(f"[red]Data file not found: {e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Compute metrics
+    try:
+        console.print("[blue]Computing quality metrics...[/blue]")
+        fingerprint = compute_quality_metrics(
+            edges_gdf=gdf,
+            dataset_name=dataset,
             name_column=name_column,
             class_column=class_column,
+            detect_drift=not skip_drift,
+            detect_duplicates=not skip_duplicates,
         )
 
         # Print summary
@@ -3830,27 +3883,75 @@ def quality(
         console.print(f"  Dataset: {fingerprint.dataset_name}")
         console.print(f"  Segments: {fingerprint.total_segments:,}")
         console.print(f"  Total length: {fingerprint.total_length_m / 1000:.1f} km")
+
+        console.print("\n[bold]Length Distribution:[/bold]")
+        console.print(f"  Min: {fingerprint.length_min_m:.1f}m")
+        console.print(f"  Median: {fingerprint.length_median_m:.1f}m")
+        console.print(f"  Max: {fingerprint.length_max_m:.1f}m")
+        console.print(f"  P5-P95: {fingerprint.length_p5_m:.1f}m - {fingerprint.length_p95_m:.1f}m")
+
+        console.print("\n[bold]Geometry Quality:[/bold]")
         console.print(
-            f"  Vertex density: {fingerprint.vertex_density_mean:.4f} (±{fingerprint.vertex_density_std:.4f})"
+            f"  Vertex density: {fingerprint.vertex_density_mean:.4f} "
+            f"(±{fingerprint.vertex_density_std:.4f}) vertices/m"
         )
         console.print(f"  Invalid geometries: {fingerprint.invalid_geometry_count}")
+        console.print(
+            f"  Sharp turns (>150°): {fingerprint.sharp_angle_count} "
+            f"({fingerprint.sharp_angle_ratio:.1%})"
+        )
+        console.print(f"  Mean sinuosity: {fingerprint.mean_segment_sinuosity:.3f}")
+        console.print(
+            f"  High sinuosity (>1.5): {fingerprint.high_sinuosity_count} "
+            f"({fingerprint.high_sinuosity_ratio:.1%})"
+        )
+
+        if not skip_drift:
+            console.print("\n[bold]GPS Artifacts:[/bold]")
+            console.print(f"  Zigzag patterns: {fingerprint.zigzag_segment_count}")
+            console.print(f"  Spikes: {fingerprint.spike_segment_count}")
+            console.print(f"  Small loops: {fingerprint.loop_segment_count}")
+            console.print(f"  Drift affected: {fingerprint.drift_affected_ratio:.1%}")
+
+        if not skip_duplicates:
+            console.print("\n[bold]Duplicates:[/bold]")
+            console.print(
+                f"  Near-duplicates: {fingerprint.near_duplicate_count} "
+                f"({fingerprint.near_duplicate_ratio:.1%})"
+            )
+
+        console.print("\n[bold]Topology:[/bold]")
         console.print(f"  Connected components: {fingerprint.connected_components}")
         console.print(f"  Largest component: {fingerprint.largest_component_ratio:.1%}")
         console.print(f"  Islands: {fingerprint.island_count}")
         console.print(
             f"  Dead ends: {fingerprint.dead_end_count} ({fingerprint.dead_end_ratio:.1%})"
         )
+
+        console.print("\n[bold]Attributes:[/bold]")
         console.print(f"  Name coverage: {fingerprint.name_coverage_ratio:.1%}")
+        console.print(f"  Class coverage: {fingerprint.class_coverage_ratio:.1%}")
 
         if fingerprint.class_distribution:
             console.print("\n[bold]Class distribution:[/bold]")
             for cls, count in list(fingerprint.class_distribution.items())[:10]:
                 console.print(f"  {cls}: {count:,}")
 
-        # Save report if requested
+        # Save JSON report if requested
         if output:
             save_quality_report(fingerprint, output)
             console.print(f"\n[green]Quality report saved to {output}[/green]")
+
+        # Save to dataset YAML if requested
+        if save_yaml:
+            yaml_fingerprint = fingerprint_from_quality(fingerprint)
+            result = update_quality_fingerprint(dataset, yaml_fingerprint)
+            if result:
+                console.print(
+                    f"\n[green]Quality fingerprint saved to datasets/{dataset}.yaml[/green]"
+                )
+            else:
+                console.print(f"[red]Failed to save to dataset YAML: {dataset}[/red]")
 
     except Exception as e:
         console.print(f"[red]Quality analysis failed: {e}[/red]")

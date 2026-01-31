@@ -100,6 +100,52 @@ class ClassificationConfig(BaseModel):
     confidence: str = "medium"  # low, medium, high
 
 
+class QualityFingerprintConfig(BaseModel):
+    """Quality fingerprint stored in dataset YAML.
+
+    Captures key metrics about dataset quality, computed by `matcher quality fingerprint`.
+    See QualityFingerprint in matcher.quality for full metric details.
+    """
+
+    # When fingerprint was computed
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    # Basic statistics
+    total_segments: int = 0
+    total_length_km: float = 0.0
+
+    # Length distribution (meters)
+    length_min_m: float = 0.0
+    length_max_m: float = 0.0
+    length_median_m: float = 0.0
+    length_p5_m: float = 0.0
+    length_p95_m: float = 0.0
+
+    # Geometry quality
+    vertex_density_mean: float = 0.0
+    invalid_geometry_count: int = 0
+    sharp_angle_ratio: float = 0.0  # Ratio of segments with sharp turns (>150°)
+    mean_sinuosity: float = 1.0  # 1.0 = straight, higher = curvy
+    high_sinuosity_ratio: float = 0.0
+
+    # GPS artifacts
+    drift_affected_ratio: float = 0.0  # Ratio affected by zigzag/spike/loop
+
+    # Duplicates
+    near_duplicate_ratio: float = 0.0
+
+    # Topology
+    island_count: int = 0  # Disconnected components
+    dead_end_ratio: float = 0.0
+    connected_components: int = 0
+    largest_component_ratio: float = 0.0  # Main network coverage
+
+    # Attributes
+    name_coverage_ratio: float = 0.0  # Ratio with names
+    class_coverage_ratio: float = 0.0  # Ratio with road class
+    class_distribution: dict[str, int] = Field(default_factory=dict)
+
+
 class DatasetConfig(BaseModel):
     """Complete unified dataset configuration.
 
@@ -125,6 +171,9 @@ class DatasetConfig(BaseModel):
 
     # Classification (from discover-classes)
     classification: ClassificationConfig | None = None
+
+    # Quality fingerprint (from matcher quality fingerprint)
+    quality_fingerprint: QualityFingerprintConfig | None = None
 
     # Additional metadata
     notes: str | None = None
@@ -182,6 +231,11 @@ def save_dataset_config(config: DatasetConfig, path: Path) -> Path:
     if "last_fetch" in data and "fetched_at" in data["last_fetch"]:
         data["last_fetch"]["fetched_at"] = data["last_fetch"]["fetched_at"].isoformat()
 
+    if "quality_fingerprint" in data and "computed_at" in data["quality_fingerprint"]:
+        data["quality_fingerprint"]["computed_at"] = data["quality_fingerprint"][
+            "computed_at"
+        ].isoformat()
+
     # Convert tuples to lists for YAML
     data = _convert_tuples_to_lists(data)
 
@@ -211,9 +265,16 @@ def load_dataset_config(path: Path) -> DatasetConfig:
     if not data or not isinstance(data, dict):
         raise ValueError(f"Empty or invalid YAML file: {path}")
 
-    # Parse datetime
+    # Parse datetime fields
     if "last_fetch" in data and isinstance(data["last_fetch"].get("fetched_at"), str):
         data["last_fetch"]["fetched_at"] = datetime.fromisoformat(data["last_fetch"]["fetched_at"])
+
+    if "quality_fingerprint" in data and isinstance(
+        data["quality_fingerprint"].get("computed_at"), str
+    ):
+        data["quality_fingerprint"]["computed_at"] = datetime.fromisoformat(
+            data["quality_fingerprint"]["computed_at"]
+        )
 
     # Convert bbox lists to tuples
     tuple_keys = {"bbox", "bbox_buffered"}
@@ -305,3 +366,67 @@ def update_last_fetch(
     save_dataset_config(config, config_path)
 
     return config
+
+
+def update_quality_fingerprint(
+    name: str,
+    fingerprint: "QualityFingerprintConfig",
+) -> DatasetConfig | None:
+    """Update the quality_fingerprint section of a dataset config.
+
+    Args:
+        name: Dataset name
+        fingerprint: QualityFingerprintConfig to save
+
+    Returns:
+        Updated DatasetConfig if found, None if dataset doesn't exist
+    """
+    config = get_dataset_config(name)
+    if config is None:
+        return None
+
+    # Update quality_fingerprint
+    config.quality_fingerprint = fingerprint
+
+    # Save back
+    config_path = get_datasets_dir() / f"{name}.yaml"
+    save_dataset_config(config, config_path)
+
+    return config
+
+
+def fingerprint_from_quality(
+    quality_fp: "QualityFingerprint",  # noqa: F821
+) -> QualityFingerprintConfig:
+    """Convert a QualityFingerprint to QualityFingerprintConfig for YAML storage.
+
+    Args:
+        quality_fp: Full QualityFingerprint from quality module
+
+    Returns:
+        QualityFingerprintConfig suitable for YAML
+    """
+    return QualityFingerprintConfig(
+        computed_at=quality_fp.timestamp,
+        total_segments=quality_fp.total_segments,
+        total_length_km=round(quality_fp.total_length_m / 1000, 2),
+        length_min_m=quality_fp.length_min_m,
+        length_max_m=quality_fp.length_max_m,
+        length_median_m=quality_fp.length_median_m,
+        length_p5_m=quality_fp.length_p5_m,
+        length_p95_m=quality_fp.length_p95_m,
+        vertex_density_mean=quality_fp.vertex_density_mean,
+        invalid_geometry_count=quality_fp.invalid_geometry_count,
+        sharp_angle_ratio=quality_fp.sharp_angle_ratio,
+        mean_sinuosity=quality_fp.mean_segment_sinuosity,
+        high_sinuosity_ratio=quality_fp.high_sinuosity_ratio,
+        drift_affected_ratio=quality_fp.drift_affected_ratio,
+        near_duplicate_ratio=quality_fp.near_duplicate_ratio,
+        island_count=quality_fp.island_count,
+        dead_end_ratio=quality_fp.dead_end_ratio,
+        connected_components=quality_fp.connected_components,
+        largest_component_ratio=quality_fp.largest_component_ratio,
+        name_coverage_ratio=quality_fp.name_coverage_ratio,
+        class_coverage_ratio=quality_fp.class_coverage_ratio,
+        class_distribution=quality_fp.class_distribution,
+    )
