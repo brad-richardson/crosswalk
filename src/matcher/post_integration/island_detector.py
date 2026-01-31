@@ -329,5 +329,10 @@ def _get_id_column(gdf: gpd.GeoDataFrame) -> str:
     for col in ["id", "ID", "edge_id"]:
         if col in gdf.columns:
             return col
-    # Use index if no ID column found
-    return gdf.index.name or "index"
+    # Check if index name exists as a column
+    if gdf.index.name and gdf.index.name in gdf.columns:
+        return gdf.index.name
+    raise ValueError(
+        f"Could not determine ID column. Expected one of ['id', 'ID', 'edge_id']. "
+        f"Available columns: {list(gdf.columns)}"
+    )
