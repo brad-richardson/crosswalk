@@ -84,6 +84,19 @@ class TestFetchOvertureBuildings:
 
     @patch("matcher.screen.context.overture_buildings.geodataframe")
     @patch("matcher.screen.context.overture_buildings.get_latest_release")
+    def test_fetch_filters_small_buildings(self, mock_release, mock_geodataframe):
+        mock_release.return_value = "2024-01-01"
+        large = Polygon([(0, 0), (0, 0.001), (0.001, 0.001), (0.001, 0)])
+        small = Polygon([(1, 1), (1, 1.000001), (1.000001, 1.000001), (1.000001, 1)])
+        mock_geodataframe.return_value = gpd.GeoDataFrame(
+            {"id": [1, 2]}, geometry=[large, small], crs="EPSG:4326"
+        )
+
+        result = fetch_overture_buildings((-1, -1, 4, 4), min_area_m2=20.0)
+        assert len(result) == 1
+
+    @patch("matcher.screen.context.overture_buildings.geodataframe")
+    @patch("matcher.screen.context.overture_buildings.get_latest_release")
     def test_fetch_empty_returns_empty_gdf(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         mock_geodataframe.return_value = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")

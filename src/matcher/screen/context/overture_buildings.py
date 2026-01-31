@@ -42,7 +42,8 @@ def fetch_overture_buildings(
         gdf = gdf.set_crs("EPSG:4326")
 
     # Filter to polygon geometries only
-    gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+    mask = gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
+    gdf = gdf.loc[mask].copy()
 
     if len(gdf) == 0:
         logger.info("No polygon buildings found")
@@ -67,8 +68,13 @@ def get_building_union(gdf: gpd.GeoDataFrame) -> Polygon | MultiPolygon | None:
     if len(gdf) == 0:
         return None
 
-    valid_geoms = [g.buffer(0) if not g.is_valid else g for g in gdf.geometry if g is not None]
+    valid_geoms = [
+        g.buffer(0) if not g.is_valid else g
+        for g in gdf.geometry
+        if g is not None and not g.is_empty
+    ]
     if not valid_geoms:
         return None
 
-    return unary_union(valid_geoms)
+    result = unary_union(valid_geoms)
+    return None if result.is_empty else result
