@@ -10,8 +10,15 @@ from shapely.geometry import LineString
 
 from ..config import CLASS_COLUMN, NAMES_COLUMN
 from ..post_integration.constants import SNAP_TOLERANCE_M
+from ..post_integration.gps_drift_detector import detect_gps_drift
 from ..post_integration.island_detector import detect_islands
 from .fingerprint import QualityFingerprint
+
+# Thresholds for quality metrics
+SHARP_ANGLE_THRESHOLD_DEG = 30.0  # Angles less than this are "sharp"
+HIGH_SINUOSITY_THRESHOLD = 1.5  # Sinuosity > this is considered "high"
+NEAR_DUPLICATE_BUFFER_M = 2.0  # Buffer for near-duplicate detection
+NEAR_DUPLICATE_IOU_THRESHOLD = 0.9  # IOU threshold for near-duplicates
 
 
 def compute_quality_metrics(
@@ -20,6 +27,8 @@ def compute_quality_metrics(
     name_column: str | None = None,
     class_column: str | None = None,
     snap_tolerance_m: float = SNAP_TOLERANCE_M,
+    detect_drift: bool = True,
+    detect_duplicates: bool = True,
 ) -> QualityFingerprint:
     """Compute comprehensive quality metrics for a road network dataset.
 
@@ -29,6 +38,8 @@ def compute_quality_metrics(
         name_column: Column containing road names (auto-detected if None)
         class_column: Column containing road class (auto-detected if None)
         snap_tolerance_m: Tolerance for topology analysis
+        detect_drift: Whether to run GPS drift detection (slower)
+        detect_duplicates: Whether to run near-duplicate detection (slower)
 
     Returns:
         QualityFingerprint with computed metrics
@@ -54,7 +65,10 @@ def compute_quality_metrics(
     vertex_density_mean, vertex_density_std = _compute_vertex_density(edges_metric)
     invalid_geometry_count = _count_invalid_geometries(edges_gdf)
 
-    # Filter to LineString geometries for topology analysis
+    # Length distribution
+    length_stats = _compute_length_distribution(edges_metric)
+
+    # Filter to LineString geometries for topology/geometry analysis
     line_mask = edges_gdf.geometry.apply(lambda g: isinstance(g, LineString) if g else False)
     if not line_mask.all():
         non_line_count = (~line_mask).sum()
@@ -63,6 +77,40 @@ def compute_quality_metrics(
         )
     edges_lines = edges_gdf[line_mask]
     edges_metric_lines = edges_metric.loc[edges_lines.index]
+
+    # Jaggedness / geometry quality metrics
+    jaggedness_stats = _compute_jaggedness_metrics(edges_metric_lines)
+
+    # GPS drift detection (optional, slower)
+    drift_stats = {
+        "zigzag_segment_count": 0,
+        "spike_segment_count": 0,
+        "loop_segment_count": 0,
+        "drift_affected_ratio": 0.0,
+    }
+    if detect_drift and len(edges_lines) > 0:
+        try:
+            drift_result = detect_gps_drift(edges_lines)
+            drift_stats = {
+                "zigzag_segment_count": drift_result.zigzag_count,
+                "spike_segment_count": drift_result.spike_count,
+                "loop_segment_count": drift_result.loop_count,
+                "drift_affected_ratio": (
+                    drift_result.edges_with_drift / drift_result.total_edges
+                    if drift_result.total_edges > 0
+                    else 0.0
+                ),
+            }
+        except Exception as e:
+            logger.warning(f"GPS drift detection failed: {e}")
+
+    # Near-duplicate detection (optional, slower)
+    duplicate_stats = {"near_duplicate_count": 0, "near_duplicate_ratio": 0.0}
+    if detect_duplicates and len(edges_metric_lines) > 0:
+        try:
+            duplicate_stats = _compute_near_duplicates(edges_metric_lines)
+        except Exception as e:
+            logger.warning(f"Near-duplicate detection failed: {e}")
 
     # Topology metrics
     island_result = detect_islands(edges_lines, snap_tolerance_m=snap_tolerance_m)
@@ -74,26 +122,53 @@ def compute_quality_metrics(
 
     class_col = class_column or CLASS_COLUMN
     class_distribution = _compute_class_distribution(edges_gdf, class_col)
+    class_coverage_ratio = _compute_class_coverage(edges_gdf, class_col)
 
     fingerprint = QualityFingerprint(
         dataset_name=dataset_name,
+        # Basic stats
         total_segments=total_segments,
         total_length_m=total_length_m,
+        # Geometry
         vertex_density_mean=vertex_density_mean,
         vertex_density_std=vertex_density_std,
         invalid_geometry_count=invalid_geometry_count,
+        # Length distribution
+        length_min_m=length_stats["min"],
+        length_max_m=length_stats["max"],
+        length_median_m=length_stats["median"],
+        length_p5_m=length_stats["p5"],
+        length_p95_m=length_stats["p95"],
+        # Jaggedness
+        sharp_angle_count=jaggedness_stats["sharp_angle_count"],
+        sharp_angle_ratio=jaggedness_stats["sharp_angle_ratio"],
+        mean_segment_sinuosity=jaggedness_stats["mean_sinuosity"],
+        high_sinuosity_count=jaggedness_stats["high_sinuosity_count"],
+        high_sinuosity_ratio=jaggedness_stats["high_sinuosity_ratio"],
+        # GPS drift
+        zigzag_segment_count=drift_stats["zigzag_segment_count"],
+        spike_segment_count=drift_stats["spike_segment_count"],
+        loop_segment_count=drift_stats["loop_segment_count"],
+        drift_affected_ratio=drift_stats["drift_affected_ratio"],
+        # Duplicates
+        near_duplicate_count=duplicate_stats["near_duplicate_count"],
+        near_duplicate_ratio=duplicate_stats["near_duplicate_ratio"],
+        # Topology
         island_count=len(island_result.islands),
         dead_end_count=dead_end_count,
         dead_end_ratio=dead_end_ratio,
         connected_components=island_result.total_components,
         largest_component_ratio=island_result.main_component_ratio,
+        # Attributes
         name_coverage_ratio=name_coverage_ratio,
+        class_coverage_ratio=class_coverage_ratio,
         class_distribution=class_distribution,
     )
 
     logger.info(
         f"Quality fingerprint computed: {total_segments} segments, "
-        f"{total_length_m / 1000:.1f}km, {name_coverage_ratio:.1%} named"
+        f"{total_length_m / 1000:.1f}km, {name_coverage_ratio:.1%} named, "
+        f"{class_coverage_ratio:.1%} classified"
     )
 
     return fingerprint
@@ -253,3 +328,209 @@ def _compute_class_distribution(
 
     # Sort by count descending
     return dict(sorted(distribution.items(), key=lambda x: -x[1]))
+
+
+def _compute_length_distribution(edges_metric: gpd.GeoDataFrame) -> dict[str, float]:
+    """Compute length distribution statistics.
+
+    Args:
+        edges_metric: GeoDataFrame in metric CRS
+
+    Returns:
+        Dictionary with min, max, median, p5, p95 lengths
+    """
+    lengths = []
+    for geom in edges_metric.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        lengths.append(geom.length)
+
+    if not lengths:
+        return {"min": 0.0, "max": 0.0, "median": 0.0, "p5": 0.0, "p95": 0.0}
+
+    lengths_arr = np.array(lengths)
+    return {
+        "min": float(np.min(lengths_arr)),
+        "max": float(np.max(lengths_arr)),
+        "median": float(np.median(lengths_arr)),
+        "p5": float(np.percentile(lengths_arr, 5)),
+        "p95": float(np.percentile(lengths_arr, 95)),
+    }
+
+
+def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, float | int]:
+    """Compute geometry jaggedness and sinuosity metrics.
+
+    Jaggedness is measured by:
+    - Sharp angles: Vertices where the angle between segments is < 30 degrees
+    - Sinuosity: Ratio of actual length to straight-line distance
+
+    Args:
+        edges_metric: GeoDataFrame in metric CRS with LineString geometries
+
+    Returns:
+        Dictionary with jaggedness metrics
+    """
+    sharp_angle_segments = 0
+    total_segments = 0
+    sinuosities = []
+    high_sinuosity_count = 0
+
+    for geom in edges_metric.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        if not isinstance(geom, LineString):
+            continue
+
+        total_segments += 1
+        coords = np.array(geom.coords)
+
+        # Compute sinuosity (length / straight-line distance)
+        if len(coords) >= 2:
+            straight_dist = np.sqrt(
+                (coords[-1][0] - coords[0][0]) ** 2 + (coords[-1][1] - coords[0][1]) ** 2
+            )
+            if straight_dist > 0:
+                sinuosity = geom.length / straight_dist
+                sinuosities.append(sinuosity)
+                if sinuosity > HIGH_SINUOSITY_THRESHOLD:
+                    high_sinuosity_count += 1
+
+        # Check for sharp angles (only if >= 3 vertices)
+        if len(coords) >= 3:
+            has_sharp_angle = False
+            for i in range(1, len(coords) - 1):
+                v1 = coords[i] - coords[i - 1]
+                v2 = coords[i + 1] - coords[i]
+
+                # Compute angle between vectors
+                dot = np.dot(v1, v2)
+                mag1 = np.linalg.norm(v1)
+                mag2 = np.linalg.norm(v2)
+
+                if mag1 > 0 and mag2 > 0:
+                    cos_angle = np.clip(dot / (mag1 * mag2), -1, 1)
+                    angle_deg = np.degrees(np.arccos(cos_angle))
+
+                    # Angle < threshold is "sharp" (near reversal)
+                    if angle_deg < SHARP_ANGLE_THRESHOLD_DEG:
+                        has_sharp_angle = True
+                        break
+
+            if has_sharp_angle:
+                sharp_angle_segments += 1
+
+    return {
+        "sharp_angle_count": sharp_angle_segments,
+        "sharp_angle_ratio": sharp_angle_segments / total_segments if total_segments > 0 else 0.0,
+        "mean_sinuosity": float(np.mean(sinuosities)) if sinuosities else 1.0,
+        "high_sinuosity_count": high_sinuosity_count,
+        "high_sinuosity_ratio": high_sinuosity_count / total_segments
+        if total_segments > 0
+        else 0.0,
+    }
+
+
+def _compute_near_duplicates(
+    edges_metric: gpd.GeoDataFrame,
+    buffer_m: float = NEAR_DUPLICATE_BUFFER_M,
+    iou_threshold: float = NEAR_DUPLICATE_IOU_THRESHOLD,
+    sample_size: int = 5000,
+) -> dict[str, float | int]:
+    """Detect near-duplicate geometries using buffered IOU.
+
+    For performance, samples the dataset if it's large.
+
+    Args:
+        edges_metric: GeoDataFrame in metric CRS
+        buffer_m: Buffer distance for IOU calculation
+        iou_threshold: IOU threshold above which geometries are duplicates
+        sample_size: Maximum edges to check (for performance)
+
+    Returns:
+        Dictionary with duplicate count and ratio
+    """
+    total_edges = len(edges_metric)
+    if total_edges < 2:
+        return {"near_duplicate_count": 0, "near_duplicate_ratio": 0.0}
+
+    # Sample if dataset is large
+    if total_edges > sample_size:
+        edges_sample = edges_metric.sample(n=sample_size, random_state=42)
+    else:
+        edges_sample = edges_metric
+
+    # Build spatial index
+    sindex = edges_sample.sindex
+
+    duplicate_ids: set[int] = set()
+    checked_pairs: set[tuple[int, int]] = set()
+
+    for idx, row in edges_sample.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+
+        # Buffer and find candidates
+        buffered = geom.buffer(buffer_m * 2)
+        candidate_idxs = list(sindex.intersection(buffered.bounds))
+
+        for cand_idx in candidate_idxs:
+            if cand_idx == idx:
+                continue
+
+            # Avoid checking same pair twice
+            pair = tuple(sorted([idx, cand_idx]))
+            if pair in checked_pairs:
+                continue
+            checked_pairs.add(pair)
+
+            cand_geom = edges_sample.loc[cand_idx].geometry
+            if cand_geom is None or cand_geom.is_empty:
+                continue
+
+            # Compute buffered IOU
+            try:
+                buf1 = geom.buffer(buffer_m)
+                buf2 = cand_geom.buffer(buffer_m)
+                intersection = buf1.intersection(buf2).area
+                union = buf1.union(buf2).area
+
+                if union > 0:
+                    iou = intersection / union
+                    if iou > iou_threshold:
+                        duplicate_ids.add(idx)
+                        duplicate_ids.add(cand_idx)
+            except Exception:
+                continue
+
+    duplicate_count = len(duplicate_ids)
+
+    return {
+        "near_duplicate_count": duplicate_count,
+        "near_duplicate_ratio": duplicate_count / total_edges if total_edges > 0 else 0.0,
+    }
+
+
+def _compute_class_coverage(
+    gdf: gpd.GeoDataFrame,
+    class_column: str | None,
+) -> float:
+    """Compute the ratio of edges that have a class assigned.
+
+    Args:
+        gdf: GeoDataFrame with edges
+        class_column: Column containing road class
+
+    Returns:
+        Ratio of classified edges (0.0 to 1.0)
+    """
+    if class_column is None or class_column not in gdf.columns:
+        return 0.0
+
+    classified_count = 0
+    for cls in gdf[class_column]:
+        if cls is not None and str(cls).strip() and str(cls).lower() != "unknown":
+            classified_count += 1
+
+    return classified_count / len(gdf) if len(gdf) > 0 else 0.0
