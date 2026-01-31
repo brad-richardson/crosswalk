@@ -14,7 +14,6 @@ fetch:
   class_mapping:
     EXISTING_SIDEWALK: footway
     DRIVEWAY: footway
-    footway: footway
   subclass_column: PEDESTRIAN_FACILITY_TYPE
   subclass_mapping:
     EXISTING_SIDEWALK: sidewalk

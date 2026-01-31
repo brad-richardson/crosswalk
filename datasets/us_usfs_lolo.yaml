@@ -17,7 +17,6 @@ fetch:
     3: unclassified
     4: tertiary
     5: secondary
-    unclassified: track
   bbox:
   - -115.0
   - 46.5

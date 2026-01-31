@@ -4629,15 +4629,20 @@ def update_class_mappings_cmd(
     classification to Overture classes. Applies safety checks for tier-changing
     mappings (vehicle <-> pedestrian).
 
+    IMPORTANT: This command only works correctly for datasets WITHOUT existing
+    class_mapping. The geometry store captures post-mapping class values, so
+    datasets with existing mappings will produce incorrect results (mapping
+    already-mapped values like "residential" instead of raw source values).
+
     Examples:
         # Dry run on all datasets with labels
         matcher update-class-mappings --dry-run
 
-        # Update specific datasets
-        matcher update-class-mappings us_boston_streets de_berlin_roads
+        # Update specific datasets (only those without existing class_mapping)
+        matcher update-class-mappings us_montana_helena us_usfs_lolo
 
         # Apply changes (no dry run)
-        matcher update-class-mappings us_boston_streets
+        matcher update-class-mappings us_montana_helena
     """
     from .classification.predictor import OVERTURE_TIERS, analyze_source_class_mapping
     from .datasets.schema import (
@@ -4683,6 +4688,16 @@ def update_class_mappings_cmd(
 
     for dataset_id in sorted(dataset_list):
         console.print(f"\n[bold]Dataset: {dataset_id}[/bold]")
+
+        # Check if dataset already has class_mapping - skip if so
+        config = get_dataset_config(dataset_id)
+        if config and config.fetch and config.fetch.class_mapping:
+            console.print(
+                "  [yellow]⚠️ SKIPPED: Dataset has existing class_mapping. "
+                "Geometry store contains mapped values, not raw source.[/yellow]"
+            )
+            results["no_changes"].append(dataset_id)
+            continue
 
         labels_path = labels_dir / f"dataset={dataset_id}" / "data.csv"
         if not labels_path.exists():

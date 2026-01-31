@@ -17,8 +17,6 @@ fetch:
     5: unclassified
     6: pedestrian
     7: unclassified
-    tertiary: residential
-    residential: footway
   bbox:
   - -74.25
   - 4.45

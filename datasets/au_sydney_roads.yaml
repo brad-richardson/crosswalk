@@ -17,8 +17,6 @@ fetch:
     4: tertiary
     5: tertiary
     6: residential
-    residential: residential
-    tertiary: tertiary
   bbox:
   - 150.85
   - -34.15
