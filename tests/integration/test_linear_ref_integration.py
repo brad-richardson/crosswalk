@@ -12,6 +12,7 @@ from matcher.fetch.overture import (
     parse_names_lr,
 )
 from matcher.utils.linear_ref import (
+    AttributeRange,
     LinearReferencedAttribute,
     create_trivial_lr,
     extract_aligned_attributes,
@@ -112,16 +113,8 @@ class TestLRDataFlowIntegration:
         # Create LR with name change at midpoint
         lr = LinearReferencedAttribute(
             ranges=[
-                LinearReferencedAttribute.from_dict_list(
-                    [
-                        {"start": 0.0, "end": 0.5, "value": "First Half Name"},
-                    ]
-                ).ranges[0],
-                LinearReferencedAttribute.from_dict_list(
-                    [
-                        {"start": 0.5, "end": 1.0, "value": "Second Half Name"},
-                    ]
-                ).ranges[0],
+                AttributeRange(start=0.0, end=0.5, value="First Half Name"),
+                AttributeRange(start=0.5, end=1.0, value="Second Half Name"),
             ],
             default_value="First Half Name",
         )
@@ -184,21 +177,27 @@ class TestBackwardsCompatibility:
     def test_none_lr_data_uses_flat_name(self):
         """Test that None LR data falls back to flat name."""
         # When LR data is None, the feature computation should use flat names
-        # This tests the worker function logic path
+        # This tests the fallback logic pattern used in ml.py
 
-        # Flat name only
         flat_name = "Oak Street"
-        lr_data = None
 
-        # When LR is None, we should get the flat name
-        if lr_data is not None:
-            lr = LinearReferencedAttribute.from_dict_list(lr_data)
-            result = extract_aligned_attributes({"name": lr}, 0.0, 1.0)
-            name = result["name"]
-        else:
-            name = flat_name
+        # Simulate the fallback logic used in _extract_lr_attributes_for_pair
+        def get_name_with_fallback(lr_data, flat_name, start_frac, end_frac):
+            """Mimics the fallback pattern in ml.py."""
+            if lr_data is not None:
+                lr = LinearReferencedAttribute.from_dict_list(lr_data)
+                result = extract_aligned_attributes({"name": lr}, start_frac, end_frac)
+                return result["name"]
+            return flat_name
 
+        # Test with None LR data - should return flat name
+        name = get_name_with_fallback(None, flat_name, 0.0, 1.0)
         assert name == "Oak Street"
+
+        # Test with actual LR data - should use LR extraction
+        lr_data = [{"start": 0.0, "end": 1.0, "value": "LR Name"}]
+        name = get_name_with_fallback(lr_data, flat_name, 0.0, 1.0)
+        assert name == "LR Name"
 
 
 class TestMultipleAttributes:

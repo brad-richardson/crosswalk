@@ -233,20 +233,41 @@ def extract_majority(
     # Calculate coverage for each unique value
     # Use a list to preserve order for tie-breaking
     value_coverage: list[tuple[Any, float]] = []
-    seen_values: dict[int, int] = {}  # id(value) -> index in value_coverage
+    # Map hashable values to their index in value_coverage
+    seen_hashable: dict[Any, int] = {}
 
     for attr_range in lr_attr.ranges:
         coverage = attr_range.intersection(start_frac, end_frac)
         if coverage > 0:
-            # Use id() for hashability of arbitrary values
-            value_id = id(attr_range.value)
-            if value_id in seen_values:
-                idx = seen_values[value_id]
-                old_value, old_coverage = value_coverage[idx]
-                value_coverage[idx] = (old_value, old_coverage + coverage)
+            value = attr_range.value
+            # Try to use value-based grouping (hashable types)
+            try:
+                hash(value)
+                is_hashable = True
+            except TypeError:
+                is_hashable = False
+
+            if is_hashable:
+                # Hashable: use the value itself as the key
+                if value in seen_hashable:
+                    idx = seen_hashable[value]
+                    old_value, old_coverage = value_coverage[idx]
+                    value_coverage[idx] = (old_value, old_coverage + coverage)
+                else:
+                    seen_hashable[value] = len(value_coverage)
+                    value_coverage.append((value, coverage))
             else:
-                seen_values[value_id] = len(value_coverage)
-                value_coverage.append((attr_range.value, coverage))
+                # Unhashable: linear search for equality
+                found_idx = None
+                for i, (existing_value, _) in enumerate(value_coverage):
+                    if existing_value == value:
+                        found_idx = i
+                        break
+                if found_idx is not None:
+                    old_value, old_coverage = value_coverage[found_idx]
+                    value_coverage[found_idx] = (old_value, old_coverage + coverage)
+                else:
+                    value_coverage.append((value, coverage))
 
     if not value_coverage:
         return lr_attr.default_value

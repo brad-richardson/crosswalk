@@ -540,7 +540,7 @@ def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if "subclass" in gdf.columns:
         gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
     else:
-        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}]]
+        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}] for _ in range(len(gdf))]
 
     # Level LR - extract from level_rules if present, otherwise use 0
     def get_level(row):
