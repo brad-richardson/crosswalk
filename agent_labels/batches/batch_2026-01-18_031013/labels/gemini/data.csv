@@ -1,5 +1,0 @@
-ref_id,target_id,label,confidence,reasoning
-2d62d71d-657e-44ab-ad27-d49f407577fa,boston_streets_7026,no_match,0.95,"High Hausdorff distance (47.5m) and low buffer_iou (0.16) suggest the segments are parallel but separate ways."
-3ee3ff5d-7b52-4816-b7f5-b32fadae8a31,boston_streets_8337,no_match,1.0,"Very high Hausdorff distance (54.6m) and heading delta (78.1°) indicate completely different, non-aligned segments."
-d43310d5-b8a7-4907-923d-8399725f7c45,boston_streets_971,no_match,1.0,"Extremely high Hausdorff distance (121.0m) and heading delta (50.9°) show no alignment."
-d464fb79-d751-4326-bbf5-98003f7d6e81,boston_streets_4752,match,0.90,"Low Hausdorff distance (7.6m) and low heading delta (1.7°) strongly indicate geometric alignment, despite a moderate IoU."
