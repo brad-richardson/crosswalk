@@ -70,3 +70,4 @@ models/
 agent_labels/**/raw_output.txt
 agent_labels/**/agent_prompt.md
 agent_labels/batches/
+best_params.json
