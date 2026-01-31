@@ -1,6 +1,6 @@
 """Water body screen test.
 
-Detects matches where the target road intersects water bodies (lakes, rivers, etc.)
+Detects target segments that intersect water bodies (lakes, rivers, etc.)
 beyond what could reasonably be a bridge.
 """
 
@@ -9,7 +9,7 @@ from loguru import logger
 from shapely.geometry import MultiPolygon, Polygon
 
 from ..base import (
-    MatchContext,
+    CandidateContext,
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -22,7 +22,7 @@ from .travel_mode import get_travel_mode
 
 @register_test
 class WaterBodyTest(ScreenTest):
-    """Test if a match's target geometry intersects water bodies.
+    """Test if a candidate segment intersects water bodies.
 
     Buffers water bodies based on road type - vehicle roads need more
     clearance than pedestrian paths. Buffers are pre-computed in prepare()
@@ -64,8 +64,8 @@ class WaterBodyTest(ScreenTest):
 
         logger.info(f"WaterBodyTest prepared with {len(self.water_gdf)} water bodies")
 
-    def test_match(self, ctx: MatchContext) -> ScreenResult:
-        """Test if the target geometry intersects buffered water bodies."""
+    def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
+        """Test if the candidate geometry intersects buffered water bodies."""
         if self.water_union is None:
             return ScreenResult(
                 outcome=ScreenOutcome.SKIP,

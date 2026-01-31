@@ -3667,6 +3667,108 @@ def benchmark(
 
 
 @app.command()
+def screen(
+    target_path: Path = typer.Argument(
+        ...,
+        help="Path to target parquet file to screen",
+    ),
+    bridge_path: Path | None = typer.Option(
+        None,
+        "--bridge",
+        "-b",
+        help="Path to bridge parquet file (screens only unmatched targets if provided)",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output path for valid candidates (default: adds _screened suffix)",
+    ),
+    tests: list[str] | None = typer.Option(
+        None,
+        "--test",
+        "-t",
+        help="Specific test(s) to run (default: all). Options: water_body, building, landcover",
+    ),
+    report_only: bool = typer.Option(
+        False,
+        "--report-only",
+        help="Generate report without outputting candidates",
+    ),
+    report_output: Path | None = typer.Option(
+        None,
+        "--report",
+        "-r",
+        help="Output path for JSON report",
+    ),
+):
+    """Screen target segments for valid network additions.
+
+    Validates unmatched target segments using external context (water bodies,
+    buildings, etc.) to identify which segments are valid candidates for
+    addition to the network.
+
+    If a bridge file is provided, only screens unmatched targets (those not
+    in the bridge file). Otherwise screens all targets.
+
+    Examples:
+        matcher screen target.parquet
+        matcher screen target.parquet -b bridge.parquet
+        matcher screen target.parquet -t water_body --report-only
+    """
+    import json
+
+    from .screen import run_screen
+
+    # Determine output path
+    if output is None and not report_only:
+        output = target_path.parent / f"{target_path.stem}_screened.parquet"
+
+    console.print(f"[blue]Running screen tests on {target_path}[/blue]")
+    if bridge_path:
+        console.print(f"[blue]Filtering to unmatched targets using {bridge_path}[/blue]")
+
+    try:
+        valid_gdf, report = run_screen(
+            target_path=target_path,
+            bridge_path=bridge_path,
+            test_names=tests,
+            output_path=output,
+            report_only=report_only,
+        )
+
+        # Print summary
+        console.print("\n[bold]Screen Results:[/bold]")
+        console.print(f"  Total candidates: {report.total_candidates}")
+        console.print(f"  Passed: [green]{report.passed}[/green] ({report.pass_rate:.2%})")
+        console.print(f"  Failed: [red]{report.failed}[/red] ({report.fail_rate:.2%})")
+        console.print(f"  Warned: [yellow]{report.warned}[/yellow] ({report.warn_rate:.2%})")
+
+        # Per-test breakdown
+        if report.test_results:
+            console.print("\n[bold]Per-test breakdown:[/bold]")
+            for test_name, counts in report.test_results.items():
+                console.print(
+                    f"  {test_name}: pass={counts['pass']}, fail={counts['fail']}, "
+                    f"warn={counts['warn']}, skip={counts['skip']}"
+                )
+
+        # Save report if requested
+        if report_output:
+            report_output.parent.mkdir(parents=True, exist_ok=True)
+            with open(report_output, "w") as f:
+                json.dump(report.to_dict(), f, indent=2)
+            console.print(f"\n[green]Report saved to {report_output}[/green]")
+
+        if output and not report_only:
+            console.print(f"\n[green]Valid candidates saved to {output}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Screen tests failed: {e}[/red]")
+        raise typer.Exit(1) from None
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__

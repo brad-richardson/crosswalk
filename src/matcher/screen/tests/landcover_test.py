@@ -1,7 +1,7 @@
 """Landcover screen test.
 
-Detects matches where the target road passes through restricted landcover
-types like wetlands or sports fields.
+Detects target segments that pass through restricted landcover types
+like wetlands or sports fields.
 """
 
 import geopandas as gpd
@@ -9,7 +9,7 @@ from loguru import logger
 from shapely.geometry import MultiPolygon, Polygon
 
 from ..base import (
-    MatchContext,
+    CandidateContext,
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -22,7 +22,7 @@ from .travel_mode import get_travel_mode
 
 @register_test
 class LandcoverTest(ScreenTest):
-    """Test if a match's target geometry passes through restricted landcover.
+    """Test if a candidate segment passes through restricted landcover.
 
     Checks for:
     - Wetlands (marsh, swamp, bog) - roads shouldn't pass through
@@ -66,8 +66,8 @@ class LandcoverTest(ScreenTest):
 
         logger.info(f"LandcoverTest prepared with {len(self.landcover_gdf)} restricted areas")
 
-    def test_match(self, ctx: MatchContext) -> ScreenResult:
-        """Test if the target geometry intersects buffered restricted landcover."""
+    def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
+        """Test if the candidate geometry intersects buffered restricted landcover."""
         if self.landcover_union is None:
             return ScreenResult(
                 outcome=ScreenOutcome.SKIP,

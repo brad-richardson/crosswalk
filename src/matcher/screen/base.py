@@ -37,20 +37,17 @@ class ScreenResult:
 
 
 @dataclass
-class MatchContext:
-    """Context for a match being tested.
+class CandidateContext:
+    """Context for an unmatched target segment being screened.
 
-    Provides all geometry and metadata needed for screen tests.
+    These are segments from the target dataset that didn't match anything
+    in the reference network. Screen tests determine if they're valid
+    candidates for addition to the network.
     """
 
-    match_id: str
-    ref_id: str
     target_id: str
-    ref_geom: LineString
     target_geom: LineString
-    confidence: float
     road_class: str | None = None  # e.g., "motorway", "residential", "footway"
-    ref_attrs: dict[str, Any] = field(default_factory=dict)
     target_attrs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -93,14 +90,14 @@ def get_test(name: str) -> type["ScreenTest"]:
 class ScreenTest(ABC):
     """Base class for screen tests.
 
-    Screen tests validate matches using external context (water bodies,
-    buildings, etc.) to identify matches that are geometrically plausible
-    but semantically impossible.
+    Screen tests validate unmatched target segments using external context
+    (water bodies, buildings, etc.) to identify segments that should not
+    be added to the network.
 
     Implement this class to create a new screen test:
     1. Set the `name` class attribute
     2. Implement `prepare()` to fetch context data
-    3. Implement `test_match()` to check a single match
+    3. Implement `test_candidate()` to check a single candidate
     4. Decorate the class with @register_test
 
     Example:
@@ -111,7 +108,7 @@ class ScreenTest(ABC):
             def prepare(self, bbox: tuple[float, float, float, float]) -> None:
                 self.water_union = fetch_water_bodies(bbox)
 
-            def test_match(self, ctx: MatchContext) -> ScreenResult:
+            def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
                 intersection = ctx.target_geom.intersection(self.water_union)
                 if intersection.length > threshold:
                     return ScreenResult(
@@ -131,7 +128,7 @@ class ScreenTest(ABC):
     def prepare(self, bbox: tuple[float, float, float, float]) -> None:
         """Prepare the test by fetching context data.
 
-        Called once before testing matches. Implementations should fetch
+        Called once before testing candidates. Implementations should fetch
         any external data needed (water bodies, buildings, etc.) and store
         it as instance attributes.
 
@@ -141,11 +138,11 @@ class ScreenTest(ABC):
         ...
 
     @abstractmethod
-    def test_match(self, ctx: MatchContext) -> ScreenResult:
-        """Test a single match.
+    def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
+        """Test a single candidate segment.
 
         Args:
-            ctx: Match context with geometries and metadata
+            ctx: Candidate context with geometry and metadata
 
         Returns:
             ScreenResult with outcome and details
