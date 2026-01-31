@@ -17,6 +17,9 @@ fetch:
     5: unclassified
     6: pedestrian
     7: unclassified
+    '3': residential
+    '4': footway
+    '6': residential
   bbox:
   - -74.25
   - 4.45

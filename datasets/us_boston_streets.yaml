@@ -17,6 +17,10 @@ fetch:
     4: tertiary
     5: residential
     6: service
+    '4': primary
+    '3': primary
+    '5': residential
+    '2': primary
   bbox:
   - -71.19
   - 42.21

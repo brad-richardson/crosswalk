@@ -16,6 +16,9 @@ fetch:
     II: secondary
     III: tertiary
     IV: residential
+    ii: secondary
+    iii: secondary
+    i: motorway
   bbox:
   - 13.088
   - 52.34

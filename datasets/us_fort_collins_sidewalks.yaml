@@ -14,6 +14,8 @@ fetch:
     3: footway
     4: footway
     5: footway
+    '2': footway
+    '1': footway
   subclass_column: TYPE
   subclass_mapping:
     1: sidewalk

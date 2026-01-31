@@ -22,6 +22,11 @@ fetch:
     BAR_PAIRS: footway
     DASHED: footway
     UNKNOWN: footway
+    parallel: footway
+    unmarked: footway
+    path: footway
+    unknown: footway
+    continental: footway
   subclass_column: feat_type
   subclass_mapping:
     PATH: sidewalk

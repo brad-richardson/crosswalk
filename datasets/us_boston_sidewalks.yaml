@@ -17,6 +17,10 @@ fetch:
     Sidewalk centerline: footway
     Crosswalk centerline: footway
     Privatewalk centerline: footway
+    swalk-cl: footway
+    cwalk-cl: footway
+    pwalk-cl: footway
+    cwalk-cl-um: footway
   subclass_column: TYPE
   subclass_mapping:
     SWALK-CL: sidewalk

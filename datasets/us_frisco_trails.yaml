@@ -16,6 +16,9 @@ fetch:
     Local: footway
     Nature: path
     Golf Course: path
+    parkway: footway
+    regional: cycleway
+    golf course: path
   bbox:
   - -96.9
   - 33.1

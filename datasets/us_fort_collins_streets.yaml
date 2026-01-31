@@ -20,6 +20,10 @@ fetch:
     RAMP: motorway_link
     ROUNDABOUT: tertiary
     ALLEY: service
+    collector: residential
+    local: residential
+    arterial: residential
+    alley: residential
   bbox:
   - -105.15
   - 40.45
