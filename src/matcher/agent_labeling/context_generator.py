@@ -366,7 +366,7 @@ def generate_batch(
 
     Args:
         candidates: List of sampled candidates
-        output_dir: Base output directory (e.g., agent_labels)
+        output_dir: Base output directory (e.g., data/agents)
         batch_id: Batch identifier (auto-generated if not provided)
         dataset_name: Source dataset name
         fetch_satellite: Whether to fetch satellite imagery

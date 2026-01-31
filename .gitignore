@@ -66,8 +66,7 @@ models/
 # Validation outputs (root level only, not src/matcher/validation/)
 /validation/
 
-# Agent labeling raw outputs (keep only processed CSVs)
-agent_labels/**/raw_output.txt
-agent_labels/**/agent_prompt.md
-agent_labels/batches/
+# Agent batch artifacts are in data/agents/ (already covered by data/)
+# Tracked agent labels go to labels_agent/
+
 best_params.json
