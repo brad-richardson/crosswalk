@@ -40,14 +40,26 @@ class TestLanguagePriority:
     """Tests for language priority."""
 
     def test_bare_preferred(self):
-        """Test that bare (no language) names are preferred."""
+        """Test that bare (no language) names are highest priority."""
         assert _get_language_priority(None) == 0
-        assert _get_language_priority("en") == 1
+        assert _get_language_priority("en") > _get_language_priority(None)
 
-    def test_all_languages_equal(self):
-        """Test that all specific languages have equal priority."""
-        assert _get_language_priority("en") == _get_language_priority("es")
-        assert _get_language_priority("fr") == _get_language_priority("de")
+    def test_english_preferred_over_other_languages(self):
+        """Test that English names are preferred over other languages."""
+        assert _get_language_priority("en") < _get_language_priority("es")
+        assert _get_language_priority("en") < _get_language_priority("fr")
+        assert _get_language_priority("en") < _get_language_priority("de")
+
+    def test_english_variants(self):
+        """Test that en-US, en-GB etc. are treated as English."""
+        assert _get_language_priority("en") == _get_language_priority("en-US")
+        assert _get_language_priority("en") == _get_language_priority("en-GB")
+        assert _get_language_priority("EN") == _get_language_priority("en")  # Case insensitive
+
+    def test_non_english_languages_equal(self):
+        """Test that all non-English specific languages have equal priority."""
+        assert _get_language_priority("es") == _get_language_priority("fr")
+        assert _get_language_priority("de") == _get_language_priority("zh")
 
 
 class TestExtractRangeFromRule:
@@ -159,6 +171,30 @@ class TestParseNamesLr:
         # Bare should win over language-specific
         assert len(result.ranges) == 1
         assert result.ranges[0].value == "Bare Name"
+
+    def test_english_beats_other_languages(self):
+        """Test that English names beat other language-specific names."""
+        names = {
+            "primary": "Default",
+            "rules": [
+                {
+                    "value": "Spanish Name",
+                    "variant": "common",
+                    "language": "es",
+                    "between": [0.0, 1.0],
+                },
+                {
+                    "value": "English Name",
+                    "variant": "common",
+                    "language": "en",
+                    "between": [0.0, 1.0],
+                },
+            ],
+        }
+        result = parse_names_lr(names)
+        # English should win over Spanish
+        assert len(result.ranges) == 1
+        assert result.ranges[0].value == "English Name"
 
     def test_empty_rules(self):
         """Test with empty rules array."""

@@ -422,7 +422,10 @@ def _get_variant_priority(variant: str | None) -> int:
 def _get_language_priority(language: str | None) -> int:
     """Get priority value for language.
 
-    Bare names (no language specified) are preferred over language-specific.
+    Priority order:
+    1. Bare names (no language specified) - highest priority
+    2. English names - preferred for English-speaking reviewers
+    3. Other language-specific names
 
     Args:
         language: Language code or None for bare names
@@ -430,7 +433,11 @@ def _get_language_priority(language: str | None) -> int:
     Returns:
         Priority value (lower = higher priority)
     """
-    return 0 if language is None else 1
+    if language is None:
+        return 0  # Bare names highest priority
+    if language.lower().startswith("en"):  # "en", "en-US", "en-GB", etc.
+        return 1  # English preferred over other languages
+    return 2  # Other languages
 
 
 def _extract_range_from_rule(rule: dict) -> tuple[float, float] | None:
