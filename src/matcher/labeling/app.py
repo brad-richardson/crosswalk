@@ -274,6 +274,40 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # App mode selector at the very top of sidebar
+    with st.sidebar:
+        app_mode = st.selectbox(
+            "App",
+            ["Labeling", "Integration QA"],
+            index=0 if st.session_state.get("app_mode", "labeling") == "labeling" else 1,
+            key="app_mode_selector",
+            help="Switch between Match Labeling and Integration QA apps",
+        )
+        st.session_state.app_mode = "labeling" if app_mode == "Labeling" else "integration_qa"
+
+    # Route to the appropriate app
+    if st.session_state.app_mode == "integration_qa":
+        _render_integration_qa_app()
+    else:
+        _render_labeling_app()
+
+
+def _render_integration_qa_app():
+    """Render the Integration QA app within the combined interface."""
+    from matcher.integration_qa.app import (
+        render_integration_qa_content,
+        render_integration_qa_sidebar,
+    )
+
+    with st.sidebar:
+        st.title("Integration QA")
+        integration_dir, session = render_integration_qa_sidebar()
+
+    render_integration_qa_content(integration_dir, session)
+
+
+def _render_labeling_app():
+    """Render the labeling app (original main content)."""
     # Initialize state
     init_session_state()
 
