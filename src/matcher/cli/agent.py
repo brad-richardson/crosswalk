@@ -1149,8 +1149,6 @@ def export_agent_labels(
         # Append to existing labels
         matcher agent export --append
     """
-    from datetime import UTC, datetime
-
     if not batches_dir.exists():
         console.print(f"[red]Error: Batches directory not found: {batches_dir}[/red]")
         raise typer.Exit(1)
@@ -1202,7 +1200,7 @@ def export_agent_labels(
                         for c in manifest["candidates"]
                     }
                     df["dataset"] = df.apply(
-                        lambda row: candidate_datasets.get(
+                        lambda row, cd=candidate_datasets: cd.get(
                             (row["ref_id"], row["target_id"]), "unknown"
                         ),
                         axis=1,
