@@ -4727,7 +4727,9 @@ def update_class_mappings_cmd(
         # Filter out overture and osm files, prefer exact dataset match
         target_files = [f for f in target_files if "overture" not in f.lower()]
         # Prefer exact match (dataset_id_v*.parquet) over variants (dataset_id_osm_*.parquet)
-        exact_matches = [f for f in target_files if f"/{dataset_id}_v" in f or f"/{dataset_id}.parquet" in f]
+        exact_matches = [
+            f for f in target_files if f"/{dataset_id}_v" in f or f"/{dataset_id}.parquet" in f
+        ]
         if exact_matches:
             target_files = exact_matches
 
@@ -4848,25 +4850,50 @@ def update_class_mappings_cmd(
         if config.fetch is None:
             config.fetch = FetchConfig()
 
+        # Normalize all keys to lowercase strings for consistency
+        def normalize_key(k):
+            return str(k).lower().strip()
+
         existing = config.fetch.class_mapping or {}
-        new_keys = set(mapping.keys()) - set(existing.keys())
-        changed_keys = {k for k in mapping if k in existing and existing[k] != mapping[k]}
+        # Normalize existing keys
+        existing_normalized = {normalize_key(k): v for k, v in existing.items()}
+
+        # Check for changes against normalized existing
+        new_keys = set(mapping.keys()) - set(existing_normalized.keys())
+        changed_keys = {
+            k for k in mapping if k in existing_normalized and existing_normalized[k] != mapping[k]
+        }
 
         if not new_keys and not changed_keys:
-            console.print("  No changes needed")
-            results["no_changes"].append(dataset_id)
-            continue
+            # Still save if existing keys need normalization:
+            # - Non-string keys (ints from YAML)
+            # - Duplicate keys after normalization (both 4 and '4' exist)
+            # - Case/whitespace differences
+            needs_normalization = (
+                len(existing) != len(existing_normalized)  # duplicates collapsed
+                or any(not isinstance(k, str) or k != normalize_key(k) for k in existing)
+            )
+            if not needs_normalization:
+                console.print("  No changes needed")
+                results["no_changes"].append(dataset_id)
+                continue
+            console.print("  Normalizing existing keys to lowercase strings")
 
-        console.print("  Changes:")
-        for k in sorted(new_keys):
-            console.print(f"    [green]+ {k} -> {mapping[k]}[/green]")
-        for k in sorted(changed_keys):
-            console.print(f"    [yellow]~ {k}: {existing[k]} -> {mapping[k]}[/yellow]")
+        if new_keys or changed_keys:
+            console.print("  Changes:")
+            for k in sorted(new_keys):
+                console.print(f"    [green]+ {k} -> {mapping[k]}[/green]")
+            for k in sorted(changed_keys):
+                console.print(
+                    f"    [yellow]~ {k}: {existing_normalized[k]} -> {mapping[k]}[/yellow]"
+                )
 
         if dry_run:
             console.print("  [dim](dry run - not saving)[/dim]")
         else:
-            config.fetch.class_mapping = {**existing, **mapping}
+            # Merge and ensure all keys are normalized lowercase strings
+            merged = {**existing_normalized, **mapping}
+            config.fetch.class_mapping = merged
             config_path = get_datasets_dir() / f"{dataset_id}.yaml"
             save_dataset_config(config, config_path)
             console.print(f"  [green]Saved to {config_path}[/green]")

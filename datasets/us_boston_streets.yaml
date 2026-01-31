@@ -11,16 +11,12 @@ fetch:
   name_column: STREETNAME
   class_column: CLASS
   class_mapping:
-    1: motorway
-    2: primary
-    3: primary
-    4: tertiary
-    5: residential
-    6: service
-    '4': primary
-    '3': primary
-    '5': residential
+    '1': motorway
     '2': primary
+    '3': primary
+    '4': primary
+    '5': residential
+    '6': service
   bbox:
   - -71.19
   - 42.21

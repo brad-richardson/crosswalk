@@ -5,12 +5,12 @@ source features like names, physical attributes, and geometry.
 """
 
 from .predictor import (
-    ClassPredictionAnalysis,
-    LightweightClassPredictor,
     NAME_PATTERNS,
     OVERTURE_HIERARCHY,
     OVERTURE_TIERS,
     SOURCE_CLASS_KEYWORDS,
+    ClassPredictionAnalysis,
+    LightweightClassPredictor,
     analyze_predictions,
     analyze_source_class_mapping,
     format_prediction_analysis,

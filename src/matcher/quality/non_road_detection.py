@@ -11,12 +11,10 @@ This module provides detection strategies to identify these features.
 
 import math
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-from loguru import logger
 from shapely.geometry import LineString, Point, Polygon
 
 

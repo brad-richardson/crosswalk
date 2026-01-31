@@ -10,14 +10,11 @@ fetch:
   name_column: Name
   class_column: TrailType
   class_mapping:
-    Bike Only: cycleway
-    Parkway: path
-    Regional: path
-    Local: footway
-    Nature: path
-    Golf Course: path
+    bike only: cycleway
     parkway: footway
     regional: cycleway
+    local: footway
+    nature: path
     golf course: path
   bbox:
   - -96.9

@@ -14,9 +14,9 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from ..features.semantic import TRAFFIC_TIERS, get_traffic_tier
+from ..features.semantic import get_traffic_tier
 from ..labeling.geometry_store import GeometryStore
-from ..labeling.label_store import DEFAULT_LABELS_DIR, LabelStore
+from ..labeling.label_store import DEFAULT_LABELS_DIR
 
 
 @dataclass
@@ -441,14 +441,14 @@ def format_analysis_report(report: ClassAnalysisReport) -> str:
             pair = (v["ref_class"] or "unknown", v["target_class"] or "unknown")
             class_pair_counts[pair] = class_pair_counts.get(pair, 0) + 1
 
-        for (ref_cls, tgt_cls), count in sorted(
-            class_pair_counts.items(), key=lambda x: -x[1]
-        )[:10]:
+        for (ref_cls, tgt_cls), count in sorted(class_pair_counts.items(), key=lambda x: -x[1])[
+            :10
+        ]:
             lines.append(f"  - {ref_cls} -> {tgt_cls}: {count} pairs")
     lines.append("")
 
     # Low similarity matches
-    lines.append(f"Low Similarity Matches (class_similarity < 0.3):")
+    lines.append("Low Similarity Matches (class_similarity < 0.3):")
     lines.append(
         f"  {report.low_similarity_match_count} pairs where class differs but humans labeled match"
     )
@@ -456,7 +456,7 @@ def format_analysis_report(report: ClassAnalysisReport) -> str:
     lines.append("")
 
     # High similarity no-matches
-    lines.append(f"High Similarity No-Matches (class_similarity > 0.8):")
+    lines.append("High Similarity No-Matches (class_similarity > 0.8):")
     lines.append(
         f"  {report.high_similarity_no_match_count} pairs with similar classes labeled no_match"
     )

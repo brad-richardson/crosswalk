@@ -11,14 +11,12 @@ fetch:
   name_column: roadnamebase
   class_column: functionhierarchy
   class_mapping:
-    1: motorway
-    2: primary
-    3: secondary
-    4: tertiary
-    5: tertiary
-    6: residential
-    '6': residential
+    '1': motorway
+    '2': primary
+    '3': secondary
+    '4': tertiary
     '5': tertiary
+    '6': residential
   bbox:
   - 150.85
   - -34.15

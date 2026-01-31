@@ -48,7 +48,9 @@ class FetchConfig(BaseModel):
     source_crs: str | None = None  # Source data CRS if different (e.g., "EPSG:5179")
     encoding: str | None = None  # File encoding if non-UTF8 (e.g., "EUC-KR")
     # Non-road feature detection
-    non_road_type_codes: list[str] | None = None  # Type codes to filter as non-roads (e.g., ['PC', 'PQ'])
+    non_road_type_codes: list[str] | None = (
+        None  # Type codes to filter as non-roads (e.g., ['PC', 'PQ'])
+    )
     filter_closed_loops: bool = False  # Enable geometry-based closed loop filtering
 
 

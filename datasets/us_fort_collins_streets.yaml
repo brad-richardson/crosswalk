@@ -10,19 +10,15 @@ fetch:
   name_column: STRNAME
   class_column: STREETTYPE
   class_mapping:
-    INTERSTATE: motorway
-    ARTERIAL: primary
-    ARTERIAL MAJOR: primary
-    HIGHWAY: primary
-    HIGHWAY DIVIDED: primary
-    COLLECTOR: tertiary
-    LOCAL: residential
-    RAMP: motorway_link
-    ROUNDABOUT: tertiary
-    ALLEY: service
+    interstate: motorway
+    arterial: residential
+    arterial major: primary
+    highway: primary
+    highway divided: primary
     collector: residential
     local: residential
-    arterial: residential
+    ramp: motorway_link
+    roundabout: tertiary
     alley: residential
   bbox:
   - -105.15
