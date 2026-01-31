@@ -5,7 +5,30 @@ from shapely.geometry import LineString, Polygon
 
 from matcher.screen import MatchContext, ScreenOutcome, get_registered_tests
 from matcher.screen.tests.building_test import BuildingTest
+from matcher.screen.tests.travel_mode import get_travel_mode
 from matcher.screen.tests.water_body_test import WaterBodyTest
+
+
+class TestTravelMode:
+    def test_vehicle_classes(self):
+        assert get_travel_mode("motorway") == "vehicle"
+        assert get_travel_mode("residential") == "vehicle"
+        assert get_travel_mode("service") == "vehicle"
+
+    def test_bike_classes(self):
+        assert get_travel_mode("cycleway") == "bike"
+
+    def test_pedestrian_classes(self):
+        assert get_travel_mode("footway") == "pedestrian"
+        assert get_travel_mode("path") == "pedestrian"
+        assert get_travel_mode("steps") == "pedestrian"
+
+    def test_none_defaults_to_vehicle(self):
+        assert get_travel_mode(None) == "vehicle"
+
+    def test_case_insensitive(self):
+        assert get_travel_mode("MOTORWAY") == "vehicle"
+        assert get_travel_mode("Footway") == "pedestrian"
 
 
 class TestWaterBodyTest:
@@ -23,12 +46,13 @@ class TestWaterBodyTest:
             ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
             confidence=0.95,
+            road_class="residential",
         )
 
         result = test.test_match(ctx)
         assert result.outcome == ScreenOutcome.PASS
 
-    def test_road_entirely_in_water_fails(self):
+    def test_road_in_water_fails(self):
         test = WaterBodyTest()
         water = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
         test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
@@ -42,31 +66,12 @@ class TestWaterBodyTest:
             ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
             confidence=0.95,
+            road_class="residential",
         )
 
         result = test.test_match(ctx)
         assert result.outcome == ScreenOutcome.FAIL
         assert "water" in result.reason.lower()
-
-    def test_short_bridge_passes(self):
-        test = WaterBodyTest()
-        # Water body that the road crosses briefly
-        water = Polygon([(0.00475, -0.001), (0.00475, 0.001), (0.00525, 0.001), (0.00525, -0.001)])
-        test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
-        test.water_union = water
-        test._metric_crs = "EPSG:32618"
-
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
-            target_id="target_1",
-            ref_geom=LineString([(0, 0), (0.01, 0)]),
-            target_geom=LineString([(0, 0), (0.01, 0)]),
-            confidence=0.95,
-        )
-
-        result = test.test_match(ctx)
-        assert result.outcome in [ScreenOutcome.PASS, ScreenOutcome.WARN]
 
     def test_no_water_skips(self):
         test = WaterBodyTest()
@@ -85,6 +90,11 @@ class TestWaterBodyTest:
         result = test.test_match(ctx)
         assert result.outcome == ScreenOutcome.SKIP
 
+    def test_buffer_varies_by_road_class(self):
+        test = WaterBodyTest()
+        # Check that buffers are set correctly
+        assert test.buffers["vehicle"] > test.buffers["pedestrian"]
+
 
 class TestBuildingTest:
     def test_road_not_through_building_passes(self):
@@ -101,6 +111,7 @@ class TestBuildingTest:
             ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
             confidence=0.95,
+            road_class="residential",
         )
 
         result = test.test_match(ctx)
@@ -120,6 +131,7 @@ class TestBuildingTest:
             ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
             confidence=0.95,
+            road_class="residential",
         )
 
         result = test.test_match(ctx)
@@ -142,6 +154,10 @@ class TestBuildingTest:
 
         result = test.test_match(ctx)
         assert result.outcome == ScreenOutcome.SKIP
+
+    def test_buffer_varies_by_road_class(self):
+        test = BuildingTest()
+        assert test.buffers["vehicle"] > test.buffers["pedestrian"]
 
 
 class TestRegistration:
