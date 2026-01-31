@@ -1205,8 +1205,8 @@ def export_agent_labels(
                         ),
                         axis=1,
                     )
-            except Exception:
-                pass
+            except (yaml.YAMLError, KeyError, TypeError) as e:
+                console.print(f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]")
 
         # If no dataset column, try to infer from batch name or mark as unknown
         if "dataset" not in df.columns:
