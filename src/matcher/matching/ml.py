@@ -31,7 +31,7 @@ import pandas as pd
 from loguru import logger
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from sklearn.model_selection import GroupShuffleSplit, cross_val_score
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, cross_val_score
 
 from ..config import (
     DEFAULT_TOPOLOGY_FEATURES,
@@ -833,9 +833,14 @@ class MLMatcher:
         if len(X_test) > 0:
             y_pred = self.model.predict(X_test)
 
-            # Cross-validation score (need to impute full X for this)
+            # Cross-validation score with segment-aware folding to prevent data leakage
+            # (pairs sharing a segment must stay in the same fold)
             X_imputed = self._impute_missing(X.copy())
-            cv_scores = cross_val_score(self.model, X_imputed, y, cv=5, scoring="f1_weighted")
+            groups = create_segment_groups(df)
+            gkf = GroupKFold(n_splits=5)
+            cv_scores = cross_val_score(
+                self.model, X_imputed, y, cv=gkf, groups=groups, scoring="f1_weighted"
+            )
 
             results.update(
                 {
