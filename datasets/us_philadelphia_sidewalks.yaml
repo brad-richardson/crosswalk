@@ -22,6 +22,7 @@ fetch:
     BAR_PAIRS: footway
     DASHED: footway
     UNKNOWN: footway
+    footway: footway
   subclass_column: feat_type
   subclass_mapping:
     PATH: sidewalk

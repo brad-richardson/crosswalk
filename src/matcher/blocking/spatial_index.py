@@ -21,6 +21,7 @@ from shapely import LineString
 from shapely.strtree import STRtree
 
 from ..config import NAMES_COLUMN, settings
+from ..features.semantic import get_traffic_tier
 
 
 def _create_local_projection_crs(gdf: gpd.GeoDataFrame) -> CRS | None:
@@ -186,6 +187,65 @@ class CandidateBatch:
         id_arr_bytes = self.ref_ids.nbytes + self.target_ids.nbytes
         id_content_bytes = len(self) * 50 * 2  # Estimated string content
         return (arr_bytes + id_arr_bytes + id_content_bytes) / (1024 * 1024)
+
+
+def filter_tier_incompatible(
+    candidates: CandidateBatch,
+    ref_classes: dict[str, str | None],
+    target_classes: dict[str, str | None],
+) -> CandidateBatch:
+    """Remove vehicle↔pedestrian candidate pairs (hard blocking).
+
+    This is an opt-in filter that can be enabled per-dataset to prevent
+    matching residential roads with sidewalks, footways, etc.
+
+    Args:
+        candidates: CandidateBatch to filter
+        ref_classes: Dict mapping ref_id -> road class
+        target_classes: Dict mapping target_id -> road class
+
+    Returns:
+        Filtered CandidateBatch with incompatible pairs removed
+    """
+    if len(candidates) == 0:
+        return candidates
+
+    # Build mask for compatible pairs
+    keep_mask = np.ones(len(candidates), dtype=bool)
+
+    for i in range(len(candidates)):
+        ref_id = candidates.ref_ids[i]
+        target_id = candidates.target_ids[i]
+
+        ref_class = ref_classes.get(str(ref_id))
+        target_class = target_classes.get(str(target_id))
+
+        ref_tier = get_traffic_tier(ref_class)
+        target_tier = get_traffic_tier(target_class)
+
+        # Block vehicle↔pedestrian pairs
+        if ref_tier is not None and target_tier is not None:
+            if {ref_tier, target_tier} == {"vehicle", "pedestrian"}:
+                keep_mask[i] = False
+
+    # If all kept, return original
+    if keep_mask.all():
+        return candidates
+
+    # Filter to kept indices
+    kept_count = keep_mask.sum()
+    removed_count = len(candidates) - kept_count
+    logger.info(f"  Tier filter: removed {removed_count:,} vehicle↔pedestrian pairs")
+
+    return CandidateBatch(
+        ref_ids=candidates.ref_ids[keep_mask],
+        ref_idxs=candidates.ref_idxs[keep_mask],
+        target_ids=candidates.target_ids[keep_mask],
+        target_idxs=candidates.target_idxs[keep_mask],
+        distances=candidates.distances[keep_mask],
+        heading_diffs=candidates.heading_diffs[keep_mask],
+        length_ratios=candidates.length_ratios[keep_mask],
+    )
 
 
 def generate_candidates(

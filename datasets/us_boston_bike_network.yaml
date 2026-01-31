@@ -28,6 +28,8 @@ fetch:
     SLMTC: unknown
     PED: pedestrian
     WALK: footway
+    path: footway
+    cycleway: primary
   bbox:
   - -71.19
   - 42.21

@@ -107,8 +107,10 @@ FEATURE_COLUMNS = [
     "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
     "has_name_target",  # 1.0 if target has non-empty name, else 0.0
     "name_is_generic",  # 1.0 if either name matches generic pattern
-    # Semantic features - class (1)
+    # Semantic features - class (3)
     "class_similarity",
+    "same_traffic_tier",  # 1.0 if same tier, 0.0 otherwise, 0.5 if unknown
+    "tier_incompatible",  # 1.0 if vehicle↔pedestrian mismatch, 0.0 otherwise
     # Endpoint/connectivity (3) - direction-invariant
     "min_endpoint_proximity_m",  # Min of start/end proximities
     "max_endpoint_proximity_m",  # Max of start/end proximities
@@ -171,6 +173,8 @@ SEMANTIC_FEATURES = [
     "has_name_target",
     "name_is_generic",
     "class_similarity",
+    "same_traffic_tier",
+    "tier_incompatible",
     "name_numeric_match",
 ]
 
