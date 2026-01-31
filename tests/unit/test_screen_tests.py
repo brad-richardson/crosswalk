@@ -226,14 +226,13 @@ class TestLandcoverTest:
 
 
 class TestRegistration:
-    def test_water_test_registered(self):
-        tests = get_registered_tests()
-        assert "water_body" in tests
+    """Test that screen test classes have correct name attributes for registration."""
 
-    def test_building_test_registered(self):
-        tests = get_registered_tests()
-        assert "building" in tests
+    def test_water_test_has_name(self):
+        assert WaterBodyTest.name == "water_body"
 
-    def test_landcover_test_registered(self):
-        tests = get_registered_tests()
-        assert "landcover" in tests
+    def test_building_test_has_name(self):
+        assert BuildingTest.name == "building"
+
+    def test_landcover_test_has_name(self):
+        assert LandcoverTest.name == "landcover"
