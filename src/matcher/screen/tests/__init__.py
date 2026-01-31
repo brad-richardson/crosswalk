@@ -1,6 +1,6 @@
-"""Falsification tests for match validation.
+"""Screen tests for match validation.
 
-Import this module to register all built-in falsification tests.
+Import this module to register all built-in screen tests.
 """
 
 from .building_test import BuildingTest
