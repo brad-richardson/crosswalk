@@ -18,7 +18,7 @@ class QualityFingerprint:
     - Geometry: vertex density, invalid geometries
     - Topology: connectivity, dead ends, components
     - Attributes: name coverage, class distribution
-    - Falsification: results from falsification tests (if run)
+    - Falsification: results from screen tests (if run)
     """
 
     # Dataset identification
@@ -45,11 +45,11 @@ class QualityFingerprint:
     name_coverage_ratio: float = 0.0
     class_distribution: dict[str, int] = field(default_factory=dict)
 
-    # Falsification metrics (populated if falsification was run)
-    falsification_fail_count: int = 0
-    falsification_fail_rate: float = 0.0
-    falsification_warn_count: int = 0
-    falsification_warn_rate: float = 0.0
+    # Falsification metrics (populated if screen was run)
+    screen_fail_count: int = 0
+    screen_fail_rate: float = 0.0
+    screen_warn_count: int = 0
+    screen_warn_rate: float = 0.0
 
     # Additional metadata
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -71,10 +71,10 @@ class QualityFingerprint:
             "largest_component_ratio": round(self.largest_component_ratio, 4),
             "name_coverage_ratio": round(self.name_coverage_ratio, 4),
             "class_distribution": self.class_distribution,
-            "falsification_fail_count": self.falsification_fail_count,
-            "falsification_fail_rate": round(self.falsification_fail_rate, 4),
-            "falsification_warn_count": self.falsification_warn_count,
-            "falsification_warn_rate": round(self.falsification_warn_rate, 4),
+            "screen_fail_count": self.screen_fail_count,
+            "screen_fail_rate": round(self.screen_fail_rate, 4),
+            "screen_warn_count": self.screen_warn_count,
+            "screen_warn_rate": round(self.screen_warn_rate, 4),
             "metadata": self.metadata,
         }
 
@@ -103,9 +103,9 @@ class QualityFingerprint:
             largest_component_ratio=data.get("largest_component_ratio", 0.0),
             name_coverage_ratio=data.get("name_coverage_ratio", 0.0),
             class_distribution=data.get("class_distribution", {}),
-            falsification_fail_count=data.get("falsification_fail_count", 0),
-            falsification_fail_rate=data.get("falsification_fail_rate", 0.0),
-            falsification_warn_count=data.get("falsification_warn_count", 0),
-            falsification_warn_rate=data.get("falsification_warn_rate", 0.0),
+            screen_fail_count=data.get("screen_fail_count", 0),
+            screen_fail_rate=data.get("screen_fail_rate", 0.0),
+            screen_warn_count=data.get("screen_warn_count", 0),
+            screen_warn_rate=data.get("screen_warn_rate", 0.0),
             metadata=data.get("metadata", {}),
         )
