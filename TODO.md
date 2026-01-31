@@ -643,6 +643,29 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 ---
 
+## Validation & Screening
+
+### Screen Module (Pre-Match Filtering)
+- [x] `screen/` module scaffold
+- [x] Water body screen test
+- [x] Building footprint screen test
+- [x] Fringe detection screen test
+- [x] Screen runner + CLI command
+
+### Post-Integration Analysis
+- [x] Island detector (connected components)
+- [x] GPS drift detector (zigzag, spike, loop patterns)
+- [ ] Conflict detector (duplicate matches) - deferred
+- [x] Topology repair (snap endpoints, remove islands)
+
+### Quality Fingerprint
+- [x] QualityFingerprint dataclass
+- [x] Metric computations (vertex density, topology, coverage)
+- [x] JSON report generation
+- [x] CLI command
+
+---
+
 ## Implementation Priority Summary
 
 ### Medium Priority

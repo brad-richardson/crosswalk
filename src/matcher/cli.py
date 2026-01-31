@@ -3771,6 +3771,163 @@ def screen(
 
 
 @app.command()
+def quality(
+    data_path: Path = typer.Argument(
+        ...,
+        help="Path to GeoParquet file with road edges",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output path for JSON quality report",
+    ),
+    dataset_name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Dataset name (default: filename stem)",
+    ),
+    name_column: str | None = typer.Option(
+        None,
+        "--name-column",
+        help="Column containing road names (auto-detected if not specified)",
+    ),
+    class_column: str | None = typer.Option(
+        None,
+        "--class-column",
+        help="Column containing road class (auto-detected if not specified)",
+    ),
+):
+    """Generate a quality fingerprint for a road network dataset.
+
+    Computes comprehensive quality metrics including:
+    - Basic statistics (segment count, total length)
+    - Geometry metrics (vertex density, invalid geometries)
+    - Topology metrics (islands, dead ends, connectivity)
+    - Attribute metrics (name coverage, class distribution)
+
+    Examples:
+        matcher quality data/raw/streets.parquet -o quality.json
+        matcher quality integrated.parquet --name "Boston Streets"
+    """
+    from .quality import generate_quality_report, save_quality_report
+
+    console.print(f"[blue]Generating quality fingerprint for {data_path}[/blue]")
+
+    try:
+        fingerprint = generate_quality_report(
+            data_path=data_path,
+            dataset_name=dataset_name,
+            name_column=name_column,
+            class_column=class_column,
+        )
+
+        # Print summary
+        console.print("\n[bold]Quality Fingerprint:[/bold]")
+        console.print(f"  Dataset: {fingerprint.dataset_name}")
+        console.print(f"  Segments: {fingerprint.total_segments:,}")
+        console.print(f"  Total length: {fingerprint.total_length_m / 1000:.1f} km")
+        console.print(
+            f"  Vertex density: {fingerprint.vertex_density_mean:.4f} (±{fingerprint.vertex_density_std:.4f})"
+        )
+        console.print(f"  Invalid geometries: {fingerprint.invalid_geometry_count}")
+        console.print(f"  Connected components: {fingerprint.connected_components}")
+        console.print(f"  Largest component: {fingerprint.largest_component_ratio:.1%}")
+        console.print(f"  Islands: {fingerprint.island_count}")
+        console.print(
+            f"  Dead ends: {fingerprint.dead_end_count} ({fingerprint.dead_end_ratio:.1%})"
+        )
+        console.print(f"  Name coverage: {fingerprint.name_coverage_ratio:.1%}")
+
+        if fingerprint.class_distribution:
+            console.print("\n[bold]Class distribution:[/bold]")
+            for cls, count in list(fingerprint.class_distribution.items())[:10]:
+                console.print(f"  {cls}: {count:,}")
+
+        # Save report if requested
+        if output:
+            save_quality_report(fingerprint, output)
+            console.print(f"\n[green]Quality report saved to {output}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Quality analysis failed: {e}[/red]")
+        raise typer.Exit(1) from None
+
+
+@app.command()
+def repair(
+    data_path: Path = typer.Argument(
+        ...,
+        help="Path to GeoParquet file with road edges",
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Output path for repaired parquet file",
+    ),
+    snap_tolerance_m: float = typer.Option(
+        5.0,
+        "--snap-tolerance",
+        help="Tolerance in meters for endpoint snapping",
+    ),
+    remove_islands: bool = typer.Option(
+        True,
+        "--remove-islands/--keep-islands",
+        help="Remove critical-severity islands (single isolated segments)",
+    ),
+    id_column: str | None = typer.Option(
+        None,
+        "--id-column",
+        help="Column containing edge IDs (auto-detected if not specified)",
+    ),
+):
+    """Repair topology issues in a road network.
+
+    Performs two types of repairs:
+    - Snap near-miss endpoints within tolerance
+    - Remove isolated segments (critical-severity islands)
+
+    Examples:
+        matcher repair integrated.parquet -o repaired.parquet
+        matcher repair streets.parquet -o fixed.parquet --snap-tolerance 10.0
+        matcher repair data.parquet -o data.parquet --keep-islands
+    """
+    import geopandas as gpd
+
+    from .post_integration import repair_topology as _repair_topology
+
+    console.print(f"[blue]Repairing topology in {data_path}[/blue]")
+
+    try:
+        gdf = gpd.read_parquet(data_path)
+        console.print(f"  Loaded {len(gdf):,} edges")
+
+        repaired_gdf, result = _repair_topology(
+            gdf,
+            snap_tolerance_m=snap_tolerance_m,
+            remove_critical_islands=remove_islands,
+            id_column=id_column,
+        )
+
+        # Print summary
+        console.print("\n[bold]Repair Results:[/bold]")
+        console.print(f"  Edges snapped: {result.edges_snapped}")
+        console.print(f"  Edges removed: {result.edges_removed}")
+        console.print(f"  Output edges: {len(repaired_gdf):,}")
+
+        # Save result
+        output.parent.mkdir(parents=True, exist_ok=True)
+        repaired_gdf.to_parquet(output)
+        console.print(f"\n[green]Repaired data saved to {output}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Topology repair failed: {e}[/red]")
+        raise typer.Exit(1) from None
+
+
+@app.command()
 def version():
     """Show version information."""
     from . import __version__

@@ -73,6 +73,10 @@ class PipelineResult:
     bridge_file: Path
     unmatched_file: Path | None
 
+    # Screen test results (if run)
+    n_screen_failed: int | None = None
+    n_screen_warned: int | None = None
+
 
 def run_pipeline(
     reference_path: Path,
@@ -91,6 +95,8 @@ def run_pipeline(
     ref_class_column: str = CLASS_COLUMN,
     target_class_column: str = CLASS_COLUMN,
     n_jobs: int = -1,
+    run_screen: bool = False,
+    screen_tests: list[str] | None = None,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -107,6 +113,8 @@ def run_pipeline(
         target_name_column: Name column in target
         ref_class_column: Class column in reference
         target_class_column: Class column in target
+        run_screen: Whether to run screen tests after matching
+        screen_tests: Specific screen tests to run (None = all)
 
     Returns:
         PipelineResult with statistics
@@ -288,6 +296,13 @@ def run_pipeline(
         match_method=method,
     )
 
+    # Step 5.5: Optional screen tests (placeholder - not yet implemented)
+    n_screen_failed = None
+    n_screen_warned = None
+
+    if run_screen:
+        logger.warning("Screen tests on bridge files not yet implemented, skipping...")
+
     # Unmatched report
     # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
     # and should appear in unmatched.parquet so they can be labeled/reviewed.
@@ -315,6 +330,9 @@ def run_pipeline(
     logger.info(f"  Matched: {n_matched}")
     logger.info(f"  Review: {n_review}")
     logger.info(f"  Unmatched: {n_unmatched}")
+    if n_screen_failed is not None:
+        logger.info(f"  Screen failed: {n_screen_failed}")
+        logger.info(f"  Screen warned: {n_screen_warned}")
     logger.info("=" * 60)
 
     return PipelineResult(
@@ -326,6 +344,8 @@ def run_pipeline(
         n_unmatched=n_unmatched,
         bridge_file=output_path,
         unmatched_file=unmatched_path,
+        n_screen_failed=n_screen_failed,
+        n_screen_warned=n_screen_warned,
     )
 
 
