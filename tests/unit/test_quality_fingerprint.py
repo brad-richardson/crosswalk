@@ -89,7 +89,7 @@ class TestComputeQualityMetrics:
         edges = gpd.GeoDataFrame(
             {
                 "id": [1, 2, 3],
-                "name": ["Main St", "Oak Ave", None],
+                "names": ["Main St", "Oak Ave", None],  # Standardized column name
             },
             geometry=[
                 LineString([(0, 0), (0.001, 0)]),

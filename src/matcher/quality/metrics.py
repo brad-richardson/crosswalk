@@ -8,6 +8,7 @@ import numpy as np
 from loguru import logger
 from shapely.geometry import LineString
 
+from ..config import CLASS_COLUMN, NAMES_COLUMN
 from ..post_integration.constants import SNAP_TOLERANCE_M
 from ..post_integration.island_detector import detect_islands
 from .fingerprint import QualityFingerprint
@@ -57,11 +58,11 @@ def compute_quality_metrics(
     island_result = detect_islands(edges_gdf, snap_tolerance_m=snap_tolerance_m)
     dead_end_count, dead_end_ratio = _compute_dead_ends(edges_metric, snap_tolerance_m)
 
-    # Attribute metrics
-    name_col = name_column or _detect_name_column(edges_gdf)
+    # Attribute metrics (use standardized column names from fetch step)
+    name_col = name_column or NAMES_COLUMN
     name_coverage_ratio = _compute_name_coverage(edges_gdf, name_col)
 
-    class_col = class_column or _detect_class_column(edges_gdf)
+    class_col = class_column or CLASS_COLUMN
     class_distribution = _compute_class_distribution(edges_gdf, class_col)
 
     fingerprint = QualityFingerprint(
@@ -181,14 +182,6 @@ def _compute_dead_ends(
     return dead_end_count, dead_end_ratio
 
 
-def _detect_name_column(gdf: gpd.GeoDataFrame) -> str | None:
-    """Detect the name column in a GeoDataFrame."""
-    for col in ["name", "names", "STREET_NAME", "street_name", "NAME"]:
-        if col in gdf.columns:
-            return col
-    return None
-
-
 def _compute_name_coverage(
     gdf: gpd.GeoDataFrame,
     name_column: str | None,
@@ -220,14 +213,6 @@ def _compute_name_coverage(
                 named_count += 1
 
     return named_count / len(gdf) if len(gdf) > 0 else 0.0
-
-
-def _detect_class_column(gdf: gpd.GeoDataFrame) -> str | None:
-    """Detect the class column in a GeoDataFrame."""
-    for col in ["class", "road_class", "highway", "ROAD_TYPE", "road_type"]:
-        if col in gdf.columns:
-            return col
-    return None
 
 
 def _compute_class_distribution(
