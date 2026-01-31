@@ -400,6 +400,38 @@ Considerations:
 - Often lack names entirely
 - May benefit from geometry-only model approach
 
+### Bike Lane vs Cycleway Classification
+
+**Priority:** Medium
+**Status:** Investigation needed
+**Related PR:** #111
+
+**Problem**: The `us_boston_bike_network` dataset's source classification uses "cycleway" to mean "bike lane on a road" rather than "separate cycleway path". This causes the class predictor to map `cycleway -> primary` (the road class the bike lane is on).
+
+**Evidence** (from labeled matches):
+```
+cycleway -> primary    | Charles Street
+cycleway -> primary    | Stuart Street
+cycleway -> secondary  | Commercial Street
+path     -> footway    | Paul Revere Park
+path     -> cycleway   | North Bank Shared-Use Bridge
+```
+
+**The issue**: Source classification describes *bike infrastructure type*, not *road class*:
+- `cycleway` = bike lane painted on a vehicular road
+- `path` = shared-use path (separate from roads)
+
+**Potential solutions**:
+1. **Add bike_infrastructure attribute**: Store infrastructure type separately from road class
+2. **Use subclass**: Map to road class but preserve original as subclass
+3. **Dataset-specific handling**: Don't use class_mapping for bike network datasets
+4. **Dual classification**: Track both "road class" and "bike facility type"
+
+**Next steps**:
+- Analyze how other bike network datasets classify segments
+- Determine if this is Boston-specific or a general pattern
+- Design schema that captures both road class and bike infrastructure type
+
 ### Improve Geometry-Only Model
 
 **Priority:** Medium
