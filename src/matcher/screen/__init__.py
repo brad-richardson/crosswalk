@@ -14,6 +14,12 @@ from .base import (
     get_test,
     register_test,
 )
+from .context import (
+    fetch_overture_buildings,
+    fetch_overture_water,
+    get_building_union,
+    get_water_union,
+)
 
 __all__ = [
     # Base classes
@@ -25,4 +31,9 @@ __all__ = [
     "register_test",
     "get_registered_tests",
     "get_test",
+    # Context fetchers
+    "fetch_overture_water",
+    "get_water_union",
+    "fetch_overture_buildings",
+    "get_building_union",
 ]
