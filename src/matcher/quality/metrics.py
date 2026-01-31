@@ -8,6 +8,7 @@ import numpy as np
 from loguru import logger
 from shapely.geometry import LineString
 
+from ..post_integration.constants import SNAP_TOLERANCE_M
 from ..post_integration.island_detector import detect_islands
 from .fingerprint import QualityFingerprint
 
@@ -17,7 +18,7 @@ def compute_quality_metrics(
     dataset_name: str,
     name_column: str | None = None,
     class_column: str | None = None,
-    snap_tolerance_m: float = 5.0,
+    snap_tolerance_m: float = SNAP_TOLERANCE_M,
 ) -> QualityFingerprint:
     """Compute comprehensive quality metrics for a road network dataset.
 

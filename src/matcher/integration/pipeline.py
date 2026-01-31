@@ -16,6 +16,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..config import settings
+from ..post_integration.constants import SNAP_TOLERANCE_M
 from ..resolution.bridge import load_bridge_file
 from ..screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
 from ..screen.tests.fringe_test import filter_fringe_segments
@@ -60,7 +61,7 @@ def run_integration_pipeline(
     target_id_column: str = "local_id",
     run_post_analysis: bool = False,
     repair_topology: bool = False,
-    snap_tolerance_m: float = 5.0,
+    snap_tolerance_m: float = SNAP_TOLERANCE_M,
 ) -> IntegrationResult:
     """Run the full integration pipeline.
 
