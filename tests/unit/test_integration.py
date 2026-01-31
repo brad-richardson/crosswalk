@@ -22,6 +22,7 @@ from matcher.integration import (
     filter_fringe_segments,
     filter_short_segments,
 )
+from matcher.screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
 from matcher.topology.planarize import planarize
 
 
@@ -339,8 +340,6 @@ class TestFringeDetection:
             crs="EPSG:32610",
         )
 
-        coverage = compute_reference_coverage(reference, buffer_distance_m=30.0)
-
         # Target inside coverage (parallel to reference, within buffer)
         inside = gpd.GeoDataFrame(
             {
@@ -359,13 +358,23 @@ class TestFringeDetection:
             crs="EPSG:32610",
         )
 
-        # Test inside segment - should be valid (inside_length >= 5m)
-        valid, fringe = filter_fringe_segments(inside, coverage, min_inside_length_m=5.0)
+        # Test inside segment - should be valid (inside_length >= min threshold)
+        valid, fringe = filter_fringe_segments(
+            inside,
+            reference,
+            buffer_distance_m=FRINGE_BUFFER_M,
+            min_inside_length_m=FRINGE_MIN_INSIDE_LENGTH_M,
+        )
         assert len(valid) == 1
         assert len(fringe) == 0
 
         # Test outside segment - should be fringe
-        valid, fringe = filter_fringe_segments(outside, coverage, min_inside_length_m=5.0)
+        valid, fringe = filter_fringe_segments(
+            outside,
+            reference,
+            buffer_distance_m=FRINGE_BUFFER_M,
+            min_inside_length_m=FRINGE_MIN_INSIDE_LENGTH_M,
+        )
         assert len(valid) == 0
         assert len(fringe) == 1
         assert fringe.iloc[0]["unmatched_reason"] == "outside_reference_coverage"

@@ -1,6 +1,11 @@
 """Integration pipeline orchestration.
 
 Main entry point for running the network integration pipeline.
+
+Pipeline phases:
+1. Pre-screening: Filter targets using screen module (fringe, water, buildings)
+2. Integration: Combine reference + targets, detect connectivity
+3. Post-integration: Island detection, GPS drift analysis (via post_integration module)
 """
 
 from dataclasses import dataclass
@@ -12,6 +17,8 @@ from loguru import logger
 
 from ..config import settings
 from ..resolution.bridge import load_bridge_file
+from ..screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
+from ..screen.tests.fringe_test import filter_fringe_segments
 from .combiner import combine_networks, separate_matched_unmatched
 from .filters import detect_near_duplicates, filter_short_segments
 from .orphan_detector import detect_orphans_by_proximity
@@ -45,8 +52,8 @@ def run_integration_pipeline(
     min_merge_length_m: float = 20.0,
     net_new_buffer_m: float = 5.0,
     max_hops: int = 2,
-    fringe_buffer_m: float = 50.0,
-    enable_fringe_detection: bool = True,
+    fringe_buffer_m: float = FRINGE_BUFFER_M,
+    enable_fringe_screening: bool = True,
     transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
     ref_id_column: str = "id",
@@ -54,12 +61,16 @@ def run_integration_pipeline(
 ) -> IntegrationResult:
     """Run the full integration pipeline.
 
-    Pipeline stages:
-    1. Load reference network and target datasets
-    2. Apply optional filters (min length, near-duplicates)
-    3. Combine reference + targets with provenance
-    4. Detect orphans by endpoint proximity (no planarization)
-    5. Write outputs
+    Pipeline phases:
+    1. Load: Load reference network and target datasets
+    2. Pre-screen: Apply filters (min length, near-duplicates, fringe detection)
+    3. Combine: Merge reference + targets with provenance
+    4. Connectivity: Detect orphans by endpoint proximity
+    5. Output: Write results
+
+    Pre-screening (fringe detection) is handled by the screen module before
+    combining. This separates "should this segment be considered?" from
+    "is this segment connected to the network?".
 
     Args:
         reference_path: Path to reference network (Overture segments parquet)
@@ -73,12 +84,12 @@ def run_integration_pipeline(
         min_merge_length_m: Minimum net-new length (meters) to merge a segment.
             Connected segments with less than this much new coverage are orphaned.
         net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation.
-            Segments within this buffer are considered "covered" by reference. Default 10m.
+            Segments within this buffer are considered "covered" by reference.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             Segments connected via other target segments are included up to this depth.
         fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
-            detection. Segments outside this area are marked as fringe. Default 50m.
-        enable_fringe_detection: Whether to filter fringe segments. Default True.
+            screening. Segments outside this area are filtered before combining.
+        enable_fringe_screening: Whether to pre-screen fringe segments. Default True.
         transitive_tolerance_m: Tolerance (meters) for transitive connections between
             target segments. Defaults to 2x connection_tolerance_m since trails often
             don't share exact endpoints. Set to connection_tolerance_m for strict mode.
@@ -146,6 +157,17 @@ def run_integration_pipeline(
             if len(duplicates) > 0:
                 logger.info(f"    Detected {len(duplicates)} potential near-duplicates")
 
+        # Pre-screen fringe segments (outside reference coverage)
+        if enable_fringe_screening and len(unmatched) > 0 and len(reference) > 0:
+            unmatched, fringe_segments = filter_fringe_segments(
+                target_edges=unmatched,
+                reference_edges=reference,
+                buffer_distance_m=fringe_buffer_m,
+                min_inside_length_m=FRINGE_MIN_INSIDE_LENGTH_M,
+            )
+            if len(fringe_segments) > 0:
+                logger.info(f"    Pre-screened {len(fringe_segments)} fringe segments")
+
         target_inputs.append(
             TargetInput(
                 name=config.name,
@@ -172,7 +194,8 @@ def run_integration_pipeline(
     stats.dropped_overlaps = len(dropped_overlaps)
     stats.total_edges = len(combined_gdf)
 
-    # Step 4: Detect orphans by endpoint proximity (no planarization)
+    # Step 4: Detect orphans by endpoint proximity (connectivity analysis)
+    # Note: Fringe detection is now done in pre-screening step above
     logger.info("Step 4: Detecting orphans by endpoint proximity...")
     main_edges, orphan_edges, net_new_edges, orphan_stats = detect_orphans_by_proximity(
         combined_gdf,
@@ -180,8 +203,6 @@ def run_integration_pipeline(
         min_merge_length_m=min_merge_length_m,
         net_new_buffer_m=net_new_buffer_m,
         max_hops=max_hops,
-        fringe_buffer_m=fringe_buffer_m,
-        enable_fringe_detection=enable_fringe_detection,
         transitive_tolerance_m=transitive_tolerance_m,
         debug_connectivity=debug_connectivity,
     )

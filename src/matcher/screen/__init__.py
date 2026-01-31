@@ -23,7 +23,14 @@ from .context import (
     get_water_union,
 )
 from .runner import ScreenReport, run_screen
-from .tests import BuildingTest, LandcoverTest, WaterBodyTest
+from .tests import (
+    BuildingTest,
+    FringeTest,
+    LandcoverTest,
+    WaterBodyTest,
+    compute_reference_coverage,
+    filter_fringe_segments,
+)
 
 __all__ = [
     # Base classes
@@ -46,6 +53,10 @@ __all__ = [
     "WaterBodyTest",
     "BuildingTest",
     "LandcoverTest",
+    "FringeTest",
+    # Fringe detection utilities
+    "compute_reference_coverage",
+    "filter_fringe_segments",
     # Runner
     "run_screen",
     "ScreenReport",
