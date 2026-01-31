@@ -3668,23 +3668,21 @@ def benchmark(
 
 @app.command()
 def screen(
-    bridge_path: Path = typer.Argument(
-        ...,
-        help="Path to bridge parquet file with matches",
-    ),
-    ref_path: Path = typer.Argument(
-        ...,
-        help="Path to reference parquet file (Overture)",
-    ),
     target_path: Path = typer.Argument(
         ...,
-        help="Path to target parquet file",
+        help="Path to target parquet file to screen",
+    ),
+    bridge_path: Path | None = typer.Option(
+        None,
+        "--bridge",
+        "-b",
+        help="Path to bridge parquet file (screens only unmatched targets if provided)",
     ),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
-        help="Output path for filtered bridge file (default: adds _screened suffix)",
+        help="Output path for valid candidates (default: adds _screened suffix)",
     ),
     tests: list[str] | None = typer.Option(
         None,
@@ -3695,7 +3693,7 @@ def screen(
     report_only: bool = typer.Option(
         False,
         "--report-only",
-        help="Generate report without modifying bridge file",
+        help="Generate report without outputting candidates",
     ),
     report_output: Path | None = typer.Option(
         None,
@@ -3704,16 +3702,19 @@ def screen(
         help="Output path for JSON report",
     ),
 ):
-    """Run screen tests on a bridge file.
+    """Screen target segments for valid network additions.
 
-    Screen tests detect invalid matches that slip through ML scoring
-    by checking against external context (water bodies, buildings, etc.).
-    Matches that fail screening are removed from the output.
+    Validates unmatched target segments using external context (water bodies,
+    buildings, etc.) to identify which segments are valid candidates for
+    addition to the network.
+
+    If a bridge file is provided, only screens unmatched targets (those not
+    in the bridge file). Otherwise screens all targets.
 
     Examples:
-        matcher screen bridge.parquet ref.parquet target.parquet
-        matcher screen bridge.parquet ref.parquet target.parquet -t water_body
-        matcher screen bridge.parquet ref.parquet target.parquet --report-only
+        matcher screen target.parquet
+        matcher screen target.parquet -b bridge.parquet
+        matcher screen target.parquet -t water_body --report-only
     """
     import json
 
@@ -3721,15 +3722,16 @@ def screen(
 
     # Determine output path
     if output is None and not report_only:
-        output = bridge_path.parent / f"{bridge_path.stem}_screened.parquet"
+        output = target_path.parent / f"{target_path.stem}_screened.parquet"
 
-    console.print(f"[blue]Running screen tests on {bridge_path}[/blue]")
+    console.print(f"[blue]Running screen tests on {target_path}[/blue]")
+    if bridge_path:
+        console.print(f"[blue]Filtering to unmatched targets using {bridge_path}[/blue]")
 
     try:
-        filtered_gdf, report = run_screen(
-            bridge_path=bridge_path,
-            ref_path=ref_path,
+        valid_gdf, report = run_screen(
             target_path=target_path,
+            bridge_path=bridge_path,
             test_names=tests,
             output_path=output,
             report_only=report_only,
@@ -3737,8 +3739,8 @@ def screen(
 
         # Print summary
         console.print("\n[bold]Screen Results:[/bold]")
-        console.print(f"  Total matches: {report.total_matches}")
-        console.print(f"  Passed: [green]{report.passed}[/green]")
+        console.print(f"  Total candidates: {report.total_candidates}")
+        console.print(f"  Passed: [green]{report.passed}[/green] ({report.pass_rate:.2%})")
         console.print(f"  Failed: [red]{report.failed}[/red] ({report.fail_rate:.2%})")
         console.print(f"  Warned: [yellow]{report.warned}[/yellow] ({report.warn_rate:.2%})")
 
@@ -3759,7 +3761,7 @@ def screen(
             console.print(f"\n[green]Report saved to {report_output}[/green]")
 
         if output and not report_only:
-            console.print(f"\n[green]Filtered bridge file saved to {output}[/green]")
+            console.print(f"\n[green]Valid candidates saved to {output}[/green]")
 
     except Exception as e:
         console.print(f"[red]Screen tests failed: {e}[/red]")

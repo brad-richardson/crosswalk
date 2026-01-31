@@ -1,12 +1,13 @@
-"""Screen framework for post-scoring match validation.
+"""Screen framework for validating unmatched target segments.
 
-This module provides a pluggable test framework for validating matches
-using external context (water bodies, buildings, etc.). Screen tests can
-provide both positive and negative signals to confirm or rule out matches.
+This module provides a pluggable test framework for screening unmatched
+target segments using external context (water bodies, buildings, etc.).
+Screen tests identify segments that should not be added to the network.
 """
 
 from .base import (
-    MatchContext,
+    CandidateContext,
+    MatchContext,  # Backwards compatibility alias
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -30,7 +31,8 @@ __all__ = [
     "ScreenOutcome",
     "ScreenResult",
     "ScreenTest",
-    "MatchContext",
+    "CandidateContext",
+    "MatchContext",  # Backwards compatibility alias
     # Registry
     "register_test",
     "get_registered_tests",

@@ -1,7 +1,6 @@
 """Building footprint screen test.
 
-Detects matches where the target road passes through or too close to
-building footprints.
+Detects target segments that pass through or too close to building footprints.
 """
 
 import geopandas as gpd
@@ -9,7 +8,7 @@ from loguru import logger
 from shapely.geometry import MultiPolygon, Polygon
 
 from ..base import (
-    MatchContext,
+    CandidateContext,
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -22,7 +21,7 @@ from .travel_mode import get_travel_mode
 
 @register_test
 class BuildingTest(ScreenTest):
-    """Test if a match's target geometry passes through buildings.
+    """Test if a candidate segment passes through buildings.
 
     Buffers building footprints based on road type - vehicle roads need
     more clearance than pedestrian paths. Buffers are pre-computed in
@@ -64,8 +63,8 @@ class BuildingTest(ScreenTest):
 
         logger.info(f"BuildingTest prepared with {len(self.building_gdf)} buildings")
 
-    def test_match(self, ctx: MatchContext) -> ScreenResult:
-        """Test if the target geometry intersects buffered buildings."""
+    def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
+        """Test if the candidate geometry intersects buffered buildings."""
         if self.building_union is None:
             return ScreenResult(
                 outcome=ScreenOutcome.SKIP,

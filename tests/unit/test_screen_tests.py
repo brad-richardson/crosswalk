@@ -3,7 +3,7 @@
 import geopandas as gpd
 from shapely.geometry import LineString, Polygon
 
-from matcher.screen import MatchContext, ScreenOutcome
+from matcher.screen import CandidateContext, ScreenOutcome
 from matcher.screen.tests.building_test import BuildingTest
 from matcher.screen.tests.landcover_test import LandcoverTest
 from matcher.screen.tests.travel_mode import get_travel_mode
@@ -50,17 +50,13 @@ class TestWaterBodyTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(water, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.PASS
 
     def test_road_in_water_fails(self):
@@ -71,17 +67,13 @@ class TestWaterBodyTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(water, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.FAIL
         assert "water" in result.reason.lower()
 
@@ -90,16 +82,12 @@ class TestWaterBodyTest:
         test.water_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
         test.water_union = None
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.SKIP
 
     def test_buffer_varies_by_road_class(self):
@@ -116,17 +104,13 @@ class TestBuildingTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.PASS
 
     def test_road_through_building_fails(self):
@@ -137,17 +121,13 @@ class TestBuildingTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.FAIL
         assert "building" in result.reason.lower()
 
@@ -156,16 +136,12 @@ class TestBuildingTest:
         test.building_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
         test.building_union = None
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.SKIP
 
     def test_buffer_varies_by_road_class(self):
@@ -182,17 +158,13 @@ class TestLandcoverTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.PASS
 
     def test_road_through_wetland_fails(self):
@@ -203,17 +175,13 @@ class TestLandcoverTest:
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
             road_class="residential",
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.FAIL
         assert "landcover" in result.reason.lower()
 
@@ -222,16 +190,12 @@ class TestLandcoverTest:
         test.landcover_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
         test.landcover_union = None
 
-        ctx = MatchContext(
-            match_id="1",
-            ref_id="ref_1",
+        ctx = CandidateContext(
             target_id="target_1",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0), (1, 1)]),
-            confidence=0.95,
         )
 
-        result = test.test_match(ctx)
+        result = test.test_candidate(ctx)
         assert result.outcome == ScreenOutcome.SKIP
 
     def test_buffer_varies_by_road_class(self):

@@ -1,7 +1,7 @@
-"""Screen runner - orchestrates screen tests on match results.
+"""Screen runner - validates unmatched target segments.
 
-Runs registered screen tests on bridge file matches and outputs
-filtered results with a detailed report.
+Runs registered screen tests on unmatched target segments to identify
+valid candidates for addition to the network.
 """
 
 from dataclasses import dataclass, field
@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
-import pandas as pd
 from loguru import logger
 
 # Import tests to register them
 from . import tests as _tests  # noqa: F401
 from .base import (
-    MatchContext,
+    CandidateContext,
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -26,9 +25,9 @@ from .base import (
 
 @dataclass
 class ScreenReport:
-    """Report from running screen tests."""
+    """Report from running screen tests on unmatched candidates."""
 
-    total_matches: int
+    total_candidates: int
     passed: int
     failed: int
     warned: int
@@ -37,87 +36,114 @@ class ScreenReport:
     # Per-test breakdown
     test_results: dict[str, dict[str, int]] = field(default_factory=dict)
 
-    # Details of failed matches
-    failed_matches: list[dict[str, Any]] = field(default_factory=list)
+    # Details of failed candidates
+    failed_candidates: list[dict[str, Any]] = field(default_factory=list)
 
-    # Details of warned matches
-    warned_matches: list[dict[str, Any]] = field(default_factory=list)
+    # Details of warned candidates
+    warned_candidates: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def fail_rate(self) -> float:
-        """Percentage of matches that failed."""
-        if self.total_matches == 0:
+        """Percentage of candidates that failed."""
+        if self.total_candidates == 0:
             return 0.0
-        return self.failed / self.total_matches
+        return self.failed / self.total_candidates
 
     @property
     def warn_rate(self) -> float:
-        """Percentage of matches that warned."""
-        if self.total_matches == 0:
+        """Percentage of candidates that warned."""
+        if self.total_candidates == 0:
             return 0.0
-        return self.warned / self.total_matches
+        return self.warned / self.total_candidates
+
+    @property
+    def pass_rate(self) -> float:
+        """Percentage of candidates that passed (valid for addition)."""
+        if self.total_candidates == 0:
+            return 0.0
+        return self.passed / self.total_candidates
 
     def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary for JSON serialization."""
         return {
-            "total_matches": self.total_matches,
+            "total_candidates": self.total_candidates,
             "passed": self.passed,
             "failed": self.failed,
             "warned": self.warned,
             "skipped": self.skipped,
+            "pass_rate": round(self.pass_rate, 4),
             "fail_rate": round(self.fail_rate, 4),
             "warn_rate": round(self.warn_rate, 4),
             "test_results": self.test_results,
-            "failed_matches": self.failed_matches,
-            "warned_matches": self.warned_matches,
+            "failed_candidates": self.failed_candidates,
+            "warned_candidates": self.warned_candidates,
         }
 
 
 def run_screen(
-    bridge_path: Path,
-    ref_path: Path,
     target_path: Path,
+    bridge_path: Path | None = None,
     test_names: list[str] | None = None,
     output_path: Path | None = None,
     report_only: bool = False,
 ) -> tuple[gpd.GeoDataFrame | None, ScreenReport]:
-    """Run screen tests on a bridge file.
+    """Run screen tests on unmatched target segments.
 
-    Loads the bridge file, reference, and target datasets, then runs
-    specified (or all) screen tests on each match. Outputs a filtered
-    bridge file with failed matches removed.
+    Identifies target segments that don't appear in the bridge file (unmatched),
+    then runs screen tests on each to determine if they're valid candidates
+    for addition to the network.
 
     Args:
-        bridge_path: Path to bridge parquet file with matches
-        ref_path: Path to reference parquet file (Overture)
         target_path: Path to target parquet file
+        bridge_path: Path to bridge parquet file with matches (None = screen all targets)
         test_names: List of test names to run (None = all registered tests)
-        output_path: Path for output filtered bridge file (None = no output)
-        report_only: If True, don't filter matches, just generate report
+        output_path: Path for output filtered candidates file (None = no output)
+        report_only: If True, don't filter candidates, just generate report
 
     Returns:
-        Tuple of (filtered_gdf, report)
-        - filtered_gdf: Bridge file with failed matches removed (None if report_only)
+        Tuple of (valid_candidates_gdf, report)
+        - valid_candidates_gdf: Target segments that passed screening (None if report_only)
         - report: ScreenReport with test results
     """
-    logger.info(f"Running screen tests on {bridge_path}")
+    logger.info(f"Running screen tests on {target_path}")
 
-    # Load data
-    bridge_gdf = gpd.read_parquet(bridge_path)
-    ref_gdf = gpd.read_parquet(ref_path)
+    # Load target data
     target_gdf = gpd.read_parquet(target_path)
 
     # Ensure consistent CRS (EPSG:4326 for screen tests)
-    if bridge_gdf.crs is not None and bridge_gdf.crs != "EPSG:4326":
-        bridge_gdf = bridge_gdf.to_crs("EPSG:4326")
-    if ref_gdf.crs is not None and ref_gdf.crs != "EPSG:4326":
-        ref_gdf = ref_gdf.to_crs("EPSG:4326")
     if target_gdf.crs is not None and target_gdf.crs != "EPSG:4326":
         target_gdf = target_gdf.to_crs("EPSG:4326")
 
-    # Get bounding box from combined geometries
-    all_geoms = pd.concat([ref_gdf.geometry, target_gdf.geometry], ignore_index=True)
-    bounds = all_geoms.total_bounds
+    # Determine target ID column
+    target_id_col = _get_id_column(target_gdf, "target")
+
+    # Find unmatched targets (not in bridge file)
+    if bridge_path is not None:
+        bridge_gdf = gpd.read_parquet(bridge_path)
+        bridge_target_col = _get_bridge_target_column(bridge_gdf)
+        matched_ids = set(bridge_gdf[bridge_target_col].astype(str))
+        unmatched_mask = ~target_gdf[target_id_col].astype(str).isin(matched_ids)
+        candidates_gdf = target_gdf[unmatched_mask].copy()
+        logger.info(
+            f"Found {len(candidates_gdf)} unmatched targets "
+            f"(out of {len(target_gdf)} total, {len(matched_ids)} matched)"
+        )
+    else:
+        candidates_gdf = target_gdf.copy()
+        logger.info(f"Screening all {len(candidates_gdf)} targets (no bridge file provided)")
+
+    if len(candidates_gdf) == 0:
+        logger.info("No candidates to screen")
+        return candidates_gdf if not report_only else None, ScreenReport(
+            total_candidates=0,
+            passed=0,
+            failed=0,
+            warned=0,
+            skipped=0,
+        )
+
+    # Get bounding box from candidates
+    bounds = candidates_gdf.total_bounds
     bbox = (bounds[0], bounds[1], bounds[2], bounds[3])
 
     # Initialize tests
@@ -134,98 +160,77 @@ def run_screen(
         logger.info(f"Preparing test: {test.name}")
         test.prepare(bbox)
 
-    # Build lookup indices for geometries (vectorized for performance)
-    ref_id_col = _get_id_column(ref_gdf, "ref")
-    target_id_col = _get_id_column(target_gdf, "target")
+    # Run tests on each candidate
+    results_by_candidate: dict[Any, list[ScreenResult]] = {}
+    failed_indices: set[Any] = set()
+    warned_indices: set[Any] = set()
 
-    ref_lookup = ref_gdf.set_index(ref_id_col)["geometry"].to_dict()
-    target_lookup = target_gdf.set_index(target_id_col)["geometry"].to_dict()
+    for idx, row in candidates_gdf.iterrows():
+        target_id = str(row[target_id_col])
+        target_geom = row.geometry
 
-    # Run tests on each match
-    results_by_match: dict[int, list[ScreenResult]] = {}
-    failed_indices: set[int] = set()
-    warned_indices: set[int] = set()
-
-    # Determine bridge file ID columns
-    bridge_ref_col = _get_bridge_ref_column(bridge_gdf)
-    bridge_target_col = _get_bridge_target_column(bridge_gdf)
-
-    for idx, row in bridge_gdf.iterrows():
-        ref_id = row[bridge_ref_col]
-        target_id = row[bridge_target_col]
-        confidence = row.get("confidence", 1.0)
-
-        # Get geometries
-        ref_geom = ref_lookup.get(ref_id)
-        target_geom = target_lookup.get(target_id)
-
-        if ref_geom is None or target_geom is None:
-            logger.warning(f"Missing geometry for match {idx}: ref={ref_id}, target={target_id}")
+        if target_geom is None or target_geom.is_empty:
+            logger.warning(f"Empty geometry for candidate {target_id}")
             continue
 
         # Get road class if available
         road_class = row.get("road_class") or row.get("class") or row.get("highway")
 
-        # Create match context
-        ctx = MatchContext(
-            match_id=str(idx),
-            ref_id=str(ref_id),
-            target_id=str(target_id),
-            ref_geom=ref_geom,
+        # Create candidate context
+        ctx = CandidateContext(
+            target_id=target_id,
             target_geom=target_geom,
-            confidence=confidence,
             road_class=road_class,
         )
 
         # Run all tests
-        match_results = []
-        match_failed = False
-        match_warned = False
+        candidate_results = []
+        candidate_failed = False
+        candidate_warned = False
 
         for test in tests:
-            result = test.test_match(ctx)
-            match_results.append(result)
+            result = test.test_candidate(ctx)
+            candidate_results.append(result)
 
             if result.outcome == ScreenOutcome.FAIL:
-                match_failed = True
+                candidate_failed = True
             elif result.outcome == ScreenOutcome.WARN:
-                match_warned = True
+                candidate_warned = True
 
-        results_by_match[idx] = match_results
+        results_by_candidate[idx] = candidate_results
 
-        if match_failed:
+        if candidate_failed:
             failed_indices.add(idx)
-        elif match_warned:
+        elif candidate_warned:
             warned_indices.add(idx)
 
     # Build report
     report = _build_report(
-        bridge_gdf=bridge_gdf,
-        results_by_match=results_by_match,
+        candidates_gdf=candidates_gdf,
+        results_by_candidate=results_by_candidate,
         failed_indices=failed_indices,
         warned_indices=warned_indices,
         tests=tests,
-        bridge_ref_col=bridge_ref_col,
-        bridge_target_col=bridge_target_col,
+        target_id_col=target_id_col,
     )
 
     logger.info(
         f"Screen tests complete: {report.passed} passed, {report.failed} failed, "
-        f"{report.warned} warned ({report.fail_rate:.2%} fail rate)"
+        f"{report.warned} warned ({report.pass_rate:.2%} pass rate)"
     )
 
     # Filter output
     if report_only:
         return None, report
 
-    filtered_gdf = bridge_gdf[~bridge_gdf.index.isin(failed_indices)].copy()
+    valid_gdf = candidates_gdf[~candidates_gdf.index.isin(failed_indices)].copy()
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        filtered_gdf.to_parquet(output_path)
-        logger.info(f"Saved filtered bridge file to {output_path}")
+        valid_gdf.to_parquet(output_path)
+        logger.info(f"Saved valid candidates to {output_path}")
 
-    return filtered_gdf, report
+    return valid_gdf, report
 
 
 def _get_id_column(gdf: gpd.GeoDataFrame, name: str) -> str:
@@ -238,14 +243,6 @@ def _get_id_column(gdf: gpd.GeoDataFrame, name: str) -> str:
     raise ValueError(f"Could not determine ID column for {name}")
 
 
-def _get_bridge_ref_column(gdf: gpd.GeoDataFrame) -> str:
-    """Determine the reference ID column in bridge file."""
-    for col in ["ref_id", "reference_id", "overture_id"]:
-        if col in gdf.columns:
-            return col
-    raise ValueError("Could not determine reference ID column in bridge file")
-
-
 def _get_bridge_target_column(gdf: gpd.GeoDataFrame) -> str:
     """Determine the target ID column in bridge file."""
     for col in ["target_id", "local_id"]:
@@ -255,22 +252,21 @@ def _get_bridge_target_column(gdf: gpd.GeoDataFrame) -> str:
 
 
 def _build_report(
-    bridge_gdf: gpd.GeoDataFrame,
-    results_by_match: dict[int, list[ScreenResult]],
-    failed_indices: set[int],
-    warned_indices: set[int],
+    candidates_gdf: gpd.GeoDataFrame,
+    results_by_candidate: dict[Any, list[ScreenResult]],
+    failed_indices: set[Any],
+    warned_indices: set[Any],
     tests: list[ScreenTest],
-    bridge_ref_col: str,
-    bridge_target_col: str,
+    target_id_col: str,
 ) -> ScreenReport:
     """Build screen report from results."""
-    total = len(bridge_gdf)
+    total = len(candidates_gdf)
     failed = len(failed_indices)
     warned = len(warned_indices)
     passed = total - failed - warned
 
-    # Count skipped (matches not in results_by_match)
-    skipped = total - len(results_by_match)
+    # Count skipped (candidates not in results)
+    skipped = total - len(results_by_candidate)
 
     # Per-test breakdown
     test_results: dict[str, dict[str, int]] = {}
@@ -282,25 +278,22 @@ def _build_report(
             "skip": 0,
         }
 
-    for match_results in results_by_match.values():
-        for result in match_results:
+    for candidate_results in results_by_candidate.values():
+        for result in candidate_results:
             outcome_key = result.outcome.value
             if result.test_name in test_results:
                 test_results[result.test_name][outcome_key] += 1
 
-    # Failed match details
-    failed_matches = []
+    # Failed candidate details
+    failed_candidates = []
     for idx in failed_indices:
-        row = bridge_gdf.loc[idx]
-        match_results = results_by_match.get(idx, [])
-        fail_reasons = [r for r in match_results if r.outcome == ScreenOutcome.FAIL]
+        row = candidates_gdf.loc[idx]
+        candidate_results = results_by_candidate.get(idx, [])
+        fail_reasons = [r for r in candidate_results if r.outcome == ScreenOutcome.FAIL]
 
-        failed_matches.append(
+        failed_candidates.append(
             {
-                "match_index": int(idx),
-                "ref_id": str(row[bridge_ref_col]),
-                "target_id": str(row[bridge_target_col]),
-                "confidence": float(row.get("confidence", 1.0)),
+                "target_id": str(row[target_id_col]),
                 "fail_reasons": [
                     {"test": r.test_name, "reason": r.reason, "details": r.details}
                     for r in fail_reasons
@@ -308,19 +301,16 @@ def _build_report(
             }
         )
 
-    # Warned match details (limit to top 100)
-    warned_matches = []
+    # Warned candidate details (limit to top 100)
+    warned_candidates = []
     for idx in list(warned_indices)[:100]:
-        row = bridge_gdf.loc[idx]
-        match_results = results_by_match.get(idx, [])
-        warn_reasons = [r for r in match_results if r.outcome == ScreenOutcome.WARN]
+        row = candidates_gdf.loc[idx]
+        candidate_results = results_by_candidate.get(idx, [])
+        warn_reasons = [r for r in candidate_results if r.outcome == ScreenOutcome.WARN]
 
-        warned_matches.append(
+        warned_candidates.append(
             {
-                "match_index": int(idx),
-                "ref_id": str(row[bridge_ref_col]),
-                "target_id": str(row[bridge_target_col]),
-                "confidence": float(row.get("confidence", 1.0)),
+                "target_id": str(row[target_id_col]),
                 "warn_reasons": [
                     {"test": r.test_name, "reason": r.reason, "details": r.details}
                     for r in warn_reasons
@@ -329,12 +319,12 @@ def _build_report(
         )
 
     return ScreenReport(
-        total_matches=total,
+        total_candidates=total,
         passed=passed,
         failed=failed,
         warned=warned,
         skipped=skipped,
         test_results=test_results,
-        failed_matches=failed_matches,
-        warned_matches=warned_matches,
+        failed_candidates=failed_candidates,
+        warned_candidates=warned_candidates,
     )

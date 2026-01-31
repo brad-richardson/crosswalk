@@ -4,7 +4,7 @@ import pytest
 from shapely.geometry import LineString
 
 from matcher.screen import (
-    MatchContext,
+    CandidateContext,
     ScreenOutcome,
     ScreenResult,
     ScreenTest,
@@ -53,19 +53,24 @@ class TestScreenResult:
         assert result.details["intersection_m"] == 50.0
 
 
-class TestMatchContext:
+class TestCandidateContext:
     def test_create_context(self):
-        ctx = MatchContext(
-            match_id="match_1",
-            ref_id="ref_123",
+        ctx = CandidateContext(
             target_id="target_456",
-            ref_geom=LineString([(0, 0), (1, 1)]),
             target_geom=LineString([(0, 0.1), (1, 1.1)]),
-            confidence=0.95,
+            road_class="residential",
         )
-        assert ctx.match_id == "match_1"
-        assert ctx.confidence == 0.95
-        assert ctx.ref_attrs == {}
+        assert ctx.target_id == "target_456"
+        assert ctx.road_class == "residential"
+        assert ctx.target_attrs == {}
+
+    def test_context_optional_fields(self):
+        ctx = CandidateContext(
+            target_id="target_1",
+            target_geom=LineString([(0, 0), (1, 1)]),
+        )
+        assert ctx.road_class is None
+        assert ctx.target_attrs == {}
 
 
 class TestRegistry:
@@ -83,7 +88,7 @@ class TestRegistry:
             def prepare(self, bbox):
                 pass
 
-            def test_match(self, ctx):
+            def test_candidate(self, ctx):
                 return ScreenResult(outcome=ScreenOutcome.PASS, test_name=self.name)
 
         assert "dummy_test" in get_registered_tests()
@@ -102,7 +107,7 @@ class TestRegistry:
                 def prepare(self, bbox):
                     pass
 
-                def test_match(self, ctx):
+                def test_candidate(self, ctx):
                     pass
 
         # Whitespace name
@@ -115,7 +120,7 @@ class TestRegistry:
                 def prepare(self, bbox):
                     pass
 
-                def test_match(self, ctx):
+                def test_candidate(self, ctx):
                     pass
 
         # Non-string name
@@ -128,5 +133,5 @@ class TestRegistry:
                 def prepare(self, bbox):
                     pass
 
-                def test_match(self, ctx):
+                def test_candidate(self, ctx):
                     pass
