@@ -1,4 +1,4 @@
-"""Tests for the fetch CLI subcommands."""
+"""Tests for the data fetch CLI subcommands."""
 
 import re
 from pathlib import Path
@@ -18,18 +18,18 @@ def strip_ansi(text: str) -> str:
 
 
 class TestFetchTargetCommand:
-    """Tests for the fetch target command."""
+    """Tests for the data fetch target command."""
 
     def test_fetch_target_help(self):
-        """Test fetch target help output."""
-        result = runner.invoke(app, ["fetch", "target", "--help"])
+        """Test data fetch target help output."""
+        result = runner.invoke(app, ["data", "fetch", "target", "--help"])
         assert result.exit_code == 0
         assert "target" in result.output.lower()
         assert "gis portals" in result.output.lower()
 
     def test_fetch_target_no_args(self):
-        """Test fetch target with no arguments shows error."""
-        result = runner.invoke(app, ["fetch", "target"])
+        """Test data fetch target with no arguments shows error."""
+        result = runner.invoke(app, ["data", "fetch", "target"])
         assert result.exit_code == 1
         assert "Error" in result.output
 
@@ -38,7 +38,7 @@ class TestFetchTargetCommand:
         """Test fetching a single dataset."""
         mock_fetch.return_value = Path("data/raw/test_v1.0.parquet")
 
-        result = runner.invoke(app, ["fetch", "target", "test_dataset"])
+        result = runner.invoke(app, ["data", "fetch", "target", "test_dataset"])
 
         assert result.exit_code == 0
         mock_fetch.assert_called_once()
@@ -51,18 +51,18 @@ class TestFetchTargetCommand:
             "test_b": Path("b.parquet"),
         }
 
-        result = runner.invoke(app, ["fetch", "target", "--prefix", "test_"])
+        result = runner.invoke(app, ["data", "fetch", "target", "--prefix", "test_"])
 
         assert result.exit_code == 0
         mock_fetch_by_prefix.assert_called_once()
 
 
 class TestFetchReferenceCommand:
-    """Tests for the fetch reference command."""
+    """Tests for the data fetch reference command."""
 
     def test_fetch_reference_help(self):
-        """Test fetch reference help output."""
-        result = runner.invoke(app, ["fetch", "reference", "--help"])
+        """Test data fetch reference help output."""
+        result = runner.invoke(app, ["data", "fetch", "reference", "--help"])
         assert result.exit_code == 0
         assert "reference" in result.output.lower()
         assert "Overture" in result.output
@@ -74,35 +74,35 @@ class TestFetchReferenceCommand:
         mock_get_config.return_value = None
         mock_list.return_value = []
 
-        result = runner.invoke(app, ["fetch", "reference", "nonexistent"])
+        result = runner.invoke(app, ["data", "fetch", "reference", "nonexistent"])
 
         assert result.exit_code == 1
         assert "Could not find" in result.output
 
 
 class TestFetchAllCommand:
-    """Tests for the fetch all command."""
+    """Tests for the data fetch all command."""
 
     def test_fetch_all_help(self):
-        """Test fetch all help output."""
-        result = runner.invoke(app, ["fetch", "all", "--help"])
+        """Test data fetch all help output."""
+        result = runner.invoke(app, ["data", "fetch", "all", "--help"])
         assert result.exit_code == 0
         assert "target and reference" in result.output.lower()
 
 
 class TestFetchListCommand:
-    """Tests for the fetch list command."""
+    """Tests for the data fetch list command."""
 
     def test_fetch_list_help(self):
-        """Test fetch list help output."""
-        result = runner.invoke(app, ["fetch", "list", "--help"])
+        """Test data fetch list help output."""
+        result = runner.invoke(app, ["data", "fetch", "list", "--help"])
         assert result.exit_code == 0
         assert "List available datasets" in result.output
 
     @patch("matcher.fetch.target.print_datasets")
     def test_fetch_list_all(self, mock_print):
         """Test listing all datasets."""
-        result = runner.invoke(app, ["fetch", "list"])
+        result = runner.invoke(app, ["data", "fetch", "list"])
 
         assert result.exit_code == 0
         mock_print.assert_called_once_with(None)
@@ -110,25 +110,25 @@ class TestFetchListCommand:
     @patch("matcher.fetch.target.print_datasets")
     def test_fetch_list_with_prefix(self, mock_print):
         """Test listing datasets with prefix filter."""
-        result = runner.invoke(app, ["fetch", "list", "--prefix", "us_"])
+        result = runner.invoke(app, ["data", "fetch", "list", "--prefix", "us_"])
 
         assert result.exit_code == 0
         mock_print.assert_called_once_with("us_")
 
 
 class TestFetchVerifyCommand:
-    """Tests for the fetch verify command."""
+    """Tests for the data fetch verify command."""
 
     def test_fetch_verify_help(self):
-        """Test fetch verify help output."""
-        result = runner.invoke(app, ["fetch", "verify", "--help"])
+        """Test data fetch verify help output."""
+        result = runner.invoke(app, ["data", "fetch", "verify", "--help"])
         assert result.exit_code == 0
         assert "Verify" in result.output
         assert "dataset" in result.output.lower()
 
     def test_fetch_verify_no_args(self):
-        """Test fetch verify with no arguments shows error."""
-        result = runner.invoke(app, ["fetch", "verify"])
+        """Test data fetch verify with no arguments shows error."""
+        result = runner.invoke(app, ["data", "fetch", "verify"])
         assert result.exit_code == 1
         assert "Error" in result.output or "Must specify" in result.output
 
@@ -137,18 +137,18 @@ class TestFetchVerifyCommand:
         """Test error when dataset doesn't exist."""
         mock_get_config.return_value = None
 
-        result = runner.invoke(app, ["fetch", "verify", "nonexistent"])
+        result = runner.invoke(app, ["data", "fetch", "verify", "nonexistent"])
 
         assert result.exit_code == 1
         assert "not found" in result.output.lower() or "Could not find" in result.output
 
 
 class TestFetchOvertureCommand:
-    """Tests for the fetch overture command."""
+    """Tests for the data fetch overture command."""
 
     def test_fetch_overture_help(self):
-        """Test fetch overture help output."""
-        result = runner.invoke(app, ["fetch", "overture", "--help"])
+        """Test data fetch overture help output."""
+        result = runner.invoke(app, ["data", "fetch", "overture", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "Overture" in output
@@ -156,18 +156,18 @@ class TestFetchOvertureCommand:
         assert "--prefix" in output
 
     def test_fetch_overture_no_args(self):
-        """Test fetch overture with no arguments shows error."""
-        result = runner.invoke(app, ["fetch", "overture"])
+        """Test data fetch overture with no arguments shows error."""
+        result = runner.invoke(app, ["data", "fetch", "overture"])
         assert result.exit_code == 1
         assert "Must specify" in result.output or "Error" in result.output
 
 
 class TestFetchOsmCommand:
-    """Tests for the fetch osm command."""
+    """Tests for the data fetch osm command."""
 
     def test_fetch_osm_help(self):
-        """Test fetch osm help output."""
-        result = runner.invoke(app, ["fetch", "osm", "--help"])
+        """Test data fetch osm help output."""
+        result = runner.invoke(app, ["data", "fetch", "osm", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "OSM" in output
@@ -175,18 +175,18 @@ class TestFetchOsmCommand:
         assert "--prefix" in output
 
     def test_fetch_osm_no_args(self):
-        """Test fetch osm with no arguments shows error."""
-        result = runner.invoke(app, ["fetch", "osm"])
+        """Test data fetch osm with no arguments shows error."""
+        result = runner.invoke(app, ["data", "fetch", "osm"])
         assert result.exit_code == 1
         assert "Must specify" in result.output or "Error" in result.output
 
 
 class TestFetchSubcommands:
-    """Test the fetch subcommand structure."""
+    """Test the data fetch subcommand structure."""
 
     def test_fetch_shows_subcommands(self):
-        """Test that fetch command shows available subcommands."""
-        result = runner.invoke(app, ["fetch", "--help"])
+        """Test that data fetch command shows available subcommands."""
+        result = runner.invoke(app, ["data", "fetch", "--help"])
         assert result.exit_code == 0
         assert "target" in result.output
         assert "reference" in result.output

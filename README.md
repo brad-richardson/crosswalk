@@ -91,7 +91,7 @@ After installation, here's the typical workflow for matching a new dataset:
 
 ```bash
 # 1. Fetch all data (target + Overture reference) for a dataset
-matcher fetch all us_boston_streets
+matcher data fetch all us_boston_streets
 
 # 2. Train the ML model (required after fresh clone)
 matcher train
@@ -150,18 +150,18 @@ Fetch Overture reference data and your local dataset. Local data typically comes
 
 ```bash
 # Fetch all data (target + Overture reference) for a configured dataset
-matcher fetch all us_boston_streets
+matcher data fetch all us_boston_streets
 
 # Fetch target data only (from ArcGIS/WFS)
-matcher fetch target us_boston_streets
-matcher fetch target --prefix us_boston  # All datasets for a region
+matcher data fetch target us_boston_streets
+matcher data fetch target --prefix us_boston  # All datasets for a region
 
 # Fetch reference data only (Overture by default)
-matcher fetch reference us_boston_streets
-matcher fetch reference us_boston_streets --source osm  # Use OSM instead
+matcher data fetch reference us_boston_streets
+matcher data fetch reference us_boston_streets --source osm  # Use OSM instead
 
 # List available datasets
-matcher fetch list
+matcher data fetch list
 ```
 
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions on adding new datasets.
@@ -207,7 +207,7 @@ Label pairs as `match`, `no_match`, or `unsure`, then retrain:
 
 ```bash
 matcher train
-matcher eval-model data/models/matcher_model_combined.joblib
+matcher ml eval data/models/matcher_model_combined.joblib
 ```
 
 ### Step 4: Integration
@@ -215,7 +215,7 @@ matcher eval-model data/models/matcher_model_combined.joblib
 Merge unmatched segments into the reference network:
 
 ```bash
-matcher integrate data/raw/overture_segments.parquet \
+matcher integrate run data/raw/overture_segments.parquet \
     -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \
     -o data/integrated
 ```
@@ -223,7 +223,7 @@ matcher integrate data/raw/overture_segments.parquet \
 Review integration results with the QA app:
 
 ```bash
-matcher qa-integration -o data/integrated
+matcher integrate qa -o data/integrated
 ```
 
 ### Dataset Classification
@@ -232,30 +232,55 @@ Discover class mappings for new datasets:
 
 ```bash
 # Basic discovery - analyzes dataset structure
-matcher discover-classes data/raw/new_dataset.parquet
+matcher class discover data/raw/new_dataset.parquet
 
 # With match-based analysis (more accurate)
-matcher discover-classes data/raw/new_dataset.parquet \
+matcher class discover data/raw/new_dataset.parquet \
     --reference data/raw/overture_segments.parquet \
     --bridge data/output/new_dataset_bridge.parquet
 ```
 
 ## CLI Reference
 
+### Top-Level Commands
+
 | Command | Description |
 |---------|-------------|
-| `matcher fetch` | Fetch Overture or OSM data for a bounding box |
 | `matcher match` | Run the matching pipeline |
 | `matcher train` | Train ML model on labeled data |
-| `matcher eval-model` | Evaluate model performance on training labels |
-| `matcher eval-bridge` | Evaluate bridge file (matching output) quality |
 | `matcher label` | Launch labeling UI |
-| `matcher integrate` | Integrate unmatched segments |
-| `matcher qa-integration` | Launch integration QA app |
-| `matcher discover-classes` | Analyze class mappings for new datasets |
-| `matcher topology` | Reconstruct network topology |
-| `matcher validate-matching` | Run validation experiments (Overture provenance) |
-| `matcher validate-data` | Validate data file versions |
+| `matcher match-eval` | Evaluate bridge file (matching output) quality |
+| `matcher screen` | Screen segments for valid network additions |
+| `matcher version` | Show version information |
+
+### Command Groups
+
+| Group | Command | Description |
+|-------|---------|-------------|
+| **data** | `data fetch target` | Fetch local road data |
+| | `data fetch reference` | Fetch Overture/OSM reference |
+| | `data fetch all` | Fetch both target and reference |
+| | `data fetch list` | List available datasets |
+| | `data topology` | Reconstruct network topology |
+| | `data repair` | Repair topology issues |
+| | `data quality` | Dataset quality fingerprint |
+| | `data validate` | Validate data file versions |
+| **ml** | `ml eval` | Evaluate model performance on training labels |
+| | `ml benchmark` | Train on subset, eval on holdout |
+| | `ml features` | Compute and cache features |
+| | `ml backfill` | Backfill labels with features |
+| **integrate** | `integrate run` | Integrate unmatched segments |
+| | `integrate qa` | Launch integration QA app |
+| **class** | `class discover` | Discover class mappings |
+| | `class analyze` | Analyze class confusion |
+| | `class detect-non-roads` | Detect non-road features |
+| | `class train-predictor` | Train class predictor |
+| | `class predict` | Apply class predictor |
+| **agent** | `agent batch` | Generate candidates for agent labeling |
+| | `agent run` | Run agent on batch |
+| | `agent import` | Import agent labels from CSV |
+| | `agent consensus` | Analyze agent consensus |
+| **validate** | `validate matching` | Run validation experiments (Overture provenance) |
 
 Run `matcher --help` or `matcher <command> --help` for detailed options.
 
@@ -263,7 +288,8 @@ Run `matcher --help` or `matcher <command> --help` for detailed options.
 
 ```
 src/matcher/
-├── cli.py              # Typer CLI application
+├── cli.py              # CLI entry point (thin wrapper)
+├── cli/                # CLI package with command groups
 ├── config.py           # Pydantic settings & feature definitions (source of truth)
 ├── fetch/              # Data fetching (Overture, OSM, ArcGIS)
 ├── features/           # Feature computation (geometric, semantic, topological)
