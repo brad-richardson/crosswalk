@@ -15,7 +15,7 @@ from ..post_integration.island_detector import detect_islands
 from .fingerprint import QualityFingerprint
 
 # Thresholds for quality metrics
-SHARP_ANGLE_THRESHOLD_DEG = 30.0  # Angles less than this are "sharp"
+SHARP_TURN_THRESHOLD_DEG = 150.0  # Interior angles > this indicate sharp turns/reversals
 HIGH_SINUOSITY_THRESHOLD = 1.5  # Sinuosity > this is considered "high"
 NEAR_DUPLICATE_BUFFER_M = 2.0  # Buffer for near-duplicate detection
 NEAR_DUPLICATE_IOU_THRESHOLD = 0.9  # IOU threshold for near-duplicates
@@ -362,8 +362,8 @@ def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, flo
     """Compute geometry jaggedness and sinuosity metrics.
 
     Jaggedness is measured by:
-    - Sharp angles: Vertices where the angle between segments is < 30 degrees
-    - Sinuosity: Ratio of actual length to straight-line distance
+    - Sharp turns: Vertices where the interior angle > 150 degrees (near reversal)
+    - Sinuosity: Ratio of actual length to straight-line distance (1.0 = straight)
 
     Args:
         edges_metric: GeoDataFrame in metric CRS with LineString geometries
@@ -371,7 +371,7 @@ def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, flo
     Returns:
         Dictionary with jaggedness metrics
     """
-    sharp_angle_segments = 0
+    sharp_turn_segments = 0
     total_segments = 0
     sinuosities = []
     high_sinuosity_count = 0
@@ -386,6 +386,7 @@ def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, flo
         coords = np.array(geom.coords)
 
         # Compute sinuosity (length / straight-line distance)
+        # Skip closed loops (start == end) as sinuosity is undefined
         if len(coords) >= 2:
             straight_dist = np.sqrt(
                 (coords[-1][0] - coords[0][0]) ** 2 + (coords[-1][1] - coords[0][1]) ** 2
@@ -396,14 +397,16 @@ def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, flo
                 if sinuosity > HIGH_SINUOSITY_THRESHOLD:
                     high_sinuosity_count += 1
 
-        # Check for sharp angles (only if >= 3 vertices)
+        # Check for sharp turns (only if >= 3 vertices)
+        # A sharp turn is where the interior angle between consecutive segments is large,
+        # indicating an abrupt direction change (e.g., zigzag or reversal)
         if len(coords) >= 3:
-            has_sharp_angle = False
+            has_sharp_turn = False
             for i in range(1, len(coords) - 1):
                 v1 = coords[i] - coords[i - 1]
                 v2 = coords[i + 1] - coords[i]
 
-                # Compute angle between vectors
+                # Compute angle between vectors (0° = same direction, 180° = reversal)
                 dot = np.dot(v1, v2)
                 mag1 = np.linalg.norm(v1)
                 mag2 = np.linalg.norm(v2)
@@ -412,17 +415,17 @@ def _compute_jaggedness_metrics(edges_metric: gpd.GeoDataFrame) -> dict[str, flo
                     cos_angle = np.clip(dot / (mag1 * mag2), -1, 1)
                     angle_deg = np.degrees(np.arccos(cos_angle))
 
-                    # Angle < threshold is "sharp" (near reversal)
-                    if angle_deg < SHARP_ANGLE_THRESHOLD_DEG:
-                        has_sharp_angle = True
+                    # Large angle = sharp turn (vectors pointing opposite directions)
+                    if angle_deg > SHARP_TURN_THRESHOLD_DEG:
+                        has_sharp_turn = True
                         break
 
-            if has_sharp_angle:
-                sharp_angle_segments += 1
+            if has_sharp_turn:
+                sharp_turn_segments += 1
 
     return {
-        "sharp_angle_count": sharp_angle_segments,
-        "sharp_angle_ratio": sharp_angle_segments / total_segments if total_segments > 0 else 0.0,
+        "sharp_angle_count": sharp_turn_segments,
+        "sharp_angle_ratio": sharp_turn_segments / total_segments if total_segments > 0 else 0.0,
         "mean_sinuosity": float(np.mean(sinuosities)) if sinuosities else 1.0,
         "high_sinuosity_count": high_sinuosity_count,
         "high_sinuosity_ratio": high_sinuosity_count / total_segments
@@ -439,7 +442,9 @@ def _compute_near_duplicates(
 ) -> dict[str, float | int]:
     """Detect near-duplicate geometries using buffered IOU.
 
-    For performance, samples the dataset if it's large.
+    For performance, samples the dataset if it's large. When sampling is used,
+    the ratio is computed within the sample and extrapolated to estimate the
+    full dataset duplicate count.
 
     Args:
         edges_metric: GeoDataFrame in metric CRS
@@ -448,44 +453,48 @@ def _compute_near_duplicates(
         sample_size: Maximum edges to check (for performance)
 
     Returns:
-        Dictionary with duplicate count and ratio
+        Dictionary with duplicate count and ratio (estimated if sampled)
     """
     total_edges = len(edges_metric)
     if total_edges < 2:
         return {"near_duplicate_count": 0, "near_duplicate_ratio": 0.0}
 
     # Sample if dataset is large
-    if total_edges > sample_size:
-        edges_sample = edges_metric.sample(n=sample_size, random_state=42)
+    is_sampled = total_edges > sample_size
+    if is_sampled:
+        edges_sample = edges_metric.sample(n=sample_size, random_state=42).reset_index(drop=True)
     else:
-        edges_sample = edges_metric
+        edges_sample = edges_metric.reset_index(drop=True)
 
-    # Build spatial index
+    sample_count = len(edges_sample)
+
+    # Build spatial index (returns positional indices after reset_index)
     sindex = edges_sample.sindex
 
-    duplicate_ids: set[int] = set()
+    duplicate_positions: set[int] = set()
     checked_pairs: set[tuple[int, int]] = set()
+    failed_comparisons = 0
 
-    for idx, row in edges_sample.iterrows():
-        geom = row.geometry
+    for pos in range(sample_count):
+        geom = edges_sample.iloc[pos].geometry
         if geom is None or geom.is_empty:
             continue
 
-        # Buffer and find candidates
+        # Buffer and find candidates (sindex returns positional indices)
         buffered = geom.buffer(buffer_m * 2)
-        candidate_idxs = list(sindex.intersection(buffered.bounds))
+        candidate_positions = list(sindex.intersection(buffered.bounds))
 
-        for cand_idx in candidate_idxs:
-            if cand_idx == idx:
+        for cand_pos in candidate_positions:
+            if cand_pos == pos:
                 continue
 
             # Avoid checking same pair twice
-            pair = tuple(sorted([idx, cand_idx]))
+            pair = (min(pos, cand_pos), max(pos, cand_pos))
             if pair in checked_pairs:
                 continue
             checked_pairs.add(pair)
 
-            cand_geom = edges_sample.loc[cand_idx].geometry
+            cand_geom = edges_sample.iloc[cand_pos].geometry
             if cand_geom is None or cand_geom.is_empty:
                 continue
 
@@ -499,16 +508,31 @@ def _compute_near_duplicates(
                 if union > 0:
                     iou = intersection / union
                     if iou > iou_threshold:
-                        duplicate_ids.add(idx)
-                        duplicate_ids.add(cand_idx)
-            except Exception:
+                        duplicate_positions.add(pos)
+                        duplicate_positions.add(cand_pos)
+            except Exception as e:
+                failed_comparisons += 1
+                if failed_comparisons <= 5:
+                    logger.debug(f"IOU comparison failed: {e}")
                 continue
 
-    duplicate_count = len(duplicate_ids)
+    if failed_comparisons > 5:
+        logger.debug(f"Total failed IOU comparisons: {failed_comparisons}")
+
+    sample_duplicate_count = len(duplicate_positions)
+    sample_ratio = sample_duplicate_count / sample_count if sample_count > 0 else 0.0
+
+    # If sampled, extrapolate to estimate full dataset
+    if is_sampled:
+        estimated_count = int(sample_ratio * total_edges)
+        return {
+            "near_duplicate_count": estimated_count,
+            "near_duplicate_ratio": sample_ratio,
+        }
 
     return {
-        "near_duplicate_count": duplicate_count,
-        "near_duplicate_ratio": duplicate_count / total_edges if total_edges > 0 else 0.0,
+        "near_duplicate_count": sample_duplicate_count,
+        "near_duplicate_ratio": sample_ratio,
     }
 
 
@@ -528,9 +552,14 @@ def _compute_class_coverage(
     if class_column is None or class_column not in gdf.columns:
         return 0.0
 
-    classified_count = 0
-    for cls in gdf[class_column]:
-        if cls is not None and str(cls).strip() and str(cls).lower() != "unknown":
-            classified_count += 1
+    total_edges = len(gdf)
+    if total_edges == 0:
+        return 0.0
 
-    return classified_count / len(gdf) if len(gdf) > 0 else 0.0
+    # Vectorized classification check
+    col = gdf[class_column]
+    col_str = col.astype(str)
+    mask = col.notna() & (col_str.str.strip() != "") & (col_str.str.lower() != "unknown")
+    classified_count = int(mask.sum())
+
+    return classified_count / total_edges

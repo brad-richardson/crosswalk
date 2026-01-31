@@ -124,7 +124,7 @@ class QualityFingerprintConfig(BaseModel):
     # Geometry quality
     vertex_density_mean: float = 0.0
     invalid_geometry_count: int = 0
-    sharp_angle_ratio: float = 0.0  # Ratio of segments with jagged angles
+    sharp_angle_ratio: float = 0.0  # Ratio of segments with sharp turns (>150°)
     mean_sinuosity: float = 1.0  # 1.0 = straight, higher = curvy
     high_sinuosity_ratio: float = 0.0
 

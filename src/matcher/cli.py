@@ -23,6 +23,14 @@ fetch_app = typer.Typer(
 )
 app.add_typer(fetch_app, name="fetch")
 
+# Create dataset subcommand group
+dataset_app = typer.Typer(
+    name="dataset",
+    help="Dataset management and analysis commands",
+    no_args_is_help=True,
+)
+app.add_typer(dataset_app, name="dataset")
+
 
 @fetch_app.command("target")
 def fetch_target(
@@ -3772,29 +3780,17 @@ def screen(
         raise typer.Exit(1) from None
 
 
-@app.command()
-def quality(
-    data_path: Path = typer.Argument(
-        None,
-        help="Path to GeoParquet file with road edges (or use --dataset)",
-    ),
-    dataset: str | None = typer.Option(
-        None,
-        "--dataset",
-        "-d",
-        help="Dataset name from datasets/*.yaml (loads target data automatically)",
+@dataset_app.command("quality")
+def dataset_quality(
+    dataset: str = typer.Argument(
+        ...,
+        help="Dataset name from datasets/*.yaml",
     ),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
         help="Output path for JSON quality report",
-    ),
-    dataset_name: str | None = typer.Option(
-        None,
-        "--name",
-        "-n",
-        help="Dataset name (default: filename stem or --dataset value)",
     ),
     name_column: str | None = typer.Option(
         None,
@@ -3823,22 +3819,23 @@ def quality(
         help="Skip near-duplicate detection (faster)",
     ),
 ):
-    """Generate a quality fingerprint for a road network dataset.
+    """Generate a quality fingerprint for a dataset.
 
     Computes comprehensive quality metrics including:
     - Basic statistics (segment count, total length)
     - Length distribution (min, max, median, percentiles)
-    - Geometry quality (vertex density, jaggedness, sinuosity)
+    - Geometry quality (vertex density, sharp turns, sinuosity)
     - GPS drift detection (zigzag, spike, loop patterns)
     - Near-duplicate detection
     - Topology metrics (islands, dead ends, connectivity)
     - Attribute metrics (name/class coverage, distribution)
 
     Examples:
-        matcher quality data/raw/streets.parquet -o quality.json
-        matcher quality --dataset us_boston_streets --save-yaml
-        matcher quality data/raw/target.parquet --dataset us_boston_streets -s
+        matcher dataset quality us_boston_streets
+        matcher dataset quality us_boston_streets --save-yaml
+        matcher dataset quality us_boston_streets -o quality.json -s
     """
+    from .config import CLASS_COLUMN, NAMES_COLUMN
     from .datasets.loader import DatasetLoader
     from .datasets.schema import (
         fingerprint_from_quality,
@@ -3848,38 +3845,23 @@ def quality(
     from .quality import save_quality_report
     from .quality.metrics import compute_quality_metrics
 
-    # Validate input
-    if data_path is None and dataset is None:
-        console.print("[red]Error: Provide either a data_path or --dataset[/red]")
+    # Load from dataset config
+    config = get_dataset_config(dataset)
+    if config is None:
+        console.print(f"[red]Dataset not found: {dataset}[/red]")
         raise typer.Exit(1)
-
-    # Resolve dataset name
-    effective_name = dataset_name or dataset or (data_path.stem if data_path else "unknown")
 
     # Load data
     try:
-        if data_path:
-            console.print(f"[blue]Generating quality fingerprint for {data_path}[/blue]")
-            import geopandas as gpd
+        console.print(f"[blue]Loading data for dataset: {dataset}[/blue]")
+        loader = DatasetLoader()
+        gdf = loader.load_target(dataset)
 
-            gdf = gpd.read_parquet(data_path)
-        else:
-            # Load from dataset config
-            config = get_dataset_config(dataset)
-            if config is None:
-                console.print(f"[red]Dataset not found: {dataset}[/red]")
-                raise typer.Exit(1)
-
-            console.print(f"[blue]Loading data for dataset: {dataset}[/blue]")
-            loader = DatasetLoader()
-            gdf = loader.load_target(dataset)
-            effective_name = dataset
-
-            # Use columns from config if not specified
-            if name_column is None and config.fetch and config.fetch.name_column:
-                name_column = "names"  # Standardized column after fetch
-            if class_column is None and config.fetch and config.fetch.class_column:
-                class_column = "class"  # Standardized column after fetch
+        # Use standardized column names from config module
+        if name_column is None:
+            name_column = NAMES_COLUMN
+        if class_column is None:
+            class_column = CLASS_COLUMN
     except FileNotFoundError as e:
         console.print(f"[red]Data file not found: {e}[/red]")
         raise typer.Exit(1) from None
@@ -3889,7 +3871,7 @@ def quality(
         console.print("[blue]Computing quality metrics...[/blue]")
         fingerprint = compute_quality_metrics(
             edges_gdf=gdf,
-            dataset_name=effective_name,
+            dataset_name=dataset,
             name_column=name_column,
             class_column=class_column,
             detect_drift=not skip_drift,
@@ -3915,7 +3897,7 @@ def quality(
         )
         console.print(f"  Invalid geometries: {fingerprint.invalid_geometry_count}")
         console.print(
-            f"  Sharp angles (<30°): {fingerprint.sharp_angle_count} "
+            f"  Sharp turns (>150°): {fingerprint.sharp_angle_count} "
             f"({fingerprint.sharp_angle_ratio:.1%})"
         )
         console.print(f"  Mean sinuosity: {fingerprint.mean_segment_sinuosity:.3f}")
@@ -3962,19 +3944,14 @@ def quality(
 
         # Save to dataset YAML if requested
         if save_yaml:
-            if dataset is None:
+            yaml_fingerprint = fingerprint_from_quality(fingerprint)
+            result = update_quality_fingerprint(dataset, yaml_fingerprint)
+            if result:
                 console.print(
-                    "[yellow]Warning: --save-yaml requires --dataset to identify the YAML file[/yellow]"
+                    f"\n[green]Quality fingerprint saved to datasets/{dataset}.yaml[/green]"
                 )
             else:
-                yaml_fingerprint = fingerprint_from_quality(fingerprint)
-                result = update_quality_fingerprint(dataset, yaml_fingerprint)
-                if result:
-                    console.print(
-                        f"\n[green]Quality fingerprint saved to datasets/{dataset}.yaml[/green]"
-                    )
-                else:
-                    console.print(f"[red]Failed to save to dataset YAML: {dataset}[/red]")
+                console.print(f"[red]Failed to save to dataset YAML: {dataset}[/red]")
 
     except Exception as e:
         console.print(f"[red]Quality analysis failed: {e}[/red]")

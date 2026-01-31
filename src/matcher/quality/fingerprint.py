@@ -48,8 +48,8 @@ class QualityFingerprint:
     length_p95_m: float = 0.0  # 95th percentile
 
     # Geometry quality / jaggedness metrics
-    sharp_angle_count: int = 0  # Vertices with angle < 30 degrees
-    sharp_angle_ratio: float = 0.0  # Ratio of segments with sharp angles
+    sharp_angle_count: int = 0  # Segments with sharp turns (interior angle > 150°)
+    sharp_angle_ratio: float = 0.0  # Ratio of segments with sharp turns
     mean_segment_sinuosity: float = 1.0  # Length / straight-line distance (1.0 = straight)
     high_sinuosity_count: int = 0  # Segments with sinuosity > 1.5
     high_sinuosity_ratio: float = 0.0
