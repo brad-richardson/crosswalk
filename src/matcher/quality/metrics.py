@@ -58,7 +58,9 @@ def compute_quality_metrics(
     line_mask = edges_gdf.geometry.apply(lambda g: isinstance(g, LineString) if g else False)
     if not line_mask.all():
         non_line_count = (~line_mask).sum()
-        logger.warning(f"Filtering {non_line_count} non-LineString geometries for topology analysis")
+        logger.warning(
+            f"Filtering {non_line_count} non-LineString geometries for topology analysis"
+        )
     edges_lines = edges_gdf[line_mask]
     edges_metric_lines = edges_metric.loc[edges_lines.index]
 
