@@ -14,6 +14,8 @@ import numpy as np
 from loguru import logger
 from shapely.geometry import Point
 
+from .constants import FAR_DISTANCE_M, ISLAND_SNAP_TOLERANCE_M, SMALL_CLUSTER_THRESHOLD
+
 
 class IslandSeverity(Enum):
     """Severity classification for disconnected components."""
@@ -81,10 +83,10 @@ class IslandDetectionResult:
 
 def detect_islands(
     edges_gdf: gpd.GeoDataFrame,
-    snap_tolerance_m: float = 5.0,
+    snap_tolerance_m: float = ISLAND_SNAP_TOLERANCE_M,
     single_segment_is_critical: bool = True,
-    small_cluster_threshold: int = 5,
-    far_distance_m: float = 100.0,
+    small_cluster_threshold: int = SMALL_CLUSTER_THRESHOLD,
+    far_distance_m: float = FAR_DISTANCE_M,
     id_column: str | None = None,
 ) -> IslandDetectionResult:
     """Detect disconnected components (islands) in a road network.

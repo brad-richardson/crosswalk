@@ -276,6 +276,9 @@ def _detect_spikes(
     # Fit a regression line to overall trajectory
     # Use simplified approach: check each vertex against its neighbors
     for i in range(2, len(coords) - 2):
+        # Initialize angle_deg for this iteration
+        angle_deg: float | None = None
+
         # Get surrounding context (2 vertices on each side)
         context = np.array([coords[i - 2], coords[i - 1], coords[i + 1], coords[i + 2]])
         context_mean = np.mean(context, axis=0)
@@ -313,7 +316,7 @@ def _detect_spikes(
                 location_index=i,
                 details={
                     "deviation_m": round(float(deviation), 2),
-                    "angle_deg": round(float(angle_deg), 1) if "angle_deg" in dir() else None,
+                    "angle_deg": round(float(angle_deg), 1) if angle_deg is not None else None,
                 },
             )
         )

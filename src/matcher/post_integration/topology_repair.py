@@ -14,6 +14,7 @@ from loguru import logger
 from shapely.geometry import LineString, Point
 from shapely.ops import snap
 
+from .constants import SNAP_TOLERANCE_M
 from .island_detector import IslandSeverity, detect_islands
 
 
@@ -40,7 +41,7 @@ class RepairResult:
 
 def repair_topology(
     edges_gdf: gpd.GeoDataFrame,
-    snap_tolerance_m: float = 5.0,
+    snap_tolerance_m: float = None,
     remove_critical_islands: bool = True,
     id_column: str | None = None,
 ) -> tuple[gpd.GeoDataFrame, RepairResult]:
@@ -59,6 +60,9 @@ def repair_topology(
     Returns:
         Tuple of (repaired_gdf, repair_result)
     """
+    if snap_tolerance_m is None:
+        snap_tolerance_m = SNAP_TOLERANCE_M
+
     if len(edges_gdf) == 0:
         return edges_gdf.copy(), RepairResult(
             original_edge_count=0,
@@ -124,7 +128,7 @@ def repair_topology(
 
 def snap_endpoints(
     edges_gdf: gpd.GeoDataFrame,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = SNAP_TOLERANCE_M,
     id_column: str | None = None,
 ) -> tuple[gpd.GeoDataFrame, int]:
     """Snap edge endpoints that are close but not connected.
