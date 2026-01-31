@@ -13,6 +13,11 @@ from pydantic import BaseModel
 
 from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
 from ..utils import filter_to_linestrings
+from ..utils.linear_ref import (
+    LinearReferencedAttribute,
+    create_trivial_lr,
+    normalize_ranges,
+)
 from .metadata import FetchMetadata, save_metadata
 
 # Overture segment classes to exclude (non-road transport)
@@ -329,6 +334,9 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
     if "class" in gdf.columns and "road_class" not in gdf.columns:
         gdf["road_class"] = gdf["class"]
 
+    # Extract linear-referenced attributes
+    gdf = extract_lr_attributes(gdf)
+
     logger.info(f"Loaded {len(gdf)} Overture segments")
     return gdf
 
@@ -379,3 +387,363 @@ def _get_level_from_rules(level_rules) -> int:
     if isinstance(first_rule, dict):
         return first_rule.get("value", 0)
     return 0
+
+
+# -----------------------------------------------------------------------------
+# Linear-Referenced Attribute Parsing
+# -----------------------------------------------------------------------------
+
+# Priority order for name variants (lower = higher priority)
+NAME_VARIANT_PRIORITY = {
+    "common": 0,
+    "official": 1,
+    "alternate": 2,
+    "alt": 2,
+    "short": 3,
+    "colloquial": 4,
+    "historical": 5,
+}
+
+
+def _get_variant_priority(variant: str | None) -> int:
+    """Get priority value for a name variant.
+
+    Args:
+        variant: Name variant string (e.g., "common", "alt")
+
+    Returns:
+        Priority value (lower = higher priority), default 10 for unknown
+    """
+    if variant is None:
+        return 0  # No variant = most preferred (common)
+    return NAME_VARIANT_PRIORITY.get(variant.lower(), 10)
+
+
+def _get_language_priority(language: str | None) -> int:
+    """Get priority value for language.
+
+    Bare names (no language specified) are preferred over language-specific.
+
+    Args:
+        language: Language code or None for bare names
+
+    Returns:
+        Priority value (lower = higher priority)
+    """
+    return 0 if language is None else 1
+
+
+def _extract_range_from_rule(rule: dict) -> tuple[float, float] | None:
+    """Extract geometric range from a rule's scope.
+
+    Overture rules can have geometric scopes like:
+    - {"between": [0.2, 0.6]}
+    - No between = applies to entire segment
+
+    Args:
+        rule: Rule dict that may contain scope/between
+
+    Returns:
+        Tuple of (start, end) or None if no geometric scope
+    """
+    # Check for "between" at the top level (common format)
+    between = rule.get("between")
+    if between and isinstance(between, (list, tuple)) and len(between) == 2:
+        return (float(between[0]), float(between[1]))
+
+    # Check for scope.between (alternative format)
+    scope = rule.get("scope")
+    if scope and isinstance(scope, dict):
+        between = scope.get("between")
+        if between and isinstance(between, (list, tuple)) and len(between) == 2:
+            return (float(between[0]), float(between[1]))
+
+    return None
+
+
+def parse_names_lr(names_dict: dict | None) -> LinearReferencedAttribute:
+    """Parse Overture names struct into linear-referenced attribute.
+
+    Overture names structure:
+    - primary: The default/main name (string)
+    - rules: Array of name rules with potential geometric scopes
+
+    Each rule may have:
+    - value: The name string
+    - variant: Type (common, alt, short, etc.)
+    - language: Language code or None for bare names
+    - between: [start, end] geometric scope (0-1 fractions)
+
+    Priority for overlapping ranges:
+    1. Variant priority (common > alt > short)
+    2. Language priority (bare > language-specific)
+    3. Order in array (first wins for ties)
+
+    Args:
+        names_dict: Overture names struct or None
+
+    Returns:
+        LinearReferencedAttribute with normalized name ranges
+    """
+    # Handle None/missing
+    if not names_dict or not isinstance(names_dict, dict):
+        return create_trivial_lr(None)
+
+    # Get default value (primary name)
+    primary = names_dict.get("primary")
+    default_value = primary if isinstance(primary, str) else None
+
+    # Get rules array
+    rules = names_dict.get("rules")
+    if not rules or not isinstance(rules, list):
+        return create_trivial_lr(default_value)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, str, int]] = []
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+
+        # Extract value
+        value = rule.get("value")
+        if not isinstance(value, str):
+            continue
+
+        # Extract range (default to full segment)
+        range_tuple = _extract_range_from_rule(rule)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Calculate priority (lower = higher priority)
+        variant = rule.get("variant")
+        language = rule.get("language")
+        variant_priority = _get_variant_priority(variant)
+        language_priority = _get_language_priority(language)
+        # Combine priorities: variant is more important, then language
+        priority = variant_priority * 10 + language_priority
+
+        rule_tuples.append((start, end, value, priority))
+
+    if not rule_tuples:
+        return create_trivial_lr(default_value)
+
+    return normalize_ranges(rule_tuples, default_value)
+
+
+def parse_subclass_rules_lr(
+    subclass_rules: list | None, default_subclass: str | None = None
+) -> LinearReferencedAttribute:
+    """Parse Overture subclass_rules into linear-referenced attribute.
+
+    Each rule has:
+    - value: The subclass string
+    - between: [start, end] geometric scope (optional)
+
+    Args:
+        subclass_rules: Array of subclass rule structs
+        default_subclass: Default subclass from flat column
+
+    Returns:
+        LinearReferencedAttribute with normalized subclass ranges
+    """
+    if not subclass_rules or not isinstance(subclass_rules, list):
+        return create_trivial_lr(default_subclass)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, str, int]] = []
+
+    for i, rule in enumerate(subclass_rules):
+        if not isinstance(rule, dict):
+            continue
+
+        value = rule.get("value")
+        if not isinstance(value, str):
+            continue
+
+        range_tuple = _extract_range_from_rule(rule)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Use index as priority (earlier rules win)
+        rule_tuples.append((start, end, value, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(default_subclass)
+
+    return normalize_ranges(rule_tuples, default_subclass)
+
+
+def parse_level_rules_lr(level_rules: list | None) -> LinearReferencedAttribute:
+    """Parse Overture level_rules into linear-referenced attribute.
+
+    Each rule has:
+    - value: The level integer (0 = ground, positive = elevated, negative = underground)
+    - between: [start, end] geometric scope (optional)
+
+    Args:
+        level_rules: Array of level rule structs
+
+    Returns:
+        LinearReferencedAttribute with normalized level ranges
+    """
+    default_level = 0  # Ground level
+
+    if not level_rules or not isinstance(level_rules, list):
+        return create_trivial_lr(default_level)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, int, int]] = []
+
+    for i, rule in enumerate(level_rules):
+        if not isinstance(rule, dict):
+            continue
+
+        value = rule.get("value")
+        if not isinstance(value, int):
+            # Try to convert
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+
+        range_tuple = _extract_range_from_rule(rule)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Use index as priority (earlier rules win)
+        rule_tuples.append((start, end, value, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(default_level)
+
+    return normalize_ranges(rule_tuples, default_level)
+
+
+def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
+    """Parse Overture road_flags into linear-referenced attribute.
+
+    Each rule has:
+    - values: List of flag strings (e.g., ["is_bridge", "is_link"])
+    - between: [start, end] geometric scope (optional)
+
+    The value stored is a frozenset of flags for hashability.
+
+    Args:
+        road_flags: Array of road flag rule structs
+
+    Returns:
+        LinearReferencedAttribute with normalized flag ranges
+    """
+    default_flags: frozenset[str] = frozenset()
+
+    if not road_flags or not isinstance(road_flags, list):
+        return create_trivial_lr(default_flags)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, frozenset[str], int]] = []
+
+    for i, rule in enumerate(road_flags):
+        if not isinstance(rule, dict):
+            continue
+
+        values = rule.get("values")
+        if not isinstance(values, list):
+            continue
+
+        # Convert to frozenset of strings
+        flag_set = frozenset(str(v) for v in values if v)
+
+        range_tuple = _extract_range_from_rule(rule)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Use index as priority (earlier rules win)
+        rule_tuples.append((start, end, flag_set, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(default_flags)
+
+    return normalize_ranges(rule_tuples, default_flags)
+
+
+def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Extract linear-referenced attributes from Overture columns.
+
+    Adds *_lr columns for each supported attribute type:
+    - names_lr: From names struct
+    - subclass_lr: From subclass_rules array
+    - level_lr: From level_rules array
+    - road_flags_lr: From road.road_flags array
+
+    The LR columns store JSON-serializable dict lists for parquet compatibility.
+
+    Args:
+        gdf: GeoDataFrame with Overture columns
+
+    Returns:
+        GeoDataFrame with added *_lr columns
+    """
+    # Parse names linear reference
+    if "names" in gdf.columns:
+        gdf["names_lr"] = gdf["names"].apply(lambda x: parse_names_lr(x).to_dict_list())
+    else:
+        gdf["names_lr"] = gdf.get("name", None).apply(lambda x: create_trivial_lr(x).to_dict_list())
+
+    # Parse subclass linear reference
+    if "subclass_rules" in gdf.columns:
+        default_subclass = gdf.get("subclass", None)
+        gdf["subclass_lr"] = gdf.apply(
+            lambda row: parse_subclass_rules_lr(
+                row.get("subclass_rules"),
+                row.get("subclass") if default_subclass is not None else None,
+            ).to_dict_list(),
+            axis=1,
+        )
+    elif "subclass" in gdf.columns:
+        gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
+    else:
+        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}] for _ in range(len(gdf))]
+
+    # Parse level linear reference
+    if "level_rules" in gdf.columns:
+        gdf["level_lr"] = gdf["level_rules"].apply(lambda x: parse_level_rules_lr(x).to_dict_list())
+    elif "level" in gdf.columns:
+        gdf["level_lr"] = gdf["level"].apply(
+            lambda x: create_trivial_lr(x if isinstance(x, int) else 0).to_dict_list()
+        )
+    else:
+        gdf["level_lr"] = [[{"start": 0.0, "end": 1.0, "value": 0}] for _ in range(len(gdf))]
+
+    # Parse road_flags linear reference
+    if "road" in gdf.columns:
+        gdf["road_flags_lr"] = gdf["road"].apply(
+            lambda x: parse_road_flags_lr(
+                x.get("road_flags") if isinstance(x, dict) else None
+            ).to_dict_list()
+        )
+    else:
+        gdf["road_flags_lr"] = [[{"start": 0.0, "end": 1.0, "value": []}] for _ in range(len(gdf))]
+
+    # Convert frozensets to lists for JSON serialization in road_flags_lr
+    def convert_frozensets(lr_data: list) -> list:
+        """Convert frozenset values to lists for JSON compatibility."""
+        result = []
+        for item in lr_data:
+            value = item.get("value")
+            if isinstance(value, frozenset):
+                item = {**item, "value": sorted(value)}
+            result.append(item)
+        return result
+
+    gdf["road_flags_lr"] = gdf["road_flags_lr"].apply(convert_frozensets)
+
+    return gdf
