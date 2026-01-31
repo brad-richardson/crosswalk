@@ -788,7 +788,9 @@ def generate_basemap_sweep(
 def run_agent(
     agent: str = typer.Argument(help="Agent: claude, gemini, codex, ollama"),
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch directory"),
-    model: str = typer.Option("", "--model", "-m", help="Model variant (e.g., sonnet, flash)"),
+    model: str = typer.Option(
+        "opus", "--model", "-m", help="Model variant (default: opus for claude, flash for gemini)"
+    ),
     variant: str = typer.Option("", "--variant", "-v", help="Image variant name"),
     limit: int = typer.Option(0, "--limit", "-l", help="Max candidates to process (0=no limit)"),
     overwrite: bool = typer.Option(
