@@ -49,6 +49,7 @@ class MatchContext:
     ref_geom: LineString
     target_geom: LineString
     confidence: float
+    road_class: str | None = None  # e.g., "motorway", "residential", "footway"
     ref_attrs: dict[str, Any] = field(default_factory=dict)
     target_attrs: dict[str, Any] = field(default_factory=dict)
 

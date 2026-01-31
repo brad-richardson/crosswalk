@@ -10,11 +10,13 @@ from overturemaps.core import geodataframe, get_latest_release
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
+from ..constants import MIN_WATER_AREA_M2
+
 
 def fetch_overture_water(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
-    min_area_m2: float = 100.0,
+    min_area_m2: float = MIN_WATER_AREA_M2,
 ) -> gpd.GeoDataFrame:
     """Fetch water body polygons from Overture Maps.
 

@@ -16,10 +16,13 @@ from .base import (
 )
 from .context import (
     fetch_overture_buildings,
+    fetch_overture_landcover,
     fetch_overture_water,
     get_building_union,
+    get_landcover_union,
     get_water_union,
 )
+from .tests import BuildingTest, LandcoverTest, WaterBodyTest
 
 __all__ = [
     # Base classes
@@ -36,4 +39,10 @@ __all__ = [
     "get_water_union",
     "fetch_overture_buildings",
     "get_building_union",
+    "fetch_overture_landcover",
+    "get_landcover_union",
+    # Test implementations
+    "WaterBodyTest",
+    "BuildingTest",
+    "LandcoverTest",
 ]

@@ -1,7 +1,7 @@
-"""Fetch Overture building footprint polygons for screen tests.
+"""Fetch Overture landcover polygons for screen tests.
 
-Uses Overture Maps buildings theme to get building footprints that roads
-should not pass through.
+Uses Overture Maps land_use theme to get wetlands, sports fields, and other
+landcover types that roads should not pass through.
 """
 
 import geopandas as gpd
@@ -10,45 +10,59 @@ from overturemaps.core import geodataframe, get_latest_release
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
-from ..constants import MIN_BUILDING_AREA_M2
+from ..constants import MIN_LANDCOVER_AREA_M2, RESTRICTED_LANDCOVER_SUBTYPES
 
 
-def fetch_overture_buildings(
+def fetch_overture_landcover(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
-    min_area_m2: float = MIN_BUILDING_AREA_M2,
+    subtypes: set[str] | None = None,
+    min_area_m2: float = MIN_LANDCOVER_AREA_M2,
 ) -> gpd.GeoDataFrame:
-    """Fetch building footprint polygons from Overture Maps.
+    """Fetch landcover polygons from Overture Maps.
 
     Args:
         bbox: Bounding box as (xmin, ymin, xmax, ymax) in EPSG:4326
         release: Overture release version (None = latest)
-        min_area_m2: Minimum building area in square meters to include
+        subtypes: Landcover subtypes to include (None = RESTRICTED_SUBTYPES)
+        min_area_m2: Minimum area in square meters to include
 
     Returns:
-        GeoDataFrame with building footprint polygons in EPSG:4326
+        GeoDataFrame with landcover polygons in EPSG:4326
     """
     if release is None:
         release = get_latest_release()
         logger.debug(f"Using latest Overture release: {release}")
 
-    logger.info(f"Fetching Overture buildings for bbox: {bbox}")
+    if subtypes is None:
+        subtypes = RESTRICTED_LANDCOVER_SUBTYPES
 
-    gdf = geodataframe("building", bbox=bbox, release=release)
+    logger.info(f"Fetching Overture landcover for bbox: {bbox}")
+
+    gdf = geodataframe("land_use", bbox=bbox, release=release)
 
     if len(gdf) == 0:
-        logger.info("No buildings found in bbox")
+        logger.info("No landcover found in bbox")
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
+
+    # Filter to requested subtypes
+    if "subtype" in gdf.columns:
+        mask = gdf["subtype"].str.lower().isin({s.lower() for s in subtypes})
+        gdf = gdf.loc[mask].copy()
+
+    if len(gdf) == 0:
+        logger.info(f"No landcover matching subtypes: {subtypes}")
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
     # Filter to polygon geometries only
     mask = gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
     gdf = gdf.loc[mask].copy()
 
     if len(gdf) == 0:
-        logger.info("No polygon buildings found")
+        logger.info("No polygon landcover found")
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
     # Filter by minimum area
@@ -59,14 +73,14 @@ def fetch_overture_buildings(
         gdf = gdf[gdf["area_m2"] >= min_area_m2]
         filtered_count = initial_count - len(gdf)
         if filtered_count > 0:
-            logger.debug(f"Filtered {filtered_count} small buildings (< {min_area_m2} m2)")
+            logger.debug(f"Filtered {filtered_count} small landcover areas (< {min_area_m2} m2)")
 
-    logger.info(f"Fetched {len(gdf)} building footprints")
+    logger.info(f"Fetched {len(gdf)} landcover polygons")
     return gdf
 
 
-def get_building_union(gdf: gpd.GeoDataFrame) -> Polygon | MultiPolygon | None:
-    """Get union of all building footprint geometries for efficient intersection testing."""
+def get_landcover_union(gdf: gpd.GeoDataFrame) -> Polygon | MultiPolygon | None:
+    """Get union of all landcover geometries for efficient intersection testing."""
     if len(gdf) == 0:
         return None
 
