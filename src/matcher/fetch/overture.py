@@ -448,15 +448,23 @@ def _extract_range_from_rule(rule: dict) -> tuple[float, float] | None:
     """
     # Check for "between" at the top level (common format)
     between = rule.get("between")
-    if between and isinstance(between, (list, tuple)) and len(between) == 2:
-        return (float(between[0]), float(between[1]))
+    if between is not None:
+        # Convert numpy array to list if needed
+        if hasattr(between, "tolist"):
+            between = between.tolist()
+        if isinstance(between, (list, tuple)) and len(between) == 2:
+            return (float(between[0]), float(between[1]))
 
     # Check for scope.between (alternative format)
     scope = rule.get("scope")
     if scope and isinstance(scope, dict):
         between = scope.get("between")
-        if between and isinstance(between, (list, tuple)) and len(between) == 2:
-            return (float(between[0]), float(between[1]))
+        if between is not None:
+            # Convert numpy array to list if needed
+            if hasattr(between, "tolist"):
+                between = between.tolist()
+            if isinstance(between, (list, tuple)) and len(between) == 2:
+                return (float(between[0]), float(between[1]))
 
     return None
 
@@ -493,9 +501,14 @@ def parse_names_lr(names_dict: dict | None) -> LinearReferencedAttribute:
     primary = names_dict.get("primary")
     default_value = primary if isinstance(primary, str) else None
 
-    # Get rules array
+    # Get rules array (may be list or numpy array from parquet)
     rules = names_dict.get("rules")
-    if not rules or not isinstance(rules, list):
+    if rules is None:
+        return create_trivial_lr(default_value)
+    # Convert numpy array to list if needed
+    if hasattr(rules, "tolist"):
+        rules = rules.tolist()
+    if not isinstance(rules, list) or len(rules) == 0:
         return create_trivial_lr(default_value)
 
     # Build list of (start, end, value, priority) tuples
@@ -549,7 +562,12 @@ def parse_subclass_rules_lr(
     Returns:
         LinearReferencedAttribute with normalized subclass ranges
     """
-    if not subclass_rules or not isinstance(subclass_rules, list):
+    if subclass_rules is None:
+        return create_trivial_lr(default_subclass)
+    # Convert numpy array to list if needed
+    if hasattr(subclass_rules, "tolist"):
+        subclass_rules = subclass_rules.tolist()
+    if not isinstance(subclass_rules, list) or len(subclass_rules) == 0:
         return create_trivial_lr(default_subclass)
 
     # Build list of (start, end, value, priority) tuples
@@ -593,7 +611,12 @@ def parse_level_rules_lr(level_rules: list | None) -> LinearReferencedAttribute:
     """
     default_level = 0  # Ground level
 
-    if not level_rules or not isinstance(level_rules, list):
+    if level_rules is None:
+        return create_trivial_lr(default_level)
+    # Convert numpy array to list if needed
+    if hasattr(level_rules, "tolist"):
+        level_rules = level_rules.tolist()
+    if not isinstance(level_rules, list) or len(level_rules) == 0:
         return create_trivial_lr(default_level)
 
     # Build list of (start, end, value, priority) tuples
@@ -643,7 +666,12 @@ def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
     """
     default_flags: frozenset[str] = frozenset()
 
-    if not road_flags or not isinstance(road_flags, list):
+    if road_flags is None:
+        return create_trivial_lr(default_flags)
+    # Convert numpy array to list if needed
+    if hasattr(road_flags, "tolist"):
+        road_flags = road_flags.tolist()
+    if not isinstance(road_flags, list) or len(road_flags) == 0:
         return create_trivial_lr(default_flags)
 
     # Build list of (start, end, value, priority) tuples
@@ -654,6 +682,11 @@ def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
             continue
 
         values = rule.get("values")
+        if values is None:
+            continue
+        # Convert numpy array to list if needed
+        if hasattr(values, "tolist"):
+            values = values.tolist()
         if not isinstance(values, list):
             continue
 
