@@ -25,18 +25,52 @@ GEOMETRY_COLUMNS = [
 ]
 
 
-def _serialize_attributes(**kwargs) -> str:
+def _serialize_attributes(
+    name: str | None = None,
+    road_class: str | None = None,
+    subclass: str | None = None,
+    names_lr: list | None = None,
+    subclass_lr: list | None = None,
+    level_lr: list | None = None,
+    road_flags_lr: list | None = None,
+) -> str:
     """Serialize attribute key-value pairs to JSON, dropping None values.
 
     Converts numpy/pandas types to plain Python strings for JSON compatibility.
+    LR data is stored as-is (already JSON-serializable list of dicts).
+
+    Args:
+        name: Flat name string
+        road_class: Road class (use 'road_class' to avoid Python keyword)
+        subclass: Road subclass
+        names_lr: Linear-referenced names data
+        subclass_lr: Linear-referenced subclass data
+        level_lr: Linear-referenced level data
+        road_flags_lr: Linear-referenced road flags data
+
+    Returns:
+        JSON string of attributes
     """
     clean = {}
-    for k, v in kwargs.items():
-        if v is None:
-            continue
-        if isinstance(v, float) and pd.isna(v):
-            continue
-        clean[k] = str(v)
+
+    # Flat attributes (stored as strings)
+    if name is not None:
+        clean["name"] = str(name)
+    if road_class is not None and not (isinstance(road_class, float) and pd.isna(road_class)):
+        clean["class"] = str(road_class)
+    if subclass is not None and not (isinstance(subclass, float) and pd.isna(subclass)):
+        clean["subclass"] = str(subclass)
+
+    # LR data (stored as-is - already JSON-serializable)
+    if names_lr is not None:
+        clean["names_lr"] = names_lr
+    if subclass_lr is not None:
+        clean["subclass_lr"] = subclass_lr
+    if level_lr is not None:
+        clean["level_lr"] = level_lr
+    if road_flags_lr is not None:
+        clean["road_flags_lr"] = road_flags_lr
+
     return json.dumps(clean)
 
 
@@ -166,6 +200,14 @@ class GeometryStore:
         target_class: str | None = None,
         ref_subclass: str | None = None,
         target_subclass: str | None = None,
+        ref_names_lr: list | None = None,
+        target_names_lr: list | None = None,
+        ref_subclass_lr: list | None = None,
+        target_subclass_lr: list | None = None,
+        ref_level_lr: list | None = None,
+        target_level_lr: list | None = None,
+        ref_road_flags_lr: list | None = None,
+        target_road_flags_lr: list | None = None,
     ) -> None:
         """Add or update a geometry record for a labeled pair.
 
@@ -182,6 +224,14 @@ class GeometryStore:
             target_class: Target road class
             ref_subclass: Reference road subclass
             target_subclass: Target road subclass
+            ref_names_lr: Reference linear-referenced names data
+            target_names_lr: Target linear-referenced names data
+            ref_subclass_lr: Reference linear-referenced subclass data
+            target_subclass_lr: Target linear-referenced subclass data
+            ref_level_lr: Reference linear-referenced level data
+            target_level_lr: Target linear-referenced level data
+            ref_road_flags_lr: Reference linear-referenced road flags data
+            target_road_flags_lr: Target linear-referenced road flags data
         """
         new_row = {
             "gers_id": str(gers_id),
@@ -189,10 +239,22 @@ class GeometryStore:
             "ref_geometry_wkt": wkt.dumps(ref_geometry),
             "target_geometry_wkt": wkt.dumps(target_geometry),
             "ref_attributes": _serialize_attributes(
-                name=ref_name, **{"class": ref_class}, subclass=ref_subclass
+                name=ref_name,
+                road_class=ref_class,
+                subclass=ref_subclass,
+                names_lr=ref_names_lr,
+                subclass_lr=ref_subclass_lr,
+                level_lr=ref_level_lr,
+                road_flags_lr=ref_road_flags_lr,
             ),
             "target_attributes": _serialize_attributes(
-                name=target_name, **{"class": target_class}, subclass=target_subclass
+                name=target_name,
+                road_class=target_class,
+                subclass=target_subclass,
+                names_lr=target_names_lr,
+                subclass_lr=target_subclass_lr,
+                level_lr=target_level_lr,
+                road_flags_lr=target_road_flags_lr,
             ),
         }
 
@@ -215,7 +277,8 @@ class GeometryStore:
         Returns:
             Dict with parsed LineString geometries and attributes, or None if not found.
             Attributes are unpacked from JSON into top-level keys:
-            ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass.
+            - Flat attributes: ref_name, target_name, ref_class, target_class, etc.
+            - LR attributes: ref_names_lr, target_names_lr, etc.
         """
         df = self.df
         mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
@@ -241,12 +304,22 @@ class GeometryStore:
             "target_id": row["target_id"],
             "ref_geometry": ref_geom,
             "target_geometry": target_geom,
+            # Flat attributes
             "ref_name": ref_attrs.get("name"),
             "target_name": target_attrs.get("name"),
             "ref_class": ref_attrs.get("class"),
             "target_class": target_attrs.get("class"),
             "ref_subclass": ref_attrs.get("subclass"),
             "target_subclass": target_attrs.get("subclass"),
+            # LR attributes
+            "ref_names_lr": ref_attrs.get("names_lr"),
+            "target_names_lr": target_attrs.get("names_lr"),
+            "ref_subclass_lr": ref_attrs.get("subclass_lr"),
+            "target_subclass_lr": target_attrs.get("subclass_lr"),
+            "ref_level_lr": ref_attrs.get("level_lr"),
+            "target_level_lr": target_attrs.get("level_lr"),
+            "ref_road_flags_lr": ref_attrs.get("road_flags_lr"),
+            "target_road_flags_lr": target_attrs.get("road_flags_lr"),
         }
 
     def has_pair(self, gers_id: str, target_id: str) -> bool:
@@ -274,3 +347,74 @@ class GeometryStore:
 
         # Atomic replace temp to final
         temp_path.replace(self.csv_path)
+
+    def update_lr_attributes(
+        self,
+        gers_id: str,
+        target_id: str,
+        ref_names_lr: list | None = None,
+        target_names_lr: list | None = None,
+        ref_subclass_lr: list | None = None,
+        target_subclass_lr: list | None = None,
+        ref_level_lr: list | None = None,
+        target_level_lr: list | None = None,
+        ref_road_flags_lr: list | None = None,
+        target_road_flags_lr: list | None = None,
+    ) -> bool:
+        """Update LR attributes for an existing geometry record.
+
+        Used during backfill to add LR data to existing records without
+        replacing the geometries or flat attributes.
+
+        Args:
+            gers_id: Overture reference segment ID
+            target_id: Target segment ID
+            ref_names_lr: Reference linear-referenced names data
+            target_names_lr: Target linear-referenced names data
+            ref_subclass_lr: Reference linear-referenced subclass data
+            target_subclass_lr: Target linear-referenced subclass data
+            ref_level_lr: Reference linear-referenced level data
+            target_level_lr: Target linear-referenced level data
+            ref_road_flags_lr: Reference linear-referenced road flags data
+            target_road_flags_lr: Target linear-referenced road flags data
+
+        Returns:
+            True if record was found and updated, False if not found
+        """
+        df = self.df
+        mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
+
+        if not mask.any():
+            return False
+
+        # Find the index of the matching row
+        idx = df[mask].index[-1]
+
+        # Get existing attributes
+        ref_attrs = _deserialize_attributes(df.at[idx, "ref_attributes"])
+        target_attrs = _deserialize_attributes(df.at[idx, "target_attributes"])
+
+        # Update with new LR data
+        if ref_names_lr is not None:
+            ref_attrs["names_lr"] = ref_names_lr
+        if ref_subclass_lr is not None:
+            ref_attrs["subclass_lr"] = ref_subclass_lr
+        if ref_level_lr is not None:
+            ref_attrs["level_lr"] = ref_level_lr
+        if ref_road_flags_lr is not None:
+            ref_attrs["road_flags_lr"] = ref_road_flags_lr
+
+        if target_names_lr is not None:
+            target_attrs["names_lr"] = target_names_lr
+        if target_subclass_lr is not None:
+            target_attrs["subclass_lr"] = target_subclass_lr
+        if target_level_lr is not None:
+            target_attrs["level_lr"] = target_level_lr
+        if target_road_flags_lr is not None:
+            target_attrs["road_flags_lr"] = target_road_flags_lr
+
+        # Serialize back to JSON
+        self._df.at[idx, "ref_attributes"] = json.dumps(ref_attrs)
+        self._df.at[idx, "target_attributes"] = json.dumps(target_attrs)
+
+        return True

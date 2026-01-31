@@ -11,6 +11,7 @@ from shapely.geometry import LineString
 
 from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_COLUMNS, FEATURE_VERSION
 from ..features.semantic import _extract_name_string
+from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 
 
 class LabelLoadError(Exception):
@@ -919,9 +920,31 @@ def backfill_features(
                     alignment,
                 )
 
-                # Get names and classes
-                ref_name = ref_row.get("names") if hasattr(ref_row, "get") else None
-                target_name = target_row.get("names") if hasattr(target_row, "get") else None
+                # Get names and classes - use LR extraction if available
+                ref_names_lr = ref_row.get("names_lr") if hasattr(ref_row, "get") else None
+                if ref_names_lr is not None:
+                    lr_attr = LinearReferencedAttribute.from_dict_list(ref_names_lr)
+                    ref_attrs = extract_aligned_attributes(
+                        {"name": lr_attr},
+                        alignment.overture_start_frac,
+                        alignment.overture_end_frac,
+                    )
+                    ref_name = ref_attrs.get("name")
+                else:
+                    ref_name = ref_row.get("names") if hasattr(ref_row, "get") else None
+
+                target_names_lr = target_row.get("names_lr") if hasattr(target_row, "get") else None
+                if target_names_lr is not None:
+                    lr_attr = LinearReferencedAttribute.from_dict_list(target_names_lr)
+                    target_attrs = extract_aligned_attributes(
+                        {"name": lr_attr},
+                        alignment.dataset_start_frac,
+                        alignment.dataset_end_frac,
+                    )
+                    target_name = target_attrs.get("name")
+                else:
+                    target_name = target_row.get("names") if hasattr(target_row, "get") else None
+
                 ref_class = ref_row.get("class") if hasattr(ref_row, "get") else None
                 target_class = target_row.get("class") if hasattr(target_row, "get") else None
                 ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
@@ -968,6 +991,29 @@ def backfill_features(
                 # Persist geometry to companion file (WGS84)
                 ref_geom_wgs84 = ref_gdf.geometry.loc[ref_idx_in_gdf]
                 target_geom_wgs84 = target_gdf.geometry.loc[target_idx_in_gdf]
+
+                # Get LR data if available (for alignment-aware feature recomputation)
+                ref_names_lr_data = ref_row.get("names_lr") if hasattr(ref_row, "get") else None
+                target_names_lr_data = (
+                    target_row.get("names_lr") if hasattr(target_row, "get") else None
+                )
+                ref_subclass_lr_data = (
+                    ref_row.get("subclass_lr") if hasattr(ref_row, "get") else None
+                )
+                target_subclass_lr_data = (
+                    target_row.get("subclass_lr") if hasattr(target_row, "get") else None
+                )
+                ref_level_lr_data = ref_row.get("level_lr") if hasattr(ref_row, "get") else None
+                target_level_lr_data = (
+                    target_row.get("level_lr") if hasattr(target_row, "get") else None
+                )
+                ref_road_flags_lr_data = (
+                    ref_row.get("road_flags_lr") if hasattr(ref_row, "get") else None
+                )
+                target_road_flags_lr_data = (
+                    target_row.get("road_flags_lr") if hasattr(target_row, "get") else None
+                )
+
                 geo_store.add(
                     gers_id=ref_id,
                     target_id=target_id,
@@ -979,6 +1025,14 @@ def backfill_features(
                     target_class=str(target_class) if target_class is not None else None,
                     ref_subclass=str(ref_subclass) if ref_subclass is not None else None,
                     target_subclass=str(target_subclass) if target_subclass is not None else None,
+                    ref_names_lr=ref_names_lr_data,
+                    target_names_lr=target_names_lr_data,
+                    ref_subclass_lr=ref_subclass_lr_data,
+                    target_subclass_lr=target_subclass_lr_data,
+                    ref_level_lr=ref_level_lr_data,
+                    target_level_lr=target_level_lr_data,
+                    ref_road_flags_lr=ref_road_flags_lr_data,
+                    target_road_flags_lr=target_road_flags_lr_data,
                 )
 
             else:

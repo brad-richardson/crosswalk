@@ -14,6 +14,7 @@ import requests
 from loguru import logger
 
 from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
+from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
 
 
@@ -354,6 +355,9 @@ def _transform_to_overture_schema(
     # Create GeoDataFrame with geometry
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
+    # Add trivial linear-referenced columns
+    result = add_trivial_lr_columns(result)
+
     return result
 
 
@@ -500,3 +504,68 @@ def _is_truthy(value: Any) -> bool:
         return value.upper() in ("Y", "YES", "TRUE", "1", "T")
 
     return bool(value)
+
+
+def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Add trivial linear-referenced columns for target-side data.
+
+    Target-side data typically doesn't have linear-referenced attributes,
+    so we create trivial LR columns with a single range [0.0, 1.0, value]
+    for each attribute.
+
+    This enables the same feature computation code to work with both
+    Overture (which has LR attributes) and target data.
+
+    Args:
+        gdf: GeoDataFrame with flat attribute columns
+
+    Returns:
+        GeoDataFrame with added *_lr columns
+    """
+
+    # Get name from names struct or flat name column
+    def get_name(row):
+        names = row.get("names")
+        if isinstance(names, dict):
+            return names.get("primary")
+        return row.get("name")
+
+    # Names LR - extract primary from names struct
+    gdf["names_lr"] = gdf.apply(
+        lambda row: create_trivial_lr(get_name(row)).to_dict_list(),
+        axis=1,
+    )
+
+    # Subclass LR
+    if "subclass" in gdf.columns:
+        gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
+    else:
+        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}] for _ in range(len(gdf))]
+
+    # Level LR - extract from level_rules if present, otherwise use 0
+    def get_level(row):
+        level_rules = row.get("level_rules")
+        if isinstance(level_rules, list) and len(level_rules) > 0:
+            first = level_rules[0]
+            if isinstance(first, dict):
+                return first.get("value", 0)
+        return 0
+
+    gdf["level_lr"] = gdf.apply(
+        lambda row: create_trivial_lr(get_level(row)).to_dict_list(),
+        axis=1,
+    )
+
+    # Road flags LR - extract from road_flags if present
+    def get_flags(row):
+        road_flags = row.get("road_flags")
+        if isinstance(road_flags, list):
+            return sorted(road_flags)
+        return []
+
+    gdf["road_flags_lr"] = gdf.apply(
+        lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),
+        axis=1,
+    )
+
+    return gdf

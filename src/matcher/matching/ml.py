@@ -41,6 +41,7 @@ from ..config import (
     SEMANTIC_FEATURES,
 )
 from ..utils.crs import validate_projected_crs
+from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 from .types import MatchDecision, MatchResult
 
 # Module-level globals for multiprocessing worker data
@@ -51,6 +52,72 @@ def _init_worker(data):
     """Initialize worker process with shared data."""
     global _worker_data
     _worker_data = data
+
+
+def _extract_lr_attributes_for_pair(
+    ref_idx: int,
+    target_idx: int,
+    alignment,
+    worker_data: dict,
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    """Extract aligned attributes from LR data for a candidate pair.
+
+    Uses alignment fractions to extract majority-covering values from
+    linear-referenced attributes. Falls back to flat values if LR data
+    is not available.
+
+    Args:
+        ref_idx: Reference segment index
+        target_idx: Target segment index
+        alignment: Alignment result (may be None)
+        worker_data: Worker data dict with LR columns
+
+    Returns:
+        Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
+    """
+    # Get alignment fractions
+    if alignment is not None:
+        ref_start = alignment.overture_start_frac
+        ref_end = alignment.overture_end_frac
+        target_start = alignment.dataset_start_frac
+        target_end = alignment.dataset_end_frac
+    else:
+        ref_start, ref_end = 0.0, 1.0
+        target_start, target_end = 0.0, 1.0
+
+    # Extract reference attributes
+    ref_names_lr = worker_data.get("ref_names_lr")
+    if ref_names_lr is not None:
+        lr_data = ref_names_lr[ref_idx]
+        if lr_data is not None:
+            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+            ref_attrs = extract_aligned_attributes({"name": lr_attr}, ref_start, ref_end)
+            ref_name = ref_attrs.get("name")
+        else:
+            ref_name = worker_data["ref_names"][ref_idx]
+    else:
+        ref_name = worker_data["ref_names"][ref_idx]
+
+    # Extract target attributes (typically trivial LR, but support full LR)
+    target_names_lr = worker_data.get("target_names_lr")
+    if target_names_lr is not None:
+        lr_data = target_names_lr[target_idx]
+        if lr_data is not None:
+            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+            target_attrs = extract_aligned_attributes({"name": lr_attr}, target_start, target_end)
+            target_name = target_attrs.get("name")
+        else:
+            target_name = worker_data["target_names"][target_idx]
+    else:
+        target_name = worker_data["target_names"][target_idx]
+
+    # Classes and subclasses - use flat values for now (LR support can be added)
+    ref_class = worker_data["ref_classes"][ref_idx]
+    target_class = worker_data["target_classes"][target_idx]
+    ref_subclass = worker_data["ref_subclasses"][ref_idx]
+    target_subclass = worker_data["target_subclasses"][target_idx]
+
+    return ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass
 
 
 def _compute_single_feature(args):
@@ -159,6 +226,11 @@ def _compute_feature_chunk(chunk):
                     geom_sim_ref = ref_geom
                     geom_sim_target = target_geom
 
+            # Extract aligned attributes from LR data (using alignment fractions)
+            ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
+                _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
+            )
+
             pair_data.append(
                 {
                     "chunk_idx": chunk_idx,
@@ -166,12 +238,12 @@ def _compute_feature_chunk(chunk):
                     "target_idx": target_idx,
                     "geom_sim_ref": geom_sim_ref,
                     "geom_sim_target": geom_sim_target,
-                    "ref_name": _worker_data["ref_names"][ref_idx],
-                    "target_name": _worker_data["target_names"][target_idx],
-                    "ref_class": _worker_data["ref_classes"][ref_idx],
-                    "target_class": _worker_data["target_classes"][target_idx],
-                    "ref_subclass": _worker_data["ref_subclasses"][ref_idx],
-                    "target_subclass": _worker_data["target_subclasses"][target_idx],
+                    "ref_name": ref_name,
+                    "target_name": target_name,
+                    "ref_class": ref_class,
+                    "target_class": target_class,
+                    "ref_subclass": ref_subclass,
+                    "target_subclass": target_subclass,
                     "endpoint_features": endpoint_features,
                     "ref_topology": ref_topology,
                     "target_topology": target_topology,
@@ -1072,6 +1144,11 @@ class MLMatcher:
             else np.full(len(target), None, dtype=object)
         )
 
+        # Extract linear-referenced attribute columns if available
+        # These allow alignment-aware attribute extraction (majority covering value)
+        ref_names_lr = reference["names_lr"].to_numpy() if "names_lr" in reference.columns else None
+        target_names_lr = target["names_lr"].to_numpy() if "names_lr" in target.columns else None
+
         timings["data_extraction"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
 
@@ -1263,6 +1340,8 @@ class MLMatcher:
             "target_classes": target_classes,
             "ref_subclasses": ref_subclasses,
             "target_subclasses": target_subclasses,
+            "ref_names_lr": ref_names_lr,
+            "target_names_lr": target_names_lr,
             "ref_ids": ref_ids,
             "target_ids": target_ids,
             "aligned_endpoint_features": aligned_endpoint_features,

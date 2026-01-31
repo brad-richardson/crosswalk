@@ -42,6 +42,22 @@ NAMES_COLUMN = "names"
 CLASS_COLUMN = "class"
 SUBCLASS_COLUMN = "subclass"
 
+# Linear-referenced attribute columns (stores JSON-serialized LR data)
+# These columns store attributes that vary along the segment's length
+# Each column contains a list of dicts: [{"start": 0.0, "end": 0.5, "value": "..."}]
+NAMES_LR_COLUMN = "names_lr"
+SUBCLASS_LR_COLUMN = "subclass_lr"
+LEVEL_LR_COLUMN = "level_lr"
+ROAD_FLAGS_LR_COLUMN = "road_flags_lr"
+
+# All LR columns for convenience
+LR_ATTRIBUTE_COLUMNS = [
+    NAMES_LR_COLUMN,
+    SUBCLASS_LR_COLUMN,
+    LEVEL_LR_COLUMN,
+    ROAD_FLAGS_LR_COLUMN,
+]
+
 # ============================================================================
 # DATA AND FEATURE VERSIONING
 # ============================================================================

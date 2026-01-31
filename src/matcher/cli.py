@@ -3541,12 +3541,12 @@ def benchmark(
         console.print(f"  Precision: {overall_precision:.3f}")
         console.print(f"  Recall:    {overall_recall:.3f}")
 
-        # Extract top 5 feature importances
+        # Extract top 10 feature importances
         feature_importances = dict(zip(matcher.feature_names, matcher.model.feature_importances_))
-        top_5_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:5]
+        top_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:10]
 
-        console.print("\nTop 5 features by importance:")
-        for feat, imp in top_5_features:
+        console.print("\nTop 10 features by importance:")
+        for feat, imp in top_features:
             console.print(f"  {feat}: {imp:.3f}")
 
         # Per-dataset metrics
@@ -3611,6 +3611,16 @@ def benchmark(
                 "top4_importance",
                 "top5_feature",
                 "top5_importance",
+                "top6_feature",
+                "top6_importance",
+                "top7_feature",
+                "top7_importance",
+                "top8_feature",
+                "top8_importance",
+                "top9_feature",
+                "top9_importance",
+                "top10_feature",
+                "top10_importance",
             ]
 
             write_header = not results_file.exists()
@@ -3638,26 +3648,16 @@ def benchmark(
                         "recall": f"{metrics.get('recall', 0):.4f}",
                         "split_seed": seed,
                         "model_name": model_path.name,
-                        "top1_feature": top_5_features[0][0] if len(top_5_features) > 0 else "",
-                        "top1_importance": f"{top_5_features[0][1]:.4f}"
-                        if len(top_5_features) > 0
-                        else "",
-                        "top2_feature": top_5_features[1][0] if len(top_5_features) > 1 else "",
-                        "top2_importance": f"{top_5_features[1][1]:.4f}"
-                        if len(top_5_features) > 1
-                        else "",
-                        "top3_feature": top_5_features[2][0] if len(top_5_features) > 2 else "",
-                        "top3_importance": f"{top_5_features[2][1]:.4f}"
-                        if len(top_5_features) > 2
-                        else "",
-                        "top4_feature": top_5_features[3][0] if len(top_5_features) > 3 else "",
-                        "top4_importance": f"{top_5_features[3][1]:.4f}"
-                        if len(top_5_features) > 3
-                        else "",
-                        "top5_feature": top_5_features[4][0] if len(top_5_features) > 4 else "",
-                        "top5_importance": f"{top_5_features[4][1]:.4f}"
-                        if len(top_5_features) > 4
-                        else "",
+                        **{
+                            f"top{i+1}_feature": top_features[i][0] if len(top_features) > i else ""
+                            for i in range(10)
+                        },
+                        **{
+                            f"top{i+1}_importance": f"{top_features[i][1]:.4f}"
+                            if len(top_features) > i
+                            else ""
+                            for i in range(10)
+                        },
                     }
                     writer.writerow(row)
 
