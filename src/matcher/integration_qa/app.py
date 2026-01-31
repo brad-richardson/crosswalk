@@ -72,7 +72,7 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
         session.current_view = new_view
         # Reset index and clear click state when view changes
         session.current_index = 0
-        st.session_state.pop("qa_qa_last_processed_click", None)
+        st.session_state.pop("qa_last_processed_click", None)
 
     return integration_dir, session
 
