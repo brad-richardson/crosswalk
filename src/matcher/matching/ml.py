@@ -31,7 +31,7 @@ import pandas as pd
 from loguru import logger
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from sklearn.model_selection import GroupShuffleSplit, cross_val_score
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, cross_val_score
 
 from ..config import (
     DEFAULT_TOPOLOGY_FEATURES,
@@ -513,7 +513,8 @@ def segment_aware_split(
     df: pd.DataFrame,
     test_size: float = 0.2,
     random_state: int = 42,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_groups: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, pd.Series]:
     """Split data ensuring no segment appears in both train and test sets.
 
     Uses Union-Find to group pairs that share segments, then splits by group.
@@ -524,9 +525,11 @@ def segment_aware_split(
         df: DataFrame with 'gers_id' and 'target_id' columns
         test_size: Fraction of data to use for testing (0.0 to 1.0)
         random_state: Random seed for reproducibility
+        return_groups: If True, also return the computed segment groups
 
     Returns:
-        Tuple of (train_indices, test_indices) as numpy arrays
+        Tuple of (train_indices, test_indices) as numpy arrays.
+        If return_groups=True, returns (train_indices, test_indices, groups).
 
     Raises:
         ValueError: If test_size is not in range [0.0, 1.0]
@@ -537,11 +540,19 @@ def segment_aware_split(
 
     # Handle empty DataFrame
     if len(df) == 0:
-        return np.array([], dtype=int), np.array([], dtype=int)
+        empty_idx = np.array([], dtype=int)
+        if return_groups:
+            return empty_idx, empty_idx, pd.Series([], dtype=int)
+        return empty_idx, empty_idx
 
     # Handle test_size=0.0 (no split, all training)
     if test_size == 0.0:
-        return np.arange(len(df)), np.array([], dtype=int)
+        train_idx = np.arange(len(df))
+        test_idx = np.array([], dtype=int)
+        if return_groups:
+            groups = create_segment_groups(df)
+            return train_idx, test_idx, groups
+        return train_idx, test_idx
 
     groups = create_segment_groups(df)
     n_groups = groups.nunique()
@@ -552,7 +563,11 @@ def segment_aware_split(
             f"Only {n_groups} segment group(s) found - cannot split. "
             "All pairs are transitively connected. Placing all in training set."
         )
-        return np.arange(len(df)), np.array([], dtype=int)
+        train_idx = np.arange(len(df))
+        test_idx = np.array([], dtype=int)
+        if return_groups:
+            return train_idx, test_idx, groups
+        return train_idx, test_idx
 
     # Use GroupShuffleSplit to split by group
     gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
@@ -563,6 +578,8 @@ def segment_aware_split(
         f"across {n_groups} groups"
     )
 
+    if return_groups:
+        return train_idx, test_idx, groups
     return train_idx, test_idx
 
 
@@ -745,7 +762,10 @@ class MLMatcher:
         logger.info(f"Label distribution: {pd.Series(y).value_counts().to_dict()}")
 
         # Segment-aware train/test split to prevent data leakage
-        train_idx, test_idx = segment_aware_split(df, test_size=test_size, random_state=42)
+        # Also get groups for reuse in cross-validation
+        train_idx, test_idx, groups = segment_aware_split(
+            df, test_size=test_size, random_state=42, return_groups=True
+        )
 
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
@@ -833,9 +853,22 @@ class MLMatcher:
         if len(X_test) > 0:
             y_pred = self.model.predict(X_test)
 
-            # Cross-validation score (need to impute full X for this)
+            # Cross-validation score with segment-aware folding to prevent data leakage
+            # (pairs sharing a segment must stay in the same fold)
+            # Note: CV is computed on the full dataset to estimate generalization error;
+            # the holdout test set provides an independent metric.
             X_imputed = self._impute_missing(X.copy())
-            cv_scores = cross_val_score(self.model, X_imputed, y, cv=5, scoring="f1_weighted")
+            n_groups = groups.nunique()
+            if n_groups >= 2:
+                n_splits = min(5, n_groups)
+                gkf = GroupKFold(n_splits=n_splits)
+                cv_scores = cross_val_score(
+                    self.model, X_imputed, y, cv=gkf, groups=groups, scoring="f1_weighted"
+                )
+            else:
+                # Cannot do CV with < 2 groups
+                logger.warning("Skipping CV: fewer than 2 segment groups")
+                cv_scores = np.array([np.nan])
 
             results.update(
                 {

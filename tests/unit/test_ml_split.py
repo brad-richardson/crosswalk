@@ -322,3 +322,108 @@ class TestSegmentAwareSplitEdgeCases:
 
         with pytest.raises(ValueError, match="must not contain null"):
             segment_aware_split(df, test_size=0.3, random_state=42)
+
+
+class TestSegmentAwareSplitReturnGroups:
+    """Tests for the return_groups parameter."""
+
+    def test_return_groups_false_returns_two_values(self):
+        """Without return_groups, should return (train_idx, test_idx)."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "C", "D"],
+                "target_id": ["1", "2", "3", "4"],
+                "label": ["match"] * 4,
+            }
+        )
+
+        result = segment_aware_split(df, test_size=0.3, random_state=42)
+        assert len(result) == 2
+        train_idx, test_idx = result
+        assert isinstance(train_idx, np.ndarray)
+        assert isinstance(test_idx, np.ndarray)
+
+    def test_return_groups_true_returns_three_values(self):
+        """With return_groups=True, should return (train_idx, test_idx, groups)."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "C", "D"],
+                "target_id": ["1", "2", "3", "4"],
+                "label": ["match"] * 4,
+            }
+        )
+
+        result = segment_aware_split(df, test_size=0.3, random_state=42, return_groups=True)
+        assert len(result) == 3
+        train_idx, test_idx, groups = result
+        assert isinstance(train_idx, np.ndarray)
+        assert isinstance(test_idx, np.ndarray)
+        assert isinstance(groups, pd.Series)
+
+    def test_returned_groups_match_create_segment_groups(self):
+        """Returned groups should match what create_segment_groups produces."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "A", "B", "C"],
+                "target_id": ["1", "2", "2", "3"],
+                "label": ["match"] * 4,
+            }
+        )
+
+        _, _, groups = segment_aware_split(df, test_size=0.3, random_state=42, return_groups=True)
+        expected_groups = create_segment_groups(df)
+
+        pd.testing.assert_series_equal(groups, expected_groups)
+
+    def test_return_groups_empty_dataframe(self):
+        """Empty DataFrame with return_groups=True should return empty groups."""
+        df = pd.DataFrame({"gers_id": [], "target_id": [], "label": []})
+
+        train_idx, test_idx, groups = segment_aware_split(
+            df, test_size=0.2, random_state=42, return_groups=True
+        )
+
+        assert len(train_idx) == 0
+        assert len(test_idx) == 0
+        assert len(groups) == 0
+
+    def test_return_groups_test_size_zero(self):
+        """test_size=0.0 with return_groups=True should still return groups."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "C"],
+                "target_id": ["1", "2", "3"],
+                "label": ["match"] * 3,
+            }
+        )
+
+        train_idx, test_idx, groups = segment_aware_split(
+            df, test_size=0.0, random_state=42, return_groups=True
+        )
+
+        assert len(train_idx) == 3
+        assert len(test_idx) == 0
+        assert len(groups) == 3
+        # Each pair is isolated, so 3 unique groups
+        assert groups.nunique() == 3
+
+    def test_return_groups_single_group(self):
+        """Single large group with return_groups=True should return groups."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "A", "B", "B"],
+                "target_id": ["1", "2", "2", "3"],
+                "label": ["match"] * 4,
+            }
+        )
+
+        train_idx, test_idx, groups = segment_aware_split(
+            df, test_size=0.5, random_state=42, return_groups=True
+        )
+
+        # All in training since there's only 1 group
+        assert len(train_idx) == 4
+        assert len(test_idx) == 0
+        # But groups should still be returned
+        assert len(groups) == 4
+        assert groups.nunique() == 1
