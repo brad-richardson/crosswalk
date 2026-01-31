@@ -132,8 +132,6 @@ from .semantic import (
     compute_class_similarity,
     compute_name_numeric_match,
     compute_name_similarity,
-    compute_tier_incompatible,
-    compute_tier_match,
 )
 from .spatial_context import (
     build_connector_graph,
@@ -227,10 +225,6 @@ def _compute_non_geometric_features(
 
     with timed_section("class_similarity"):
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
-
-    with timed_section("tier_features"):
-        same_tier = compute_tier_match(ref_class, target_class)
-        tier_incompat = compute_tier_incompatible(ref_class, target_class)
 
     # Lateral offset
     with timed_section("perpendicular_offset"):
@@ -380,8 +374,6 @@ def _compute_non_geometric_features(
         "name_is_generic": name_sim["name_is_generic"],
         # Semantic - class
         "class_similarity": class_sim,
-        "same_traffic_tier": same_tier,
-        "tier_incompatible": tier_incompat,
         # Endpoint proximity
         "min_endpoint_proximity_m": endpoint_features.get(
             "min_endpoint_proximity_m", MAX_DISTANCE_METERS
@@ -624,8 +616,6 @@ def _get_error_features() -> dict[str, float]:
         "name_is_generic": 0.0,
         # Semantic features - class
         "class_similarity": 0.0,
-        "same_traffic_tier": 0.5,  # Neutral when unknown
-        "tier_incompatible": 0.0,  # Don't penalize when unknown
         # Endpoint proximity
         "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
         "max_endpoint_proximity_m": MAX_DISTANCE_METERS,

@@ -380,10 +380,8 @@ class LabelStore:
             "has_name_ref": features.get("has_name_ref", 0.0),
             "has_name_target": features.get("has_name_target", 0.0),
             "name_is_generic": features.get("name_is_generic", 0.0),
-            # Semantic features - class (3)
+            # Semantic features - class (1)
             "class_similarity": features.get("class_similarity", 0.0),
-            "same_traffic_tier": features.get("same_traffic_tier", 0.5),
-            "tier_incompatible": features.get("tier_incompatible", 0.0),
             # Endpoint/connectivity features (3) - direction-invariant min/max
             "min_endpoint_proximity_m": features.get("min_endpoint_proximity_m", 0.0),
             "max_endpoint_proximity_m": features.get("max_endpoint_proximity_m", 0.0),

@@ -70,6 +70,20 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Use case**: International deployments (co_bogota, etc.)
 - **Priority**: Medium for international datasets, LOW for English-only
 
+### Traffic Tier Binary Features
+- **Features**: `same_traffic_tier`, `tier_incompatible`
+- **Purpose**: Give ML explicit signals about traffic tier mismatches (vehicle vs pedestrian)
+- **Computation**:
+  - `same_traffic_tier`: 1.0 if both classes in same tier (vehicle/pedestrian/bicycle), 0.0 otherwise
+  - `tier_incompatible`: 1.0 if vehicle↔pedestrian mismatch, 0.0 otherwise
+- **Status**: Functions implemented in `semantic.py` (`compute_tier_match`, `compute_tier_incompatible`)
+- **Why deferred**: Requires label backfill; soft class_similarity penalty currently sufficient
+- **Next steps**:
+  1. Backfill labels with new features
+  2. Retrain model and compare feature importance
+  3. Evaluate if hard tier blocking is needed for specific datasets
+- **Priority**: Low-Medium (incremental improvement over class_similarity)
+
 ---
 
 ## Attribute Features
