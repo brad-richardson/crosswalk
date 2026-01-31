@@ -1,15 +1,11 @@
 """Streamlit app for integration QA."""
 
 import os
-import sys
 from pathlib import Path
 
 import geopandas as gpd
 import streamlit as st
 from streamlit_folium import st_folium
-
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from matcher.integration.output import load_integration_result
 from matcher.integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
@@ -41,6 +37,7 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
         "Integration Output Directory",
         value=os.environ.get("INTEGRATION_DIR", "data/integrated"),
         help="Directory containing edges.parquet, orphans.parquet, etc.",
+        key="qa_integration_dir",
     )
 
     # Reviewer name
@@ -54,9 +51,12 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
         session.reviewer_name = reviewer
         save_reviewer_name(reviewer)
 
-    # Load data button
-    if st.button("Load Integration Data", type="primary"):
-        st.session_state.qa_data_loaded = False
+    # Load data button (forces a rerun when clicked)
+    st.button(
+        "Load Integration Data",
+        type="primary",
+        key="qa_load_integration_data",
+    )
 
     st.divider()
 
@@ -72,7 +72,7 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
         session.current_view = new_view
         # Reset index and clear click state when view changes
         session.current_index = 0
-        st.session_state.pop("last_processed_click", None)
+        st.session_state.pop("qa_qa_last_processed_click", None)
 
     return integration_dir, session
 
@@ -207,7 +207,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                 click_key = f"{click_lat:.6f},{click_lon:.6f}"
 
                 # Only process if this is a new click (not the same as last processed)
-                last_click = st.session_state.get("last_processed_click")
+                last_click = st.session_state.get("qa_last_processed_click")
                 if click_key != last_click:
                     # Find nearest edge in display_edges
                     from shapely.geometry import Point
@@ -226,13 +226,13 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                     # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
                     if nearest_pos is not None and min_dist < 0.001:
                         # Always update the processed click to prevent re-processing
-                        st.session_state.last_processed_click = click_key
+                        st.session_state.qa_last_processed_click = click_key
                         if nearest_pos != session.current_index:
                             session.current_index = nearest_pos
                             st.rerun()
                     else:
                         # Click was not near any edge - still update to prevent re-processing
-                        st.session_state.last_processed_click = click_key
+                        st.session_state.qa_last_processed_click = click_key
 
             # Navigation controls (below map)
             col_prev, col_idx, col_next = st.columns([1, 2, 1])
@@ -369,7 +369,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                         session.show_reviewed = new_show_reviewed
                         # Reset index and clear click state when filter changes
                         session.current_index = 0
-                        st.session_state.pop("last_processed_click", None)
+                        st.session_state.pop("qa_last_processed_click", None)
                         st.rerun()
 
                     if is_orphan:
@@ -384,7 +384,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                             session.filter_by_priority = new_priority
                             # Reset index and clear click state when filter changes
                             session.current_index = 0
-                            st.session_state.pop("last_processed_click", None)
+                            st.session_state.pop("qa_last_processed_click", None)
                             st.rerun()
 
                         if (
@@ -406,7 +406,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                                 session.filter_by_component = new_component
                                 # Reset index and clear click state when filter changes
                                 session.current_index = 0
-                                st.session_state.pop("last_processed_click", None)
+                                st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
                     else:
                         if edges is not None and len(edges) > 0:
@@ -422,7 +422,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                                 session.filter_by_source = new_source
                                 # Reset index and clear click state when filter changes
                                 session.current_index = 0
-                                st.session_state.pop("last_processed_click", None)
+                                st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
 
                 # Statistics in expander
@@ -506,4 +506,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Add parent to path for standalone execution
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     main()
