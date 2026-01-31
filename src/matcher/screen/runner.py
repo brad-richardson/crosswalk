@@ -1,6 +1,6 @@
-"""Falsification runner - orchestrates falsification tests on match results.
+"""Screen runner - orchestrates screen tests on match results.
 
-Runs registered falsification tests on bridge file matches and outputs
+Runs registered screen tests on bridge file matches and outputs
 filtered results with a detailed report.
 """
 
@@ -14,22 +14,19 @@ from loguru import logger
 
 # Import tests to register them
 from . import tests as _tests  # noqa: F401
-
-del _tests  # Avoid unused variable warning; import is only for side effects
-
 from .base import (
-    FalsificationOutcome,
-    FalsificationResult,
-    FalsificationTest,
     MatchContext,
+    ScreenOutcome,
+    ScreenResult,
+    ScreenTest,
     get_registered_tests,
     get_test,
 )
 
 
 @dataclass
-class FalsificationReport:
-    """Report from running falsification tests."""
+class ScreenReport:
+    """Report from running screen tests."""
 
     total_matches: int
     passed: int
@@ -76,19 +73,19 @@ class FalsificationReport:
         }
 
 
-def run_falsification(
+def run_screen(
     bridge_path: Path,
     ref_path: Path,
     target_path: Path,
     test_names: list[str] | None = None,
     output_path: Path | None = None,
     report_only: bool = False,
-) -> tuple[gpd.GeoDataFrame | None, FalsificationReport]:
-    """Run falsification tests on a bridge file.
+) -> tuple[gpd.GeoDataFrame | None, ScreenReport]:
+    """Run screen tests on a bridge file.
 
     Loads the bridge file, reference, and target datasets, then runs
-    specified (or all) falsification tests on each match. Outputs a
-    filtered bridge file with failed matches removed.
+    specified (or all) screen tests on each match. Outputs a filtered
+    bridge file with failed matches removed.
 
     Args:
         bridge_path: Path to bridge parquet file with matches
@@ -101,16 +98,16 @@ def run_falsification(
     Returns:
         Tuple of (filtered_gdf, report)
         - filtered_gdf: Bridge file with failed matches removed (None if report_only)
-        - report: FalsificationReport with test results
+        - report: ScreenReport with test results
     """
-    logger.info(f"Running falsification on {bridge_path}")
+    logger.info(f"Running screen tests on {bridge_path}")
 
     # Load data
     bridge_gdf = gpd.read_parquet(bridge_path)
     ref_gdf = gpd.read_parquet(ref_path)
     target_gdf = gpd.read_parquet(target_path)
 
-    # Ensure consistent CRS (EPSG:4326 for falsification)
+    # Ensure consistent CRS (EPSG:4326 for screen tests)
     if bridge_gdf.crs is not None and bridge_gdf.crs != "EPSG:4326":
         bridge_gdf = bridge_gdf.to_crs("EPSG:4326")
     if ref_gdf.crs is not None and ref_gdf.crs != "EPSG:4326":
@@ -129,24 +126,23 @@ def run_falsification(
     else:
         test_classes = [get_test(name) for name in test_names]
 
-    tests: list[FalsificationTest] = [cls() for cls in test_classes]
-    logger.info(f"Running {len(tests)} falsification tests: {[t.name for t in tests]}")
+    tests: list[ScreenTest] = [cls() for cls in test_classes]
+    logger.info(f"Running {len(tests)} screen tests: {[t.name for t in tests]}")
 
     # Prepare all tests (fetch context data)
     for test in tests:
         logger.info(f"Preparing test: {test.name}")
         test.prepare(bbox)
 
-    # Build lookup indices for geometries
-    # Determine ID columns
+    # Build lookup indices for geometries (vectorized for performance)
     ref_id_col = _get_id_column(ref_gdf, "ref")
     target_id_col = _get_id_column(target_gdf, "target")
 
-    ref_lookup = {row[ref_id_col]: row.geometry for _, row in ref_gdf.iterrows()}
-    target_lookup = {row[target_id_col]: row.geometry for _, row in target_gdf.iterrows()}
+    ref_lookup = ref_gdf.set_index(ref_id_col)["geometry"].to_dict()
+    target_lookup = target_gdf.set_index(target_id_col)["geometry"].to_dict()
 
     # Run tests on each match
-    results_by_match: dict[int, list[FalsificationResult]] = {}
+    results_by_match: dict[int, list[ScreenResult]] = {}
     failed_indices: set[int] = set()
     warned_indices: set[int] = set()
 
@@ -167,6 +163,9 @@ def run_falsification(
             logger.warning(f"Missing geometry for match {idx}: ref={ref_id}, target={target_id}")
             continue
 
+        # Get road class if available
+        road_class = row.get("road_class") or row.get("class") or row.get("highway")
+
         # Create match context
         ctx = MatchContext(
             match_id=str(idx),
@@ -175,6 +174,7 @@ def run_falsification(
             ref_geom=ref_geom,
             target_geom=target_geom,
             confidence=confidence,
+            road_class=road_class,
         )
 
         # Run all tests
@@ -186,9 +186,9 @@ def run_falsification(
             result = test.test_match(ctx)
             match_results.append(result)
 
-            if result.outcome == FalsificationOutcome.FAIL:
+            if result.outcome == ScreenOutcome.FAIL:
                 match_failed = True
-            elif result.outcome == FalsificationOutcome.WARN:
+            elif result.outcome == ScreenOutcome.WARN:
                 match_warned = True
 
         results_by_match[idx] = match_results
@@ -210,7 +210,7 @@ def run_falsification(
     )
 
     logger.info(
-        f"Falsification complete: {report.passed} passed, {report.failed} failed, "
+        f"Screen tests complete: {report.passed} passed, {report.failed} failed, "
         f"{report.warned} warned ({report.fail_rate:.2%} fail rate)"
     )
 
@@ -256,14 +256,14 @@ def _get_bridge_target_column(gdf: gpd.GeoDataFrame) -> str:
 
 def _build_report(
     bridge_gdf: gpd.GeoDataFrame,
-    results_by_match: dict[int, list[FalsificationResult]],
+    results_by_match: dict[int, list[ScreenResult]],
     failed_indices: set[int],
     warned_indices: set[int],
-    tests: list[FalsificationTest],
+    tests: list[ScreenTest],
     bridge_ref_col: str,
     bridge_target_col: str,
-) -> FalsificationReport:
-    """Build falsification report from results."""
+) -> ScreenReport:
+    """Build screen report from results."""
     total = len(bridge_gdf)
     failed = len(failed_indices)
     warned = len(warned_indices)
@@ -293,7 +293,7 @@ def _build_report(
     for idx in failed_indices:
         row = bridge_gdf.loc[idx]
         match_results = results_by_match.get(idx, [])
-        fail_reasons = [r for r in match_results if r.outcome == FalsificationOutcome.FAIL]
+        fail_reasons = [r for r in match_results if r.outcome == ScreenOutcome.FAIL]
 
         failed_matches.append(
             {
@@ -313,7 +313,7 @@ def _build_report(
     for idx in list(warned_indices)[:100]:
         row = bridge_gdf.loc[idx]
         match_results = results_by_match.get(idx, [])
-        warn_reasons = [r for r in match_results if r.outcome == FalsificationOutcome.WARN]
+        warn_reasons = [r for r in match_results if r.outcome == ScreenOutcome.WARN]
 
         warned_matches.append(
             {
@@ -328,7 +328,7 @@ def _build_report(
             }
         )
 
-    return FalsificationReport(
+    return ScreenReport(
         total_matches=total,
         passed=passed,
         failed=failed,

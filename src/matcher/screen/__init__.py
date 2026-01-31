@@ -22,6 +22,7 @@ from .context import (
     get_landcover_union,
     get_water_union,
 )
+from .runner import ScreenReport, run_screen
 from .tests import BuildingTest, LandcoverTest, WaterBodyTest
 
 __all__ = [
@@ -45,4 +46,7 @@ __all__ = [
     "WaterBodyTest",
     "BuildingTest",
     "LandcoverTest",
+    # Runner
+    "run_screen",
+    "ScreenReport",
 ]

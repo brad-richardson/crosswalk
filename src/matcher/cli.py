@@ -3667,7 +3667,7 @@ def benchmark(
 
 
 @app.command()
-def falsify(
+def screen(
     bridge_path: Path = typer.Argument(
         ...,
         help="Path to bridge parquet file with matches",
@@ -3684,13 +3684,13 @@ def falsify(
         None,
         "--output",
         "-o",
-        help="Output path for filtered bridge file (default: adds _falsified suffix)",
+        help="Output path for filtered bridge file (default: adds _screened suffix)",
     ),
     tests: list[str] | None = typer.Option(
         None,
         "--test",
         "-t",
-        help="Specific test(s) to run (default: all). Options: water_body, building",
+        help="Specific test(s) to run (default: all). Options: water_body, building, landcover",
     ),
     report_only: bool = typer.Option(
         False,
@@ -3704,29 +3704,29 @@ def falsify(
         help="Output path for JSON report",
     ),
 ):
-    """Run falsification tests on a bridge file.
+    """Run screen tests on a bridge file.
 
-    Falsification tests detect invalid matches that slip through ML scoring
+    Screen tests detect invalid matches that slip through ML scoring
     by checking against external context (water bodies, buildings, etc.).
-    Matches that fail falsification are removed from the output.
+    Matches that fail screening are removed from the output.
 
     Examples:
-        matcher falsify bridge.parquet ref.parquet target.parquet
-        matcher falsify bridge.parquet ref.parquet target.parquet -t water_body
-        matcher falsify bridge.parquet ref.parquet target.parquet --report-only
+        matcher screen bridge.parquet ref.parquet target.parquet
+        matcher screen bridge.parquet ref.parquet target.parquet -t water_body
+        matcher screen bridge.parquet ref.parquet target.parquet --report-only
     """
     import json
 
-    from .falsification import run_falsification
+    from .screen import run_screen
 
     # Determine output path
     if output is None and not report_only:
-        output = bridge_path.parent / f"{bridge_path.stem}_falsified.parquet"
+        output = bridge_path.parent / f"{bridge_path.stem}_screened.parquet"
 
-    console.print(f"[blue]Running falsification on {bridge_path}[/blue]")
+    console.print(f"[blue]Running screen tests on {bridge_path}[/blue]")
 
     try:
-        filtered_gdf, report = run_falsification(
+        filtered_gdf, report = run_screen(
             bridge_path=bridge_path,
             ref_path=ref_path,
             target_path=target_path,
@@ -3736,7 +3736,7 @@ def falsify(
         )
 
         # Print summary
-        console.print("\n[bold]Falsification Results:[/bold]")
+        console.print("\n[bold]Screen Results:[/bold]")
         console.print(f"  Total matches: {report.total_matches}")
         console.print(f"  Passed: [green]{report.passed}[/green]")
         console.print(f"  Failed: [red]{report.failed}[/red] ({report.fail_rate:.2%})")
@@ -3762,7 +3762,7 @@ def falsify(
             console.print(f"\n[green]Filtered bridge file saved to {output}[/green]")
 
     except Exception as e:
-        console.print(f"[red]Falsification failed: {e}[/red]")
+        console.print(f"[red]Screen tests failed: {e}[/red]")
         raise typer.Exit(1) from None
 
 
