@@ -339,8 +339,6 @@ class TestFringeDetection:
             crs="EPSG:32610",
         )
 
-        coverage = compute_reference_coverage(reference, buffer_distance_m=30.0)
-
         # Target inside coverage (parallel to reference, within buffer)
         inside = gpd.GeoDataFrame(
             {
@@ -360,12 +358,16 @@ class TestFringeDetection:
         )
 
         # Test inside segment - should be valid (inside_length >= 5m)
-        valid, fringe = filter_fringe_segments(inside, coverage, min_inside_length_m=5.0)
+        valid, fringe = filter_fringe_segments(
+            inside, reference, buffer_distance_m=30.0, min_inside_length_m=5.0
+        )
         assert len(valid) == 1
         assert len(fringe) == 0
 
         # Test outside segment - should be fringe
-        valid, fringe = filter_fringe_segments(outside, coverage, min_inside_length_m=5.0)
+        valid, fringe = filter_fringe_segments(
+            outside, reference, buffer_distance_m=30.0, min_inside_length_m=5.0
+        )
         assert len(valid) == 0
         assert len(fringe) == 1
         assert fringe.iloc[0]["unmatched_reason"] == "outside_reference_coverage"

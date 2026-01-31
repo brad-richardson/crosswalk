@@ -2,6 +2,10 @@
 
 Identifies disconnected components (orphans) that are not connected
 to the reference network, flagging them for QA review.
+
+This module focuses purely on connectivity analysis. Pre-integration
+screening (fringe detection, water/building intersection) is handled
+by the screen module.
 """
 
 from typing import Any
@@ -11,7 +15,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from loguru import logger
-from shapely import MultiPoint, Point, concave_hull
+from shapely import Point
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
@@ -39,111 +43,6 @@ def _get_endpoints(geom) -> list[Point]:
         return []
 
 
-def compute_reference_coverage(
-    reference_edges: gpd.GeoDataFrame,
-    buffer_distance_m: float = 50.0,
-    hull_ratio: float = 0.3,
-) -> Any:
-    """Compute a coverage polygon from the reference network.
-
-    Creates a concave hull around the reference network and buffers it
-    to define the area where target segments are considered valid.
-    Segments outside this area are likely "fringe" data at the boundary
-    of the reference coverage.
-
-    Args:
-        reference_edges: GeoDataFrame of reference network edges
-        buffer_distance_m: Buffer distance (meters) to expand the hull
-        hull_ratio: Concave hull ratio (0=convex, 1=very tight). Default 0.3.
-
-    Returns:
-        Shapely Polygon representing the coverage area
-    """
-    if len(reference_edges) == 0:
-        return None
-
-    # Extract all coordinates from the reference network (LineStrings only)
-    all_coords = []
-    for geom in reference_edges.geometry:
-        if geom is None or geom.is_empty:
-            continue
-        all_coords.extend(list(geom.coords))
-
-    if len(all_coords) < 3:
-        return None
-
-    # Create concave hull
-    points = MultiPoint([Point(c) for c in all_coords])
-    try:
-        hull = concave_hull(points, ratio=hull_ratio)
-    except (ValueError, RuntimeError) as e:
-        # Fall back to convex hull if concave hull fails (e.g., too few points, invalid geometry)
-        logger.debug(f"Concave hull failed, using convex hull: {e}")
-        hull = points.convex_hull
-
-    if hull is None or hull.is_empty:
-        return None
-
-    # Buffer the hull to account for gaps at the edges
-    coverage = hull.buffer(buffer_distance_m)
-
-    return coverage
-
-
-def filter_fringe_segments(
-    target_edges: gpd.GeoDataFrame,
-    coverage_polygon: Any,
-    min_inside_length_m: float = 10.0,
-) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """Filter target segments that are outside the reference coverage area.
-
-    Segments with less than min_inside_length_m within the coverage polygon
-    are considered "fringe" segments at the boundary of reference coverage.
-
-    Args:
-        target_edges: GeoDataFrame of target edges to filter
-        coverage_polygon: Shapely Polygon representing reference coverage
-        min_inside_length_m: Minimum length (meters) inside coverage to be valid
-
-    Returns:
-        Tuple of:
-        - valid_targets: Targets with sufficient coverage
-        - fringe_targets: Targets outside coverage (marked with unmatched_reason)
-    """
-    if coverage_polygon is None or len(target_edges) == 0:
-        return target_edges, gpd.GeoDataFrame(columns=target_edges.columns, crs=target_edges.crs)
-
-    inside_lengths = []
-    for geom in target_edges.geometry:
-        if geom is None or geom.is_empty:
-            inside_lengths.append(0.0)
-            continue
-
-        try:
-            inside_portion = geom.intersection(coverage_polygon)
-            if inside_portion.is_empty:
-                inside_lengths.append(0.0)
-            else:
-                inside_lengths.append(inside_portion.length)
-        except (ValueError, RuntimeError) as e:
-            logger.debug(f"Intersection failed for geometry: {e}")
-            inside_lengths.append(0.0)
-
-    target_edges = target_edges.copy()
-    target_edges["_inside_coverage_length"] = inside_lengths
-
-    # Split into valid and fringe
-    valid_mask = target_edges["_inside_coverage_length"] >= min_inside_length_m
-    valid_targets = target_edges[valid_mask].copy()
-    fringe_targets = target_edges[~valid_mask].copy()
-
-    # Mark fringe segments
-    if len(fringe_targets) > 0:
-        fringe_targets["unmatched_reason"] = "outside_reference_coverage"
-
-    return valid_targets, fringe_targets
-
-
 def propagate_transitive_connectivity(
     connected_targets: gpd.GeoDataFrame,
     orphan_targets: gpd.GeoDataFrame,
@@ -162,6 +61,7 @@ def propagate_transitive_connectivity(
         orphan_targets: GeoDataFrame of targets not connected to reference
         connection_tolerance_m: Distance in meters to consider segments connected
         max_hops: Maximum number of hops from reference (default 2)
+        debug: Enable debug logging
 
     Returns:
         Tuple of:
@@ -255,25 +155,18 @@ def propagate_transitive_connectivity(
 
 def detect_orphans_by_proximity(
     combined_gdf: gpd.GeoDataFrame,
-    connection_tolerance_m: float = 3.0,  # Tight tolerance - must actually connect to infrastructure
-    min_merge_length_m: float = 20.0,  # Minimum length to merge (adds meaningful new coverage)
-    net_new_buffer_m: float = 5.0,  # Buffer around reference for net-new calculation
-    max_hops: int = 2,  # Maximum transitive connectivity hops
-    fringe_buffer_m: float = 50.0,  # Buffer around reference coverage for fringe detection
-    enable_fringe_detection: bool = True,  # Whether to filter fringe segments
-    transitive_tolerance_m: float
-    | None = None,  # Tolerance for transitive connections (default: 2x connection_tolerance_m)
-    debug_connectivity: bool = False,  # Enable debug logging for transitive connectivity
+    connection_tolerance_m: float = 3.0,
+    min_merge_length_m: float = 20.0,
+    net_new_buffer_m: float = 5.0,
+    max_hops: int = 2,
+    transitive_tolerance_m: float | None = None,
+    debug_connectivity: bool = False,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame | None, dict[str, Any]]:
     """Identify orphan segments based on endpoint proximity to reference network.
 
     A segment is considered connected if at least one of its endpoints is within
     connection_tolerance_m of any reference segment. Target segments not connected
     to the reference network are flagged as orphans.
-
-    Fringe detection: Segments at the boundary of reference coverage (outside the
-    buffered concave hull of reference) are marked as fringe and not merged. This
-    prevents false positives where there's simply no Overture data.
 
     Transitive connectivity: If trail A connects to a road, and trail B connects
     to trail A (but not the road), trail B is also considered connected via
@@ -282,8 +175,8 @@ def detect_orphans_by_proximity(
     Additionally, connected segments shorter than min_merge_length_m are treated
     as orphans since they don't add meaningful new coverage.
 
-    This is a simpler approach that doesn't require planarization - it just checks
-    if target endpoints are near the reference network.
+    Note: Pre-integration screening (fringe detection, water/building checks) should
+    be performed before calling this function using the screen module.
 
     Args:
         combined_gdf: Combined GeoDataFrame with _source column
@@ -294,19 +187,19 @@ def detect_orphans_by_proximity(
             Segments within this buffer are considered "covered" by reference.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             0 = only direct connections, 1 = direct + 1 hop, 2 = direct + 2 hops.
-        fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
-            detection. Segments outside this area are considered fringe. Default 50m.
-        enable_fringe_detection: Whether to filter fringe segments. Default True.
+        transitive_tolerance_m: Tolerance (meters) for transitive connections between
+            target segments. Defaults to 2x connection_tolerance_m since trails often
+            don't share exact endpoints. Set to connection_tolerance_m for strict mode.
+        debug_connectivity: Enable debug logging for transitive connectivity analysis.
 
     Returns:
         Tuple of:
         - main_edges: Reference edges + connected target edges meeting length requirement
-        - orphan_edges: Target edges not connected or too short (includes fringe)
+        - orphan_edges: Target edges not connected or too short
         - net_new_edges: GeoDataFrame with net-new geometry portions (for visualization)
-        - stats: Statistics including connectivity hop breakdown and fringe count
+        - stats: Statistics including connectivity hop breakdown
     """
     # Set default transitive tolerance to 2x connection tolerance
-    # This accounts for trails that don't share exact endpoints
     if transitive_tolerance_m is None:
         transitive_tolerance_m = connection_tolerance_m * 2
 
@@ -316,9 +209,6 @@ def detect_orphans_by_proximity(
     logger.info(f"  Min merge length: {min_merge_length_m}m")
     logger.info(f"  Net-new buffer: {net_new_buffer_m}m")
     logger.info(f"  Max transitive hops: {max_hops}")
-    logger.info(f"  Fringe detection: {'enabled' if enable_fringe_detection else 'disabled'}")
-    if enable_fringe_detection:
-        logger.info(f"  Fringe buffer: {fringe_buffer_m}m")
 
     # Work in a projected CRS for accurate distance calculations
     original_crs = combined_gdf.crs
@@ -335,22 +225,6 @@ def detect_orphans_by_proximity(
 
     logger.info(f"  Reference edges: {len(reference_edges)}")
     logger.info(f"  Target edges: {len(target_edges)}")
-
-    # Fringe detection: filter out targets outside reference coverage area
-    fringe_count = 0
-    fringe_targets = gpd.GeoDataFrame(columns=target_edges.columns, crs=combined_gdf.crs)
-    if enable_fringe_detection and len(target_edges) > 0 and len(reference_edges) > 0:
-        logger.info("  Computing reference coverage polygon...")
-        coverage_polygon = compute_reference_coverage(
-            reference_edges, buffer_distance_m=fringe_buffer_m
-        )
-        if coverage_polygon is not None:
-            target_edges, fringe_targets = filter_fringe_segments(
-                target_edges, coverage_polygon, min_inside_length_m=10.0
-            )
-            fringe_count = len(fringe_targets)
-            if fringe_count > 0:
-                logger.info(f"  Fringe segments (outside reference coverage): {fringe_count}")
 
     if len(target_edges) == 0:
         # No targets, everything is main
@@ -424,7 +298,7 @@ def detect_orphans_by_proximity(
         connected_targets, orphan_targets = propagate_transitive_connectivity(
             connected_targets=connected_targets,
             orphan_targets=orphan_targets,
-            connection_tolerance_m=transitive_tolerance_m,  # Use larger tolerance for transitive connections
+            connection_tolerance_m=transitive_tolerance_m,
             max_hops=max_hops,
             debug=debug_connectivity,
         )
@@ -433,11 +307,9 @@ def detect_orphans_by_proximity(
     logger.info(f"  Orphan target edges (disconnected): {len(orphan_targets)}")
 
     # Filter connected targets by minimum NET NEW length
-    # Only merge if segment adds meaningful new coverage beyond existing reference
     net_new_edges = None
     if min_merge_length_m > 0 and len(connected_targets) > 0:
         # Create a buffer around reference network to define "existing coverage"
-        # Segments within this buffer are considered duplicating reference
         logger.info(f"  Computing net-new lengths (coverage buffer: {net_new_buffer_m}m)...")
 
         ref_union = unary_union(reference_edges.geometry.values)
@@ -484,12 +356,9 @@ def detect_orphans_by_proximity(
         connected_targets = connected_targets[long_enough].copy()
 
         # Build net-new edges GeoDataFrame for visualization
-        # Shows FULL geometry of segments that passed the net-new filter
-        # (net_new_length_m shows how much is truly new coverage)
         if len(connected_targets) > 0:
             net_new_records = []
             for _, row in connected_targets.iterrows():
-                # Use full geometry for visualization, not trimmed
                 full_geom = row.geometry
                 if full_geom is not None and not full_geom.is_empty:
                     net_new_records.append(
@@ -509,15 +378,6 @@ def detect_orphans_by_proximity(
     logger.info(f"  Connected target edges (after length filter): {len(connected_targets)}")
     logger.info(f"  Orphan edges (disconnected/too short): {len(orphan_targets)}")
 
-    # Add fringe targets to orphan targets
-    if fringe_count > 0:
-        fringe_targets["component_status"] = ComponentStatus.ORPHAN.value
-        orphan_targets = gpd.GeoDataFrame(
-            pd.concat([orphan_targets, fringe_targets], ignore_index=True),
-            crs=combined_gdf.crs,
-        )
-        logger.info(f"  Total orphan edges (including fringe): {len(orphan_targets)}")
-
     # Build main edges (reference + connected targets)
     reference_edges["component_status"] = ComponentStatus.MAIN.value
     reference_edges["is_connected"] = True
@@ -531,7 +391,7 @@ def detect_orphans_by_proximity(
     )
 
     # Drop internal columns that can't be serialized
-    drop_cols = ["_net_new_geometry", "_inside_coverage_length"]
+    drop_cols = ["_net_new_geometry"]
     for col in drop_cols:
         if col in main_edges.columns:
             main_edges = main_edges.drop(columns=[col])
@@ -547,7 +407,7 @@ def detect_orphans_by_proximity(
     else:
         orphan_targets["unmatched_reason"] = "not_connected_to_network"
 
-    # Drop internal columns that can't be serialized from orphans too
+    # Drop internal columns from orphans too
     for col in drop_cols:
         if col in orphan_targets.columns:
             orphan_targets = orphan_targets.drop(columns=[col])
@@ -576,7 +436,6 @@ def detect_orphans_by_proximity(
         "reference_edges": len(reference_edges),
         "connected_target_edges": len(connected_targets),
         "orphan_edges": len(orphan_targets),
-        "fringe_edges": fringe_count,
         "too_short_to_merge": too_short_count,
         **hop_counts,
     }

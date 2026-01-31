@@ -57,3 +57,13 @@ RESTRICTED_LANDCOVER_SUBTYPES = {
     "track",
     "golf_course",
 }
+
+# =============================================================================
+# FRINGE DETECTION (reference coverage)
+# =============================================================================
+# Segments outside the reference network coverage area are "fringe" segments
+# that may be false positives at data boundaries.
+
+FRINGE_BUFFER_M = 50.0  # Buffer around reference coverage polygon
+FRINGE_MIN_INSIDE_LENGTH_M = 10.0  # Minimum length inside coverage to pass
+FRINGE_HULL_RATIO = 0.3  # Concave hull ratio (0=convex, 1=very tight)
