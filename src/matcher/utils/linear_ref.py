@@ -105,9 +105,9 @@ class LinearReferencedAttribute:
         """Convert to a JSON-serializable list of dicts.
 
         Returns:
-            List of dicts with 'start', 'end', 'value' keys
+            List of dicts with 'between' and 'value' keys, matching Overture schema
         """
-        return [{"start": r.start, "end": r.end, "value": r.value} for r in self.ranges]
+        return [{"between": [r.start, r.end], "value": r.value} for r in self.ranges]
 
     @classmethod
     def from_dict_list(
@@ -116,13 +116,20 @@ class LinearReferencedAttribute:
         """Create from a JSON-deserialized list of dicts.
 
         Args:
-            data: List of dicts with 'start', 'end', 'value' keys
+            data: List of dicts with 'between' (or legacy 'start'/'end') and 'value' keys
             default_value: Default value for gaps
 
         Returns:
             LinearReferencedAttribute instance
         """
-        ranges = [AttributeRange(start=d["start"], end=d["end"], value=d["value"]) for d in data]
+        ranges = []
+        for d in data:
+            if "between" in d:
+                start, end = d["between"]
+            else:
+                # Legacy format support
+                start, end = d["start"], d["end"]
+            ranges.append(AttributeRange(start=start, end=end, value=d["value"]))
         return cls(ranges=ranges, default_value=default_value)
 
 

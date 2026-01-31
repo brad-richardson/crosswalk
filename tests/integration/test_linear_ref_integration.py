@@ -168,11 +168,10 @@ class TestBackwardsCompatibility:
         result = extract_lr_attributes(gdf)
 
         assert "names_lr" in result.columns
-        # Should have created trivial LR
+        # Should have created trivial LR matching Overture schema
         lr_data = result.iloc[0]["names_lr"]
         assert len(lr_data) == 1
-        assert lr_data[0]["start"] == 0.0
-        assert lr_data[0]["end"] == 1.0
+        assert lr_data[0]["between"] == [0.0, 1.0]
 
     def test_none_lr_data_uses_flat_name(self):
         """Test that None LR data falls back to flat name."""
@@ -195,7 +194,7 @@ class TestBackwardsCompatibility:
         assert name == "Oak Street"
 
         # Test with actual LR data - should use LR extraction
-        lr_data = [{"start": 0.0, "end": 1.0, "value": "LR Name"}]
+        lr_data = [{"between": [0.0, 1.0], "value": "LR Name"}]
         name = get_name_with_fallback(lr_data, flat_name, 0.0, 1.0)
         assert name == "LR Name"
 
@@ -208,8 +207,8 @@ class TestMultipleAttributes:
         # Name changes at 0.5
         names_lr = LinearReferencedAttribute.from_dict_list(
             [
-                {"start": 0.0, "end": 0.5, "value": "First St"},
-                {"start": 0.5, "end": 1.0, "value": "Second St"},
+                {"between": [0.0, 0.5], "value": "First St"},
+                {"between": [0.5, 1.0], "value": "Second St"},
             ]
         )
 
@@ -219,9 +218,9 @@ class TestMultipleAttributes:
         # Level has elevated section
         level_lr = LinearReferencedAttribute.from_dict_list(
             [
-                {"start": 0.0, "end": 0.3, "value": 0},
-                {"start": 0.3, "end": 0.7, "value": 1},
-                {"start": 0.7, "end": 1.0, "value": 0},
+                {"between": [0.0, 0.3], "value": 0},
+                {"between": [0.3, 0.7], "value": 1},
+                {"between": [0.7, 1.0], "value": 0},
             ]
         )
 
