@@ -36,13 +36,21 @@ Key Features:
    - neighbor_agreement: Score based on nearby match confidence
 """
 
+import re
 from typing import NamedTuple
 
 import numpy as np
 import shapely
-from shapely import LineString, Point, line_interpolate_point
+from shapely import LineString, Point, STRtree, line_interpolate_point
 from shapely import distance as shapely_distance
 
+from ..config import (
+    DEFAULT_EXPECTED_HALF_WIDTH_M,
+    EXPECTED_HALF_WIDTH_BY_CLASS_M,
+    PARALLEL_SIBLING_MAX_OFFSET_M,
+    PARALLEL_SIBLING_MIN_ALIGNMENT,
+    PARALLEL_SIBLING_MIN_OFFSET_M,
+)
 from ._jit_helpers import (
     compute_endpoint_proximity_numba,
     compute_parallel_alignment_numba,
@@ -456,3 +464,300 @@ def compute_neighbor_agreement(
     adjusted_confidence = np.clip(candidate_confidence + adjustment, 0.0, 1.0)
 
     return float(adjusted_confidence)
+
+
+# ============================================================================
+# Parallel Sibling Detection for Split Carriageway Recognition
+# ============================================================================
+
+
+# Regex pattern to extract route numbers from road names
+# Matches patterns like: I-90, US-101, US 1, Route 66, State Highway 1, SR-12, A1, M25, Interstate 90
+_ROUTE_NUMBER_PATTERN = re.compile(
+    r"""
+    (?:^|[^\w])       # Start of string or non-word character
+    (?:
+        (?:Interstate|I|US|SR|M|A)  # Common highway prefixes
+        [-\s]?        # Optional separator
+        (\d+)         # Route number (captured - group 1)
+    |
+        (?:Route|Highway|Hwy|State\s+(?:Route|Highway))  # Route/Highway keyword
+        \s*
+        (\d+)         # Route number (captured - group 2)
+    )
+    (?:[^\d]|$)       # Non-digit or end of string
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def extract_route_number(name: str | None) -> str | None:
+    """Extract numeric route number from a road name.
+
+    Examples:
+        - "I-90" -> "90"
+        - "US Highway 101" -> "101"
+        - "Route 66" -> "66"
+        - "Main Street" -> None
+
+    Args:
+        name: Road name string
+
+    Returns:
+        Route number as string, or None if no route number found
+    """
+    if not name:
+        return None
+
+    match = _ROUTE_NUMBER_PATTERN.search(name)
+    if match:
+        # Return whichever group matched
+        return match.group(1) or match.group(2)
+    return None
+
+
+def names_compatible(name_a: str | None, name_b: str | None) -> bool:
+    """Check if names are compatible for sibling matching.
+
+    Philosophy: Require BOTH segments to have names for name-based matching.
+    If either is unnamed, return None to indicate "no opinion" - caller must
+    rely on class matching instead.
+
+    Args:
+        name_a: First road name (may be None)
+        name_b: Second road name (may be None)
+
+    Returns:
+        True if names match, False if names conflict, None if inconclusive
+        (one or both names missing)
+    """
+    # If either is unnamed, we can't use names for matching
+    # Return None to signal "no opinion" - must rely on class
+    if not name_a or not name_b:
+        return None  # type: ignore[return-value]
+
+    # Both have names - require match
+    name_a_norm = name_a.lower().strip()
+    name_b_norm = name_b.lower().strip()
+    if name_a_norm == name_b_norm:
+        return True
+
+    # Numeric route match (I-90 == Interstate 90 == I 90)
+    route_a = extract_route_number(name_a)
+    route_b = extract_route_number(name_b)
+    return bool(route_a and route_b and route_a == route_b)
+
+
+# Road class hierarchy for sibling detection
+# Lower numbers = higher priority roads
+_CLASS_HIERARCHY: dict[str, int] = {
+    "motorway": 0,
+    "trunk": 1,
+    "primary": 2,
+    "secondary": 3,
+    "tertiary": 4,
+    "unclassified": 5,
+    "residential": 6,
+    "service": 7,
+    "living_street": 8,
+    "pedestrian": 9,
+    "track": 10,
+    "path": 11,
+    "cycleway": 12,
+}
+
+
+def classes_compatible(class_a: str | None, class_b: str | None, max_tier_diff: int = 1) -> bool:
+    """Check if road classes are compatible for sibling matching.
+
+    Allows matching within a specified tier difference in the road hierarchy.
+
+    Args:
+        class_a: First road class
+        class_b: Second road class
+        max_tier_diff: Maximum allowed tier difference (default 1)
+
+    Returns:
+        True if classes are within max_tier_diff tiers of each other
+    """
+    # If either is None/unknown, be permissive
+    if not class_a or not class_b:
+        return True
+
+    tier_a = _CLASS_HIERARCHY.get(class_a.lower(), 5)  # Default to unclassified
+    tier_b = _CLASS_HIERARCHY.get(class_b.lower(), 5)
+
+    return abs(tier_a - tier_b) <= max_tier_diff
+
+
+def get_expected_half_width(road_class: str | None) -> float:
+    """Get expected half-width for a road class.
+
+    Args:
+        road_class: Road class (e.g., "motorway", "residential")
+
+    Returns:
+        Expected half-width in meters
+    """
+    if not road_class:
+        return DEFAULT_EXPECTED_HALF_WIDTH_M
+
+    return EXPECTED_HALF_WIDTH_BY_CLASS_M.get(road_class.lower(), DEFAULT_EXPECTED_HALF_WIDTH_M)
+
+
+def find_parallel_sibling(
+    segment: LineString,
+    segment_id: str,
+    segment_name: str | None,
+    segment_class: str | None,
+    spatial_index: STRtree,
+    segment_data: list[tuple[str, str | None, str | None]],
+    min_offset: float = PARALLEL_SIBLING_MIN_OFFSET_M,
+    max_offset: float = PARALLEL_SIBLING_MAX_OFFSET_M,
+    min_alignment: float = PARALLEL_SIBLING_MIN_ALIGNMENT,
+) -> tuple[bool, float]:
+    """Find parallel sibling segment (other half of split highway).
+
+    Detects when a segment has a nearby parallel "twin" with same name/class,
+    indicating it's part of a split carriageway representation.
+
+    Args:
+        segment: Geometry of the segment to check
+        segment_id: ID of the segment
+        segment_name: Name of the segment (may be None)
+        segment_class: Road class of the segment (may be None)
+        spatial_index: STRtree built from all segment geometries
+        segment_data: List of (id, name, class) tuples parallel to spatial_index geometries
+        min_offset: Minimum lateral offset for sibling detection (meters)
+        max_offset: Maximum lateral offset for sibling detection (meters)
+        min_alignment: Minimum parallel alignment score (0-1)
+
+    Returns:
+        Tuple of (has_sibling, sibling_distance) where sibling_distance is inf if no sibling.
+    """
+    if segment.is_empty:
+        return False, float("inf")
+
+    # Query spatial index with buffer
+    buffer_geom = segment.buffer(max_offset)
+    candidate_indices = spatial_index.query(buffer_geom)
+
+    # Get segment coords once for efficiency
+    segment_coords = np.array(segment.coords)
+
+    for candidate_idx in candidate_indices:
+        # O(1) lookup using index directly - segment_data is parallel to spatial_index
+        candidate_id, candidate_name, candidate_class = segment_data[candidate_idx]
+
+        if candidate_id == segment_id:
+            continue
+
+        # Get the candidate geometry from the tree
+        candidate_geom = spatial_index.geometries[candidate_idx]
+
+        if candidate_geom is None or candidate_geom.is_empty:
+            continue
+
+        # 1. Check parallel alignment (must be nearly parallel)
+        candidate_coords = np.array(candidate_geom.coords)
+        alignment = compute_parallel_alignment(
+            segment, candidate_geom, coords_a=segment_coords, coords_b=candidate_coords
+        )
+        if alignment < min_alignment:
+            continue
+
+        # 2. Check lateral offset (must be in dual-carriageway range)
+        offset, _, _ = compute_perpendicular_offset(candidate_geom, segment)
+        if not (min_offset <= offset <= max_offset):
+            continue
+
+        # 3. Check name/class compatibility (same road)
+        # Need at least one of: matching names OR compatible classes
+        name_match = names_compatible(segment_name, candidate_name)
+        class_match = classes_compatible(segment_class, candidate_class)
+
+        # If names explicitly conflict, skip
+        if name_match is False:
+            continue
+
+        # If classes explicitly conflict, skip
+        if not class_match:
+            continue
+
+        # Need at least one positive signal (matching names or both have compatible classes)
+        # If names are inconclusive (None) AND classes are missing, skip
+        if name_match is None and (not segment_class or not candidate_class):
+            continue
+
+        # Found a sibling! Use first valid one for early termination
+        # (finding ANY sibling indicates split carriageway)
+        return True, offset
+
+    return False, float("inf")
+
+
+def precompute_parallel_siblings(
+    geometries: list[LineString],
+    segment_ids: list[str],
+    names: list[str | None],
+    classes: list[str | None],
+    ids_to_compute: set[str] | None = None,
+    spatial_index: STRtree | None = None,
+) -> dict[str, tuple[bool, float]]:
+    """Pre-compute parallel sibling info for segments in a dataset.
+
+    This is called once per dataset (ref and target) during Pass 1 of feature
+    computation. Results are cached and reused for all candidate pairs.
+
+    The spatial index includes ALL segments (for finding potential siblings),
+    but sibling detection is only performed for segments in ids_to_compute.
+
+    Args:
+        geometries: List of segment geometries (projected to meters)
+        segment_ids: List of segment IDs
+        names: List of segment names (may contain None)
+        classes: List of road classes (may contain None)
+        ids_to_compute: Optional set of segment IDs to compute sibling info for.
+            If None, computes for all segments. Use this to filter to only
+            labeled segments for efficiency during backfill.
+        spatial_index: Optional pre-built STRtree over geometries. If provided,
+            skips building a new one (saves O(N log N) construction time).
+
+    Returns:
+        Dict mapping segment_id -> (has_sibling, sibling_distance)
+    """
+    # Use provided spatial index or build a new one
+    if spatial_index is None:
+        spatial_index = STRtree(geometries)
+
+    # Build parallel list of (id, name, class) - matches spatial_index order
+    segment_data: list[tuple[str, str | None, str | None]] = list(zip(segment_ids, names, classes))
+
+    # Build lookup for O(1) access by ID
+    id_to_idx = {seg_id: i for i, seg_id in enumerate(segment_ids)}
+
+    # Compute sibling info - only for requested segments
+    result: dict[str, tuple[bool, float]] = {}
+
+    # If filtered, only iterate through requested IDs (O(k) instead of O(N))
+    ids_to_process = ids_to_compute if ids_to_compute is not None else segment_ids
+    for seg_id in ids_to_process:
+        idx = id_to_idx.get(seg_id)
+        if idx is None:
+            continue  # ID not in dataset
+
+        geom = geometries[idx]
+        name = segment_data[idx][1]
+        cls = segment_data[idx][2]
+
+        has_sibling, sibling_dist = find_parallel_sibling(
+            segment=geom,
+            segment_id=seg_id,
+            segment_name=name,
+            segment_class=cls,
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        result[seg_id] = (has_sibling, sibling_dist)
+
+    return result

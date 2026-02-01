@@ -231,6 +231,12 @@ def _compute_feature_chunk(chunk):
                 _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
             )
 
+            # Look up pre-computed sibling info
+            ref_sibling_dict = _worker_data.get("ref_sibling_info", {})
+            target_sibling_dict = _worker_data.get("target_sibling_info", {})
+            ref_sibling_info = ref_sibling_dict.get(ref_seg_id)
+            target_sibling_info = target_sibling_dict.get(target_seg_id)
+
             pair_data.append(
                 {
                     "chunk_idx": chunk_idx,
@@ -253,6 +259,8 @@ def _compute_feature_chunk(chunk):
                     "target_graphlet_data": target_graphlet_data,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
+                    "ref_sibling_info": ref_sibling_info,
+                    "target_sibling_info": target_sibling_info,
                 }
             )
             valid_indices.append(chunk_idx)
@@ -352,6 +360,8 @@ def _compute_feature_chunk(chunk):
                     batch_iqr_offsets[i],
                     batch_p95_offsets[i],
                 ),
+                ref_sibling_info=pd_item.get("ref_sibling_info"),
+                target_sibling_info=pd_item.get("target_sibling_info"),
             )
 
             # Assemble full feature dict
@@ -808,18 +818,18 @@ class MLMatcher:
         else:
             scale_pos_weight = None
 
-        # Default XGBoost parameters (F1-optimized via Optuna tuning)
+        # Default XGBoost parameters (F1-optimized via Optuna tuning, 60 features)
         default_params = {
-            "n_estimators": 498,
+            "n_estimators": 912,
             "max_depth": 7,
-            "learning_rate": 0.036132253030964435,
-            "min_child_weight": 3,
-            "subsample": 0.8532855449949288,
-            "colsample_bytree": 0.9310658287940973,
-            "gamma": 0.184964581813493,
-            "reg_alpha": 0.32269976684680857,
-            "reg_lambda": 2.9941661918091094,
-            "max_bin": 422,
+            "learning_rate": 0.010636101749852585,
+            "min_child_weight": 5,
+            "subsample": 0.8761081830856152,
+            "colsample_bytree": 0.9616639656253169,
+            "gamma": 0.30396926808636227,
+            "reg_alpha": 1.724985773632091,
+            "reg_lambda": 2.7011840568401686,
+            "max_bin": 147,
             "tree_method": "hist",
             "objective": "binary:logistic" if binary else "multi:softprob",
             "eval_metric": "logloss" if binary else "mlogloss",
@@ -1332,6 +1342,35 @@ class MLMatcher:
             timings["alignment_batch"] = time.perf_counter() - t0_align
             logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
 
+        # Pre-compute parallel sibling info for split carriageway detection
+        # This detects segments that are part of dual highways (split representation)
+        from ..features.compute import precompute_parallel_siblings
+
+        logger.info("Computing parallel sibling features for split carriageway detection...")
+        t0 = time.perf_counter()
+        ref_sibling_info = precompute_parallel_siblings(
+            ref_candidates_only,
+            id_column=ref_id_column,
+            name_column="names",
+            class_column="class",
+        )
+        timings["sibling_ref"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] sibling_ref: {timings['sibling_ref']:.2f}s")
+
+        t0 = time.perf_counter()
+        target_sibling_info = precompute_parallel_siblings(
+            target_candidates_only_proj,
+            id_column=target_id_column,
+            name_column="names",
+            class_column="class",
+        )
+        timings["sibling_target"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] sibling_target: {timings['sibling_target']:.2f}s")
+        logger.info(
+            f"Found {sum(1 for v in ref_sibling_info.values() if v[0])} ref siblings, "
+            f"{sum(1 for v in target_sibling_info.values() if v[0])} target siblings"
+        )
+
         # Recompute endpoint features using alignment fractions
         # This uses aligned subline endpoints instead of full segment endpoints,
         # which is critical for partial overlaps
@@ -1391,6 +1430,8 @@ class MLMatcher:
             "target_topology": target_topology_features,
             "ref_graphlet_data": ref_graphlet_data,
             "target_graphlet_data": target_graphlet_data,
+            "ref_sibling_info": ref_sibling_info,
+            "target_sibling_info": target_sibling_info,
             "alignments": alignments,
         }
 

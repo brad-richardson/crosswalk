@@ -1206,7 +1206,9 @@ def export_agent_labels(
                         axis=1,
                     )
             except (yaml.YAMLError, KeyError, TypeError) as e:
-                console.print(f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]")
+                console.print(
+                    f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]"
+                )
 
         # If no dataset column, try to infer from batch name or mark as unknown
         if "dataset" not in df.columns:
@@ -1223,9 +1225,7 @@ def export_agent_labels(
     combined = pd.concat(all_labels, ignore_index=True)
 
     # Deduplicate: keep latest label per (ref_id, target_id, labeler)
-    combined = combined.drop_duplicates(
-        subset=["ref_id", "target_id", "labeler"], keep="last"
-    )
+    combined = combined.drop_duplicates(subset=["ref_id", "target_id", "labeler"], keep="last")
 
     console.print(f"\n[blue]Exporting {len(combined)} labels[/blue]")
 
@@ -1242,13 +1242,9 @@ def export_agent_labels(
             existing = pd.read_csv(csv_path, dtype={"ref_id": str, "target_id": str})
             # Combine and dedupe
             merged = pd.concat([existing, group], ignore_index=True)
-            merged = merged.drop_duplicates(
-                subset=["ref_id", "target_id", "labeler"], keep="last"
-            )
+            merged = merged.drop_duplicates(subset=["ref_id", "target_id", "labeler"], keep="last")
             merged.to_csv(csv_path, index=False)
-            console.print(
-                f"  {dataset}: appended {len(group)} → {len(merged)} total labels"
-            )
+            console.print(f"  {dataset}: appended {len(group)} → {len(merged)} total labels")
         else:
             group.to_csv(csv_path, index=False)
             console.print(f"  {dataset}: wrote {len(group)} labels")

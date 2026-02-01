@@ -115,7 +115,11 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
         logger.info(f"Worker timing after {count} pairs:\n{stats.summary()}")
 
 
-from ..config import DEFAULT_TOPOLOGY_FEATURES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
+from ..config import (
+    DEFAULT_TOPOLOGY_FEATURES,
+    FEATURE_COLUMNS,
+    MAX_DISTANCE_METERS,
+)
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import (
     GeometricFeatures,
@@ -127,7 +131,7 @@ from .geometric import (
     compute_sinuosity,
     compute_vertex_density,
 )
-from .relational import compute_perpendicular_offset
+from .relational import compute_perpendicular_offset, get_expected_half_width
 from .semantic import (
     compute_class_similarity,
     compute_name_numeric_match,
@@ -166,6 +170,8 @@ def _compute_non_geometric_features(
     target_seg_id: str | None,
     geom_features: GeometricFeatures,
     precomputed_lateral_offset: tuple[float, float, float] | None = None,
+    ref_sibling_info: tuple[bool, float] | None = None,
+    target_sibling_info: tuple[bool, float] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -355,6 +361,46 @@ def _compute_non_geometric_features(
     with timed_section("coverage_features"):
         coverage_feats = compute_coverage_features(alignment)
 
+    # Parallel sibling features (detect split vs centerline representation)
+    with timed_section("sibling_features"):
+        # Unpack sibling info (may be None if not precomputed)
+        if ref_sibling_info is not None:
+            has_sibling_ref, sibling_dist_ref = ref_sibling_info
+        else:
+            has_sibling_ref, sibling_dist_ref = False, MAX_DISTANCE_METERS
+
+        if target_sibling_info is not None:
+            has_sibling_target, sibling_dist_target = target_sibling_info
+        else:
+            has_sibling_target, sibling_dist_target = False, MAX_DISTANCE_METERS
+
+        # Core sibling detection
+        has_parallel_sibling_ref = float(has_sibling_ref)
+
+        # Derived: likely representation mismatch (XOR: one has sibling, other doesn't)
+        likely_representation_mismatch = float(has_sibling_ref != has_sibling_target)
+
+        # Corridor-aware offset ratio
+        # Use sibling distance from whichever side is split (has sibling)
+        if has_sibling_ref and not has_sibling_target:
+            corridor_width = sibling_dist_ref
+        elif has_sibling_target and not has_sibling_ref:
+            corridor_width = sibling_dist_target
+        elif has_sibling_ref and has_sibling_target:
+            corridor_width = min(sibling_dist_ref, sibling_dist_target)
+        else:
+            corridor_width = MAX_DISTANCE_METERS  # No corridor detected
+
+        half_corridor = corridor_width / 2.0
+        offset_vs_half = abs(lateral_offset - half_corridor)
+        offset_vs_half_corridor_ratio = offset_vs_half / (corridor_width + 1e-6)
+
+        # Class-based normalization
+        half_width_ref = get_expected_half_width(ref_class)
+        half_width_target = get_expected_half_width(target_class)
+        expected_half_width = (half_width_ref + half_width_target) / 2.0
+        offset_over_expected_halfwidth = lateral_offset / (expected_half_width + 1e-6)
+
     # Log timing summary periodically
     log_timing_summary_if_needed()
 
@@ -431,6 +477,11 @@ def _compute_non_geometric_features(
         "shape_complexity_delta": shape_complexity_delta,
         # Numeric route matching
         "name_numeric_match": name_numeric_match,
+        # Parallel sibling features (4) - detect split vs centerline representation
+        "has_parallel_sibling_ref": has_parallel_sibling_ref,
+        "offset_vs_half_corridor_ratio": offset_vs_half_corridor_ratio,
+        "offset_over_expected_halfwidth": offset_over_expected_halfwidth,
+        "likely_representation_mismatch": likely_representation_mismatch,
     }
 
 
@@ -452,6 +503,8 @@ def compute_pair_features(
     target_graphlet_data: tuple | None = None,
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
+    ref_sibling_info: tuple[bool, float] | None = None,
+    target_sibling_info: tuple[bool, float] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -557,6 +610,8 @@ def compute_pair_features(
             ref_seg_id=ref_seg_id,
             target_seg_id=target_seg_id,
             geom_features=geom_features,
+            ref_sibling_info=ref_sibling_info,
+            target_sibling_info=target_sibling_info,
         )
 
         # Merge batchable geometric features with non-geometric features
@@ -665,7 +720,74 @@ def _get_error_features() -> dict[str, float]:
         "shape_complexity_delta": 0,
         # Numeric route matching - 0.0 (no signal when neither has number)
         "name_numeric_match": 0.0,
+        # Parallel sibling features - default to no sibling detected
+        "has_parallel_sibling_ref": 0.0,
+        "offset_vs_half_corridor_ratio": 1.0,
+        "offset_over_expected_halfwidth": 0.0,
+        "likely_representation_mismatch": 0.0,
     }
+
+
+def precompute_parallel_siblings(
+    gdf: gpd.GeoDataFrame,
+    id_column: str = "id",
+    name_column: str = "names",
+    class_column: str = "class",
+    ids_to_compute: set[str] | None = None,
+    spatial_index: Any | None = None,
+) -> dict[str, tuple[bool, float]]:
+    """Pre-compute parallel sibling info for segments in a GeoDataFrame.
+
+    This function detects which segments are part of split carriageways
+    (dual highways) by finding nearby parallel segments with matching names/classes.
+
+    Args:
+        gdf: GeoDataFrame with road segments (must be in projected CRS, meters)
+        id_column: Column name for segment IDs
+        name_column: Column name for segment names
+        class_column: Column name for road class
+        ids_to_compute: Optional set of segment IDs to compute sibling info for.
+            If None, computes for all segments. Use this to filter to only
+            labeled/candidate segments for efficiency.
+        spatial_index: Optional pre-built STRtree over gdf.geometry. If provided,
+            skips building a new one (saves O(N log N) construction time).
+
+    Returns:
+        Dict mapping segment_id -> (has_sibling, sibling_distance)
+        where has_sibling is True if a parallel sibling was found,
+        and sibling_distance is the lateral offset in meters (inf if no sibling).
+    """
+    from .relational import precompute_parallel_siblings as _precompute_siblings
+
+    # Extract data from GeoDataFrame
+    geometries = list(gdf.geometry)
+    segment_ids = [str(sid) for sid in gdf[id_column]]
+
+    # Handle name column - may be nested dict, list, or string
+    names: list[str | None] = []
+    for idx in range(len(gdf)):
+        name_val = gdf.iloc[idx].get(name_column) if name_column in gdf.columns else None
+        if name_val is None:
+            names.append(None)
+        elif isinstance(name_val, dict):
+            # Overture format: {"primary": "Main St", "common": [...]}
+            names.append(name_val.get("primary") or name_val.get("common", [None])[0])
+        elif isinstance(name_val, list) and len(name_val) > 0:
+            names.append(str(name_val[0]) if name_val[0] else None)
+        else:
+            names.append(str(name_val) if name_val else None)
+
+    # Handle class column
+    classes: list[str | None] = []
+    if class_column in gdf.columns:
+        for cls in gdf[class_column]:
+            classes.append(str(cls) if cls else None)
+    else:
+        classes = [None] * len(gdf)
+
+    return _precompute_siblings(
+        geometries, segment_ids, names, classes, ids_to_compute, spatial_index
+    )
 
 
 def precompute_graphlet_features(

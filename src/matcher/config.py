@@ -35,6 +35,42 @@ DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance
 DIVERGENCE_MIN_DISTANCE_M = 20.0  # Minimum absolute distance threshold (meters)
 DIVERGENCE_PARALLELNESS_THRESHOLD = 0.5  # dot2 < this = diverging (>45 degrees)
 
+# Parallel sibling detection thresholds
+# Used to detect split carriageway representation (dual highways)
+PARALLEL_SIBLING_MIN_OFFSET_M = 5.0  # Minimum lateral offset for sibling
+PARALLEL_SIBLING_MAX_OFFSET_M = 30.0  # Maximum lateral offset for sibling
+PARALLEL_SIBLING_MIN_ALIGNMENT = 0.9  # Minimum parallel alignment score (0-1)
+
+# Expected half-width by road class (meters)
+# Derived from OSM wiki/taginfo typical paved widths
+# Used to normalize lateral offset by road type
+#
+# Source data (typical paved width):
+#   motorway:    22-35m (4-8 lanes, almost always dual carriageway)
+#   trunk:       14-25m (2-6 lanes, often divided)
+#   primary:     10-20m (2-4 lanes, mix of divided/undivided)
+#   secondary:   8-15m  (2-3 lanes, mostly undivided)
+#   tertiary:    7-12m  (2 lanes, rarely divided)
+#   residential: 5-9m   (1-2 lanes, centerline dominant)
+#   service:     3-6m   (1 lane, alleys/driveways)
+#
+EXPECTED_HALF_WIDTH_BY_CLASS_M: dict[str, float] = {
+    "motorway": 14.0,  # (22+35)/2 / 2 ≈ 14m
+    "trunk": 10.0,  # (14+25)/2 / 2 ≈ 10m
+    "primary": 7.5,  # (10+20)/2 / 2 = 7.5m
+    "secondary": 5.75,  # (8+15)/2 / 2 ≈ 5.75m
+    "tertiary": 4.75,  # (7+12)/2 / 2 ≈ 4.75m
+    "residential": 3.5,  # (5+9)/2 / 2 = 3.5m
+    "service": 2.25,  # (3+6)/2 / 2 = 2.25m
+    "unclassified": 4.0,  # Default, similar to tertiary
+    "living_street": 3.0,  # Narrow, pedestrian priority
+    "pedestrian": 2.0,  # Pedestrian-only
+    "track": 3.0,  # Unpaved/agricultural
+    "path": 1.5,  # Footpaths
+    "cycleway": 2.0,  # Bike paths
+}
+DEFAULT_EXPECTED_HALF_WIDTH_M = 4.0  # Fallback for unknown classes
+
 # Standardized column names for parquet files (Overture format)
 # The fetch step transforms source columns (e.g., "name_1", "road_classification")
 # to these standardized names. Use these constants when reading parquet files.
@@ -77,7 +113,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-01-25"
+FEATURE_VERSION = "2026-02-01"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -158,6 +194,11 @@ FEATURE_COLUMNS = [
     "shape_complexity_delta",
     # Numeric route matching (1) - better matching for numbered routes (I-90, US-101)
     "name_numeric_match",
+    # Parallel sibling features (4) - detect split vs centerline representation
+    "has_parallel_sibling_ref",  # Whether ref segment has a parallel sibling
+    "offset_vs_half_corridor_ratio",  # Normalized offset for dual carriageway detection
+    "offset_over_expected_halfwidth",  # Offset normalized by road class width
+    "likely_representation_mismatch",  # Flag when ref/target have different representation
 ]
 
 # Semantic features - excluded when training geometry-only models
