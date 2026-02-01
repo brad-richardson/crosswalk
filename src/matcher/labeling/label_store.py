@@ -526,6 +526,36 @@ class LabelStore:
             )
             feature_store.save()
 
+            # Write to normalized human labels directory (metadata only)
+            human_dir = self.labels_dir / "human"
+            human_partition = human_dir / f"dataset={self.dataset_id}"
+            human_partition.mkdir(parents=True, exist_ok=True)
+            human_csv_path = human_partition / "data.csv"
+
+            human_row = {
+                "gers_id": str(gers_id),
+                "target_id": str(target_id),
+                "label": label,
+                "labeler": labeler,
+                "labeled_at": datetime.now(UTC).isoformat(),
+                "session_id": session_id,
+                "original_decision": original_decision,
+                "original_confidence": original_confidence,
+                "ref_start_pct": ref_start_pct,
+                "ref_end_pct": ref_end_pct,
+                "target_start_pct": target_start_pct,
+                "target_end_pct": target_end_pct,
+                "is_subsegment": is_subseg,
+            }
+
+            if human_csv_path.exists():
+                human_df = pd.read_csv(human_csv_path)
+            else:
+                human_df = pd.DataFrame(columns=HUMAN_LABEL_COLUMNS)
+
+            human_df = pd.concat([human_df, pd.DataFrame([human_row])], ignore_index=True)
+            human_df.to_csv(human_csv_path, index=False)
+
     def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
 

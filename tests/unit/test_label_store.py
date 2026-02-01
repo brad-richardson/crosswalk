@@ -183,6 +183,16 @@ class TestGeometryPersistence:
             assert result is not None
             assert result["ref_name"] == "Main St"
             assert isinstance(result["ref_geometry"], LineString)
+
+            # Verify human labels were written to normalized location
+            human_csv_path = labels_dir / "human" / f"dataset={dataset_id}" / "data.csv"
+            assert human_csv_path.exists(), f"Human labels not created at {human_csv_path}"
+            import pandas as pd
+
+            human_df = pd.read_csv(human_csv_path)
+            assert len(human_df) == 1
+            assert human_df.iloc[0]["gers_id"] == "ref-001"
+            assert human_df.iloc[0]["label"] == "match"
         finally:
             # Clean up companion files created in CWD
             for base_dir in [DEFAULT_DATA_DIR, DEFAULT_FEATURES_DIR]:
