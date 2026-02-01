@@ -367,9 +367,7 @@ def run_ablation_study(
             logger.info(f"  [{i}/{len(FEATURE_COLUMNS)}] Excluding: {feature}")
 
             try:
-                metrics = train_and_evaluate(
-                    labels_dir, exclude_features=[feature], seed=seed
-                )
+                metrics = train_and_evaluate(labels_dir, exclude_features=[feature], seed=seed)
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
@@ -390,25 +388,25 @@ def run_ablation_study(
                 }
                 results.append(result)
 
-                logger.info(
-                    f"    -> f1_delta={f1_delta:+.4f} ({classification})"
-                )
+                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
-                results.append({
-                    "experiment_type": "single_feature",
-                    "excluded_features": feature,
-                    "excluded_category": "",
-                    "n_features_used": 0,
-                    "accuracy": 0.0,
-                    "f1": 0.0,
-                    "cv_f1_mean": 0.0,
-                    "cv_f1_std": 0.0,
-                    "accuracy_delta": 0.0,
-                    "f1_delta": 0.0,
-                    "classification": "error",
-                })
+                results.append(
+                    {
+                        "experiment_type": "single_feature",
+                        "excluded_features": feature,
+                        "excluded_category": "",
+                        "n_features_used": 0,
+                        "accuracy": 0.0,
+                        "f1": 0.0,
+                        "cv_f1_mean": 0.0,
+                        "cv_f1_std": 0.0,
+                        "accuracy_delta": 0.0,
+                        "f1_delta": 0.0,
+                        "classification": "error",
+                    }
+                )
 
     # Step 3: Category ablations
     if mode in ("full", "category"):
@@ -418,9 +416,7 @@ def run_ablation_study(
             logger.info(f"  Excluding category: {category_name} ({len(features)} features)")
 
             try:
-                metrics = train_and_evaluate(
-                    labels_dir, exclude_features=features, seed=seed
-                )
+                metrics = train_and_evaluate(labels_dir, exclude_features=features, seed=seed)
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
@@ -441,25 +437,25 @@ def run_ablation_study(
                 }
                 results.append(result)
 
-                logger.info(
-                    f"    -> f1_delta={f1_delta:+.4f} ({classification})"
-                )
+                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
-                results.append({
-                    "experiment_type": "category",
-                    "excluded_features": ",".join(features),
-                    "excluded_category": category_name,
-                    "n_features_used": 0,
-                    "accuracy": 0.0,
-                    "f1": 0.0,
-                    "cv_f1_mean": 0.0,
-                    "cv_f1_std": 0.0,
-                    "accuracy_delta": 0.0,
-                    "f1_delta": 0.0,
-                    "classification": "error",
-                })
+                results.append(
+                    {
+                        "experiment_type": "category",
+                        "excluded_features": ",".join(features),
+                        "excluded_category": category_name,
+                        "n_features_used": 0,
+                        "accuracy": 0.0,
+                        "f1": 0.0,
+                        "cv_f1_mean": 0.0,
+                        "cv_f1_std": 0.0,
+                        "accuracy_delta": 0.0,
+                        "f1_delta": 0.0,
+                        "classification": "error",
+                    }
+                )
 
     # Generate summary
     summary = generate_summary(results, baseline_metrics)
@@ -481,10 +477,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     single_feature_results = [r for r in results if r["experiment_type"] == "single_feature"]
 
     # Sort by F1 delta (most negative = most important)
-    ranked_by_importance = sorted(
-        single_feature_results,
-        key=lambda x: x["f1_delta"]
-    )
+    ranked_by_importance = sorted(single_feature_results, key=lambda x: x["f1_delta"])
 
     # Identify noise candidates (F1 delta >= 0)
     noise_candidates = [
@@ -495,9 +488,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
 
     # Identify redundant features
     redundant_candidates = [
-        r["excluded_features"]
-        for r in single_feature_results
-        if r["classification"] == "redundant"
+        r["excluded_features"] for r in single_feature_results if r["classification"] == "redundant"
     ]
 
     # Important features (bottom of list, most negative F1 delta)
@@ -510,8 +501,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     # Category impact ranking
     category_results = [r for r in results if r["experiment_type"] == "category"]
     category_ranking = sorted(
-        [(r["excluded_category"], r["f1_delta"]) for r in category_results],
-        key=lambda x: x[1]
+        [(r["excluded_category"], r["f1_delta"]) for r in category_results], key=lambda x: x[1]
     )
 
     # Classification counts
@@ -550,8 +540,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
             for r in ranked_by_importance
         ],
         "category_ranking_by_importance": [
-            {"category": cat, "f1_delta": delta}
-            for cat, delta in category_ranking
+            {"category": cat, "f1_delta": delta} for cat, delta in category_ranking
         ],
         "noise_candidates": noise_candidates,
         "redundant_candidates": redundant_candidates,
@@ -619,45 +608,45 @@ def print_summary(summary: dict):
     print("=" * 70)
 
     baseline = summary["baseline"]
-    print(f"\nBaseline Performance:")
+    print("\nBaseline Performance:")
     print(f"  Accuracy:    {baseline['accuracy']:.4f}")
     print(f"  F1:          {baseline['f1']:.4f}")
     print(f"  CV F1 Mean:  {baseline['cv_f1_mean']:.4f} ± {baseline['cv_f1_std']:.4f}")
     print(f"  Features:    {baseline['n_features']}")
 
     qc = summary["quality_check"]
-    print(f"\nQuality Check:")
+    print("\nQuality Check:")
     acc_status = "✓" if qc["meets_accuracy_threshold"] else "✗"
     cv_status = "✓" if qc["meets_cv_f1_threshold"] else "✗"
     print(f"  {acc_status} Accuracy >= {qc['accuracy_threshold']:.0%}")
     print(f"  {cv_status} CV F1 >= {qc['cv_f1_threshold']:.0%}")
 
     counts = summary["classification_counts"]
-    print(f"\nFeature Classifications:")
+    print("\nFeature Classifications:")
     print(f"  Noise:      {counts.get('noise', 0)}")
     print(f"  Redundant:  {counts.get('redundant', 0)}")
     print(f"  Useful:     {counts.get('useful', 0)}")
     print(f"  Important:  {counts.get('important', 0)}")
 
     if summary["noise_candidates"]:
-        print(f"\nNoise Candidates (safe to remove):")
+        print("\nNoise Candidates (safe to remove):")
         for feat in summary["noise_candidates"]:
             print(f"  - {feat}")
 
     if summary["redundant_candidates"]:
-        print(f"\nRedundant Candidates (consider removing):")
+        print("\nRedundant Candidates (consider removing):")
         for feat in summary["redundant_candidates"][:5]:
             print(f"  - {feat}")
         if len(summary["redundant_candidates"]) > 5:
             print(f"  ... and {len(summary['redundant_candidates']) - 5} more")
 
     if summary["important_features"]:
-        print(f"\nMost Important Features (DO NOT remove):")
+        print("\nMost Important Features (DO NOT remove):")
         for feat in summary["important_features"][:10]:
             print(f"  - {feat}")
 
     if summary["category_ranking_by_importance"]:
-        print(f"\nCategory Importance Ranking:")
+        print("\nCategory Importance Ranking:")
         for item in summary["category_ranking_by_importance"]:
             print(f"  {item['category']}: F1 delta = {item['f1_delta']:+.4f}")
 
@@ -699,7 +688,7 @@ def main():
         logger.error(f"Labels directory not found: {args.labels}")
         sys.exit(1)
 
-    logger.info(f"Starting ablation study...")
+    logger.info("Starting ablation study...")
     logger.info(f"  Labels: {args.labels}")
     logger.info(f"  Output: {args.output}")
     logger.info(f"  Mode: {args.mode}")

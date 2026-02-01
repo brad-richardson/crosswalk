@@ -61,6 +61,24 @@ def _deserialize_lr_data(raw: str | None) -> list | None:
         return None
 
 
+def _hive_partitioning_kwargs() -> dict:
+    """Return kwargs for read_parquet to handle Hive partitioning consistently.
+
+    Forces the 'dataset' partition column to be a plain string type instead of
+    dictionary-encoded, avoiding type mismatches (int8 vs int32 indices) when
+    reading files written at different times or with different pyarrow versions.
+    """
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+
+    return {
+        "partitioning": ds.partitioning(
+            pa.schema([("dataset", pa.string())]),
+            flavor="hive",
+        )
+    }
+
+
 @dataclass
 class DataStore:
     """Manages raw pair data (geometries + attributes) in GeoParquet.
@@ -101,7 +119,7 @@ class DataStore:
             return self._empty_geodataframe()
 
         try:
-            gdf = gpd.read_parquet(self.parquet_path)
+            gdf = gpd.read_parquet(self.parquet_path, **_hive_partitioning_kwargs())
 
             # Convert target_geometry from WKB if stored that way
             if "target_geometry_wkb" in gdf.columns:
@@ -337,7 +355,7 @@ class DataStore:
             gdf = gdf.drop(columns=["target_geometry"])
 
         # Write to temp file first
-        gdf.to_parquet(temp_path)
+        gdf.to_parquet(temp_path, compression="zstd")
 
         # Backup existing file (if present)
         if self.parquet_path.exists():
@@ -374,7 +392,7 @@ class DataStore:
             parquet_path = partition_dir / "data.parquet"
             if parquet_path.exists():
                 try:
-                    gdf = gpd.read_parquet(parquet_path)
+                    gdf = gpd.read_parquet(parquet_path, **_hive_partitioning_kwargs())
 
                     # Convert target_geometry from WKB if stored that way
                     if "target_geometry_wkb" in gdf.columns:

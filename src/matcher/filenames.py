@@ -144,13 +144,29 @@ def find_osm_segments(data_dir: Path, dataset_name: str) -> Path | None:
 def find_target_file(data_dir: Path, dataset_name: str) -> Path | None:
     """Find target/local dataset file.
 
+    Handles special case for OSM target datasets (ending in '_osm'),
+    which use the osm_segments naming convention instead of the
+    standard target file naming.
+
     Args:
         data_dir: Directory containing data files
-        dataset_name: Dataset name (e.g., "us_boston_streets")
+        dataset_name: Dataset name (e.g., "us_boston_streets" or "us_boston_streets_osm")
 
     Returns:
         Path to target file, or None if not found
+
+    Examples:
+        us_boston_streets -> us_boston_streets_v1.0.parquet
+        us_boston_streets_osm -> us_boston_streets_osm_segments_v1.0.parquet
     """
+    # Special case: OSM target datasets use osm_segments naming
+    if dataset_name.endswith("_osm"):
+        # Strip '_osm' suffix and use osm_segments naming
+        base_name = dataset_name[:-4]  # Remove '_osm'
+        path = data_dir / osm_segments_filename(base_name)
+        return path if path.exists() else None
+
+    # Standard target file naming
     path = data_dir / target_filename(dataset_name)
     return path if path.exists() else None
 
@@ -161,9 +177,11 @@ def find_target_file(data_dir: Path, dataset_name: str) -> Path | None:
 
 
 def scored_cache_path(dataset_id: str) -> Path:
-    """Get path to scored candidates cache file.
+    """Get path to versioned scored candidates cache file.
 
-    The scored cache contains candidates with ML predictions (decision, confidence).
+    The scored cache contains candidates with ML predictions (decision, confidence)
+    and all computed features. It is versioned by FEATURE_VERSION so that feature
+    changes invalidate the cache automatically.
 
     Args:
         dataset_id: Dataset identifier (e.g., "us_boston_streets")
@@ -172,9 +190,9 @@ def scored_cache_path(dataset_id: str) -> Path:
         Path to cache file (may not exist)
 
     Example:
-        us_boston_streets -> data/cache/labeling/us_boston_streets_candidates.parquet
+        us_boston_streets -> data/cache/labeling/us_boston_streets_candidates_v2026-02-01.parquet
     """
-    return LABELING_CACHE_DIR / f"{dataset_id}_candidates.parquet"
+    return LABELING_CACHE_DIR / f"{dataset_id}_candidates_v{FEATURE_VERSION}.parquet"
 
 
 def feature_cache_path(dataset_id: str) -> Path:

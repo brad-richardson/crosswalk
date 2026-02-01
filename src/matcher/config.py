@@ -118,87 +118,108 @@ FEATURE_VERSION = "2026-02-01"
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================
-# These lists define all features computed during matching and used for ML.
-# Import these in ml.py, compute.py, and label_store.py to ensure consistency.
+# These dicts/lists define all features computed during matching and used for ML.
+# Import these in ml.py, compute.py, label_store.py, and feature_panel.py.
+#
+# IMPORTANT: When adding new features, add them to FEATURE_CATEGORIES below.
+# FEATURE_COLUMNS is derived automatically from FEATURE_CATEGORIES.
 
-# All feature columns computed by the matcher
+# Feature categories - organized for display and documentation
 # Distance/length features use _m suffix to indicate meters
-FEATURE_COLUMNS = [
-    # Geometric features (9)
-    "hausdorff_distance_m",
-    "mean_hausdorff_distance_m",
-    "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
-    "buffer_iou_5m",  # Tight alignment (exact centerline matches)
-    "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
-    "heading_delta",
-    "length_ratio",
-    "centroid_distance_m",
-    "collinear_gap_ratio",
-    # Semantic features - name (8)
-    "name_levenshtein",
-    "name_jaro_winkler",
-    "name_token_sort",
-    "name_soundex",
-    "name_metaphone",
-    "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
-    "has_name_target",  # 1.0 if target has non-empty name, else 0.0
-    "name_is_generic",  # 1.0 if either name matches generic pattern
-    # Semantic features - class (1)
-    "class_similarity",
-    # Endpoint/connectivity (3) - direction-invariant
-    "min_endpoint_proximity_m",  # Min of start/end proximities
-    "max_endpoint_proximity_m",  # Max of start/end proximities
-    "shared_endpoint_count",
-    # Lateral offset (3)
-    "lateral_offset_m",
-    "lateral_offset_iqr_m",  # IQR (p75 - p25) - robust to outliers
-    "lateral_offset_p95_m",  # 95th percentile of lateral offsets
-    # Topology features (12)
-    "from_degree_ref",
-    "to_degree_ref",
-    "from_degree_target",
-    "to_degree_target",
-    "degree_match_score",
-    "degree_signature_similarity",
-    "is_dead_end_ref",
-    "is_dead_end_target",
-    "dead_end_match",
-    "is_intersection_ref",
-    "is_intersection_target",
-    "intersection_match",
-    # Alignment coverage features (4)
-    "ref_coverage",
-    "target_coverage",
-    "min_coverage",
-    "coverage_ratio",
-    # Graphlet features (2) - network topology similarity
-    "graphlet_similarity",
-    "endpoint_degree_similarity",
-    # Sinuosity features (3) - distinguish curvy vs straight roads
-    "sinuosity_ref",
-    "sinuosity_target",
-    "sinuosity_delta",
-    # Heading consistency features (3) - roads that constantly change direction
-    "heading_consistency_ref",
-    "heading_consistency_target",
-    "heading_consistency_delta",
-    # Vertex density features (3) - quality signal for consistent vertex spacing
-    "vertex_density_ref",
-    "vertex_density_target",
-    "vertex_density_ratio",
-    # Length features (1)
-    "min_length_m",
-    # Shape complexity features (3) - count of significant turns (>10 deg)
-    "shape_complexity_ref",
-    "shape_complexity_target",
-    "shape_complexity_delta",
-    # Numeric route matching (1) - better matching for numbered routes (I-90, US-101)
-    "name_numeric_match",
-    # Parallel sibling features (4) - detect split vs centerline representation
-    "has_parallel_sibling_ref",  # Whether ref segment has a parallel sibling
-    "offset_vs_half_corridor_ratio",  # Normalized offset for dual carriageway detection
-    "offset_over_expected_halfwidth",  # Offset normalized by road class width
-    "likely_representation_mismatch",  # Flag when ref/target have different representation
+FEATURE_CATEGORIES: dict[str, list[str]] = {
+    "Geometric": [
+        "hausdorff_distance_m",
+        "mean_hausdorff_distance_m",
+        "hausdorff_p95_m",  # 95th percentile of min-distances (robust to outliers)
+        "buffer_iou_5m",  # Tight alignment (exact centerline matches)
+        "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
+        "heading_delta",
+        "length_ratio",
+        "centroid_distance_m",
+        "collinear_gap_ratio",
+    ],
+    "Name Similarity": [
+        "name_levenshtein",
+        "name_jaro_winkler",
+        "name_token_sort",
+        "name_soundex",
+        "name_metaphone",
+        "has_name_ref",  # 1.0 if ref has non-empty name, else 0.0
+        "has_name_target",  # 1.0 if target has non-empty name, else 0.0
+        "name_is_generic",  # 1.0 if either name matches generic pattern
+        "name_numeric_match",  # Better matching for numbered routes (I-90, US-101)
+    ],
+    "Class": [
+        "class_similarity",
+    ],
+    "Endpoint/Connectivity": [
+        "min_endpoint_proximity_m",  # Min of start/end proximities
+        "max_endpoint_proximity_m",  # Max of start/end proximities
+        "shared_endpoint_count",
+    ],
+    "Lateral Offset": [
+        "lateral_offset_m",
+        "lateral_offset_iqr_m",  # IQR (p75 - p25) - robust to outliers
+        "lateral_offset_p95_m",  # 95th percentile of lateral offsets
+    ],
+    "Topology": [
+        "from_degree_ref",
+        "to_degree_ref",
+        "from_degree_target",
+        "to_degree_target",
+        "degree_match_score",
+        "degree_signature_similarity",
+        "is_dead_end_ref",
+        "is_dead_end_target",
+        "dead_end_match",
+        "is_intersection_ref",
+        "is_intersection_target",
+        "intersection_match",
+    ],
+    "Alignment Coverage": [
+        "ref_coverage",
+        "target_coverage",
+        "min_coverage",
+        "coverage_ratio",
+    ],
+    "Graphlet": [
+        "graphlet_similarity",
+        "endpoint_degree_similarity",
+    ],
+    "Sinuosity": [
+        "sinuosity_ref",
+        "sinuosity_target",
+        "sinuosity_delta",
+    ],
+    "Heading Consistency": [
+        "heading_consistency_ref",
+        "heading_consistency_target",
+        "heading_consistency_delta",
+    ],
+    "Vertex Density": [
+        "vertex_density_ref",
+        "vertex_density_target",
+        "vertex_density_ratio",
+    ],
+    "Length": [
+        "min_length_m",
+    ],
+    "Shape Complexity": [
+        "shape_complexity_ref",
+        "shape_complexity_target",
+        "shape_complexity_delta",
+    ],
+    "Parallel Sibling": [
+        "has_parallel_sibling_ref",  # Whether ref segment has a parallel sibling
+        "offset_vs_half_corridor_ratio",  # Normalized offset for dual carriageway detection
+        "offset_over_expected_halfwidth",  # Offset normalized by road class width
+        "likely_representation_mismatch",  # Flag when ref/target have different representation
+    ],
+}
+
+# Flattened list of all feature columns (derived from FEATURE_CATEGORIES)
+FEATURE_COLUMNS: list[str] = [
+    feature for features in FEATURE_CATEGORIES.values() for feature in features
 ]
 
 # Semantic features - excluded when training geometry-only models

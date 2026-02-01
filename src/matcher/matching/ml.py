@@ -231,12 +231,6 @@ def _compute_feature_chunk(chunk):
                 _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
             )
 
-            # Look up pre-computed sibling info
-            ref_sibling_dict = _worker_data.get("ref_sibling_info", {})
-            target_sibling_dict = _worker_data.get("target_sibling_info", {})
-            ref_sibling_info = ref_sibling_dict.get(ref_seg_id)
-            target_sibling_info = target_sibling_dict.get(target_seg_id)
-
             pair_data.append(
                 {
                     "chunk_idx": chunk_idx,
@@ -259,8 +253,6 @@ def _compute_feature_chunk(chunk):
                     "target_graphlet_data": target_graphlet_data,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
-                    "ref_sibling_info": ref_sibling_info,
-                    "target_sibling_info": target_sibling_info,
                 }
             )
             valid_indices.append(chunk_idx)
@@ -360,8 +352,8 @@ def _compute_feature_chunk(chunk):
                     batch_iqr_offsets[i],
                     batch_p95_offsets[i],
                 ),
-                ref_sibling_info=pd_item.get("ref_sibling_info"),
-                target_sibling_info=pd_item.get("target_sibling_info"),
+                ref_sibling_context=_worker_data.get("ref_sibling_context"),
+                target_sibling_context=_worker_data.get("target_sibling_context"),
             )
 
             # Assemble full feature dict
@@ -494,9 +486,16 @@ def create_segment_groups(df: pd.DataFrame) -> pd.Series:
     def find(x):
         if x not in parent:
             parent[x] = x
-        if parent[x] != x:
-            parent[x] = find(parent[x])
-        return parent[x]
+        # Find root iteratively
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        # Path compression
+        while parent[x] != root:
+            next_x = parent[x]
+            parent[x] = root
+            x = next_x
+        return root
 
     def union(x, y):
         px, py = find(x), find(y)
@@ -808,12 +807,7 @@ class MLMatcher:
             if agent_dir.exists():
                 agent_labels = LabelStore.load_agent_labels(agent_dir)
             else:
-                # Try legacy format
-                legacy_agent_dir = Path(labels_dir).parent / "labels_agent"
-                if legacy_agent_dir.exists():
-                    agent_labels = LabelStore.load_agent_labels(legacy_agent_dir)
-                else:
-                    agent_labels = pd.DataFrame()
+                agent_labels = pd.DataFrame()
 
             if len(agent_labels) > 0:
                 # Filter by minimum confidence
@@ -1477,34 +1471,36 @@ class MLMatcher:
             timings["alignment_batch"] = time.perf_counter() - t0_align
             logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
 
-        # Pre-compute parallel sibling info for split carriageway detection
-        # This detects segments that are part of dual highways (split representation)
-        from ..features.compute import precompute_parallel_siblings
+        # Build sibling search contexts for per-pair parallel sibling detection
+        # These hold the spatial index and segment metadata needed to search for
+        # parallel siblings on aligned sublines (not precomputed on full geometries)
+        from ..features.relational import build_sibling_search_context
 
-        logger.info("Computing parallel sibling features for split carriageway detection...")
+        logger.info("Building sibling search contexts for split carriageway detection...")
         t0 = time.perf_counter()
-        ref_sibling_info = precompute_parallel_siblings(
-            ref_candidates_only,
-            id_column=ref_id_column,
-            name_column="names",
-            class_column="class",
+        ref_sibling_context = build_sibling_search_context(
+            geometries=list(ref_candidates_only.geometry),
+            segment_ids=[str(sid) for sid in ref_candidates_only[ref_id_column]],
+            names=list(ref_candidates_only.get("names", [None] * len(ref_candidates_only))),
+            classes=list(ref_candidates_only.get("class", [None] * len(ref_candidates_only))),
         )
-        timings["sibling_ref"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] sibling_ref: {timings['sibling_ref']:.2f}s")
+        timings["sibling_context_ref"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] sibling_context_ref: {timings['sibling_context_ref']:.2f}s")
 
         t0 = time.perf_counter()
-        target_sibling_info = precompute_parallel_siblings(
-            target_candidates_only_proj,
-            id_column=target_id_column,
-            name_column="names",
-            class_column="class",
+        target_sibling_context = build_sibling_search_context(
+            geometries=list(target_candidates_only_proj.geometry),
+            segment_ids=[str(sid) for sid in target_candidates_only_proj[target_id_column]],
+            names=list(
+                target_candidates_only_proj.get("names", [None] * len(target_candidates_only_proj))
+            ),
+            classes=list(
+                target_candidates_only_proj.get("class", [None] * len(target_candidates_only_proj))
+            ),
         )
-        timings["sibling_target"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] sibling_target: {timings['sibling_target']:.2f}s")
-        logger.info(
-            f"Found {sum(1 for v in ref_sibling_info.values() if v[0])} ref siblings, "
-            f"{sum(1 for v in target_sibling_info.values() if v[0])} target siblings"
-        )
+        timings["sibling_context_target"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] sibling_context_target: {timings['sibling_context_target']:.2f}s")
+        logger.info("Sibling search contexts built (per-pair detection on sublines)")
 
         # Recompute endpoint features using alignment fractions
         # This uses aligned subline endpoints instead of full segment endpoints,
@@ -1565,8 +1561,8 @@ class MLMatcher:
             "target_topology": target_topology_features,
             "ref_graphlet_data": ref_graphlet_data,
             "target_graphlet_data": target_graphlet_data,
-            "ref_sibling_info": ref_sibling_info,
-            "target_sibling_info": target_sibling_info,
+            "ref_sibling_context": ref_sibling_context,
+            "target_sibling_context": target_sibling_context,
             "alignments": alignments,
         }
 

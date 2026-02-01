@@ -470,6 +470,8 @@ def backfill_features(
         compute_pair_features,
         precompute_graphlet_features,
     )
+    from ..features.relational import build_sibling_search_context
+    from ..features.semantic import _extract_name_string
     from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
     from ..filenames import find_overture_segments, find_target_file
     from ..utils.geometry import filter_to_linestrings
@@ -552,6 +554,23 @@ def backfill_features(
             target_graphlet_data if target_graphlet_data else (None, None, None, None)
         )
 
+        # Build sibling search contexts for per-pair parallel sibling detection
+        # These hold the spatial index and segment metadata needed to search for
+        # parallel siblings on aligned sublines (not precomputed on full geometries)
+        console.print("  Building sibling search contexts...")
+        ref_sibling_context = build_sibling_search_context(
+            geometries=list(ref_gdf_proj.geometry),
+            segment_ids=[str(sid) for sid in ref_gdf_proj["id"]],
+            names=list(ref_gdf_proj.get("names", [None] * len(ref_gdf_proj))),
+            classes=list(ref_gdf_proj.get("class", [None] * len(ref_gdf_proj))),
+        )
+        target_sibling_context = build_sibling_search_context(
+            geometries=list(target_gdf_proj.geometry),
+            segment_ids=[str(sid) for sid in target_gdf_proj["id"]],
+            names=list(target_gdf_proj.get("names", [None] * len(target_gdf_proj))),
+            classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
+        )
+
         # Initialize feature store for this dataset
         feature_store = FeatureStore(dataset, features_dir=features_dir)
 
@@ -606,8 +625,10 @@ def backfill_features(
             # Get names and classes
             ref_row = ref_lookup.loc[gers_id]
             target_row = target_lookup.loc[target_id]
-            ref_name = ref_row["names"] if "names" in ref_row.index else None
-            target_name = target_row["names"] if "names" in target_row.index else None
+            ref_name = _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
+            target_name = (
+                _extract_name_string(target_row["names"]) if "names" in target_row.index else None
+            )
             ref_class = ref_row["class"] if "class" in ref_row.index else None
             target_class = target_row["class"] if "class" in target_row.index else None
             ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
@@ -630,6 +651,8 @@ def backfill_features(
                 target_graphlet_data=target_graphlet_data,
                 ref_seg_id=gers_id,
                 target_seg_id=target_id,
+                ref_sibling_context=ref_sibling_context,
+                target_sibling_context=target_sibling_context,
             )
 
             # Add to feature store

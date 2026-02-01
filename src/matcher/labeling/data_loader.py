@@ -348,7 +348,7 @@ def save_candidates_to_cache(
     df = pd.DataFrame(records)
 
     # Save as parquet
-    df.to_parquet(cache_path, index=False)
+    df.to_parquet(cache_path, index=False, compression="zstd")
 
     logger.info(f"Cache saved successfully: {cache_path}")
     return cache_path
@@ -493,7 +493,7 @@ def save_feature_cache(dataset_id: str, df: pd.DataFrame) -> Path:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Saving {len(df)} features to cache at {cache_path}")
-    df.to_parquet(cache_path, index=False)
+    df.to_parquet(cache_path, index=False, compression="zstd")
     logger.info(f"Feature cache saved successfully (version {FEATURE_VERSION})")
     return cache_path
 

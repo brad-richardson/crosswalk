@@ -131,7 +131,12 @@ from .geometric import (
     compute_sinuosity,
     compute_vertex_density,
 )
-from .relational import compute_perpendicular_offset, get_expected_half_width
+from .relational import (
+    SiblingSearchContext,
+    compute_perpendicular_offset,
+    find_parallel_sibling,
+    get_expected_half_width,
+)
 from .semantic import (
     compute_class_similarity,
     compute_name_numeric_match,
@@ -170,8 +175,8 @@ def _compute_non_geometric_features(
     target_seg_id: str | None,
     geom_features: GeometricFeatures,
     precomputed_lateral_offset: tuple[float, float, float] | None = None,
-    ref_sibling_info: tuple[bool, float] | None = None,
-    target_sibling_info: tuple[bool, float] | None = None,
+    ref_sibling_context: SiblingSearchContext | None = None,
+    target_sibling_context: SiblingSearchContext | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -362,15 +367,30 @@ def _compute_non_geometric_features(
         coverage_feats = compute_coverage_features(alignment)
 
     # Parallel sibling features (detect split vs centerline representation)
+    # Computed per-pair on the aligned sublines for accuracy with partial alignments
     with timed_section("sibling_features"):
-        # Unpack sibling info (may be None if not precomputed)
-        if ref_sibling_info is not None:
-            has_sibling_ref, sibling_dist_ref = ref_sibling_info
+        # Compute sibling detection on sublines (not precomputed full geometries)
+        if ref_sibling_context is not None and ref_seg_id is not None:
+            has_sibling_ref, sibling_dist_ref = find_parallel_sibling(
+                segment=geom_sim_ref,  # Use subline, not full geometry
+                segment_id=ref_seg_id,
+                segment_name=ref_name,
+                segment_class=ref_class,
+                spatial_index=ref_sibling_context.spatial_index,
+                segment_data=ref_sibling_context.segment_data,
+            )
         else:
             has_sibling_ref, sibling_dist_ref = False, MAX_DISTANCE_METERS
 
-        if target_sibling_info is not None:
-            has_sibling_target, sibling_dist_target = target_sibling_info
+        if target_sibling_context is not None and target_seg_id is not None:
+            has_sibling_target, sibling_dist_target = find_parallel_sibling(
+                segment=geom_sim_target,  # Use subline, not full geometry
+                segment_id=target_seg_id,
+                segment_name=target_name,
+                segment_class=target_class,
+                spatial_index=target_sibling_context.spatial_index,
+                segment_data=target_sibling_context.segment_data,
+            )
         else:
             has_sibling_target, sibling_dist_target = False, MAX_DISTANCE_METERS
 
@@ -503,8 +523,8 @@ def compute_pair_features(
     target_graphlet_data: tuple | None = None,
     ref_seg_id: str | None = None,
     target_seg_id: str | None = None,
-    ref_sibling_info: tuple[bool, float] | None = None,
-    target_sibling_info: tuple[bool, float] | None = None,
+    ref_sibling_context: SiblingSearchContext | None = None,
+    target_sibling_context: SiblingSearchContext | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -610,8 +630,8 @@ def compute_pair_features(
             ref_seg_id=ref_seg_id,
             target_seg_id=target_seg_id,
             geom_features=geom_features,
-            ref_sibling_info=ref_sibling_info,
-            target_sibling_info=target_sibling_info,
+            ref_sibling_context=ref_sibling_context,
+            target_sibling_context=target_sibling_context,
         )
 
         # Merge batchable geometric features with non-geometric features

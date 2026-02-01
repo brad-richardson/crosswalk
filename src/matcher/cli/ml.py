@@ -183,15 +183,44 @@ def benchmark(
     # Save train labels to temp directory for training
     import tempfile
 
+    from ..config import FEATURE_COLUMNS
+    from ..labeling.label_store import HUMAN_LABEL_COLUMNS
+
+    # Check for duplicate (gers_id, target_id, dataset) pairs and warn
+    # Duplicates can occur from multiple labeling sessions for the same pair
+    n_before = len(train_df)
+    train_df = train_df.drop_duplicates(subset=["gers_id", "target_id", "dataset"], keep="first")
+    n_dropped = n_before - len(train_df)
+    if n_dropped > 0:
+        console.print(
+            f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first occurrence)[/yellow]"
+        )
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
+        human_dir = tmpdir / "human"
+        features_dir = tmpdir / "features"
 
-        # Save each dataset's train portion
+        # Save each dataset's train portion in the expected format
+        # LabelStore.load_all expects:
+        #   - human/dataset=*/data.csv (label metadata)
+        #   - features/dataset=*/data.parquet (computed features)
         for dataset in train_df["dataset"].unique():
             ds_train = train_df[train_df["dataset"] == dataset]
-            ds_dir = tmpdir / f"dataset={dataset}"
-            ds_dir.mkdir(parents=True, exist_ok=True)
-            ds_train.to_csv(ds_dir / "data.csv", index=False)
+
+            # Write human labels (metadata only)
+            human_ds_dir = human_dir / f"dataset={dataset}"
+            human_ds_dir.mkdir(parents=True, exist_ok=True)
+            label_cols = [c for c in HUMAN_LABEL_COLUMNS if c in ds_train.columns]
+            ds_train[label_cols].to_csv(human_ds_dir / "data.csv", index=False)
+
+            # Write features (key columns + feature columns)
+            features_ds_dir = features_dir / f"dataset={dataset}"
+            features_ds_dir.mkdir(parents=True, exist_ok=True)
+            feature_cols = ["gers_id", "target_id"] + [
+                c for c in FEATURE_COLUMNS if c in ds_train.columns
+            ]
+            ds_train[feature_cols].to_parquet(features_ds_dir / "data.parquet", index=False)
 
         # Train model on train set only (no internal split since we already split)
         console.print(f"\n[blue]Training model on {len(train_df)} samples...[/blue]")
