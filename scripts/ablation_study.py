@@ -619,45 +619,45 @@ def print_summary(summary: dict):
     print("=" * 70)
 
     baseline = summary["baseline"]
-    print(f"\nBaseline Performance:")
+    print("\nBaseline Performance:")
     print(f"  Accuracy:    {baseline['accuracy']:.4f}")
     print(f"  F1:          {baseline['f1']:.4f}")
     print(f"  CV F1 Mean:  {baseline['cv_f1_mean']:.4f} ± {baseline['cv_f1_std']:.4f}")
     print(f"  Features:    {baseline['n_features']}")
 
     qc = summary["quality_check"]
-    print(f"\nQuality Check:")
+    print("\nQuality Check:")
     acc_status = "✓" if qc["meets_accuracy_threshold"] else "✗"
     cv_status = "✓" if qc["meets_cv_f1_threshold"] else "✗"
     print(f"  {acc_status} Accuracy >= {qc['accuracy_threshold']:.0%}")
     print(f"  {cv_status} CV F1 >= {qc['cv_f1_threshold']:.0%}")
 
     counts = summary["classification_counts"]
-    print(f"\nFeature Classifications:")
+    print("\nFeature Classifications:")
     print(f"  Noise:      {counts.get('noise', 0)}")
     print(f"  Redundant:  {counts.get('redundant', 0)}")
     print(f"  Useful:     {counts.get('useful', 0)}")
     print(f"  Important:  {counts.get('important', 0)}")
 
     if summary["noise_candidates"]:
-        print(f"\nNoise Candidates (safe to remove):")
+        print("\nNoise Candidates (safe to remove):")
         for feat in summary["noise_candidates"]:
             print(f"  - {feat}")
 
     if summary["redundant_candidates"]:
-        print(f"\nRedundant Candidates (consider removing):")
+        print("\nRedundant Candidates (consider removing):")
         for feat in summary["redundant_candidates"][:5]:
             print(f"  - {feat}")
         if len(summary["redundant_candidates"]) > 5:
             print(f"  ... and {len(summary['redundant_candidates']) - 5} more")
 
     if summary["important_features"]:
-        print(f"\nMost Important Features (DO NOT remove):")
+        print("\nMost Important Features (DO NOT remove):")
         for feat in summary["important_features"][:10]:
             print(f"  - {feat}")
 
     if summary["category_ranking_by_importance"]:
-        print(f"\nCategory Importance Ranking:")
+        print("\nCategory Importance Ranking:")
         for item in summary["category_ranking_by_importance"]:
             print(f"  {item['category']}: F1 delta = {item['f1_delta']:+.4f}")
 
@@ -699,7 +699,7 @@ def main():
         logger.error(f"Labels directory not found: {args.labels}")
         sys.exit(1)
 
-    logger.info(f"Starting ablation study...")
+    logger.info("Starting ablation study...")
     logger.info(f"  Labels: {args.labels}")
     logger.info(f"  Output: {args.output}")
     logger.info(f"  Mode: {args.mode}")
