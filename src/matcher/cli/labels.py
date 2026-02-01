@@ -626,7 +626,9 @@ def backfill_features(
             ref_row = ref_lookup.loc[gers_id]
             target_row = target_lookup.loc[target_id]
             ref_name = _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
-            target_name = _extract_name_string(target_row["names"]) if "names" in target_row.index else None
+            target_name = (
+                _extract_name_string(target_row["names"]) if "names" in target_row.index else None
+            )
             ref_class = ref_row["class"] if "class" in ref_row.index else None
             target_class = target_row["class"] if "class" in target_row.index else None
             ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
