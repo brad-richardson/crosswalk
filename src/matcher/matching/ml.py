@@ -818,18 +818,18 @@ class MLMatcher:
         else:
             scale_pos_weight = None
 
-        # Default XGBoost parameters (F1-optimized via Optuna tuning)
+        # Default XGBoost parameters (F1-optimized via Optuna tuning, 60 features)
         default_params = {
-            "n_estimators": 498,
+            "n_estimators": 912,
             "max_depth": 7,
-            "learning_rate": 0.036132253030964435,
-            "min_child_weight": 3,
-            "subsample": 0.8532855449949288,
-            "colsample_bytree": 0.9310658287940973,
-            "gamma": 0.184964581813493,
-            "reg_alpha": 0.32269976684680857,
-            "reg_lambda": 2.9941661918091094,
-            "max_bin": 422,
+            "learning_rate": 0.010636101749852585,
+            "min_child_weight": 5,
+            "subsample": 0.8761081830856152,
+            "colsample_bytree": 0.9616639656253169,
+            "gamma": 0.30396926808636227,
+            "reg_alpha": 1.724985773632091,
+            "reg_lambda": 2.7011840568401686,
+            "max_bin": 147,
             "tree_method": "hist",
             "objective": "binary:logistic" if binary else "multi:softprob",
             "eval_metric": "logloss" if binary else "mlogloss",
