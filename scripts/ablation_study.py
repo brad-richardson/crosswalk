@@ -367,9 +367,7 @@ def run_ablation_study(
             logger.info(f"  [{i}/{len(FEATURE_COLUMNS)}] Excluding: {feature}")
 
             try:
-                metrics = train_and_evaluate(
-                    labels_dir, exclude_features=[feature], seed=seed
-                )
+                metrics = train_and_evaluate(labels_dir, exclude_features=[feature], seed=seed)
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
@@ -390,25 +388,25 @@ def run_ablation_study(
                 }
                 results.append(result)
 
-                logger.info(
-                    f"    -> f1_delta={f1_delta:+.4f} ({classification})"
-                )
+                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
-                results.append({
-                    "experiment_type": "single_feature",
-                    "excluded_features": feature,
-                    "excluded_category": "",
-                    "n_features_used": 0,
-                    "accuracy": 0.0,
-                    "f1": 0.0,
-                    "cv_f1_mean": 0.0,
-                    "cv_f1_std": 0.0,
-                    "accuracy_delta": 0.0,
-                    "f1_delta": 0.0,
-                    "classification": "error",
-                })
+                results.append(
+                    {
+                        "experiment_type": "single_feature",
+                        "excluded_features": feature,
+                        "excluded_category": "",
+                        "n_features_used": 0,
+                        "accuracy": 0.0,
+                        "f1": 0.0,
+                        "cv_f1_mean": 0.0,
+                        "cv_f1_std": 0.0,
+                        "accuracy_delta": 0.0,
+                        "f1_delta": 0.0,
+                        "classification": "error",
+                    }
+                )
 
     # Step 3: Category ablations
     if mode in ("full", "category"):
@@ -418,9 +416,7 @@ def run_ablation_study(
             logger.info(f"  Excluding category: {category_name} ({len(features)} features)")
 
             try:
-                metrics = train_and_evaluate(
-                    labels_dir, exclude_features=features, seed=seed
-                )
+                metrics = train_and_evaluate(labels_dir, exclude_features=features, seed=seed)
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
@@ -441,25 +437,25 @@ def run_ablation_study(
                 }
                 results.append(result)
 
-                logger.info(
-                    f"    -> f1_delta={f1_delta:+.4f} ({classification})"
-                )
+                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
-                results.append({
-                    "experiment_type": "category",
-                    "excluded_features": ",".join(features),
-                    "excluded_category": category_name,
-                    "n_features_used": 0,
-                    "accuracy": 0.0,
-                    "f1": 0.0,
-                    "cv_f1_mean": 0.0,
-                    "cv_f1_std": 0.0,
-                    "accuracy_delta": 0.0,
-                    "f1_delta": 0.0,
-                    "classification": "error",
-                })
+                results.append(
+                    {
+                        "experiment_type": "category",
+                        "excluded_features": ",".join(features),
+                        "excluded_category": category_name,
+                        "n_features_used": 0,
+                        "accuracy": 0.0,
+                        "f1": 0.0,
+                        "cv_f1_mean": 0.0,
+                        "cv_f1_std": 0.0,
+                        "accuracy_delta": 0.0,
+                        "f1_delta": 0.0,
+                        "classification": "error",
+                    }
+                )
 
     # Generate summary
     summary = generate_summary(results, baseline_metrics)
@@ -481,10 +477,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     single_feature_results = [r for r in results if r["experiment_type"] == "single_feature"]
 
     # Sort by F1 delta (most negative = most important)
-    ranked_by_importance = sorted(
-        single_feature_results,
-        key=lambda x: x["f1_delta"]
-    )
+    ranked_by_importance = sorted(single_feature_results, key=lambda x: x["f1_delta"])
 
     # Identify noise candidates (F1 delta >= 0)
     noise_candidates = [
@@ -495,9 +488,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
 
     # Identify redundant features
     redundant_candidates = [
-        r["excluded_features"]
-        for r in single_feature_results
-        if r["classification"] == "redundant"
+        r["excluded_features"] for r in single_feature_results if r["classification"] == "redundant"
     ]
 
     # Important features (bottom of list, most negative F1 delta)
@@ -510,8 +501,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     # Category impact ranking
     category_results = [r for r in results if r["experiment_type"] == "category"]
     category_ranking = sorted(
-        [(r["excluded_category"], r["f1_delta"]) for r in category_results],
-        key=lambda x: x[1]
+        [(r["excluded_category"], r["f1_delta"]) for r in category_results], key=lambda x: x[1]
     )
 
     # Classification counts
@@ -550,8 +540,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
             for r in ranked_by_importance
         ],
         "category_ranking_by_importance": [
-            {"category": cat, "f1_delta": delta}
-            for cat, delta in category_ranking
+            {"category": cat, "f1_delta": delta} for cat, delta in category_ranking
         ],
         "noise_candidates": noise_candidates,
         "redundant_candidates": redundant_candidates,
