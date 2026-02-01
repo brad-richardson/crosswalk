@@ -319,13 +319,11 @@ class TestLabelStoreParity:
             )
 
             # Features are now stored in FeatureStore (normalized format)
-            feature_store = FeatureStore(
-                dataset_id="test", features_dir=Path(tmpdir) / "features"
-            )
+            feature_store = FeatureStore(dataset_id="test", features_dir=Path(tmpdir) / "features")
             stored_features = feature_store.get("ref_001", "target_001")
             assert stored_features is not None, "Features not found in FeatureStore"
 
             for feat in FEATURE_COLUMNS:
-                assert stored_features[feat] == pytest.approx(
-                    features[feat], rel=1e-5
-                ), f"Mismatch: {feat}"
+                assert stored_features[feat] == pytest.approx(features[feat], rel=1e-5), (
+                    f"Mismatch: {feat}"
+                )

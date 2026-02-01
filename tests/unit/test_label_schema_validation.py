@@ -205,15 +205,15 @@ class TestLabelFeatureParity:
             pytest.skip("No features found")
 
         # Create key sets
-        label_dataset = labels["dataset"] if "dataset" in labels.columns else ["unknown"] * len(labels)
-        feature_dataset = features["dataset"] if "dataset" in features.columns else ["unknown"] * len(features)
+        label_dataset = (
+            labels["dataset"] if "dataset" in labels.columns else ["unknown"] * len(labels)
+        )
+        feature_dataset = (
+            features["dataset"] if "dataset" in features.columns else ["unknown"] * len(features)
+        )
 
-        label_keys = set(
-            zip(labels["gers_id"], labels["target_id"], label_dataset)
-        )
-        feature_keys = set(
-            zip(features["gers_id"], features["target_id"], feature_dataset)
-        )
+        label_keys = set(zip(labels["gers_id"], labels["target_id"], label_dataset))
+        feature_keys = set(zip(features["gers_id"], features["target_id"], feature_dataset))
 
         missing = label_keys - feature_keys
         if missing:

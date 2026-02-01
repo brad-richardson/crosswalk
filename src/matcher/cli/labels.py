@@ -146,7 +146,9 @@ def migrate(
             features_partition.mkdir(parents=True, exist_ok=True)
             features_df.to_parquet(features_partition / "data.parquet", index=False)
 
-            logger.info(f"Migrated {dataset_id}: {len(human_df)} labels, {len(features_df)} features")
+            logger.info(
+                f"Migrated {dataset_id}: {len(human_df)} labels, {len(features_df)} features"
+            )
 
         stats["human_labels"] += len(human_df)
         stats["features"] += len(features_df)
@@ -172,7 +174,9 @@ def migrate(
 
             # Parse WKT geometries
             ref_geoms = geo_df["ref_geometry_wkt"].apply(lambda x: wkt.loads(x) if x else None)
-            target_geoms = geo_df["target_geometry_wkt"].apply(lambda x: wkt.loads(x) if x else None)
+            target_geoms = geo_df["target_geometry_wkt"].apply(
+                lambda x: wkt.loads(x) if x else None
+            )
 
             # Create GeoDataFrame
             data_gdf = gpd.GeoDataFrame(
@@ -206,7 +210,9 @@ def migrate(
 
             if dry_run:
                 console.print(f"  {dataset_id} (geometry):")
-                console.print(f"    - Migrate {len(data_gdf)} geometry records to data/{dataset_id}")
+                console.print(
+                    f"    - Migrate {len(data_gdf)} geometry records to data/{dataset_id}"
+                )
             else:
                 from shapely import wkb
 
@@ -372,7 +378,9 @@ def backfill_features(
                         human_labels["dataset"],
                     )
                 )
-                console.print(f"  Found {len(human_labels)} human labels across {human_labels['dataset'].nunique()} datasets")
+                console.print(
+                    f"  Found {len(human_labels)} human labels across {human_labels['dataset'].nunique()} datasets"
+                )
                 all_label_keys.update(human_keys)
                 for k in human_keys:
                     label_sources[k] = "human"
@@ -393,7 +401,9 @@ def backfill_features(
                         agent_labels["dataset"],
                     )
                 )
-                console.print(f"  Found {len(agent_labels)} agent labels across {agent_labels['dataset'].nunique()} datasets")
+                console.print(
+                    f"  Found {len(agent_labels)} agent labels across {agent_labels['dataset'].nunique()} datasets"
+                )
                 all_label_keys.update(agent_keys)
                 for k in agent_keys:
                     if k not in label_sources:  # Don't overwrite human
@@ -430,7 +440,9 @@ def backfill_features(
     # Count by source
     missing_human = sum(1 for k in missing_keys if label_sources.get(k) == "human")
     missing_agent = sum(1 for k in missing_keys if label_sources.get(k) == "agent")
-    console.print(f"  {len(missing_keys)} labels need features ({missing_human} human, {missing_agent} agent)")
+    console.print(
+        f"  {len(missing_keys)} labels need features ({missing_human} human, {missing_agent} agent)"
+    )
 
     if len(missing_keys) == 0:
         console.print("[green]All labels already have features.[/green]")
@@ -468,9 +480,7 @@ def backfill_features(
     total_skipped = 0
 
     for dataset in datasets:
-        dataset_missing = [
-            (g, t) for g, t, d in missing_keys if d == dataset
-        ]
+        dataset_missing = [(g, t) for g, t, d in missing_keys if d == dataset]
         if not dataset_missing:
             continue
 
@@ -636,7 +646,9 @@ def backfill_features(
         total_computed += computed
         total_skipped += skipped
 
-    console.print(f"\n[green]Backfill complete: {total_computed} features computed, {total_skipped} skipped[/green]")
+    console.print(
+        f"\n[green]Backfill complete: {total_computed} features computed, {total_skipped} skipped[/green]"
+    )
 
 
 @labels_app.command("stats")

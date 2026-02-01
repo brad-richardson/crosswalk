@@ -799,7 +799,9 @@ class MLMatcher:
         if agent_weight > 0:
             from ..labeling.feature_store import FeatureStore
 
-            logger.info(f"Loading agent labels with weight={agent_weight}, min_confidence={min_agent_confidence}")
+            logger.info(
+                f"Loading agent labels with weight={agent_weight}, min_confidence={min_agent_confidence}"
+            )
 
             # Load agent labels from normalized format
             agent_dir = Path(labels_dir) / "agent"
@@ -817,7 +819,9 @@ class MLMatcher:
                 # Filter by minimum confidence
                 if "confidence" in agent_labels.columns and min_agent_confidence > 0:
                     before_count = len(agent_labels)
-                    agent_labels = agent_labels[agent_labels["confidence"] >= min_agent_confidence].copy()
+                    agent_labels = agent_labels[
+                        agent_labels["confidence"] >= min_agent_confidence
+                    ].copy()
                     logger.info(
                         f"Filtered agent labels by confidence >= {min_agent_confidence}: "
                         f"{before_count} -> {len(agent_labels)}"
@@ -828,7 +832,9 @@ class MLMatcher:
 
                 # Exclude same datasets if specified
                 if exclude_datasets and "dataset" in agent_labels.columns:
-                    agent_labels = agent_labels[~agent_labels["dataset"].isin(exclude_datasets)].copy()
+                    agent_labels = agent_labels[
+                        ~agent_labels["dataset"].isin(exclude_datasets)
+                    ].copy()
 
                 if len(agent_labels) > 0:
                     # Load features for agent labels
@@ -851,7 +857,9 @@ class MLMatcher:
                                 )
 
                                 # Create agent sample weights
-                                agent_weights = np.full(len(agent_with_features), agent_weight, dtype=np.float32)
+                                agent_weights = np.full(
+                                    len(agent_with_features), agent_weight, dtype=np.float32
+                                )
 
                                 # Combine human and agent labels
                                 df = pd.concat([df, agent_with_features], ignore_index=True)
@@ -862,11 +870,17 @@ class MLMatcher:
                                     f"{len(agent_with_features)} agent (weight={agent_weight})"
                                 )
                             else:
-                                logger.warning("No agent labels have features - skipping agent labels")
+                                logger.warning(
+                                    "No agent labels have features - skipping agent labels"
+                                )
                         else:
-                            logger.warning("No features found in feature store - skipping agent labels")
+                            logger.warning(
+                                "No features found in feature store - skipping agent labels"
+                            )
                     else:
-                        logger.warning(f"Features directory not found: {features_dir} - skipping agent labels")
+                        logger.warning(
+                            f"Features directory not found: {features_dir} - skipping agent labels"
+                        )
                 else:
                     logger.info("No valid agent labels after filtering")
             else:
@@ -965,7 +979,9 @@ class MLMatcher:
         fit_kwargs = {}
         if use_sample_weight:
             fit_kwargs["sample_weight"] = weights_train
-            logger.info(f"Using sample weights (min={weights_train.min():.2f}, max={weights_train.max():.2f})")
+            logger.info(
+                f"Using sample weights (min={weights_train.min():.2f}, max={weights_train.max():.2f})"
+            )
 
         # Only use eval_set if we have test data
         if len(X_test) > 0:

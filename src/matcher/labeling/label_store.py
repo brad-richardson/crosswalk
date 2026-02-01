@@ -661,7 +661,11 @@ class LabelStore:
 
             # Load features
             if features_dir is None:
-                features_dir = labels_dir / "features" if labels_dir.name != "human" else labels_dir.parent / "features"
+                features_dir = (
+                    labels_dir / "features"
+                    if labels_dir.name != "human"
+                    else labels_dir.parent / "features"
+                )
 
             from .feature_store import FeatureStore
 
