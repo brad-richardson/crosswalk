@@ -4,7 +4,7 @@ import html
 
 import streamlit as st
 
-from ..config import ALIGNMENT_FULL_TOLERANCE
+from ..config import ALIGNMENT_FULL_TOLERANCE, FEATURE_CATEGORIES
 from .data_loader import CandidatePairView
 
 # Feature display configuration - top features by XGBoost importance
@@ -214,68 +214,6 @@ def render_score_breakdown(pair: CandidatePairView) -> None:
 
 def render_raw_features(pair: CandidatePairView) -> None:
     """Render raw feature values in a collapsible section, organized by category."""
-    # Organize features by category for better readability
-    FEATURE_CATEGORIES = {
-        "Geometric": [
-            "hausdorff_distance_m",
-            "mean_hausdorff_distance_m",
-            "hausdorff_p95_m",
-            "buffer_iou_5m",
-            "buffer_iou_15m",
-            "heading_delta",
-            "length_ratio",
-            "centroid_distance_m",
-            "collinear_gap_ratio",
-        ],
-        "Name Similarity": [
-            "name_levenshtein",
-            "name_jaro_winkler",
-            "name_token_sort",
-            "name_soundex",
-            "name_metaphone",
-            "has_name_ref",
-            "has_name_target",
-            "name_is_generic",
-        ],
-        "Class": [
-            "class_similarity",
-        ],
-        "Endpoint/Connectivity": [
-            "min_endpoint_proximity_m",
-            "max_endpoint_proximity_m",
-            "shared_endpoint_count",
-        ],
-        "Lateral Offset": [
-            "lateral_offset_m",
-            "lateral_offset_iqr_m",
-            "lateral_offset_p95_m",
-        ],
-        "Topology": [
-            "from_degree_ref",
-            "to_degree_ref",
-            "from_degree_target",
-            "to_degree_target",
-            "degree_match_score",
-            "degree_signature_similarity",
-            "is_dead_end_ref",
-            "is_dead_end_target",
-            "dead_end_match",
-            "is_intersection_ref",
-            "is_intersection_target",
-            "intersection_match",
-        ],
-        "Alignment Coverage": [
-            "ref_coverage",
-            "target_coverage",
-            "min_coverage",
-            "coverage_ratio",
-        ],
-        "Graphlet": [
-            "graphlet_similarity",
-            "endpoint_degree_similarity",
-        ],
-    }
-
     with st.expander("All Features (ML)"):
         for category, feature_keys in FEATURE_CATEGORIES.items():
             # Check if any features in this category exist

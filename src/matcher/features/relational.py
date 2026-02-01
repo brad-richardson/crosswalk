@@ -37,6 +37,7 @@ Key Features:
 """
 
 import re
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
@@ -56,6 +57,51 @@ from ._jit_helpers import (
     compute_parallel_alignment_numba,
     side_of_street_vote_numba,
 )
+
+
+@dataclass
+class SiblingSearchContext:
+    """Context for per-pair parallel sibling detection.
+
+    Holds the spatial index and segment metadata needed to search for
+    parallel siblings within a dataset. This is built once per dataset
+    and reused for all pairs involving that dataset.
+
+    The search is performed per-pair on the aligned subline (not the full
+    geometry), allowing accurate sibling detection for partial alignments.
+    """
+
+    spatial_index: STRtree
+    """Spatial index over all segment geometries (projected to meters)."""
+
+    segment_data: list[tuple[str, str | None, str | None]]
+    """List of (id, name, class) tuples, parallel to spatial_index geometries."""
+
+
+def build_sibling_search_context(
+    geometries: list[LineString],
+    segment_ids: list[str],
+    names: list,
+    classes: list[str | None],
+) -> SiblingSearchContext:
+    """Build a SiblingSearchContext for parallel sibling detection.
+
+    Args:
+        geometries: List of segment geometries (projected to meters)
+        segment_ids: List of segment IDs
+        names: List of segment names (may contain None, strings, dicts, or lists)
+        classes: List of road classes (may contain None)
+
+    Returns:
+        SiblingSearchContext for use with find_parallel_sibling
+    """
+    from .semantic import _extract_name_string
+
+    spatial_index = STRtree(geometries)
+    # Normalize names to plain strings using existing extraction logic
+    normalized_names = [_extract_name_string(n) for n in names]
+    segment_data = list(zip(segment_ids, normalized_names, classes))
+    return SiblingSearchContext(spatial_index=spatial_index, segment_data=segment_data)
 
 
 class RelationalFeatures(NamedTuple):

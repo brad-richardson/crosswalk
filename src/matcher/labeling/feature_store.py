@@ -174,7 +174,7 @@ class FeatureStore:
         backup_path = self.parquet_path.with_suffix(".parquet.bak")
 
         # Write to temp file first
-        self._df.to_parquet(temp_path, index=False)
+        self._df.to_parquet(temp_path, index=False, compression="zstd")
 
         # Backup existing file (if present)
         if self.parquet_path.exists():

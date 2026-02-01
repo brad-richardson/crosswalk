@@ -183,15 +183,38 @@ def benchmark(
     # Save train labels to temp directory for training
     import tempfile
 
+    from ..config import FEATURE_COLUMNS
+    from ..labeling.label_store import HUMAN_LABEL_COLUMNS
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
+        human_dir = tmpdir / "human"
+        features_dir = tmpdir / "features"
 
-        # Save each dataset's train portion
+        # Save each dataset's train portion in the expected format
+        # LabelStore.load_all expects:
+        #   - human/dataset=*/data.csv (label metadata)
+        #   - features/dataset=*/data.parquet (computed features)
         for dataset in train_df["dataset"].unique():
             ds_train = train_df[train_df["dataset"] == dataset]
-            ds_dir = tmpdir / f"dataset={dataset}"
-            ds_dir.mkdir(parents=True, exist_ok=True)
-            ds_train.to_csv(ds_dir / "data.csv", index=False)
+
+            # Write human labels (metadata only)
+            # Deduplicate on (gers_id, target_id) to avoid join explosion
+            human_ds_dir = human_dir / f"dataset={dataset}"
+            human_ds_dir.mkdir(parents=True, exist_ok=True)
+            label_cols = [c for c in HUMAN_LABEL_COLUMNS if c in ds_train.columns]
+            ds_human = ds_train[label_cols].drop_duplicates(subset=["gers_id", "target_id"])
+            ds_human.to_csv(human_ds_dir / "data.csv", index=False)
+
+            # Write features (key columns + feature columns)
+            # Deduplicate on (gers_id, target_id) to match human labels
+            features_ds_dir = features_dir / f"dataset={dataset}"
+            features_ds_dir.mkdir(parents=True, exist_ok=True)
+            feature_cols = ["gers_id", "target_id"] + [
+                c for c in FEATURE_COLUMNS if c in ds_train.columns
+            ]
+            ds_features = ds_train[feature_cols].drop_duplicates(subset=["gers_id", "target_id"])
+            ds_features.to_parquet(features_ds_dir / "data.parquet", index=False)
 
         # Train model on train set only (no internal split since we already split)
         console.print(f"\n[blue]Training model on {len(train_df)} samples...[/blue]")

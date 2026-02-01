@@ -765,8 +765,8 @@ def backfill_features(
         compute_graphlet_similarity,
         compute_pair_features,
         precompute_graphlet_features,
-        precompute_parallel_siblings,
     )
+    from ..features.relational import build_sibling_search_context
     from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
     from ..utils.geometry import filter_to_linestrings
 
@@ -954,27 +954,24 @@ def backfill_features(
         labeled_ref_ids = set(str(x) for x in df.get("gers_id", df.get("ref_id", [])))
         labeled_target_ids = set(str(x) for x in df["target_id"])
 
-        # Precompute parallel sibling info for split carriageway detection
-        # Only compute for labeled segments (huge speedup vs computing for all)
+        # Build sibling search contexts for per-pair parallel sibling detection
+        # These hold the spatial index and segment metadata needed to search for
+        # parallel siblings on aligned sublines (not precomputed on full geometries)
         logger.info(
-            f"  Building parallel sibling data for {len(labeled_ref_ids)} ref, "
-            f"{len(labeled_target_ids)} target segments..."
+            f"  Building sibling search contexts for {len(ref_gdf_proj)} ref, "
+            f"{len(target_gdf_proj)} target segments..."
         )
-        ref_sibling_info = precompute_parallel_siblings(
-            ref_gdf_proj,
-            id_column="id",
-            name_column="names",
-            class_column="class",
-            ids_to_compute=labeled_ref_ids,
-            # No pre-built index for ref - will build one
+        ref_sibling_context = build_sibling_search_context(
+            geometries=list(ref_gdf_proj.geometry),
+            segment_ids=[str(sid) for sid in ref_gdf_proj["id"]],
+            names=list(ref_gdf_proj.get("names", [None] * len(ref_gdf_proj))),
+            classes=list(ref_gdf_proj.get("class", [None] * len(ref_gdf_proj))),
         )
-        target_sibling_info = precompute_parallel_siblings(
-            target_gdf_proj,
-            id_column="id",
-            name_column="names",
-            class_column="class",
-            ids_to_compute=labeled_target_ids,
-            spatial_index=target_context._segment_tree,  # Reuse existing STRtree
+        target_sibling_context = build_sibling_search_context(
+            geometries=list(target_gdf_proj.geometry),
+            segment_ids=[str(sid) for sid in target_gdf_proj["id"]],
+            names=list(target_gdf_proj.get("names", [None] * len(target_gdf_proj))),
+            classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
         )
 
         # Get data versions for tracking
@@ -1110,11 +1107,8 @@ def backfill_features(
                 ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
                 target_subclass = target_row.get("subclass") if hasattr(target_row, "get") else None
 
-                # Look up sibling info for this pair
-                pair_ref_sibling = ref_sibling_info.get(ref_id)
-                pair_target_sibling = target_sibling_info.get(target_id)
-
                 # Compute ALL features using the authoritative function
+                # Sibling detection is done per-pair on aligned sublines
                 features = compute_pair_features(
                     ref_geom,
                     target_geom,
@@ -1131,8 +1125,8 @@ def backfill_features(
                     target_graphlet_data=target_graphlet_data,
                     ref_seg_id=ref_id,
                     target_seg_id=target_id,
-                    ref_sibling_info=pair_ref_sibling,
-                    target_sibling_info=pair_target_sibling,
+                    ref_sibling_context=ref_sibling_context,
+                    target_sibling_context=target_sibling_context,
                 )
 
                 # Update all feature columns in the dataframe
