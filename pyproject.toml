@@ -52,6 +52,7 @@ os = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
+    "pytest-xdist>=3.5",
     "ruff>=0.5",
     "ipykernel>=6.27",
 ]
@@ -77,6 +78,7 @@ ignore = ["E501", "B008", "E402", "B905", "SIM102", "SIM108"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-n auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
