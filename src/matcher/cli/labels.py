@@ -208,9 +208,19 @@ def migrate(
                 console.print(f"  {dataset_id} (geometry):")
                 console.print(f"    - Migrate {len(data_gdf)} geometry records to data/{dataset_id}")
             else:
+                from shapely import wkb
+
                 data_partition = data_dir / f"dataset={dataset_id}"
                 data_partition.mkdir(parents=True, exist_ok=True)
-                data_gdf.to_parquet(data_partition / "data.parquet")
+
+                # GeoParquet only supports one active geometry column
+                # Store target_geometry as WKB bytes
+                write_gdf = data_gdf.copy()
+                write_gdf["target_geometry_wkb"] = write_gdf["target_geometry"].apply(
+                    lambda g: wkb.dumps(g) if g is not None else None
+                )
+                write_gdf = write_gdf.drop(columns=["target_geometry"])
+                write_gdf.to_parquet(data_partition / "data.parquet")
                 logger.info(f"Migrated {dataset_id} geometry: {len(data_gdf)} records")
 
             stats["data"] += len(data_gdf)
@@ -286,8 +296,8 @@ def migrate(
         console.print("\n[yellow]Run without --dry-run to apply changes.[/yellow]")
 
 
-@labels_app.command("backfill-agent-features")
-def backfill_agent_features(
+@labels_app.command("backfill")
+def backfill_features(
     labels_dir: Path = typer.Option(
         Path("labels"),
         "--labels",
@@ -310,40 +320,92 @@ def backfill_agent_features(
         "--skip-missing/--fail-missing",
         help="Skip pairs with missing source data",
     ),
+    human_only: bool = typer.Option(
+        False,
+        "--human-only",
+        help="Only backfill human labels (skip agent)",
+    ),
+    agent_only: bool = typer.Option(
+        False,
+        "--agent-only",
+        help="Only backfill agent labels (skip human)",
+    ),
 ):
-    """Compute features for agent labels that don't have them.
+    """Compute missing features for human and/or agent labels.
 
-    This command loads agent labels from labels/agent/ and computes features
-    for any pairs that don't already have features in labels/features/.
+    This command finds labels (human and/or agent) that don't have corresponding
+    features in labels/features/ and computes them from source data.
 
-    This is useful after migrating to enable weak supervision training with
-    agent labels.
+    Use this after:
+    - Adding new labels via the UI
+    - Migrating to enable weak supervision with agent labels
+    - When features need to be recomputed (e.g., new feature version)
 
     Examples:
-        matcher labels backfill-agent-features --dry-run
-        matcher labels backfill-agent-features
+        matcher labels backfill --dry-run
+        matcher labels backfill
+        matcher labels backfill --agent-only
+        matcher labels backfill --human-only
     """
 
     from ..labeling.feature_store import FeatureStore
     from ..labeling.label_store import LabelStore
 
     labels_dir = Path(labels_dir)
+    human_dir = labels_dir / "human"
     agent_dir = labels_dir / "agent"
     features_dir = labels_dir / "features"
 
-    if not agent_dir.exists():
-        console.print(f"[red]Agent labels directory not found: {agent_dir}[/red]")
-        console.print("[yellow]Run 'matcher labels migrate' first.[/yellow]")
-        raise typer.Exit(1)
+    # Collect all labels to process
+    all_label_keys = set()
+    label_sources = {}  # Track which source each key came from
 
-    console.print("[blue]Loading agent labels...[/blue]")
-    agent_labels = LabelStore.load_agent_labels(agent_dir)
+    if not agent_only:
+        if human_dir.exists():
+            console.print("[blue]Loading human labels...[/blue]")
+            human_labels = LabelStore.load_human_labels(human_dir)
+            if len(human_labels) > 0:
+                human_keys = set(
+                    zip(
+                        human_labels["gers_id"],
+                        human_labels["target_id"],
+                        human_labels["dataset"],
+                    )
+                )
+                console.print(f"  Found {len(human_labels)} human labels across {human_labels['dataset'].nunique()} datasets")
+                all_label_keys.update(human_keys)
+                for k in human_keys:
+                    label_sources[k] = "human"
+            else:
+                console.print("  [yellow]No human labels found[/yellow]")
+        else:
+            console.print(f"  [yellow]Human labels directory not found: {human_dir}[/yellow]")
 
-    if len(agent_labels) == 0:
-        console.print("[yellow]No agent labels found.[/yellow]")
+    if not human_only:
+        if agent_dir.exists():
+            console.print("[blue]Loading agent labels...[/blue]")
+            agent_labels = LabelStore.load_agent_labels(agent_dir)
+            if len(agent_labels) > 0:
+                agent_keys = set(
+                    zip(
+                        agent_labels["gers_id"],
+                        agent_labels["target_id"],
+                        agent_labels["dataset"],
+                    )
+                )
+                console.print(f"  Found {len(agent_labels)} agent labels across {agent_labels['dataset'].nunique()} datasets")
+                all_label_keys.update(agent_keys)
+                for k in agent_keys:
+                    if k not in label_sources:  # Don't overwrite human
+                        label_sources[k] = "agent"
+            else:
+                console.print("  [yellow]No agent labels found[/yellow]")
+        else:
+            console.print(f"  [yellow]Agent labels directory not found: {agent_dir}[/yellow]")
+
+    if len(all_label_keys) == 0:
+        console.print("[yellow]No labels found to process.[/yellow]")
         raise typer.Exit(0)
-
-    console.print(f"  Found {len(agent_labels)} agent labels across {agent_labels['dataset'].nunique()} datasets")
 
     # Load existing features to find what's missing
     console.print("[blue]Loading existing features...[/blue]")
@@ -362,20 +424,16 @@ def backfill_agent_features(
         existing_keys = set()
         console.print("  No existing features found")
 
-    # Find agent labels without features
-    agent_keys = set(
-        zip(
-            agent_labels["gers_id"],
-            agent_labels["target_id"],
-            agent_labels["dataset"],
-        )
-    )
-    missing_keys = agent_keys - existing_keys
+    # Find labels without features
+    missing_keys = all_label_keys - existing_keys
 
-    console.print(f"  {len(missing_keys)} agent labels need features computed")
+    # Count by source
+    missing_human = sum(1 for k in missing_keys if label_sources.get(k) == "human")
+    missing_agent = sum(1 for k in missing_keys if label_sources.get(k) == "agent")
+    console.print(f"  {len(missing_keys)} labels need features ({missing_human} human, {missing_agent} agent)")
 
     if len(missing_keys) == 0:
-        console.print("[green]All agent labels already have features.[/green]")
+        console.print("[green]All labels already have features.[/green]")
         raise typer.Exit(0)
 
     if dry_run:
@@ -404,8 +462,8 @@ def backfill_agent_features(
     from ..filenames import find_overture_segments, find_target_file
     from ..utils.geometry import filter_to_linestrings
 
-    # Process by dataset
-    datasets = agent_labels["dataset"].unique()
+    # Process by dataset - get unique datasets from missing keys
+    datasets = sorted(set(d for _, _, d in missing_keys))
     total_computed = 0
     total_skipped = 0
 
