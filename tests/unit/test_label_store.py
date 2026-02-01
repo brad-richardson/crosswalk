@@ -134,14 +134,17 @@ class TestGeometryPersistence:
     """Test that LabelStore.add() with geometry params creates companion file."""
 
     def test_add_with_geometry_creates_companion_file(self, tmp_path):
-        """Adding a label with geometry params persists to label_geometries/."""
+        """Adding a label with geometry params persists to labels/data/."""
         import shutil
+        from pathlib import Path
 
-        from matcher.labeling.geometry_store import DEFAULT_GEOMETRIES_DIR, GeometryStore
+        from matcher.labeling.data_store import DEFAULT_DATA_DIR, DataStore
+        from matcher.labeling.feature_store import DEFAULT_FEATURES_DIR
 
         labels_dir = tmp_path / "labels"
+        dataset_id = "test_dataset_geo_persist"
 
-        store = LabelStore("test_dataset_geo_persist", labels_dir=labels_dir)
+        store = LabelStore(dataset_id, labels_dir=labels_dir)
 
         ref_geom = LineString([(0.0, 0.0), (1.0, 1.0)])
         target_geom = LineString([(0.0, 0.1), (1.0, 1.1)])
@@ -170,24 +173,25 @@ class TestGeometryPersistence:
             assert len(store.df) == 1
             assert store.df.iloc[0]["gers_id"] == "ref-001"
 
-            # Companion file should exist in the default geometry dir
-            geo_store = GeometryStore("test_dataset_geo_persist")
-            geo_path = DEFAULT_GEOMETRIES_DIR / "dataset=test_dataset_geo_persist" / "data.csv"
-            assert geo_path.exists(), f"Companion file not created at {geo_path}"
+            # Companion file should exist in the default data dir
+            data_path = DEFAULT_DATA_DIR / f"dataset={dataset_id}" / "data.parquet"
+            assert data_path.exists(), f"Companion file not created at {data_path}"
 
-            # Verify geometry was persisted correctly
-            result = geo_store.get_pair("ref-001", "target-001")
+            # Verify geometry was persisted correctly by creating a fresh DataStore
+            data_store = DataStore(dataset_id)
+            result = data_store.get_pair("ref-001", "target-001")
             assert result is not None
             assert result["ref_name"] == "Main St"
             assert isinstance(result["ref_geometry"], LineString)
         finally:
-            # Clean up companion file created in CWD
-            geo_partition = DEFAULT_GEOMETRIES_DIR / "dataset=test_dataset_geo_persist"
-            if geo_partition.exists():
-                shutil.rmtree(geo_partition)
-            # Remove parent dir if empty
-            if DEFAULT_GEOMETRIES_DIR.exists() and not any(DEFAULT_GEOMETRIES_DIR.iterdir()):
-                DEFAULT_GEOMETRIES_DIR.rmdir()
+            # Clean up companion files created in CWD
+            for base_dir in [DEFAULT_DATA_DIR, DEFAULT_FEATURES_DIR]:
+                partition = base_dir / f"dataset={dataset_id}"
+                if partition.exists():
+                    shutil.rmtree(partition)
+                # Remove parent dir if empty
+                if base_dir.exists() and not any(base_dir.iterdir()):
+                    base_dir.rmdir()
 
     def test_add_without_geometry_no_error(self, tmp_path):
         """Adding a label without geometry params does not raise an error."""

@@ -117,6 +117,16 @@ def register_commands(app: typer.Typer) -> None:
             "-e",
             help="Feature(s) to exclude from training (for feature importance analysis). Can be repeated.",
         ),
+        agent_weight: float = typer.Option(
+            0.0,
+            "--agent-weight",
+            help="Weight for agent labels (0.0=ignore, 1.0=equal to human). Enables weak supervision.",
+        ),
+        min_agent_confidence: float = typer.Option(
+            0.0,
+            "--min-agent-confidence",
+            help="Minimum confidence for including agent labels (0.0-1.0).",
+        ),
     ):
         """Train an ML model on labeled data.
 
@@ -131,6 +141,9 @@ def register_commands(app: typer.Typer) -> None:
 
             # Leave-one-out: train without Frisco labels to test generalization
             matcher train -x us_frisco_trails -o data/models/no_frisco.joblib
+
+            # Train with weak supervision from agent labels
+            matcher train --agent-weight 0.5 --min-agent-confidence 0.7
         """
         from ..labeling.label_store import LabelStore
         from ..matching.ml import MLMatcher
@@ -156,6 +169,12 @@ def register_commands(app: typer.Typer) -> None:
         if exclude_features:
             console.print(f"[yellow]Excluding features: {', '.join(exclude_features)}[/yellow]")
 
+        if agent_weight > 0:
+            console.print(
+                f"[yellow]Including agent labels with weight={agent_weight}, "
+                f"min_confidence={min_agent_confidence}[/yellow]"
+            )
+
         # Train model
         model_type = "geometry-only" if exclude_semantic else "full"
         console.print(f"[blue]Training {model_type} model...[/blue]")
@@ -167,6 +186,8 @@ def register_commands(app: typer.Typer) -> None:
             exclude_semantic=exclude_semantic,
             exclude_datasets=list(exclude_dataset) if exclude_dataset else None,
             exclude_features=list(exclude_features) if exclude_features else None,
+            agent_weight=agent_weight,
+            min_agent_confidence=min_agent_confidence,
         )
 
         # Save model

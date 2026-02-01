@@ -1,4 +1,16 @@
-"""Label persistence - Hive-partitioned CSV storage for labeled training data."""
+"""Label persistence - Hive-partitioned CSV storage for labeled training data.
+
+This module provides the LabelStore class which manages human labels in CSV format.
+Labels are stored separately from features and raw data in a normalized architecture:
+
+- labels/human/dataset={id}/data.csv - Human labels (metadata only)
+- labels/agent/dataset={id}/data.csv - Agent labels (metadata only)
+- labels/features/dataset={id}/data.parquet - Computed features
+- labels/data/dataset={id}/data.parquet - Raw pair data (geometries + attributes)
+
+For backward compatibility, this module also supports loading legacy labels that
+have embedded features (labels/dataset={id}/data.csv format).
+"""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -76,11 +88,13 @@ def is_subsegment_selection(
     return not (ref_is_full and target_is_full)
 
 
-# Default paths
+# Default paths - using new normalized structure
 DEFAULT_LABELS_DIR = Path("labels")
+DEFAULT_HUMAN_LABELS_DIR = Path("labels/human")
+DEFAULT_AGENT_LABELS_DIR = Path("labels/agent")
 
-# Metadata columns for labels (not features)
-LABEL_METADATA_COLUMNS = [
+# Metadata columns for human labels (not features)
+HUMAN_LABEL_COLUMNS = [
     "gers_id",  # Overture reference segment ID (renamed from ref_id)
     "target_id",
     "label",  # "match", "no_match", "unsure"
@@ -95,14 +109,41 @@ LABEL_METADATA_COLUMNS = [
     "target_start_pct",
     "target_end_pct",
     "is_subsegment",
-    # Data versioning columns (added 2026-01-23)
-    "ref_data_version",  # Version identifier for reference data file
-    "target_data_version",  # Version identifier for target data file
-    "feature_version",  # Feature computation version (from config.FEATURE_VERSION)
 ]
 
-# Column definitions for labels: metadata + all feature columns
-# FEATURE_COLUMNS is imported from config.py - single source of truth
+# Agent label columns
+AGENT_LABEL_COLUMNS = [
+    "gers_id",
+    "target_id",
+    "label",  # "match", "no_match", "unsure"
+    "confidence",  # Agent confidence (0.0-1.0)
+    "reasoning",  # Agent explanation
+    "labeler",  # Agent identifier
+    "labeled_at",  # ISO timestamp string
+]
+
+# Legacy column definitions for backward compatibility
+# This includes both metadata AND feature columns for old-style labels
+LABEL_METADATA_COLUMNS = [
+    "gers_id",
+    "target_id",
+    "label",
+    "labeler",
+    "labeled_at",
+    "session_id",
+    "original_decision",
+    "original_confidence",
+    "ref_start_pct",
+    "ref_end_pct",
+    "target_start_pct",
+    "target_end_pct",
+    "is_subsegment",
+    "ref_data_version",
+    "target_data_version",
+    "feature_version",
+]
+
+# Full legacy schema (metadata + features) for backward compatibility
 LABEL_COLUMNS = LABEL_METADATA_COLUMNS + FEATURE_COLUMNS
 
 # Default values for sub-segment columns (for backward compatibility)
@@ -124,7 +165,12 @@ VERSION_DEFAULTS = {
 
 @dataclass
 class LabelStore:
-    """Manages labeled data storage for a single dataset partition."""
+    """Manages labeled data storage for a single dataset partition.
+
+    This class supports both the legacy embedded-feature format and the new
+    normalized format. When adding labels, it writes to all three stores
+    (data, features, labels) for the new format.
+    """
 
     dataset_id: str
     labels_dir: Path = DEFAULT_LABELS_DIR
@@ -312,6 +358,11 @@ class LabelStore:
     ) -> None:
         """Add a new label.
 
+        Writes to all three stores:
+        - LabelStore (this class): Label metadata in CSV
+        - DataStore: Raw geometries and attributes in GeoParquet
+        - FeatureStore: Computed features in Parquet
+
         Args:
             gers_id: Overture reference segment ID (GERS ID)
             target_id: Target segment ID
@@ -328,20 +379,21 @@ class LabelStore:
             ref_data_version: Version identifier for reference data file
             target_data_version: Version identifier for target data file
             feature_version: Feature computation version (defaults to FEATURE_VERSION)
-            ref_geometry: Reference geometry (WGS84) for persistence in companion file
-            target_geometry: Target geometry (WGS84) for persistence in companion file
-            ref_name_raw: Reference segment name for companion file
-            target_name_raw: Target segment name for companion file
-            ref_class_raw: Reference road class for companion file
-            target_class_raw: Target road class for companion file
-            ref_subclass: Reference road subclass for companion file
-            target_subclass: Target road subclass for companion file
+            ref_geometry: Reference geometry (WGS84) for persistence in data store
+            target_geometry: Target geometry (WGS84) for persistence in data store
+            ref_name_raw: Reference segment name for data store
+            target_name_raw: Target segment name for data store
+            ref_class_raw: Reference road class for data store
+            target_class_raw: Target road class for data store
+            ref_subclass: Reference road subclass for data store
+            target_subclass: Target road subclass for data store
         """
         # Determine if this is a sub-segment selection
         is_subseg = is_subsegment_selection(
             ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
         )
 
+        # Build the new row with metadata AND features (for backward compatibility)
         new_row = {
             "gers_id": str(gers_id),
             "target_id": str(target_id),
@@ -443,12 +495,12 @@ class LabelStore:
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
 
-        # Persist geometries to companion file if provided
+        # Persist geometries and features to normalized stores if provided
         if ref_geometry is not None and target_geometry is not None:
-            from .geometry_store import GeometryStore
+            from .data_store import DataStore
 
-            geo_store = GeometryStore(self.dataset_id)
-            geo_store.add(
+            data_store = DataStore(self.dataset_id)
+            data_store.add(
                 gers_id=gers_id,
                 target_id=target_id,
                 ref_geometry=ref_geometry,
@@ -460,7 +512,19 @@ class LabelStore:
                 ref_subclass=ref_subclass,
                 target_subclass=target_subclass,
             )
-            geo_store.save()
+            data_store.save()
+
+            # Write to normalized FeatureStore
+            from .feature_store import FeatureStore
+
+            feature_store = FeatureStore(self.dataset_id)
+            feature_store.add(
+                gers_id=gers_id,
+                target_id=target_id,
+                features=features,
+                feature_version=feature_version if feature_version else FEATURE_VERSION,
+            )
+            feature_store.save()
 
     def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
@@ -511,6 +575,9 @@ class LabelStore:
         skip_errors: bool = True,
     ) -> pd.DataFrame:
         """Load all label partitions for ML training.
+
+        Supports both legacy format (labels/dataset=*/data.csv with embedded features)
+        and new normalized format (labels/human/dataset=*/data.csv).
 
         Uses PyArrow's Hive partitioning to read all dataset partitions
         and adds a 'dataset' column from the partition path.
@@ -564,6 +631,143 @@ class LabelStore:
                 result = result.rename(columns={"ref_id": "gers_id"})
             return result
         return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
+
+    @staticmethod
+    def load_human_labels(
+        human_dir: Path = DEFAULT_HUMAN_LABELS_DIR,
+        skip_errors: bool = True,
+    ) -> pd.DataFrame:
+        """Load human labels from normalized format.
+
+        Args:
+            human_dir: Directory containing human label CSVs (labels/human/)
+            skip_errors: If True, skip partitions that fail to load.
+
+        Returns:
+            DataFrame with human labels and 'dataset' column
+        """
+        human_dir = Path(human_dir)
+        if not human_dir.exists():
+            return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + ["dataset"])
+
+        dfs = []
+        for partition_dir in human_dir.glob("dataset=*"):
+            if not partition_dir.is_dir():
+                continue
+            dataset_id = partition_dir.name.split("=")[1]
+            csv_path = partition_dir / "data.csv"
+            if csv_path.exists():
+                try:
+                    df = pd.read_csv(csv_path)
+                    df["dataset"] = dataset_id
+                    # Handle ref_id -> gers_id rename
+                    if "ref_id" in df.columns and "gers_id" not in df.columns:
+                        df = df.rename(columns={"ref_id": "gers_id"})
+                    dfs.append(df)
+                except Exception as e:
+                    if skip_errors:
+                        logger.warning(f"Failed to load {csv_path}: {e}")
+                    else:
+                        raise
+
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + ["dataset"])
+
+    @staticmethod
+    def load_agent_labels(
+        agent_dir: Path = DEFAULT_AGENT_LABELS_DIR,
+        skip_errors: bool = True,
+    ) -> pd.DataFrame:
+        """Load agent labels from normalized format.
+
+        Args:
+            agent_dir: Directory containing agent label CSVs (labels/agent/)
+            skip_errors: If True, skip partitions that fail to load.
+
+        Returns:
+            DataFrame with agent labels and 'dataset' column
+        """
+        agent_dir = Path(agent_dir)
+        if not agent_dir.exists():
+            return pd.DataFrame(columns=AGENT_LABEL_COLUMNS + ["dataset"])
+
+        dfs = []
+        for partition_dir in agent_dir.glob("dataset=*"):
+            if not partition_dir.is_dir():
+                continue
+            dataset_id = partition_dir.name.split("=")[1]
+            csv_path = partition_dir / "data.csv"
+            if csv_path.exists():
+                try:
+                    df = pd.read_csv(csv_path)
+                    df["dataset"] = dataset_id
+                    # Handle ref_id -> gers_id rename
+                    if "ref_id" in df.columns and "gers_id" not in df.columns:
+                        df = df.rename(columns={"ref_id": "gers_id"})
+                    dfs.append(df)
+                except Exception as e:
+                    if skip_errors:
+                        logger.warning(f"Failed to load {csv_path}: {e}")
+                    else:
+                        raise
+
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        return pd.DataFrame(columns=AGENT_LABEL_COLUMNS + ["dataset"])
+
+    @staticmethod
+    def load_all_with_features(
+        labels_dir: Path = DEFAULT_LABELS_DIR,
+        features_dir: Path | None = None,
+        skip_errors: bool = True,
+    ) -> pd.DataFrame:
+        """Load labels joined with features for ML training.
+
+        This method supports both legacy and normalized formats:
+        - Legacy: labels/dataset=*/data.csv with embedded features
+        - Normalized: labels/human/ + labels/features/
+
+        Args:
+            labels_dir: Directory containing labels (legacy or human/)
+            features_dir: Directory containing features (for normalized format)
+            skip_errors: If True, skip partitions that fail to load.
+
+        Returns:
+            DataFrame with labels joined with features
+        """
+        labels_dir = Path(labels_dir)
+
+        # Check for normalized format first (labels/human/ exists)
+        human_dir = labels_dir / "human" if labels_dir.name != "human" else labels_dir
+        if human_dir.exists() and any(human_dir.glob("dataset=*")):
+            # Normalized format
+            labels = LabelStore.load_human_labels(human_dir, skip_errors=skip_errors)
+            if len(labels) == 0:
+                return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
+
+            # Load features
+            if features_dir is None:
+                features_dir = labels_dir / "features" if labels_dir.name != "human" else labels_dir.parent / "features"
+
+            from .feature_store import FeatureStore
+
+            features = FeatureStore.load_all(features_dir)
+
+            if len(features) == 0:
+                logger.warning("No features found - returning labels without features")
+                return labels
+
+            # Join labels with features on (gers_id, target_id, dataset)
+            result = labels.merge(
+                features,
+                on=["gers_id", "target_id", "dataset"],
+                how="left",
+            )
+            return result
+
+        # Legacy format - labels already have embedded features
+        return LabelStore.load_all(labels_dir, skip_errors=skip_errors)
 
 
 # Backward compatibility aliases
@@ -860,10 +1064,10 @@ def backfill_features(
         ref_data_version = get_data_version(ref_path)
         target_data_version = get_data_version(target_path)
 
-        # Load geometry store for persisted geometry recovery and persistence
-        from .geometry_store import GeometryStore
+        # Load data store for persisted geometry recovery and persistence
+        from .data_store import DataStore
 
-        geo_store = GeometryStore(dataset_name)
+        data_store = DataStore(dataset_name)
 
         # Context feature columns to preserve from existing CSV row when using
         # persisted geometry (tier 2) — these require full dataset spatial index /
@@ -1059,7 +1263,7 @@ def backfill_features(
                     target_row.get("road_flags_lr") if hasattr(target_row, "get") else None
                 )
 
-                geo_store.add(
+                data_store.add(
                     gers_id=ref_id,
                     target_id=target_id,
                     ref_geometry=ref_geom_wgs84,
@@ -1082,7 +1286,7 @@ def backfill_features(
 
             else:
                 # === TIER 2: IDs not in current data — try persisted geometry ===
-                persisted = geo_store.get_pair(ref_id, target_id)
+                persisted = data_store.get_pair(ref_id, target_id)
                 if persisted is None:
                     # === TIER 3: Truly orphaned — no recovery possible ===
                     orphaned_indices.append(idx)
@@ -1207,8 +1411,8 @@ def backfill_features(
 
         # Save geometry store once per partition (batch save)
         if not dry_run and not report_only:
-            geo_store.save()
-            logger.info(f"  Saved geometry store to {geo_store.csv_path}")
+            data_store.save()
+            logger.info(f"  Saved data store to {data_store.parquet_path}")
 
         # Store detailed results
         results[dataset_name] = {

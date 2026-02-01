@@ -6,6 +6,7 @@ from .agent import agent_app
 from .classify import class_app
 from .data import data_app
 from .integrate import integrate_app
+from .labels import labels_app
 from .main import register_commands
 from .ml import ml_app
 from .validate import validate_app
@@ -27,5 +28,6 @@ app.add_typer(integrate_app, name="integrate")
 app.add_typer(class_app, name="class")
 app.add_typer(agent_app, name="agent")
 app.add_typer(validate_app, name="validate")
+app.add_typer(labels_app, name="labels")
 
 __all__ = ["app"]

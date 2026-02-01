@@ -15,7 +15,7 @@ import pandas as pd
 from loguru import logger
 
 from ..features.semantic import get_traffic_tier
-from ..labeling.geometry_store import GeometryStore
+from ..labeling.data_store import DataStore
 from ..labeling.label_store import DEFAULT_LABELS_DIR
 
 
@@ -78,7 +78,7 @@ def _is_tier_incompatible(ref_class: str | None, target_class: str | None) -> bo
 
 def analyze_class_confusion_from_labels(
     labels_dir: Path = DEFAULT_LABELS_DIR,
-    geometries_dir: Path = Path("label_geometries"),
+    data_dir: Path = Path("labels/data"),
     low_similarity_threshold: float = 0.3,
     high_similarity_threshold: float = 0.8,
     max_examples: int = 100,
@@ -104,7 +104,7 @@ def analyze_class_confusion_from_labels(
 
     # Load all labels
     labels_dir = Path(labels_dir)
-    geometries_dir = Path(geometries_dir)
+    data_dir = Path(data_dir)
 
     if not labels_dir.exists():
         logger.warning(f"Labels directory not found: {labels_dir}")
@@ -132,8 +132,8 @@ def analyze_class_confusion_from_labels(
         if len(df) == 0:
             continue
 
-        # Load geometry store for raw class values
-        geo_store = GeometryStore(dataset_name, geometries_dir=geometries_dir)
+        # Load data store for raw class values
+        data_store = DataStore(dataset_name, data_dir=data_dir)
 
         # Initialize per-dataset stats
         dataset_stats = {
@@ -165,7 +165,7 @@ def analyze_class_confusion_from_labels(
                 dataset_stats["no_matches"] += 1
 
             # Get raw class values from geometry store
-            pair = geo_store.get_pair(gers_id, target_id)
+            pair = data_store.get_pair(gers_id, target_id)
             if pair is None:
                 # Fall back to feature-based analysis without raw classes
                 ref_class = None

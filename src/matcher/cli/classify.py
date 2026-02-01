@@ -880,10 +880,10 @@ def update_class_mappings(
         get_datasets_dir,
         save_dataset_config,
     )
-    from ..labeling.geometry_store import GeometryStore
+    from ..labeling.data_store import DataStore
 
     labels_dir = labels_dir or Path("labels")
-    geometries_dir = geometries_dir or Path("label_geometries")
+    data_dir = Path("labels/data")
 
     def get_tier(class_name: str) -> str:
         return OVERTURE_TIERS.get(class_name.lower(), "unknown")
@@ -944,8 +944,8 @@ def update_class_mappings(
             results["no_data"].append(dataset_id)
             continue
 
-        # Load geometry store for ref class (Overture class is always correct)
-        geo_store = GeometryStore(dataset_id=dataset_id, geometries_dir=geometries_dir)
+        # Load data store for ref class (Overture class is always correct)
+        data_store = DataStore(dataset_id=dataset_id, data_dir=data_dir)
 
         # Try to load raw target data for source class
         target_files = glob(f"data/raw/{dataset_id}*.parquet")
@@ -978,7 +978,7 @@ def update_class_mappings(
         overture_classes = []
 
         for _, row in match_labels.iterrows():
-            pair = geo_store.get_pair(row["gers_id"], row["target_id"])
+            pair = data_store.get_pair(row["gers_id"], row["target_id"])
             if pair is None:
                 continue
 

@@ -7,7 +7,7 @@ semantic features using correct majority-covering attributes.
 Usage:
     from matcher.labeling.backfill import backfill_lr_data, recompute_label_features
 
-    # Add LR data to label_geometries
+    # Add LR data to labels/data/
     backfill_lr_data("my_dataset")
 
     # Recompute features with LR-aware extraction
@@ -20,22 +20,25 @@ import geopandas as gpd
 from loguru import logger
 
 from ..fetch.overture import extract_lr_attributes
-from .geometry_store import GeometryStore
+from .data_store import DataStore
+
+# Default directory for data store
+DEFAULT_DATA_DIR = Path("labels/data")
 
 
 def backfill_lr_data(
     dataset_id: str,
     overture_path: Path,
     target_path: Path | None = None,
-    geometries_dir: Path | None = None,
+    data_dir: Path | None = None,
     dry_run: bool = False,
     target_is_osm: bool = False,
 ) -> dict[str, int]:
-    """Backfill LR data to existing label_geometries entries.
+    """Backfill LR data to existing data store entries.
 
     Looks up each labeled pair's reference segment by gers_id in the current
     Overture data and adds the LR attributes (names_lr, subclass_lr, etc.)
-    to the geometry store.
+    to the data store.
 
     For Overture → OSM datasets (where target_is_osm=True):
     - Reference LR comes from Overture data (looked up by gers_id)
@@ -46,7 +49,7 @@ def backfill_lr_data(
         dataset_id: Dataset identifier for the label partition
         overture_path: Path to current Overture segments parquet file
         target_path: Optional path to target data (for target LR attributes)
-        geometries_dir: Directory for geometry stores (default: label_geometries)
+        data_dir: Directory for data stores (default: labels/data)
         dry_run: If True, don't save changes, just report counts
         target_is_osm: If True, target is OSM data with LR-capable structure.
             Use this for Overture → OSM matching datasets.
@@ -54,8 +57,8 @@ def backfill_lr_data(
     Returns:
         Dict with counts: {"updated": n, "not_found": n, "total": n}
     """
-    if geometries_dir is None:
-        geometries_dir = Path("label_geometries")
+    if data_dir is None:
+        data_dir = DEFAULT_DATA_DIR
 
     # Auto-detect OSM datasets based on naming convention
     if not target_is_osm and dataset_id.endswith("_osm"):
@@ -64,13 +67,13 @@ def backfill_lr_data(
 
     logger.info(f"Backfilling LR data for dataset: {dataset_id}")
 
-    # Load geometry store
-    geo_store = GeometryStore(dataset_id, geometries_dir)
-    if len(geo_store.df) == 0:
-        logger.warning(f"No geometries found for dataset {dataset_id}")
+    # Load data store
+    store = DataStore(dataset_id, data_dir=data_dir)
+    if len(store.gdf) == 0:
+        logger.warning(f"No data found for dataset {dataset_id}")
         return {"updated": 0, "not_found": 0, "total": 0}
 
-    logger.info(f"Found {len(geo_store.df)} geometry entries")
+    logger.info(f"Found {len(store.gdf)} data entries")
 
     # Load Overture data with LR attributes
     logger.info(f"Loading Overture data from {overture_path}")
@@ -103,11 +106,11 @@ def backfill_lr_data(
         target_gdf[target_id_col] = target_gdf[target_id_col].astype(str)
         target_by_id = target_gdf.set_index(target_id_col)
 
-    # Process each geometry entry
+    # Process each data entry
     updated = 0
     not_found = 0
 
-    for _idx, row in geo_store.df.iterrows():
+    for _idx, row in store.gdf.iterrows():
         gers_id = str(row["gers_id"])
         target_id = str(row["target_id"])
 
@@ -140,9 +143,9 @@ def backfill_lr_data(
             target_level_lr = target_row.get("level_lr")
             target_road_flags_lr = target_row.get("road_flags_lr")
 
-        # Update the geometry store entry
+        # Update the data store entry
         if not dry_run:
-            success = geo_store.update_lr_attributes(
+            success = store.update_lr_attributes(
                 gers_id=gers_id,
                 target_id=target_id,
                 ref_names_lr=ref_names_lr,
@@ -161,13 +164,13 @@ def backfill_lr_data(
 
     # Save changes
     if not dry_run and updated > 0:
-        geo_store.save()
-        logger.info(f"Saved {updated} updated geometry entries")
+        store.save()
+        logger.info(f"Saved {updated} updated data entries")
 
     result = {
         "updated": updated,
         "not_found": not_found,
-        "total": len(geo_store.df),
+        "total": len(store.gdf),
     }
 
     if dry_run:
@@ -181,31 +184,31 @@ def backfill_lr_data(
 def backfill_all_datasets(
     overture_dir: Path,
     target_dir: Path | None = None,
-    geometries_dir: Path | None = None,
+    data_dir: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, dict[str, int]]:
-    """Backfill LR data for all datasets with label_geometries.
+    """Backfill LR data for all datasets with data entries.
 
     Args:
         overture_dir: Directory containing Overture parquet files
         target_dir: Optional directory containing target parquet files
-        geometries_dir: Directory for geometry stores (default: label_geometries)
+        data_dir: Directory for data stores (default: labels/data)
         dry_run: If True, don't save changes, just report counts
 
     Returns:
         Dict mapping dataset_id to counts
     """
-    if geometries_dir is None:
-        geometries_dir = Path("label_geometries")
+    if data_dir is None:
+        data_dir = DEFAULT_DATA_DIR
 
-    if not geometries_dir.exists():
-        logger.warning(f"Geometries directory not found: {geometries_dir}")
+    if not data_dir.exists():
+        logger.warning(f"Data directory not found: {data_dir}")
         return {}
 
     # Find all dataset partitions
-    partitions = list(geometries_dir.glob("dataset=*/data.csv"))
+    partitions = list(data_dir.glob("dataset=*/data.parquet"))
     if not partitions:
-        logger.warning("No geometry partitions found")
+        logger.warning("No data partitions found")
         return {}
 
     results = {}
@@ -233,7 +236,7 @@ def backfill_all_datasets(
                 dataset_id=dataset_id,
                 overture_path=overture_path,
                 target_path=target_path,
-                geometries_dir=geometries_dir,
+                data_dir=data_dir,
                 dry_run=dry_run,
             )
         except Exception as e:
