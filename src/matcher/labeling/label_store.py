@@ -949,11 +949,6 @@ def backfill_features(
             target_graphlet_data if target_graphlet_data else (None, None, None, None)
         )
 
-        # Collect labeled IDs for efficient sibling computation
-        # Only compute sibling info for segments that appear in labeled pairs
-        labeled_ref_ids = set(str(x) for x in df.get("gers_id", df.get("ref_id", [])))
-        labeled_target_ids = set(str(x) for x in df["target_id"])
-
         # Build sibling search contexts for per-pair parallel sibling detection
         # These hold the spatial index and segment metadata needed to search for
         # parallel siblings on aligned sublines (not precomputed on full geometries)
