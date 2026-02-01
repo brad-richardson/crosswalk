@@ -461,10 +461,10 @@ def generate_basemap_sweep(
         help="Directory containing human labels (Hive-partitioned)",
     ),
     geom_dir: Path = typer.Option(
-        Path("label_geometries"),
+        Path("labels/data"),
         "--geometries",
         "-g",
-        help="Directory containing label geometries (Hive-partitioned WKT)",
+        help="Directory containing geometry data (GeoParquet)",
     ),
     data_dir: Path = typer.Option(
         Path("data/raw"),
@@ -1117,7 +1117,7 @@ def export_agent_labels(
         help="Directory containing agent batches",
     ),
     output_dir: Path = typer.Option(
-        Path("labels_agent"),
+        Path("labels/agent"),
         "--output",
         "-o",
         help="Output directory for consolidated labels (Hive-partitioned)",
@@ -1137,7 +1137,7 @@ def export_agent_labels(
     """Export agent labels from batches to tracked Hive-partitioned directory.
 
     Consolidates labels from data/agents/batches/*/labels/*/data.csv into
-    labels_agent/dataset=X/data.csv with labeler field set to agent name.
+    labels/agent/dataset=X/data.csv with labeler field set to agent name.
 
     Examples:
         # Export all agent labels
