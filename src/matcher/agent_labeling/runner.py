@@ -103,24 +103,24 @@ LABELS:
 - unsure: Ambiguous cases
 
 CRITICAL RULES:
-1. GEOMETRY FIRST: If lines clearly follow the same path, it's likely match
-2. SAME FEATURE TYPE REQUIRED: Road-to-road=OK, sidewalk-to-sidewalk=OK, road-to-sidewalk=NO
+1. GEOMETRY FIRST: If lines clearly overlap/follow the same path, it's likely a match
+2. CLASS LABELS ARE WEAK EVIDENCE: Different classes (footway vs tertiary, residential vs secondary) don't preclude match - datasets classify the same road differently
 3. LENGTH DIFFERENCES OK: One segment can be longer (subsegment matches count as match)
-4. PARALLEL BUT SEPARATE = NO MATCH: Opposite carriageways, adjacent sidewalks, service roads
-5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable for match
+4. PARALLEL BUT SEPARATE = NO MATCH: Lines that run SIDE BY SIDE (visually offset) are different features
+5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable IF lines follow same path
 6. NAMES ARE SECONDARY: Same name doesn't guarantee match; different names don't prevent match
 
 NO_MATCH EXAMPLES:
-- Road vs parallel sidewalk (different feature types)
-- Northbound vs southbound lanes of divided highway (parallel but separate)
+- Two lines running parallel but visually offset from each other (separate infrastructure)
+- Northbound vs southbound lanes of divided highway
+- Road centerline vs sidewalk that runs 5m to the side
 - Main road vs adjacent service road/alley
 - Perpendicular/intersecting segments
-- Two segments that touch at endpoint but go different directions
 
 MATCH EXAMPLES:
-- Lines overlap on same road even if different lengths
-- Same road with 3-5m digitization offset
-- Road centerline matching one side of split carriageway
+- Lines that overlap on the same path (even with different class labels like footway/tertiary)
+- Same road with 3-5m digitization offset along its length
+- Segments of different lengths that share overlapping portions
 - Same feature with different names or abbreviations
 
 Image:
@@ -143,24 +143,24 @@ LABELS:
 - unsure: Ambiguous cases
 
 CRITICAL RULES:
-1. GEOMETRY FIRST: If lines clearly follow the same path, it's likely match
-2. SAME FEATURE TYPE REQUIRED: Road-to-road=OK, sidewalk-to-sidewalk=OK, road-to-sidewalk=NO
+1. GEOMETRY FIRST: If lines clearly overlap/follow the same path, it's likely a match
+2. CLASS LABELS ARE WEAK EVIDENCE: Different classes (footway vs tertiary, residential vs secondary) don't preclude match - datasets classify the same road differently
 3. LENGTH DIFFERENCES OK: One segment can be longer (subsegment matches count as match)
-4. PARALLEL BUT SEPARATE = NO MATCH: Opposite carriageways, adjacent sidewalks, service roads
-5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable for match
+4. PARALLEL BUT SEPARATE = NO MATCH: Lines that run SIDE BY SIDE (visually offset) are different features
+5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable IF lines follow same path
 6. NAMES ARE SECONDARY: Same name doesn't guarantee match; different names don't prevent match
 
 NO_MATCH EXAMPLES:
-- Road vs parallel sidewalk (different feature types)
-- Northbound vs southbound lanes of divided highway (parallel but separate)
+- Two lines running parallel but visually offset from each other (separate infrastructure)
+- Northbound vs southbound lanes of divided highway
+- Road centerline vs sidewalk that runs 5m to the side
 - Main road vs adjacent service road/alley
 - Perpendicular/intersecting segments
-- Two segments that touch at endpoint but go different directions
 
 MATCH EXAMPLES:
-- Lines overlap on same road even if different lengths
-- Same road with 3-5m digitization offset
-- Road centerline matching one side of split carriageway
+- Lines that overlap on the same path (even with different class labels like footway/tertiary)
+- Same road with 3-5m digitization offset along its length
+- Segments of different lengths that share overlapping portions
 - Same feature with different names or abbreviations
 
 Images:
