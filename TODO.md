@@ -226,6 +226,47 @@ Current topology features are hand-crafted and limited to local neighborhood. Gr
 
 ---
 
+## Dual Carriageway / Centerline Handling
+
+**Priority:** Medium
+**Status:** Deferred - using simple geometric overlap for now
+
+### Problem
+
+Datasets represent divided highways differently:
+- **Centerline representation**: Single line down the middle of a divided highway
+- **Split carriageway representation**: Two parallel lines for northbound/southbound lanes
+
+When matching between datasets with different representations:
+- Centerline vs one carriageway lane: Should this be a match?
+- Northbound vs southbound carriageways: Clearly no_match (parallel separate lanes)
+
+**Current approach**: Agent uses pure geometric overlap. If a centerline runs between the two carriageways without overlapping either, it will be no_match. If it happens to overlap one carriageway, it will be match. This may create inconsistency.
+
+### Future Options
+
+#### Option 1: Add ML Feature for Dual Carriageway Detection
+Add features to help the ML model recognize centerline scenarios:
+- `has_parallel_sibling`: Does the reference have a parallel segment with same name/class nearby?
+- `potential_dual_carriageway`: Heuristic based on road class + parallel detection
+- Use OSM tags if available (`dual_carriageway`, lane count, `oneway=yes` pairs)
+
+The ML model can then learn when to flag these for review vs auto-match.
+
+#### Option 3: Pre-filter Dual Carriageway Cases
+Detect dual carriageway situations upstream and either:
+- Normalize representations before matching (convert centerlines to split or vice versa)
+- Exclude from standard matching pipeline (handle separately with specialized logic)
+- Flag for manual review
+
+### Context
+
+This was identified during agent accuracy analysis (Feb 2026). Sydney and Bogota datasets had ~51-54% agent accuracy partly due to class metadata mismatches (footway vs tertiary) but also potential centerline representation differences.
+
+The agent prompt was simplified to focus on geometric overlap only - avoiding the complexity of teaching the agent about centerline abstractions. The ML model is a better place for this logic since it can learn patterns from labeled examples.
+
+---
+
 ## Sub-segment Matching
 
 **Priority:** Medium
