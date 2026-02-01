@@ -596,12 +596,12 @@ def backfill_features(
             # Get names and classes
             ref_row = ref_lookup.loc[gers_id]
             target_row = target_lookup.loc[target_id]
-            ref_name = ref_row.get("names") if hasattr(ref_row, "get") else None
-            target_name = target_row.get("names") if hasattr(target_row, "get") else None
-            ref_class = ref_row.get("class") if hasattr(ref_row, "get") else None
-            target_class = target_row.get("class") if hasattr(target_row, "get") else None
-            ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
-            target_subclass = target_row.get("subclass") if hasattr(target_row, "get") else None
+            ref_name = ref_row["names"] if "names" in ref_row.index else None
+            target_name = target_row["names"] if "names" in target_row.index else None
+            ref_class = ref_row["class"] if "class" in ref_row.index else None
+            target_class = target_row["class"] if "class" in target_row.index else None
+            ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
+            target_subclass = target_row["subclass"] if "subclass" in target_row.index else None
 
             # Compute all features
             features = compute_pair_features(

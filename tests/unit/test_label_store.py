@@ -135,7 +135,6 @@ class TestGeometryPersistence:
 
     def test_add_with_geometry_creates_companion_file(self, tmp_path):
         """Adding a label with geometry params persists to normalized stores."""
-        from pathlib import Path
 
         from matcher.labeling.data_store import DataStore
         from matcher.labeling.feature_store import FeatureStore
