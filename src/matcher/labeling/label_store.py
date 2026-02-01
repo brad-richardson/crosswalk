@@ -433,6 +433,11 @@ class LabelStore:
             "shape_complexity_delta": features.get("shape_complexity_delta", 0),
             # Numeric route matching (1) - default 0.0 when neither has number
             "name_numeric_match": features.get("name_numeric_match", 0.0),
+            # Parallel sibling features (4) - detect split vs centerline representation
+            "has_parallel_sibling_ref": features.get("has_parallel_sibling_ref", 0.0),
+            "offset_vs_half_corridor_ratio": features.get("offset_vs_half_corridor_ratio", 1.0),
+            "offset_over_expected_halfwidth": features.get("offset_over_expected_halfwidth", 0.0),
+            "likely_representation_mismatch": features.get("likely_representation_mismatch", 0.0),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
@@ -639,6 +644,7 @@ def backfill_features(
         compute_graphlet_similarity,
         compute_pair_features,
         precompute_graphlet_features,
+        precompute_parallel_siblings,
     )
     from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
     from ..utils.geometry import filter_to_linestrings
@@ -822,6 +828,34 @@ def backfill_features(
             target_graphlet_data if target_graphlet_data else (None, None, None, None)
         )
 
+        # Collect labeled IDs for efficient sibling computation
+        # Only compute sibling info for segments that appear in labeled pairs
+        labeled_ref_ids = set(str(x) for x in df.get("gers_id", df.get("ref_id", [])))
+        labeled_target_ids = set(str(x) for x in df["target_id"])
+
+        # Precompute parallel sibling info for split carriageway detection
+        # Only compute for labeled segments (huge speedup vs computing for all)
+        logger.info(
+            f"  Building parallel sibling data for {len(labeled_ref_ids)} ref, "
+            f"{len(labeled_target_ids)} target segments..."
+        )
+        ref_sibling_info = precompute_parallel_siblings(
+            ref_gdf_proj,
+            id_column="id",
+            name_column="names",
+            class_column="class",
+            ids_to_compute=labeled_ref_ids,
+            # No pre-built index for ref - will build one
+        )
+        target_sibling_info = precompute_parallel_siblings(
+            target_gdf_proj,
+            id_column="id",
+            name_column="names",
+            class_column="class",
+            ids_to_compute=labeled_target_ids,
+            spatial_index=target_context._segment_tree,  # Reuse existing STRtree
+        )
+
         # Get data versions for tracking
         ref_data_version = get_data_version(ref_path)
         target_data_version = get_data_version(target_path)
@@ -852,6 +886,11 @@ def backfill_features(
             "intersection_match",
             "graphlet_similarity",
             "endpoint_degree_similarity",
+            # Parallel sibling features (require full dataset spatial index)
+            "has_parallel_sibling_ref",
+            "offset_vs_half_corridor_ratio",
+            "offset_over_expected_halfwidth",
+            "likely_representation_mismatch",
         }
 
         # Process each label row
@@ -950,6 +989,10 @@ def backfill_features(
                 ref_subclass = ref_row.get("subclass") if hasattr(ref_row, "get") else None
                 target_subclass = target_row.get("subclass") if hasattr(target_row, "get") else None
 
+                # Look up sibling info for this pair
+                pair_ref_sibling = ref_sibling_info.get(ref_id)
+                pair_target_sibling = target_sibling_info.get(target_id)
+
                 # Compute ALL features using the authoritative function
                 features = compute_pair_features(
                     ref_geom,
@@ -967,6 +1010,8 @@ def backfill_features(
                     target_graphlet_data=target_graphlet_data,
                     ref_seg_id=ref_id,
                     target_seg_id=target_id,
+                    ref_sibling_info=pair_ref_sibling,
+                    target_sibling_info=pair_target_sibling,
                 )
 
                 # Update all feature columns in the dataframe

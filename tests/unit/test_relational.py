@@ -411,3 +411,301 @@ class TestPerpendicularOffsetBatch:
             np.array([], dtype=object), np.array([], dtype=object)
         )
         assert len(means) == 0
+
+
+class TestParallelSiblingDetection:
+    """Tests for parallel sibling (split carriageway) detection."""
+
+    def test_extract_route_number(self):
+        """Route numbers are correctly extracted from road names."""
+        from matcher.features.relational import extract_route_number
+
+        # Interstate format
+        assert extract_route_number("I-90") == "90"
+        assert extract_route_number("I 90") == "90"
+        assert extract_route_number("Interstate 90") == "90"
+
+        # US Highway format
+        assert extract_route_number("US-101") == "101"
+        assert extract_route_number("US Highway 101") == "101"
+
+        # State route format
+        assert extract_route_number("Route 66") == "66"
+        assert extract_route_number("State Highway 1") == "1"
+        assert extract_route_number("SR-12") == "12"
+
+        # UK format (M/A roads)
+        assert extract_route_number("M25") == "25"
+        assert extract_route_number("A1") == "1"
+
+        # No route number
+        assert extract_route_number("Main Street") is None
+        assert extract_route_number("Oak Avenue") is None
+        assert extract_route_number(None) is None
+        assert extract_route_number("") is None
+
+    def test_names_compatible(self):
+        """Name compatibility logic for sibling detection."""
+        from matcher.features.relational import names_compatible
+
+        # Both unnamed - inconclusive, must rely on class
+        assert names_compatible(None, None) is None
+        assert names_compatible("", "") is None
+
+        # One unnamed - inconclusive, must rely on class
+        assert names_compatible("I-90", None) is None
+        assert names_compatible(None, "Main St") is None
+
+        # Exact match
+        assert names_compatible("Main Street", "Main Street") is True
+        assert names_compatible("main street", "MAIN STREET") is True
+
+        # Route number match
+        assert names_compatible("I-90", "Interstate 90") is True
+        assert names_compatible("US-101", "US Highway 101") is True
+
+        # Different names - not compatible
+        assert names_compatible("Main Street", "Oak Avenue") is False
+        assert names_compatible("I-90", "I-95") is False
+
+    def test_classes_compatible(self):
+        """Road class compatibility for sibling detection."""
+        from matcher.features.relational import classes_compatible
+
+        # Same class
+        assert classes_compatible("motorway", "motorway") is True
+        assert classes_compatible("residential", "residential") is True
+
+        # Within 1 tier
+        assert classes_compatible("motorway", "trunk") is True
+        assert classes_compatible("primary", "secondary") is True
+
+        # More than 1 tier apart
+        assert classes_compatible("motorway", "residential") is False
+        assert classes_compatible("primary", "service") is False
+
+        # None/unknown - permissive
+        assert classes_compatible(None, "motorway") is True
+        assert classes_compatible("motorway", None) is True
+        assert classes_compatible(None, None) is True
+
+    def test_find_parallel_sibling_dual_carriageway(self):
+        """Detect parallel sibling for split highway geometry."""
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Create a split highway: two parallel lines 15m apart (typical dual carriageway)
+        eastbound = LineString([(0, 0), (500, 0)])
+        westbound = LineString([(0, 15), (500, 15)])  # 15m offset, parallel
+
+        geometries = [eastbound, westbound]
+        spatial_index = STRtree(geometries)
+        # segment_data is parallel to geometries: [(id, name, class), ...]
+        segment_data = [("eb", "I-90", "motorway"), ("wb", "I-90", "motorway")]
+
+        # Eastbound should find westbound as sibling
+        has_sibling, dist = find_parallel_sibling(
+            segment=eastbound,
+            segment_id="eb",
+            segment_name="I-90",
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is True
+        assert dist == pytest.approx(15.0, abs=1.0)
+
+        # Westbound should find eastbound as sibling
+        has_sibling, dist = find_parallel_sibling(
+            segment=westbound,
+            segment_id="wb",
+            segment_name="I-90",
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is True
+        assert dist == pytest.approx(15.0, abs=1.0)
+
+    def test_find_parallel_sibling_no_sibling(self):
+        """No sibling for isolated centerline road."""
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Single centerline road (no parallel twin)
+        main_st = LineString([(0, 0), (500, 0)])
+        oak_ave = LineString([(0, 100), (500, 100)])  # Far away, different road
+
+        geometries = [main_st, oak_ave]
+        spatial_index = STRtree(geometries)
+        segment_data = [
+            ("main", "Main Street", "residential"),
+            ("oak", "Oak Avenue", "residential"),
+        ]
+
+        # Main St should NOT find Oak Ave as sibling (too far)
+        has_sibling, dist = find_parallel_sibling(
+            segment=main_st,
+            segment_id="main",
+            segment_name="Main Street",
+            segment_class="residential",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False
+        assert dist == float("inf")
+
+    def test_find_parallel_sibling_too_close(self):
+        """Siblings too close (<5m) should not be detected."""
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Two parallel lines only 2m apart (too close for dual carriageway)
+        line_a = LineString([(0, 0), (500, 0)])
+        line_b = LineString([(0, 2), (500, 2)])  # Only 2m offset
+
+        geometries = [line_a, line_b]
+        spatial_index = STRtree(geometries)
+        segment_data = [("a", "I-90", "motorway"), ("b", "I-90", "motorway")]
+
+        has_sibling, dist = find_parallel_sibling(
+            segment=line_a,
+            segment_id="a",
+            segment_name="I-90",
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False  # 2m is below minimum threshold
+
+    def test_find_parallel_sibling_not_parallel(self):
+        """Perpendicular roads should not be detected as siblings."""
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # One horizontal, one perpendicular (crossing road)
+        horizontal = LineString([(0, 0), (500, 0)])
+        perpendicular = LineString([(250, -100), (250, 100)])  # Crosses at 90 degrees
+
+        geometries = [horizontal, perpendicular]
+        spatial_index = STRtree(geometries)
+        segment_data = [("h", "I-90", "motorway"), ("p", "Exit 5", "motorway")]
+
+        has_sibling, dist = find_parallel_sibling(
+            segment=horizontal,
+            segment_id="h",
+            segment_name="I-90",
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False  # Not parallel enough
+
+    def test_precompute_parallel_siblings(self):
+        """Batch precomputation of sibling info for dataset."""
+        from matcher.features.relational import precompute_parallel_siblings
+
+        # Split highway geometry
+        eastbound = LineString([(0, 0), (500, 0)])
+        westbound = LineString([(0, 12), (500, 12)])  # 12m offset
+        centerline_road = LineString([(0, 200), (500, 200)])  # Isolated road
+
+        result = precompute_parallel_siblings(
+            geometries=[eastbound, westbound, centerline_road],
+            segment_ids=["eb", "wb", "center"],
+            names=["I-90", "I-90", "Main Street"],
+            classes=["motorway", "motorway", "residential"],
+        )
+
+        # Eastbound and westbound should have siblings
+        assert result["eb"][0] is True
+        assert result["eb"][1] == pytest.approx(12.0, abs=1.0)
+
+        assert result["wb"][0] is True
+        assert result["wb"][1] == pytest.approx(12.0, abs=1.0)
+
+        # Centerline road should not have sibling
+        assert result["center"][0] is False
+        assert result["center"][1] == float("inf")
+
+    def test_get_expected_half_width(self):
+        """Expected half-width lookup by road class."""
+        from matcher.features.relational import get_expected_half_width
+
+        # Known classes
+        assert get_expected_half_width("motorway") == 14.0
+        assert get_expected_half_width("trunk") == 10.0
+        assert get_expected_half_width("residential") == 3.5
+
+        # Unknown class - default
+        assert get_expected_half_width("unknown") == 4.0
+        assert get_expected_half_width(None) == 4.0
+
+        # Case insensitive
+        assert get_expected_half_width("MOTORWAY") == 14.0
+        assert get_expected_half_width("Residential") == 3.5
+
+    def test_sibling_detection_performance(self):
+        """Sibling detection should complete in <5 seconds for 10k segments.
+
+        Uses a realistic road network pattern with sparse spatial distribution.
+        """
+        import time
+
+        from matcher.features.relational import precompute_parallel_siblings
+
+        # Generate 10k test segments - realistic sparse distribution
+        # (not a dense grid - that's unrealistic for road networks)
+        n_segments = 10000
+        geometries = []
+        segment_ids = []
+        names = []
+        classes = []
+
+        for i in range(n_segments):
+            # Spread segments across a large area with realistic spacing
+            # Most roads are 100-500m apart, not 20m like in a grid
+            row = i // 50  # 50 segments per "corridor"
+            col = i % 50
+            x_start = col * 500  # 500m spacing between roads
+            y = row * 100  # 100m spacing between corridors
+
+            # Occasionally create dual carriageways (every 10th corridor)
+            if row % 10 == 0:
+                # Dual carriageway - two parallel segments 15m apart
+                geom = LineString([(x_start, y), (x_start + 400, y)])
+                names.append(f"Highway {row // 10}")
+                classes.append("motorway")
+            elif row % 10 == 1:
+                # Second carriageway of the dual
+                geom = LineString(
+                    [(x_start, y - 85), (x_start + 400, y - 85)]
+                )  # 15m from row above
+                names.append(f"Highway {row // 10}")
+                classes.append("motorway")
+            else:
+                # Regular road
+                geom = LineString([(x_start, y), (x_start + 200, y)])
+                names.append(f"Street {i}")
+                classes.append("residential")
+
+            geometries.append(geom)
+            segment_ids.append(f"seg_{i}")
+
+        start = time.perf_counter()
+        result = precompute_parallel_siblings(geometries, segment_ids, names, classes)
+        elapsed = time.perf_counter() - start
+
+        assert len(result) == n_segments
+        # 5 second threshold - allows for CI variance while catching major regressions
+        assert elapsed < 5.0, (
+            f"Sibling detection too slow: {elapsed:.2f}s for {n_segments} segments"
+        )
+
+        # Verify some siblings were detected (sanity check)
+        siblings_found = sum(1 for v in result.values() if v[0])
+        assert siblings_found > 0, "Expected to find some siblings in test data"
