@@ -427,6 +427,39 @@ with loader.session():
    - `matcher validate-data` - Check all data files for version compatibility
    - `matcher fetch --force` - Refetch even if data exists
 
+### Normalized Label Storage Architecture
+
+**Priority:** High
+**Status:** Planned
+
+**Problem**: Current label storage embeds 56 computed features directly in label CSVs. This causes issues:
+- Agent labels (`labels_agent/`) lack features entirely (only have ref_id, target_id, label, confidence)
+- Human labels (`labels/`) duplicate feature storage across datasets
+- Cannot easily merge human + agent labels for training (agent labels need feature backfill)
+- Feature recomputation requires updating all label files
+
+**Proposed Structure**:
+```
+labels/
+├── data/           # Raw candidate pair data (geometries, metadata)
+├── features/       # Computed features keyed by (ref_id, target_id, dataset)
+├── human/          # Human labels (ref_id, target_id, label, labeler, timestamp, etc.)
+└── agent/          # Agent labels (ref_id, target_id, label, confidence, reasoning, labeler)
+```
+
+**Benefits**:
+- Features computed once, shared by all label sources
+- Agent labels can be used for weak supervision by joining with features at training time
+- Sample weights can be assigned based on label source (human=1.0, agent=0.5)
+- Clean separation of concerns: data vs features vs labels
+
+**Implementation**:
+1. Create feature store keyed by `(ref_id, target_id, dataset)`
+2. Migrate human labels to store only metadata (not features)
+3. Update `LabelStore.load_all()` to join labels with feature store
+4. Add `sample_weight` parameter to `MLMatcher.train()` for weak supervision
+5. Update CLI: `matcher train --agent-labels labels/agent --agent-weight 0.5`
+
 ---
 
 ## Other Ideas

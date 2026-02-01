@@ -111,6 +111,12 @@ def register_commands(app: typer.Typer) -> None:
             "-x",
             help="Dataset(s) to exclude from training (for leave-one-out evaluation). Can be repeated.",
         ),
+        exclude_features: list[str] = typer.Option(
+            [],
+            "--exclude-features",
+            "-e",
+            help="Feature(s) to exclude from training (for feature importance analysis). Can be repeated.",
+        ),
     ):
         """Train an ML model on labeled data.
 
@@ -147,6 +153,9 @@ def register_commands(app: typer.Typer) -> None:
         if exclude_dataset:
             console.print(f"[yellow]Excluding datasets: {', '.join(exclude_dataset)}[/yellow]")
 
+        if exclude_features:
+            console.print(f"[yellow]Excluding features: {', '.join(exclude_features)}[/yellow]")
+
         # Train model
         model_type = "geometry-only" if exclude_semantic else "full"
         console.print(f"[blue]Training {model_type} model...[/blue]")
@@ -157,6 +166,7 @@ def register_commands(app: typer.Typer) -> None:
             binary=True,
             exclude_semantic=exclude_semantic,
             exclude_datasets=list(exclude_dataset) if exclude_dataset else None,
+            exclude_features=list(exclude_features) if exclude_features else None,
         )
 
         # Save model

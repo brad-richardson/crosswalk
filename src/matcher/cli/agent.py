@@ -1129,9 +1129,9 @@ def export_agent_labels(
         help="Filter to specific agent (e.g., 'gemini-flash')",
     ),
     append: bool = typer.Option(
-        False,
-        "--append",
-        help="Append to existing labels instead of replacing",
+        True,
+        "--append/--replace",
+        help="Append to existing labels (default) or replace them",
     ),
 ):
     """Export agent labels from batches to tracked Hive-partitioned directory.
@@ -1193,20 +1193,13 @@ def export_agent_labels(
 
             try:
                 manifest = yaml.safe_load(manifest_path.read_text())
-                # If candidates have dataset info, use it
-                if "candidates" in manifest:
-                    candidate_datasets = {
-                        (c["ref_id"], c["target_id"]): c.get("dataset")
-                        for c in manifest["candidates"]
-                    }
-                    df["dataset"] = df.apply(
-                        lambda row, cd=candidate_datasets: cd.get(
-                            (row["ref_id"], row["target_id"]), "unknown"
-                        ),
-                        axis=1,
-                    )
+                # Get dataset from manifest root (batch-level) or fall back to unknown
+                batch_dataset = manifest.get("dataset", "unknown")
+                df["dataset"] = batch_dataset
             except (yaml.YAMLError, KeyError, TypeError) as e:
-                console.print(f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]")
+                console.print(
+                    f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]"
+                )
 
         # If no dataset column, try to infer from batch name or mark as unknown
         if "dataset" not in df.columns:
@@ -1223,9 +1216,7 @@ def export_agent_labels(
     combined = pd.concat(all_labels, ignore_index=True)
 
     # Deduplicate: keep latest label per (ref_id, target_id, labeler)
-    combined = combined.drop_duplicates(
-        subset=["ref_id", "target_id", "labeler"], keep="last"
-    )
+    combined = combined.drop_duplicates(subset=["ref_id", "target_id", "labeler"], keep="last")
 
     console.print(f"\n[blue]Exporting {len(combined)} labels[/blue]")
 
@@ -1242,13 +1233,9 @@ def export_agent_labels(
             existing = pd.read_csv(csv_path, dtype={"ref_id": str, "target_id": str})
             # Combine and dedupe
             merged = pd.concat([existing, group], ignore_index=True)
-            merged = merged.drop_duplicates(
-                subset=["ref_id", "target_id", "labeler"], keep="last"
-            )
+            merged = merged.drop_duplicates(subset=["ref_id", "target_id", "labeler"], keep="last")
             merged.to_csv(csv_path, index=False)
-            console.print(
-                f"  {dataset}: appended {len(group)} → {len(merged)} total labels"
-            )
+            console.print(f"  {dataset}: appended {len(group)} → {len(merged)} total labels")
         else:
             group.to_csv(csv_path, index=False)
             console.print(f"  {dataset}: wrote {len(group)} labels")
