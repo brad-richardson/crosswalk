@@ -1129,9 +1129,9 @@ def export_agent_labels(
         help="Filter to specific agent (e.g., 'gemini-flash')",
     ),
     append: bool = typer.Option(
-        False,
-        "--append",
-        help="Append to existing labels instead of replacing",
+        True,
+        "--append/--replace",
+        help="Append to existing labels (default) or replace them",
     ),
 ):
     """Export agent labels from batches to tracked Hive-partitioned directory.
@@ -1193,18 +1193,9 @@ def export_agent_labels(
 
             try:
                 manifest = yaml.safe_load(manifest_path.read_text())
-                # If candidates have dataset info, use it
-                if "candidates" in manifest:
-                    candidate_datasets = {
-                        (c["ref_id"], c["target_id"]): c.get("dataset")
-                        for c in manifest["candidates"]
-                    }
-                    df["dataset"] = df.apply(
-                        lambda row, cd=candidate_datasets: cd.get(
-                            (row["ref_id"], row["target_id"]), "unknown"
-                        ),
-                        axis=1,
-                    )
+                # Get dataset from manifest root (batch-level) or fall back to unknown
+                batch_dataset = manifest.get("dataset", "unknown")
+                df["dataset"] = batch_dataset
             except (yaml.YAMLError, KeyError, TypeError) as e:
                 console.print(
                     f"  [yellow]Warning: Could not parse manifest {batch_dir.name}: {e}[/yellow]"
