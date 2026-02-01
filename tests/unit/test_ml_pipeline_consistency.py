@@ -293,6 +293,7 @@ class TestLabelStoreParity:
     def test_all_features_preserved_after_storage(self):
         """All computed features should be retrievable from stored labels."""
         from matcher.features.compute import compute_pair_features
+        from matcher.labeling.feature_store import FeatureStore
         from matcher.labeling.label_store import LabelStore
 
         features = compute_pair_features(
@@ -317,6 +318,12 @@ class TestLabelStoreParity:
                 features=features,
             )
 
-            row = store.df.iloc[0]
+            # Features are now stored in FeatureStore (normalized format)
+            feature_store = FeatureStore(dataset_id="test", features_dir=Path(tmpdir) / "features")
+            stored_features = feature_store.get("ref_001", "target_001")
+            assert stored_features is not None, "Features not found in FeatureStore"
+
             for feat in FEATURE_COLUMNS:
-                assert row[feat] == pytest.approx(features[feat], rel=1e-5), f"Mismatch: {feat}"
+                assert stored_features[feat] == pytest.approx(features[feat], rel=1e-5), (
+                    f"Mismatch: {feat}"
+                )

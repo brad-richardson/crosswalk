@@ -680,6 +680,8 @@ class MLMatcher:
         exclude_semantic: bool = False,
         exclude_datasets: list[str] | None = None,
         exclude_features: list[str] | None = None,
+        agent_weight: float = 0.0,
+        min_agent_confidence: float = 0.0,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
@@ -695,6 +697,10 @@ class MLMatcher:
                              (for leave-one-out cross-validation)
             exclude_features: List of feature names to exclude from training
                              (for feature importance analysis)
+            agent_weight: Weight for agent labels in training (0.0 = ignore, 1.0 = equal to human).
+                         When > 0, agent labels are included with this sample weight.
+            min_agent_confidence: Minimum confidence threshold for including agent labels.
+                                 Only agent labels with confidence >= this value are included.
             **kwargs: Additional XGBoost parameters
 
         Returns:
@@ -785,6 +791,101 @@ class MLMatcher:
         df = df[df["label"].isin(valid_labels)].copy()
         logger.info(f"After filtering to valid labels: {len(df)} pairs")
 
+        # Initialize sample weights (human labels get weight 1.0)
+        sample_weights = np.ones(len(df), dtype=np.float32)
+        n_human = len(df)
+
+        # Load and merge agent labels if agent_weight > 0
+        if agent_weight > 0:
+            from ..labeling.feature_store import FeatureStore
+
+            logger.info(
+                f"Loading agent labels with weight={agent_weight}, min_confidence={min_agent_confidence}"
+            )
+
+            # Load agent labels from normalized format
+            agent_dir = Path(labels_dir) / "agent"
+            if agent_dir.exists():
+                agent_labels = LabelStore.load_agent_labels(agent_dir)
+            else:
+                # Try legacy format
+                legacy_agent_dir = Path(labels_dir).parent / "labels_agent"
+                if legacy_agent_dir.exists():
+                    agent_labels = LabelStore.load_agent_labels(legacy_agent_dir)
+                else:
+                    agent_labels = pd.DataFrame()
+
+            if len(agent_labels) > 0:
+                # Filter by minimum confidence
+                if "confidence" in agent_labels.columns and min_agent_confidence > 0:
+                    before_count = len(agent_labels)
+                    agent_labels = agent_labels[
+                        agent_labels["confidence"] >= min_agent_confidence
+                    ].copy()
+                    logger.info(
+                        f"Filtered agent labels by confidence >= {min_agent_confidence}: "
+                        f"{before_count} -> {len(agent_labels)}"
+                    )
+
+                # Filter to valid labels
+                agent_labels = agent_labels[agent_labels["label"].isin(valid_labels)].copy()
+
+                # Exclude same datasets if specified
+                if exclude_datasets and "dataset" in agent_labels.columns:
+                    agent_labels = agent_labels[
+                        ~agent_labels["dataset"].isin(exclude_datasets)
+                    ].copy()
+
+                if len(agent_labels) > 0:
+                    # Load features for agent labels
+                    features_dir = Path(labels_dir) / "features"
+                    if features_dir.exists():
+                        all_features = FeatureStore.load_all(features_dir)
+
+                        if len(all_features) > 0:
+                            # Join agent labels with features
+                            agent_with_features = agent_labels.merge(
+                                all_features,
+                                on=["gers_id", "target_id", "dataset"],
+                                how="inner",
+                            )
+
+                            if len(agent_with_features) > 0:
+                                logger.info(
+                                    f"Merged {len(agent_with_features)} agent labels with features "
+                                    f"({len(agent_labels) - len(agent_with_features)} missing features)"
+                                )
+
+                                # Create agent sample weights
+                                agent_weights = np.full(
+                                    len(agent_with_features), agent_weight, dtype=np.float32
+                                )
+
+                                # Combine human and agent labels
+                                df = pd.concat([df, agent_with_features], ignore_index=True)
+                                sample_weights = np.concatenate([sample_weights, agent_weights])
+
+                                logger.info(
+                                    f"Training data: {n_human} human (weight=1.0) + "
+                                    f"{len(agent_with_features)} agent (weight={agent_weight})"
+                                )
+                            else:
+                                logger.warning(
+                                    "No agent labels have features - skipping agent labels"
+                                )
+                        else:
+                            logger.warning(
+                                "No features found in feature store - skipping agent labels"
+                            )
+                    else:
+                        logger.warning(
+                            f"Features directory not found: {features_dir} - skipping agent labels"
+                        )
+                else:
+                    logger.info("No valid agent labels after filtering")
+            else:
+                logger.info("No agent labels found")
+
         # Extract features (without imputation - we'll do that after split)
         X, y = self._extract_features_and_labels(df, binary=binary)
 
@@ -799,6 +900,7 @@ class MLMatcher:
 
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
+        weights_train = sample_weights[train_idx]
 
         # Verify labels have all expected features before computing medians
         # This catches bugs where new features are added to FEATURE_COLUMNS but
@@ -872,6 +974,15 @@ class MLMatcher:
         logger.info(f"Training XGBoost with params: {params}")
         self.model = xgb.XGBClassifier(**params)
 
+        # Prepare sample_weight for training (only use if we have mixed weights)
+        use_sample_weight = agent_weight > 0 and len(weights_train) > 0
+        fit_kwargs = {}
+        if use_sample_weight:
+            fit_kwargs["sample_weight"] = weights_train
+            logger.info(
+                f"Using sample weights (min={weights_train.min():.2f}, max={weights_train.max():.2f})"
+            )
+
         # Only use eval_set if we have test data
         if len(X_test) > 0:
             self.model.fit(
@@ -879,9 +990,10 @@ class MLMatcher:
                 y_train,
                 eval_set=[(X_test, y_test)],
                 verbose=False,
+                **fit_kwargs,
             )
         else:
-            self.model.fit(X_train, y_train, verbose=False)
+            self.model.fit(X_train, y_train, verbose=False, **fit_kwargs)
 
         # Results dict
         target_names = ["no_match", "match"] if binary else ["no_match", "match", "associated"]

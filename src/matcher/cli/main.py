@@ -117,10 +117,22 @@ def register_commands(app: typer.Typer) -> None:
             "-e",
             help="Feature(s) to exclude from training (for feature importance analysis). Can be repeated.",
         ),
+        agent_weight: float = typer.Option(
+            0.0,
+            "--agent-weight",
+            help="Weight for agent labels (0.0=ignore, 1.0=equal to human). Enables weak supervision.",
+        ),
+        min_agent_confidence: float = typer.Option(
+            0.0,
+            "--min-agent-confidence",
+            help="Minimum confidence for including agent labels (0.0-1.0).",
+        ),
     ):
         """Train an ML model on labeled data.
 
-        Loads labels from Hive-partitioned CSV format (labels/dataset=*/data.csv).
+        Loads labels from normalized format:
+        - labels/human/dataset=*/data.csv (metadata)
+        - labels/features/dataset=*/data.parquet (computed features)
 
         Examples:
             matcher train
@@ -131,6 +143,9 @@ def register_commands(app: typer.Typer) -> None:
 
             # Leave-one-out: train without Frisco labels to test generalization
             matcher train -x us_frisco_trails -o data/models/no_frisco.joblib
+
+            # Train with weak supervision from agent labels
+            matcher train --agent-weight 0.5 --min-agent-confidence 0.7
         """
         from ..labeling.label_store import LabelStore
         from ..matching.ml import MLMatcher
@@ -139,11 +154,13 @@ def register_commands(app: typer.Typer) -> None:
             console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
             raise typer.Exit(1)
 
-        # Check for dataset partitions
-        partitions = list(labels_dir.glob("dataset=*/data.csv"))
-        if not partitions:
-            console.print(f"[red]No label partitions found in {labels_dir}[/red]")
-            console.print("[yellow]Expected format: labels/dataset=*/data.csv[/yellow]")
+        # Check for normalized format (human labels + features)
+        human_dir = labels_dir / "human"
+        features_dir = labels_dir / "features"
+        if not human_dir.exists() or not features_dir.exists():
+            console.print(f"[red]Normalized label format not found in {labels_dir}[/red]")
+            console.print("[yellow]Expected: labels/human/ and labels/features/[/yellow]")
+            console.print("[yellow]Run 'matcher labels migrate' first.[/yellow]")
             raise typer.Exit(1)
 
         console.print(f"[blue]Loading labels from {labels_dir}...[/blue]")
@@ -156,6 +173,12 @@ def register_commands(app: typer.Typer) -> None:
         if exclude_features:
             console.print(f"[yellow]Excluding features: {', '.join(exclude_features)}[/yellow]")
 
+        if agent_weight > 0:
+            console.print(
+                f"[yellow]Including agent labels with weight={agent_weight}, "
+                f"min_confidence={min_agent_confidence}[/yellow]"
+            )
+
         # Train model
         model_type = "geometry-only" if exclude_semantic else "full"
         console.print(f"[blue]Training {model_type} model...[/blue]")
@@ -167,6 +190,8 @@ def register_commands(app: typer.Typer) -> None:
             exclude_semantic=exclude_semantic,
             exclude_datasets=list(exclude_dataset) if exclude_dataset else None,
             exclude_features=list(exclude_features) if exclude_features else None,
+            agent_weight=agent_weight,
+            min_agent_confidence=min_agent_confidence,
         )
 
         # Save model

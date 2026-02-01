@@ -1,2 +1,0 @@
-ref_id,target_id,label,confidence,reasoning,labeler,dataset
-69ee9844-5e91-4d49-8152-eb3f0fcbf8e7,gb_london_F44FBFB0-5F18-4394-B565-12925D7225FC,match,0.85,Lines follow same path with small digitization offset and similar lengths - same road feature,claude_opus_geometry_only,gb_london_roads
