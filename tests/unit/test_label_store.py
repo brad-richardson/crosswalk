@@ -134,12 +134,11 @@ class TestGeometryPersistence:
     """Test that LabelStore.add() with geometry params creates companion file."""
 
     def test_add_with_geometry_creates_companion_file(self, tmp_path):
-        """Adding a label with geometry params persists to labels/data/."""
-        import shutil
+        """Adding a label with geometry params persists to normalized stores."""
         from pathlib import Path
 
-        from matcher.labeling.data_store import DEFAULT_DATA_DIR, DataStore
-        from matcher.labeling.feature_store import DEFAULT_FEATURES_DIR
+        from matcher.labeling.data_store import DataStore
+        from matcher.labeling.feature_store import FeatureStore
 
         labels_dir = tmp_path / "labels"
         dataset_id = "test_dataset_geo_persist"
@@ -149,59 +148,51 @@ class TestGeometryPersistence:
         ref_geom = LineString([(0.0, 0.0), (1.0, 1.0)])
         target_geom = LineString([(0.0, 0.1), (1.0, 1.1)])
 
-        try:
-            store.add(
-                gers_id="ref-001",
-                target_id="target-001",
-                label="match",
-                labeler="tester",
-                session_id="sess-001",
-                original_decision="review",
-                original_confidence=0.75,
-                features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
-                ref_geometry=ref_geom,
-                target_geometry=target_geom,
-                ref_name_raw="Main St",
-                target_name_raw="Main Street",
-                ref_class_raw="residential",
-                target_class_raw="residential",
-                ref_subclass="urban",
-                target_subclass="urban",
-            )
+        store.add(
+            gers_id="ref-001",
+            target_id="target-001",
+            label="match",
+            labeler="tester",
+            session_id="sess-001",
+            original_decision="review",
+            original_confidence=0.75,
+            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+            ref_geometry=ref_geom,
+            target_geometry=target_geom,
+            ref_name_raw="Main St",
+            target_name_raw="Main Street",
+            ref_class_raw="residential",
+            target_class_raw="residential",
+            ref_subclass="urban",
+            target_subclass="urban",
+        )
 
-            # Label should be saved
-            assert len(store.df) == 1
-            assert store.df.iloc[0]["gers_id"] == "ref-001"
+        # Label should be saved to labels/human/
+        human_csv_path = labels_dir / "human" / f"dataset={dataset_id}" / "data.csv"
+        assert human_csv_path.exists(), f"Human labels not created at {human_csv_path}"
+        assert len(store.df) == 1
+        assert store.df.iloc[0]["gers_id"] == "ref-001"
 
-            # Companion file should exist in the default data dir
-            data_path = DEFAULT_DATA_DIR / f"dataset={dataset_id}" / "data.parquet"
-            assert data_path.exists(), f"Companion file not created at {data_path}"
+        # Data should be saved to labels/data/
+        data_path = labels_dir / "data" / f"dataset={dataset_id}" / "data.parquet"
+        assert data_path.exists(), f"Data file not created at {data_path}"
 
-            # Verify geometry was persisted correctly by creating a fresh DataStore
-            data_store = DataStore(dataset_id)
-            result = data_store.get_pair("ref-001", "target-001")
-            assert result is not None
-            assert result["ref_name"] == "Main St"
-            assert isinstance(result["ref_geometry"], LineString)
+        # Features should be saved to labels/features/
+        features_path = labels_dir / "features" / f"dataset={dataset_id}" / "data.parquet"
+        assert features_path.exists(), f"Features file not created at {features_path}"
 
-            # Verify human labels were written to normalized location
-            human_csv_path = labels_dir / "human" / f"dataset={dataset_id}" / "data.csv"
-            assert human_csv_path.exists(), f"Human labels not created at {human_csv_path}"
-            import pandas as pd
+        # Verify geometry was persisted correctly
+        data_store = DataStore(dataset_id, data_dir=labels_dir / "data")
+        result = data_store.get_pair("ref-001", "target-001")
+        assert result is not None
+        assert result["ref_name"] == "Main St"
+        assert isinstance(result["ref_geometry"], LineString)
 
-            human_df = pd.read_csv(human_csv_path)
-            assert len(human_df) == 1
-            assert human_df.iloc[0]["gers_id"] == "ref-001"
-            assert human_df.iloc[0]["label"] == "match"
-        finally:
-            # Clean up companion files created in CWD
-            for base_dir in [DEFAULT_DATA_DIR, DEFAULT_FEATURES_DIR]:
-                partition = base_dir / f"dataset={dataset_id}"
-                if partition.exists():
-                    shutil.rmtree(partition)
-                # Remove parent dir if empty
-                if base_dir.exists() and not any(base_dir.iterdir()):
-                    base_dir.rmdir()
+        # Verify features were persisted correctly
+        feature_store = FeatureStore(dataset_id, features_dir=labels_dir / "features")
+        features = feature_store.get("ref-001", "target-001")
+        assert features is not None
+        assert features["buffer_iou_5m"] == 0.5
 
     def test_add_without_geometry_no_error(self, tmp_path):
         """Adding a label without geometry params does not raise an error."""

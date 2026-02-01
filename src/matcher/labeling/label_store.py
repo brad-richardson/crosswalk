@@ -167,9 +167,12 @@ VERSION_DEFAULTS = {
 class LabelStore:
     """Manages labeled data storage for a single dataset partition.
 
-    This class supports both the legacy embedded-feature format and the new
-    normalized format. When adding labels, it writes to all three stores
-    (data, features, labels) for the new format.
+    Uses normalized format with separate stores:
+    - labels/human/dataset={id}/data.csv - Human labels (metadata only)
+    - labels/features/dataset={id}/data.parquet - Computed features
+    - labels/data/dataset={id}/data.parquet - Raw pair data (geometries)
+
+    When adding labels, writes to all three stores.
     """
 
     dataset_id: str
@@ -178,7 +181,9 @@ class LabelStore:
 
     def __post_init__(self):
         self.labels_dir = Path(self.labels_dir)
-        self.partition_path = self.labels_dir / f"dataset={self.dataset_id}"
+        # Use normalized human labels directory
+        self.human_dir = self.labels_dir / "human"
+        self.partition_path = self.human_dir / f"dataset={self.dataset_id}"
         self.csv_path = self.partition_path / "data.csv"
         self._df = None
 
@@ -303,7 +308,7 @@ class LabelStore:
 
     def _empty_dataframe(self) -> pd.DataFrame:
         """Create empty DataFrame with correct schema."""
-        return pd.DataFrame(columns=LABEL_COLUMNS)
+        return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS)
 
     def save(self) -> None:
         """Save labels to CSV atomically with backup.
@@ -358,10 +363,10 @@ class LabelStore:
     ) -> None:
         """Add a new label.
 
-        Writes to all three stores:
-        - LabelStore (this class): Label metadata in CSV
-        - DataStore: Raw geometries and attributes in GeoParquet
-        - FeatureStore: Computed features in Parquet
+        Writes to all three normalized stores:
+        - labels/human/: Label metadata in CSV
+        - labels/data/: Raw geometries and attributes in GeoParquet
+        - labels/features/: Computed features in Parquet
 
         Args:
             gers_id: Overture reference segment ID (GERS ID)
@@ -393,7 +398,7 @@ class LabelStore:
             ref_start_pct, ref_end_pct, target_start_pct, target_end_pct
         )
 
-        # Build the new row with metadata AND features (for backward compatibility)
+        # Build the new row with metadata only (no features)
         new_row = {
             "gers_id": str(gers_id),
             "target_id": str(target_id),
@@ -403,103 +408,34 @@ class LabelStore:
             "session_id": session_id,
             "original_decision": original_decision,
             "original_confidence": original_confidence,
-            # Sub-segment fields
             "ref_start_pct": ref_start_pct,
             "ref_end_pct": ref_end_pct,
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
-            # Data versioning fields
-            "ref_data_version": ref_data_version,
-            "target_data_version": target_data_version,
-            "feature_version": feature_version if feature_version else FEATURE_VERSION,
-            # Geometric features (9)
-            "hausdorff_distance_m": features.get("hausdorff_distance_m", 0.0),
-            "mean_hausdorff_distance_m": features.get("mean_hausdorff_distance_m", 0.0),
-            "hausdorff_p95_m": features.get("hausdorff_p95_m", 0.0),
-            "buffer_iou_5m": features.get("buffer_iou_5m", 0.0),
-            "buffer_iou_15m": features.get("buffer_iou_15m", 0.0),
-            "heading_delta": features.get("heading_delta", 0.0),
-            "length_ratio": features.get("length_ratio", 0.0),
-            "centroid_distance_m": features.get("centroid_distance_m", 0.0),
-            "collinear_gap_ratio": features.get("collinear_gap_ratio", 1.0),
-            # Semantic features - name (7)
-            "name_levenshtein": features.get("name_levenshtein", 0.0),
-            "name_jaro_winkler": features.get("name_jaro_winkler", 0.0),
-            "name_token_sort": features.get("name_token_sort", 0.0),
-            "name_soundex": features.get("name_soundex", 0.5),
-            "name_metaphone": features.get("name_metaphone", 0.5),
-            "has_name_ref": features.get("has_name_ref", 0.0),
-            "has_name_target": features.get("has_name_target", 0.0),
-            "name_is_generic": features.get("name_is_generic", 0.0),
-            # Semantic features - class (1)
-            "class_similarity": features.get("class_similarity", 0.0),
-            # Endpoint/connectivity features (3) - direction-invariant min/max
-            "min_endpoint_proximity_m": features.get("min_endpoint_proximity_m", 0.0),
-            "max_endpoint_proximity_m": features.get("max_endpoint_proximity_m", 0.0),
-            "shared_endpoint_count": features.get("shared_endpoint_count", 0),
-            # Lateral offset features (3) - distance features use _m suffix
-            "lateral_offset_m": features.get("lateral_offset_m", 0.0),
-            "lateral_offset_iqr_m": features.get("lateral_offset_iqr_m", 0.0),
-            "lateral_offset_p95_m": features.get("lateral_offset_p95_m", 0.0),
-            # Topology features (12)
-            "from_degree_ref": features.get("from_degree_ref", 0),
-            "to_degree_ref": features.get("to_degree_ref", 0),
-            "from_degree_target": features.get("from_degree_target", 0),
-            "to_degree_target": features.get("to_degree_target", 0),
-            # Topology defaults use 0.5 (neutral) to match _get_error_features() in compute.py
-            # This ensures training/inference consistency when features are missing
-            "degree_match_score": features.get("degree_match_score", 0.5),
-            "degree_signature_similarity": features.get("degree_signature_similarity", 0.5),
-            "is_dead_end_ref": features.get("is_dead_end_ref", 0.5),
-            "is_dead_end_target": features.get("is_dead_end_target", 0.5),
-            "dead_end_match": features.get("dead_end_match", 0.5),
-            "is_intersection_ref": features.get("is_intersection_ref", 0.5),
-            "is_intersection_target": features.get("is_intersection_target", 0.5),
-            "intersection_match": features.get("intersection_match", 0.5),
-            # Alignment coverage features (4)
-            "ref_coverage": features.get("ref_coverage", 0.0),
-            "target_coverage": features.get("target_coverage", 0.0),
-            "min_coverage": features.get("min_coverage", 0.0),
-            "coverage_ratio": features.get("coverage_ratio", 0.0),
-            # Graphlet features (2)
-            "graphlet_similarity": features.get("graphlet_similarity", 0.5),
-            "endpoint_degree_similarity": features.get("endpoint_degree_similarity", 0.5),
-            # Sinuosity features (3)
-            "sinuosity_ref": features.get("sinuosity_ref", 1.0),
-            "sinuosity_target": features.get("sinuosity_target", 1.0),
-            "sinuosity_delta": features.get("sinuosity_delta", 0.0),
-            # Heading consistency features (3)
-            "heading_consistency_ref": features.get("heading_consistency_ref", 1.0),
-            "heading_consistency_target": features.get("heading_consistency_target", 1.0),
-            "heading_consistency_delta": features.get("heading_consistency_delta", 0.0),
-            # Vertex density features (3)
-            "vertex_density_ref": features.get("vertex_density_ref", 0.0),
-            "vertex_density_target": features.get("vertex_density_target", 0.0),
-            "vertex_density_ratio": features.get("vertex_density_ratio", 0.0),
-            # Length features (1)
-            "min_length_m": features.get("min_length_m", 0.0),
-            # Shape complexity features (3)
-            "shape_complexity_ref": features.get("shape_complexity_ref", 0),
-            "shape_complexity_target": features.get("shape_complexity_target", 0),
-            "shape_complexity_delta": features.get("shape_complexity_delta", 0),
-            # Numeric route matching (1) - default 0.0 when neither has number
-            "name_numeric_match": features.get("name_numeric_match", 0.0),
-            # Parallel sibling features (4) - detect split vs centerline representation
-            "has_parallel_sibling_ref": features.get("has_parallel_sibling_ref", 0.0),
-            "offset_vs_half_corridor_ratio": features.get("offset_vs_half_corridor_ratio", 1.0),
-            "offset_over_expected_halfwidth": features.get("offset_over_expected_halfwidth", 0.0),
-            "likely_representation_mismatch": features.get("likely_representation_mismatch", 0.0),
         }
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
 
-        # Persist geometries and features to normalized stores if provided
+        # Write to FeatureStore (always, if features provided)
+        if features:
+            from .feature_store import FeatureStore
+
+            feature_store = FeatureStore(self.dataset_id, features_dir=self.labels_dir / "features")
+            feature_store.add(
+                gers_id=gers_id,
+                target_id=target_id,
+                features=features,
+                feature_version=feature_version if feature_version else FEATURE_VERSION,
+            )
+            feature_store.save()
+
+        # Write to DataStore (if geometries provided)
         if ref_geometry is not None and target_geometry is not None:
             from .data_store import DataStore
 
-            data_store = DataStore(self.dataset_id)
+            data_store = DataStore(self.dataset_id, data_dir=self.labels_dir / "data")
             data_store.add(
                 gers_id=gers_id,
                 target_id=target_id,
@@ -513,48 +449,6 @@ class LabelStore:
                 target_subclass=target_subclass,
             )
             data_store.save()
-
-            # Write to normalized FeatureStore
-            from .feature_store import FeatureStore
-
-            feature_store = FeatureStore(self.dataset_id)
-            feature_store.add(
-                gers_id=gers_id,
-                target_id=target_id,
-                features=features,
-                feature_version=feature_version if feature_version else FEATURE_VERSION,
-            )
-            feature_store.save()
-
-            # Write to normalized human labels directory (metadata only)
-            human_dir = self.labels_dir / "human"
-            human_partition = human_dir / f"dataset={self.dataset_id}"
-            human_partition.mkdir(parents=True, exist_ok=True)
-            human_csv_path = human_partition / "data.csv"
-
-            human_row = {
-                "gers_id": str(gers_id),
-                "target_id": str(target_id),
-                "label": label,
-                "labeler": labeler,
-                "labeled_at": datetime.now(UTC).isoformat(),
-                "session_id": session_id,
-                "original_decision": original_decision,
-                "original_confidence": original_confidence,
-                "ref_start_pct": ref_start_pct,
-                "ref_end_pct": ref_end_pct,
-                "target_start_pct": target_start_pct,
-                "target_end_pct": target_end_pct,
-                "is_subsegment": is_subseg,
-            }
-
-            if human_csv_path.exists():
-                human_df = pd.read_csv(human_csv_path)
-            else:
-                human_df = pd.DataFrame(columns=HUMAN_LABEL_COLUMNS)
-
-            human_df = pd.concat([human_df, pd.DataFrame([human_row])], ignore_index=True)
-            human_df.to_csv(human_csv_path, index=False)
 
     def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
@@ -604,63 +498,52 @@ class LabelStore:
         labels_dir: Path = DEFAULT_LABELS_DIR,
         skip_errors: bool = True,
     ) -> pd.DataFrame:
-        """Load all label partitions for ML training.
+        """Load all human labels joined with features for ML training.
 
-        Supports both legacy format (labels/dataset=*/data.csv with embedded features)
-        and new normalized format (labels/human/dataset=*/data.csv).
-
-        Uses PyArrow's Hive partitioning to read all dataset partitions
-        and adds a 'dataset' column from the partition path.
+        Loads from normalized format:
+        - labels/human/dataset=*/data.csv - Human labels (metadata)
+        - labels/features/dataset=*/data.parquet - Computed features
 
         Args:
-            labels_dir: Directory containing Hive-partitioned label CSVs
+            labels_dir: Base labels directory (contains human/, features/ subdirs)
             skip_errors: If True (default), skip partitions that fail to load.
                         If False, raise an error on any loading failure.
 
         Returns:
-            DataFrame with all labels and 'dataset' column
+            DataFrame with all labels joined with features and 'dataset' column
 
         Raises:
             ValueError: If skip_errors=False and any partition fails to load
         """
+        from .feature_store import FeatureStore
+
         labels_dir = Path(labels_dir)
-        if not labels_dir.exists():
-            if skip_errors:
-                return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
-            else:
-                raise FileNotFoundError(f"Labels directory not found: {labels_dir}")
+        human_dir = labels_dir / "human"
+        features_dir = labels_dir / "features"
 
-        # Always use manual loading for more control over error handling
-        # PyArrow's Hive partitioning can fail on type mismatches
-        dfs = []
-        errors = []
+        # Load human labels
+        human_labels = LabelStore.load_human_labels(human_dir, skip_errors=skip_errors)
+        if len(human_labels) == 0:
+            return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + FEATURE_COLUMNS + ["dataset"])
 
-        for partition_dir in labels_dir.glob("dataset=*"):
-            if not partition_dir.is_dir():
-                continue
-            dataset_id = partition_dir.name.split("=")[1]
-            csv_path = partition_dir / "data.csv"
-            if csv_path.exists():
-                try:
-                    df = pd.read_csv(csv_path)
-                    df["dataset"] = dataset_id
-                    dfs.append(df)
-                except Exception as e:
-                    if skip_errors:
-                        logger.warning(f"Failed to load {csv_path}: {e}")
-                    else:
-                        errors.append((dataset_id, str(e)))
+        # Load features
+        features = FeatureStore.load_all(features_dir)
+        if len(features) == 0:
+            logger.warning(f"No features found in {features_dir}")
+            return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + FEATURE_COLUMNS + ["dataset"])
 
-        if errors and not skip_errors:
-            error_msg = "\n".join([f"  {ds}: {err}" for ds, err in errors])
-            raise ValueError(f"Failed to load label partitions:\n{error_msg}")
+        # Join labels with features
+        result = human_labels.merge(
+            features,
+            on=["gers_id", "target_id", "dataset"],
+            how="inner",
+        )
 
-        if dfs:
-            result = pd.concat(dfs, ignore_index=True)
-            if "ref_id" in result.columns and "gers_id" not in result.columns:
-                result = result.rename(columns={"ref_id": "gers_id"})
-            return result
-        return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
+        if len(result) < len(human_labels):
+            missing = len(human_labels) - len(result)
+            logger.warning(f"{missing} labels missing features (run 'matcher labels backfill')")
+
+        return result
 
     @staticmethod
     def load_human_labels(

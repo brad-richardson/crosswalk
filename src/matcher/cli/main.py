@@ -130,7 +130,9 @@ def register_commands(app: typer.Typer) -> None:
     ):
         """Train an ML model on labeled data.
 
-        Loads labels from Hive-partitioned CSV format (labels/dataset=*/data.csv).
+        Loads labels from normalized format:
+        - labels/human/dataset=*/data.csv (metadata)
+        - labels/features/dataset=*/data.parquet (computed features)
 
         Examples:
             matcher train
@@ -152,11 +154,13 @@ def register_commands(app: typer.Typer) -> None:
             console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
             raise typer.Exit(1)
 
-        # Check for dataset partitions
-        partitions = list(labels_dir.glob("dataset=*/data.csv"))
-        if not partitions:
-            console.print(f"[red]No label partitions found in {labels_dir}[/red]")
-            console.print("[yellow]Expected format: labels/dataset=*/data.csv[/yellow]")
+        # Check for normalized format (human labels + features)
+        human_dir = labels_dir / "human"
+        features_dir = labels_dir / "features"
+        if not human_dir.exists() or not features_dir.exists():
+            console.print(f"[red]Normalized label format not found in {labels_dir}[/red]")
+            console.print("[yellow]Expected: labels/human/ and labels/features/[/yellow]")
+            console.print("[yellow]Run 'matcher labels migrate' first.[/yellow]")
             raise typer.Exit(1)
 
         console.print(f"[blue]Loading labels from {labels_dir}...[/blue]")
