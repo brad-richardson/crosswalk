@@ -389,5 +389,10 @@ class DataStore:
                     logger.warning(f"Failed to load {parquet_path}: {e}")
 
         if gdfs:
-            return pd.concat(gdfs, ignore_index=True)
+            result = pd.concat(gdfs, ignore_index=True)
+            # Ensure all expected columns exist (fill missing with None)
+            for col in DATA_COLUMNS:
+                if col not in result.columns:
+                    result[col] = None
+            return result
         return gpd.GeoDataFrame(columns=DATA_COLUMNS + ["dataset"])

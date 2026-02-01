@@ -98,11 +98,9 @@ class TestDataStoreSchema:
         assert "target_geometry" in data_gdf.columns
 
     def test_attribute_columns_present(self, data_gdf):
-        """Data store has required key and geometry columns."""
-        # Only check for required columns - optional columns may not be in all datasets
-        required_columns = ["gers_id", "target_id", "ref_geometry", "target_geometry"]
-        for col in required_columns:
-            assert col in data_gdf.columns, f"Missing required data column: {col}"
+        """Data store has all attribute columns (missing filled with None)."""
+        for col in DATA_COLUMNS:
+            assert col in data_gdf.columns, f"Missing data column: {col}"
 
     def test_geometries_are_valid(self, data_gdf):
         """Geometry columns contain valid geometries."""
