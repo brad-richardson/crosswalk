@@ -136,11 +136,18 @@ def detect_gps_drift(
     detections: list[DriftDetection] = []
     edges_with_drift: set[str | int] = set()
 
-    logger.info(f"Analyzing {len(edges_metric)} edges for GPS drift patterns")
+    n_edges = len(edges_metric)
+    logger.info(f"Analyzing {n_edges} edges for GPS drift patterns")
 
-    for _, row in edges_metric.iterrows():
-        geom = row.geometry
-        edge_id = row[id_col]
+    # Pre-extract geometries, lengths, and IDs for faster iteration
+    geometries = edges_metric.geometry.values
+    lengths = edges_metric.geometry.length.values
+    edge_ids = edges_metric[id_col].values
+
+    for idx in range(n_edges):
+        geom = geometries[idx]
+        edge_id = edge_ids[idx]
+        length = lengths[idx]
 
         if geom is None or geom.is_empty or not isinstance(geom, LineString):
             continue
@@ -150,7 +157,7 @@ def detect_gps_drift(
             continue
 
         # Check for zigzag pattern
-        zigzag = _detect_zigzag(coords, geom.length, zigzag_vertex_density, edge_id)
+        zigzag = _detect_zigzag(coords, length, zigzag_vertex_density, edge_id)
         if zigzag:
             detections.append(zigzag)
             edges_with_drift.add(edge_id)
@@ -166,6 +173,10 @@ def detect_gps_drift(
         if loop:
             detections.append(loop)
             edges_with_drift.add(edge_id)
+
+        # Log progress for large datasets
+        if n_edges > 10000 and (idx + 1) % 100000 == 0:
+            logger.info(f"GPS drift analysis progress: {idx + 1}/{n_edges} edges")
 
     # Compute counts
     zigzag_count = sum(1 for d in detections if d.pattern == DriftPattern.ZIGZAG)

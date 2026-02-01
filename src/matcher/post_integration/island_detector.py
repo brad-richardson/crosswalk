@@ -12,6 +12,7 @@ import geopandas as gpd
 import networkx as nx
 import numpy as np
 from loguru import logger
+from scipy.spatial import KDTree
 from shapely.geometry import Point
 
 from .constants import FAR_DISTANCE_M, ISLAND_SNAP_TOLERANCE_M, SMALL_CLUSTER_THRESHOLD
@@ -242,6 +243,8 @@ def _build_graph(
     Creates a graph where edges are nodes and connections exist when
     edge endpoints are within snap_tolerance_m of each other.
 
+    Uses KDTree for O(n log n) spatial queries instead of O(n²) brute force.
+
     Args:
         edges_gdf: GeoDataFrame with edges in metric CRS
         id_col: Column containing edge IDs
@@ -254,8 +257,9 @@ def _build_graph(
 
     # Collect all endpoints
     endpoints: list[tuple[float, float, str | int]] = []
+    n_edges = len(edges_gdf)
 
-    for _, row in edges_gdf.iterrows():
+    for idx, (_, row) in enumerate(edges_gdf.iterrows()):
         geom = row.geometry
         edge_id = row[id_col]
         G.add_node(edge_id)
@@ -271,25 +275,28 @@ def _build_graph(
             endpoints.append((start[0], start[1], edge_id))
             endpoints.append((end[0], end[1], edge_id))
 
-    # Build spatial index for fast endpoint matching
-    # Use numpy for vectorized distance calculation
+        # Log progress for large datasets
+        if n_edges > 10000 and (idx + 1) % 100000 == 0:
+            logger.info(f"Collected endpoints: {idx + 1}/{n_edges} edges")
+
     if len(endpoints) == 0:
         return G
 
     points = np.array([(x, y) for x, y, _ in endpoints])
     edge_ids = [eid for _, _, eid in endpoints]
 
-    # For each endpoint, find other endpoints within tolerance
-    # This is O(n^2) but with numpy it's fast enough for most networks
-    # For very large networks, consider using scipy.spatial.KDTree
-    for i in range(len(points)):
-        dists = np.sqrt(np.sum((points - points[i]) ** 2, axis=1))
-        nearby = np.where(dists <= snap_tolerance_m)[0]
+    # Use KDTree for O(n log n) spatial queries
+    logger.debug(f"Building KDTree for {len(points)} endpoints")
+    tree = KDTree(points)
 
-        for j in nearby:
-            # Connect different edges that share endpoints
-            if edge_ids[i] != edge_ids[j]:
-                G.add_edge(edge_ids[i], edge_ids[j])
+    # Find all pairs of points within snap tolerance - O(n log n)
+    pairs = tree.query_pairs(snap_tolerance_m)
+    logger.debug(f"Found {len(pairs)} endpoint pairs within tolerance")
+
+    # Add edges between different road segments that share endpoints
+    for i, j in pairs:
+        if edge_ids[i] != edge_ids[j]:
+            G.add_edge(edge_ids[i], edge_ids[j])
 
     return G
 

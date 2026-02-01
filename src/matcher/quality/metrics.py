@@ -6,6 +6,7 @@ Computes various quality metrics from a GeoDataFrame of road edges.
 import geopandas as gpd
 import numpy as np
 from loguru import logger
+from scipy.spatial import KDTree
 from shapely.geometry import LineString
 
 from ..config import CLASS_COLUMN, NAMES_COLUMN
@@ -226,6 +227,7 @@ def _compute_dead_ends(
     """Compute dead end count and ratio.
 
     A dead end is an endpoint that connects to only one edge.
+    Uses KDTree for O(n log n) spatial queries instead of O(n²) brute force.
 
     Args:
         edges_metric: GeoDataFrame in metric CRS
@@ -236,8 +238,9 @@ def _compute_dead_ends(
     """
     # Collect all endpoints
     endpoints: list[tuple[float, float]] = []
+    n_edges = len(edges_metric)
 
-    for geom in edges_metric.geometry:
+    for idx, geom in enumerate(edges_metric.geometry):
         if geom is None or geom.is_empty:
             continue
         if not isinstance(geom, LineString):
@@ -248,20 +251,26 @@ def _compute_dead_ends(
             endpoints.append(coords[0][:2])
             endpoints.append(coords[-1][:2])
 
+        # Log progress for large datasets
+        if n_edges > 10000 and (idx + 1) % 100000 == 0:
+            logger.info(f"Collected endpoints for dead-end analysis: {idx + 1}/{n_edges} edges")
+
     if len(endpoints) < 2:
         return 0, 0.0
 
-    # Count endpoint occurrences using spatial proximity
+    # Use KDTree for O(n log n) neighbor counting
     points = np.array(endpoints)
-    endpoint_degrees: dict[int, int] = {}
+    logger.debug(f"Building KDTree for {len(points)} endpoints (dead-end detection)")
+    tree = KDTree(points)
 
+    # Count neighbors for each point using query_ball_point
+    # Dead ends have degree 1 (only themselves within tolerance)
+    dead_end_count = 0
     for i in range(len(points)):
-        dists = np.sqrt(np.sum((points - points[i]) ** 2, axis=1))
-        nearby_count = np.sum(dists <= snap_tolerance_m)
-        endpoint_degrees[i] = nearby_count
+        neighbors = tree.query_ball_point(points[i], snap_tolerance_m)
+        if len(neighbors) == 1:  # Only itself
+            dead_end_count += 1
 
-    # Dead ends have degree 1 (only connect to themselves)
-    dead_end_count = sum(1 for d in endpoint_degrees.values() if d == 1)
     dead_end_ratio = dead_end_count / len(endpoints) if endpoints else 0.0
 
     return dead_end_count, dead_end_ratio

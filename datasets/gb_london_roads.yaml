@@ -42,5 +42,34 @@ last_fetch:
   geometry_types:
   - LineString
   output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-01T12:59:34.994679+00:00'
+  total_segments: 264756
+  total_length_km: 24639.89
+  length_min_m: 0.01000217266390687
+  length_max_m: 9907.00208213658
+  length_median_m: 65.8111654025562
+  length_p5_m: 14.039224036215787
+  length_p95_m: 250.68994684909438
+  vertex_density_mean: 0.10297895814089786
+  invalid_geometry_count: 0
+  sharp_angle_ratio: 0.0002190696339270876
+  mean_sinuosity: 1.0699478575047514
+  high_sinuosity_ratio: 0.021076009608847392
+  drift_affected_ratio: 0.02065297859160888
+  near_duplicate_ratio: 0.0004
+  island_count: 85
+  dead_end_ratio: 0.10658493103083594
+  connected_components: 86
+  largest_component_ratio: 0.9990444031485595
+  name_coverage_ratio: 0.8124084062306426
+  class_coverage_ratio: 1.0
+  class_distribution:
+    residential: 143501
+    unclassified: 58108
+    primary: 30359
+    service: 23118
+    secondary: 9190
+    motorway: 480
 notes: Requires free registration at osdatahub.os.uk. OS_API_KEY env var optional
   but recommended.

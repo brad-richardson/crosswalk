@@ -44,3 +44,31 @@ last_fetch:
 classification:
   source_classification:
     column: dc_tipo_classificacao_viaria
+quality_fingerprint:
+  computed_at: '2026-02-01T13:02:29.820453+00:00'
+  total_segments: 222531
+  total_length_km: 19711.21
+  length_min_m: 0.11074812812517236
+  length_max_m: 16962.086835370617
+  length_median_m: 64.994583882783
+  length_p5_m: 13.121452081673702
+  length_p95_m: 217.85029709147534
+  vertex_density_mean: 0.08618603275191108
+  invalid_geometry_count: 0
+  sharp_angle_ratio: 0.0028175849656901734
+  mean_sinuosity: 1.3377776767643148
+  high_sinuosity_ratio: 0.01023228224382221
+  drift_affected_ratio: 0.02943410131622111
+  near_duplicate_ratio: 0.0028
+  island_count: 5087
+  dead_end_ratio: 0.05556079827080272
+  connected_components: 5088
+  largest_component_ratio: 0.9660406864661553
+  name_coverage_ratio: 0.9891925169976318
+  class_coverage_ratio: 1.0
+  class_distribution:
+    residential: 150317
+    tertiary: 48212
+    primary: 23165
+    motorway: 569
+    footway: 268
