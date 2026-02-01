@@ -116,7 +116,6 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
 
 
 from ..config import (
-    DEFAULT_EXPECTED_HALF_WIDTH_M,
     DEFAULT_TOPOLOGY_FEATURES,
     FEATURE_COLUMNS,
     MAX_DISTANCE_METERS,

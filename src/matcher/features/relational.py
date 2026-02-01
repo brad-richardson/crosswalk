@@ -545,11 +545,7 @@ def names_compatible(name_a: str | None, name_b: str | None) -> bool:
     # Numeric route match (I-90 == Interstate 90 == I 90)
     route_a = extract_route_number(name_a)
     route_b = extract_route_number(name_b)
-    if route_a and route_b and route_a == route_b:
-        return True
-
-    # Names present but don't match
-    return False
+    return bool(route_a and route_b and route_a == route_b)
 
 
 # Road class hierarchy for sibling detection
