@@ -46,8 +46,9 @@ htmlcov/
 # Cache files
 *.sqlite
 
-# Data directories
+# Data directories (but not labels/data/)
 data/
+!labels/data/
 
 # OS
 .DS_Store
