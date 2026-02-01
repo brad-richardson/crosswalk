@@ -106,23 +106,35 @@ class TestLoadModelVersionWarnings:
 
 class TestTrainVersionChecks:
     def _make_labels(self, labels_dir, feature_versions):
-        """Create label CSV files for testing."""
-        ds_dir = labels_dir / "dataset=test_ds"
-        ds_dir.mkdir(parents=True)
-
+        """Create label files in normalized format for testing."""
         n_samples = len(feature_versions)
-        data = {
+        rng = np.random.default_rng(123)
+
+        # Create human labels in labels/human/dataset=test_ds/data.csv
+        human_dir = labels_dir / "human" / "dataset=test_ds"
+        human_dir.mkdir(parents=True)
+        human_data = {
             "gers_id": [f"ref_{i}" for i in range(n_samples)],
             "target_id": [f"target_{i}" for i in range(n_samples)],
             "label": ["match"] * (n_samples // 2) + ["no_match"] * (n_samples - n_samples // 2),
+            "labeler": ["test"] * n_samples,
+            "labeled_at": ["2026-01-01T00:00:00"] * n_samples,
+            "session_id": ["test"] * n_samples,
+        }
+        pd.DataFrame(human_data).to_csv(human_dir / "data.csv", index=False)
+
+        # Create features in labels/features/dataset=test_ds/data.parquet
+        features_dir = labels_dir / "features" / "dataset=test_ds"
+        features_dir.mkdir(parents=True)
+        features_data = {
+            "gers_id": [f"ref_{i}" for i in range(n_samples)],
+            "target_id": [f"target_{i}" for i in range(n_samples)],
             "feature_version": feature_versions,
         }
-        rng = np.random.default_rng(123)
         for col in FEATURE_COLUMNS:
-            data[col] = rng.random(n_samples).tolist()
+            features_data[col] = rng.random(n_samples).tolist()
 
-        df = pd.DataFrame(data)
-        df.to_csv(ds_dir / "data.csv", index=False)
+        pd.DataFrame(features_data).to_parquet(features_dir / "data.parquet", index=False)
 
     def test_train_sets_feature_version(self, tmp_path):
         """Training should set feature_version to current FEATURE_VERSION."""

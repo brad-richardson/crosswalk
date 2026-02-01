@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from matcher.labeling.label_store import (
-    LABEL_COLUMNS,
+    HUMAN_LABEL_COLUMNS,
     LabelLoadError,
     LabelStore,
 )
@@ -240,7 +240,7 @@ class TestBackupRecovery:
         # Should return empty dataframe, not raise error
         df = store.df
         assert len(df) == 0
-        assert list(df.columns) == LABEL_COLUMNS
+        assert list(df.columns) == HUMAN_LABEL_COLUMNS
 
     def test_backup_only_loads_when_primary_missing(self, temp_labels_dir, sample_features):
         """Test that backup is loaded when primary is missing."""
