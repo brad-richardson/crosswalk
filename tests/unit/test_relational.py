@@ -683,9 +683,7 @@ class TestParallelSiblingDetection:
             elif row % 10 == 1:
                 # Second carriageway of the dual - 15m offset from first (row above is at y-100)
                 prev_row_y = (row - 1) * 100
-                geom = LineString(
-                    [(x_start, prev_row_y + 15), (x_start + 400, prev_row_y + 15)]
-                )
+                geom = LineString([(x_start, prev_row_y + 15), (x_start + 400, prev_row_y + 15)])
                 names.append(f"Highway {row // 10}")
                 classes.append("motorway")
             else:
