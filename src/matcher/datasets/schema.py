@@ -52,6 +52,7 @@ class FetchConfig(BaseModel):
         None  # Type codes to filter as non-roads (e.g., ['PC', 'PQ'])
     )
     filter_closed_loops: bool = False  # Enable geometry-based closed loop filtering
+    exclude: dict[str, list[str]] | None = None  # Column -> values to exclude
 
 
 class MatchingConfig(BaseModel):

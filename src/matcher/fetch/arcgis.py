@@ -36,6 +36,7 @@ def fetch_arcgis_layer(
     page_size: int = 5000,
     where_clause: str = "1=1",
     bbox: tuple[float, float, float, float] | None = None,
+    exclude: dict[str, list[str]] | None = None,
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -100,6 +101,7 @@ def fetch_arcgis_layer(
         status_column=status_column,
         status_mapping=status_mapping,
         source_name=source_name,
+        exclude=exclude,
     )
 
     # Deduplicate by ID (ArcGIS pagination can return duplicates if data changes during fetch)
@@ -258,6 +260,7 @@ def _transform_to_overture_schema(
     status_column: str | None,
     status_mapping: dict | None,
     source_name: str,
+    exclude: dict[str, list[str]] | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
 
@@ -281,6 +284,18 @@ def _transform_to_overture_schema(
     """
     if len(gdf) == 0:
         return gdf
+
+    # Apply exclude filter if configured
+    if exclude:
+        for column, values in exclude.items():
+            if column in gdf.columns:
+                before_count = len(gdf)
+                gdf = gdf[~gdf[column].isin(values)]
+                excluded = before_count - len(gdf)
+                if excluded > 0:
+                    logger.info(f"Excluded {excluded} features where {column} in {values}")
+        if len(gdf) == 0:
+            return gdf
 
     # Find the ID column (OBJECTID, FID, or similar)
     id_col = _find_id_column(gdf)

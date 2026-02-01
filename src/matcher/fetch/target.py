@@ -55,6 +55,7 @@ def _transform_download_data(
     subclass_column: str | None = None,
     subclass_mapping: dict | None = None,
     default_subclass: str | None = None,
+    exclude: dict[str, list[str]] | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
@@ -71,6 +72,18 @@ def _transform_download_data(
     """
     if len(gdf) == 0:
         return gdf
+
+    # Apply exclude filter if configured
+    if exclude:
+        for column, values in exclude.items():
+            if column in gdf.columns:
+                before_count = len(gdf)
+                gdf = gdf[~gdf[column].isin(values)]
+                excluded = before_count - len(gdf)
+                if excluded > 0:
+                    logger.info(f"Excluded {excluded} features where {column} in {values}")
+        if len(gdf) == 0:
+            return gdf
 
     # Convert single-part MultiLineStrings to LineStrings
     multi_mask = gdf.geometry.geom_type == "MultiLineString"
@@ -236,6 +249,7 @@ def fetch_ogc_features(
     source_name: str = "OGC API Features",
     bbox: tuple | None = None,
     limit_per_page: int = 5000,
+    exclude: dict[str, list[str]] | None = None,
 ) -> Path:
     """Fetch geospatial data from an OGC API Features endpoint.
 
@@ -306,6 +320,7 @@ def fetch_ogc_features(
         class_column=class_column,
         class_mapping=class_mapping,
         source_name=source_name,
+        exclude=exclude,
     )
 
     # Save to parquet
@@ -327,6 +342,7 @@ def fetch_wfs(
     source_name: str = "WFS",
     bbox: tuple | None = None,
     max_features: int = 300000,
+    exclude: dict[str, list[str]] | None = None,
 ) -> Path:
     """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
 
@@ -400,6 +416,7 @@ def fetch_wfs(
         class_column=class_column,
         class_mapping=class_mapping,
         source_name=source_name,
+        exclude=exclude,
     )
 
     # Save to parquet
@@ -537,6 +554,7 @@ def fetch_download(
     source_crs: str | None = None,
     cache_download: bool = False,
     cache_ttl_hours: int = 168,
+    exclude: dict[str, list[str]] | None = None,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -739,6 +757,7 @@ def fetch_download(
             class_column=class_column,
             class_mapping=class_mapping,
             source_name=source_name,
+            exclude=exclude,
         )
 
         # Save to parquet
@@ -798,6 +817,7 @@ def fetch_os_downloads(
     bbox: tuple | None = None,
     api_key: str | None = None,
     cache_ttl_hours: int = 168,
+    exclude: dict[str, list[str]] | None = None,
 ) -> Path:
     """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
 
@@ -959,6 +979,7 @@ def fetch_os_downloads(
         class_column=class_column,
         class_mapping=class_mapping,
         source_name=source_name,
+        exclude=exclude,
     )
 
     # Save to parquet
@@ -1034,6 +1055,7 @@ def fetch_dataset(
         bbox = fetch_config.bbox if fetch_config else None
         encoding = fetch_config.encoding if fetch_config else None
         source_crs = fetch_config.source_crs if fetch_config else None
+        exclude = fetch_config.exclude if fetch_config else None
 
         # Handle os_downloads before URL check (it uses product_id, not url)
         if source_type == "os_downloads":
@@ -1057,6 +1079,7 @@ def fetch_dataset(
                 source_name=config.display_name or dataset_name,
                 bbox=bbox,
                 api_key=api_key,
+                exclude=exclude,
             )
 
         if url is None:
@@ -1120,6 +1143,7 @@ def fetch_dataset(
                 source_crs=source_crs,
                 cache_download=cache_download,
                 cache_ttl_hours=cache_ttl_hours,
+                exclude=exclude,
             )
 
         elif source_type == "ogc_features":
@@ -1133,6 +1157,7 @@ def fetch_dataset(
                 class_mapping=class_mapping,
                 source_name=config.display_name or dataset_name,
                 bbox=bbox,
+                exclude=exclude,
             )
 
         elif source_type == "wfs":
@@ -1152,6 +1177,7 @@ def fetch_dataset(
                 class_mapping=class_mapping,
                 source_name=config.display_name or dataset_name,
                 bbox=bbox,
+                exclude=exclude,
             )
 
         else:
@@ -1173,6 +1199,9 @@ def fetch_dataset(
             # Pass bbox for server-side filtering (reduces bandwidth for large datasets)
             if bbox:
                 arcgis_kwargs["bbox"] = bbox
+            # Pass exclude filter
+            if exclude:
+                arcgis_kwargs["exclude"] = exclude
 
             return fetch_arcgis_layer(**arcgis_kwargs)
 

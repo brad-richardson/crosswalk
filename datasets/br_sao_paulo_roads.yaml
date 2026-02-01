@@ -18,6 +18,9 @@ fetch:
     vtr: primary
     rodovia: motorway
     vias de pedestre: footway
+  exclude:
+    cd_tipo_logradouro:
+      - PC
   bbox:
   - -46.83
   - -24.0
