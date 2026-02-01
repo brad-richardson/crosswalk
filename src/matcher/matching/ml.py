@@ -713,6 +713,13 @@ class MLMatcher:
 
         # Remove explicitly excluded features
         if exclude_features:
+            # Validate that all excluded features actually exist
+            invalid_features = [f for f in exclude_features if f not in FEATURE_COLUMNS]
+            if invalid_features:
+                raise ValueError(
+                    f"Invalid feature names in exclude_features: {invalid_features}. "
+                    f"Valid features are: {FEATURE_COLUMNS[:5]}... ({len(FEATURE_COLUMNS)} total)"
+                )
             before_count = len(self.feature_names)
             self.feature_names = [f for f in self.feature_names if f not in exclude_features]
             excluded_count = before_count - len(self.feature_names)
@@ -790,7 +797,7 @@ class MLMatcher:
         expected_features = (
             [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
             if exclude_semantic
-            else FEATURE_COLUMNS.copy()
+            else FEATURE_COLUMNS  # No .copy() needed since we filter below anyway
         )
         if exclude_features:
             expected_features = [f for f in expected_features if f not in exclude_features]
