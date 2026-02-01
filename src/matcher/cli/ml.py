@@ -18,87 +18,12 @@ ml_app = typer.Typer(
 
 @ml_app.command("eval")
 def eval_model(
-    model: Path = typer.Argument(..., help="Path to trained model"),
-    labels_dir: Path = typer.Option(
-        Path("labels"),
-        "--labels",
-        "-l",
-        help="Labels directory (Hive-partitioned CSV format)",
+    model: Path = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Path to existing trained model (if not provided, trains a fresh model)",
     ),
-    by_dataset: bool = typer.Option(
-        True,
-        "--by-dataset/--overall",
-        help="Show metrics broken down by dataset",
-    ),
-    dataset: list[str] = typer.Option(
-        [],
-        "--dataset",
-        "-d",
-        help="Only evaluate on specific dataset(s). Can be repeated.",
-    ),
-    holdout: bool = typer.Option(
-        True,
-        "--holdout/--no-holdout",
-        help="Use holdout set for evaluation (default: True for unbiased metrics)",
-    ),
-    holdout_pct: float = typer.Option(
-        0.2,
-        "--holdout-pct",
-        help="Fraction of data to hold out for testing (default: 0.2 = 20%%)",
-    ),
-    seed: int = typer.Option(
-        42,
-        "--seed",
-        help="Random seed for holdout split (use same seed for comparable results)",
-    ),
-):
-    """Evaluate ML model performance on labeled data.
-
-    By default, evaluates on a 20%% holdout set for unbiased metrics.
-    Use --no-holdout to evaluate on ALL data (may include training data).
-
-    Examples:
-        matcher ml eval data/models/matcher_model.joblib
-        matcher ml eval data/models/combined.joblib --no-holdout
-        matcher ml eval data/models/combined.joblib --seed 123
-        matcher ml eval data/models/combined.joblib --holdout-pct 0.3
-
-        # Evaluate only on specific dataset (for leave-one-out testing)
-        matcher ml eval data/models/no_frisco.joblib -d us_frisco_trails --no-holdout
-    """
-    from ..matching.ml import evaluate_by_dataset
-
-    if not model.exists():
-        console.print(f"[red]Model not found: {model}[/red]")
-        raise typer.Exit(1)
-
-    if dataset:
-        console.print(f"[blue]Filtering to datasets: {', '.join(dataset)}[/blue]")
-
-    if holdout:
-        console.print(
-            f"[blue]Evaluating {model.name} on {holdout_pct * 100:.0f}% holdout (seed={seed})...[/blue]"
-        )
-    else:
-        console.print(
-            f"[yellow]Evaluating {model.name} on all data (may include training data)...[/yellow]"
-        )
-
-    evaluate_by_dataset(
-        str(model),
-        str(labels_dir),
-        show_by_dataset=by_dataset,
-        holdout=holdout,
-        holdout_pct=holdout_pct,
-        seed=seed,
-        filter_datasets=list(dataset) if dataset else None,
-    )
-
-    console.print("[green]Evaluation complete[/green]")
-
-
-@ml_app.command("benchmark")
-def benchmark(
     labels_dir: Path = typer.Option(
         Path("labels"),
         "--labels",
@@ -128,18 +53,286 @@ def benchmark(
         "--skip-save",
         help="Skip saving results to CSV (just print)",
     ),
+    by_dataset: bool = typer.Option(
+        True,
+        "--by-dataset/--overall",
+        help="Show metrics broken down by dataset",
+    ),
+    dataset: list[str] = typer.Option(
+        [],
+        "--dataset",
+        "-d",
+        help="Only evaluate on specific dataset(s). Can be repeated.",
+    ),
 ):
-    """Run a benchmark: train on subset, evaluate on holdout.
+    """Evaluate ML model performance on labeled data.
 
-    Uses segment-aware splitting to prevent data leakage - no segment
-    appears in both train and test sets. Results are saved to
-    benchmarks/ml_eval_results.csv for tracking over time.
+    By default, trains a fresh model on a subset of data and evaluates on a
+    holdout set. Uses segment-aware splitting to prevent data leakage.
+
+    Use --model to evaluate an existing trained model instead.
 
     Examples:
-        matcher ml benchmark
-        matcher ml benchmark --train-size 0.8
-        matcher ml benchmark --seed 123 --skip-save
+        # Train fresh model and evaluate (default)
+        matcher ml eval
+        matcher ml eval --train-size 0.8
+        matcher ml eval --seed 123 --skip-save
+
+        # Evaluate an existing model
+        matcher ml eval --model data/models/matcher_model.joblib
+        matcher ml eval -m data/models/combined.joblib -d us_frisco_trails
     """
+    if model is not None:
+        # Evaluate existing model
+        _eval_existing_model(
+            model=model,
+            labels_dir=labels_dir,
+            by_dataset=by_dataset,
+            dataset=dataset,
+            train_size=train_size,
+            seed=seed,
+            output_dir=output_dir,
+            skip_save=skip_save,
+        )
+    else:
+        # Train fresh model and evaluate (benchmark mode)
+        _train_and_eval(
+            labels_dir=labels_dir,
+            output_dir=output_dir,
+            train_size=train_size,
+            seed=seed,
+            skip_save=skip_save,
+            by_dataset=by_dataset,
+            filter_datasets=list(dataset) if dataset else None,
+        )
+
+
+def _eval_existing_model(
+    model: Path,
+    labels_dir: Path,
+    by_dataset: bool,
+    dataset: list[str],
+    train_size: float,
+    seed: int,
+    output_dir: Path,
+    skip_save: bool,
+) -> None:
+    """Evaluate an existing trained model on labeled data."""
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+    from ..labeling.label_store import LabelStore
+    from ..matching.ml import MLMatcher, segment_aware_split
+
+    if not model.exists():
+        console.print(f"[red]Model not found: {model}[/red]")
+        raise typer.Exit(1)
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    run_date = datetime.now(UTC)
+    holdout_pct = 1 - train_size
+    test_pct = int(holdout_pct * 100)
+
+    if dataset:
+        console.print(f"[blue]Filtering to datasets: {', '.join(dataset)}[/blue]")
+
+    console.print(
+        f"[blue]Evaluating {model.name} on {holdout_pct * 100:.0f}% holdout (seed={seed})...[/blue]"
+    )
+
+    # Load model
+    matcher = MLMatcher()
+    matcher.load_model(str(model))
+
+    # Load labels
+    console.print("[blue]Loading labels...[/blue]")
+    all_labels = LabelStore.load_all(labels_dir)
+    console.print(f"  Total labels: {len(all_labels)}")
+
+    # Filter to valid labels only
+    valid_labels = {"match", "no_match"}
+    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
+
+    # Filter to specific datasets if requested
+    if dataset:
+        all_labels = all_labels[all_labels["dataset"].isin(dataset)].copy()
+        console.print(f"  Filtered to datasets {dataset}: {len(all_labels)}")
+
+    # Segment-aware split to get test set
+    _, test_idx = segment_aware_split(all_labels, test_size=holdout_pct, random_state=seed)
+    test_df = all_labels.iloc[test_idx].copy()
+    console.print(f"  Test set: {len(test_df)} samples")
+
+    # Evaluate
+    X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
+    X_test = matcher._impute_missing(X_test)
+    y_pred = matcher.model.predict(X_test)
+
+    # Overall metrics
+    overall_acc = accuracy_score(y_test, y_pred)
+    overall_f1 = f1_score(y_test, y_pred, average="weighted")
+    overall_precision = precision_score(y_test, y_pred, average="weighted")
+    overall_recall = recall_score(y_test, y_pred, average="weighted")
+
+    console.print(f"\n{'=' * 60}")
+    console.print(f"[bold]EVALUATION ON {test_pct}% HOLDOUT ({len(test_df)} samples)[/bold]")
+    console.print("=" * 60)
+    console.print("\nOverall:")
+    console.print(f"  Accuracy:  {overall_acc:.3f}")
+    console.print(f"  F1:        {overall_f1:.3f}")
+    console.print(f"  Precision: {overall_precision:.3f}")
+    console.print(f"  Recall:    {overall_recall:.3f}")
+
+    # Feature importances (if available)
+    top_features = []
+    if hasattr(matcher.model, "feature_importances_"):
+        feature_importances = dict(zip(matcher.feature_names, matcher.model.feature_importances_))
+        top_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:10]
+        console.print("\nTop 10 features by importance:")
+        for feat, imp in top_features:
+            console.print(f"  {feat}: {imp:.3f}")
+
+    # Per-dataset metrics
+    results = {}
+    if by_dataset:
+        console.print("\nPer-dataset results:")
+        for ds in sorted(test_df["dataset"].unique()):
+            ds_test = test_df[test_df["dataset"] == ds]
+            X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
+            X_ds = matcher._impute_missing(X_ds)
+            y_ds_pred = matcher.model.predict(X_ds)
+
+            ds_acc = accuracy_score(y_ds, y_ds_pred)
+            ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
+            ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+            ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+            n_match = int((y_ds == 1).sum())
+            n_no_match = int((y_ds == 0).sum())
+
+            console.print(
+                f"  {ds}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
+                f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
+            )
+
+            results[ds] = {
+                "n_samples": len(ds_test),
+                "n_match": n_match,
+                "n_no_match": n_no_match,
+                "accuracy": ds_acc,
+                "f1": ds_f1,
+                "precision": ds_precision,
+                "recall": ds_recall,
+            }
+    else:
+        results["overall"] = {
+            "n_samples": len(test_df),
+            "n_match": int((y_test == 1).sum()),
+            "n_no_match": int((y_test == 0).sum()),
+            "accuracy": overall_acc,
+            "f1": overall_f1,
+            "precision": overall_precision,
+            "recall": overall_recall,
+        }
+
+    # Save results to CSV
+    if not skip_save:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results_file = output_dir / "ml_eval_results.csv"
+
+        fieldnames = [
+            "run_date",
+            "data_pull_date",
+            "dataset",
+            "n_train",
+            "n_test",
+            "train_size",
+            "n_samples",
+            "n_match",
+            "n_no_match",
+            "accuracy",
+            "f1",
+            "precision",
+            "recall",
+            "split_seed",
+            "model_name",
+            "top1_feature",
+            "top1_importance",
+            "top2_feature",
+            "top2_importance",
+            "top3_feature",
+            "top3_importance",
+            "top4_feature",
+            "top4_importance",
+            "top5_feature",
+            "top5_importance",
+            "top6_feature",
+            "top6_importance",
+            "top7_feature",
+            "top7_importance",
+            "top8_feature",
+            "top8_importance",
+            "top9_feature",
+            "top9_importance",
+            "top10_feature",
+            "top10_importance",
+        ]
+
+        write_header = not results_file.exists()
+
+        with open(results_file, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            if write_header:
+                writer.writeheader()
+
+            for dataset_name, metrics in results.items():
+                row = {
+                    "run_date": run_date.isoformat(),
+                    "data_pull_date": run_date.isoformat(),
+                    "dataset": dataset_name,
+                    "n_train": "N/A (existing model)",
+                    "n_test": len(test_df),
+                    "train_size": train_size,
+                    "n_samples": metrics.get("n_samples", 0),
+                    "n_match": metrics.get("n_match", 0),
+                    "n_no_match": metrics.get("n_no_match", 0),
+                    "accuracy": f"{metrics.get('accuracy', 0):.4f}",
+                    "f1": f"{metrics.get('f1', 0):.4f}",
+                    "precision": f"{metrics.get('precision', 0):.4f}",
+                    "recall": f"{metrics.get('recall', 0):.4f}",
+                    "split_seed": seed,
+                    "model_name": model.name,
+                    **{
+                        f"top{i + 1}_feature": top_features[i][0] if len(top_features) > i else ""
+                        for i in range(10)
+                    },
+                    **{
+                        f"top{i + 1}_importance": f"{top_features[i][1]:.4f}"
+                        if len(top_features) > i
+                        else ""
+                        for i in range(10)
+                    },
+                }
+                writer.writerow(row)
+
+        console.print(f"\n[green]Results saved to {results_file}[/green]")
+
+    console.print("[green]Evaluation complete[/green]")
+
+
+def _train_and_eval(
+    labels_dir: Path,
+    output_dir: Path,
+    train_size: float,
+    seed: int,
+    skip_save: bool,
+    by_dataset: bool,
+    filter_datasets: list[str] | None,
+) -> None:
+    """Train a fresh model and evaluate on holdout set."""
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
     from ..labeling.label_store import LabelStore
@@ -166,6 +359,11 @@ def benchmark(
     valid_labels = {"match", "no_match"}
     all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
     console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
+
+    # Filter to specific datasets if requested
+    if filter_datasets:
+        all_labels = all_labels[all_labels["dataset"].isin(filter_datasets)].copy()
+        console.print(f"  Filtered to datasets {filter_datasets}: {len(all_labels)}")
 
     # Segment-aware split to prevent leakage
     console.print(f"\n[blue]Splitting {train_pct}/{test_pct} with segment-aware split...[/blue]")
@@ -205,17 +403,17 @@ def benchmark(
         # LabelStore.load_all expects:
         #   - human/dataset=*/data.csv (label metadata)
         #   - features/dataset=*/data.parquet (computed features)
-        for dataset in train_df["dataset"].unique():
-            ds_train = train_df[train_df["dataset"] == dataset]
+        for ds in train_df["dataset"].unique():
+            ds_train = train_df[train_df["dataset"] == ds]
 
             # Write human labels (metadata only)
-            human_ds_dir = human_dir / f"dataset={dataset}"
+            human_ds_dir = human_dir / f"dataset={ds}"
             human_ds_dir.mkdir(parents=True, exist_ok=True)
             label_cols = [c for c in HUMAN_LABEL_COLUMNS if c in ds_train.columns]
             ds_train[label_cols].to_csv(human_ds_dir / "data.csv", index=False)
 
             # Write features (key columns + feature columns)
-            features_ds_dir = features_dir / f"dataset={dataset}"
+            features_ds_dir = features_dir / f"dataset={ds}"
             features_ds_dir.mkdir(parents=True, exist_ok=True)
             feature_cols = ["gers_id", "target_id"] + [
                 c for c in FEATURE_COLUMNS if c in ds_train.columns
@@ -266,33 +464,45 @@ def benchmark(
 
         # Per-dataset metrics
         results = {}
-        console.print("\nPer-dataset results:")
-        for dataset in sorted(test_df["dataset"].unique()):
-            ds_test = test_df[test_df["dataset"] == dataset]
-            X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
-            X_ds = matcher._impute_missing(X_ds)
-            y_ds_pred = matcher.model.predict(X_ds)
+        if by_dataset:
+            console.print("\nPer-dataset results:")
+            for ds in sorted(test_df["dataset"].unique()):
+                ds_test = test_df[test_df["dataset"] == ds]
+                X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
+                X_ds = matcher._impute_missing(X_ds)
+                y_ds_pred = matcher.model.predict(X_ds)
 
-            ds_acc = accuracy_score(y_ds, y_ds_pred)
-            ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
-            ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
-            ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
-            n_match = int((y_ds == 1).sum())
-            n_no_match = int((y_ds == 0).sum())
+                ds_acc = accuracy_score(y_ds, y_ds_pred)
+                ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
+                ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                n_match = int((y_ds == 1).sum())
+                n_no_match = int((y_ds == 0).sum())
 
-            console.print(
-                f"  {dataset}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
-                f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
-            )
+                console.print(
+                    f"  {ds}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
+                    f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
+                )
 
-            results[dataset] = {
-                "n_samples": len(ds_test),
-                "n_match": n_match,
-                "n_no_match": n_no_match,
-                "accuracy": ds_acc,
-                "f1": ds_f1,
-                "precision": ds_precision,
-                "recall": ds_recall,
+                results[ds] = {
+                    "n_samples": len(ds_test),
+                    "n_match": n_match,
+                    "n_no_match": n_no_match,
+                    "accuracy": ds_acc,
+                    "f1": ds_f1,
+                    "precision": ds_precision,
+                    "recall": ds_recall,
+                }
+        else:
+            # Store overall results for CSV
+            results["overall"] = {
+                "n_samples": len(test_df),
+                "n_match": int((y_test == 1).sum()),
+                "n_no_match": int((y_test == 0).sum()),
+                "accuracy": overall_acc,
+                "f1": overall_f1,
+                "precision": overall_precision,
+                "recall": overall_recall,
             }
 
         # Save results to CSV
@@ -380,7 +590,7 @@ def benchmark(
 
             console.print(f"\n[green]Results saved to {results_file}[/green]")
 
-    console.print("\n[green]Benchmark complete![/green]")
+    console.print("\n[green]Evaluation complete![/green]")
 
 
 @ml_app.command("features")

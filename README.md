@@ -207,7 +207,7 @@ Label pairs as `match`, `no_match`, or `unsure`, then retrain:
 
 ```bash
 matcher train
-matcher ml eval data/models/matcher_model_combined.joblib
+matcher ml eval  # Trains fresh model on 70% of data, evaluates on 30% holdout
 ```
 
 ### Step 4: Integration
@@ -265,8 +265,7 @@ matcher class discover data/raw/new_dataset.parquet \
 | | `data repair` | Repair topology issues |
 | | `data quality` | Dataset quality fingerprint |
 | | `data validate` | Validate data file versions |
-| **ml** | `ml eval` | Evaluate model performance on training labels |
-| | `ml benchmark` | Train on subset, eval on holdout |
+| **ml** | `ml eval` | Train on subset, eval on holdout (or eval existing model with `--model`) |
 | | `ml features` | Compute and cache features |
 | | `ml backfill` | Backfill labels with features |
 | **integrate** | `integrate run` | Integrate unmatched segments |
