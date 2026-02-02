@@ -719,6 +719,7 @@ def find_parallel_sibling(
 
         # 3. Check name/class compatibility (same road)
         # Need at least one of: matching names OR compatible classes
+        # If names positively match, that overrides class differences
         name_match = names_compatible(segment_name, candidate_name)
         class_match = classes_compatible(segment_class, candidate_class)
 
@@ -726,11 +727,17 @@ def find_parallel_sibling(
         if name_match is False:
             continue
 
+        # If names positively match, accept regardless of class difference
+        # (same road can be classified differently in different datasets)
+        if name_match is True:
+            return True, offset
+
+        # Names are inconclusive (None) - fall back to class check
         # If classes explicitly conflict, skip
         if not class_match:
             continue
 
-        # Need at least one positive signal (matching names or both have compatible classes)
+        # Need at least one positive signal (compatible classes when names inconclusive)
         # If names are inconclusive (None) AND classes are missing, skip
         if name_match is None and (not segment_class or not candidate_class):
             continue

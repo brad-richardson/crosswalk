@@ -380,6 +380,8 @@ def _compute_non_geometric_features(
                 segment_data=ref_sibling_context.segment_data,
             )
         else:
+            if ref_sibling_context is None:
+                logger.warning("ref_sibling_context is None - sibling detection disabled")
             has_sibling_ref, sibling_dist_ref = False, MAX_DISTANCE_METERS
 
         if target_sibling_context is not None and target_seg_id is not None:
@@ -392,6 +394,8 @@ def _compute_non_geometric_features(
                 segment_data=target_sibling_context.segment_data,
             )
         else:
+            if target_sibling_context is None:
+                logger.warning("target_sibling_context is None - sibling detection disabled")
             has_sibling_target, sibling_dist_target = False, MAX_DISTANCE_METERS
 
         # Core sibling detection
@@ -657,8 +661,8 @@ def compute_pair_features(
         return features
 
     except Exception as e:
-        # Log at debug level to avoid noise - errors are counted and reported in ml.py
-        logger.debug(f"Feature computation failed: {e}")
+        # Log at warning level to catch bugs early (see TODO.md for planned improvements)
+        logger.warning(f"Feature computation failed: {e}")
         # Return error values
         return _get_error_features()
 

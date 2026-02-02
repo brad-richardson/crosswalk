@@ -253,6 +253,18 @@ Add features to help the ML model recognize centerline scenarios:
 
 The ML model can then learn when to flag these for review vs auto-match.
 
+#### Option 2: Detect Split Carriageway Start/End Points
+At divergence/convergence points where a dual carriageway begins or ends, the segments are:
+- Separate (not the same road segment)
+- Same name and class
+- Close together (within sibling detection buffer)
+- But NOT parallel (diverging at ~90 degrees)
+
+Current `find_parallel_sibling()` correctly rejects these because they're not parallel, but we may want a separate feature to detect this edge case:
+- `at_carriageway_split`: Boolean indicating segment is at a divergence/convergence point
+- Could use angle between segments + endpoint proximity to detect Y-junction patterns
+- Useful for understanding why sibling detection returns false for nearby same-name segments
+
 #### Option 3: Pre-filter Dual Carriageway Cases
 Detect dual carriageway situations upstream and either:
 - Normalize representations before matching (convert centerlines to split or vice versa)

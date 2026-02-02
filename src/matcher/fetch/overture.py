@@ -184,6 +184,9 @@ def fetch_overture_segments(
     if "bbox" in gdf.columns:
         gdf = gdf.drop(columns=["bbox"])
 
+    # Extract linear-referenced attributes (names_lr, subclass_lr, etc.)
+    gdf = extract_lr_attributes(gdf)
+
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_parquet(output_path, write_covering_bbox=True)
