@@ -50,7 +50,8 @@ class TestFeatureParity:
         )
 
         declared_features = set(ALL_FEATURE_COLUMNS)
-        computed_features = set(features.keys())
+        # Filter out internal metadata fields (prefixed with _)
+        computed_features = {k for k in features if not k.startswith("_")}
 
         missing_from_output = declared_features - computed_features
         assert not missing_from_output, (
