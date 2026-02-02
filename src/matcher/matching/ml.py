@@ -1370,6 +1370,43 @@ class MLMatcher:
         timings["data_extraction"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
 
+        # Filter candidates by physical overlap (actual geometric intersection, no translation)
+        # This removes collinear segments that barely touch at tips, which dominate labeling
+        # time but are almost never real matches. 5m threshold gives 5.9:1 no_match:match ratio.
+        from ..config import PHYSICAL_OVERLAP_MIN_M
+
+        t0 = time.perf_counter()
+
+        # Batch computation using vectorized shapely for performance
+        import shapely as shapely_mod
+
+        ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
+        target_geom_arr = np.array([target_geoms[c.target_idx] for c in candidates], dtype=object)
+
+        # Buffer targets and intersect with refs (vectorized)
+        target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
+        intersections = shapely_mod.intersection(ref_geom_arr, target_buffers)
+        overlap_lengths = shapely_mod.length(intersections)
+
+        # Filter candidates that meet threshold
+        mask = overlap_lengths >= PHYSICAL_OVERLAP_MIN_M
+        filtered_candidates = [c for c, keep in zip(candidates, mask) if keep]
+
+        n_filtered = len(candidates) - len(filtered_candidates)
+        if n_filtered > 0:
+            logger.info(
+                f"Physical overlap filter: removed {n_filtered} candidates "
+                f"(<{PHYSICAL_OVERLAP_MIN_M}m overlap), {len(filtered_candidates)} remaining"
+            )
+        candidates = filtered_candidates
+        timings["physical_overlap_filter"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] physical_overlap_filter: {timings['physical_overlap_filter']:.2f}s")
+
+        # Handle case where all candidates were filtered
+        if not candidates:
+            logger.info("All candidates filtered by physical overlap threshold")
+            return []
+
         # Pre-compute endpoint, topology, and graphlet features for both reference and target
         # These capture network connectivity without requiring explicit topology
         from ..config import settings

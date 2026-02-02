@@ -166,3 +166,86 @@ class TestBatchGeometricEdgeCases:
         for field_name in BatchGeometricResult._fields:
             arr = getattr(result, field_name)
             assert arr.shape == (N,), f"{field_name} has wrong shape: {arr.shape}"
+
+
+class TestPhysicalOverlapM:
+    """Tests for compute_physical_overlap_m() function.
+
+    This function measures actual geometric intersection length without
+    alignment translation. It's used as an early filter to remove
+    tip-contact candidates.
+    """
+
+    def test_identical_lines_full_overlap(self):
+        """Identical lines should have full overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line = _make_line([(0, 0), (100, 0)])
+        overlap = compute_physical_overlap_m(line, line)
+        assert overlap == pytest.approx(100.0, abs=1.0)
+
+    def test_parallel_lines_within_buffer(self):
+        """Parallel lines within buffer distance should have high overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(0, 3), (100, 3)])  # 3m offset, within 5m buffer
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        assert overlap > 90  # Should capture most of the line
+
+    def test_parallel_lines_outside_buffer(self):
+        """Parallel lines outside buffer distance should have zero overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(0, 20), (100, 20)])  # 20m offset, outside 5m buffer
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        assert overlap == pytest.approx(0.0, abs=0.1)
+
+    def test_tip_to_tip_collinear_minimal_overlap(self):
+        """Collinear segments touching at tips should have minimal overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(100, 0), (200, 0)])  # Continuation, tip-to-tip
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        # Only the buffer around the endpoint provides overlap
+        assert overlap < 10  # Should be ~5m (buffer radius at tip)
+
+    def test_partial_overlap(self):
+        """Partially overlapping collinear lines should have proportional overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(50, 0), (150, 0)])  # 50m overlap
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        assert overlap > 45  # Should capture most of the 50m overlap
+
+    def test_crossing_intersection(self):
+        """Crossing lines should have minimal overlap at the intersection point."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(50, -50), (50, 50)])  # Perpendicular crossing at midpoint
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        # Only ~10m of line1 falls within the 5m buffer of line2 at crossing
+        assert 5 < overlap < 20
+
+    def test_disjoint_lines_zero_overlap(self):
+        """Completely disjoint lines should have zero overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(200, 0), (300, 0)])  # Far away
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        assert overlap == pytest.approx(0.0, abs=0.1)
+
+    def test_small_gap_between_collinear(self):
+        """Collinear lines with a small gap should have low overlap."""
+        from matcher.features.geometric import compute_physical_overlap_m
+
+        line1 = _make_line([(0, 0), (100, 0)])
+        line2 = _make_line([(110, 0), (200, 0)])  # 10m gap
+        overlap = compute_physical_overlap_m(line1, line2, buffer_m=5.0)
+        # Gap is larger than buffer, so no overlap
+        assert overlap == pytest.approx(0.0, abs=0.1)

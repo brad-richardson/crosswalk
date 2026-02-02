@@ -723,6 +723,39 @@ def compute_shape_complexity(
     return compute_shape_complexity_numba(coords, angle_threshold)
 
 
+def compute_physical_overlap_m(
+    ref_geom: LineString,
+    target_geom: LineString,
+    buffer_m: float = 5.0,
+) -> float:
+    """Compute actual geometric intersection length (no alignment translation).
+
+    This measures the physical overlap between two segments without any
+    sliding/translation. For segments that barely touch at tips, this
+    will be ~0m even if alignment reports high coverage.
+
+    Args:
+        ref_geom: Reference geometry (projected CRS, meters)
+        target_geom: Target geometry (projected CRS, meters)
+        buffer_m: Buffer distance to handle GPS tolerance
+
+    Returns:
+        Length of intersection in meters
+    """
+    from shapely.errors import GEOSException
+
+    try:
+        intersection = ref_geom.intersection(target_geom.buffer(buffer_m))
+        if intersection.is_empty:
+            return 0.0
+        if hasattr(intersection, "length"):
+            return float(intersection.length)
+        return 0.0  # Point intersection
+    except GEOSException:
+        # Topology errors from invalid geometries - treat as no overlap
+        return 0.0
+
+
 def compute_collinear_gap_ratio(
     line_a: LineString,
     line_b: LineString,
