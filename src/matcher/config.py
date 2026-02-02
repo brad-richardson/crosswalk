@@ -29,6 +29,12 @@ ALIGNMENT_FULL_TOLERANCE = 0.01
 # typically ranges from 1-5 meters
 DEFAULT_SNAP_TOLERANCE_M = 5.0
 
+# Minimum physical overlap for candidate pairs (meters)
+# Pairs with less actual geometric intersection (without alignment translation)
+# are rejected early. Based on label analysis: 5m gives 5.9:1 no_match:match
+# filter ratio (removes 46.5% of no_match while only losing 6.7% of match).
+PHYSICAL_OVERLAP_MIN_M = 5.0
+
 # Alignment divergence detection thresholds
 # Used to truncate alignment at points where roads diverge significantly
 DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance threshold

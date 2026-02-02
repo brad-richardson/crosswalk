@@ -1370,6 +1370,36 @@ class MLMatcher:
         timings["data_extraction"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
 
+        # Filter candidates by physical overlap (actual geometric intersection, no translation)
+        # This removes collinear segments that barely touch at tips, which dominate labeling
+        # time but are almost never real matches. 5m threshold gives 5.9:1 no_match:match ratio.
+        from ..config import PHYSICAL_OVERLAP_MIN_M
+        from ..features.geometric import compute_physical_overlap_m
+
+        t0 = time.perf_counter()
+        filtered_candidates = []
+        for cand in candidates:
+            physical_overlap = compute_physical_overlap_m(
+                ref_geoms[cand.ref_idx], target_geoms[cand.target_idx]
+            )
+            if physical_overlap >= PHYSICAL_OVERLAP_MIN_M:
+                filtered_candidates.append(cand)
+
+        n_filtered = len(candidates) - len(filtered_candidates)
+        if n_filtered > 0:
+            logger.info(
+                f"Physical overlap filter: removed {n_filtered} candidates "
+                f"(<{PHYSICAL_OVERLAP_MIN_M}m overlap), {len(filtered_candidates)} remaining"
+            )
+        candidates = filtered_candidates
+        timings["physical_overlap_filter"] = time.perf_counter() - t0
+        logger.debug(f"[TIMING] physical_overlap_filter: {timings['physical_overlap_filter']:.2f}s")
+
+        # Handle case where all candidates were filtered
+        if not candidates:
+            logger.info("All candidates filtered by physical overlap threshold")
+            return []
+
         # Pre-compute endpoint, topology, and graphlet features for both reference and target
         # These capture network connectivity without requiring explicit topology
         from ..config import settings
