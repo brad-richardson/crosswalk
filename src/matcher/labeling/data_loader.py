@@ -764,7 +764,7 @@ def compute_features_only(
     with ProcessPoolExecutor(
         max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
     ) as executor:
-        for chunk_results in executor.map(_compute_feature_chunk, chunks):
+        for chunk_results, _chunk_errors in executor.map(_compute_feature_chunk, chunks):
             features_list.extend(chunk_results)
             processed = len(features_list)
             pct = int(processed / len(work_items) * 100)

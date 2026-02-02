@@ -851,7 +851,8 @@ def _compute_single_alignment(args):
             return None
 
         return linestring_alignment(ref_geom, target_geom)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Alignment failed for ({ref_idx}, {target_idx}): {type(e).__name__}: {e}")
         return None
 
 

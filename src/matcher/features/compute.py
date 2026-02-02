@@ -662,18 +662,26 @@ def compute_pair_features(
 
     except Exception as e:
         # Log at warning level to catch bugs early (see TODO.md for planned improvements)
-        logger.warning(f"Feature computation failed: {e}")
-        # Return error values
-        return _get_error_features()
+        logger.warning(f"Feature computation failed: {type(e).__name__}: {e}")
+        # Return error values with metadata for tracking
+        return _get_error_features(error=e, phase="compute_pair_features")
 
 
-def _get_error_features() -> dict[str, float]:
+def _get_error_features(
+    error: Exception | None = None,
+    phase: str | None = None,
+) -> dict[str, Any]:
     """Return default feature values for error cases.
 
+    Args:
+        error: Optional exception that caused the error
+        phase: Optional phase where the error occurred (e.g., "compute_pair_features")
+
     Returns a dict with all features from FEATURE_COLUMNS, using neutral/default
-    values that won't artificially inflate or deflate match scores.
+    values that won't artificially inflate or deflate match scores. Also includes
+    error metadata fields (_error, _error_type, _error_phase) when error is provided.
     """
-    return {
+    features = {
         # Geometric features
         "hausdorff_distance_m": MAX_DISTANCE_METERS,
         "mean_hausdorff_distance_m": MAX_DISTANCE_METERS,
@@ -750,6 +758,14 @@ def _get_error_features() -> dict[str, float]:
         "offset_over_expected_halfwidth": 0.0,
         "likely_representation_mismatch": 0.0,
     }
+
+    # Add error metadata only if error is provided
+    if error is not None:
+        features["_error"] = str(error)
+        features["_error_type"] = type(error).__name__
+        features["_error_phase"] = phase or "unknown"
+
+    return features
 
 
 def precompute_parallel_siblings(

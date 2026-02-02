@@ -133,7 +133,7 @@ def _compute_single_feature(args):
     Returns a dict of features, None if pair is rejected (missing aligned endpoint
     features), or a dict with error defaults if computation fails.
     """
-    results = _compute_feature_chunk([args])
+    results, _errors = _compute_feature_chunk([args])
     return results[0] if results else None
 
 
@@ -151,8 +151,11 @@ def _compute_feature_chunk(chunk):
         chunk: List of (ref_idx, target_idx) tuples
 
     Returns:
-        List of feature dicts (or None for rejected pairs)
+        Tuple of (results, error_summary_dict) where:
+        - results: List of feature dicts (or None for rejected pairs)
+        - error_summary_dict: Serializable dict with error counts and samples
     """
+    from ..errors import ErrorAggregator, ErrorPhase, ErrorSeverity
     from ..features.alignment import create_subline
     from ..features.compute import (
         _compute_non_geometric_features,
@@ -166,6 +169,7 @@ def _compute_feature_chunk(chunk):
     from ..features.relational import compute_perpendicular_offset_batch
 
     HIGH_COVERAGE_THRESHOLD = 0.995
+    error_tracker = ErrorAggregator()
 
     # ---- Pass 1: Collect geometry pairs and per-pair data ----
     # Store per-pair data for valid pairs only
@@ -263,14 +267,20 @@ def _compute_feature_chunk(chunk):
             valid_indices.append(chunk_idx)
 
         except Exception as e:
-            error_features = _get_error_features()
-            error_features["_error"] = str(e)
+            error_tracker.add_simple(
+                ErrorPhase.PAIR_FEATURES,
+                e,
+                ErrorSeverity.WARNING,
+                ref_idx=ref_idx,
+                target_idx=target_idx,
+            )
+            error_features = _get_error_features(error=e, phase=ErrorPhase.PAIR_FEATURES.value)
             if is_profiling_enabled():
                 get_timing_stats().reset()
             results[chunk_idx] = error_features
 
     if not pair_data:
-        return results
+        return (results, error_tracker.to_serializable())
 
     # ---- Pass 2: Batch geometric computation ----
     arr_a = np.array([pd["geom_sim_ref"] for pd in pair_data], dtype=object)
@@ -280,13 +290,21 @@ def _compute_feature_chunk(chunk):
         with timed_section("batch_geometric"):
             batch_result = compute_geometric_features_batch(arr_a, arr_b)
     except Exception as e:
-        error_features = _get_error_features()
-        error_features["_error"] = str(e)
+        # Track batch failure - affects all pairs in chunk
+        for pd_item in pair_data:
+            error_tracker.add_simple(
+                ErrorPhase.BATCH_GEOMETRIC,
+                e,
+                ErrorSeverity.CRITICAL,
+                ref_idx=pd_item["ref_idx"],
+                target_idx=pd_item["target_idx"],
+            )
+        error_features = _get_error_features(error=e, phase="batch_geometric")
         if is_profiling_enabled():
             get_timing_stats().reset()
         for pd_item in pair_data:
             results[pd_item["chunk_idx"]] = error_features
-        return results
+        return (results, error_tracker.to_serializable())
 
     # ---- Pass 2.5: Batch perpendicular offset ----
     # Batch line_interpolate_point + distance across all pairs in the chunk
@@ -298,13 +316,21 @@ def _compute_feature_chunk(chunk):
                 compute_perpendicular_offset_batch(arr_b, arr_a)
             )
     except Exception as e:
-        error_features = _get_error_features()
-        error_features["_error"] = str(e)
+        # Track batch failure - affects all pairs in chunk
+        for pd_item in pair_data:
+            error_tracker.add_simple(
+                ErrorPhase.PERPENDICULAR_OFFSET,
+                e,
+                ErrorSeverity.CRITICAL,
+                ref_idx=pd_item["ref_idx"],
+                target_idx=pd_item["target_idx"],
+            )
+        error_features = _get_error_features(error=e, phase="perpendicular_offset")
         if is_profiling_enabled():
             get_timing_stats().reset()
         for pd_item in pair_data:
             results[pd_item["chunk_idx"]] = error_features
-        return results
+        return (results, error_tracker.to_serializable())
 
     # ---- Pass 3: Per-pair non-batchable features + assembly ----
     for i, pd_item in enumerate(pair_data):
@@ -377,8 +403,14 @@ def _compute_feature_chunk(chunk):
             results[chunk_idx] = features
 
         except Exception as e:
-            error_features = _get_error_features()
-            error_features["_error"] = str(e)
+            error_tracker.add_simple(
+                ErrorPhase.PAIR_FEATURES,
+                e,
+                ErrorSeverity.WARNING,
+                ref_idx=pd_item["ref_idx"],
+                target_idx=pd_item["target_idx"],
+            )
+            error_features = _get_error_features(error=e, phase=ErrorPhase.PAIR_FEATURES.value)
             if is_profiling_enabled():
                 get_timing_stats().reset()
             results[chunk_idx] = error_features
@@ -395,7 +427,7 @@ def _compute_feature_chunk(chunk):
                     feat[f"_t_{name}"] = per_pair
         stats.reset()
 
-    return results
+    return (results, error_tracker.to_serializable())
 
 
 def select_model_for_dataset(
@@ -1590,6 +1622,11 @@ class MLMatcher:
         chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
         features_list = []
 
+        # Error aggregation across workers
+        from ..errors import ErrorAggregator
+
+        total_errors = ErrorAggregator()
+
         logger.info(
             f"Starting parallel feature computation "
             f"(chunk_size={chunk_size}, {len(chunks)} chunks)..."
@@ -1602,8 +1639,11 @@ class MLMatcher:
             # Submit chunks in batches for progress reporting
             for i in range(0, len(chunks), n_workers):
                 batch_chunks = chunks[i : i + n_workers]
-                for chunk_results in executor.map(_compute_feature_chunk, batch_chunks):
+                for chunk_results, chunk_errors in executor.map(
+                    _compute_feature_chunk, batch_chunks
+                ):
                     features_list.extend(chunk_results)
+                    total_errors.merge_serialized(chunk_errors)
                 processed = len(features_list)
                 pct = processed / len(work_items) * 100
                 logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
@@ -1692,21 +1732,51 @@ class MLMatcher:
 
         # Check for degenerate geometry errors (aligned sublines becoming points/empty)
         # These pairs get error default features but may indicate data quality issues
-        error_features = [f for f in valid_features if f.get("_error")]
-        if error_features:
-            error_rate = len(error_features) / len(valid_features)
-            logger.warning(
-                f"{len(error_features)} candidates had feature computation errors "
-                f"({error_rate:.1%} of valid pairs)"
-            )
-            # Fail if too many pairs have degenerate geometries
+        error_features_list = [f for f in valid_features if f.get("_error")]
+        if error_features_list or total_errors.has_errors():
+            error_rate = len(error_features_list) / len(valid_features) if valid_features else 0
+
+            # Log detailed error breakdown from aggregated worker errors
+            if total_errors.has_errors():
+                summary = total_errors.summary()
+                logger.warning(
+                    f"Feature computation errors: {summary['total']} total across workers"
+                )
+                logger.warning(f"  Errors by phase: {summary['by_phase']}")
+                logger.warning(f"  Errors by type: {summary['by_type']}")
+
+                # Log sample errors (up to error_log_samples per type)
+                for err_key, sample_info in list(summary["samples"].items())[
+                    : settings.error_log_samples
+                ]:
+                    logger.warning(f"  Sample [{err_key}]: {sample_info['message'][:200]}")
+
+            if error_features_list:
+                logger.warning(
+                    f"{len(error_features_list)} candidates had feature computation errors "
+                    f"({error_rate:.1%} of valid pairs)"
+                )
+
+            # Fail if overall error rate exceeds 20% threshold
             if error_rate > 0.20:
                 raise ValueError(
                     f"Feature computation error rate {error_rate:.1%} exceeds 20% threshold. "
-                    f"{len(error_features)} of {len(valid_features)} pairs had errors "
+                    f"{len(error_features_list)} of {len(valid_features)} pairs had errors "
                     "(likely degenerate aligned sublines). "
                     "This may indicate poor alignment coverage or bad geometry data."
                 )
+
+            # Check per-phase hard fail threshold
+            if total_errors.has_errors():
+                total_pairs = len(valid_features) if valid_features else 1
+                for phase, count in total_errors.counts_by_phase.items():
+                    phase_rate = count / total_pairs
+                    if phase_rate > settings.error_hard_fail_threshold:
+                        raise ValueError(
+                            f"Error rate for phase '{phase}' ({phase_rate:.1%}) exceeds "
+                            f"{settings.error_hard_fail_threshold:.0%} hard fail threshold. "
+                            f"{count} of {total_pairs} pairs failed in this phase."
+                        )
 
         # Batch prediction - use probability (confidence), not predicted class
         # This allows the downstream optimizer to use confidence threshold
