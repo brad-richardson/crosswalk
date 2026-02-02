@@ -211,11 +211,11 @@ class TestClassCommandGroup:
         assert result.exit_code == 0
         assert "Apply" in result.output or "predict" in result.output.lower()
 
-    def test_class_analyze_predictor_help(self):
-        """Test class analyze-predictor command."""
-        result = runner.invoke(app, ["class", "analyze-predictor", "--help"])
+    def test_class_analyze_train_predictor_option(self):
+        """Test class analyze --train-predictor option (merged from analyze-predictor)."""
+        result = runner.invoke(app, ["class", "analyze", "--help"])
         assert result.exit_code == 0
-        assert "Analyze" in result.output
+        assert "--train-predictor" in result.output
 
     def test_class_update_mappings_help(self):
         """Test class update-mappings command."""

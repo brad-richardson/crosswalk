@@ -13,22 +13,24 @@ fetch:
   class_column: dc_tipo_classificacao_viaria
   class_mapping:
     local: residential
-    coletora: tertiary
+    coletora: residential
     arterial: primary
     vtr: primary
     rodovia: motorway
     vias de pedestre: footway
-  exclude:
-    cd_tipo_logradouro:
-      - PC
+    tertiary: tertiary
+    residential: residential
   bbox:
   - -46.83
   - -24.0
   - -46.36
   - -23.35
   crs: EPSG:4326
+  exclude:
+    cd_tipo_logradouro:
+    - PC
 last_fetch:
-  fetched_at: '2026-01-24T14:52:05.554821+00:00'
+  fetched_at: '2026-02-02T01:23:19.330201+00:00'
   bbox:
   - -46.83
   - -24.0
