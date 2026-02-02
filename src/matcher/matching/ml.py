@@ -1374,16 +1374,23 @@ class MLMatcher:
         # This removes collinear segments that barely touch at tips, which dominate labeling
         # time but are almost never real matches. 5m threshold gives 5.9:1 no_match:match ratio.
         from ..config import PHYSICAL_OVERLAP_MIN_M
-        from ..features.geometric import compute_physical_overlap_m
 
         t0 = time.perf_counter()
-        filtered_candidates = []
-        for cand in candidates:
-            physical_overlap = compute_physical_overlap_m(
-                ref_geoms[cand.ref_idx], target_geoms[cand.target_idx]
-            )
-            if physical_overlap >= PHYSICAL_OVERLAP_MIN_M:
-                filtered_candidates.append(cand)
+
+        # Batch computation using vectorized shapely for performance
+        import shapely as shapely_mod
+
+        ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
+        target_geom_arr = np.array([target_geoms[c.target_idx] for c in candidates], dtype=object)
+
+        # Buffer targets and intersect with refs (vectorized)
+        target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
+        intersections = shapely_mod.intersection(ref_geom_arr, target_buffers)
+        overlap_lengths = shapely_mod.length(intersections)
+
+        # Filter candidates that meet threshold
+        mask = overlap_lengths >= PHYSICAL_OVERLAP_MIN_M
+        filtered_candidates = [c for c, keep in zip(candidates, mask) if keep]
 
         n_filtered = len(candidates) - len(filtered_candidates)
         if n_filtered > 0:

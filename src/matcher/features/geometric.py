@@ -742,6 +742,8 @@ def compute_physical_overlap_m(
     Returns:
         Length of intersection in meters
     """
+    from shapely.errors import GEOSException
+
     try:
         intersection = ref_geom.intersection(target_geom.buffer(buffer_m))
         if intersection.is_empty:
@@ -749,7 +751,8 @@ def compute_physical_overlap_m(
         if hasattr(intersection, "length"):
             return float(intersection.length)
         return 0.0  # Point intersection
-    except Exception:
+    except GEOSException:
+        # Topology errors from invalid geometries - treat as no overlap
         return 0.0
 
 
