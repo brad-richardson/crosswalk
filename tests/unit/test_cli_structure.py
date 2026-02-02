@@ -121,7 +121,6 @@ class TestMLCommandGroup:
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "eval" in output.lower()
-        assert "benchmark" in output.lower()
         assert "features" in output.lower()
         assert "backfill" in output.lower()
 
@@ -130,12 +129,6 @@ class TestMLCommandGroup:
         result = runner.invoke(app, ["ml", "eval", "--help"])
         assert result.exit_code == 0
         assert "Evaluate" in result.output
-
-    def test_ml_benchmark_help(self):
-        """Test ml benchmark command."""
-        result = runner.invoke(app, ["ml", "benchmark", "--help"])
-        assert result.exit_code == 0
-        assert "benchmark" in result.output.lower()
 
     def test_ml_features_help(self):
         """Test ml features command."""
