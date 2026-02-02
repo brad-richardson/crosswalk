@@ -93,12 +93,18 @@ class TestComputePairFeaturesConsistency:
     """Ensure compute_pair_features() returns exactly FEATURE_COLUMNS."""
 
     def test_returns_all_feature_columns(self, simple_pair_geoms):
-        """compute_pair_features() must return exactly FEATURE_COLUMNS."""
+        """compute_pair_features() must return exactly FEATURE_COLUMNS.
+
+        Note: Error cases may include _error* metadata fields which are
+        internal tracking fields, not ML features.
+        """
         ref_geom, target_geom = simple_pair_geoms
         features = compute_pair_features(
             ref_geom, target_geom, "Main St", "Main St", "residential", "residential"
         )
-        assert set(features.keys()) == set(FEATURE_COLUMNS)
+        # Filter out internal metadata fields (prefixed with _)
+        feature_keys = {k for k in features if not k.startswith("_")}
+        assert feature_keys == set(FEATURE_COLUMNS)
 
     @pytest.mark.parametrize(
         "graphlet_features,expected_sim,expected_deg",

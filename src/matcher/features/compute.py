@@ -759,15 +759,11 @@ def _get_error_features(
         "likely_representation_mismatch": 0.0,
     }
 
-    # Add error metadata if error is provided
+    # Add error metadata only if error is provided
     if error is not None:
         features["_error"] = str(error)
         features["_error_type"] = type(error).__name__
         features["_error_phase"] = phase or "unknown"
-    else:
-        features["_error"] = None
-        features["_error_type"] = None
-        features["_error_phase"] = None
 
     return features
 
