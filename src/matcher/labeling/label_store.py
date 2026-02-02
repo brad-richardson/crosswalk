@@ -1084,7 +1084,11 @@ def backfill_features(
                     ref_name = ref_attrs.get("name")
                 else:
                     # Non-LR fallback: extract string from Overture's nested name format
-                    ref_name = _extract_name_string(ref_row.get("names")) if hasattr(ref_row, "get") else None
+                    ref_name = (
+                        _extract_name_string(ref_row.get("names"))
+                        if hasattr(ref_row, "get")
+                        else None
+                    )
 
                 target_names_lr = target_row.get("names_lr") if hasattr(target_row, "get") else None
                 if target_names_lr is not None:
@@ -1097,7 +1101,11 @@ def backfill_features(
                     target_name = target_attrs.get("name")
                 else:
                     # Non-LR fallback: extract string from Overture's nested name format
-                    target_name = _extract_name_string(target_row.get("names")) if hasattr(target_row, "get") else None
+                    target_name = (
+                        _extract_name_string(target_row.get("names"))
+                        if hasattr(target_row, "get")
+                        else None
+                    )
 
                 ref_class = ref_row.get("class") if hasattr(ref_row, "get") else None
                 target_class = target_row.get("class") if hasattr(target_row, "get") else None
