@@ -333,6 +333,16 @@ class MatcherSettings(BaseSettings):
         "target dataset attributes. If target has >50% name coverage, uses full model. "
         "Otherwise, uses geometry-only model if available.",
     )
+
+    # Error handling settings
+    error_hard_fail_threshold: float = Field(
+        default=0.50,
+        description="Fail if any phase exceeds this error rate (0.50 = 50%)",
+    )
+    error_log_samples: int = Field(
+        default=5,
+        description="Number of sample errors to log per error type",
+    )
     matching_weights: dict[str, float] = Field(
         default={
             "hausdorff_norm": 0.10,
