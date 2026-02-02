@@ -341,7 +341,7 @@ class MatcherSettings(BaseSettings):
     )
     error_log_samples: int = Field(
         default=5,
-        description="Number of sample errors to log per error type",
+        description="Maximum number of sample errors to log (one per phase:type)",
     )
     matching_weights: dict[str, float] = Field(
         default={

@@ -670,7 +670,7 @@ def compute_pair_features(
 def _get_error_features(
     error: Exception | None = None,
     phase: str | None = None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Return default feature values for error cases.
 
     Args:

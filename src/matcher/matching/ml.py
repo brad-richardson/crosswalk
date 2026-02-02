@@ -274,7 +274,9 @@ def _compute_feature_chunk(chunk):
                 ref_idx=ref_idx,
                 target_idx=target_idx,
             )
-            error_features = _get_error_features(error=e, phase="pass1_data_collection")
+            error_features = _get_error_features(
+                error=e, phase=ErrorPhase.PAIR_FEATURES.value
+            )
             if is_profiling_enabled():
                 get_timing_stats().reset()
             results[chunk_idx] = error_features
@@ -410,7 +412,9 @@ def _compute_feature_chunk(chunk):
                 ref_idx=pd_item["ref_idx"],
                 target_idx=pd_item["target_idx"],
             )
-            error_features = _get_error_features(error=e, phase="pass3_pair_features")
+            error_features = _get_error_features(
+                error=e, phase=ErrorPhase.PAIR_FEATURES.value
+            )
             if is_profiling_enabled():
                 get_timing_stats().reset()
             results[chunk_idx] = error_features

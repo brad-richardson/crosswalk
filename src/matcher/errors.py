@@ -67,14 +67,13 @@ class ErrorAggregator:
     """Aggregates errors across feature computation phases.
 
     Designed to work across process boundaries by supporting serialization
-    for multiprocessing workers.
+    for multiprocessing workers. Tracks counts and keeps one sample error
+    per phase:type combination for debugging.
     """
 
-    errors: list[FeatureError] = field(default_factory=list)
     counts_by_phase: dict[str, int] = field(default_factory=dict)
     counts_by_type: dict[str, int] = field(default_factory=dict)
     sample_errors: dict[str, FeatureError] = field(default_factory=dict)
-    max_samples_per_type: int = 5
 
     @property
     def total(self) -> int:
@@ -90,13 +89,10 @@ class ErrorAggregator:
         self.counts_by_phase[phase_key] = self.counts_by_phase.get(phase_key, 0) + 1
         self.counts_by_type[type_key] = self.counts_by_type.get(type_key, 0) + 1
 
-        # Keep sample errors for each type (up to max_samples_per_type)
+        # Keep one sample error per phase:type combination
         sample_key = f"{phase_key}:{type_key}"
         if sample_key not in self.sample_errors:
             self.sample_errors[sample_key] = error
-
-        # Store in full list (for detailed analysis if needed)
-        self.errors.append(error)
 
     def add_simple(
         self,
@@ -130,9 +126,6 @@ class ErrorAggregator:
         for key, error in other.sample_errors.items():
             if key not in self.sample_errors:
                 self.sample_errors[key] = error
-
-        # Merge full error list
-        self.errors.extend(other.errors)
 
     def to_serializable(self) -> dict[str, Any]:
         """Convert to a serializable dict for pickling across processes."""
