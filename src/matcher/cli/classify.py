@@ -171,6 +171,11 @@ def analyze_classes(
         "--from-labels",
         help="Analyze from labeled data instead of bridge file",
     ),
+    train_predictor: bool = typer.Option(
+        False,
+        "--train-predictor",
+        help="Train a class predictor and show prediction accuracy and suggested mappings",
+    ),
     reference: Path = typer.Option(
         None,
         "--reference",
@@ -184,7 +189,7 @@ def analyze_classes(
         help="Target parquet file (required with bridge file)",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels-dir",
         help="Directory containing Hive-partitioned label CSVs",
     ),
@@ -192,6 +197,11 @@ def analyze_classes(
         Path("labels/data"),
         "--geometries-dir",
         help="Directory containing geometry data (GeoParquet)",
+    ),
+    min_labels: int = typer.Option(
+        50,
+        "--min-labels",
+        help="Minimum labels required per dataset (only with --from-labels)",
     ),
     output: Path = typer.Option(
         None,
@@ -209,30 +219,46 @@ def analyze_classes(
         "--high-threshold",
         help="Threshold for high similarity no-matches",
     ),
+    confidence_threshold: float = typer.Option(
+        0.9,
+        "--confidence-threshold",
+        help="Minimum confidence for bridge file matches (only without --from-labels)",
+    ),
 ):
-    """Analyze class confusion to identify mapping issues.
+    """Analyze class confusion and optionally train a class predictor.
 
     This command analyzes class mappings by examining:
     - Tier violations: vehicle<->pedestrian pairs labeled as match (likely mapping errors)
     - Low similarity matches: class differs but humans labeled match
     - High similarity no-matches: class matches but humans labeled no_match
 
+    With --train-predictor, also:
+    - Trains a lightweight class predictor on matched pairs
+    - Shows prediction accuracy (exact, tier, hierarchy)
+    - Suggests source class -> Overture class mappings
+    - Shows feature importance
+
     Examples:
         # Analyze from labeled data (recommended)
         matcher class analyze --from-labels
 
-        # Analyze from bridge file
+        # Full analysis with predictor on datasets with 50+ labels
+        matcher class analyze --from-labels --train-predictor
+
+        # Analyze from bridge file with predictor
         matcher class analyze bridge.parquet \\
-            --reference ref.parquet --target target.parquet
+            --reference ref.parquet --target target.parquet --train-predictor
 
         # Save detailed report
-        matcher class analyze --from-labels --output analysis_report.json
+        matcher class analyze --from-labels --train-predictor --output analysis.json
     """
     from ..quality.class_analysis import (
         analyze_class_confusion_from_bridge,
         analyze_class_confusion_from_labels,
         format_analysis_report,
     )
+
+    result = {}
 
     if from_labels:
         console.print("[blue]Analyzing class confusion from labels...[/blue]")
@@ -265,13 +291,331 @@ def analyze_classes(
     # Print formatted report
     console.print()
     console.print(format_analysis_report(report))
+    result["confusion_analysis"] = report.to_dict()
+
+    # Train predictor if requested
+    if train_predictor:
+        console.print()
+        console.print("[blue]Training class predictor...[/blue]")
+
+        if from_labels:
+            _train_predictor_from_labels(
+                labels_dir=labels_dir,
+                geometries_dir=geometries_dir,
+                min_labels=min_labels,
+                result=result,
+            )
+        else:
+            _train_predictor_from_bridge(
+                bridge_file=bridge_file,
+                reference=reference,
+                target=target,
+                confidence_threshold=confidence_threshold,
+                result=result,
+            )
 
     # Save JSON if requested
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:
-            json.dump(report.to_dict(), f, indent=2, default=str)
+            json.dump(result, f, indent=2, default=str)
         console.print(f"\n[green]Detailed report saved to {output}[/green]")
+
+
+def _train_predictor_from_labels(
+    labels_dir: Path,
+    geometries_dir: Path,
+    min_labels: int,
+    result: dict,
+):
+    """Train predictor from labeled data."""
+    import geopandas as gpd
+    from shapely import wkb
+
+    from ..classification import (
+        LightweightClassPredictor,
+        analyze_predictions,
+        analyze_source_class_mapping,
+        format_prediction_analysis,
+    )
+
+    labels_dir = Path(labels_dir)
+    geometries_dir = Path(geometries_dir)
+
+    # Find all label partitions
+    partitions = list(labels_dir.glob("dataset=*/data.csv"))
+    if not partitions:
+        console.print(f"[red]No label partitions found in {labels_dir}[/red]")
+        return
+
+    # Collect matches from all datasets with enough labels
+    all_rows = []
+    dataset_stats = []
+
+    for partition_path in partitions:
+        dataset_name = partition_path.parent.name.replace("dataset=", "")
+
+        # Load labels
+        labels_df = pd.read_csv(partition_path)
+        matches = labels_df[labels_df["label"] == "match"]
+
+        if len(matches) < min_labels:
+            continue
+
+        # Load geometry data with classes
+        data_path = geometries_dir / f"dataset={dataset_name}" / "data.parquet"
+        if not data_path.exists():
+            console.print(f"  [yellow]Skipping {dataset_name}: no geometry data[/yellow]")
+            continue
+
+        data_df = pd.read_parquet(data_path)
+
+        # Merge to get classes and geometry for matches
+        cols_to_merge = ["gers_id", "target_id", "ref_class", "target_class", "target_name"]
+        if "target_geometry_wkb" in data_df.columns:
+            cols_to_merge.append("target_geometry_wkb")
+
+        merged = matches.merge(
+            data_df[cols_to_merge],
+            on=["gers_id", "target_id"],
+            how="inner",
+        )
+
+        # Filter out missing classes
+        merged = merged.dropna(subset=["ref_class", "target_class"])
+        merged = merged[merged["ref_class"] != "unknown"]
+
+        if len(merged) < 10:
+            continue
+
+        all_rows.append(merged)
+        dataset_stats.append({"dataset": dataset_name, "matches": len(merged)})
+
+    if not all_rows:
+        console.print("[red]No valid matches found for training[/red]")
+        return
+
+    # Combine all matches
+    combined = pd.concat(all_rows, ignore_index=True)
+
+    console.print(f"  Datasets with {min_labels}+ labels: {len(dataset_stats)}")
+    console.print(f"  Total training samples: {len(combined):,}")
+
+    # Show per-dataset stats
+    for stat in sorted(dataset_stats, key=lambda x: -x["matches"]):
+        console.print(f"    {stat['dataset']}: {stat['matches']} matches")
+
+    # Build training GeoDataFrame with geometry if available
+    if "target_geometry_wkb" in combined.columns:
+        geometries = combined["target_geometry_wkb"].apply(
+            lambda x: wkb.loads(x) if x is not None else None
+        )
+        train_gdf = gpd.GeoDataFrame(
+            {
+                "names": combined["target_name"].fillna(""),
+                "class": combined["target_class"].fillna("unknown"),
+            },
+            geometry=geometries,
+            crs="EPSG:4326",
+        )
+        # Project to metric CRS for length calculations
+        train_gdf = train_gdf.to_crs("EPSG:3857")
+    else:
+        # No geometry available, create simple DataFrame
+        train_gdf = gpd.GeoDataFrame(
+            {
+                "names": combined["target_name"].fillna(""),
+                "class": combined["target_class"].fillna("unknown"),
+            }
+        )
+
+    true_classes = pd.Series(combined["ref_class"].tolist())
+    source_classes = pd.Series(combined["target_class"].tolist())
+
+    # Train predictor
+    predictor = LightweightClassPredictor()
+    train_stats = predictor.train(
+        train_gdf,
+        true_classes,
+        name_column="names",
+        class_column="class",
+    )
+
+    console.print()
+    console.print(f"  Training accuracy: {train_stats['accuracy']:.1%}")
+    console.print(f"  Training tier accuracy: {train_stats['tier_accuracy']:.1%}")
+
+    # Predict and analyze
+    predictions = predictor.predict(train_gdf)
+    pred_analysis = analyze_predictions(true_classes, predictions)
+
+    console.print()
+    console.print(format_prediction_analysis(pred_analysis))
+
+    # Analyze source class mapping
+    console.print()
+    console.print("[blue]Source Class -> Overture Class Mappings:[/blue]")
+    mapping_analysis = analyze_source_class_mapping(source_classes, true_classes)
+
+    console.print(f"  (Based on {mapping_analysis['n_samples']:,} matched pairs)")
+    console.print()
+
+    # Show suggested mappings sorted by confidence
+    sorted_mappings = sorted(
+        mapping_analysis["suggested_mapping"].items(),
+        key=lambda x: mapping_analysis["mapping_confidence"].get(x[0], 0),
+        reverse=True,
+    )
+
+    for src_class, suggested in sorted_mappings[:20]:
+        conf = mapping_analysis["mapping_confidence"].get(src_class, 0)
+        dist = mapping_analysis["mapping_distribution"].get(src_class, {})
+        total = sum(dist.values())
+        top_3 = sorted(dist.items(), key=lambda x: -x[1])[:3]
+        dist_str = ", ".join(f"{c}:{n}" for c, n in top_3)
+        console.print(f"  {src_class:25} -> {suggested:15} ({conf:.0%} of {total}) [{dist_str}]")
+
+    # Feature importance
+    console.print()
+    console.print("[blue]Top Predictive Features:[/blue]")
+    importance = predictor.feature_importance()
+    for feat, imp in importance.head(15).items():
+        console.print(f"  {feat:35} {imp:.3f}")
+
+    # Store results
+    result["training_stats"] = train_stats
+    result["prediction_analysis"] = pred_analysis.to_dict()
+    result["source_mapping_analysis"] = mapping_analysis
+    result["feature_importance"] = importance.to_dict()
+    result["dataset_stats"] = dataset_stats
+
+
+def _train_predictor_from_bridge(
+    bridge_file: Path,
+    reference: Path,
+    target: Path,
+    confidence_threshold: float,
+    result: dict,
+):
+    """Train predictor from bridge file."""
+    import geopandas as gpd
+
+    from ..classification import (
+        LightweightClassPredictor,
+        analyze_predictions,
+        analyze_source_class_mapping,
+        format_prediction_analysis,
+    )
+
+    # Load bridge file
+    bridge = pd.read_parquet(bridge_file)
+    console.print(f"  Bridge file: {len(bridge):,} entries")
+
+    # Filter to confident matches
+    confident = bridge[bridge["confidence"] >= confidence_threshold]
+    console.print(f"  Confident matches (>= {confidence_threshold}): {len(confident):,}")
+
+    if len(confident) < 50:
+        console.print("[red]Error: Not enough confident matches for training[/red]")
+        return
+
+    # Load reference
+    ref_gdf = gpd.read_parquet(reference)
+    ref_gdf["id"] = ref_gdf["id"].astype(str)
+    ref_lookup = ref_gdf.set_index("id")
+    console.print(f"  Reference: {len(ref_gdf):,} segments")
+
+    # Load target
+    target_gdf = gpd.read_parquet(target)
+    target_gdf["id"] = target_gdf["id"].astype(str)
+    console.print(f"  Target: {len(target_gdf):,} segments")
+
+    # Build training set
+    eval_indices = []
+    true_classes = []
+    source_classes = []
+
+    for _, row in confident.iterrows():
+        gers_id = str(row.get("gers_id", row.get("ref_id", "")))
+        target_id = str(row.get("local_id", row.get("target_id", "")))
+
+        if gers_id in ref_lookup.index:
+            ref_class = ref_lookup.loc[gers_id].get("class")
+            if ref_class and ref_class != "unknown":
+                target_mask = target_gdf["id"] == target_id
+                if target_mask.any():
+                    target_idx = target_gdf.index[target_mask][0]
+                    eval_indices.append(target_idx)
+                    true_classes.append(ref_class)
+
+                    src_class = target_gdf.loc[target_idx].get("class")
+                    source_classes.append(src_class if src_class else "unknown")
+
+    console.print(f"  Training samples: {len(eval_indices):,}")
+
+    if len(eval_indices) < 50:
+        console.print("[red]Error: Not enough samples with valid classes[/red]")
+        return
+
+    # Create evaluation dataframes
+    eval_gdf = target_gdf.loc[eval_indices]
+    true_classes_series = pd.Series(true_classes, index=eval_indices)
+    source_classes_series = pd.Series(source_classes, index=eval_indices)
+
+    # Train predictor
+    predictor = LightweightClassPredictor()
+    train_stats = predictor.train(
+        eval_gdf,
+        true_classes_series,
+        name_column="names",
+        class_column="class",
+    )
+
+    console.print()
+    console.print(f"  Training accuracy: {train_stats['accuracy']:.1%}")
+    console.print(f"  Training tier accuracy: {train_stats['tier_accuracy']:.1%}")
+
+    # Predict and analyze
+    predictions = predictor.predict(eval_gdf)
+    pred_analysis = analyze_predictions(true_classes_series, predictions)
+
+    console.print()
+    console.print(format_prediction_analysis(pred_analysis))
+
+    # Analyze source class mapping
+    console.print()
+    console.print("[blue]Source Class -> Overture Class Mappings:[/blue]")
+    mapping_analysis = analyze_source_class_mapping(source_classes_series, true_classes_series)
+
+    console.print(f"  (Based on {mapping_analysis['n_samples']:,} matched pairs)")
+    console.print()
+
+    sorted_mappings = sorted(
+        mapping_analysis["suggested_mapping"].items(),
+        key=lambda x: mapping_analysis["mapping_confidence"].get(x[0], 0),
+        reverse=True,
+    )
+
+    for src_class, suggested in sorted_mappings[:20]:
+        conf = mapping_analysis["mapping_confidence"].get(src_class, 0)
+        dist = mapping_analysis["mapping_distribution"].get(src_class, {})
+        total = sum(dist.values())
+        top_3 = sorted(dist.items(), key=lambda x: -x[1])[:3]
+        dist_str = ", ".join(f"{c}:{n}" for c, n in top_3)
+        console.print(f"  {src_class:25} -> {suggested:15} ({conf:.0%} of {total}) [{dist_str}]")
+
+    # Feature importance
+    console.print()
+    console.print("[blue]Top Predictive Features:[/blue]")
+    importance = predictor.feature_importance()
+    for feat, imp in importance.head(15).items():
+        console.print(f"  {feat:35} {imp:.3f}")
+
+    # Store results
+    result["training_stats"] = train_stats
+    result["prediction_analysis"] = pred_analysis.to_dict()
+    result["source_mapping_analysis"] = mapping_analysis
+    result["feature_importance"] = importance.to_dict()
 
 
 @class_app.command("detect-non-roads")
@@ -602,215 +946,6 @@ def predict_classes(
     console.print(f"\n[green]Predictions saved to {output}[/green]")
 
 
-@class_app.command("analyze-predictor")
-def analyze_class_predictor(
-    bridge_file: Path = typer.Argument(
-        ...,
-        help="Bridge file with confident matches",
-    ),
-    reference: Path = typer.Option(
-        ...,
-        "--reference",
-        "-r",
-        help="Reference parquet file (Overture)",
-    ),
-    target: Path = typer.Option(
-        ...,
-        "--target",
-        "-t",
-        help="Target parquet file",
-    ),
-    output: Path = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Output JSON file for detailed analysis",
-    ),
-    confidence_threshold: float = typer.Option(
-        0.9,
-        "--confidence-threshold",
-        help="Minimum confidence to include in analysis",
-    ),
-    name_column: str = typer.Option(
-        "names",
-        "--name-column",
-        help="Column containing road names in target",
-    ),
-    class_column: str = typer.Option(
-        "class",
-        "--class-column",
-        help="Column containing source class in target",
-    ),
-):
-    """Analyze class predictor performance on known matches.
-
-    This command:
-    1. Trains a class predictor on confident matches
-    2. Evaluates prediction quality (exact, tier, hierarchy accuracy)
-    3. Analyzes how source classes map to Overture classes
-    4. Identifies tier violations and mapping errors
-
-    Examples:
-        matcher class analyze-predictor bridge.parquet \\
-            --reference overture.parquet --target local.parquet
-
-        matcher class analyze-predictor bridge.parquet \\
-            --reference overture.parquet --target local.parquet \\
-            --output analysis.json
-    """
-    import geopandas as gpd
-
-    from ..classification import (
-        LightweightClassPredictor,
-        analyze_predictions,
-        analyze_source_class_mapping,
-        format_prediction_analysis,
-    )
-
-    console.print("[blue]Loading data...[/blue]")
-
-    # Load bridge file
-    bridge = pd.read_parquet(bridge_file)
-    console.print(f"  Bridge file: {len(bridge):,} entries")
-
-    # Filter to confident matches
-    confident = bridge[bridge["confidence"] >= confidence_threshold]
-    console.print(f"  Confident matches (>= {confidence_threshold}): {len(confident):,}")
-
-    if len(confident) < 50:
-        console.print("[red]Error: Not enough confident matches for analysis[/red]")
-        raise typer.Exit(1)
-
-    # Load reference
-    ref_gdf = gpd.read_parquet(reference)
-    ref_gdf["id"] = ref_gdf["id"].astype(str)
-    ref_lookup = ref_gdf.set_index("id")
-    console.print(f"  Reference: {len(ref_gdf):,} segments")
-
-    # Load target
-    target_gdf = gpd.read_parquet(target)
-    target_gdf["id"] = target_gdf["id"].astype(str)
-    console.print(f"  Target: {len(target_gdf):,} segments")
-
-    # Build training/evaluation set
-    console.print("[blue]Building evaluation set...[/blue]")
-    eval_indices = []
-    true_classes = []
-    source_classes = []
-
-    for _, row in confident.iterrows():
-        gers_id = str(row.get("gers_id", row.get("ref_id", "")))
-        target_id = str(row.get("local_id", row.get("target_id", "")))
-
-        if gers_id in ref_lookup.index:
-            ref_class = ref_lookup.loc[gers_id].get("class")
-            if ref_class and ref_class != "unknown":
-                target_mask = target_gdf["id"] == target_id
-                if target_mask.any():
-                    target_idx = target_gdf.index[target_mask][0]
-                    eval_indices.append(target_idx)
-                    true_classes.append(ref_class)
-
-                    src_class = target_gdf.loc[target_idx].get(class_column)
-                    source_classes.append(src_class if src_class else "unknown")
-
-    console.print(f"  Evaluation samples: {len(eval_indices):,}")
-
-    if len(eval_indices) < 50:
-        console.print("[red]Error: Not enough samples with valid classes[/red]")
-        raise typer.Exit(1)
-
-    # Create evaluation dataframes
-    eval_gdf = target_gdf.loc[eval_indices]
-    true_classes_series = pd.Series(true_classes, index=eval_indices)
-    source_classes_series = pd.Series(source_classes, index=eval_indices)
-
-    # Get names for error reporting
-    if name_column in eval_gdf.columns:
-        names_series = eval_gdf[name_column]
-    else:
-        names_series = None
-
-    # Train predictor
-    console.print("[blue]Training class predictor...[/blue]")
-    predictor = LightweightClassPredictor()
-    train_stats = predictor.train(
-        eval_gdf,
-        true_classes_series,
-        name_column=name_column,
-        class_column=class_column,
-    )
-
-    console.print(f"  Training accuracy: {train_stats['accuracy']:.1%}")
-    console.print(f"  Training tier accuracy: {train_stats['tier_accuracy']:.1%}")
-
-    # Predict on evaluation set
-    console.print("[blue]Evaluating predictions...[/blue]")
-    predictions = predictor.predict(eval_gdf)
-
-    # Analyze predictions
-    pred_analysis = analyze_predictions(
-        true_classes_series,
-        predictions,
-        segment_ids=eval_gdf["id"] if "id" in eval_gdf.columns else None,
-        names=names_series,
-    )
-
-    # Print prediction analysis
-    console.print()
-    console.print(format_prediction_analysis(pred_analysis))
-
-    # Analyze source class mapping
-    console.print()
-    console.print("[blue]Analyzing source class mappings...[/blue]")
-    mapping_analysis = analyze_source_class_mapping(
-        source_classes_series,
-        true_classes_series,
-    )
-
-    console.print("\nSource Class -> Overture Class Mappings:")
-    console.print(f"  (Based on {mapping_analysis['n_samples']:,} matched pairs)")
-    console.print()
-
-    # Show suggested mappings sorted by confidence
-    sorted_mappings = sorted(
-        mapping_analysis["suggested_mapping"].items(),
-        key=lambda x: mapping_analysis["mapping_confidence"].get(x[0], 0),
-        reverse=True,
-    )
-
-    for src_class, suggested in sorted_mappings[:20]:
-        conf = mapping_analysis["mapping_confidence"].get(src_class, 0)
-        dist = mapping_analysis["mapping_distribution"].get(src_class, {})
-        total = sum(dist.values())
-
-        # Show top 3 mappings
-        top_3 = sorted(dist.items(), key=lambda x: -x[1])[:3]
-        dist_str = ", ".join(f"{c}:{n}" for c, n in top_3)
-
-        console.print(f"  {src_class:25} -> {suggested:15} ({conf:.0%} of {total}) [{dist_str}]")
-
-    # Feature importance
-    console.print()
-    console.print("[blue]Top Predictive Features:[/blue]")
-    importance = predictor.feature_importance()
-    for feat, imp in importance.head(15).items():
-        console.print(f"  {feat:35} {imp:.3f}")
-
-    # Save detailed output
-    if output:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        result = {
-            "training_stats": train_stats,
-            "prediction_analysis": pred_analysis.to_dict(),
-            "source_mapping_analysis": mapping_analysis,
-            "feature_importance": importance.to_dict(),
-        }
-        with open(output, "w") as f:
-            json.dump(result, f, indent=2, default=str)
-        console.print(f"\n[green]Detailed analysis saved to {output}[/green]")
-
-
 @class_app.command("update-mappings")
 def update_class_mappings(
     datasets: list[str] = typer.Argument(
@@ -838,9 +973,9 @@ def update_class_mappings(
         help="Minimum samples per class",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels-dir",
-        help="Labels directory",
+        help="Directory containing Hive-partitioned label CSVs",
     ),
     geometries_dir: Path = typer.Option(
         Path("labels/data"),
