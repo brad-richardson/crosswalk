@@ -37,12 +37,14 @@ def get_cached_matcher() -> MLMatcher | None:
     try:
         import streamlit as st
 
+        # Check model exists BEFORE calling cached function to avoid caching None
+        model_path = settings.model_path
+        if not model_path.exists():
+            logger.warning(f"ML model not found at {model_path}")
+            return None
+
         @st.cache_resource
         def _load_matcher():
-            model_path = settings.model_path
-            if not model_path.exists():
-                logger.warning(f"ML model not found at {model_path}")
-                return None
             logger.info(f"Loading ML model from {model_path}...")
             matcher = MLMatcher(auto_select=True)
             matcher.load_model(str(model_path))
@@ -697,6 +699,24 @@ def compute_features_only(
             seg_to_connectors=target_seg_to_connectors_ep,
         )
 
+    # Build sibling search contexts for parallel sibling detection
+    # Use ALL segments, not just candidates - a parallel sibling might not have candidate matches
+    from ..features.relational import build_sibling_search_context
+
+    logger.info("Building sibling search contexts...")
+    ref_sibling_context = build_sibling_search_context(
+        geometries=list(reference_proj.geometry),
+        segment_ids=[str(sid) for sid in reference_proj[ref_id_column]],
+        names=list(reference_proj.get(ref_name_column, [None] * len(reference_proj))),
+        classes=list(reference_proj.get(ref_class_column, [None] * len(reference_proj))),
+    )
+    target_sibling_context = build_sibling_search_context(
+        geometries=list(target_proj.geometry),
+        segment_ids=[str(sid) for sid in target_proj[target_id_column]],
+        names=list(target_proj.get(target_name_column, [None] * len(target_proj))),
+        classes=list(target_proj.get(target_class_column, [None] * len(target_proj))),
+    )
+
     # Determine number of workers
     if n_jobs == -1:
         n_workers = max(1, mp.cpu_count() - 2)
@@ -724,6 +744,8 @@ def compute_features_only(
         "ref_graphlet_data": ref_graphlet_data,
         "target_graphlet_data": target_graphlet_data,
         "alignments": alignments,
+        "ref_sibling_context": ref_sibling_context,
+        "target_sibling_context": target_sibling_context,
     }
 
     work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]

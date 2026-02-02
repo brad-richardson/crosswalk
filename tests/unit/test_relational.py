@@ -708,3 +708,42 @@ class TestParallelSiblingDetection:
         # Verify some siblings were detected (sanity check)
         siblings_found = sum(1 for v in result.values() if v[0])
         assert siblings_found > 0, "Expected to find some siblings in test data"
+
+    def test_find_parallel_sibling_cross_class_with_matching_names(self):
+        """Sibling detection should work when names match but classes differ.
+
+        Real-world case: East Mountain Avenue (tertiary in Overture) should match
+        a parallel sibling E MOUNTAIN AVE (primary in local data) because names match.
+        The 2-tier class difference (primary=2, tertiary=4) should NOT block detection
+        when names clearly indicate it's the same road.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Create a split highway where one side is classified differently
+        # This happens when conflating datasets with different classification schemes
+        eastbound = LineString([(0, 0), (500, 0)])
+        westbound = LineString([(0, 15), (500, 15)])  # 15m offset, parallel
+
+        geometries = [eastbound, westbound]
+        spatial_index = STRtree(geometries)
+        # Same road name, but different classes (primary vs tertiary = 2 tier diff)
+        segment_data = [
+            ("eb", "East Mountain Avenue", "tertiary"),
+            ("wb", "East Mountain Avenue", "primary"),
+        ]
+
+        # Should find sibling because NAMES MATCH even though classes differ by 2 tiers
+        has_sibling, dist = find_parallel_sibling(
+            segment=eastbound,
+            segment_id="eb",
+            segment_name="East Mountain Avenue",
+            segment_class="tertiary",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is True, (
+            "Should detect sibling when names match, even with 2-tier class difference"
+        )
+        assert dist == pytest.approx(15.0, abs=1.0)

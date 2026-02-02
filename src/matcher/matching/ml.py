@@ -40,6 +40,7 @@ from ..config import (
     MAX_DISTANCE_METERS,
     SEMANTIC_FEATURES,
 )
+from ..features.semantic import _extract_name_string
 from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 from .types import MatchDecision, MatchResult
@@ -94,9 +95,11 @@ def _extract_lr_attributes_for_pair(
             ref_attrs = extract_aligned_attributes({"name": lr_attr}, ref_start, ref_end)
             ref_name = ref_attrs.get("name")
         else:
-            ref_name = worker_data["ref_names"][ref_idx]
+            # Non-LR fallback: extract string from Overture's nested name format
+            ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
     else:
-        ref_name = worker_data["ref_names"][ref_idx]
+        # Non-LR fallback: extract string from Overture's nested name format
+        ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
 
     # Extract target attributes (typically trivial LR, but support full LR)
     target_names_lr = worker_data.get("target_names_lr")
@@ -107,9 +110,11 @@ def _extract_lr_attributes_for_pair(
             target_attrs = extract_aligned_attributes({"name": lr_attr}, target_start, target_end)
             target_name = target_attrs.get("name")
         else:
-            target_name = worker_data["target_names"][target_idx]
+            # Non-LR fallback: extract string from Overture's nested name format
+            target_name = _extract_name_string(worker_data["target_names"][target_idx])
     else:
-        target_name = worker_data["target_names"][target_idx]
+        # Non-LR fallback: extract string from Overture's nested name format
+        target_name = _extract_name_string(worker_data["target_names"][target_idx])
 
     # Classes and subclasses - use flat values for now (LR support can be added)
     ref_class = worker_data["ref_classes"][ref_idx]
@@ -1474,29 +1479,28 @@ class MLMatcher:
         # Build sibling search contexts for per-pair parallel sibling detection
         # These hold the spatial index and segment metadata needed to search for
         # parallel siblings on aligned sublines (not precomputed on full geometries)
+        # IMPORTANT: Use ALL reference segments, not just candidates - a parallel sibling
+        # might not have any candidate matches in the target dataset
         from ..features.relational import build_sibling_search_context
 
         logger.info("Building sibling search contexts for split carriageway detection...")
         t0 = time.perf_counter()
         ref_sibling_context = build_sibling_search_context(
-            geometries=list(ref_candidates_only.geometry),
-            segment_ids=[str(sid) for sid in ref_candidates_only[ref_id_column]],
-            names=list(ref_candidates_only.get("names", [None] * len(ref_candidates_only))),
-            classes=list(ref_candidates_only.get("class", [None] * len(ref_candidates_only))),
+            geometries=list(reference.geometry),
+            segment_ids=[str(sid) for sid in reference[ref_id_column]],
+            names=list(reference.get("names", [None] * len(reference))),
+            classes=list(reference.get("class", [None] * len(reference))),
         )
         timings["sibling_context_ref"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] sibling_context_ref: {timings['sibling_context_ref']:.2f}s")
 
+        # Use ALL target segments for sibling context (same reasoning as reference)
         t0 = time.perf_counter()
         target_sibling_context = build_sibling_search_context(
-            geometries=list(target_candidates_only_proj.geometry),
-            segment_ids=[str(sid) for sid in target_candidates_only_proj[target_id_column]],
-            names=list(
-                target_candidates_only_proj.get("names", [None] * len(target_candidates_only_proj))
-            ),
-            classes=list(
-                target_candidates_only_proj.get("class", [None] * len(target_candidates_only_proj))
-            ),
+            geometries=list(target.geometry),
+            segment_ids=[str(sid) for sid in target[target_id_column]],
+            names=list(target.get("names", [None] * len(target))),
+            classes=list(target.get("class", [None] * len(target))),
         )
         timings["sibling_context_target"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] sibling_context_target: {timings['sibling_context_target']:.2f}s")
