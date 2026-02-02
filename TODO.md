@@ -25,21 +25,29 @@ This document consolidates all future feature ideas, technical debt, and improve
 ### Fréchet Distance
 - **Feature**: `frechet_distance_m`
 - **Purpose**: Order-preserving distance metric that considers both position and traversal order
-- **Trade-off**: Heavier computation than Hausdorff (~O(n^2) with Douglas-Peucker simplification)
-- **Use case**: Distinguish segments that have similar point sets but different shapes
-- **Priority**: Lower (expensive to compute)
+- **Trade-off**: Heavier computation than Hausdorff (~O(n²) with Douglas-Peucker simplification)
+- **Critical issue**: Direction-sensitive - if datasets have inconsistent digitization direction (common), Fréchet gives poor scores for identical geometry. Would require `min(frechet(A, B), frechet(A, reverse(B)))` which doubles cost.
+- **Why Hausdorff is preferred**: Direction-agnostic by design; handles digitization direction differences without extra computation
+- **Use case**: Only useful if you encounter cases where Hausdorff fails but direction-corrected Fréchet succeeds
+- **Priority**: Low (direction sensitivity makes it problematic for road conflation)
 
 ### Short Segment Flag
 - **Feature**: `short_segment_flag`, `min_length_m`
 - **Purpose**: Short segments (<10m) may need different matching logic
 - **Use case**: Improve matching for ramps, driveways, and connection segments
 
-### Turn-Angle Histogram
-- **Feature**: `turn_angle_histogram`
-- **Purpose**: Capture shape characteristics via distribution of turn angles
-- **Computation**: Compute histogram of angles between consecutive segments
-- **Academic basis**: Hootenanny "shape distance" and conflation literature
-- **Use case**: Compare shape fingerprints between candidate pairs
+### Angle Histogram Similarity
+- **Feature**: `angle_histogram_similarity`
+- **Purpose**: Capture overall shape "signature" independent of position; robust to segmentation differences
+- **Computation**:
+  - Extract angles of each line segment between consecutive vertices
+  - Use `angle % π` to be direction-agnostic (0° and 180° both map to 0)
+  - Bin into 8-16 buckets, normalize to probability distribution
+  - Compare histograms using intersection similarity or chi-squared distance
+- **Gap vs current features**: `heading_delta` is a single value (overall direction); `heading_consistency` measures straightness; neither captures full shape distribution
+- **Academic basis**: Hootenanny "Angle Histogram" from RoadMatcher; shape distance literature
+- **Use case**: Compare shape fingerprints between candidate pairs; distinguish straight vs curvy roads with similar endpoints
+- **Priority**: Medium (novel feature not currently captured)
 
 ---
 
@@ -103,11 +111,23 @@ Features derived from road attributes beyond names and classes.
 - **Computation**: Absolute difference in speed limits (when available)
 - **Use case**: Distinguish frontage roads from highways
 
-### Infrastructure Flags
-- **Features**: `oneway_match`, `surface_match`, `bridge_tunnel_match`
+### One-Way Direction Features
+- **Features**: `is_oneway_ref`, `is_oneway_target`, `oneway_agreement`
+- **Purpose**: Distinguish parallel divided carriageway lanes from true duplicates; avoid matching one-way to two-way
+- **Computation**:
+  - `is_oneway_ref`: Binary flag from Overture `access.forward`/`access.backward` or road properties
+  - `is_oneway_target`: Binary flag from target dataset one-way attribute
+  - `oneway_agreement`: Categorical - both bidirectional (1.0), both oneway same direction (1.0), both oneway opposite direction (0.0), mixed one-way/bidirectional (0.5)
+- **Data sources**: Overture has direction info; many local datasets have one-way attributes
+- **Use case**: Parallel divided carriageway lanes are both one-way but opposite directions; this helps ML distinguish them from duplicate matches
+- **Priority**: Medium (addresses known edge case in split carriageway matching)
+- **Academic basis**: Hootenanny preserves one-way direction during conflation
+
+### Other Infrastructure Flags
+- **Features**: `surface_match`, `bridge_tunnel_match`
 - **Purpose**: Binary flags that should agree for matching segments
-- **Computation**: Direct comparison of oneway, surface, bridge/tunnel attributes
-- **Use case**: Avoid matching one-way street to two-way street
+- **Computation**: Direct comparison of surface, bridge/tunnel attributes
+- **Use case**: Additional signal for edge cases
 
 ---
 
