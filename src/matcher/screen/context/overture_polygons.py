@@ -99,30 +99,30 @@ def get_polygon_union(gdf: gpd.GeoDataFrame) -> Polygon | MultiPolygon | None:
     return None if result.is_empty else result
 
 
-# Convenience aliases for backwards compatibility and clearer API
+# Convenience functions with sensible defaults
+from ..constants import (
+    MIN_BUILDING_AREA_M2,
+    MIN_LANDCOVER_AREA_M2,
+    MIN_WATER_AREA_M2,
+    RESTRICTED_LANDCOVER_SUBTYPES,
+)
+
+
 def fetch_overture_buildings(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
-    min_area_m2: float = 0.0,
+    min_area_m2: float = MIN_BUILDING_AREA_M2,
 ) -> gpd.GeoDataFrame:
     """Fetch building footprint polygons from Overture Maps."""
-    from ..constants import MIN_BUILDING_AREA_M2
-
-    if min_area_m2 == 0.0:
-        min_area_m2 = MIN_BUILDING_AREA_M2
     return fetch_overture_polygons("building", bbox, release, min_area_m2)
 
 
 def fetch_overture_water(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
-    min_area_m2: float = 0.0,
+    min_area_m2: float = MIN_WATER_AREA_M2,
 ) -> gpd.GeoDataFrame:
     """Fetch water body polygons from Overture Maps."""
-    from ..constants import MIN_WATER_AREA_M2
-
-    if min_area_m2 == 0.0:
-        min_area_m2 = MIN_WATER_AREA_M2
     return fetch_overture_polygons("water", bbox, release, min_area_m2)
 
 
@@ -130,13 +130,9 @@ def fetch_overture_landcover(
     bbox: tuple[float, float, float, float],
     release: str | None = None,
     subtypes: set[str] | None = None,
-    min_area_m2: float = 0.0,
+    min_area_m2: float = MIN_LANDCOVER_AREA_M2,
 ) -> gpd.GeoDataFrame:
     """Fetch landcover polygons from Overture Maps."""
-    from ..constants import MIN_LANDCOVER_AREA_M2, RESTRICTED_LANDCOVER_SUBTYPES
-
-    if min_area_m2 == 0.0:
-        min_area_m2 = MIN_LANDCOVER_AREA_M2
     if subtypes is None:
         subtypes = RESTRICTED_LANDCOVER_SUBTYPES
     return fetch_overture_polygons("land_use", bbox, release, min_area_m2, subtypes)
