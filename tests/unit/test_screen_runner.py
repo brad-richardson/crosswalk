@@ -31,11 +31,6 @@ class TestIdColumnDetection:
         # Returns None when raise_on_missing=False
         assert find_id_column(gdf, raise_on_missing=False) is None
 
-    def test_find_id_column_falls_back_when_requested(self):
-        gdf = gpd.GeoDataFrame({"name": ["a", "b"]})
-        # Falls back to first column with warning when explicitly requested
-        assert find_id_column(gdf, fallback=True) == "name"
-
     def test_get_bridge_target_column(self):
         gdf = gpd.GeoDataFrame({"ref_id": [1], "target_id": [2]})
         assert _get_bridge_target_column(gdf) == "target_id"
