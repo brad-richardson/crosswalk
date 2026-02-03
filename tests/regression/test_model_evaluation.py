@@ -8,11 +8,9 @@ from pathlib import Path
 
 import pytest
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split
 
-from matcher.config import FEATURE_COLUMNS
 from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import MLMatcher
+from matcher.matching.ml import MLMatcher, segment_aware_split
 
 # Minimum acceptable F1 score on held-out test set
 MIN_TEST_F1_SCORE = 0.85
@@ -45,11 +43,13 @@ class TestModelEvaluation:
     def test_f1_score_meets_threshold(self, trained_model_path, labels_dir):
         """Model should achieve F1 >= 0.85 on held-out test set.
 
-        This test loads all labels, splits into train/test, and evaluates
-        the model's F1 score on the held-out test set.
+        This test loads all labels, splits into train/test using segment-aware
+        splitting (same as training), and evaluates the model's F1 score on the
+        held-out test set.
         """
         # Load trained model
-        matcher = MLMatcher(str(trained_model_path))
+        matcher = MLMatcher()
+        matcher.load_model(str(trained_model_path))
 
         # Load all labels
         all_labels = LabelStore.load_all(labels_dir)
@@ -57,27 +57,24 @@ class TestModelEvaluation:
         if len(all_labels) == 0:
             pytest.skip("No labels found for evaluation")
 
-        # Filter to binary classification (match vs no_match)
-        # Binary: 0 = no_match, 1 = match
-        df = all_labels[all_labels["label"].isin([0, 1])].copy()
+        # Filter to valid labels (match/no_match)
+        valid_labels = {"match", "no_match"}
+        df = all_labels[all_labels["label"].isin(valid_labels)].copy()
 
         if len(df) < 100:
             pytest.skip(f"Not enough labels for evaluation (found {len(df)}, need >= 100)")
 
-        # Split into train/test (same seed and split as training for consistency)
-        X = df[FEATURE_COLUMNS]
-        y = df["label"]
+        # Segment-aware split (same as training) to get test set
+        # Uses same parameters as training: test_size=0.2, random_state=42
+        _, test_idx = segment_aware_split(df, test_size=0.2, random_state=42)
+        test_df = df.iloc[test_idx].copy()
 
-        _, X_test, _, y_test = train_test_split(
-            X,
-            y,
-            test_size=0.2,
-            random_state=42,
-            stratify=y,
-        )
+        # Extract features and labels (same as training evaluation)
+        X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
+        X_test = matcher._impute_missing(X_test)
 
-        # Predict on test set
-        y_pred = matcher.predict(X_test)
+        # Predict on test set - use model.predict for class labels (0/1)
+        y_pred = matcher.model.predict(X_test)
 
         # Calculate F1 score (weighted average for multiclass, binary here)
         test_f1 = f1_score(y_test, y_pred, average="weighted")
