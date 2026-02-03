@@ -830,5 +830,3 @@ def compute_features(
     console.print(f"  Skipped (cached): {skip_count}")
     if fail_count > 0:
         console.print(f"  [red]Failed: {fail_count}[/red]")
-
-

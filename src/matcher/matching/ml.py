@@ -446,10 +446,8 @@ def _compute_feature_chunk(chunk):
                 target_class=pd_item["target_class"],
                 ref_subclass=pd_item["ref_subclass"],
                 target_subclass=pd_item["target_subclass"],
-                ref_oneway=pd_item["ref_oneway"],
-                target_oneway=pd_item["target_oneway"],
-                ref_speed_limit_kph=pd_item["ref_speed_limit_kph"],
-                target_speed_limit_kph=pd_item["target_speed_limit_kph"],
+                # Note: ref_oneway, target_oneway, ref_speed_limit_kph, target_speed_limit_kph
+                # are extracted but not passed - features parked (see RESEARCH_GRAVEYARD.md)
                 endpoint_features=pd_item["endpoint_features"],
                 ref_topology=pd_item["ref_topology"],
                 target_topology=pd_item["target_topology"],
