@@ -7,7 +7,9 @@ import geopandas as gpd
 from loguru import logger
 
 
-def find_id_column(gdf: gpd.GeoDataFrame, raise_on_missing: bool = True) -> str | None:
+def find_id_column(
+    gdf: gpd.GeoDataFrame, raise_on_missing: bool = True, fallback: bool = True
+) -> str | None:
     """Find the ID column in a GeoDataFrame.
 
     Searches for common ID column names in order of preference:
@@ -16,14 +18,21 @@ def find_id_column(gdf: gpd.GeoDataFrame, raise_on_missing: bool = True) -> str 
 
     Args:
         gdf: Input GeoDataFrame
-        raise_on_missing: If True, raise ValueError when no ID column found.
-                         If False, return None instead.
+        raise_on_missing: If True and no ID column found (after fallback if enabled),
+                         raise ValueError. If False, return None instead.
+        fallback: If True, fall back to first non-geometry column with a warning
+                 when no standard ID column is found. If False, do not fall back.
 
     Returns:
         Name of the ID column, or None if not found and raise_on_missing=False
 
     Raises:
         ValueError: If no ID column found and raise_on_missing=True
+
+    Note:
+        When fallback=True (default), the function will use the first column
+        as a last resort. This may not be unique, so a warning is logged.
+        Use fallback=False when you need strict ID column detection.
     """
     # Check standard ID column names first
     for col in ["id", "ID", "edge_id"]:
@@ -39,8 +48,8 @@ def find_id_column(gdf: gpd.GeoDataFrame, raise_on_missing: bool = True) -> str 
     if gdf.index.name and gdf.index.name in gdf.columns:
         return gdf.index.name
 
-    if raise_on_missing:
-        # Fall back to first non-geometry column with a warning
+    # Fall back to first non-geometry column with a warning (if enabled)
+    if fallback:
         non_geom_cols = [c for c in gdf.columns if c != "geometry"]
         if non_geom_cols:
             fallback_col = non_geom_cols[0]
@@ -50,6 +59,7 @@ def find_id_column(gdf: gpd.GeoDataFrame, raise_on_missing: bool = True) -> str 
             )
             return fallback_col
 
+    if raise_on_missing:
         raise ValueError(
             f"Could not find ID column in GeoDataFrame. "
             f"Expected one of ['id', 'ID', 'edge_id', 'OBJECTID', 'FID']. "

@@ -20,6 +20,13 @@ from ..context import get_polygon_union
 from .travel_mode import get_travel_mode
 
 
+def _pluralize(word: str) -> str:
+    """Simple pluralization for feature type names."""
+    if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+        return word[:-1] + "ies"  # body -> bodies
+    return word + "s"
+
+
 class PolygonBufferTest(ScreenTest):
     """Base class for polygon buffer intersection tests.
 
@@ -35,10 +42,13 @@ class PolygonBufferTest(ScreenTest):
 
     name: str = ""
     feature_type: str = ""
+    # Note: Subclasses should override default_buffers; empty dict is a safe default
+    # since __init__ copies it rather than mutating in-place.
     default_buffers: dict[str, float] = {}
     fetch_func: Callable[..., gpd.GeoDataFrame] | None = None
 
     def __init__(self, buffer_overrides: dict[str, float] | None = None) -> None:
+        # Create new dict to avoid mutating class attribute
         self.buffers = {**self.default_buffers, **(buffer_overrides or {})}
         self.polygon_gdf: gpd.GeoDataFrame | None = None
         self.polygon_union: Polygon | MultiPolygon | None = None
@@ -55,12 +65,16 @@ class PolygonBufferTest(ScreenTest):
 
         if len(self.polygon_gdf) == 0:
             self.polygon_union = None
-            logger.info(f"{self.__class__.__name__} prepared with 0 {self.feature_type}s")
+            logger.info(
+                f"{self.__class__.__name__} prepared with 0 {_pluralize(self.feature_type)}"
+            )
             return
 
         self.polygon_union = get_polygon_union(self.polygon_gdf)
         if self.polygon_union is None:
-            logger.info(f"{self.__class__.__name__} prepared with 0 valid {self.feature_type}s")
+            logger.info(
+                f"{self.__class__.__name__} prepared with 0 valid {_pluralize(self.feature_type)}"
+            )
             return
 
         # Pre-compute buffered geometries for each travel mode
@@ -73,7 +87,8 @@ class PolygonBufferTest(ScreenTest):
             self._buffered[mode] = buffered_metric.to_crs("EPSG:4326").iloc[0]
 
         logger.info(
-            f"{self.__class__.__name__} prepared with {len(self.polygon_gdf)} {self.feature_type}s"
+            f"{self.__class__.__name__} prepared with "
+            f"{len(self.polygon_gdf)} {_pluralize(self.feature_type)}"
         )
 
     def test_candidate(self, ctx: CandidateContext) -> ScreenResult:
@@ -82,7 +97,7 @@ class PolygonBufferTest(ScreenTest):
             return ScreenResult(
                 outcome=ScreenOutcome.SKIP,
                 test_name=self.name,
-                reason=f"No {self.feature_type}s in area",
+                reason=f"No {_pluralize(self.feature_type)} in area",
             )
 
         mode = get_travel_mode(ctx.road_class)

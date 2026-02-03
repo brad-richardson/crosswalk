@@ -21,7 +21,7 @@ from matcher.fetch.overture import (
 
 
 class TestNormalizeOnewayValue:
-    """Tests for normalize_oneway_value in arcgis.py."""
+    """Tests for normalize_oneway_value in normalize.py."""
 
     @pytest.mark.parametrize(
         "value,expected",
@@ -85,7 +85,7 @@ class TestNormalizeOnewayValue:
 
 
 class TestNormalizeSpeedToKph:
-    """Tests for normalize_speed_to_kph in arcgis.py."""
+    """Tests for normalize_speed_to_kph in normalize.py."""
 
     @pytest.mark.parametrize(
         "value,unit,expected",
