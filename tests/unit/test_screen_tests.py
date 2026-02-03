@@ -44,8 +44,8 @@ class TestWaterBodyTest:
     def test_road_not_in_water_passes(self):
         test = WaterBodyTest()
         water = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
-        test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
-        test.water_union = water
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
+        test.polygon_union = water
         # Pre-compute buffered geometries
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(water, buffer_m)
@@ -62,8 +62,8 @@ class TestWaterBodyTest:
     def test_road_in_water_fails(self):
         test = WaterBodyTest()
         water = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
-        test.water_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
-        test.water_union = water
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[water], crs="EPSG:4326")
+        test.polygon_union = water
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(water, buffer_m)
 
@@ -79,8 +79,8 @@ class TestWaterBodyTest:
 
     def test_no_water_skips(self):
         test = WaterBodyTest()
-        test.water_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
-        test.water_union = None
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        test.polygon_union = None
 
         ctx = CandidateContext(
             target_id="target_1",
@@ -99,8 +99,8 @@ class TestBuildingTest:
     def test_road_not_through_building_passes(self):
         test = BuildingTest()
         building = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
-        test.building_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
-        test.building_union = building
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
+        test.polygon_union = building
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
@@ -116,8 +116,8 @@ class TestBuildingTest:
     def test_road_through_building_fails(self):
         test = BuildingTest()
         building = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
-        test.building_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
-        test.building_union = building
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[building], crs="EPSG:4326")
+        test.polygon_union = building
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(building, buffer_m)
 
@@ -133,8 +133,8 @@ class TestBuildingTest:
 
     def test_no_buildings_skips(self):
         test = BuildingTest()
-        test.building_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
-        test.building_union = None
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        test.polygon_union = None
 
         ctx = CandidateContext(
             target_id="target_1",
@@ -153,8 +153,8 @@ class TestLandcoverTest:
     def test_road_not_in_landcover_passes(self):
         test = LandcoverTest()
         wetland = Polygon([(10, 10), (10, 11), (11, 11), (11, 10)])
-        test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
-        test.landcover_union = wetland
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
+        test.polygon_union = wetland
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
@@ -170,8 +170,8 @@ class TestLandcoverTest:
     def test_road_through_wetland_fails(self):
         test = LandcoverTest()
         wetland = Polygon([(-1, -1), (-1, 2), (2, 2), (2, -1)])
-        test.landcover_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
-        test.landcover_union = wetland
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[wetland], crs="EPSG:4326")
+        test.polygon_union = wetland
         for mode, buffer_m in test.buffers.items():
             test._buffered[mode] = _buffer_polygon(wetland, buffer_m)
 
@@ -187,8 +187,8 @@ class TestLandcoverTest:
 
     def test_no_landcover_skips(self):
         test = LandcoverTest()
-        test.landcover_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
-        test.landcover_union = None
+        test.polygon_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        test.polygon_union = None
 
         ctx = CandidateContext(
             target_id="target_1",

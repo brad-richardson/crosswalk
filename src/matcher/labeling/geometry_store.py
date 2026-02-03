@@ -132,22 +132,12 @@ class GeometryStore:
         return self._df
 
     def _load(self) -> pd.DataFrame:
-        """Load geometries from CSV, returning empty DataFrame if file doesn't exist.
-
-        Handles backward compatibility with the old fixed-column schema
-        (ref_name, target_name, ref_class, target_class, ref_subclass,
-        target_subclass) by migrating to JSON attributes on load.
-        """
+        """Load geometries from CSV, returning empty DataFrame if file doesn't exist."""
         if not self.csv_path.exists():
             return self._empty_dataframe()
 
         try:
             df = pd.read_csv(self.csv_path, dtype=str)
-
-            # Migrate old fixed-column schema to JSON attributes
-            if "ref_name" in df.columns and "ref_attributes" not in df.columns:
-                logger.info(f"Migrating {self.csv_path} from fixed columns to JSON attributes")
-                df = self._migrate_fixed_to_json(df)
 
             # Ensure all expected columns exist (forward compatibility)
             for col in GEOMETRY_COLUMNS:
@@ -157,40 +147,6 @@ class GeometryStore:
         except Exception as e:
             logger.warning(f"Failed to load geometry store from {self.csv_path}: {e}")
             return self._empty_dataframe()
-
-    @staticmethod
-    def _migrate_fixed_to_json(df: pd.DataFrame) -> pd.DataFrame:
-        """Migrate old fixed-column schema to JSON attributes."""
-        old_ref_cols = ["ref_name", "ref_class", "ref_subclass"]
-        old_target_cols = ["target_name", "target_class", "target_subclass"]
-
-        ref_attrs = []
-        target_attrs = []
-        for _, row in df.iterrows():
-            ref_dict = {}
-            for col in old_ref_cols:
-                val = row.get(col)
-                if val is not None and not (isinstance(val, float) and pd.isna(val)):
-                    key = col.replace("ref_", "")
-                    ref_dict[key] = str(val)
-            ref_attrs.append(json.dumps(ref_dict) if ref_dict else "{}")
-
-            target_dict = {}
-            for col in old_target_cols:
-                val = row.get(col)
-                if val is not None and not (isinstance(val, float) and pd.isna(val)):
-                    key = col.replace("target_", "")
-                    target_dict[key] = str(val)
-            target_attrs.append(json.dumps(target_dict) if target_dict else "{}")
-
-        df["ref_attributes"] = ref_attrs
-        df["target_attributes"] = target_attrs
-
-        # Drop old columns
-        cols_to_drop = [c for c in old_ref_cols + old_target_cols if c in df.columns]
-        df = df.drop(columns=cols_to_drop)
-
-        return df
 
     def _empty_dataframe(self) -> pd.DataFrame:
         """Create empty DataFrame with correct schema."""

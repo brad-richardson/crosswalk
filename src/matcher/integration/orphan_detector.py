@@ -597,9 +597,11 @@ def _annotate_edges_with_components(
     # Add columns
     annotated["component_id"] = annotated["edge_id"].map(edge_to_component)
     annotated["component_status"] = annotated["component_id"].apply(
-        lambda cid: ComponentStatus.MAIN.value
-        if cid in main_component_ids
-        else ComponentStatus.ORPHAN.value
+        lambda cid: (
+            ComponentStatus.MAIN.value
+            if cid in main_component_ids
+            else ComponentStatus.ORPHAN.value
+        )
     )
     annotated["component_size"] = annotated["component_id"].map(component_sizes)
 
@@ -662,9 +664,11 @@ def annotate_nodes_with_components(
     # Add columns
     annotated["component_id"] = annotated["node_id"].map(node_to_component)
     annotated["component_status"] = annotated["component_id"].apply(
-        lambda cid: ComponentStatus.MAIN.value
-        if cid in main_component_ids
-        else ComponentStatus.ORPHAN.value
+        lambda cid: (
+            ComponentStatus.MAIN.value
+            if cid in main_component_ids
+            else ComponentStatus.ORPHAN.value
+        )
     )
 
     return annotated

@@ -1,30 +1,35 @@
 """Tests for screen runner."""
 
 import geopandas as gpd
-import pytest
 
 from matcher.screen import ScreenReport
-from matcher.screen.runner import (
-    _get_bridge_target_column,
-    _get_id_column,
-)
+from matcher.screen.runner import _get_bridge_target_column
+from matcher.utils.dataframe import find_id_column
 
 
 class TestIdColumnDetection:
     """Tests for ID column detection helpers."""
 
-    def test_get_id_column_finds_id(self):
+    def test_find_id_column_finds_id(self):
         gdf = gpd.GeoDataFrame({"id": [1, 2], "name": ["a", "b"]})
-        assert _get_id_column(gdf, "test") == "id"
+        assert find_id_column(gdf) == "id"
 
-    def test_get_id_column_finds_ID(self):
+    def test_find_id_column_finds_ID(self):
         gdf = gpd.GeoDataFrame({"ID": [1, 2], "name": ["a", "b"]})
-        assert _get_id_column(gdf, "test") == "ID"
+        assert find_id_column(gdf) == "ID"
 
-    def test_get_id_column_raises_if_not_found(self):
+    def test_find_id_column_raises_when_no_id_column(self):
+        import pytest
+
         gdf = gpd.GeoDataFrame({"name": ["a", "b"]})
-        with pytest.raises(ValueError, match="Could not determine ID column"):
-            _get_id_column(gdf, "test")
+        # Raises by default when no ID column found
+        with pytest.raises(ValueError, match="Could not find ID column"):
+            find_id_column(gdf)
+
+    def test_find_id_column_returns_none_when_no_raise(self):
+        gdf = gpd.GeoDataFrame({"name": ["a", "b"]})
+        # Returns None when raise_on_missing=False
+        assert find_id_column(gdf, raise_on_missing=False) is None
 
     def test_get_bridge_target_column(self):
         gdf = gpd.GeoDataFrame({"ref_id": [1], "target_id": [2]})

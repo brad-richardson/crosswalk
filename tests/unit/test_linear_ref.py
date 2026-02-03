@@ -138,18 +138,6 @@ class TestLinearReferencedAttribute:
         assert lr.ranges[1].value == "B"
         assert lr.default_value == "default"
 
-    def test_from_dict_list_legacy_format(self):
-        """Test deserialization supports legacy start/end format."""
-        data = [
-            {"start": 0.0, "end": 0.5, "value": "A"},
-            {"start": 0.5, "end": 1.0, "value": "B"},
-        ]
-        lr = LinearReferencedAttribute.from_dict_list(data)
-        assert len(lr.ranges) == 2
-        assert lr.ranges[0].start == 0.0
-        assert lr.ranges[0].end == 0.5
-        assert lr.ranges[0].value == "A"
-
 
 class TestNormalizeRanges:
     """Tests for normalize_ranges function."""

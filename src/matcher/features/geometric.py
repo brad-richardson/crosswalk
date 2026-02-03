@@ -521,22 +521,6 @@ def _compute_hausdorff_stats(
     return mean_dist, p95_dist
 
 
-def _avg_projection_distance(line_a: LineString, line_b: LineString) -> float:
-    """Compute bidirectional average perpendicular distance.
-
-    For each vertex in A, finds distance to nearest point on B, and vice versa.
-    Returns the mean of all these distances.
-
-    Note: This is mathematically equivalent to mean_hausdorff_distance.
-    Kept as separate function for semantic clarity - "projection distance"
-    emphasizes alignment quality, while "mean Hausdorff" emphasizes the
-    relationship to the classic Hausdorff metric.
-    """
-    # Delegate to _compute_hausdorff_stats to avoid code duplication
-    mean_dist, _ = _compute_hausdorff_stats(line_a, line_b)
-    return mean_dist
-
-
 def _overlap_ratio(line_a: LineString, buf_b: "Polygon") -> float:
     """Compute the ratio of line_a that overlaps with line_b's buffer.
 

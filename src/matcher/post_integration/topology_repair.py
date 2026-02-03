@@ -14,6 +14,7 @@ from loguru import logger
 from shapely.geometry import LineString, Point
 from shapely.ops import snap
 
+from ..utils.dataframe import find_id_column
 from .constants import SNAP_TOLERANCE_M
 from .island_detector import IslandSeverity, detect_islands
 
@@ -79,7 +80,7 @@ def repair_topology(
     repaired_gdf = edges_gdf.copy()
 
     # Determine ID column
-    id_col = id_column or _get_id_column(repaired_gdf)
+    id_col = id_column or find_id_column(repaired_gdf)
 
     # Step 1: Snap endpoints
     repaired_gdf, edges_snapped = snap_endpoints(repaired_gdf, snap_tolerance_m, id_col)
@@ -156,7 +157,7 @@ def snap_endpoints(
     metric_crs = edges_gdf.estimate_utm_crs()
     edges_metric = edges_gdf.to_crs(metric_crs)
 
-    id_col = id_column or _get_id_column(edges_gdf)
+    id_col = id_column or find_id_column(edges_gdf)
 
     # Collect all endpoints
     endpoints: list[dict[str, Any]] = []
@@ -239,16 +240,3 @@ def snap_endpoints(
     result_gdf = edges_metric.to_crs(original_crs)
 
     return result_gdf, len(snapped_edges)
-
-
-def _get_id_column(gdf: gpd.GeoDataFrame) -> str:
-    """Determine the ID column for a GeoDataFrame."""
-    for col in ["id", "ID", "edge_id"]:
-        if col in gdf.columns:
-            return col
-    if gdf.index.name and gdf.index.name in gdf.columns:
-        return gdf.index.name
-    raise ValueError(
-        f"Could not determine ID column. Expected one of ['id', 'ID', 'edge_id']. "
-        f"Available columns: {list(gdf.columns)}"
-    )
