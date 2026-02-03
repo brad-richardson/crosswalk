@@ -698,6 +698,138 @@ def parse_road_flags_lr(road_flags: list | None) -> LinearReferencedAttribute:
     return _parse_simple_rules_lr(road_flags, frozenset(), extract_flags)
 
 
+def parse_oneway_lr(access_restrictions: list | None) -> LinearReferencedAttribute:
+    """Parse Overture access_restrictions array to one-way direction.
+
+    Overture uses access_restrictions[].when.heading with access_type to indicate direction:
+    - heading=backward, access_type=denied → "forward" (backward is denied)
+    - heading=forward, access_type=denied → "backward" (forward is denied)
+    - no heading restrictions → "both" (bidirectional)
+
+    Args:
+        access_restrictions: Array of access restriction rules, or None
+
+    Returns:
+        LinearReferencedAttribute with one-way direction ("forward", "backward", "both", or None)
+    """
+    if access_restrictions is None:
+        return create_trivial_lr(None)
+
+    # Convert numpy array to list if needed
+    if hasattr(access_restrictions, "tolist"):
+        access_restrictions = access_restrictions.tolist()
+
+    if not isinstance(access_restrictions, list) or len(access_restrictions) == 0:
+        return create_trivial_lr(None)
+
+    # Check for heading-based access restrictions
+    forward_denied = False
+    backward_denied = False
+
+    for rule in access_restrictions:
+        if not isinstance(rule, dict):
+            continue
+
+        access_type = rule.get("access_type")
+        when = rule.get("when", {})
+
+        if not isinstance(when, dict):
+            continue
+
+        heading = when.get("heading")
+        if heading is None:
+            continue
+
+        # heading can be "forward" or "backward"
+        if heading == "forward" and access_type == "denied":
+            forward_denied = True
+        elif heading == "backward" and access_type == "denied":
+            backward_denied = True
+
+    # Determine one-way direction based on what's denied
+    if forward_denied and backward_denied:
+        # Both directions denied = no through traffic (rare)
+        value = "none"
+    elif backward_denied:
+        # Backward denied = forward one-way
+        value = "forward"
+    elif forward_denied:
+        # Forward denied = backward one-way
+        value = "backward"
+    else:
+        # Neither denied = bidirectional (or no heading-based rules)
+        value = "both"
+
+    return create_trivial_lr(value)
+
+
+def parse_speed_limit_lr(speed_limits: list | None) -> LinearReferencedAttribute:
+    """Parse Overture speed_limits array into linear-referenced attribute.
+
+    Each entry has:
+    - max_speed: {value: int, unit: "km/h" or "mph"}
+    - between: [start, end] geometric scope (optional)
+
+    All speeds are normalized to km/h for consistent comparison.
+
+    Args:
+        speed_limits: Array of speed limit rule structs
+
+    Returns:
+        LinearReferencedAttribute with normalized speed limit ranges (in kph)
+    """
+    if speed_limits is None:
+        return create_trivial_lr(None)
+
+    # Convert numpy array to list if needed
+    if hasattr(speed_limits, "tolist"):
+        speed_limits = speed_limits.tolist()
+
+    if not isinstance(speed_limits, list) or len(speed_limits) == 0:
+        return create_trivial_lr(None)
+
+    # Build list of (start, end, value, priority) tuples
+    rule_tuples: list[tuple[float, float, int | None, int]] = []
+
+    for i, sl in enumerate(speed_limits):
+        if not isinstance(sl, dict):
+            continue
+
+        # Extract max_speed
+        max_speed = sl.get("max_speed", {})
+        if not isinstance(max_speed, dict):
+            continue
+
+        value = max_speed.get("value")
+        if value is None:
+            continue
+
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+
+        # Convert to km/h if in mph
+        unit = max_speed.get("unit", "km/h")
+        if isinstance(unit, str) and unit.lower() in ("mph", "mi/h"):
+            value = int(value * 1.60934)
+
+        # Extract range
+        range_tuple = _extract_range_from_rule(sl)
+        if range_tuple:
+            start, end = range_tuple
+        else:
+            start, end = 0.0, 1.0
+
+        # Use index as priority (earlier rules win)
+        rule_tuples.append((start, end, value, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(None)
+
+    return normalize_ranges(rule_tuples, default_value=None)
+
+
 def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Extract linear-referenced attributes from Overture columns.
 
@@ -706,6 +838,8 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     - subclass_lr: From subclass_rules array
     - level_lr: From level_rules array
     - road_flags_lr: From road.road_flags array
+    - oneway_lr: From access struct (forward/backward)
+    - speed_limit_kph_lr: From speed_limits array (normalized to kph)
 
     The LR columns store JSON-serializable dict lists for parquet compatibility.
 
@@ -734,7 +868,7 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     elif "subclass" in gdf.columns:
         gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
     else:
-        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}] for _ in range(len(gdf))]
+        gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
     # Parse level linear reference
     if "level_rules" in gdf.columns:
@@ -744,7 +878,7 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             lambda x: create_trivial_lr(x if isinstance(x, int) else 0).to_dict_list()
         )
     else:
-        gdf["level_lr"] = [[{"start": 0.0, "end": 1.0, "value": 0}] for _ in range(len(gdf))]
+        gdf["level_lr"] = [[{"between": [0.0, 1.0], "value": 0}] for _ in range(len(gdf))]
 
     # Parse road_flags linear reference
     if "road" in gdf.columns:
@@ -754,7 +888,7 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             ).to_dict_list()
         )
     else:
-        gdf["road_flags_lr"] = [[{"start": 0.0, "end": 1.0, "value": []}] for _ in range(len(gdf))]
+        gdf["road_flags_lr"] = [[{"between": [0.0, 1.0], "value": []}] for _ in range(len(gdf))]
 
     # Convert frozensets to lists for JSON serialization in road_flags_lr
     def convert_frozensets(lr_data: list) -> list:
@@ -768,5 +902,23 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         return result
 
     gdf["road_flags_lr"] = gdf["road_flags_lr"].apply(convert_frozensets)
+
+    # Parse one-way direction from access_restrictions array
+    if "access_restrictions" in gdf.columns:
+        gdf["oneway_lr"] = gdf["access_restrictions"].apply(
+            lambda x: parse_oneway_lr(x).to_dict_list()
+        )
+    else:
+        gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
+
+    # Parse speed limit from speed_limits array
+    if "speed_limits" in gdf.columns:
+        gdf["speed_limit_kph_lr"] = gdf["speed_limits"].apply(
+            lambda x: parse_speed_limit_lr(x).to_dict_list()
+        )
+    else:
+        gdf["speed_limit_kph_lr"] = [
+            [{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))
+        ]
 
     return gdf

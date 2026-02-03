@@ -8,6 +8,10 @@ source:
   portal_url: https://gcgis-gwinnettcountyga.hub.arcgis.com/datasets/3e039e014f774429b44ac2f721e0cb0e_2/about
 fetch:
   id_prefix: us_gwinnett
+  name_column: FULLNAME
+  oneway_column: ONEWAYDIR
+  speed_limit_column: SPEED_LIMIT
+  speed_limit_unit: mph
   bbox:
   - -84.25
   - 33.75
@@ -15,7 +19,7 @@ fetch:
   - 34.15
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-01-24T15:00:56.931348+00:00'
+  fetched_at: '2026-02-03T12:41:22.812194+00:00'
   bbox:
   - -84.25
   - 33.75

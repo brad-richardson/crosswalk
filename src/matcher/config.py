@@ -91,6 +91,8 @@ NAMES_LR_COLUMN = "names_lr"
 SUBCLASS_LR_COLUMN = "subclass_lr"
 LEVEL_LR_COLUMN = "level_lr"
 ROAD_FLAGS_LR_COLUMN = "road_flags_lr"
+ONEWAY_LR_COLUMN = "oneway_lr"
+SPEED_LIMIT_KPH_LR_COLUMN = "speed_limit_kph_lr"
 
 # All LR columns for convenience
 LR_ATTRIBUTE_COLUMNS = [
@@ -98,6 +100,8 @@ LR_ATTRIBUTE_COLUMNS = [
     SUBCLASS_LR_COLUMN,
     LEVEL_LR_COLUMN,
     ROAD_FLAGS_LR_COLUMN,
+    ONEWAY_LR_COLUMN,
+    SPEED_LIMIT_KPH_LR_COLUMN,
 ]
 
 # ============================================================================
@@ -229,6 +233,9 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "offset_over_expected_halfwidth",  # Offset normalized by road class width
         "likely_representation_mismatch",  # Flag when ref/target have different representation
     ],
+    # Road Properties features (oneway_match, speed_limit_similarity) moved to graveyard
+    # - Data is still fetched (oneway_lr, speed_limit_kph_lr columns) for future use
+    # - See docs/RESEARCH_GRAVEYARD.md for ablation results
 }
 
 # Flattened list of all feature columns (derived from FEATURE_CATEGORIES)

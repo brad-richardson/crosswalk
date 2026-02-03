@@ -10,6 +10,9 @@ fetch:
   id_prefix: us_boston_streets
   name_column: STREETNAME
   class_column: CLASS
+  oneway_column: OP_DIR_SL
+  speed_limit_column: SPEED_LIM
+  speed_limit_unit: mph
   class_mapping:
     '1': motorway
     '2': primary
@@ -24,7 +27,7 @@ fetch:
   - 42.4
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-01-31T17:49:24.554631+00:00'
+  fetched_at: '2026-02-03T12:39:21.919675+00:00'
   bbox:
   - -71.19
   - 42.21
@@ -36,7 +39,7 @@ last_fetch:
   - -70.90785364052692
   - 42.40898311174991
   bbox_buffer_m: 1000.0
-  feature_count: 116760
+  feature_count: 125769
   geometry_types:
   - LineString
   output_path: data/raw

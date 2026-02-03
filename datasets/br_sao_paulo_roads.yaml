@@ -30,7 +30,7 @@ fetch:
     cd_tipo_logradouro:
     - PC
 last_fetch:
-  fetched_at: '2026-02-02T01:23:19.330201+00:00'
+  fetched_at: '2026-02-03T12:29:24.472040+00:00'
   bbox:
   - -46.83
   - -24.0

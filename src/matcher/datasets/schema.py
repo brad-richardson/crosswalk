@@ -53,6 +53,11 @@ class FetchConfig(BaseModel):
     )
     filter_closed_loops: bool = False  # Enable geometry-based closed loop filtering
     exclude: dict[str, list[str]] | None = None  # Column -> values to exclude
+    # One-way direction
+    oneway_column: str | None = None  # Column for one-way direction
+    # Speed limit
+    speed_limit_column: str | None = None  # Column for speed limit
+    speed_limit_unit: str = "kph"  # Unit: "kph" or "mph" (normalized to kph internally)
 
 
 class MatchingConfig(BaseModel):

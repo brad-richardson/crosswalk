@@ -122,7 +122,7 @@ class TestMLCommandGroup:
         output = strip_ansi(result.output)
         assert "eval" in output.lower()
         assert "features" in output.lower()
-        assert "backfill" in output.lower()
+        # Note: 'backfill' was removed - use 'matcher labels backfill' instead
 
     def test_ml_eval_help(self):
         """Test ml eval command."""
@@ -136,11 +136,7 @@ class TestMLCommandGroup:
         assert result.exit_code == 0
         assert "features" in result.output.lower()
 
-    def test_ml_backfill_help(self):
-        """Test ml backfill command."""
-        result = runner.invoke(app, ["ml", "backfill", "--help"])
-        assert result.exit_code == 0
-        assert "backfill" in result.output.lower() or "Recompute" in result.output
+    # ml backfill command was removed - use 'matcher labels backfill' instead
 
 
 class TestIntegrateCommandGroup:

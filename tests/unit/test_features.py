@@ -14,6 +14,8 @@ from matcher.features.geometric import (
 from matcher.features.semantic import (
     compute_class_similarity,
     compute_name_similarity,
+    compute_oneway_match,
+    compute_speed_limit_similarity,
     get_class_info,
     get_traffic_tier,
     names_likely_same_road,
@@ -196,6 +198,86 @@ class TestSemanticFeatures:
         assert names_likely_same_road("Main Street", "Main St")
         assert names_likely_same_road("Interstate 5", "I-5")
         assert not names_likely_same_road("Main Street", "Oak Avenue")
+
+
+class TestOnewayMatch:
+    """Tests for one-way direction compatibility feature."""
+
+    def test_same_direction_forward(self):
+        """Same direction (both forward) should return 1.0."""
+        assert compute_oneway_match("forward", "forward") == pytest.approx(1.0)
+
+    def test_same_direction_backward(self):
+        """Same direction (both backward) should return 1.0."""
+        assert compute_oneway_match("backward", "backward") == pytest.approx(1.0)
+
+    def test_same_direction_both(self):
+        """Same direction (both bidirectional) should return 1.0."""
+        assert compute_oneway_match("both", "both") == pytest.approx(1.0)
+
+    def test_opposite_directions(self):
+        """Opposite directions (forward vs backward) should return 0.1."""
+        assert compute_oneway_match("forward", "backward") == pytest.approx(0.1)
+        assert compute_oneway_match("backward", "forward") == pytest.approx(0.1)
+
+    def test_one_bidirectional_one_oneway(self):
+        """Bidirectional vs one-way should return 0.5 (neutral)."""
+        assert compute_oneway_match("both", "forward") == pytest.approx(0.5)
+        assert compute_oneway_match("forward", "both") == pytest.approx(0.5)
+        assert compute_oneway_match("both", "backward") == pytest.approx(0.5)
+
+    def test_missing_oneway_ref(self):
+        """Missing reference one-way should return 0.5 (neutral)."""
+        assert compute_oneway_match(None, "forward") == pytest.approx(0.5)
+        assert compute_oneway_match(None, "both") == pytest.approx(0.5)
+
+    def test_missing_oneway_target(self):
+        """Missing target one-way should return 0.5 (neutral)."""
+        assert compute_oneway_match("forward", None) == pytest.approx(0.5)
+        assert compute_oneway_match("both", None) == pytest.approx(0.5)
+
+    def test_both_missing(self):
+        """Both missing should return 0.5 (neutral)."""
+        assert compute_oneway_match(None, None) == pytest.approx(0.5)
+
+
+class TestSpeedLimitSimilarity:
+    """Tests for speed limit similarity feature."""
+
+    def test_same_speed(self):
+        """Same speed should return 1.0."""
+        assert compute_speed_limit_similarity(50, 50) == pytest.approx(1.0)
+        assert compute_speed_limit_similarity(100, 100) == pytest.approx(1.0)
+
+    def test_similar_speeds(self):
+        """Similar speeds should return high similarity (min/max ratio)."""
+        # 40 and 50 kph -> min/max = 40/50 = 0.8
+        assert compute_speed_limit_similarity(40, 50) == pytest.approx(0.8)
+        assert compute_speed_limit_similarity(50, 40) == pytest.approx(0.8)
+
+    def test_different_speeds(self):
+        """Different speeds should return lower similarity."""
+        # 30 and 100 kph -> min/max = 30/100 = 0.3
+        assert compute_speed_limit_similarity(30, 100) == pytest.approx(0.3)
+        assert compute_speed_limit_similarity(100, 30) == pytest.approx(0.3)
+
+    def test_missing_ref_speed(self):
+        """Missing reference speed should return 0.5 (neutral)."""
+        assert compute_speed_limit_similarity(None, 50) == pytest.approx(0.5)
+
+    def test_missing_target_speed(self):
+        """Missing target speed should return 0.5 (neutral)."""
+        assert compute_speed_limit_similarity(50, None) == pytest.approx(0.5)
+
+    def test_both_missing(self):
+        """Both missing should return 0.5 (neutral)."""
+        assert compute_speed_limit_similarity(None, None) == pytest.approx(0.5)
+
+    def test_zero_speed(self):
+        """Zero or negative speeds should return 0.5 (neutral)."""
+        assert compute_speed_limit_similarity(0, 50) == pytest.approx(0.5)
+        assert compute_speed_limit_similarity(50, 0) == pytest.approx(0.5)
+        assert compute_speed_limit_similarity(-10, 50) == pytest.approx(0.5)
 
 
 class TestClassInfo:

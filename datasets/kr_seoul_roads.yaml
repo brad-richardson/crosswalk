@@ -18,7 +18,7 @@ fetch:
   source_crs: EPSG:5179
   encoding: EUC-KR
 last_fetch:
-  fetched_at: '2026-01-24T14:56:31.345627+00:00'
+  fetched_at: '2026-02-03T12:35:57.868994+00:00'
   bbox:
   - 126.75
   - 37.4

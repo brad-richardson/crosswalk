@@ -36,28 +36,9 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Purpose**: Short segments (<10m) may need different matching logic
 - **Use case**: Improve matching for ramps, driveways, and connection segments
 
-### Angle Histogram Similarity
-- **Feature**: `angle_histogram_similarity`
-- **Purpose**: Capture overall shape "signature" independent of position; robust to segmentation differences
-- **Computation**:
-  - Extract angles of each line segment between consecutive vertices
-  - Use `angle % π` to be direction-agnostic (0° and 180° both map to 0)
-  - Bin into 8-16 buckets, normalize to probability distribution
-  - Compare histograms using intersection similarity or chi-squared distance
-- **Gap vs current features**: `heading_delta` is a single value (overall direction); `heading_consistency` measures straightness; neither captures full shape distribution
-- **Academic basis**: Hootenanny "Angle Histogram" from RoadMatcher; shape distance literature
-- **Use case**: Compare shape fingerprints between candidate pairs; distinguish straight vs curvy roads with similar endpoints
-- **Priority**: Medium (novel feature not currently captured)
-
 ---
 
 ## Semantic Features
-
-### Name Abbreviation Normalization
-- **Feature**: Enhancement to existing name similarity
-- **Purpose**: Better matching when datasets use different abbreviations
-- **Computation**: Pre-process with abbreviation dictionary (St->Street, Ave->Avenue, Blvd->Boulevard)
-- **Use case**: "Main St" vs "Main Street" should be near-identical match
 
 ### Route Number Normalization
 - **Feature**: `route_number_similarity`
@@ -70,27 +51,6 @@ This document consolidates all future feature ideas, technical debt, and improve
 - **Purpose**: Use alternative names and ref tags for matching
 - **Computation**: Token overlap between ref/alt_name fields when primary names don't match
 - **Use case**: Roads with multiple official names or abbreviations
-
-### Language-Aware Name Comparison
-- **Feature**: `name_language_similarity`
-- **Purpose**: Handle international datasets with non-English names
-- **Computation**: Language detection, choose appropriate phonetic algorithm
-- **Use case**: International deployments (co_bogota, etc.)
-- **Priority**: Medium for international datasets, LOW for English-only
-
-### Traffic Tier Binary Features
-- **Features**: `same_traffic_tier`, `tier_incompatible`
-- **Purpose**: Give ML explicit signals about traffic tier mismatches (vehicle vs pedestrian)
-- **Computation**:
-  - `same_traffic_tier`: 1.0 if both classes in same tier (vehicle/pedestrian/bicycle), 0.0 otherwise
-  - `tier_incompatible`: 1.0 if vehicle↔pedestrian mismatch, 0.0 otherwise
-- **Status**: Functions implemented in `semantic.py` (`compute_tier_match`, `compute_tier_incompatible`)
-- **Why deferred**: Requires label backfill; soft class_similarity penalty currently sufficient
-- **Next steps**:
-  1. Backfill labels with new features
-  2. Retrain model and compare feature importance
-  3. Evaluate if hard tier blocking is needed for specific datasets
-- **Priority**: Low-Medium (incremental improvement over class_similarity)
 
 ---
 
@@ -750,7 +710,6 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 
 | Feature/Fix | Category | Effort |
 |-------------|----------|--------|
-| Junction angle distribution | Topology | Medium |
 | Local clustering coefficient | Topology | Low |
 
 ### Lower Priority (Research)
@@ -759,7 +718,6 @@ Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
 |-------------|----------|--------|
 | Fréchet distance | Geometric | High |
 | Neighbor consistency (MRF) | Context | High |
-| Language-aware names | Semantic | Medium |
 | Graph embeddings | Research | High |
 
 ---

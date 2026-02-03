@@ -26,8 +26,9 @@ fetch:
   - -104.95
   - 40.65
   crs: EPSG:4326
+  oneway_column: ONEWAY
 last_fetch:
-  fetched_at: '2026-02-02T00:34:39.170858+00:00'
+  fetched_at: '2026-02-03T12:40:01.753135+00:00'
   bbox:
   - -105.15
   - 40.45
