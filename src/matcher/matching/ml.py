@@ -23,7 +23,7 @@ import multiprocessing as mp
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import joblib
 import numpy as np
@@ -45,6 +45,23 @@ from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 from .types import MatchDecision, MatchResult
 
+
+class LRAttributes(NamedTuple):
+    """Attributes extracted from linear-referenced data for a candidate pair."""
+
+    ref_name: str | None
+    target_name: str | None
+    ref_class: str | None
+    target_class: str | None
+    ref_subclass: str | None
+    target_subclass: str | None
+    # Road properties (data fetched but features parked - see RESEARCH_GRAVEYARD.md)
+    ref_oneway: str | None
+    target_oneway: str | None
+    ref_speed_limit_kph: int | None
+    target_speed_limit_kph: int | None
+
+
 # Module-level globals for multiprocessing worker data
 _worker_data = None
 
@@ -60,18 +77,7 @@ def _extract_lr_attributes_for_pair(
     target_idx: int,
     alignment,
     worker_data: dict,
-) -> tuple[
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    int | None,
-    int | None,
-]:
+) -> LRAttributes:
     """Extract aligned attributes from LR data for a candidate pair.
 
     Uses alignment fractions to extract majority-covering values from
@@ -85,9 +91,8 @@ def _extract_lr_attributes_for_pair(
         worker_data: Worker data dict with LR columns
 
     Returns:
-        Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass,
-                  target_subclass, ref_oneway, target_oneway,
-                  ref_speed_limit_kph, target_speed_limit_kph)
+        LRAttributes named tuple with ref/target name, class, subclass,
+        oneway, and speed_limit_kph values.
     """
     # Get alignment fractions
     if alignment is not None:
@@ -149,17 +154,17 @@ def _extract_lr_attributes_for_pair(
         worker_data.get("target_speed_limit_kph_lr"), target_idx, target_start, target_end
     )
 
-    return (
-        ref_name,
-        target_name,
-        ref_class,
-        target_class,
-        ref_subclass,
-        target_subclass,
-        ref_oneway,
-        target_oneway,
-        ref_speed_limit_kph,
-        target_speed_limit_kph,
+    return LRAttributes(
+        ref_name=ref_name,
+        target_name=target_name,
+        ref_class=ref_class,
+        target_class=target_class,
+        ref_subclass=ref_subclass,
+        target_subclass=target_subclass,
+        ref_oneway=ref_oneway,
+        target_oneway=target_oneway,
+        ref_speed_limit_kph=ref_speed_limit_kph,
+        target_speed_limit_kph=target_speed_limit_kph,
     )
 
 
@@ -301,18 +306,7 @@ def _compute_feature_chunk(chunk):
                     geom_sim_target = target_geom
 
             # Extract aligned attributes from LR data (using alignment fractions)
-            (
-                ref_name,
-                target_name,
-                ref_class,
-                target_class,
-                ref_subclass,
-                target_subclass,
-                ref_oneway,
-                target_oneway,
-                ref_speed_limit_kph,
-                target_speed_limit_kph,
-            ) = _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
+            lr_attrs = _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
 
             pair_data.append(
                 {
@@ -321,16 +315,16 @@ def _compute_feature_chunk(chunk):
                     "target_idx": target_idx,
                     "geom_sim_ref": geom_sim_ref,
                     "geom_sim_target": geom_sim_target,
-                    "ref_name": ref_name,
-                    "target_name": target_name,
-                    "ref_class": ref_class,
-                    "target_class": target_class,
-                    "ref_subclass": ref_subclass,
-                    "target_subclass": target_subclass,
-                    "ref_oneway": ref_oneway,
-                    "target_oneway": target_oneway,
-                    "ref_speed_limit_kph": ref_speed_limit_kph,
-                    "target_speed_limit_kph": target_speed_limit_kph,
+                    "ref_name": lr_attrs.ref_name,
+                    "target_name": lr_attrs.target_name,
+                    "ref_class": lr_attrs.ref_class,
+                    "target_class": lr_attrs.target_class,
+                    "ref_subclass": lr_attrs.ref_subclass,
+                    "target_subclass": lr_attrs.target_subclass,
+                    "ref_oneway": lr_attrs.ref_oneway,
+                    "target_oneway": lr_attrs.target_oneway,
+                    "ref_speed_limit_kph": lr_attrs.ref_speed_limit_kph,
+                    "target_speed_limit_kph": lr_attrs.target_speed_limit_kph,
                     "endpoint_features": endpoint_features,
                     "ref_topology": ref_topology,
                     "target_topology": target_topology,
