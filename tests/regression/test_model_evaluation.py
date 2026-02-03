@@ -6,7 +6,6 @@ that the F1 score is at least 0.85. This prevents model quality regressions.
 
 from pathlib import Path
 
-import pandas as pd
 import pytest
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
@@ -68,7 +67,6 @@ class TestModelEvaluation:
         # Split into train/test (same seed and split as training for consistency)
         X = df[FEATURE_COLUMNS]
         y = df["label"]
-        segment_id = df["ref_segment_id"]
 
         _, X_test, _, y_test = train_test_split(
             X,
