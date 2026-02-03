@@ -8,7 +8,7 @@ from loguru import logger
 
 
 def find_id_column(
-    gdf: gpd.GeoDataFrame, raise_on_missing: bool = True, fallback: bool = True
+    gdf: gpd.GeoDataFrame, raise_on_missing: bool = True, fallback: bool = False
 ) -> str | None:
     """Find the ID column in a GeoDataFrame.
 
