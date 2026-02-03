@@ -119,7 +119,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-01"
+FEATURE_VERSION = "2026-02-03"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -143,6 +143,8 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "length_ratio",
         "centroid_distance_m",
         "collinear_gap_ratio",
+        "angle_histogram_similarity",  # Shape fingerprint via turn angle distribution
+        "edge_distance_rmse_m",  # RMSE of sampled point distances (Hootenanny)
     ],
     "Name Similarity": [
         "name_levenshtein",

@@ -326,32 +326,40 @@ def backfill_features(
         "--skip-missing/--fail-missing",
         help="Skip pairs with missing source data",
     ),
-    human_only: bool = typer.Option(
+    include_agent: bool = typer.Option(
         False,
-        "--human-only",
-        help="Only backfill human labels (skip agent)",
+        "--include-agent",
+        help="Also backfill agent labels (by default only human labels are processed)",
     ),
     agent_only: bool = typer.Option(
         False,
         "--agent-only",
         help="Only backfill agent labels (skip human)",
     ),
+    missing_only: bool = typer.Option(
+        False,
+        "--missing-only",
+        help="Only compute features for labels without any features (skip existing)",
+    ),
 ):
-    """Compute missing features for human and/or agent labels.
+    """Recompute features for human labels using current feature computation code.
 
-    This command finds labels (human and/or agent) that don't have corresponding
-    features in labels/features/ and computes them from source data.
+    By default, this recomputes ALL features for all human labels to ensure
+    consistency when feature computation logic changes or new features are added.
+
+    Use --include-agent to also process agent labels.
+    Use --missing-only to only compute features for labels that don't have any.
 
     Use this after:
-    - Adding new labels via the UI
-    - Migrating to enable weak supervision with agent labels
-    - When features need to be recomputed (e.g., new feature version)
+    - Adding new features to the ML pipeline
+    - Changing feature computation logic
+    - Adding new labels via the UI (with --missing-only)
 
     Examples:
-        matcher labels backfill --dry-run
-        matcher labels backfill
-        matcher labels backfill --agent-only
-        matcher labels backfill --human-only
+        matcher labels backfill --dry-run       # Preview what would be recomputed
+        matcher labels backfill                 # Recompute all human label features
+        matcher labels backfill --include-agent # Also include agent labels
+        matcher labels backfill --missing-only  # Only compute for labels without features
     """
 
     from ..labeling.feature_store import FeatureStore
@@ -362,11 +370,15 @@ def backfill_features(
     agent_dir = labels_dir / "agent"
     features_dir = labels_dir / "features"
 
+    # Determine what to process based on flags
+    process_human = not agent_only
+    process_agent = include_agent or agent_only
+
     # Collect all labels to process
     all_label_keys = set()
     label_sources = {}  # Track which source each key came from
 
-    if not agent_only:
+    if process_human:
         if human_dir.exists():
             console.print("[blue]Loading human labels...[/blue]")
             human_labels = LabelStore.load_human_labels(human_dir)
@@ -389,7 +401,7 @@ def backfill_features(
         else:
             console.print(f"  [yellow]Human labels directory not found: {human_dir}[/yellow]")
 
-    if not human_only:
+    if process_agent:
         if agent_dir.exists():
             console.print("[blue]Loading agent labels...[/blue]")
             agent_labels = LabelStore.load_agent_labels(agent_dir)
@@ -417,45 +429,54 @@ def backfill_features(
         console.print("[yellow]No labels found to process.[/yellow]")
         raise typer.Exit(0)
 
-    # Load existing features to find what's missing
-    console.print("[blue]Loading existing features...[/blue]")
-    existing_features = FeatureStore.load_all(features_dir)
+    # Determine which labels to process
+    if missing_only:
+        # Only compute for labels without any features
+        console.print("[blue]Loading existing features...[/blue]")
+        existing_features = FeatureStore.load_all(features_dir)
 
-    if len(existing_features) > 0:
-        existing_keys = set(
-            zip(
-                existing_features["gers_id"],
-                existing_features["target_id"],
-                existing_features["dataset"],
+        if len(existing_features) > 0:
+            existing_keys = set(
+                zip(
+                    existing_features["gers_id"],
+                    existing_features["target_id"],
+                    existing_features["dataset"],
+                )
             )
-        )
-        console.print(f"  Found {len(existing_keys)} existing feature records")
-    else:
-        existing_keys = set()
-        console.print("  No existing features found")
+            console.print(f"  Found {len(existing_keys)} existing feature records")
+        else:
+            existing_keys = set()
+            console.print("  No existing features found")
 
-    # Find labels without features
-    missing_keys = all_label_keys - existing_keys
+        keys_to_process = all_label_keys - existing_keys
+        action_verb = "missing"
+    else:
+        # Recompute all features (default)
+        keys_to_process = all_label_keys
+        action_verb = "total"
 
     # Count by source
-    missing_human = sum(1 for k in missing_keys if label_sources.get(k) == "human")
-    missing_agent = sum(1 for k in missing_keys if label_sources.get(k) == "agent")
+    human_count = sum(1 for k in keys_to_process if label_sources.get(k) == "human")
+    agent_count = sum(1 for k in keys_to_process if label_sources.get(k) == "agent")
     console.print(
-        f"  {len(missing_keys)} labels need features ({missing_human} human, {missing_agent} agent)"
+        f"  {len(keys_to_process)} {action_verb} labels to process ({human_count} human, {agent_count} agent)"
     )
 
-    if len(missing_keys) == 0:
-        console.print("[green]All labels already have features.[/green]")
+    if len(keys_to_process) == 0:
+        if missing_only:
+            console.print("[green]All labels already have features.[/green]")
+        else:
+            console.print("[yellow]No labels to process.[/yellow]")
         raise typer.Exit(0)
 
     if dry_run:
         console.print("\n[yellow][DRY RUN] Would compute features for:[/yellow]")
         # Group by dataset for summary
-        missing_by_dataset = {}
-        for _gers_id, _target_id, dataset in missing_keys:
-            missing_by_dataset[dataset] = missing_by_dataset.get(dataset, 0) + 1
+        by_dataset = {}
+        for _gers_id, _target_id, dataset in keys_to_process:
+            by_dataset[dataset] = by_dataset.get(dataset, 0) + 1
 
-        for dataset, count in sorted(missing_by_dataset.items()):
+        for dataset, count in sorted(by_dataset.items()):
             console.print(f"  {dataset}: {count} pairs")
         console.print("\n[yellow]Run without --dry-run to compute features.[/yellow]")
         raise typer.Exit(0)
@@ -476,17 +497,17 @@ def backfill_features(
     from ..filenames import find_overture_segments, find_target_file
     from ..utils.geometry import filter_to_linestrings
 
-    # Process by dataset - get unique datasets from missing keys
-    datasets = sorted(set(d for _, _, d in missing_keys))
+    # Process by dataset - get unique datasets from keys to process
+    datasets = sorted(set(d for _, _, d in keys_to_process))
     total_computed = 0
     total_skipped = 0
 
     for dataset in datasets:
-        dataset_missing = [(g, t) for g, t, d in missing_keys if d == dataset]
-        if not dataset_missing:
+        dataset_keys = [(g, t) for g, t, d in keys_to_process if d == dataset]
+        if not dataset_keys:
             continue
 
-        console.print(f"\n[blue]Processing {dataset} ({len(dataset_missing)} pairs)...[/blue]")
+        console.print(f"\n[blue]Processing {dataset} ({len(dataset_keys)} pairs)...[/blue]")
 
         # Load source data
         overture_path = find_overture_segments(data_dir, dataset)
@@ -495,7 +516,7 @@ def backfill_features(
         if overture_path is None:
             if skip_missing:
                 console.print("  [yellow]Skipping: Overture data not found[/yellow]")
-                total_skipped += len(dataset_missing)
+                total_skipped += len(dataset_keys)
                 continue
             else:
                 console.print("  [red]Error: Overture data not found[/red]")
@@ -504,7 +525,7 @@ def backfill_features(
         if target_path is None:
             if skip_missing:
                 console.print("  [yellow]Skipping: Target data not found[/yellow]")
-                total_skipped += len(dataset_missing)
+                total_skipped += len(dataset_keys)
                 continue
             else:
                 console.print("  [red]Error: Target data not found[/red]")
@@ -577,7 +598,7 @@ def backfill_features(
         computed = 0
         skipped = 0
 
-        for gers_id, target_id in dataset_missing:
+        for gers_id, target_id in dataset_keys:
             # Check if IDs exist in data
             if gers_id not in ref_lookup.index or target_id not in target_lookup.index:
                 skipped += 1

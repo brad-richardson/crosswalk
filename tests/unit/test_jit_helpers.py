@@ -768,3 +768,122 @@ class TestComputeVertexDensityOptionalCoords:
         line = LineString(coords)
         result = compute_vertex_density(line)
         assert result == pytest.approx(11 / 100)
+
+
+class TestComputeAngleHistogramNumba:
+    """Tests for compute_angle_histogram_numba JIT function."""
+
+    def test_straight_line_all_in_first_bin(self):
+        """Straight line should have all turns in first bin (0° turns)."""
+        from matcher.features._jit_helpers import compute_angle_histogram_numba
+
+        # Perfectly straight line - all turn angles should be ~0
+        coords = np.array([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]])
+        histogram = compute_angle_histogram_numba(coords)
+
+        # All turns should be in first bin (0-22.5°)
+        assert histogram[0] == pytest.approx(1.0)
+        assert histogram.sum() == pytest.approx(1.0)
+
+    def test_right_angle_turns(self):
+        """Line with 90° turns should have turns in the 90° bin."""
+        from matcher.features._jit_helpers import compute_angle_histogram_numba
+
+        # Zigzag with 90° turns
+        coords = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]])
+        histogram = compute_angle_histogram_numba(coords)
+
+        # 90° falls in bin 4 (90/22.5 = 4)
+        # Two 90° turns -> bin 4 should have all the mass
+        assert histogram[4] == pytest.approx(1.0)
+        assert histogram.sum() == pytest.approx(1.0)
+
+    def test_mixed_angles(self):
+        """Line with mixed turn angles should distribute across bins."""
+        from matcher.features._jit_helpers import compute_angle_histogram_numba
+
+        # One small turn (~15°) and one larger turn (~60°)
+        # Point 1 -> 2: heading ~0°
+        # Point 2 -> 3: heading ~15° (small turn)
+        # Point 3 -> 4: heading ~75° (60° turn from 15°)
+        coords = np.array([
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [20.0, 2.68],  # ~15° turn
+            [25.0, 12.0],  # ~60° turn
+        ])
+        histogram = compute_angle_histogram_numba(coords)
+
+        # Should have distribution across multiple bins
+        assert histogram.sum() == pytest.approx(1.0)
+        # Should not be all in one bin
+        assert np.count_nonzero(histogram) >= 2
+
+    def test_too_few_points_returns_zeros(self):
+        """Lines with fewer than 3 points should return zeros."""
+        from matcher.features._jit_helpers import compute_angle_histogram_numba
+
+        # 2 points - no turns possible
+        coords = np.array([[0.0, 0.0], [10.0, 0.0]])
+        histogram = compute_angle_histogram_numba(coords)
+
+        assert histogram.sum() == pytest.approx(0.0)
+        assert len(histogram) == 8  # Default 8 bins
+
+    def test_histogram_is_normalized(self):
+        """Histogram should sum to 1.0 for valid lines."""
+        from matcher.features._jit_helpers import compute_angle_histogram_numba
+
+        # Complex line with multiple turns
+        coords = np.array([
+            [0.0, 0.0], [10.0, 5.0], [20.0, 0.0],
+            [30.0, 10.0], [40.0, 5.0], [50.0, 15.0]
+        ])
+        histogram = compute_angle_histogram_numba(coords)
+
+        assert histogram.sum() == pytest.approx(1.0)
+
+
+class TestHistogramIntersectionNumba:
+    """Tests for histogram_intersection_numba JIT function."""
+
+    def test_identical_histograms(self):
+        """Identical histograms should have intersection of 1.0."""
+        from matcher.features._jit_helpers import histogram_intersection_numba
+
+        h1 = np.array([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
+        h2 = np.array([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        result = histogram_intersection_numba(h1, h2)
+        assert result == pytest.approx(1.0)
+
+    def test_disjoint_histograms(self):
+        """Completely disjoint histograms should have intersection of 0.0."""
+        from matcher.features._jit_helpers import histogram_intersection_numba
+
+        h1 = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        h2 = np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+
+        result = histogram_intersection_numba(h1, h2)
+        assert result == pytest.approx(0.0)
+
+    def test_partial_overlap(self):
+        """Partially overlapping histograms should have intermediate intersection."""
+        from matcher.features._jit_helpers import histogram_intersection_numba
+
+        h1 = np.array([0.6, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        h2 = np.array([0.4, 0.4, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        # min(0.6, 0.4) + min(0.4, 0.4) + min(0, 0.2) = 0.4 + 0.4 + 0 = 0.8
+        result = histogram_intersection_numba(h1, h2)
+        assert result == pytest.approx(0.8)
+
+    def test_uniform_histograms(self):
+        """Uniform histograms should have intersection of 1.0."""
+        from matcher.features._jit_helpers import histogram_intersection_numba
+
+        h1 = np.array([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125])
+        h2 = np.array([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125])
+
+        result = histogram_intersection_numba(h1, h2)
+        assert result == pytest.approx(1.0)

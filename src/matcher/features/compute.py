@@ -124,7 +124,9 @@ from .alignment import AlignmentResult, compute_coverage_features, create_sublin
 from .geometric import (
     GeometricFeatures,
     _compute_hausdorff_stats,
+    compute_angle_histogram_similarity,
     compute_collinear_gap_ratio,
+    compute_edge_distance_rmse,
     compute_geometric_features,
     compute_heading_consistency,
     compute_shape_complexity,
@@ -280,6 +282,16 @@ def _compute_non_geometric_features(
         shape_complexity_ref = compute_shape_complexity(geom_sim_ref, coords=coords_ref)
         shape_complexity_target = compute_shape_complexity(geom_sim_target, coords=coords_target)
         shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
+
+    # Angle histogram similarity (shape fingerprint)
+    with timed_section("angle_histogram"):
+        angle_histogram_similarity = compute_angle_histogram_similarity(
+            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+        )
+
+    # Edge distance RMSE (Hootenanny's primary metric)
+    with timed_section("edge_distance_rmse"):
+        edge_distance_rmse_m = compute_edge_distance_rmse(geom_sim_ref, geom_sim_target)
 
     # Name numeric match
     with timed_section("name_numeric_match"):
@@ -506,6 +518,9 @@ def _compute_non_geometric_features(
         "offset_vs_half_corridor_ratio": offset_vs_half_corridor_ratio,
         "offset_over_expected_halfwidth": offset_over_expected_halfwidth,
         "likely_representation_mismatch": likely_representation_mismatch,
+        # Shape/geometric features (new)
+        "angle_histogram_similarity": angle_histogram_similarity,
+        "edge_distance_rmse_m": edge_distance_rmse_m,
     }
 
 
@@ -757,6 +772,9 @@ def _get_error_features(
         "offset_vs_half_corridor_ratio": 1.0,
         "offset_over_expected_halfwidth": 0.0,
         "likely_representation_mismatch": 0.0,
+        # Shape/geometric features - default to neutral values
+        "angle_histogram_similarity": 1.0,  # Treat as compatible in error case
+        "edge_distance_rmse_m": MAX_DISTANCE_METERS,
     }
 
     # Add error metadata only if error is provided
