@@ -383,7 +383,7 @@ def compute_angle_histogram_numba(coords: np.ndarray, n_bins: int = 8) -> np.nda
 
     Args:
         coords: Nx2 array of coordinates
-        n_bins: Number of histogram bins (default 8 = 45° per bin)
+        n_bins: Number of histogram bins (default 8 = 22.5° per bin over 0-180°)
 
     Returns:
         Normalized histogram array of shape (n_bins,), sums to 1.0

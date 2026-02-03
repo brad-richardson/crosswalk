@@ -806,12 +806,14 @@ class TestComputeAngleHistogramNumba:
         # Point 1 -> 2: heading ~0°
         # Point 2 -> 3: heading ~15° (small turn)
         # Point 3 -> 4: heading ~75° (60° turn from 15°)
-        coords = np.array([
-            [0.0, 0.0],
-            [10.0, 0.0],
-            [20.0, 2.68],  # ~15° turn
-            [25.0, 12.0],  # ~60° turn
-        ])
+        coords = np.array(
+            [
+                [0.0, 0.0],
+                [10.0, 0.0],
+                [20.0, 2.68],  # ~15° turn
+                [25.0, 12.0],  # ~60° turn
+            ]
+        )
         histogram = compute_angle_histogram_numba(coords)
 
         # Should have distribution across multiple bins
@@ -835,10 +837,9 @@ class TestComputeAngleHistogramNumba:
         from matcher.features._jit_helpers import compute_angle_histogram_numba
 
         # Complex line with multiple turns
-        coords = np.array([
-            [0.0, 0.0], [10.0, 5.0], [20.0, 0.0],
-            [30.0, 10.0], [40.0, 5.0], [50.0, 15.0]
-        ])
+        coords = np.array(
+            [[0.0, 0.0], [10.0, 5.0], [20.0, 0.0], [30.0, 10.0], [40.0, 5.0], [50.0, 15.0]]
+        )
         histogram = compute_angle_histogram_numba(coords)
 
         assert histogram.sum() == pytest.approx(1.0)
