@@ -213,6 +213,24 @@ STREET_ABBREVIATIONS = {
     " nw ": " northwest ",
     " se ": " southeast ",
     " sw ": " southwest ",
+    # Trail/Terrace/Square
+    " tr ": " trail ",
+    " trl ": " trail ",
+    " ter ": " terrace ",
+    " terr ": " terrace ",
+    " sq ": " square ",
+    # Crossing/Alley
+    " xing ": " crossing ",
+    " aly ": " alley ",
+    # Highway types
+    " frwy ": " freeway ",
+    " expy ": " expressway ",
+    # Mountain/Mount
+    " mt ": " mount ",
+    " mtn ": " mountain ",
+    # Route prefixes
+    " sr ": " state route ",
+    " cr ": " county road ",
 }
 
 
@@ -565,6 +583,99 @@ def extract_numeric_suffix(name: str | None) -> int | None:
         return int(numbers[-1])
 
     return None
+
+
+# Route prefix patterns for canonicalizing route names
+# Each pattern maps to a route type. Patterns are checked in order.
+ROUTE_PREFIX_PATTERNS = [
+    (r"^i[\-\s]?(\d)", "interstate"),
+    (r"^interstate\s*", "interstate"),
+    (r"^us[\-\s]?(\d)", "us_route"),
+    (r"^u\.?s\.?\s*(route|highway|hwy)?\s*", "us_route"),
+    (r"^sr[\-\s]?(\d)", "state_route"),
+    (r"^state\s*(route|highway|road|rd)\s*", "state_route"),
+    (r"^cr[\-\s]?(\d)", "county_road"),
+    (r"^county\s*(road|route|rd)\s*", "county_road"),
+    (r"^hwy[\-\s]?(\d)", "highway"),
+    (r"^highway\s*", "highway"),
+]
+
+# Pre-compile patterns for efficiency
+_ROUTE_PREFIX_PATTERNS_COMPILED = [
+    (re.compile(p, re.IGNORECASE), t) for p, t in ROUTE_PREFIX_PATTERNS
+]
+
+
+def canonicalize_route_name(name: str | None) -> tuple[str | None, int | None]:
+    """Canonicalize a route name to (prefix_type, route_number).
+
+    Recognizes common route naming conventions:
+    - Interstate: I-5, I 5, Interstate 5
+    - US Route: US-101, US 101, U.S. Route 101, US Highway 101
+    - State Route: SR-99, SR 99, State Route 99, State Highway 99
+    - County Road: CR-15, CR 15, County Road 15
+    - Highway: Hwy 1, Highway 1
+
+    Args:
+        name: Route name to canonicalize
+
+    Returns:
+        Tuple of (prefix_type, route_number) where:
+        - prefix_type: "interstate", "us_route", "state_route", "county_road", "highway", or None
+        - route_number: The numeric route number, or None if not found
+    """
+    if not name:
+        return None, None
+
+    name_lower = name.lower().strip()
+
+    # Try each pattern
+    for pattern, route_type in _ROUTE_PREFIX_PATTERNS_COMPILED:
+        if pattern.search(name_lower):
+            # Extract the route number
+            route_num = extract_numeric_suffix(name)
+            return route_type, route_num
+
+    return None, None
+
+
+def compute_route_prefix_match(name_a, name_b) -> float:
+    """Compute route prefix type matching score.
+
+    Compares the route prefix types (Interstate, US Route, State Route, etc.)
+    between two road names. This helps distinguish between different route
+    systems that may have the same number (e.g., I-5 vs US-5 vs SR-5).
+
+    Args:
+        name_a: First name (string or dict with 'primary' key)
+        name_b: Second name (string or dict with 'primary' key)
+
+    Returns:
+        1.0 if both have the same route prefix type
+        0.0 if both have different route prefix types
+        0.5 if either/both is not a recognized route (neutral)
+    """
+    # Extract name strings from dict if needed
+    name_a = _extract_name_string(name_a)
+    name_b = _extract_name_string(name_b)
+
+    # Get route prefix types
+    prefix_a, _ = canonicalize_route_name(name_a)
+    prefix_b, _ = canonicalize_route_name(name_b)
+
+    # Neither is a route - neutral (no signal)
+    if prefix_a is None and prefix_b is None:
+        return 0.5
+
+    # Only one is a route - neutral (don't penalize)
+    if prefix_a is None or prefix_b is None:
+        return 0.5
+
+    # Both are routes - compare types
+    if prefix_a == prefix_b:
+        return 1.0
+    else:
+        return 0.0
 
 
 def compute_name_numeric_match(name_a, name_b) -> float:

@@ -38,7 +38,7 @@ from matcher.config import FEATURE_COLUMNS
 from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import MLMatcher, segment_aware_split
 
-# Feature categories - comprehensive grouping of all 60 features
+# Feature categories - comprehensive grouping of all 69 features
 FEATURE_CATEGORIES = {
     "geometric": [
         "hausdorff_distance_m",
@@ -50,6 +50,8 @@ FEATURE_CATEGORIES = {
         "length_ratio",
         "centroid_distance_m",
         "collinear_gap_ratio",
+        "angle_histogram_similarity",
+        "edge_distance_rmse_m",
     ],
     "semantic_name": [
         "name_levenshtein",
@@ -63,6 +65,10 @@ FEATURE_CATEGORIES = {
     ],
     "semantic_class": [
         "class_similarity",
+    ],
+    "route_matching": [
+        "name_numeric_match",
+        "route_prefix_match",
     ],
     "endpoint": [
         "min_endpoint_proximity_m",
@@ -98,6 +104,11 @@ FEATURE_CATEGORIES = {
         "graphlet_similarity",
         "endpoint_degree_similarity",
     ],
+    "clustering": [
+        "clustering_coef_ref",
+        "clustering_coef_target",
+        "clustering_coef_delta",
+    ],
     "sinuosity": [
         "sinuosity_ref",
         "sinuosity_target",
@@ -120,9 +131,6 @@ FEATURE_CATEGORIES = {
         "shape_complexity_ref",
         "shape_complexity_target",
         "shape_complexity_delta",
-    ],
-    "name_numeric": [
-        "name_numeric_match",
     ],
     "parallel_sibling": [
         "has_parallel_sibling_ref",

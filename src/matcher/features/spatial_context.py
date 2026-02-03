@@ -2593,3 +2593,89 @@ def graphlet_segment_similarity(
         "graphlet_similarity": max(fwd, rev),
         "endpoint_degree_similarity": max(degree_fwd, degree_rev),
     }
+
+
+def compute_clustering_coefficient_features(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_features: dict[int, np.ndarray] | dict[int, int],
+    target_features: dict[int, np.ndarray] | dict[int, int],
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    target_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    ref_start_frac: float = 0.0,
+    ref_end_frac: float = 1.0,
+    target_start_frac: float = 0.0,
+    target_end_frac: float = 1.0,
+) -> dict[str, float]:
+    """Extract clustering coefficient features at aligned endpoints.
+
+    The clustering coefficient measures how interconnected a node's neighbors are.
+    For road networks:
+    - Low clustering (~0) is typical for most intersections (cars can't make U-turns)
+    - Higher clustering appears in complex interchanges or grid networks
+
+    The clustering coefficient is extracted from the precomputed graphlet feature
+    vectors (index 3 in the 6-element vector).
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_features: Node features - Dict[node_id, array] (full) or Dict[node_id, int] (degrees only)
+        target_features: Node features
+        ref_seg_to_connectors: Maps ref segment ID -> [(at, node_id), ...] sorted by at
+        target_seg_to_connectors: Maps target segment ID -> [(at, node_id), ...] sorted by at
+        ref_start_frac: Start position of alignment on reference (0.0 to 1.0)
+        ref_end_frac: End position of alignment on reference (0.0 to 1.0)
+        target_start_frac: Start position of alignment on target (0.0 to 1.0)
+        target_end_frac: End position of alignment on target (0.0 to 1.0)
+
+    Returns:
+        Dictionary with:
+        - clustering_coef_ref: Average clustering coefficient at ref endpoints
+        - clustering_coef_target: Average clustering coefficient at target endpoints
+        - clustering_coef_delta: Absolute difference between ref and target clustering
+    """
+    default_result = {
+        "clustering_coef_ref": 0.0,
+        "clustering_coef_target": 0.0,
+        "clustering_coef_delta": 0.0,
+    }
+
+    # Check if we have full feature vectors (clustering is index 3)
+    sample_feat = next(iter(ref_features.values()), None) if ref_features else None
+    if sample_feat is None or not isinstance(sample_feat, np.ndarray) or len(sample_feat) < 4:
+        # Degrees-only mode or insufficient features - return defaults
+        return default_result
+
+    def get_clustering(features: dict, connectors: list, frac: float) -> float:
+        """Get clustering coefficient at position along segment."""
+        if not connectors:
+            return 0.0
+        node_id = find_nearest_connector(connectors, frac)
+        if node_id is None:
+            return 0.0
+        feat = features.get(node_id)
+        if feat is None or not isinstance(feat, np.ndarray) or len(feat) < 4:
+            return 0.0
+        return float(feat[3])  # Index 3 is clustering coefficient
+
+    # Get connectors for both segments
+    ref_connectors = ref_seg_to_connectors.get(ref_seg_id, [])
+    target_connectors = target_seg_to_connectors.get(target_seg_id, [])
+
+    # Get clustering at each alignment endpoint
+    ref_start_clust = get_clustering(ref_features, ref_connectors, ref_start_frac)
+    ref_end_clust = get_clustering(ref_features, ref_connectors, ref_end_frac)
+    target_start_clust = get_clustering(target_features, target_connectors, target_start_frac)
+    target_end_clust = get_clustering(target_features, target_connectors, target_end_frac)
+
+    # Average across endpoints
+    clustering_coef_ref = (ref_start_clust + ref_end_clust) / 2.0
+    clustering_coef_target = (target_start_clust + target_end_clust) / 2.0
+    clustering_coef_delta = abs(clustering_coef_ref - clustering_coef_target)
+
+    return {
+        "clustering_coef_ref": clustering_coef_ref,
+        "clustering_coef_target": clustering_coef_target,
+        "clustering_coef_delta": clustering_coef_delta,
+    }

@@ -156,6 +156,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "has_name_target",  # 1.0 if target has non-empty name, else 0.0
         "name_is_generic",  # 1.0 if either name matches generic pattern
         "name_numeric_match",  # Better matching for numbered routes (I-90, US-101)
+        "route_prefix_match",  # Compare route types (interstate vs us_route vs state_route)
     ],
     "Class": [
         "class_similarity",
@@ -193,6 +194,11 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Graphlet": [
         "graphlet_similarity",
         "endpoint_degree_similarity",
+    ],
+    "Clustering": [
+        "clustering_coef_ref",  # Local clustering coefficient at ref endpoints
+        "clustering_coef_target",  # Local clustering coefficient at target endpoints
+        "clustering_coef_delta",  # Absolute difference in clustering coefficients
     ],
     "Sinuosity": [
         "sinuosity_ref",
@@ -242,6 +248,7 @@ SEMANTIC_FEATURES = [
     "name_is_generic",
     "class_similarity",
     "name_numeric_match",
+    "route_prefix_match",
 ]
 
 

@@ -757,6 +757,7 @@ class TestAngleHistogramSimilarity:
     def test_with_pre_extracted_coords(self):
         """Should work with pre-extracted coordinates."""
         import numpy as np
+
         from matcher.features.geometric import compute_angle_histogram_similarity
 
         line_a = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
@@ -868,3 +869,125 @@ class TestEdgeDistanceRmse:
         # Both should give ~5m (the actual offset)
         assert rmse_default == pytest.approx(5.0, abs=0.1)
         assert rmse_fine == pytest.approx(5.0, abs=0.1)
+
+
+class TestRoutePrefixMatch:
+    """Tests for route prefix matching feature."""
+
+    def test_same_interstate_routes(self):
+        """Same interstate type should return 1.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "Interstate 5")
+        assert result == pytest.approx(1.0)
+
+    def test_same_us_routes(self):
+        """Same US route type should return 1.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("US-101", "U.S. Route 101")
+        assert result == pytest.approx(1.0)
+
+    def test_different_route_types(self):
+        """Different route types should return 0.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "US-5")
+        assert result == pytest.approx(0.0)
+
+    def test_interstate_vs_state_route(self):
+        """Interstate vs state route should return 0.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-90", "SR-90")
+        assert result == pytest.approx(0.0)
+
+    def test_non_routes(self):
+        """Non-routes should return neutral 0.5."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("Main Street", "Oak Avenue")
+        assert result == pytest.approx(0.5)
+
+    def test_one_route_one_non_route(self):
+        """One route, one non-route should return neutral 0.5."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "Main Street")
+        assert result == pytest.approx(0.5)
+
+    def test_canonicalize_route_name(self):
+        """Test route name canonicalization."""
+        from matcher.features.semantic import canonicalize_route_name
+
+        assert canonicalize_route_name("I-5") == ("interstate", 5)
+        assert canonicalize_route_name("Interstate 90") == ("interstate", 90)
+        assert canonicalize_route_name("US-101") == ("us_route", 101)
+        assert canonicalize_route_name("SR-99") == ("state_route", 99)
+        assert canonicalize_route_name("County Road 15") == ("county_road", 15)
+        assert canonicalize_route_name("Highway 1") == ("highway", 1)
+        assert canonicalize_route_name("Main Street") == (None, None)
+        assert canonicalize_route_name(None) == (None, None)
+
+
+class TestClusteringCoefficientFeatures:
+    """Tests for clustering coefficient feature extraction."""
+
+    def test_clustering_coef_with_full_features(self):
+        """Should extract clustering coefficient from full feature vectors."""
+        import numpy as np
+
+        from matcher.features.spatial_context import compute_clustering_coefficient_features
+
+        # Create mock feature vectors with clustering at index 3
+        ref_features = {
+            0: np.array([2.0, 0.0, 0.0, 0.5, 0.0, 0.0]),  # clustering = 0.5
+            1: np.array([3.0, 0.0, 0.0, 0.3, 0.0, 0.0]),  # clustering = 0.3
+        }
+        target_features = {
+            10: np.array([2.0, 0.0, 0.0, 0.4, 0.0, 0.0]),  # clustering = 0.4
+            11: np.array([3.0, 0.0, 0.0, 0.2, 0.0, 0.0]),  # clustering = 0.2
+        }
+
+        ref_seg_to_connectors = {"seg_ref": [(0.0, 0), (1.0, 1)]}
+        target_seg_to_connectors = {"seg_target": [(0.0, 10), (1.0, 11)]}
+
+        result = compute_clustering_coefficient_features(
+            "seg_ref",
+            "seg_target",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+
+        # Ref clustering: (0.5 + 0.3) / 2 = 0.4
+        # Target clustering: (0.4 + 0.2) / 2 = 0.3
+        assert result["clustering_coef_ref"] == pytest.approx(0.4)
+        assert result["clustering_coef_target"] == pytest.approx(0.3)
+        assert result["clustering_coef_delta"] == pytest.approx(0.1)
+
+    def test_clustering_coef_with_degrees_only(self):
+        """Should return defaults when only degree values are available."""
+        from matcher.features.spatial_context import compute_clustering_coefficient_features
+
+        # Degrees-only mode (int values)
+        ref_features = {0: 2, 1: 3}
+        target_features = {10: 2, 11: 3}
+
+        ref_seg_to_connectors = {"seg_ref": [(0.0, 0), (1.0, 1)]}
+        target_seg_to_connectors = {"seg_target": [(0.0, 10), (1.0, 11)]}
+
+        result = compute_clustering_coefficient_features(
+            "seg_ref",
+            "seg_target",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+
+        # Should return defaults
+        assert result["clustering_coef_ref"] == 0.0
+        assert result["clustering_coef_target"] == 0.0
+        assert result["clustering_coef_delta"] == 0.0
