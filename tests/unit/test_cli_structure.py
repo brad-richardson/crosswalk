@@ -211,7 +211,8 @@ class TestClassCommandGroup:
         """Test class analyze --train-predictor option (merged from analyze-predictor)."""
         result = runner.invoke(app, ["class", "analyze", "--help"])
         assert result.exit_code == 0
-        assert "--train-predictor" in result.output
+        # Use strip_ansi because rich/typer ANSI codes can split the option string
+        assert "--train-predictor" in strip_ansi(result.output)
 
     def test_class_update_mappings_help(self):
         """Test class update-mappings command."""
