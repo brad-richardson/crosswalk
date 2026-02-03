@@ -64,8 +64,10 @@ from shapely import distance as shapely_distance
 
 from ._jit_helpers import (
     collinear_gap_ratio_numba,
+    compute_angle_histogram_numba,
     compute_heading_consistency_numba,
     compute_shape_complexity_numba,
+    histogram_intersection_numba,
 )
 
 if TYPE_CHECKING:
@@ -813,3 +815,107 @@ def compute_collinear_gap_ratio(
         coords_b = np.array(line_b.coords)
 
     return collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold, min_overlap_fraction)
+
+
+def compute_angle_histogram_similarity(
+    line_a: LineString,
+    line_b: LineString,
+    *,
+    coords_a: np.ndarray | None = None,
+    coords_b: np.ndarray | None = None,
+    n_bins: int = 8,
+) -> float:
+    """Compare angle histograms of two lines using histogram intersection.
+
+    Creates a shape fingerprint for each line by binning turn angles at vertices
+    into a histogram, then compares the distributions. This captures the overall
+    shape signature - distinguishing curves from zigzags from straight segments.
+
+    Based on Hootenanny's "Angle histogram from RoadMatcher" feature, which is
+    a core RF classifier feature for road matching.
+
+    Args:
+        line_a: First geometry (LineString, projected CRS)
+        line_b: Second geometry (LineString, projected CRS)
+        coords_a: Pre-extracted coordinates for line_a (optional)
+        coords_b: Pre-extracted coordinates for line_b (optional)
+        n_bins: Number of histogram bins (default 8 = 22.5° per bin)
+
+    Returns:
+        Similarity score (0-1) where 1 = identical angle distributions
+        Returns 1.0 for degenerate cases (< 3 points in either line)
+    """
+    if line_a.is_empty or line_b.is_empty:
+        return 1.0
+
+    if coords_a is None:
+        coords_a = np.array(line_a.coords)
+    if coords_b is None:
+        coords_b = np.array(line_b.coords)
+
+    # Lines with < 3 points have no turn angles - treat as compatible
+    if len(coords_a) < 3 or len(coords_b) < 3:
+        return 1.0
+
+    hist_a = compute_angle_histogram_numba(coords_a, n_bins)
+    hist_b = compute_angle_histogram_numba(coords_b, n_bins)
+
+    return histogram_intersection_numba(hist_a, hist_b)
+
+
+def compute_edge_distance_rmse(
+    line_a: LineString,
+    line_b: LineString,
+    sample_interval: float = 5.0,
+) -> float:
+    """Compute bidirectional RMSE of distances at fixed sample intervals.
+
+    Samples points at regular intervals along both lines, measures distances
+    to the opposite line, and aggregates with RMSE. This is Hootenanny's
+    primary classifier feature for road matching.
+
+    Unlike mean_hausdorff_distance which samples at vertices:
+    - This samples at fixed intervals for consistency across different
+      vertex densities (different digitization granularities)
+    - Uses RMSE aggregation which penalizes large deviations more than mean
+
+    Reuses patterns from:
+    - relational.py:176-183 (vectorized line_interpolate_point sampling)
+    - geometric.py:509-517 (vectorized shapely_distance)
+
+    Args:
+        line_a: First geometry (LineString, projected CRS with meter units)
+        line_b: Second geometry (LineString, projected CRS with meter units)
+        sample_interval: Distance between sample points in meters (default 5.0)
+
+    Returns:
+        RMSE of all bidirectional distances in meters.
+        Returns MAX_DISTANCE_METERS for empty/invalid geometries.
+    """
+    from ..config import MAX_DISTANCE_METERS
+
+    if line_a.is_empty or line_b.is_empty:
+        return MAX_DISTANCE_METERS
+
+    len_a, len_b = line_a.length, line_b.length
+    if len_a <= 0 or len_b <= 0:
+        return MAX_DISTANCE_METERS
+
+    # Sample points along each line (reuses relational.py pattern)
+    n_samples_a = max(3, int(len_a / sample_interval))
+    n_samples_b = max(3, int(len_b / sample_interval))
+
+    distances_a = np.linspace(0, len_a, n_samples_a)
+    distances_b = np.linspace(0, len_b, n_samples_b)
+
+    # Vectorized sampling (reuses shapely pattern)
+    points_a = line_interpolate_point(line_a, distances_a)
+    points_b = line_interpolate_point(line_b, distances_b)
+
+    # Vectorized distance (reuses _compute_hausdorff_stats pattern)
+    dists_a_to_b = shapely_distance(points_a, line_b)
+    dists_b_to_a = shapely_distance(points_b, line_a)
+
+    # RMSE aggregation (different from mean in hausdorff)
+    all_dists = np.concatenate([dists_a_to_b, dists_b_to_a])
+    return float(np.sqrt(np.mean(all_dists**2)))

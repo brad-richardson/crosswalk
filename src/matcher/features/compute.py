@@ -124,7 +124,9 @@ from .alignment import AlignmentResult, compute_coverage_features, create_sublin
 from .geometric import (
     GeometricFeatures,
     _compute_hausdorff_stats,
+    compute_angle_histogram_similarity,
     compute_collinear_gap_ratio,
+    compute_edge_distance_rmse,
     compute_geometric_features,
     compute_heading_consistency,
     compute_shape_complexity,
@@ -141,9 +143,11 @@ from .semantic import (
     compute_class_similarity,
     compute_name_numeric_match,
     compute_name_similarity,
+    compute_route_prefix_match,
 )
 from .spatial_context import (
     build_connector_graph,
+    compute_clustering_coefficient_features,
     compute_degree_match_score,
     compute_degree_signature_similarity,
     graphlet_similarity_with_alignment,
@@ -281,9 +285,23 @@ def _compute_non_geometric_features(
         shape_complexity_target = compute_shape_complexity(geom_sim_target, coords=coords_target)
         shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
 
+    # Angle histogram similarity (shape fingerprint)
+    with timed_section("angle_histogram"):
+        angle_histogram_similarity = compute_angle_histogram_similarity(
+            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+        )
+
+    # Edge distance RMSE (Hootenanny's primary metric)
+    with timed_section("edge_distance_rmse"):
+        edge_distance_rmse_m = compute_edge_distance_rmse(geom_sim_ref, geom_sim_target)
+
     # Name numeric match
     with timed_section("name_numeric_match"):
         name_numeric_match = compute_name_numeric_match(ref_name, target_name)
+
+    # Route prefix match
+    with timed_section("route_prefix_match"):
+        route_prefix_match = compute_route_prefix_match(ref_name, target_name)
 
     # Endpoint features
     with timed_section("endpoint_features_lookup"):
@@ -425,6 +443,36 @@ def _compute_non_geometric_features(
         expected_half_width = (half_width_ref + half_width_target) / 2.0
         offset_over_expected_halfwidth = lateral_offset / (expected_half_width + 1e-6)
 
+    # Clustering coefficient features
+    with timed_section("clustering_coef"):
+        if (
+            ref_graphlet_data is not None
+            and target_graphlet_data is not None
+            and ref_seg_id is not None
+            and target_seg_id is not None
+            and alignment is not None
+        ):
+            _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
+            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
+            clustering_feats = compute_clustering_coefficient_features(
+                ref_seg_id,
+                target_seg_id,
+                ref_node_features,
+                target_node_features,
+                ref_seg_to_connectors,
+                target_seg_to_connectors,
+                alignment.overture_start_frac,
+                alignment.overture_end_frac,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+        else:
+            clustering_feats = {
+                "clustering_coef_ref": 0.0,
+                "clustering_coef_target": 0.0,
+                "clustering_coef_delta": 0.0,
+            }
+
     # Log timing summary periodically
     log_timing_summary_if_needed()
 
@@ -481,6 +529,10 @@ def _compute_non_geometric_features(
         "endpoint_degree_similarity": (
             graphlet_features.get("endpoint_degree_similarity", 0.5) if graphlet_features else 0.5
         ),
+        # Clustering coefficient features
+        "clustering_coef_ref": clustering_feats["clustering_coef_ref"],
+        "clustering_coef_target": clustering_feats["clustering_coef_target"],
+        "clustering_coef_delta": clustering_feats["clustering_coef_delta"],
         # Sinuosity
         "sinuosity_ref": sinuosity_ref,
         "sinuosity_target": sinuosity_target,
@@ -501,11 +553,16 @@ def _compute_non_geometric_features(
         "shape_complexity_delta": shape_complexity_delta,
         # Numeric route matching
         "name_numeric_match": name_numeric_match,
+        # Route prefix matching
+        "route_prefix_match": route_prefix_match,
         # Parallel sibling features (4) - detect split vs centerline representation
         "has_parallel_sibling_ref": has_parallel_sibling_ref,
         "offset_vs_half_corridor_ratio": offset_vs_half_corridor_ratio,
         "offset_over_expected_halfwidth": offset_over_expected_halfwidth,
         "likely_representation_mismatch": likely_representation_mismatch,
+        # Shape/geometric features (new)
+        "angle_histogram_similarity": angle_histogram_similarity,
+        "edge_distance_rmse_m": edge_distance_rmse_m,
     }
 
 
@@ -732,6 +789,10 @@ def _get_error_features(
         # Graphlet features - neutral values for error case
         "graphlet_similarity": 0.5,
         "endpoint_degree_similarity": 0.5,
+        # Clustering coefficient features - default to 0 (no clustering)
+        "clustering_coef_ref": 0.0,
+        "clustering_coef_target": 0.0,
+        "clustering_coef_delta": 0.0,
         # Sinuosity features - default to straight line (1.0)
         "sinuosity_ref": 1.0,
         "sinuosity_target": 1.0,
@@ -752,11 +813,16 @@ def _get_error_features(
         "shape_complexity_delta": 0,
         # Numeric route matching - 0.0 (no signal when neither has number)
         "name_numeric_match": 0.0,
+        # Route prefix matching - 0.5 neutral (don't penalize non-routes)
+        "route_prefix_match": 0.5,
         # Parallel sibling features - default to no sibling detected
         "has_parallel_sibling_ref": 0.0,
         "offset_vs_half_corridor_ratio": 1.0,
         "offset_over_expected_halfwidth": 0.0,
         "likely_representation_mismatch": 0.0,
+        # Shape/geometric features - default to neutral values
+        "angle_histogram_similarity": 1.0,  # Treat as compatible in error case
+        "edge_distance_rmse_m": MAX_DISTANCE_METERS,
     }
 
     # Add error metadata only if error is provided

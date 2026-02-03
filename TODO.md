@@ -133,32 +133,12 @@ Features derived from road attributes beyond names and classes.
 
 ## Topology Features
 
-### Junction Angle Similarity
-- **Feature**: `junction_angle_similarity`
-- **Purpose**: Compare intersection geometry patterns
-- **Computation**: For each endpoint, compute angles to connected segments and compare patterns
-- **Use case**: Resolve complex urban intersections where multiple segments meet
-
 ### Network Continuity Score
 - **Feature**: `network_continuity_score`
 - **Purpose**: Penalize matches that would create disconnected subgraphs
 - **Computation**: Check if match would maintain network connectivity
 - **Use case**: Prevent matching isolated segments when better-connected alternatives exist
 - **Priority**: Lower (requires global graph analysis)
-
-### Junction Angle Signature
-- **Feature**: `junction_angle_signature`
-- **Purpose**: Compare intersection geometry beyond simple degree count (more detailed than `junction_angle_similarity` above)
-- **Computation**: For each endpoint, extract bearings of all incident edges; compare "bearing fingerprints" (sorted list of angles)
-- **Gap**: Currently have `heading_delta` but no feature comparing angles of incident roads at intersection nodes
-- **Use case**: Distinguish T-intersections (90 degree branch) from Y-splits
-
-### Local Clustering Coefficient
-- **Feature**: `clustering_coefficient`
-- **Purpose**: Distinguish grid intersections from branching patterns
-- **Computation**: For each endpoint, count triangles involving node v, normalized by possible edges
-- **Use case**: Urban grid areas vs. suburban cul-de-sac patterns
-- **Implementation**: NetworkX has built-in `nx.clustering()` function
 
 ### K-Hop Path Continuity
 - **Feature**: `path_continuity_k`

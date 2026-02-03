@@ -34,103 +34,41 @@ from sklearn.model_selection import GroupKFold
 # Add matcher to path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
+from matcher.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
 from matcher.config import FEATURE_COLUMNS
 from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import MLMatcher, segment_aware_split
 
-# Feature categories - comprehensive grouping of all 60 features
-FEATURE_CATEGORIES = {
-    "geometric": [
-        "hausdorff_distance_m",
-        "mean_hausdorff_distance_m",
-        "hausdorff_p95_m",
-        "buffer_iou_5m",
-        "buffer_iou_15m",
-        "heading_delta",
-        "length_ratio",
-        "centroid_distance_m",
-        "collinear_gap_ratio",
-    ],
-    "semantic_name": [
-        "name_levenshtein",
-        "name_jaro_winkler",
-        "name_token_sort",
-        "name_soundex",
-        "name_metaphone",
-        "has_name_ref",
-        "has_name_target",
-        "name_is_generic",
-    ],
-    "semantic_class": [
-        "class_similarity",
-    ],
-    "endpoint": [
-        "min_endpoint_proximity_m",
-        "max_endpoint_proximity_m",
-        "shared_endpoint_count",
-    ],
-    "lateral_offset": [
-        "lateral_offset_m",
-        "lateral_offset_iqr_m",
-        "lateral_offset_p95_m",
-    ],
-    "topology": [
-        "from_degree_ref",
-        "to_degree_ref",
-        "from_degree_target",
-        "to_degree_target",
-        "degree_match_score",
-        "degree_signature_similarity",
-        "is_dead_end_ref",
-        "is_dead_end_target",
-        "dead_end_match",
-        "is_intersection_ref",
-        "is_intersection_target",
-        "intersection_match",
-    ],
-    "coverage": [
-        "ref_coverage",
-        "target_coverage",
-        "min_coverage",
-        "coverage_ratio",
-    ],
-    "graphlet": [
-        "graphlet_similarity",
-        "endpoint_degree_similarity",
-    ],
-    "sinuosity": [
-        "sinuosity_ref",
-        "sinuosity_target",
-        "sinuosity_delta",
-    ],
-    "heading_consistency": [
-        "heading_consistency_ref",
-        "heading_consistency_target",
-        "heading_consistency_delta",
-    ],
-    "vertex_density": [
-        "vertex_density_ref",
-        "vertex_density_target",
-        "vertex_density_ratio",
-    ],
-    "length": [
-        "min_length_m",
-    ],
-    "shape_complexity": [
-        "shape_complexity_ref",
-        "shape_complexity_target",
-        "shape_complexity_delta",
-    ],
-    "name_numeric": [
-        "name_numeric_match",
-    ],
-    "parallel_sibling": [
-        "has_parallel_sibling_ref",
-        "offset_vs_half_corridor_ratio",
-        "offset_over_expected_halfwidth",
-        "likely_representation_mismatch",
-    ],
-}
+
+def _make_ablation_categories() -> dict[str, list[str]]:
+    """Transform config FEATURE_CATEGORIES to snake_case keys for ablation.
+
+    Also validates that all features exist in FEATURE_COLUMNS.
+    """
+    # Transform Title Case keys to snake_case
+    categories = {}
+    for key, features in CONFIG_CATEGORIES.items():
+        snake_key = key.lower().replace(" ", "_").replace("/", "_")
+        categories[snake_key] = features
+
+    # Validate all features exist in FEATURE_COLUMNS
+    all_category_features = set()
+    for features in categories.values():
+        all_category_features.update(features)
+
+    missing = all_category_features - set(FEATURE_COLUMNS)
+    if missing:
+        raise ValueError(f"Features in categories but not in FEATURE_COLUMNS: {missing}")
+
+    extra = set(FEATURE_COLUMNS) - all_category_features
+    if extra:
+        raise ValueError(f"Features in FEATURE_COLUMNS but not in categories: {extra}")
+
+    return categories
+
+
+# Feature categories derived from config.py (snake_case keys for ablation)
+FEATURE_CATEGORIES = _make_ablation_categories()
 
 # Quality thresholds
 ACCURACY_THRESHOLD = 0.90

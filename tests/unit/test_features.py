@@ -689,3 +689,305 @@ class TestComputePairFeaturesWithAlignment:
             f"Lateral offset {features['lateral_offset_m']:.1f}m is too high. "
             "Should be ~3m for aligned sublines, not inflated by non-overlapping portion."
         )
+
+
+class TestAngleHistogramSimilarity:
+    """Tests for compute_angle_histogram_similarity function."""
+
+    def test_identical_lines(self):
+        """Identical lines should have similarity of 1.0."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        line = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
+        result = compute_angle_histogram_similarity(line, line)
+        assert result == pytest.approx(1.0)
+
+    def test_straight_lines_similar(self):
+        """Two straight lines should have high similarity."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        straight1 = LineString([(0, 0), (10, 0), (20, 0), (30, 0)])
+        straight2 = LineString([(0, 0), (15, 0), (25, 0), (50, 0)])
+
+        result = compute_angle_histogram_similarity(straight1, straight2)
+        assert result == pytest.approx(1.0)
+
+    def test_straight_vs_curved_different(self):
+        """Straight line vs curved line should have lower similarity."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        straight = LineString([(0, 0), (10, 0), (20, 0), (30, 0)])
+        curved = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
+
+        result = compute_angle_histogram_similarity(straight, curved)
+        # Curved has turns, straight doesn't - should be different
+        assert result < 1.0
+
+    def test_similar_curves(self):
+        """Two curves with similar shape should have high similarity."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        curve1 = LineString([(0, 0), (10, 5), (20, 0), (30, 5), (40, 0)])
+        # Same pattern, just translated
+        curve2 = LineString([(5, 0), (15, 5), (25, 0), (35, 5), (45, 0)])
+
+        result = compute_angle_histogram_similarity(curve1, curve2)
+        assert result >= 0.9  # Should be very similar
+
+    def test_short_lines_return_one(self):
+        """Lines with < 3 points should return 1.0 (no turns to compare)."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        short1 = LineString([(0, 0), (10, 0)])
+        short2 = LineString([(0, 0), (20, 10)])
+
+        result = compute_angle_histogram_similarity(short1, short2)
+        assert result == pytest.approx(1.0)
+
+    def test_empty_line_returns_one(self):
+        """Empty lines should return 1.0."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        empty = LineString()
+        normal = LineString([(0, 0), (10, 0), (20, 0)])
+
+        result = compute_angle_histogram_similarity(empty, normal)
+        assert result == pytest.approx(1.0)
+
+    def test_with_pre_extracted_coords(self):
+        """Should work with pre-extracted coordinates."""
+        import numpy as np
+
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        line_a = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
+        line_b = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
+        coords_a = np.array(line_a.coords)
+        coords_b = np.array(line_b.coords)
+
+        result = compute_angle_histogram_similarity(
+            line_a, line_b, coords_a=coords_a, coords_b=coords_b
+        )
+        assert result == pytest.approx(1.0)
+
+
+class TestEdgeDistanceRmse:
+    """Tests for compute_edge_distance_rmse function."""
+
+    def test_identical_lines(self):
+        """Identical lines should have RMSE of 0."""
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        line = LineString([(0, 0), (100, 0)])
+        result = compute_edge_distance_rmse(line, line)
+        assert result == pytest.approx(0.0, abs=0.01)
+
+    def test_parallel_lines_offset(self):
+        """Parallel lines with constant offset should have RMSE equal to offset."""
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(0, 5), (100, 5)])  # 5m offset
+
+        result = compute_edge_distance_rmse(line_a, line_b)
+        assert result == pytest.approx(5.0, abs=0.1)
+
+    def test_diverging_lines(self):
+        """Diverging lines should have higher RMSE than parallel lines."""
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        line_a = LineString([(0, 0), (100, 0)])
+        # Starts at same point, ends 20m away
+        line_b = LineString([(0, 0), (100, 20)])
+
+        rmse_diverging = compute_edge_distance_rmse(line_a, line_b)
+
+        # Compare with parallel 5m offset
+        line_c = LineString([(0, 5), (100, 5)])
+        rmse_parallel = compute_edge_distance_rmse(line_a, line_c)
+
+        # Diverging should be worse than constant 5m offset
+        assert rmse_diverging > rmse_parallel
+
+    def test_empty_line_returns_max_distance(self):
+        """Empty lines should return MAX_DISTANCE_METERS."""
+        from matcher.config import MAX_DISTANCE_METERS
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        empty = LineString()
+        normal = LineString([(0, 0), (100, 0)])
+
+        result = compute_edge_distance_rmse(empty, normal)
+        assert result == MAX_DISTANCE_METERS
+
+    def test_different_lengths(self):
+        """Should handle lines of different lengths."""
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        line_a = LineString([(0, 0), (100, 0)])  # 100m
+        line_b = LineString([(0, 3), (50, 3)])  # 50m, 3m offset
+
+        result = compute_edge_distance_rmse(line_a, line_b)
+        # RMSE should reflect the offset and the non-overlapping portions
+        assert result > 3.0  # Greater than just the offset
+
+    def test_consistent_with_different_vertex_densities(self):
+        """RMSE should be similar regardless of vertex density.
+
+        This is a key advantage over mean_hausdorff_distance which samples at vertices.
+        """
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        # Low density line (2 vertices)
+        line_a_low = LineString([(0, 0), (100, 0)])
+        line_b_low = LineString([(0, 5), (100, 5)])
+
+        # High density line (11 vertices along same path)
+        line_a_high = LineString([(i * 10, 0) for i in range(11)])
+        line_b_high = LineString([(i * 10, 5) for i in range(11)])
+
+        rmse_low = compute_edge_distance_rmse(line_a_low, line_b_low)
+        rmse_high = compute_edge_distance_rmse(line_a_high, line_b_high)
+
+        # Both should be ~5m regardless of vertex density
+        assert rmse_low == pytest.approx(5.0, abs=0.1)
+        assert rmse_high == pytest.approx(5.0, abs=0.1)
+        assert rmse_low == pytest.approx(rmse_high, abs=0.1)
+
+    def test_custom_sample_interval(self):
+        """Should work with custom sample interval."""
+        from matcher.features.geometric import compute_edge_distance_rmse
+
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(0, 5), (100, 5)])
+
+        # Default 5m interval
+        rmse_default = compute_edge_distance_rmse(line_a, line_b)
+        # Finer 2m interval
+        rmse_fine = compute_edge_distance_rmse(line_a, line_b, sample_interval=2.0)
+
+        # Both should give ~5m (the actual offset)
+        assert rmse_default == pytest.approx(5.0, abs=0.1)
+        assert rmse_fine == pytest.approx(5.0, abs=0.1)
+
+
+class TestRoutePrefixMatch:
+    """Tests for route prefix matching feature."""
+
+    def test_same_interstate_routes(self):
+        """Same interstate type should return 1.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "Interstate 5")
+        assert result == pytest.approx(1.0)
+
+    def test_same_us_routes(self):
+        """Same US route type should return 1.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("US-101", "U.S. Route 101")
+        assert result == pytest.approx(1.0)
+
+    def test_different_route_types(self):
+        """Different route types should return 0.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "US-5")
+        assert result == pytest.approx(0.0)
+
+    def test_interstate_vs_state_route(self):
+        """Interstate vs state route should return 0.0."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-90", "SR-90")
+        assert result == pytest.approx(0.0)
+
+    def test_non_routes(self):
+        """Non-routes should return neutral 0.5."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("Main Street", "Oak Avenue")
+        assert result == pytest.approx(0.5)
+
+    def test_one_route_one_non_route(self):
+        """One route, one non-route should return neutral 0.5."""
+        from matcher.features.semantic import compute_route_prefix_match
+
+        result = compute_route_prefix_match("I-5", "Main Street")
+        assert result == pytest.approx(0.5)
+
+    def test_canonicalize_route_name(self):
+        """Test route name canonicalization."""
+        from matcher.features.semantic import canonicalize_route_name
+
+        assert canonicalize_route_name("I-5") == ("interstate", 5)
+        assert canonicalize_route_name("Interstate 90") == ("interstate", 90)
+        assert canonicalize_route_name("US-101") == ("us_route", 101)
+        assert canonicalize_route_name("SR-99") == ("state_route", 99)
+        assert canonicalize_route_name("County Road 15") == ("county_road", 15)
+        assert canonicalize_route_name("Highway 1") == ("highway", 1)
+        assert canonicalize_route_name("Main Street") == (None, None)
+        assert canonicalize_route_name(None) == (None, None)
+
+
+class TestClusteringCoefficientFeatures:
+    """Tests for clustering coefficient feature extraction."""
+
+    def test_clustering_coef_with_full_features(self):
+        """Should extract clustering coefficient from full feature vectors."""
+        import numpy as np
+
+        from matcher.features.spatial_context import compute_clustering_coefficient_features
+
+        # Create mock feature vectors with clustering at index 3
+        ref_features = {
+            0: np.array([2.0, 0.0, 0.0, 0.5, 0.0, 0.0]),  # clustering = 0.5
+            1: np.array([3.0, 0.0, 0.0, 0.3, 0.0, 0.0]),  # clustering = 0.3
+        }
+        target_features = {
+            10: np.array([2.0, 0.0, 0.0, 0.4, 0.0, 0.0]),  # clustering = 0.4
+            11: np.array([3.0, 0.0, 0.0, 0.2, 0.0, 0.0]),  # clustering = 0.2
+        }
+
+        ref_seg_to_connectors = {"seg_ref": [(0.0, 0), (1.0, 1)]}
+        target_seg_to_connectors = {"seg_target": [(0.0, 10), (1.0, 11)]}
+
+        result = compute_clustering_coefficient_features(
+            "seg_ref",
+            "seg_target",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+
+        # Ref clustering: (0.5 + 0.3) / 2 = 0.4
+        # Target clustering: (0.4 + 0.2) / 2 = 0.3
+        assert result["clustering_coef_ref"] == pytest.approx(0.4)
+        assert result["clustering_coef_target"] == pytest.approx(0.3)
+        assert result["clustering_coef_delta"] == pytest.approx(0.1)
+
+    def test_clustering_coef_with_degrees_only(self):
+        """Should return defaults when only degree values are available."""
+        from matcher.features.spatial_context import compute_clustering_coefficient_features
+
+        # Degrees-only mode (int values)
+        ref_features = {0: 2, 1: 3}
+        target_features = {10: 2, 11: 3}
+
+        ref_seg_to_connectors = {"seg_ref": [(0.0, 0), (1.0, 1)]}
+        target_seg_to_connectors = {"seg_target": [(0.0, 10), (1.0, 11)]}
+
+        result = compute_clustering_coefficient_features(
+            "seg_ref",
+            "seg_target",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+
+        # Should return defaults
+        assert result["clustering_coef_ref"] == 0.0
+        assert result["clustering_coef_target"] == 0.0
+        assert result["clustering_coef_delta"] == 0.0

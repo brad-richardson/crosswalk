@@ -119,7 +119,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-01"
+FEATURE_VERSION = "2026-02-03"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -143,6 +143,8 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "length_ratio",
         "centroid_distance_m",
         "collinear_gap_ratio",
+        "angle_histogram_similarity",  # Shape fingerprint via turn angle distribution
+        "edge_distance_rmse_m",  # RMSE of sampled point distances (Hootenanny)
     ],
     "Name Similarity": [
         "name_levenshtein",
@@ -154,6 +156,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "has_name_target",  # 1.0 if target has non-empty name, else 0.0
         "name_is_generic",  # 1.0 if either name matches generic pattern
         "name_numeric_match",  # Better matching for numbered routes (I-90, US-101)
+        "route_prefix_match",  # Compare route types (interstate vs us_route vs state_route)
     ],
     "Class": [
         "class_similarity",
@@ -191,6 +194,11 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Graphlet": [
         "graphlet_similarity",
         "endpoint_degree_similarity",
+    ],
+    "Clustering": [
+        "clustering_coef_ref",  # Local clustering coefficient at ref endpoints
+        "clustering_coef_target",  # Local clustering coefficient at target endpoints
+        "clustering_coef_delta",  # Absolute difference in clustering coefficients
     ],
     "Sinuosity": [
         "sinuosity_ref",
@@ -240,6 +248,7 @@ SEMANTIC_FEATURES = [
     "name_is_generic",
     "class_similarity",
     "name_numeric_match",
+    "route_prefix_match",
 ]
 
 

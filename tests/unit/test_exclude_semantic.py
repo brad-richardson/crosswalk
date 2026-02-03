@@ -10,8 +10,8 @@ class TestExcludeSemanticFlag:
 
     def test_semantic_features_defined_in_config(self):
         """SEMANTIC_FEATURES should be defined in config."""
-        # 10 semantic features
-        assert len(SEMANTIC_FEATURES) == 10
+        # 11 semantic features (includes route_prefix_match)
+        assert len(SEMANTIC_FEATURES) == 11
         assert "name_levenshtein" in SEMANTIC_FEATURES
         assert "name_jaro_winkler" in SEMANTIC_FEATURES
         assert "name_token_sort" in SEMANTIC_FEATURES
@@ -22,6 +22,7 @@ class TestExcludeSemanticFlag:
         assert "name_is_generic" in SEMANTIC_FEATURES
         assert "class_similarity" in SEMANTIC_FEATURES
         assert "name_numeric_match" in SEMANTIC_FEATURES
+        assert "route_prefix_match" in SEMANTIC_FEATURES
 
     def test_all_semantic_features_are_in_feature_columns(self):
         """All SEMANTIC_FEATURES should be subset of FEATURE_COLUMNS."""
@@ -128,7 +129,7 @@ class TestExcludeSemanticFlag:
         """Geometry-only model should include all non-semantic features."""
         geom_only_features = [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
 
-        # Count by category (9 geometric features)
+        # Count by category (11 geometric features)
         geometric_count = sum(
             1
             for f in geom_only_features
@@ -143,9 +144,11 @@ class TestExcludeSemanticFlag:
                 "length_ratio",
                 "centroid_distance_m",
                 "collinear_gap_ratio",
+                "angle_histogram_similarity",
+                "edge_distance_rmse_m",
             ]
         )
-        assert geometric_count == 9, "Should have 9 geometric features"
+        assert geometric_count == 11, "Should have 11 geometric features"
 
         endpoint_count = sum(
             1
@@ -187,6 +190,15 @@ class TestExcludeSemanticFlag:
         graphlet_count = sum(1 for f in geom_only_features if f in graphlet_features)
         assert graphlet_count == 2, "Should have 2 graphlet features"
 
+        # Clustering coefficient features
+        clustering_features = [
+            "clustering_coef_ref",
+            "clustering_coef_target",
+            "clustering_coef_delta",
+        ]
+        clustering_count = sum(1 for f in geom_only_features if f in clustering_features)
+        assert clustering_count == 3, "Should have 3 clustering coefficient features"
+
         # New geometric features: sinuosity (3), heading_consistency (3),
         # vertex_density (3), length_bin (3), min_length_m (1), shape_complexity (3)
         sinuosity_count = sum(1 for f in geom_only_features if f.startswith("sinuosity"))
@@ -210,9 +222,9 @@ class TestExcludeSemanticFlag:
         assert shape_complexity_count == 3, "Should have 3 shape complexity features"
 
         # Total geometry-only features:
-        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
-        # 2 (graphlet) + 3 (sinuosity) + 3 (heading_consistency) + 3 (vertex_density) +
-        # 1 (length) + 3 (shape_complexity) + 4 (parallel_sibling) = 50
-        assert len(geom_only_features) == 50, (
-            f"Expected 50 geometry-only features, got {len(geom_only_features)}"
+        # 11 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
+        # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
+        # 3 (vertex_density) + 1 (length) + 3 (shape_complexity) + 4 (parallel_sibling) = 55
+        assert len(geom_only_features) == 55, (
+            f"Expected 55 geometry-only features, got {len(geom_only_features)}"
         )

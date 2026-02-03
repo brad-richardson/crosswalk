@@ -369,3 +369,72 @@ def compute_heading_consistency_numba(
 
     # Normalize to 0-1 (0 degrees diff = 1.0, 90 degrees diff = 0.0)
     return max(0.0, 1.0 - avg_diff / 90.0)
+
+
+@njit(cache=True)
+def compute_angle_histogram_numba(coords: np.ndarray, n_bins: int = 8) -> np.ndarray:
+    """Compute normalized histogram of turn angles at vertices.
+
+    Creates a shape fingerprint by binning turn angles into a histogram.
+    This captures the distribution of direction changes along a line,
+    distinguishing curves from zigzags and straight segments.
+
+    Similar pattern to: compute_shape_complexity_numba (lines 130-167)
+
+    Args:
+        coords: Nx2 array of coordinates
+        n_bins: Number of histogram bins (default 8 = 22.5° per bin over 0-180°)
+
+    Returns:
+        Normalized histogram array of shape (n_bins,), sums to 1.0
+        Returns zeros if fewer than 3 points.
+    """
+    n_points = coords.shape[0]
+    if n_points < 3:
+        return np.zeros(n_bins, dtype=np.float64)
+
+    histogram = np.zeros(n_bins, dtype=np.float64)
+    bin_width = 180.0 / n_bins  # Turn angles range 0-180
+
+    for i in range(n_points - 2):
+        # Heading from point i to i+1 (reuses compute_heading_numba pattern)
+        dx1 = coords[i + 1, 0] - coords[i, 0]
+        dy1 = coords[i + 1, 1] - coords[i, 1]
+        heading1 = compute_heading_numba(dx1, dy1)
+
+        # Heading from point i+1 to i+2
+        dx2 = coords[i + 2, 0] - coords[i + 1, 0]
+        dy2 = coords[i + 2, 1] - coords[i + 1, 1]
+        heading2 = compute_heading_numba(dx2, dy2)
+
+        # Turn angle (0-180) - actual direction change, not bidirectional
+        turn = abs(heading2 - heading1)
+        if turn > 180.0:
+            turn = 360.0 - turn
+
+        bin_idx = min(int(turn / bin_width), n_bins - 1)
+        histogram[bin_idx] += 1.0
+
+    # Normalize to sum to 1.0
+    total = histogram.sum()
+    if total > 0:
+        histogram /= total
+    return histogram
+
+
+@njit(cache=True)
+def histogram_intersection_numba(h1: np.ndarray, h2: np.ndarray) -> float:
+    """Compute histogram intersection similarity (0-1).
+
+    Histogram intersection is the sum of element-wise minimums.
+    For normalized histograms (sum=1), the result is in [0, 1]
+    where 1 means identical distributions.
+
+    Args:
+        h1: First normalized histogram
+        h2: Second normalized histogram
+
+    Returns:
+        Intersection similarity score (0-1)
+    """
+    return np.minimum(h1, h2).sum()
