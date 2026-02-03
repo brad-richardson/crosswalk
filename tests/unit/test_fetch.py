@@ -11,11 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from matcher.fetch.arcgis import (
-    _is_truthy,
-    _normalize_oneway_value,
-    _normalize_speed_to_kph,
-)
+from matcher.fetch.arcgis import _is_truthy
+from matcher.fetch.normalize import normalize_oneway_value, normalize_speed_to_kph
 from matcher.fetch.overture import (
     parse_names_lr,
     parse_oneway_lr,
@@ -24,7 +21,7 @@ from matcher.fetch.overture import (
 
 
 class TestNormalizeOnewayValue:
-    """Tests for _normalize_oneway_value in arcgis.py."""
+    """Tests for normalize_oneway_value in arcgis.py."""
 
     @pytest.mark.parametrize(
         "value,expected",
@@ -82,13 +79,13 @@ class TestNormalizeOnewayValue:
             ("2", None),
         ],
     )
-    def test_normalize_oneway_value(self, value, expected):
+    def testnormalize_oneway_value(self, value, expected):
         """Test various one-way value normalizations."""
-        assert _normalize_oneway_value(value) == expected
+        assert normalize_oneway_value(value) == expected
 
 
 class TestNormalizeSpeedToKph:
-    """Tests for _normalize_speed_to_kph in arcgis.py."""
+    """Tests for normalize_speed_to_kph in arcgis.py."""
 
     @pytest.mark.parametrize(
         "value,unit,expected",
@@ -112,9 +109,9 @@ class TestNormalizeSpeedToKph:
             ("invalid", "kph", None),  # Non-numeric string
         ],
     )
-    def test_normalize_speed_to_kph(self, value, unit, expected):
+    def testnormalize_speed_to_kph(self, value, unit, expected):
         """Test speed normalization with various inputs."""
-        assert _normalize_speed_to_kph(value, unit) == expected
+        assert normalize_speed_to_kph(value, unit) == expected
 
 
 class TestIsTruthy:

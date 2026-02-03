@@ -11,6 +11,8 @@ from typing import Any
 import geopandas as gpd
 from loguru import logger
 
+from ..utils.dataframe import find_id_column
+
 # Import tests to register them
 from . import tests as _tests  # noqa: F401
 from .base import (
@@ -115,7 +117,7 @@ def run_screen(
         target_gdf = target_gdf.to_crs("EPSG:4326")
 
     # Determine target ID column
-    target_id_col = _get_id_column(target_gdf, "target")
+    target_id_col = find_id_column(target_gdf)
 
     # Find unmatched targets (not in bridge file)
     if bridge_path is not None:
@@ -231,16 +233,6 @@ def run_screen(
         logger.info(f"Saved valid candidates to {output_path}")
 
     return valid_gdf, report
-
-
-def _get_id_column(gdf: gpd.GeoDataFrame, name: str) -> str:
-    """Determine the ID column for a GeoDataFrame."""
-    for col in ["id", "ID", f"{name}_id"]:
-        if col in gdf.columns:
-            return col
-    if gdf.index.name:
-        return gdf.index.name
-    raise ValueError(f"Could not determine ID column for {name}")
 
 
 def _get_bridge_target_column(gdf: gpd.GeoDataFrame) -> str:

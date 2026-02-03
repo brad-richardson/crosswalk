@@ -15,6 +15,8 @@ import numpy as np
 from loguru import logger
 from shapely.geometry import LineString
 
+from ..utils.dataframe import find_id_column
+
 
 class DriftPattern(Enum):
     """Types of GPS drift patterns."""
@@ -131,7 +133,7 @@ def detect_gps_drift(
     edges_metric = edges_gdf.to_crs(metric_crs)
 
     # Determine ID column
-    id_col = id_column or _get_id_column(edges_gdf)
+    id_col = id_column or find_id_column(edges_gdf)
 
     detections: list[DriftDetection] = []
     edges_with_drift: set[str | int] = set()
@@ -385,16 +387,3 @@ def _detect_small_loop(
             )
 
     return None
-
-
-def _get_id_column(gdf: gpd.GeoDataFrame) -> str:
-    """Determine the ID column for a GeoDataFrame."""
-    for col in ["id", "ID", "edge_id"]:
-        if col in gdf.columns:
-            return col
-    if gdf.index.name and gdf.index.name in gdf.columns:
-        return gdf.index.name
-    raise ValueError(
-        f"Could not determine ID column. Expected one of ['id', 'ID', 'edge_id']. "
-        f"Available columns: {list(gdf.columns)}"
-    )

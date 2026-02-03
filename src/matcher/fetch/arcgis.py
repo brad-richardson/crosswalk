@@ -14,8 +14,10 @@ import requests
 from loguru import logger
 
 from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
+from ..utils.dataframe import find_id_column
 from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
+from .normalize import normalize_oneway_value, normalize_speed_to_kph
 
 
 def fetch_arcgis_layer(
@@ -90,7 +92,7 @@ def fetch_arcgis_layer(
     gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
 
     # Find source ID column before transformation (for metadata tracking)
-    source_id_col = _find_id_column(gdf) if len(gdf) > 0 else None
+    source_id_col = find_id_column(gdf, raise_on_missing=False) if len(gdf) > 0 else None
 
     # Transform to Overture schema
     gdf = _transform_to_overture_schema(
@@ -313,7 +315,7 @@ def _transform_to_overture_schema(
             return gdf
 
     # Find the ID column (OBJECTID, FID, or similar)
-    id_col = _find_id_column(gdf)
+    id_col = find_id_column(gdf)
 
     # Store original columns for source_tags (before we modify anything)
     original_cols = [c for c in gdf.columns if c != "geometry"]
@@ -381,7 +383,7 @@ def _transform_to_overture_schema(
 
     # One-way direction - normalize to standard format
     if oneway_column and oneway_column in gdf.columns:
-        data["oneway"] = gdf[oneway_column].apply(_normalize_oneway_value).values
+        data["oneway"] = gdf[oneway_column].apply(normalize_oneway_value).values
     else:
         data["oneway"] = [None] * len(gdf)
 
@@ -389,7 +391,7 @@ def _transform_to_overture_schema(
     if speed_limit_column and speed_limit_column in gdf.columns:
         data["speed_limit_kph"] = (
             gdf[speed_limit_column]
-            .apply(lambda x: _normalize_speed_to_kph(x, speed_limit_unit))
+            .apply(lambda x: normalize_speed_to_kph(x, speed_limit_unit))
             .values
         )
     else:
@@ -434,36 +436,6 @@ def _get_layer_id_field(url: str) -> str | None:
     except Exception as e:
         logger.warning(f"Could not determine ID field from layer metadata: {e}")
         return None
-
-
-def _find_id_column(gdf: gpd.GeoDataFrame) -> str:
-    """Find the ID column in a GeoDataFrame.
-
-    Args:
-        gdf: Input GeoDataFrame
-
-    Returns:
-        Name of the ID column
-
-    Raises:
-        ValueError: If no ID column found
-    """
-    candidates = ["OBJECTID", "FID", "ObjectID", "objectid", "fid", "ID", "id"]
-    for col in candidates:
-        if col in gdf.columns:
-            return col
-
-    # Fall back to first column (may not be unique)
-    non_geom_cols = [c for c in gdf.columns if c != "geometry"]
-    if non_geom_cols:
-        fallback_col = non_geom_cols[0]
-        logger.warning(
-            f"No standard ID column found (OBJECTID, FID, etc.). "
-            f"Falling back to '{fallback_col}' which may not be unique."
-        )
-        return fallback_col
-
-    raise ValueError("Could not find ID column in GeoDataFrame")
 
 
 def _build_level_rules(value: Any) -> list:
@@ -550,66 +522,6 @@ def _is_truthy(value: Any) -> bool:
         return value.upper() in ("Y", "YES", "TRUE", "1", "T")
 
     return bool(value)
-
-
-def _normalize_oneway_value(value: str | int | None) -> str | None:
-    """Normalize one-way value to standard format.
-
-    Common one-way values in datasets:
-    - "yes", "Yes", "Y", "1", 1 -> "forward" (assume forward if just "yes")
-    - "no", "No", "N", "0", 0, "B", "Both" -> "both"
-    - "FT", "F", "forward" -> "forward"
-    - "TF", "T", "backward" -> "backward"
-    - "-1", "reverse" -> "backward"
-
-    Args:
-        value: Raw one-way value from source data
-
-    Returns:
-        Normalized value: "forward", "backward", "both", or None
-    """
-    if pd.isna(value):
-        return None
-
-    # Convert to string and normalize
-    val_str = str(value).strip().lower()
-
-    if val_str in ("yes", "y", "1", "ft", "f", "forward", "one-way", "oneway", "from-to"):
-        return "forward"
-    elif val_str in ("no", "n", "0", "b", "both", "two-way", "twoway"):
-        return "both"
-    elif val_str in ("-1", "tf", "t", "backward", "reverse", "to-from"):
-        return "backward"
-    elif val_str in ("", "null", "none", "nan"):
-        return None
-
-    return None
-
-
-def _normalize_speed_to_kph(value: int | float | str | None, unit: str) -> int | None:
-    """Convert speed to kph.
-
-    Args:
-        value: Speed value (may be int, float, or string)
-        unit: Unit string ("kph", "mph", etc.)
-
-    Returns:
-        Speed in kph as int, or None if invalid
-    """
-    if pd.isna(value):
-        return None
-
-    try:
-        speed = float(value)
-    except (TypeError, ValueError):
-        return None
-
-    if speed <= 0:
-        return None
-
-    if unit.lower() in ("mph", "mi/h"):
-        return int(speed * 1.60934)
-    return int(speed)
 
 
 def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

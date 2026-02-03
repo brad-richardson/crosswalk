@@ -7,9 +7,6 @@ Labels are stored separately from features and raw data in a normalized architec
 - labels/agent/dataset={id}/data.csv - Agent labels (metadata only)
 - labels/features/dataset={id}/data.parquet - Computed features
 - labels/data/dataset={id}/data.parquet - Raw pair data (geometries + attributes)
-
-For backward compatibility, this module also supports loading legacy labels that
-have embedded features (labels/dataset={id}/data.csv format).
 """
 
 from dataclasses import dataclass
@@ -120,31 +117,7 @@ AGENT_LABEL_COLUMNS = [
     "labeled_at",  # ISO timestamp string
 ]
 
-# Legacy column definitions for backward compatibility
-# This includes both metadata AND feature columns for old-style labels
-LABEL_METADATA_COLUMNS = [
-    "gers_id",
-    "target_id",
-    "label",
-    "labeler",
-    "labeled_at",
-    "session_id",
-    "original_decision",
-    "original_confidence",
-    "ref_start_pct",
-    "ref_end_pct",
-    "target_start_pct",
-    "target_end_pct",
-    "is_subsegment",
-    "ref_data_version",
-    "target_data_version",
-    "feature_version",
-]
-
-# Full legacy schema (metadata + features) for backward compatibility
-LABEL_COLUMNS = LABEL_METADATA_COLUMNS + FEATURE_COLUMNS
-
-# Default values for sub-segment columns (for backward compatibility)
+# Default values for sub-segment columns
 SUBSEGMENT_DEFAULTS = {
     "ref_start_pct": 0.0,
     "ref_end_pct": 1.0,
@@ -626,95 +599,3 @@ class LabelStore:
         if dfs:
             return pd.concat(dfs, ignore_index=True)
         return pd.DataFrame(columns=AGENT_LABEL_COLUMNS + ["dataset"])
-
-    @staticmethod
-    def load_all_with_features(
-        labels_dir: Path = DEFAULT_LABELS_DIR,
-        features_dir: Path | None = None,
-        skip_errors: bool = True,
-    ) -> pd.DataFrame:
-        """Load labels joined with features for ML training.
-
-        This method supports both legacy and normalized formats:
-        - Legacy: labels/dataset=*/data.csv with embedded features
-        - Normalized: labels/human/ + labels/features/
-
-        Args:
-            labels_dir: Directory containing labels (legacy or human/)
-            features_dir: Directory containing features (for normalized format)
-            skip_errors: If True, skip partitions that fail to load.
-
-        Returns:
-            DataFrame with labels joined with features
-        """
-        labels_dir = Path(labels_dir)
-
-        # Check for normalized format first (labels/human/ exists)
-        human_dir = labels_dir / "human" if labels_dir.name != "human" else labels_dir
-        if human_dir.exists() and any(human_dir.glob("dataset=*")):
-            # Normalized format
-            labels = LabelStore.load_human_labels(human_dir, skip_errors=skip_errors)
-            if len(labels) == 0:
-                return pd.DataFrame(columns=LABEL_COLUMNS + ["dataset"])
-
-            # Load features
-            if features_dir is None:
-                features_dir = (
-                    labels_dir / "features"
-                    if labels_dir.name != "human"
-                    else labels_dir.parent / "features"
-                )
-
-            from .feature_store import FeatureStore
-
-            features = FeatureStore.load_all(features_dir)
-
-            if len(features) == 0:
-                logger.warning("No features found - returning labels without features")
-                return labels
-
-            # Join labels with features on (gers_id, target_id, dataset)
-            result = labels.merge(
-                features,
-                on=["gers_id", "target_id", "dataset"],
-                how="left",
-            )
-            return result
-
-        # Legacy format - labels already have embedded features
-        return LabelStore.load_all(labels_dir, skip_errors=skip_errors)
-
-
-# Backward compatibility aliases
-def load_labels(path: Path) -> pd.DataFrame:
-    """Load labels from a single partition (backward compatibility).
-
-    For new code, use LabelStore(dataset_id).df instead.
-    """
-    # Extract dataset_id from path
-    if path.name == "data.csv":
-        # New format: labels/dataset=xxx/data.csv
-        partition_name = path.parent.name
-        if partition_name.startswith("dataset="):
-            dataset_id = partition_name.split("=")[1]
-            store = LabelStore(dataset_id, labels_dir=path.parent.parent)
-            return store.df
-    # Old format: data/labels/labels_xxx.parquet
-    dataset_id = path.stem.replace("labels_", "")
-    store = LabelStore(dataset_id)
-    return store.df
-
-
-def save_labels(df: pd.DataFrame, path: Path) -> None:
-    """Save labels to a partition (backward compatibility).
-
-    For new code, use LabelStore(dataset_id).save() instead.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False, float_format=lambda x: f"{x:.10g}")
-
-
-# Legacy backfill_features function removed.
-# Use 'matcher labels backfill' CLI command instead, which uses normalized format.
-# See src/matcher/cli/labels.py for the implementation.

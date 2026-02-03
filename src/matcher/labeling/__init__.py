@@ -3,7 +3,7 @@
 from .data_store import DataStore
 from .dataset_registry import Dataset, DatasetRegistry
 from .feature_store import FeatureStore
-from .label_store import LabelStore, load_labels, save_labels
+from .label_store import LabelStore
 
 __all__ = [
     "DataStore",
@@ -11,6 +11,4 @@ __all__ = [
     "DatasetRegistry",
     "FeatureStore",
     "LabelStore",
-    "load_labels",
-    "save_labels",
 ]
