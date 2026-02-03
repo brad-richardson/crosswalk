@@ -33,8 +33,11 @@ fetch:
   - -111.55
   - 40.92
   crs: EPSG:4326
+  oneway_column: ONEWAY
+  speed_limit_column: SPEED_LMT
+  speed_limit_unit: mph
 last_fetch:
-  fetched_at: '2026-01-24T15:03:13.989658+00:00'
+  fetched_at: '2026-02-03T12:44:19.054962+00:00'
   bbox:
   - -112.26
   - 40.41

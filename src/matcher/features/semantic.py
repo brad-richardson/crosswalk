@@ -754,3 +754,72 @@ def names_likely_same_road(name_a: str | None, name_b: str | None) -> bool:
             return True
 
     return False
+
+
+def compute_oneway_match(
+    oneway_ref: str | None,
+    oneway_target: str | None,
+) -> float:
+    """Compute one-way direction compatibility (0-1).
+
+    One-way values:
+    - "forward": One-way in the direction of digitization
+    - "backward": One-way against the direction of digitization
+    - "both": Bidirectional (two-way)
+    - None: Unknown
+
+    Scoring:
+    - Same direction (both "forward", both "backward", both "both"): 1.0
+    - Opposite direction (forward vs backward): 0.1 (strong mismatch)
+    - One bidirectional, one one-way: 0.5 (could be valid)
+    - Either missing: 0.5 (neutral - no signal)
+
+    Args:
+        oneway_ref: Reference one-way direction
+        oneway_target: Target one-way direction
+
+    Returns:
+        Compatibility score (0.0-1.0)
+    """
+    if not oneway_ref or not oneway_target:
+        return 0.5
+
+    if oneway_ref == oneway_target:
+        return 1.0
+
+    # Opposite directions = strong mismatch
+    if {oneway_ref, oneway_target} == {"forward", "backward"}:
+        return 0.1
+
+    # One bidirectional, one one-way = moderate uncertainty
+    return 0.5
+
+
+def compute_speed_limit_similarity(
+    speed_ref: int | None,
+    speed_target: int | None,
+) -> float:
+    """Compute speed limit similarity (0-1).
+
+    Uses min/max ratio for a smooth similarity score.
+    Assumes both values are in the same unit (kph).
+
+    Scoring:
+    - Exact match: 1.0
+    - Similar speeds: ratio (e.g., 50/60 = 0.83)
+    - Either missing: 0.5 (neutral - no signal)
+    - Either invalid (<=0): 0.5 (neutral)
+
+    Args:
+        speed_ref: Reference speed limit in kph
+        speed_target: Target speed limit in kph
+
+    Returns:
+        Similarity score (0.0-1.0)
+    """
+    if speed_ref is None or speed_target is None:
+        return 0.5
+    if speed_ref <= 0 or speed_target <= 0:
+        return 0.5
+
+    return min(speed_ref, speed_target) / max(speed_ref, speed_target)

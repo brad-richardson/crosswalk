@@ -45,6 +45,66 @@ from .arcgis import fetch_arcgis_layer
 DEFAULT_DATA_DIR = Path("data/raw")
 
 
+def _normalize_speed_to_kph(value: int | float | str | None, unit: str) -> int | None:
+    """Convert speed to kph.
+
+    Args:
+        value: Speed value (may be int, float, or string)
+        unit: Unit string ("kph", "mph", etc.)
+
+    Returns:
+        Speed in kph as int, or None if invalid
+    """
+    if value is None:
+        return None
+
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if speed <= 0:
+        return None
+
+    if unit.lower() in ("mph", "mi/h"):
+        return int(speed * 1.60934)
+    return int(speed)
+
+
+def _normalize_oneway_value(value: str | int | None) -> str | None:
+    """Normalize one-way value to standard format.
+
+    Common one-way values in datasets:
+    - "yes", "Yes", "Y", "1", 1 -> "forward" (assume forward if just "yes")
+    - "no", "No", "N", "0", 0, "B", "Both" -> "both"
+    - "FT", "F", "forward" -> "forward"
+    - "TF", "T", "backward" -> "backward"
+    - "-1", "reverse" -> "backward"
+
+    Args:
+        value: Raw one-way value from source data
+
+    Returns:
+        Normalized value: "forward", "backward", "both", or None
+    """
+    if value is None:
+        return None
+
+    # Convert to string and normalize
+    val_str = str(value).strip().lower()
+
+    if val_str in ("yes", "y", "1", "ft", "f", "forward", "one-way", "oneway", "from-to"):
+        return "forward"
+    elif val_str in ("no", "n", "0", "b", "both", "two-way", "twoway"):
+        return "both"
+    elif val_str in ("-1", "tf", "t", "backward", "reverse", "to-from"):
+        return "backward"
+    elif val_str in ("", "null", "none", "nan"):
+        return None
+
+    return None
+
+
 def _transform_download_data(
     gdf: gpd.GeoDataFrame,
     id_prefix: str,
@@ -56,6 +116,9 @@ def _transform_download_data(
     subclass_mapping: dict | None = None,
     default_subclass: str | None = None,
     exclude: dict[str, list[str]] | None = None,
+    oneway_column: str | None = None,
+    speed_limit_column: str | None = None,
+    speed_limit_unit: str = "kph",
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
@@ -169,6 +232,22 @@ def _transform_download_data(
     else:
         data["subclass"] = [None] * len(gdf)
 
+    # One-way direction - normalize to standard format
+    if oneway_column and oneway_column in gdf.columns:
+        data["oneway"] = gdf[oneway_column].apply(_normalize_oneway_value).values
+    else:
+        data["oneway"] = [None] * len(gdf)
+
+    # Speed limit - normalize to kph
+    if speed_limit_column and speed_limit_column in gdf.columns:
+        data["speed_limit_kph"] = (
+            gdf[speed_limit_column]
+            .apply(lambda x: _normalize_speed_to_kph(x, speed_limit_unit))
+            .values
+        )
+    else:
+        data["speed_limit_kph"] = [None] * len(gdf)
+
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
     # Add trivial linear-referenced columns
@@ -208,7 +287,7 @@ def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if "subclass" in gdf.columns:
         gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
     else:
-        gdf["subclass_lr"] = [[{"start": 0.0, "end": 1.0, "value": None}] for _ in range(len(gdf))]
+        gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
     # Level LR - extract from level_rules if present, otherwise use 0
     def get_level(row):
@@ -235,6 +314,22 @@ def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),
         axis=1,
     )
+
+    # One-way LR - extract from oneway flat column
+    if "oneway" in gdf.columns:
+        gdf["oneway_lr"] = gdf["oneway"].apply(lambda x: create_trivial_lr(x).to_dict_list())
+    else:
+        gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
+
+    # Speed limit LR - extract from speed_limit_kph flat column
+    if "speed_limit_kph" in gdf.columns:
+        gdf["speed_limit_kph_lr"] = gdf["speed_limit_kph"].apply(
+            lambda x: create_trivial_lr(x).to_dict_list()
+        )
+    else:
+        gdf["speed_limit_kph_lr"] = [
+            [{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))
+        ]
 
     return gdf
 
@@ -555,6 +650,9 @@ def fetch_download(
     cache_download: bool = False,
     cache_ttl_hours: int = 168,
     exclude: dict[str, list[str]] | None = None,
+    oneway_column: str | None = None,
+    speed_limit_column: str | None = None,
+    speed_limit_unit: str = "kph",
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -575,6 +673,9 @@ def fetch_download(
         source_crs: Source CRS if different from data file (e.g., "EPSG:5179")
         cache_download: If True, cache the downloaded file for future use
         cache_ttl_hours: Hours before cache expires (default: 168 = 7 days)
+        oneway_column: Column name for one-way direction
+        speed_limit_column: Column name for speed limit
+        speed_limit_unit: Unit of speed limit values ("kph" or "mph")
 
     Returns:
         Path to the output GeoParquet file
@@ -758,6 +859,9 @@ def fetch_download(
             class_mapping=class_mapping,
             source_name=source_name,
             exclude=exclude,
+            oneway_column=oneway_column,
+            speed_limit_column=speed_limit_column,
+            speed_limit_unit=speed_limit_unit,
         )
 
         # Save to parquet
@@ -1056,6 +1160,9 @@ def fetch_dataset(
         encoding = fetch_config.encoding if fetch_config else None
         source_crs = fetch_config.source_crs if fetch_config else None
         exclude = fetch_config.exclude if fetch_config else None
+        oneway_column = fetch_config.oneway_column if fetch_config else None
+        speed_limit_column = fetch_config.speed_limit_column if fetch_config else None
+        speed_limit_unit = fetch_config.speed_limit_unit if fetch_config else "kph"
 
         # Handle os_downloads before URL check (it uses product_id, not url)
         if source_type == "os_downloads":
@@ -1144,6 +1251,9 @@ def fetch_dataset(
                 cache_download=cache_download,
                 cache_ttl_hours=cache_ttl_hours,
                 exclude=exclude,
+                oneway_column=oneway_column,
+                speed_limit_column=speed_limit_column,
+                speed_limit_unit=speed_limit_unit,
             )
 
         elif source_type == "ogc_features":
@@ -1202,6 +1312,12 @@ def fetch_dataset(
             # Pass exclude filter
             if exclude:
                 arcgis_kwargs["exclude"] = exclude
+            # Pass oneway/speed columns
+            if oneway_column:
+                arcgis_kwargs["oneway_column"] = oneway_column
+            if speed_limit_column:
+                arcgis_kwargs["speed_limit_column"] = speed_limit_column
+                arcgis_kwargs["speed_limit_unit"] = speed_limit_unit
 
             return fetch_arcgis_layer(**arcgis_kwargs)
 

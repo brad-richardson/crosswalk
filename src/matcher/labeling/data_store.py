@@ -165,6 +165,10 @@ class DataStore:
         target_level_lr: list | None = None,
         ref_road_flags_lr: list | None = None,
         target_road_flags_lr: list | None = None,
+        ref_oneway_lr: list | None = None,
+        target_oneway_lr: list | None = None,
+        ref_speed_limit_kph_lr: list | None = None,
+        target_speed_limit_kph_lr: list | None = None,
     ) -> None:
         """Add or update a data record for a labeled pair.
 
@@ -189,6 +193,10 @@ class DataStore:
             target_level_lr: Target linear-referenced level data
             ref_road_flags_lr: Reference linear-referenced road flags data
             target_road_flags_lr: Target linear-referenced road flags data
+            ref_oneway_lr: Reference linear-referenced one-way direction data
+            target_oneway_lr: Target linear-referenced one-way direction data
+            ref_speed_limit_kph_lr: Reference linear-referenced speed limit (kph)
+            target_speed_limit_kph_lr: Target linear-referenced speed limit (kph)
         """
         new_row = {
             "gers_id": str(gers_id),
@@ -209,6 +217,10 @@ class DataStore:
             "target_level_lr": _serialize_lr_data(target_level_lr),
             "ref_road_flags_lr": _serialize_lr_data(ref_road_flags_lr),
             "target_road_flags_lr": _serialize_lr_data(target_road_flags_lr),
+            "ref_oneway_lr": _serialize_lr_data(ref_oneway_lr),
+            "target_oneway_lr": _serialize_lr_data(target_oneway_lr),
+            "ref_speed_limit_kph_lr": _serialize_lr_data(ref_speed_limit_kph_lr),
+            "target_speed_limit_kph_lr": _serialize_lr_data(target_speed_limit_kph_lr),
         }
 
         gdf = self.gdf

@@ -42,6 +42,56 @@ Three features comparing the geometric pattern of junctions (inter-edge angles) 
 
 ---
 
+## One-Way Direction & Speed Limit Features (Parked 2026-02-03)
+
+**Branch:** `feature/oneway-speed-limit`
+
+### What They Were
+Two features leveraging Overture's road property data:
+- `oneway_match` - Compatibility score for one-way direction (0.0-1.0)
+- `speed_limit_similarity` - Ratio-based similarity for speed limits (0.0-1.0)
+
+### Implementation
+
+**One-Way Direction:**
+- Parsed from Overture `access.forward`/`access.backward` fields
+- Values: "forward", "backward", "both", "none"
+- Scoring: same direction = 1.0, opposite = 0.1, one bidirectional = 0.5, missing = 0.5
+
+**Speed Limit:**
+- Parsed from Overture `speed_limits` array
+- Normalized to km/h internally (mph converted via `* 1.60934`)
+- Similarity: `min(ref, target) / max(ref, target)`
+
+Both used linear referencing pattern for alignment-aware extraction.
+
+### Ablation Results
+| Feature | F1 Delta | Classification |
+|---------|----------|----------------|
+| `oneway_match` | +0.12% (when removed) | NOISE |
+| `speed_limit_similarity` | +0.12% (when removed) | NOISE |
+
+**Note:** Positive delta means removing the feature *improves* F1 score.
+
+### Why Parked
+- **Net negative impact**: Both features hurt model performance when included
+- **Hypothesis**: Overture represents divided roads as centerlines while many target datasets split them into separate carriageways. This causes:
+  - One-way mismatches (Overture "both" vs target "forward"/"backward")
+  - Speed limit discrepancies (different limits per direction)
+- **Data still fetched**: `oneway_lr` and `speed_limit_kph_lr` columns remain in parquet for future experimentation
+
+### Revisit Conditions
+- When target datasets consistently use centerline representation
+- When separate matching mode exists for divided/undivided roads
+- After implementing road representation detection (centerline vs split carriageways)
+
+### Lessons Learned
+1. Road representation differences (centerline vs carriageway) can make semantically-correct features harmful
+2. Features need to account for dataset representation differences, not just attribute values
+3. Keeping data fetch separate from feature usage allows easy re-enabling without re-fetching
+
+---
+
 ## Spectral Embedding Similarity (Parked 2026-01-27)
 
 **Branch:** `feature/spectral-embeddings` (commit `0628bde`, never merged)

@@ -9,6 +9,9 @@ fetch:
   id_prefix: frisco_road
   name_column: ROAD_NAME
   class_column: SUBTYPE
+  oneway_column: ONEWAY
+  speed_limit_column: MPH
+  speed_limit_unit: mph
   class_mapping:
     1: motorway
     2: primary
@@ -26,7 +29,7 @@ fetch:
   - 33.2
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-01-24T15:00:18.036362+00:00'
+  fetched_at: '2026-02-03T12:40:35.483657+00:00'
   bbox:
   - -96.9
   - 33.1

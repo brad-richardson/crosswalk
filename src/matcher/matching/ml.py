@@ -60,7 +60,18 @@ def _extract_lr_attributes_for_pair(
     target_idx: int,
     alignment,
     worker_data: dict,
-) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+) -> tuple[
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    int | None,
+    int | None,
+]:
     """Extract aligned attributes from LR data for a candidate pair.
 
     Uses alignment fractions to extract majority-covering values from
@@ -74,7 +85,9 @@ def _extract_lr_attributes_for_pair(
         worker_data: Worker data dict with LR columns
 
     Returns:
-        Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
+        Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass,
+                  target_subclass, ref_oneway, target_oneway,
+                  ref_speed_limit_kph, target_speed_limit_kph)
     """
     # Get alignment fractions
     if alignment is not None:
@@ -122,7 +135,59 @@ def _extract_lr_attributes_for_pair(
     ref_subclass = worker_data["ref_subclasses"][ref_idx]
     target_subclass = worker_data["target_subclasses"][target_idx]
 
-    return ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass
+    # Extract one-way direction from LR data
+    ref_oneway = _extract_lr_value(worker_data.get("ref_oneway_lr"), ref_idx, ref_start, ref_end)
+    target_oneway = _extract_lr_value(
+        worker_data.get("target_oneway_lr"), target_idx, target_start, target_end
+    )
+
+    # Extract speed limit from LR data
+    ref_speed_limit_kph = _extract_lr_value(
+        worker_data.get("ref_speed_limit_kph_lr"), ref_idx, ref_start, ref_end
+    )
+    target_speed_limit_kph = _extract_lr_value(
+        worker_data.get("target_speed_limit_kph_lr"), target_idx, target_start, target_end
+    )
+
+    return (
+        ref_name,
+        target_name,
+        ref_class,
+        target_class,
+        ref_subclass,
+        target_subclass,
+        ref_oneway,
+        target_oneway,
+        ref_speed_limit_kph,
+        target_speed_limit_kph,
+    )
+
+
+def _extract_lr_value(lr_column, idx: int, start_frac: float, end_frac: float):
+    """Extract a single value from an LR column for a given index and alignment range.
+
+    Args:
+        lr_column: Array of LR data (or None)
+        idx: Row index
+        start_frac: Start of alignment (0-1)
+        end_frac: End of alignment (0-1)
+
+    Returns:
+        The majority value for the aligned range, or None if not available
+    """
+    if lr_column is None:
+        return None
+
+    lr_data = lr_column[idx]
+    if lr_data is None:
+        return None
+
+    try:
+        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+        attrs = extract_aligned_attributes({"value": lr_attr}, start_frac, end_frac)
+        return attrs.get("value")
+    except Exception:
+        return None
 
 
 def _compute_single_feature(args):
@@ -236,9 +301,18 @@ def _compute_feature_chunk(chunk):
                     geom_sim_target = target_geom
 
             # Extract aligned attributes from LR data (using alignment fractions)
-            ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
-                _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
-            )
+            (
+                ref_name,
+                target_name,
+                ref_class,
+                target_class,
+                ref_subclass,
+                target_subclass,
+                ref_oneway,
+                target_oneway,
+                ref_speed_limit_kph,
+                target_speed_limit_kph,
+            ) = _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
 
             pair_data.append(
                 {
@@ -253,6 +327,10 @@ def _compute_feature_chunk(chunk):
                     "target_class": target_class,
                     "ref_subclass": ref_subclass,
                     "target_subclass": target_subclass,
+                    "ref_oneway": ref_oneway,
+                    "target_oneway": target_oneway,
+                    "ref_speed_limit_kph": ref_speed_limit_kph,
+                    "target_speed_limit_kph": target_speed_limit_kph,
                     "endpoint_features": endpoint_features,
                     "ref_topology": ref_topology,
                     "target_topology": target_topology,
@@ -368,6 +446,10 @@ def _compute_feature_chunk(chunk):
                 target_class=pd_item["target_class"],
                 ref_subclass=pd_item["ref_subclass"],
                 target_subclass=pd_item["target_subclass"],
+                ref_oneway=pd_item["ref_oneway"],
+                target_oneway=pd_item["target_oneway"],
+                ref_speed_limit_kph=pd_item["ref_speed_limit_kph"],
+                target_speed_limit_kph=pd_item["target_speed_limit_kph"],
                 endpoint_features=pd_item["endpoint_features"],
                 ref_topology=pd_item["ref_topology"],
                 target_topology=pd_item["target_topology"],
@@ -1366,6 +1448,20 @@ class MLMatcher:
         # These allow alignment-aware attribute extraction (majority covering value)
         ref_names_lr = reference["names_lr"].to_numpy() if "names_lr" in reference.columns else None
         target_names_lr = target["names_lr"].to_numpy() if "names_lr" in target.columns else None
+        ref_oneway_lr = (
+            reference["oneway_lr"].to_numpy() if "oneway_lr" in reference.columns else None
+        )
+        target_oneway_lr = target["oneway_lr"].to_numpy() if "oneway_lr" in target.columns else None
+        ref_speed_limit_kph_lr = (
+            reference["speed_limit_kph_lr"].to_numpy()
+            if "speed_limit_kph_lr" in reference.columns
+            else None
+        )
+        target_speed_limit_kph_lr = (
+            target["speed_limit_kph_lr"].to_numpy()
+            if "speed_limit_kph_lr" in target.columns
+            else None
+        )
 
         timings["data_extraction"] = time.perf_counter() - t0
         logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
@@ -1627,6 +1723,10 @@ class MLMatcher:
             "target_subclasses": target_subclasses,
             "ref_names_lr": ref_names_lr,
             "target_names_lr": target_names_lr,
+            "ref_oneway_lr": ref_oneway_lr,
+            "target_oneway_lr": target_oneway_lr,
+            "ref_speed_limit_kph_lr": ref_speed_limit_kph_lr,
+            "target_speed_limit_kph_lr": target_speed_limit_kph_lr,
             "ref_ids": ref_ids,
             "target_ids": target_ids,
             "aligned_endpoint_features": aligned_endpoint_features,

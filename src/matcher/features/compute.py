@@ -823,6 +823,9 @@ def _get_error_features(
         # Shape/geometric features - default to neutral values
         "angle_histogram_similarity": 1.0,  # Treat as compatible in error case
         "edge_distance_rmse_m": MAX_DISTANCE_METERS,
+        # Road properties - default to neutral values
+        "oneway_match": 0.5,
+        "speed_limit_similarity": 0.5,
     }
 
     # Add error metadata only if error is provided

@@ -655,6 +655,9 @@ def backfill_features(
             ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
             target_subclass = target_row["subclass"] if "subclass" in target_row.index else None
 
+            # Note: oneway_lr and speed_limit_kph_lr columns are fetched but not used as features
+            # See docs/RESEARCH_GRAVEYARD.md - ablation showed these hurt model performance
+
             # Compute all features
             features = compute_pair_features(
                 ref_geom,

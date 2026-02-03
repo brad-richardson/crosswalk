@@ -33,6 +33,8 @@ def _serialize_attributes(
     subclass_lr: list | None = None,
     level_lr: list | None = None,
     road_flags_lr: list | None = None,
+    oneway_lr: list | None = None,
+    speed_limit_kph_lr: list | None = None,
 ) -> str:
     """Serialize attribute key-value pairs to JSON, dropping None values.
 
@@ -47,6 +49,8 @@ def _serialize_attributes(
         subclass_lr: Linear-referenced subclass data
         level_lr: Linear-referenced level data
         road_flags_lr: Linear-referenced road flags data
+        oneway_lr: Linear-referenced one-way direction data
+        speed_limit_kph_lr: Linear-referenced speed limit (kph) data
 
     Returns:
         JSON string of attributes
@@ -70,6 +74,10 @@ def _serialize_attributes(
         clean["level_lr"] = level_lr
     if road_flags_lr is not None:
         clean["road_flags_lr"] = road_flags_lr
+    if oneway_lr is not None:
+        clean["oneway_lr"] = oneway_lr
+    if speed_limit_kph_lr is not None:
+        clean["speed_limit_kph_lr"] = speed_limit_kph_lr
 
     return json.dumps(clean)
 
@@ -208,6 +216,10 @@ class GeometryStore:
         target_level_lr: list | None = None,
         ref_road_flags_lr: list | None = None,
         target_road_flags_lr: list | None = None,
+        ref_oneway_lr: list | None = None,
+        target_oneway_lr: list | None = None,
+        ref_speed_limit_kph_lr: list | None = None,
+        target_speed_limit_kph_lr: list | None = None,
     ) -> None:
         """Add or update a geometry record for a labeled pair.
 
@@ -232,6 +244,10 @@ class GeometryStore:
             target_level_lr: Target linear-referenced level data
             ref_road_flags_lr: Reference linear-referenced road flags data
             target_road_flags_lr: Target linear-referenced road flags data
+            ref_oneway_lr: Reference linear-referenced one-way direction data
+            target_oneway_lr: Target linear-referenced one-way direction data
+            ref_speed_limit_kph_lr: Reference linear-referenced speed limit (kph)
+            target_speed_limit_kph_lr: Target linear-referenced speed limit (kph)
         """
         new_row = {
             "gers_id": str(gers_id),
@@ -246,6 +262,8 @@ class GeometryStore:
                 subclass_lr=ref_subclass_lr,
                 level_lr=ref_level_lr,
                 road_flags_lr=ref_road_flags_lr,
+                oneway_lr=ref_oneway_lr,
+                speed_limit_kph_lr=ref_speed_limit_kph_lr,
             ),
             "target_attributes": _serialize_attributes(
                 name=target_name,
@@ -255,6 +273,8 @@ class GeometryStore:
                 subclass_lr=target_subclass_lr,
                 level_lr=target_level_lr,
                 road_flags_lr=target_road_flags_lr,
+                oneway_lr=target_oneway_lr,
+                speed_limit_kph_lr=target_speed_limit_kph_lr,
             ),
         }
 
