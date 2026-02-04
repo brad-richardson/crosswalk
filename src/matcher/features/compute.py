@@ -389,7 +389,7 @@ def _compute_non_geometric_features(
     with timed_section("sibling_features"):
         # Compute sibling detection on sublines (not precomputed full geometries)
         if ref_sibling_context is not None and ref_seg_id is not None:
-            has_sibling_ref, sibling_dist_ref = find_parallel_sibling(
+            has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = find_parallel_sibling(
                 segment=geom_sim_ref,  # Use subline, not full geometry
                 segment_id=ref_seg_id,
                 segment_name=ref_name,
@@ -400,10 +400,14 @@ def _compute_non_geometric_features(
         else:
             if ref_sibling_context is None:
                 logger.warning("ref_sibling_context is None - sibling detection disabled")
-            has_sibling_ref, sibling_dist_ref = False, MAX_DISTANCE_METERS
+            has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = (
+                False,
+                MAX_DISTANCE_METERS,
+                0.0,
+            )
 
         if target_sibling_context is not None and target_seg_id is not None:
-            has_sibling_target, sibling_dist_target = find_parallel_sibling(
+            has_sibling_target, sibling_dist_target, _ = find_parallel_sibling(
                 segment=geom_sim_target,  # Use subline, not full geometry
                 segment_id=target_seg_id,
                 segment_name=target_name,
@@ -424,18 +428,26 @@ def _compute_non_geometric_features(
 
         # Corridor-aware offset ratio
         # Use sibling distance from whichever side is split (has sibling)
+        # FIX: When no sibling detected, set to 0.0 instead of computing with MAX_DISTANCE
+        # (which gave meaningless ~0.5 values that added noise to the ML model)
         if has_sibling_ref and not has_sibling_target:
             corridor_width = sibling_dist_ref
+            half_corridor = corridor_width / 2.0
+            offset_vs_half = abs(lateral_offset - half_corridor)
+            offset_vs_half_corridor_ratio = offset_vs_half / (corridor_width + 1e-6)
         elif has_sibling_target and not has_sibling_ref:
             corridor_width = sibling_dist_target
+            half_corridor = corridor_width / 2.0
+            offset_vs_half = abs(lateral_offset - half_corridor)
+            offset_vs_half_corridor_ratio = offset_vs_half / (corridor_width + 1e-6)
         elif has_sibling_ref and has_sibling_target:
             corridor_width = min(sibling_dist_ref, sibling_dist_target)
+            half_corridor = corridor_width / 2.0
+            offset_vs_half = abs(lateral_offset - half_corridor)
+            offset_vs_half_corridor_ratio = offset_vs_half / (corridor_width + 1e-6)
         else:
-            corridor_width = MAX_DISTANCE_METERS  # No corridor detected
-
-        half_corridor = corridor_width / 2.0
-        offset_vs_half = abs(lateral_offset - half_corridor)
-        offset_vs_half_corridor_ratio = offset_vs_half / (corridor_width + 1e-6)
+            # No corridor detected - set to 0.0 as a clean signal
+            offset_vs_half_corridor_ratio = 0.0
 
         # Class-based normalization
         half_width_ref = get_expected_half_width(ref_class)
@@ -555,8 +567,9 @@ def _compute_non_geometric_features(
         "name_numeric_match": name_numeric_match,
         # Route prefix matching
         "route_prefix_match": route_prefix_match,
-        # Parallel sibling features (4) - detect split vs centerline representation
+        # Parallel sibling features (5) - detect split vs centerline representation
         "has_parallel_sibling_ref": has_parallel_sibling_ref,
+        "parallel_fraction_ref": parallel_fraction_ref,
         "offset_vs_half_corridor_ratio": offset_vs_half_corridor_ratio,
         "offset_over_expected_halfwidth": offset_over_expected_halfwidth,
         "likely_representation_mismatch": likely_representation_mismatch,
@@ -817,7 +830,8 @@ def _get_error_features(
         "route_prefix_match": 0.5,
         # Parallel sibling features - default to no sibling detected
         "has_parallel_sibling_ref": 0.0,
-        "offset_vs_half_corridor_ratio": 1.0,
+        "parallel_fraction_ref": 0.0,
+        "offset_vs_half_corridor_ratio": 0.0,  # Changed from 1.0 - 0.0 means "no corridor"
         "offset_over_expected_halfwidth": 0.0,
         "likely_representation_mismatch": 0.0,
         # Shape/geometric features - default to neutral values
