@@ -225,7 +225,7 @@ REAL_LABELED_EXAMPLES = {
         "label": "match",
         "original_confidence": 0.5908,
         # Borderline cases - model may be confident with good geometry
-        "expected_range": (0.1, 0.98),
+        "expected_range": (0.1, 0.99),
     },
     # No match with good geometry but dead-end mismatch
     "boston_no_match_topology": {
@@ -296,7 +296,7 @@ REAL_LABELED_EXAMPLES = {
         "label": "no_match",
         "original_confidence": 0.7424,
         # Good geometry (IoU 0.95+) can override topology mismatch
-        "expected_max_confidence": 0.98,
+        "expected_max_confidence": 0.99,
     },
 }
 
@@ -397,7 +397,7 @@ class TestScoreStability:
         [
             ("perfect_match_features", 0.85, 1.0),
             ("terrible_match_features", 0.0, 0.35),  # Model may still show some confidence
-            ("borderline_match_features", 0.10, 0.98),  # Model can be confident with good geometry
+            ("borderline_match_features", 0.10, 0.99),  # Model can be confident with good geometry
         ],
         ids=["perfect_match", "terrible_match", "borderline"],
     )

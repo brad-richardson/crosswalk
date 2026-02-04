@@ -361,9 +361,7 @@ def _cross_validate(
     )
     n_dropped = n_before - len(all_labels)
     if n_dropped > 0:
-        console.print(
-            f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first)[/yellow]"
-        )
+        console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first)[/yellow]")
 
     # Create segment groups for segment-aware CV
     # Group by gers_id to prevent the same reference segment appearing in both train and test
@@ -447,9 +445,7 @@ def _cross_validate(
                         "n_samples": [],
                     }
 
-                dataset_fold_metrics[ds]["accuracy"].append(
-                    accuracy_score(y_ds, y_ds_pred)
-                )
+                dataset_fold_metrics[ds]["accuracy"].append(accuracy_score(y_ds, y_ds_pred))
                 dataset_fold_metrics[ds]["f1"].append(
                     f1_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
                 )
@@ -463,7 +459,9 @@ def _cross_validate(
 
     # Compute mean and std for overall metrics
     console.print(f"\n{'=' * 60}")
-    console.print(f"[bold]{actual_folds}-FOLD CROSS-VALIDATION RESULTS ({len(all_labels)} samples)[/bold]")
+    console.print(
+        f"[bold]{actual_folds}-FOLD CROSS-VALIDATION RESULTS ({len(all_labels)} samples)[/bold]"
+    )
     console.print("=" * 60)
 
     console.print("\nOverall (mean ± std):")
@@ -487,8 +485,7 @@ def _cross_validate(
             n_samples = sum(ds_metrics["n_samples"])
 
             console.print(
-                f"  {ds}: F1={f1_mean:.3f}±{f1_std:.3f}, "
-                f"Acc={acc_mean:.3f} (n={n_samples})"
+                f"  {ds}: F1={f1_mean:.3f}±{f1_std:.3f}, Acc={acc_mean:.3f} (n={n_samples})"
             )
 
             dataset_results[ds] = {
@@ -529,35 +526,39 @@ def _cross_validate(
                 writer.writeheader()
 
             # Write overall row
-            writer.writerow({
-                "run_date": run_date.isoformat(),
-                "dataset": "overall",
-                "cv_folds": actual_folds,
-                "n_samples": len(all_labels),
-                "f1_mean": f"{overall_results['f1_mean']:.4f}",
-                "f1_std": f"{overall_results['f1_std']:.4f}",
-                "accuracy_mean": f"{overall_results['accuracy_mean']:.4f}",
-                "accuracy_std": f"{overall_results['accuracy_std']:.4f}",
-                "precision_mean": f"{overall_results['precision_mean']:.4f}",
-                "recall_mean": f"{overall_results['recall_mean']:.4f}",
-                "seed": seed,
-            })
+            writer.writerow(
+                {
+                    "run_date": run_date.isoformat(),
+                    "dataset": "overall",
+                    "cv_folds": actual_folds,
+                    "n_samples": len(all_labels),
+                    "f1_mean": f"{overall_results['f1_mean']:.4f}",
+                    "f1_std": f"{overall_results['f1_std']:.4f}",
+                    "accuracy_mean": f"{overall_results['accuracy_mean']:.4f}",
+                    "accuracy_std": f"{overall_results['accuracy_std']:.4f}",
+                    "precision_mean": f"{overall_results['precision_mean']:.4f}",
+                    "recall_mean": f"{overall_results['recall_mean']:.4f}",
+                    "seed": seed,
+                }
+            )
 
             # Write per-dataset rows
             for ds, metrics in dataset_results.items():
-                writer.writerow({
-                    "run_date": run_date.isoformat(),
-                    "dataset": ds,
-                    "cv_folds": actual_folds,
-                    "n_samples": metrics["n_samples"],
-                    "f1_mean": f"{metrics['f1_mean']:.4f}",
-                    "f1_std": f"{metrics['f1_std']:.4f}",
-                    "accuracy_mean": f"{metrics['accuracy_mean']:.4f}",
-                    "accuracy_std": f"{metrics['accuracy_std']:.4f}",
-                    "precision_mean": f"{metrics['precision_mean']:.4f}",
-                    "recall_mean": f"{metrics['recall_mean']:.4f}",
-                    "seed": seed,
-                })
+                writer.writerow(
+                    {
+                        "run_date": run_date.isoformat(),
+                        "dataset": ds,
+                        "cv_folds": actual_folds,
+                        "n_samples": metrics["n_samples"],
+                        "f1_mean": f"{metrics['f1_mean']:.4f}",
+                        "f1_std": f"{metrics['f1_std']:.4f}",
+                        "accuracy_mean": f"{metrics['accuracy_mean']:.4f}",
+                        "accuracy_std": f"{metrics['accuracy_std']:.4f}",
+                        "precision_mean": f"{metrics['precision_mean']:.4f}",
+                        "recall_mean": f"{metrics['recall_mean']:.4f}",
+                        "seed": seed,
+                    }
+                )
 
         console.print(f"\n[green]Results saved to {results_file}[/green]")
 
