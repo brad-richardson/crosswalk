@@ -274,19 +274,37 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # Get app mode from query params (persists across reloads)
+    default_app_mode = st.query_params.get("app", "labeling")
+    if default_app_mode not in ["labeling", "label_review", "integration_qa"]:
+        default_app_mode = "labeling"
+
     # App mode selector at the very top of sidebar
     with st.sidebar:
         app_mode = st.selectbox(
             "App",
-            ["Labeling", "Integration QA"],
-            index=0 if st.session_state.get("app_mode", "labeling") == "labeling" else 1,
+            ["Labeling", "Label Review", "Integration QA"],
+            index={
+                "labeling": 0,
+                "label_review": 1,
+                "integration_qa": 2,
+            }.get(default_app_mode, 0),
             key="app_mode_selector",
-            help="Switch between Match Labeling and Integration QA apps",
+            help="Switch between Match Labeling, Label Review, and Integration QA apps",
         )
-        st.session_state.app_mode = "labeling" if app_mode == "Labeling" else "integration_qa"
+        st.session_state.app_mode = {
+            "Labeling": "labeling",
+            "Label Review": "label_review",
+            "Integration QA": "integration_qa",
+        }[app_mode]
+
+        # Persist app mode to query params
+        st.query_params["app"] = st.session_state.app_mode
 
     # Route to the appropriate app
-    if st.session_state.app_mode == "integration_qa":
+    if st.session_state.app_mode == "label_review":
+        _render_label_review_app()
+    elif st.session_state.app_mode == "integration_qa":
         _render_integration_qa_app()
     else:
         _render_labeling_app()
@@ -304,6 +322,74 @@ def _render_integration_qa_app():
         integration_dir, session = render_integration_qa_sidebar()
 
     render_integration_qa_content(integration_dir, session)
+
+
+def _render_label_review_app():
+    """Render the Label Review app for reviewing and managing existing labels."""
+    from matcher.labeling.label_review import (
+        filter_disagreements,
+        filter_low_confidence,
+        load_labeled_pairs_with_predictions,
+        render_label_detail,
+        render_label_list,
+        render_label_review_sidebar,
+    )
+
+    labels_dir = PROJECT_ROOT / "labels"
+
+    # Sidebar
+    with st.sidebar:
+        st.title("Label Review")
+        dataset_id, filter_type = render_label_review_sidebar(labels_dir)
+
+    if dataset_id is None:
+        st.title("Label Review")
+        st.info("No labeled datasets available")
+        return
+
+    # Get labeler name for updates
+    config = load_config()
+    labeler_name = config.get("labeler_name", "unknown")
+
+    # Load data ONCE with fresh ML predictions (no caching)
+    # Store in session state only for current request, reload on dataset change
+    cache_key = f"review_data_{dataset_id}"
+    if cache_key not in st.session_state or st.session_state.get("review_dataset_changed"):
+        with st.spinner("Loading labels and running ML inference..."):
+            st.session_state[cache_key] = load_labeled_pairs_with_predictions(
+                dataset_id, labels_dir
+            )
+            st.session_state.review_dataset_changed = False
+
+    all_data_df = st.session_state[cache_key]
+
+    # Check for detail view
+    if "review_selected_pair" in st.session_state and st.session_state.review_selected_pair:
+        gers_id, target_id = st.session_state.review_selected_pair
+        if render_label_detail(
+            gers_id, target_id, dataset_id, labels_dir, labeler_name, all_data_df
+        ):
+            st.session_state.review_selected_pair = None
+            st.rerun()
+        return
+
+    # List view
+    st.title(f"Label Review: {dataset_id}")
+
+    # Apply filter
+    df = all_data_df.copy()
+    if filter_type == "disagreements":
+        df = filter_disagreements(df)
+        st.caption("Showing pairs where ML disagrees with human label")
+    elif filter_type == "low_confidence":
+        df = filter_low_confidence(df)
+        st.caption("Showing pairs where ML confidence is uncertain")
+
+    # Render list
+    selected = render_label_list(df)
+    if selected:
+        st.session_state.review_selected_pair = selected
+        st.rerun()
 
 
 def _render_labeling_app():
@@ -945,7 +1031,7 @@ def record_one_to_n_label(
             label_store.add(
                 gers_id=cand.ref_id,  # ref_id is the Overture GERS ID
                 target_id=cand.target_id,
-                label="match_1n",  # Special label for 1:N matches
+                label="match",
                 labeler=session.labeler_name,
                 session_id=session.session_id,
                 original_decision=cand.decision,
@@ -964,7 +1050,7 @@ def record_one_to_n_label(
                 ref_subclass=cand.ref_subclass,
                 target_subclass=cand.target_subclass,
             )
-            push_undo(cand.ref_id, cand.target_id, "match_1n")
+            push_undo(cand.ref_id, cand.target_id, "match")
 
 
 def load_data(

@@ -421,6 +421,76 @@ class LabelStore:
             )
             data_store.save()
 
+    def update_label(
+        self,
+        gers_id: str,
+        target_id: str,
+        new_label: str,
+        labeler: str,
+    ) -> bool:
+        """Update an existing label's value.
+
+        Preserves original metadata but updates label, labeler, and timestamp.
+
+        Args:
+            gers_id: Overture reference segment ID
+            target_id: Target segment ID
+            new_label: New label value (match, no_match, unsure)
+            labeler: Name of the labeler making the update
+
+        Returns:
+            True if found and updated, False if pair not found.
+        """
+        df = self.df
+        mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
+        if not mask.any():
+            return False
+
+        idx = df[mask].index[-1]  # Latest entry for this pair
+        self._df.at[idx, "label"] = new_label
+        self._df.at[idx, "labeler"] = labeler
+        self._df.at[idx, "labeled_at"] = datetime.now(UTC).isoformat()
+        self.save()
+        return True
+
+    def delete_label(
+        self,
+        gers_id: str,
+        target_id: str,
+    ) -> bool:
+        """Delete a label and its associated feature/geometry data.
+
+        Removes from all three stores (human labels, features, data).
+
+        Args:
+            gers_id: Overture reference segment ID
+            target_id: Target segment ID
+
+        Returns:
+            True if found and deleted, False if pair not found.
+        """
+        from .data_store import DataStore
+        from .feature_store import FeatureStore
+
+        df = self.df
+        mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
+        if not mask.any():
+            return False
+
+        # Remove from labels
+        self._df = df[~mask].reset_index(drop=True)
+        self.save()
+
+        # Remove from feature store
+        fs = FeatureStore(self.dataset_id, features_dir=self.labels_dir / "features")
+        fs.delete_pair(gers_id, target_id)
+
+        # Remove from data store
+        ds = DataStore(self.dataset_id, data_dir=self.labels_dir / "data")
+        ds.delete_pair(gers_id, target_id)
+
+        return True
+
     def get_labeled_pairs(self, labeler: str | None = None) -> set[tuple[str, str]]:
         """Get set of already-labeled (gers_id, target_id) pairs.
 
@@ -449,7 +519,6 @@ class LabelStore:
             "match": (df["label"] == "match").sum(),
             "no_match": (df["label"] == "no_match").sum(),
             "skip": (df["label"] == "skip").sum(),
-            "associated": (df["label"] == "associated").sum(),
             "unsure": (df["label"] == "unsure").sum(),
         }
 

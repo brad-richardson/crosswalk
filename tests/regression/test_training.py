@@ -4,7 +4,7 @@ from matcher.matching.ml import train_model
 
 # Minimum acceptable thresholds
 MIN_TEST_ACCURACY = 0.85
-MIN_CV_F1_MEAN = 0.80
+MIN_CV_F1_MEAN = 0.85
 
 
 class TestTrainingRegression:
