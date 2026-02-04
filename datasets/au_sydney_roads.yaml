@@ -8,6 +8,7 @@ source:
   portal_url: https://portal.spatial.nsw.gov.au/
 fetch:
   id_prefix: au_sydney
+  id_column: OBJECTID
   name_column: roadnamebase
   class_column: functionhierarchy
   class_mapping:

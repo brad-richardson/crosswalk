@@ -8,6 +8,7 @@ source:
   portal_url: https://vayla.fi/en/transport-network/data/digiroad
 fetch:
   id_prefix: hel_road
+  id_column: OBJECTID
   name_column: tienimi_su
   class_column: toiminn_lk
   class_mapping:

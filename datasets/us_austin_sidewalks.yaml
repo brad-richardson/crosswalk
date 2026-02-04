@@ -9,6 +9,7 @@ source:
   portal_url: https://data.austintexas.gov/dataset/Sidewalks/pc5y-5bpw
 fetch:
   id_prefix: austin_sidewalk
+  id_column: OBJECTID
   name_column: ADDRESS_DESCRIPTION
   class_column: PEDESTRIAN_FACILITY_TYPE
   class_mapping:

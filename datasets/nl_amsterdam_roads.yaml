@@ -9,6 +9,7 @@ source:
   cache_download: true
 fetch:
   id_prefix: ams_road
+  id_column: FID
   name_column: stt_naam
   class_column: wegbehsrt
   class_mapping:

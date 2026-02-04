@@ -304,24 +304,90 @@ def backfill_features(
             classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
         )
 
-        # Initialize feature store for this dataset
+        # Initialize feature store and data store for this dataset
         feature_store = FeatureStore(dataset, features_dir=features_dir)
+
+        # Load stored pair data (geometries captured at labeling time)
+        # This is critical because target IDs are not stable across data refreshes
+        from ..labeling.data_store import DataStore
+
+        data_store = DataStore(dataset, data_dir=labels_dir / "data")
+        has_stored_data = len(data_store.gdf) > 0
+        if has_stored_data:
+            console.print(
+                f"  Using stored geometries from labels/data ({len(data_store.gdf)} pairs)"
+            )
+        else:
+            console.print("  [yellow]No stored geometries - using raw data lookup[/yellow]")
 
         computed = 0
         skipped = 0
+        used_stored = 0
+        used_lookup = 0
 
         for gers_id, target_id in dataset_keys:
-            # Check if IDs exist in data
-            if gers_id not in ref_lookup.index or target_id not in target_lookup.index:
-                skipped += 1
-                continue
+            ref_geom = None
+            target_geom = None
+            ref_name = None
+            target_name = None
+            ref_class = None
+            target_class = None
+            ref_subclass = None
+            target_subclass = None
 
-            # Get geometries
-            ref_idx = ref_gdf[ref_gdf["id"] == gers_id].index[0]
-            target_idx = target_gdf[target_gdf["id"] == target_id].index[0]
+            # First, try to get geometries from stored data (preferred - stable)
+            if has_stored_data:
+                pair_data = data_store.get_pair(gers_id, target_id)
+                if pair_data is not None:
+                    # Get geometries from stored data (in WGS84)
+                    stored_ref = pair_data.get("ref_geometry")
+                    stored_target = pair_data.get("target_geometry")
+                    if stored_ref is not None and stored_target is not None:
+                        # Project to UTM
+                        ref_geom = (
+                            gpd.GeoSeries([stored_ref], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                        )
+                        target_geom = (
+                            gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                        )
+                        # Get attributes from stored data
+                        ref_name = pair_data.get("ref_name")
+                        target_name = pair_data.get("target_name")
+                        ref_class = pair_data.get("ref_class")
+                        target_class = pair_data.get("target_class")
+                        ref_subclass = pair_data.get("ref_subclass")
+                        target_subclass = pair_data.get("target_subclass")
+                        used_stored += 1
 
-            ref_geom = ref_gdf_proj.geometry.loc[ref_idx]
-            target_geom = target_gdf_proj.geometry.loc[target_idx]
+            # Fall back to raw data lookup if stored data not available
+            if ref_geom is None or target_geom is None:
+                if gers_id not in ref_lookup.index or target_id not in target_lookup.index:
+                    skipped += 1
+                    continue
+
+                # Get geometries from raw data files
+                ref_idx = ref_gdf[ref_gdf["id"] == gers_id].index[0]
+                target_idx = target_gdf[target_gdf["id"] == target_id].index[0]
+
+                ref_geom = ref_gdf_proj.geometry.loc[ref_idx]
+                target_geom = target_gdf_proj.geometry.loc[target_idx]
+
+                # Get attributes from raw data
+                ref_row = ref_lookup.loc[gers_id]
+                target_row = target_lookup.loc[target_id]
+                ref_name = (
+                    _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
+                )
+                target_name = (
+                    _extract_name_string(target_row["names"])
+                    if "names" in target_row.index
+                    else None
+                )
+                ref_class = ref_row["class"] if "class" in ref_row.index else None
+                target_class = target_row["class"] if "class" in target_row.index else None
+                ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
+                target_subclass = target_row["subclass"] if "subclass" in target_row.index else None
+                used_lookup += 1
 
             if ref_geom is None or ref_geom.is_empty or target_geom is None or target_geom.is_empty:
                 skipped += 1
@@ -355,18 +421,6 @@ def backfill_features(
                 alignment,
             )
 
-            # Get names and classes
-            ref_row = ref_lookup.loc[gers_id]
-            target_row = target_lookup.loc[target_id]
-            ref_name = _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
-            target_name = (
-                _extract_name_string(target_row["names"]) if "names" in target_row.index else None
-            )
-            ref_class = ref_row["class"] if "class" in ref_row.index else None
-            target_class = target_row["class"] if "class" in target_row.index else None
-            ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
-            target_subclass = target_row["subclass"] if "subclass" in target_row.index else None
-
             # Note: oneway_lr and speed_limit_kph_lr columns are fetched but not used as features
             # See docs/RESEARCH_GRAVEYARD.md - ablation showed these hurt model performance
 
@@ -398,7 +452,10 @@ def backfill_features(
         # Save feature store
         if computed > 0:
             feature_store.save()
-            console.print(f"  [green]Computed {computed} features, skipped {skipped}[/green]")
+            source_info = f"(stored={used_stored}, lookup={used_lookup})" if used_stored > 0 else ""
+            console.print(
+                f"  [green]Computed {computed} features {source_info}, skipped {skipped}[/green]"
+            )
         else:
             console.print(f"  [yellow]Skipped all {skipped} pairs (IDs not in data)[/yellow]")
 

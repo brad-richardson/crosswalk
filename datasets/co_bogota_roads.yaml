@@ -7,6 +7,7 @@ source:
   url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/13
 fetch:
   id_prefix: bog_road
+  id_column: OBJECTID
   name_column: MVINPRINCI
   class_column: MVITCLA
   class_mapping:

@@ -327,6 +327,30 @@ with loader.session():
 
 ## Label Data Management
 
+### Robust Feature Backfill Validation
+
+**Priority:** High
+**Status:** Needed (discovered Feb 2026)
+
+**Problem**: Target IDs are sequential indices (e.g., `sp_road_0`, `sp_road_1`) that shift when data is re-fetched. When backfilling features, looking up geometries by stale target_id returns the wrong geometry, causing features to be computed for completely unrelated segment pairs. This led to br_sao_paulo_roads having extremely poor F1 (0.572) due to features computed against wrong geometries (Hausdorff distances of 13-33km for what should have been candidate pairs).
+
+**Current Fix**: Modified backfill to use stored geometries from `labels/data/` instead of raw data lookup. Stored geometries are captured at labeling time and remain stable.
+
+**Needed Improvements**:
+1. **Candidate validation**: After resolving geometries for backfill, verify the pair would still be a valid candidate (e.g., centroids within buffer distance). Fail/reject if not.
+2. **Fallback rejection**: When stored geometry isn't available and raw data lookup is used, validate that the resolved geometry matches expected characteristics.
+3. **Audit trail**: Log warnings when feature backfill uses fallback lookup, so issues can be detected.
+4. **Force mode**: Add `--force` flag to backfill that clears existing features for a dataset before recomputing, avoiding stale/incorrect features mixing with new ones.
+
+**Validation criteria** (proposed):
+- Centroid distance < 100m (or buffer distance from config)
+- Hausdorff distance < 500m
+- Geometries intersect or are within buffer
+
+**Implementation location**: `src/matcher/cli/labels.py:backfill_features()`
+
+---
+
 ### Stable ID Strategy
 
 **Problem**: Labels reference segments by ID, but IDs can change when data is re-fetched (e.g., `boston_streets_123` becomes `us_boston_streets_123`). This breaks the link between labels and their source data.

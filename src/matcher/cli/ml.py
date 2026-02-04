@@ -565,6 +565,363 @@ def _cross_validate(
     console.print("\n[green]Cross-validation complete![/green]")
 
 
+@ml_app.command("errors")
+def analyze_errors(
+    model: Path = typer.Option(
+        Path("data/models/matcher_model_combined.joblib"),
+        "--model",
+        "-m",
+        help="Path to trained model",
+    ),
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Labels directory (Hive-partitioned CSV format)",
+    ),
+    dataset: list[str] = typer.Option(
+        [],
+        "--dataset",
+        "-d",
+        help="Focus on specific dataset(s). Can be repeated. Default: all datasets.",
+    ),
+    top_n: int = typer.Option(
+        20,
+        "--top",
+        "-n",
+        help="Number of worst errors to show per dataset",
+    ),
+    output_dir: Path = typer.Option(
+        Path("analysis"),
+        "--output",
+        "-o",
+        help="Output directory for error analysis reports",
+    ),
+    min_confidence: float = typer.Option(
+        0.7,
+        "--min-confidence",
+        "-c",
+        help="Minimum model confidence to consider 'high confidence' errors",
+    ),
+):
+    """Analyze prediction errors to diagnose model performance issues.
+
+    This command identifies error patterns in model predictions on labeled data:
+
+    1. **Confusion Matrix**: False positives vs false negatives breakdown
+    2. **High-Confidence Errors**: Wrong predictions with model confidence >= threshold
+    3. **Feature Analysis**: Which features correlate with errors
+    4. **Error Export**: CSV of worst errors for review in labeling UI
+
+    Use this to diagnose why certain datasets underperform and whether issues
+    are model failures or potential label quality problems.
+
+    Examples:
+        # Analyze errors on all labeled datasets
+        matcher ml errors
+
+        # Focus on underperforming datasets
+        matcher ml errors -d br_sao_paulo_roads -d us_fort_collins_streets
+
+        # Show top 50 worst errors
+        matcher ml errors --top 50
+
+        # Use custom confidence threshold for "high confidence" errors
+        matcher ml errors --min-confidence 0.8
+    """
+    import numpy as np
+    from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
+
+    from ..labeling.label_store import LabelStore
+    from ..matching.ml import MLMatcher
+
+    if not model.exists():
+        console.print(f"[red]Model not found: {model}[/red]")
+        raise typer.Exit(1)
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[blue]Loading model: {model.name}[/blue]")
+    matcher = MLMatcher()
+    matcher.load_model(str(model))
+
+    console.print("[blue]Loading labels...[/blue]")
+    all_labels = LabelStore.load_all(labels_dir)
+    console.print(f"  Total labels: {len(all_labels)}")
+
+    # Filter to valid labels only
+    valid_labels = {"match", "no_match"}
+    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
+
+    # Filter to specific datasets if requested
+    if dataset:
+        all_labels = all_labels[all_labels["dataset"].isin(dataset)].copy()
+        console.print(f"  Filtered to datasets {dataset}: {len(all_labels)}")
+
+    if len(all_labels) == 0:
+        console.print("[yellow]No labels to analyze[/yellow]")
+        raise typer.Exit(0)
+
+    # Extract features and get predictions
+    console.print("[blue]Computing predictions...[/blue]")
+    X, y_true = matcher._extract_features_and_labels(all_labels, binary=True)
+    X = matcher._impute_missing(X)
+
+    y_pred = matcher.model.predict(X)
+    y_prob = matcher.model.predict_proba(X)
+
+    # Get confidence scores (probability of predicted class)
+    # For binary classification: column 0 = no_match, column 1 = match
+    match_probs = y_prob[:, 1]  # Probability of being a match
+    pred_confidence = np.where(y_pred == 1, match_probs, 1 - match_probs)
+
+    # Add predictions to dataframe for analysis
+    all_labels = all_labels.copy()
+    all_labels["y_true"] = y_true
+    all_labels["y_pred"] = y_pred
+    all_labels["match_prob"] = match_probs
+    all_labels["pred_confidence"] = pred_confidence
+    all_labels["is_error"] = y_true != y_pred
+    all_labels["is_fp"] = (y_pred == 1) & (y_true == 0)  # Predicted match, actually no_match
+    all_labels["is_fn"] = (y_pred == 0) & (y_true == 1)  # Predicted no_match, actually match
+
+    # Overall metrics
+    overall_acc = accuracy_score(y_true, y_pred)
+    overall_f1 = f1_score(y_true, y_pred, average="weighted")
+    overall_cm = confusion_matrix(y_true, y_pred)
+
+    console.print(f"\n{'=' * 70}")
+    console.print("[bold]ERROR ANALYSIS SUMMARY[/bold]")
+    console.print("=" * 70)
+
+    console.print("\n[bold]Overall Performance[/bold]")
+    console.print(f"  Accuracy: {overall_acc:.3f}")
+    console.print(f"  F1 Score: {overall_f1:.3f}")
+    console.print(f"  Total errors: {all_labels['is_error'].sum()} / {len(all_labels)}")
+
+    console.print("\n[bold]Confusion Matrix[/bold]")
+    console.print("                  Predicted")
+    console.print("                  no_match  match")
+    console.print(
+        f"  Actual no_match   {overall_cm[0, 0]:5d}    {overall_cm[0, 1]:5d}  (FP rate: {overall_cm[0, 1] / overall_cm[0].sum():.1%})"
+    )
+    console.print(
+        f"  Actual match      {overall_cm[1, 0]:5d}    {overall_cm[1, 1]:5d}  (FN rate: {overall_cm[1, 0] / overall_cm[1].sum():.1%})"
+    )
+
+    n_fp = all_labels["is_fp"].sum()
+    n_fn = all_labels["is_fn"].sum()
+    console.print(f"\n  False Positives (predicted match, was no_match): {n_fp}")
+    console.print(f"  False Negatives (predicted no_match, was match): {n_fn}")
+
+    # High-confidence errors (these are the most diagnostic)
+    high_conf_errors = all_labels[
+        (all_labels["is_error"]) & (all_labels["pred_confidence"] >= min_confidence)
+    ]
+    console.print(f"\n[bold]High-Confidence Errors (confidence >= {min_confidence})[/bold]")
+    console.print(f"  Total: {len(high_conf_errors)} / {all_labels['is_error'].sum()} errors")
+
+    if len(high_conf_errors) > 0:
+        hc_fp = high_conf_errors["is_fp"].sum()
+        hc_fn = high_conf_errors["is_fn"].sum()
+        console.print(
+            f"  High-conf FP: {hc_fp} (model confident it's a match, but labeled no_match)"
+        )
+        console.print(f"  High-conf FN: {hc_fn} (model confident it's no_match, but labeled match)")
+        console.print("\n  [yellow]High-confidence errors suggest either:[/yellow]")
+        console.print("    - Systematic model failure on certain patterns")
+        console.print("    - Potential label quality issues (mislabeled examples)")
+
+    # Per-dataset breakdown
+    console.print("\n[bold]Per-Dataset Error Analysis[/bold]")
+    console.print("-" * 70)
+
+    dataset_errors = []
+    for ds in sorted(all_labels["dataset"].unique()):
+        ds_df = all_labels[all_labels["dataset"] == ds]
+        ds_acc = accuracy_score(ds_df["y_true"], ds_df["y_pred"])
+        ds_f1 = f1_score(ds_df["y_true"], ds_df["y_pred"], average="weighted")
+        ds_n_errors = ds_df["is_error"].sum()
+        ds_n_fp = ds_df["is_fp"].sum()
+        ds_n_fn = ds_df["is_fn"].sum()
+        ds_hc_errors = len(
+            ds_df[(ds_df["is_error"]) & (ds_df["pred_confidence"] >= min_confidence)]
+        )
+
+        dataset_errors.append(
+            {
+                "dataset": ds,
+                "n": len(ds_df),
+                "acc": ds_acc,
+                "f1": ds_f1,
+                "errors": ds_n_errors,
+                "fp": ds_n_fp,
+                "fn": ds_n_fn,
+                "hc_errors": ds_hc_errors,
+            }
+        )
+
+        console.print(
+            f"  {ds}: F1={ds_f1:.3f}, Acc={ds_acc:.3f}, "
+            f"Errors={ds_n_errors} (FP={ds_n_fp}, FN={ds_n_fn}), "
+            f"HiConf={ds_hc_errors}"
+        )
+
+    # Feature correlation with errors
+    console.print("\n[bold]Feature Analysis: Errors vs Correct[/bold]")
+    console.print("-" * 70)
+
+    # Compute mean feature values for errors vs correct predictions
+    errors_df = all_labels[all_labels["is_error"]]
+    correct_df = all_labels[~all_labels["is_error"]]
+
+    feature_diffs = []
+    for feat_name in matcher.feature_names:
+        if feat_name in all_labels.columns:
+            err_mean = errors_df[feat_name].mean()
+            cor_mean = correct_df[feat_name].mean()
+            # Handle inf/nan values and division by zero
+            if np.isfinite(err_mean) and np.isfinite(cor_mean) and cor_mean != 0:
+                pct_diff = (err_mean - cor_mean) / abs(cor_mean) * 100
+            elif np.isfinite(err_mean) and np.isfinite(cor_mean):
+                pct_diff = 0 if err_mean == cor_mean else float("inf")
+            else:
+                pct_diff = np.nan  # Skip features with inf/nan means
+            feature_diffs.append(
+                {
+                    "feature": feat_name,
+                    "error_mean": err_mean,
+                    "correct_mean": cor_mean,
+                    "pct_diff": pct_diff,
+                }
+            )
+
+    # Sort by absolute percentage difference (filter out nan values for sorting)
+    feature_diffs = [fd for fd in feature_diffs if np.isfinite(fd["pct_diff"])]
+    feature_diffs.sort(key=lambda x: abs(x["pct_diff"]), reverse=True)
+
+    console.print("  Features with largest difference between errors and correct predictions:")
+    for fd in feature_diffs[:10]:
+        direction = "↑" if fd["pct_diff"] > 0 else "↓"
+        console.print(
+            f"    {fd['feature']}: errors={fd['error_mean']:.3f}, "
+            f"correct={fd['correct_mean']:.3f} ({direction}{abs(fd['pct_diff']):.1f}%)"
+        )
+
+    # Export worst errors for review
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Export all errors with details
+    error_export = all_labels[all_labels["is_error"]].copy()
+    error_export = error_export.sort_values("pred_confidence", ascending=False)
+
+    # Select relevant columns for export
+    export_cols = [
+        "dataset",
+        "gers_id",
+        "target_id",
+        "label",
+        "y_pred",
+        "match_prob",
+        "pred_confidence",
+        "is_fp",
+        "is_fn",
+    ]
+    # Add key features
+    key_features = [
+        "name_jaro_winkler",
+        "buffer_iou_5m",
+        "hausdorff_distance_m",
+        "class_similarity",
+        "lateral_offset_m",
+        "min_coverage",
+    ]
+    for feat in key_features:
+        if feat in error_export.columns:
+            export_cols.append(feat)
+
+    error_export = error_export[[c for c in export_cols if c in error_export.columns]]
+
+    errors_path = output_dir / "prediction_errors.csv"
+    error_export.to_csv(errors_path, index=False)
+    console.print(f"\n[green]Exported {len(error_export)} errors to {errors_path}[/green]")
+
+    # Export high-confidence errors separately (priority for review)
+    if len(high_conf_errors) > 0:
+        hc_export = high_conf_errors[[c for c in export_cols if c in high_conf_errors.columns]]
+        hc_export = hc_export.sort_values("pred_confidence", ascending=False)
+        hc_path = output_dir / "high_confidence_errors.csv"
+        hc_export.to_csv(hc_path, index=False)
+        console.print(
+            f"[green]Exported {len(hc_export)} high-confidence errors to {hc_path}[/green]"
+        )
+
+    # Print top errors per dataset
+    console.print(f"\n[bold]Top {top_n} Worst Errors Per Dataset[/bold]")
+    console.print("(Sorted by model confidence - these are systematic failures or label issues)")
+    console.print("-" * 70)
+
+    for ds in sorted(all_labels["dataset"].unique()):
+        ds_errors = all_labels[
+            (all_labels["dataset"] == ds) & (all_labels["is_error"])
+        ].sort_values("pred_confidence", ascending=False)
+
+        if len(ds_errors) == 0:
+            continue
+
+        console.print(f"\n[bold]{ds}[/bold] ({len(ds_errors)} errors)")
+
+        for i, (_, row) in enumerate(ds_errors.head(top_n).iterrows()):
+            error_type = "FP" if row["is_fp"] else "FN"
+            pred_label = "match" if row["y_pred"] == 1 else "no_match"
+            true_label = row["label"]
+
+            # Get key feature values
+            name_sim = row.get("name_jaro_winkler", 0)
+            buf_iou = row.get("buffer_iou_5m", 0)
+            haus = row.get("hausdorff_distance_m", 0)
+
+            console.print(
+                f"  {i + 1}. [{error_type}] conf={row['pred_confidence']:.2f} "
+                f"pred={pred_label} actual={true_label}"
+            )
+            console.print(f"      gers={row['gers_id'][:20]}... target={row['target_id'][:20]}...")
+            console.print(f"      name_jw={name_sim:.2f} buf_iou={buf_iou:.2f} haus={haus:.1f}m")
+
+    # Summary recommendations
+    console.print(f"\n{'=' * 70}")
+    console.print("[bold]RECOMMENDATIONS[/bold]")
+    console.print("=" * 70)
+
+    # Identify datasets that need attention
+    worst_datasets = sorted(dataset_errors, key=lambda x: x["f1"])[:3]
+    if worst_datasets:
+        console.print("\n[bold]Priority Datasets for Review:[/bold]")
+        for ds in worst_datasets:
+            console.print(f"  - {ds['dataset']}: F1={ds['f1']:.3f}, {ds['errors']} errors")
+
+    # Recommend actions based on error patterns
+    total_hc = sum(d["hc_errors"] for d in dataset_errors)
+    if total_hc > 10:
+        console.print(f"\n[yellow]Found {total_hc} high-confidence errors.[/yellow]")
+        console.print("  → Review these in the labeling UI to check if labels are correct")
+        console.print(f"  → See: {output_dir / 'high_confidence_errors.csv'}")
+
+    if n_fp > n_fn * 2:
+        console.print("\n[yellow]Model has 2x more False Positives than False Negatives.[/yellow]")
+        console.print("  → Model is too aggressive in predicting matches")
+        console.print("  → Consider raising the match threshold or adding more no_match examples")
+    elif n_fn > n_fp * 2:
+        console.print("\n[yellow]Model has 2x more False Negatives than False Positives.[/yellow]")
+        console.print("  → Model is too conservative in predicting matches")
+        console.print("  → Consider lowering the match threshold or adding more match examples")
+
+    console.print("\n[green]Error analysis complete![/green]")
+
+
 @ml_app.command("features")
 def compute_features(
     dataset: str = typer.Argument(

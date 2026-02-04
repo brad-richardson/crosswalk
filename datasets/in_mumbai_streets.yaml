@@ -8,6 +8,7 @@ source:
   portal_url: https://www.mcgm.gov.in
 fetch:
   id_prefix: mum_street
+  id_column: OBJECTID
   name_column: NAME
   class_column: DRV_STATUS
   class_mapping:

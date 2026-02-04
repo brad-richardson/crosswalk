@@ -37,6 +37,7 @@ class FetchConfig(BaseModel):
     """Configuration for how to process fetched data."""
 
     id_prefix: str | None = None  # Prefix for generated IDs
+    id_column: str | None = None  # Column to use as stable ID (required for data integrity)
     name_column: str | None = None  # Column containing road names
     class_column: str | None = None  # Column for classification
     class_mapping: dict[str | int, str] | None = None  # Source value -> Overture class

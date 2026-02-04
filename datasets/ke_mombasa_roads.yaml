@@ -8,7 +8,7 @@ source:
   file_format: shp
 fetch:
   id_prefix: ke_mombasa
-  # Note: Source data does not include street names - only route IDs (RID_8: A7_R, etc.)
+  id_column: FID
   class_column: CLASS
   bbox:
   - 39.55

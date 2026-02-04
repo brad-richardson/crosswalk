@@ -9,6 +9,7 @@ source:
   portal_url: https://vicroadsopendata-vicroadsmaps.opendata.arcgis.com/
 fetch:
   id_prefix: au_melbourne
+  id_column: OBJECTID
   name_column: ROADNAME
   class_column: RMACLASS
   class_mapping:

@@ -7,6 +7,7 @@ source:
   url: https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Street_Centerlines/FeatureServer/0
 fetch:
   id_prefix: fc_street
+  id_column: OBJECTID
   name_column: STRNAME
   class_column: STREETTYPE
   class_mapping:

@@ -10,6 +10,7 @@ source:
   api_key_header: AccountKey
 fetch:
   id_prefix: sg_footpath
+  id_column: FID
   bbox:
   - 103.6
   - 1.2

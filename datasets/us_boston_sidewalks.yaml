@@ -8,6 +8,7 @@ source:
   portal_url: https://data.boston.gov/dataset/sidewalk-centerline
 fetch:
   id_prefix: boston_sidewalk
+  id_column: OBJECTID
   class_column: TYPE
   class_mapping:
     SWALK-CL: footway

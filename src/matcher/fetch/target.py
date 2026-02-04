@@ -60,6 +60,7 @@ def _transform_download_data(
     oneway_column: str | None = None,
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
+    id_column: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
@@ -73,6 +74,7 @@ def _transform_download_data(
         subclass_column: Column name for subclass (optional)
         subclass_mapping: Dict mapping source values to subclass values
         default_subclass: Default subclass if no column provided
+        id_column: Column to use as stable ID (auto-detected if None)
     """
     if len(gdf) == 0:
         return gdf
@@ -115,17 +117,23 @@ def _transform_download_data(
         logger.info(f"Stripping Z coordinates from {n_3d} geometries")
         gdf.geometry = shapely.force_2d(gdf.geometry)
 
-    # Find ID column
-    id_col = None
-    for col in ["OBJECTID", "FID", "ObjectID", "objectid", "fid", "ID", "id"]:
-        if col in gdf.columns:
-            id_col = col
-            break
+    # Find ID column - MUST be specified in config to ensure stable IDs
+    # Sequential or auto-detected IDs are NOT stable across data refreshes
+    # and break label linkage when data is re-fetched
+    if not id_column:
+        raise ValueError(
+            f"id_column must be specified in fetch config for {source_name}. "
+            f"Available columns: {list(gdf.columns)}. "
+            "Choose a stable upstream ID column (e.g., OBJECTID, FID, CENTLNID)."
+        )
 
-    if id_col is None:
-        # Generate sequential IDs
-        gdf["_generated_id"] = range(len(gdf))
-        id_col = "_generated_id"
+    if id_column not in gdf.columns:
+        raise ValueError(
+            f"Configured id_column '{id_column}' not found in data for {source_name}. "
+            f"Available columns: {list(gdf.columns)}"
+        )
+
+    id_col = id_column
 
     # Store original columns
     original_cols = [c for c in gdf.columns if c != "geometry"]
@@ -306,6 +314,7 @@ def fetch_ogc_features(
     bbox: tuple | None = None,
     limit_per_page: int = 5000,
     exclude: dict[str, list[str]] | None = None,
+    id_column: str | None = None,
 ) -> Path:
     """Fetch geospatial data from an OGC API Features endpoint.
 
@@ -377,6 +386,7 @@ def fetch_ogc_features(
         class_mapping=class_mapping,
         source_name=source_name,
         exclude=exclude,
+        id_column=id_column,
     )
 
     # Save to parquet
@@ -399,6 +409,7 @@ def fetch_wfs(
     bbox: tuple | None = None,
     max_features: int = 300000,
     exclude: dict[str, list[str]] | None = None,
+    id_column: str | None = None,
 ) -> Path:
     """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
 
@@ -473,6 +484,7 @@ def fetch_wfs(
         class_mapping=class_mapping,
         source_name=source_name,
         exclude=exclude,
+        id_column=id_column,
     )
 
     # Save to parquet
@@ -494,6 +506,7 @@ def fetch_lta_geospatial(
     source_name: str = "LTA DataMall",
     bbox: tuple | None = None,
     bbox_filter: bool = False,
+    id_column: str | None = None,
 ) -> Path:
     """Fetch geospatial data from Singapore LTA DataMall API.
 
@@ -550,6 +563,7 @@ def fetch_lta_geospatial(
         source_name=source_name,
         bbox=bbox,
         bbox_filter=bbox_filter,
+        id_column=id_column,
     )
 
 
@@ -614,6 +628,7 @@ def fetch_download(
     oneway_column: str | None = None,
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
+    id_column: str | None = None,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -823,6 +838,7 @@ def fetch_download(
             oneway_column=oneway_column,
             speed_limit_column=speed_limit_column,
             speed_limit_unit=speed_limit_unit,
+            id_column=id_column,
         )
 
         # Save to parquet
@@ -883,6 +899,7 @@ def fetch_os_downloads(
     api_key: str | None = None,
     cache_ttl_hours: int = 168,
     exclude: dict[str, list[str]] | None = None,
+    id_column: str | None = None,
 ) -> Path:
     """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
 
@@ -1045,6 +1062,7 @@ def fetch_os_downloads(
         class_mapping=class_mapping,
         source_name=source_name,
         exclude=exclude,
+        id_column=id_column,
     )
 
     # Save to parquet
@@ -1112,6 +1130,7 @@ def fetch_dataset(
         # Common parameters from config
         fetch_config = config.fetch
         id_prefix = fetch_config.id_prefix if fetch_config else dataset_name
+        id_column = fetch_config.id_column if fetch_config else None
         name_column = fetch_config.name_column if fetch_config else None
         class_column = fetch_config.class_column if fetch_config else None
         class_mapping = fetch_config.class_mapping if fetch_config else None
@@ -1148,6 +1167,7 @@ def fetch_dataset(
                 bbox=bbox,
                 api_key=api_key,
                 exclude=exclude,
+                id_column=id_column,
             )
 
         if url is None:
@@ -1188,6 +1208,7 @@ def fetch_dataset(
                     source_name=config.display_name or dataset_name,
                     bbox=bbox,
                     bbox_filter=bool(bbox),
+                    id_column=id_column,
                 )
 
             # Check if caching is enabled for this download
@@ -1215,6 +1236,7 @@ def fetch_dataset(
                 oneway_column=oneway_column,
                 speed_limit_column=speed_limit_column,
                 speed_limit_unit=speed_limit_unit,
+                id_column=id_column,
             )
 
         elif source_type == "ogc_features":
@@ -1229,6 +1251,7 @@ def fetch_dataset(
                 source_name=config.display_name or dataset_name,
                 bbox=bbox,
                 exclude=exclude,
+                id_column=id_column,
             )
 
         elif source_type == "wfs":
@@ -1249,6 +1272,7 @@ def fetch_dataset(
                 source_name=config.display_name or dataset_name,
                 bbox=bbox,
                 exclude=exclude,
+                id_column=id_column,
             )
 
         else:
@@ -1279,6 +1303,9 @@ def fetch_dataset(
             if speed_limit_column:
                 arcgis_kwargs["speed_limit_column"] = speed_limit_column
                 arcgis_kwargs["speed_limit_unit"] = speed_limit_unit
+            # Pass id_column for stable IDs
+            if id_column:
+                arcgis_kwargs["id_column"] = id_column
 
             return fetch_arcgis_layer(**arcgis_kwargs)
 

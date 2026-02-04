@@ -10,6 +10,7 @@ source:
   api_key_header: AccountKey
 fetch:
   id_prefix: sg_road
+  id_column: FID
   name_column: RD_CD_DESC
   class_column: RD_CATG__1
   class_mapping:

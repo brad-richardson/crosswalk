@@ -8,6 +8,7 @@ source:
   portal_url: https://daten.berlin.de/datensaetze/detailnetz-berlin-wfs-4f2045ef
 fetch:
   id_prefix: de_berlin
+  id_column: OBJECTID
   name_column: strassenname
   class_column: strassenklasse1
   class_mapping:

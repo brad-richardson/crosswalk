@@ -8,6 +8,7 @@ source:
   portal_url: https://open.toronto.ca/dataset/toronto-centreline-tcl/
 fetch:
   id_prefix: ca_toronto
+  id_column: OBJECTID
   name_column: LINEAR_NAME_FULL
   class_column: FEATURE_CODE_DESC
   class_mapping:
