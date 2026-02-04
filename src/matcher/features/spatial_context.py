@@ -1449,13 +1449,13 @@ def build_inferred_graph(
         seg_to_start_node: Maps segment ID -> start node cluster ID
         seg_to_end_node: Maps segment ID -> end node cluster ID
     """
+    from scipy.sparse import csr_matrix
+
     from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
 
     if gdf.empty:
         empty_graph = SparseGraph(
-            adjacency=__import__("scipy.sparse", fromlist=["csr_matrix"]).csr_matrix(
-                (0, 0), dtype=np.int32
-            ),
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
             node_ids=[],
             node_to_idx={},
         )
@@ -1485,9 +1485,7 @@ def build_inferred_graph(
 
     if len(valid_geoms) == 0:
         empty_graph = SparseGraph(
-            adjacency=__import__("scipy.sparse", fromlist=["csr_matrix"]).csr_matrix(
-                (0, 0), dtype=np.int32
-            ),
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
             node_ids=[],
             node_to_idx={},
         )
@@ -1807,9 +1805,6 @@ def compute_road_graphlet_features(
         )
     else:
         # Pure Python fallback for small graphs or when numba is unavailable
-        indptr = G.adjacency.indptr
-        indices = G.adjacency.indices
-
         for _i, node in enumerate(G.node_ids):
             degree = G.degree(node)
             neighbors = set(G.neighbors(node))

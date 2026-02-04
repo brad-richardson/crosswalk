@@ -54,6 +54,7 @@ dev = [
     "pytest-xdist>=3.5",
     "ruff>=0.5",
     "ipykernel>=6.27",
+    "networkx>=3.2",  # For generating synthetic test graphs
 ]
 
 [project.scripts]
