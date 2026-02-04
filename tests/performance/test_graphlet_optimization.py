@@ -13,38 +13,47 @@ import numpy as np
 import pytest
 
 from matcher.features.spatial_context import compute_road_graphlet_features
+from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
 
 
-def create_dense_grid_graph(n: int) -> nx.Graph:
+def nx_to_sparse(G: nx.Graph) -> SparseGraph:
+    """Convert a NetworkX graph to SparseGraph."""
+    edges = list(G.edges())
+    # Include all nodes, even isolated ones
+    node_attrs = {n: {} for n in G.nodes()}
+    return build_graph_from_edges(edges, node_attrs=node_attrs)
+
+
+def create_dense_grid_graph(n: int) -> SparseGraph:
     """Create an n x n grid graph (city-like topology).
 
     Grid graphs have many 4-cycles (squares) which stress the square detection.
     Nodes: n², Edges: ~2n²
     """
-    return nx.grid_2d_graph(n, n)
+    return nx_to_sparse(nx.grid_2d_graph(n, n))
 
 
-def create_high_degree_graph(n_nodes: int, avg_degree: int = 6) -> nx.Graph:
+def create_high_degree_graph(n_nodes: int, avg_degree: int = 6) -> SparseGraph:
     """Create a graph with higher average degree (highway interchange topology).
 
     Uses Barabási-Albert model which creates hubs with high degree.
     """
     # BA model: n nodes, m edges per new node
     m = avg_degree // 2
-    return nx.barabasi_albert_graph(n_nodes, m, seed=42)
+    return nx_to_sparse(nx.barabasi_albert_graph(n_nodes, m, seed=42))
 
 
-def create_tree_like_graph(n_nodes: int) -> nx.Graph:
+def create_tree_like_graph(n_nodes: int) -> SparseGraph:
     """Create a tree-like structure (rural road topology).
 
     Trees have no cycles, so triangle/square detection should be fast.
     """
-    return nx.random_labeled_tree(n_nodes, seed=42)
+    return nx_to_sparse(nx.random_labeled_tree(n_nodes, seed=42))
 
 
 def create_mixed_topology_graph(
     n_clusters: int = 10, cluster_size: int = 50, seed: int = 42
-) -> nx.Graph:
+) -> SparseGraph:
     """Create a graph with mixed topology (realistic road network).
 
     Multiple dense clusters connected by sparse bridges.
@@ -55,7 +64,7 @@ def create_mixed_topology_graph(
         seed: Random seed for deterministic bridge generation
     """
     rng = np.random.default_rng(seed)
-    G = nx.Graph()
+    nx_G = nx.Graph()
     node_offset = 0
 
     for cluster_id in range(n_clusters):
@@ -64,7 +73,7 @@ def create_mixed_topology_graph(
         # Relabel nodes to be unique
         mapping = {old: node_offset + i for i, old in enumerate(cluster.nodes())}
         cluster = nx.relabel_nodes(cluster, mapping)
-        G = nx.compose(G, cluster)
+        nx_G = nx.compose(nx_G, cluster)
 
         # Connect to previous cluster with sparse bridge
         if cluster_id > 0:
@@ -74,12 +83,12 @@ def create_mixed_topology_graph(
             for _ in range(rng.integers(1, 4)):
                 src = prev_cluster_start + rng.integers(0, cluster_size)
                 dst = curr_cluster_start + rng.integers(0, len(cluster))
-                if G.has_node(src) and G.has_node(dst):
-                    G.add_edge(src, dst)
+                if nx_G.has_node(src) and nx_G.has_node(dst):
+                    nx_G.add_edge(src, dst)
 
         node_offset += len(cluster)
 
-    return G
+    return nx_to_sparse(nx_G)
 
 
 class TestGraphletComputePerformanceTargets:
@@ -94,13 +103,13 @@ class TestGraphletComputePerformanceTargets:
         """
         # 100x100 grid = 10,000 nodes
         G = create_dense_grid_graph(100)
-        assert G.number_of_nodes() == 10000
+        assert G.n_nodes == 10000
 
         start = time.perf_counter()
         features = compute_road_graphlet_features(G)
         elapsed = time.perf_counter() - start
 
-        assert len(features) == G.number_of_nodes()
+        assert len(features) == G.n_nodes
         assert elapsed < 5.0, f"10K grid took {elapsed:.2f}s, target is <5s"
 
     @pytest.mark.slow
@@ -115,7 +124,7 @@ class TestGraphletComputePerformanceTargets:
         features = compute_road_graphlet_features(G)
         elapsed = time.perf_counter() - start
 
-        assert len(features) == G.number_of_nodes()
+        assert len(features) == G.n_nodes
         # Trees should be faster than grids
         assert elapsed < 3.0, f"20K tree took {elapsed:.2f}s, target is <3s"
 
@@ -131,7 +140,7 @@ class TestGraphletComputePerformanceTargets:
         features = compute_road_graphlet_features(G)
         elapsed = time.perf_counter() - start
 
-        assert len(features) == G.number_of_nodes()
+        assert len(features) == G.n_nodes
         assert elapsed < 10.0, f"5K high-degree took {elapsed:.2f}s, target is <10s"
 
     @pytest.mark.slow
@@ -141,7 +150,7 @@ class TestGraphletComputePerformanceTargets:
         This mimics real road networks: dense city blocks connected by highways.
         """
         G = create_mixed_topology_graph(n_clusters=20, cluster_size=100)
-        n_nodes = G.number_of_nodes()
+        n_nodes = G.n_nodes
 
         start = time.perf_counter()
         features = compute_road_graphlet_features(G)
@@ -186,8 +195,7 @@ class TestGraphletCorrectness:
 
     def test_triangle_graph(self):
         """Verify triangle counting."""
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2), (2, 0)])
+        G = build_graph_from_edges([(0, 1), (1, 2), (2, 0)])
 
         features = compute_road_graphlet_features(G)
 
@@ -196,7 +204,8 @@ class TestGraphletCorrectness:
 
     def test_two_hop_count_chain(self):
         """Verify two-hop count for simple chain."""
-        G = nx.path_graph(5)  # 0-1-2-3-4
+        # Chain: 0-1-2-3-4
+        G = build_graph_from_edges([(0, 1), (1, 2), (2, 3), (3, 4)])
         features = compute_road_graphlet_features(G)
 
         # Node 0: neighbors={1}, two_hop={2}
@@ -209,10 +218,8 @@ class TestGraphletCorrectness:
     def test_articulation_points_bridge(self):
         """Verify articulation point detection."""
         # Two triangles connected by a bridge
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2), (2, 0)])  # Triangle 1
-        G.add_edges_from([(3, 4), (4, 5), (5, 3)])  # Triangle 2
-        G.add_edge(2, 3)  # Bridge
+        edges = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (2, 3)]
+        G = build_graph_from_edges(edges)
 
         features = compute_road_graphlet_features(G)
 
@@ -240,7 +247,7 @@ class TestGraphletScaling:
 
         for n in sizes:
             G = create_dense_grid_graph(n)
-            n_nodes = G.number_of_nodes()
+            n_nodes = G.n_nodes
 
             start = time.perf_counter()
             compute_road_graphlet_features(G)
@@ -265,12 +272,15 @@ class TestGraphletScaling:
         """High-degree hub nodes shouldn't cause O(D³) explosion."""
         # Create a star graph with one very high degree node
         hub_degree = 100
-        G = nx.star_graph(hub_degree)  # Node 0 connected to 1..100
+        # Star: node 0 connected to 1..hub_degree
+        edges = [(0, i) for i in range(1, hub_degree + 1)]
 
         # Add some structure to non-hub nodes
         for i in range(1, hub_degree, 2):
             if i + 1 <= hub_degree:
-                G.add_edge(i, i + 1)
+                edges.append((i, i + 1))
+
+        G = build_graph_from_edges(edges)
 
         start = time.perf_counter()
         features = compute_road_graphlet_features(G)
@@ -286,7 +296,7 @@ class TestGraphletScaling:
 class TestOptimizedVsOriginal:
     """Compare optimized implementation against reference (if available)."""
 
-    def _reference_square_count(self, G: nx.Graph, node: int) -> int:
+    def _reference_square_count(self, G: SparseGraph, node) -> int:
         """Reference implementation for square counting (slow but correct)."""
         neighbors = set(G.neighbors(node))
         neighbor_list = list(neighbors)
@@ -302,7 +312,7 @@ class TestOptimizedVsOriginal:
         G = create_dense_grid_graph(5)
         features = compute_road_graphlet_features(G)
 
-        for node in G.nodes():
+        for node in G.node_ids:
             expected = self._reference_square_count(G, node)
             actual = features[node][2]
             assert actual == expected, f"Node {node}: expected {expected} squares, got {actual}"

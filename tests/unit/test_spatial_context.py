@@ -821,7 +821,7 @@ class TestConnectorGraphAndAlignment:
         )
 
         # Should have 5 unique connectors (conn_a, conn_b, conn_c, conn_d, conn_e)
-        assert G.number_of_nodes() == 5
+        assert G.n_nodes == 5
 
     def test_build_connector_graph_creates_correct_edges(self, sample_segment_with_connectors):
         """build_connector_graph should create edges between consecutive connectors."""
@@ -838,7 +838,7 @@ class TestConnectorGraphAndAlignment:
         # seg_2: conn_c--conn_d (1 edge)
         # seg_3: conn_c--conn_e (1 edge)
         # Total: 4 edges
-        assert G.number_of_edges() == 4
+        assert G.n_edges == 4
 
     def test_seg_to_connectors_mapping(self, sample_segment_with_connectors):
         """seg_to_connectors should map segment IDs to connector positions."""

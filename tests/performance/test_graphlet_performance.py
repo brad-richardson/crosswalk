@@ -24,6 +24,15 @@ from matcher.features.spatial_context import (
     build_inferred_graph,
     compute_road_graphlet_features,
 )
+from matcher.topology.sparse_graph import build_graph_from_edges
+
+
+def nx_to_sparse(G):
+    """Convert a NetworkX graph to SparseGraph."""
+    edges = list(G.edges())
+    # Include all nodes, even isolated ones
+    node_attrs = {n: {} for n in G.nodes()}
+    return build_graph_from_edges(edges, node_attrs=node_attrs)
 
 
 @pytest.fixture
@@ -159,11 +168,11 @@ class TestScalingBehavior:
         times = []
 
         # Warm-up run to avoid JIT/caching effects on first measurement
-        G_warmup = nx.gnm_random_graph(200, 400, seed=0)
+        G_warmup = nx_to_sparse(nx.gnm_random_graph(200, 400, seed=0))
         compute_road_graphlet_features(G_warmup)
 
         for n_nodes in node_counts:
-            G = nx.gnm_random_graph(n_nodes, n_nodes * 2, seed=42)
+            G = nx_to_sparse(nx.gnm_random_graph(n_nodes, n_nodes * 2, seed=42))
 
             start = time.perf_counter()
             features = compute_road_graphlet_features(G)
