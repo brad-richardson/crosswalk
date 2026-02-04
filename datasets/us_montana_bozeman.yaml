@@ -8,28 +8,20 @@ source:
   portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
 fetch:
   id_prefix: us_montana_bozeman
-  class_column: SurfaceType
+  name_column: St_Name
+  class_column: RoadClass
+  class_mapping:
+    Primary: primary
+    Secondary: secondary
+    Local: residential
+    Alley: service
+    Ramp: motorway_link
+    Vehicular Trail: track
+    Other: unclassified
   bbox:
   - -111.25
   - 45.55
   - -110.75
   - 45.85
   crs: EPSG:4326
-last_fetch:
-  fetched_at: '2026-02-03T12:41:38.428315+00:00'
-  bbox:
-  - -111.25
-  - 45.55
-  - -110.75
-  - 45.85
-  bbox_buffered:
-  - -111.26286213508968
-  - 45.541016888250084
-  - -110.73713786491032
-  - 45.858983111749914
-  bbox_buffer_m: 1000.0
-  feature_count: 18728
-  geometry_types:
-  - LineString
-  output_path: data/raw
 notes: Regional subset for efficient processing. Part of Montana Transportation Framework.

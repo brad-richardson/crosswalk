@@ -1,6 +1,6 @@
 name: co_bogota_sidewalks
 display_name: IDECA Bogotá Andenes
-type: road
+type: sidewalk
 description: Sidewalks (andenes) from Bogotá cadastre GIS
 source:
   type: arcgis

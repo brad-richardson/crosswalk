@@ -17,6 +17,11 @@ fetch:
     '4': tertiary
     '5': tertiary
     '6': residential
+    '7': service
+    '8': unclassified
+    '9': path
+    '10': service
+    '11': unclassified
   bbox:
   - 150.85
   - -34.15

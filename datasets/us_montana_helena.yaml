@@ -8,32 +8,20 @@ source:
   portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
 fetch:
   id_prefix: us_montana_helena
-  class_column: SurfaceType
+  name_column: St_Name
+  class_column: RoadClass
   class_mapping:
-    gravel: residential
-    unknown: service
-    paved: residential
+    Primary: primary
+    Secondary: secondary
+    Local: residential
+    Alley: service
+    Ramp: motorway_link
+    Vehicular Trail: track
+    Other: unclassified
   bbox:
   - -112.25
   - 46.45
   - -111.75
   - 46.75
   crs: EPSG:4326
-last_fetch:
-  fetched_at: '2026-02-03T12:41:59.820517+00:00'
-  bbox:
-  - -112.25
-  - 46.45
-  - -111.75
-  - 46.75
-  bbox_buffered:
-  - -112.26307418867124
-  - 46.44101688825009
-  - -111.73692581132876
-  - 46.75898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 22137
-  geometry_types:
-  - LineString
-  output_path: data/raw
 notes: Regional subset for efficient processing. Part of Montana Transportation Framework.

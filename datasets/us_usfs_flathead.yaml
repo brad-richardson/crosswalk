@@ -12,11 +12,11 @@ fetch:
   name_column: NAME
   class_column: OPER_MAINT_LEVEL
   class_mapping:
-    1: track
-    2: track
-    3: unclassified
-    4: tertiary
-    5: secondary
+    1 - BASIC CUSTODIAL CARE (CLOSED): track
+    2 - HIGH CLEARANCE VEHICLES: track
+    3 - SUITABLE FOR PASSENGER CARS: unclassified
+    4 - MODERATE DEGREE OF USER COMFORT: service
+    5 - HIGH DEGREE OF USER COMFORT: secondary
   bbox:
   - -114.5
   - 48.0

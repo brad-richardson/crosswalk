@@ -16,6 +16,7 @@ fetch:
     Motorway: motorway
     A Road: primary
     B Road: secondary
+    Classified Unnumbered: tertiary
     Unclassified: residential
     Not Classified: service
     Unknown: unclassified

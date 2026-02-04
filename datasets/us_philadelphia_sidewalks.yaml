@@ -10,18 +10,18 @@ fetch:
   id_prefix: phila_sidewalk
   class_column: feat_type
   class_mapping:
-    path: footway
-    unmarked: footway
-    parallel: footway
-    continental: footway
-    ladder: footway
-    diagonal: footway
-    grade_separated: footway
-    solid: footway
-    decorative: footway
-    bar_pairs: footway
-    dashed: footway
-    unknown: footway
+    PATH: footway
+    UNMARKED: footway
+    PARALLEL: footway
+    CONTINENTAL: footway
+    LADDER: footway
+    DIAGONAL: footway
+    GRADE_SEPARATED: footway
+    SOLID: footway
+    DECORATIVE: footway
+    BAR_PAIRS: footway
+    DASHED: footway
+    UNKNOWN: footway
   subclass_column: feat_type
   subclass_mapping:
     PATH: sidewalk

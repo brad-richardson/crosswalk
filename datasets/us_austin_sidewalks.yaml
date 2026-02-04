@@ -12,8 +12,9 @@ fetch:
   name_column: ADDRESS_DESCRIPTION
   class_column: PEDESTRIAN_FACILITY_TYPE
   class_mapping:
-    existing_sidewalk: footway
-    driveway: footway
+    EXISTING_SIDEWALK: footway
+    DRIVEWAY: footway
+    ABSENT_SIDEWALK: footway
   subclass_column: PEDESTRIAN_FACILITY_TYPE
   subclass_mapping:
     EXISTING_SIDEWALK: sidewalk

@@ -9,6 +9,19 @@ source:
 fetch:
   id_prefix: us_gwinnett
   name_column: FULLNAME
+  class_column: ROADCLASS
+  class_mapping:
+    residential: residential
+    major arterial: primary
+    minor arterial: secondary
+    major collector: tertiary
+    minor collector: tertiary
+    collectordistributor: tertiary
+    highway: primary
+    freeway: motorway
+    ramp: motorway_link
+    private: service
+    school: service
   oneway_column: ONEWAYDIR
   speed_limit_column: SPEED_LIMIT
   speed_limit_unit: mph

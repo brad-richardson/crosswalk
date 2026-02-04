@@ -153,19 +153,39 @@ def _transform_download_data(
     else:
         data["names"] = [None] * len(gdf)
 
-    # Class
+    # Class (case-insensitive mapping)
     if class_column and class_column in gdf.columns:
         if class_mapping:
-            data["class"] = gdf[class_column].map(class_mapping).fillna("unknown").values
+            # Normalize mapping keys to lowercase for case-insensitive matching
+            lower_mapping = {str(k).lower(): v for k, v in class_mapping.items()}
+            data["class"] = (
+                gdf[class_column]
+                .fillna("")
+                .astype(str)
+                .str.lower()
+                .map(lower_mapping)
+                .fillna("unknown")
+                .values
+            )
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
         data["class"] = ["footway"] * len(gdf)  # Default for sidewalks
 
     # Subclass - use explicit column/mapping if provided, otherwise use default or None
+    # (case-insensitive mapping)
     if subclass_column and subclass_column in gdf.columns:
         if subclass_mapping:
-            data["subclass"] = gdf[subclass_column].map(subclass_mapping).values
+            # Normalize mapping keys to lowercase for case-insensitive matching
+            lower_subclass_mapping = {str(k).lower(): v for k, v in subclass_mapping.items()}
+            data["subclass"] = (
+                gdf[subclass_column]
+                .fillna("")
+                .astype(str)
+                .str.lower()
+                .map(lower_subclass_mapping)
+                .values
+            )
         else:
             data["subclass"] = gdf[subclass_column].astype(str).values
     elif default_subclass is not None:

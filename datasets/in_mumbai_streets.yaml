@@ -9,6 +9,14 @@ source:
 fetch:
   id_prefix: mum_street
   name_column: NAME
+  class_column: DRV_STATUS
+  class_mapping:
+    t: residential
+    r: residential
+    private: service
+    narrow lane: service
+    restricted: service
+    sensitive: service
   bbox:
   - 72.75
   - 18.87

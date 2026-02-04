@@ -11,23 +11,23 @@ fetch:
   name_column: STREET_NAM
   class_column: ExisFacil
   class_mapping:
-    sbl: primary
-    sblbl: cycleway
-    sblsl: cycleway
-    cfsbl: cycleway
-    bl: primary
-    bl-peakbus: unknown
-    bfbl: unknown
-    blsl: unknown
-    cfbl: unknown
-    cfbs: unknown
-    sup: footway
-    supn: path
-    supm: path
-    slm: secondary
-    slmtc: unknown
-    ped: pedestrian
-    walk: footway
+    SBL: cycleway
+    SBLBL: cycleway
+    SBLSL: cycleway
+    CFSBL: cycleway
+    BL: cycleway
+    BL-PEAKBUS: cycleway
+    BFBL: cycleway
+    BLSL: cycleway
+    CFBL: cycleway
+    CFBS: cycleway
+    SUP: path
+    SUPN: path
+    SUPM: path
+    SLM: cycleway
+    SLMTC: cycleway
+    PED: pedestrian
+    WALK: footway
   bbox:
   - -71.19
   - 42.21

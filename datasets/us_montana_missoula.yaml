@@ -8,28 +8,20 @@ source:
   portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
 fetch:
   id_prefix: us_montana_missoula
-  class_column: SurfaceType
+  name_column: St_Name
+  class_column: RoadClass
+  class_mapping:
+    Primary: primary
+    Secondary: secondary
+    Local: residential
+    Alley: service
+    Ramp: motorway_link
+    Vehicular Trail: track
+    Other: unclassified
   bbox:
   - -114.25
   - 46.75
   - -113.75
   - 47.05
   crs: EPSG:4326
-last_fetch:
-  fetched_at: '2026-02-03T12:42:16.095134+00:00'
-  bbox:
-  - -114.25
-  - 46.75
-  - -113.75
-  - 47.05
-  bbox_buffered:
-  - -114.26314716310787
-  - 46.74101688825009
-  - -113.73685283689213
-  - 47.05898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 25255
-  geometry_types:
-  - LineString
-  output_path: data/raw
 notes: Regional subset for efficient processing. Part of Montana Transportation Framework.

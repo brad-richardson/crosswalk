@@ -10,27 +10,12 @@ source:
   file_format: gdb
 fetch:
   id_prefix: hk_hongkong
+  name_column: STREET_ENAME
+  # Note: Source data uses "-99" as placeholder for unnamed roads (~16% of rows)
   bbox:
   - 113.82
   - 22.15
   - 114.45
   - 22.58
   crs: EPSG:4326
-last_fetch:
-  fetched_at: '2026-02-03T12:33:54.123351+00:00'
-  bbox:
-  - 113.82
-  - 22.15
-  - 114.45
-  - 22.58
-  bbox_buffered:
-  - 113.81028620328694
-  - 22.14101688825009
-  - 114.45971379671306
-  - 22.588983111749908
-  bbox_buffer_m: 1000.0
-  feature_count: 182808
-  geometry_types:
-  - LineString
-  output_path: data/raw
 notes: GML format is automatically parsed during fetch.
