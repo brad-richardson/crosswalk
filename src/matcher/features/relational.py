@@ -59,6 +59,20 @@ from ._jit_helpers import (
 )
 
 
+class ParallelSiblingResult(NamedTuple):
+    """Result of parallel sibling detection.
+
+    Attributes:
+        has_sibling: True if a parallel sibling was found
+        sibling_distance: Lateral offset to sibling in meters (inf if no sibling)
+        parallel_fraction: Fraction of segment with nearby parallel sibling (0.0 if no sibling)
+    """
+
+    has_sibling: bool
+    sibling_distance: float
+    parallel_fraction: float
+
+
 @dataclass
 class SiblingSearchContext:
     """Context for per-pair parallel sibling detection.
@@ -692,7 +706,7 @@ def find_parallel_sibling(
     max_offset: float = PARALLEL_SIBLING_MAX_OFFSET_M,
     min_alignment: float = 0.7,  # Lowered from 0.9 for local alignment
     min_parallel_fraction: float = 0.3,  # At least 30% of segment must be parallel
-) -> tuple[bool, float, float]:
+) -> ParallelSiblingResult:
     """Find parallel sibling segment (other half of split highway).
 
     Detects when a segment has a nearby parallel "twin" with same name/class,
@@ -716,13 +730,10 @@ def find_parallel_sibling(
         min_parallel_fraction: Minimum fraction of segment that must be parallel (0-1), default 0.3
 
     Returns:
-        Tuple of (has_sibling, sibling_distance, parallel_fraction) where:
-        - has_sibling: True if a parallel sibling was found
-        - sibling_distance: Lateral offset to sibling (inf if no sibling)
-        - parallel_fraction: Fraction of segment with nearby parallel sibling (0.0 if no sibling)
+        ParallelSiblingResult with has_sibling, sibling_distance, and parallel_fraction.
     """
     if segment.is_empty:
-        return False, float("inf"), 0.0
+        return ParallelSiblingResult(False, float("inf"), 0.0)
 
     # Query spatial index with buffer
     buffer_geom = segment.buffer(max_offset)
@@ -809,7 +820,7 @@ def find_parallel_sibling(
             best_offset = offset_p25
             found_sibling = True
 
-    return found_sibling, best_offset, best_parallel_fraction
+    return ParallelSiblingResult(found_sibling, best_offset, best_parallel_fraction)
 
 
 def precompute_parallel_siblings(
@@ -819,7 +830,7 @@ def precompute_parallel_siblings(
     classes: list[str | None],
     ids_to_compute: set[str] | None = None,
     spatial_index: STRtree | None = None,
-) -> dict[str, tuple[bool, float, float]]:
+) -> dict[str, ParallelSiblingResult]:
     """Pre-compute parallel sibling info for segments in a dataset.
 
     This is called once per dataset (ref and target) during Pass 1 of feature
@@ -840,7 +851,7 @@ def precompute_parallel_siblings(
             skips building a new one (saves O(N log N) construction time).
 
     Returns:
-        Dict mapping segment_id -> (has_sibling, sibling_distance, parallel_fraction)
+        Dict mapping segment_id -> ParallelSiblingResult
     """
     # Use provided spatial index or build a new one
     if spatial_index is None:
@@ -853,7 +864,7 @@ def precompute_parallel_siblings(
     id_to_idx = {seg_id: i for i, seg_id in enumerate(segment_ids)}
 
     # Compute sibling info - only for requested segments
-    result: dict[str, tuple[bool, float, float]] = {}
+    result: dict[str, ParallelSiblingResult] = {}
 
     # If filtered, only iterate through requested IDs (O(k) instead of O(N))
     ids_to_process = ids_to_compute if ids_to_compute is not None else segment_ids
@@ -866,7 +877,7 @@ def precompute_parallel_siblings(
         name = segment_data[idx][1]
         cls = segment_data[idx][2]
 
-        has_sibling, sibling_dist, parallel_fraction = find_parallel_sibling(
+        result[seg_id] = find_parallel_sibling(
             segment=geom,
             segment_id=seg_id,
             segment_name=name,
@@ -874,6 +885,5 @@ def precompute_parallel_siblings(
             spatial_index=spatial_index,
             segment_data=segment_data,
         )
-        result[seg_id] = (has_sibling, sibling_dist, parallel_fraction)
 
     return result

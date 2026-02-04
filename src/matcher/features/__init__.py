@@ -2,6 +2,7 @@
 
 from .geometric import GeometricFeatures, compute_geometric_features
 from .relational import (
+    ParallelSiblingResult,
     RelationalFeatures,
     compute_endpoint_proximity,
     compute_neighbor_agreement,
@@ -34,6 +35,7 @@ __all__ = [
     "compute_endpoint_proximity",
     "compute_neighbor_agreement",
     "RelationalFeatures",
+    "ParallelSiblingResult",
     # Spatial context
     "AnchorRoadMatcher",
     "AnchorMatch",
