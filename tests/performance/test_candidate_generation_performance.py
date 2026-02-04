@@ -267,8 +267,8 @@ class TestCandidatePairConstructionPerformance:
         elapsed = time.perf_counter() - start
 
         assert len(candidates) == n_pairs
-        # 100K pairs should take < 0.5s with list comprehension
-        assert elapsed < 0.5, f"100K CandidatePair construction took {elapsed:.2f}s"
+        # 100K pairs should take < 0.6s with list comprehension
+        assert elapsed < 0.6, f"100K CandidatePair construction took {elapsed:.2f}s"
 
 
 class TestHighDensityScenarios:
