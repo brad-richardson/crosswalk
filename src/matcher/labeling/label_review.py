@@ -571,22 +571,31 @@ def render_label_detail(
     else:
         st.warning("Geometry data not available")
 
+    # Helper to invalidate cache after label changes
+    def _invalidate_cache():
+        cache_key = f"review_data_{dataset_id}"
+        if cache_key in st.session_state:
+            del st.session_state[cache_key]
+
     # Action buttons - prominent, full width on mobile
     st.markdown("### Update Label")
     c1, c2, c3 = st.columns(3)
     with c1:
         if st.button("Match", key="update_match", use_container_width=True, type="primary"):
             label_store.update_label(gers_id, target_id, "match", labeler_name)
+            _invalidate_cache()
             st.success("Updated to match")
             st.rerun()
     with c2:
         if st.button("No Match", key="update_no_match", use_container_width=True):
             label_store.update_label(gers_id, target_id, "no_match", labeler_name)
+            _invalidate_cache()
             st.success("Updated to no_match")
             st.rerun()
     with c3:
         if st.button("Unsure", key="update_unsure", use_container_width=True):
             label_store.update_label(gers_id, target_id, "unsure", labeler_name)
+            _invalidate_cache()
             st.success("Updated to unsure")
             st.rerun()
 
@@ -605,6 +614,7 @@ def render_label_detail(
                 use_container_width=True,
             ):
                 label_store.delete_label(gers_id, target_id)
+                _invalidate_cache()
                 st.success("Label deleted")
                 return True  # Go back to list
 
