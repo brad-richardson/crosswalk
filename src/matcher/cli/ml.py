@@ -22,7 +22,7 @@ def eval_model(
         None,
         "--model",
         "-m",
-        help="Path to existing trained model (if not provided, trains a fresh model)",
+        help="Path to existing trained model (if not provided, uses cross-validation)",
     ),
     labels_dir: Path = typer.Option(
         Path("labels"),
@@ -36,17 +36,17 @@ def eval_model(
         "-o",
         help="Output directory for benchmark results",
     ),
-    train_size: float = typer.Option(
-        0.7,
-        "--train-size",
-        "-t",
-        help="Fraction of data for training (default: 0.7 = 70/30 split)",
+    cv_folds: int = typer.Option(
+        5,
+        "--cv-folds",
+        "-k",
+        help="Number of cross-validation folds (default: 5)",
     ),
     seed: int = typer.Option(
-        999,
+        42,
         "--seed",
         "-s",
-        help="Random seed for train/test split",
+        help="Random seed for CV splits",
     ),
     skip_save: bool = typer.Option(
         False,
@@ -65,41 +65,40 @@ def eval_model(
         help="Only evaluate on specific dataset(s). Can be repeated.",
     ),
 ):
-    """Evaluate ML model performance on labeled data.
+    """Evaluate ML model performance using cross-validation.
 
-    By default, trains a fresh model on a subset of data and evaluates on a
-    holdout set. Uses segment-aware splitting to prevent data leakage.
+    By default, runs k-fold cross-validation with segment-aware splitting to
+    prevent data leakage. Reports mean ± std for all metrics.
 
-    Use --model to evaluate an existing trained model instead.
+    Use --model to evaluate an existing trained model on a holdout set instead.
 
     Examples:
-        # Train fresh model and evaluate (default)
+        # Cross-validation evaluation (default)
         matcher ml eval
-        matcher ml eval --train-size 0.8
+        matcher ml eval --cv-folds 10
         matcher ml eval --seed 123 --skip-save
 
-        # Evaluate an existing model
+        # Evaluate an existing model (single holdout)
         matcher ml eval --model data/models/matcher_model.joblib
         matcher ml eval -m data/models/combined.joblib -d us_frisco_trails
     """
     if model is not None:
-        # Evaluate existing model
+        # Evaluate existing model on holdout
         _eval_existing_model(
             model=model,
             labels_dir=labels_dir,
             by_dataset=by_dataset,
             dataset=dataset,
-            train_size=train_size,
             seed=seed,
             output_dir=output_dir,
             skip_save=skip_save,
         )
     else:
-        # Train fresh model and evaluate (benchmark mode)
-        _train_and_eval(
+        # Cross-validation evaluation
+        _cross_validate(
             labels_dir=labels_dir,
             output_dir=output_dir,
-            train_size=train_size,
+            cv_folds=cv_folds,
             seed=seed,
             skip_save=skip_save,
             by_dataset=by_dataset,
@@ -112,12 +111,11 @@ def _eval_existing_model(
     labels_dir: Path,
     by_dataset: bool,
     dataset: list[str],
-    train_size: float,
     seed: int,
     output_dir: Path,
     skip_save: bool,
 ) -> None:
-    """Evaluate an existing trained model on labeled data."""
+    """Evaluate an existing trained model on labeled data using 20% holdout."""
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
     from ..labeling.label_store import LabelStore
@@ -132,15 +130,11 @@ def _eval_existing_model(
         raise typer.Exit(1)
 
     run_date = datetime.now(UTC)
-    holdout_pct = 1 - train_size
-    test_pct = int(holdout_pct * 100)
 
     if dataset:
         console.print(f"[blue]Filtering to datasets: {', '.join(dataset)}[/blue]")
 
-    console.print(
-        f"[blue]Evaluating {model.name} on {holdout_pct * 100:.0f}% holdout (seed={seed})...[/blue]"
-    )
+    console.print(f"[blue]Evaluating {model.name} on 20% holdout (seed={seed})...[/blue]")
 
     # Load model
     matcher = MLMatcher()
@@ -161,8 +155,8 @@ def _eval_existing_model(
         all_labels = all_labels[all_labels["dataset"].isin(dataset)].copy()
         console.print(f"  Filtered to datasets {dataset}: {len(all_labels)}")
 
-    # Segment-aware split to get test set
-    _, test_idx = segment_aware_split(all_labels, test_size=holdout_pct, random_state=seed)
+    # Segment-aware split to get test set (20% holdout)
+    _, test_idx = segment_aware_split(all_labels, test_size=0.2, random_state=seed)
     test_df = all_labels.iloc[test_idx].copy()
     console.print(f"  Test set: {len(test_df)} samples")
 
@@ -178,7 +172,7 @@ def _eval_existing_model(
     overall_recall = recall_score(y_test, y_pred, average="weighted")
 
     console.print(f"\n{'=' * 60}")
-    console.print(f"[bold]EVALUATION ON {test_pct}% HOLDOUT ({len(test_df)} samples)[/bold]")
+    console.print(f"[bold]EVALUATION ON 20% HOLDOUT ({len(test_df)} samples)[/bold]")
     console.print("=" * 60)
     console.print("\nOverall:")
     console.print(f"  Accuracy:  {overall_acc:.3f}")
@@ -295,7 +289,7 @@ def _eval_existing_model(
                     "dataset": dataset_name,
                     "n_train": "N/A (existing model)",
                     "n_test": len(test_df),
-                    "train_size": train_size,
+                    "train_size": 0.8,  # Fixed 80/20 split for existing model eval
                     "n_samples": metrics.get("n_samples", 0),
                     "n_match": metrics.get("n_match", 0),
                     "n_no_match": metrics.get("n_no_match", 0),
@@ -323,33 +317,28 @@ def _eval_existing_model(
     console.print("[green]Evaluation complete[/green]")
 
 
-def _train_and_eval(
+def _cross_validate(
     labels_dir: Path,
     output_dir: Path,
-    train_size: float,
+    cv_folds: int,
     seed: int,
     skip_save: bool,
     by_dataset: bool,
     filter_datasets: list[str] | None,
 ) -> None:
-    """Train a fresh model and evaluate on holdout set."""
+    """Run k-fold cross-validation with segment-aware splitting."""
+    import numpy as np
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    from sklearn.model_selection import GroupKFold
 
     from ..labeling.label_store import LabelStore
-    from ..matching.ml import MLMatcher, segment_aware_split
+    from ..matching.ml import MLMatcher
 
     if not labels_dir.exists():
         console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
         raise typer.Exit(1)
 
-    # Validate train size
-    if not 0.1 <= train_size <= 0.9:
-        console.print("[red]--train-size must be between 0.1 and 0.9[/red]")
-        raise typer.Exit(1)
-
     run_date = datetime.now(UTC)
-    test_pct = int((1 - train_size) * 100)
-    train_pct = int(train_size * 100)
 
     console.print("[blue]Loading labels...[/blue]")
     all_labels = LabelStore.load_all(labels_dir)
@@ -365,232 +354,215 @@ def _train_and_eval(
         all_labels = all_labels[all_labels["dataset"].isin(filter_datasets)].copy()
         console.print(f"  Filtered to datasets {filter_datasets}: {len(all_labels)}")
 
-    # Segment-aware split to prevent leakage
-    console.print(f"\n[blue]Splitting {train_pct}/{test_pct} with segment-aware split...[/blue]")
-    train_idx, test_idx = segment_aware_split(
-        all_labels, test_size=1 - train_size, random_state=seed
+    # Remove duplicates
+    n_before = len(all_labels)
+    all_labels = all_labels.drop_duplicates(
+        subset=["gers_id", "target_id", "dataset"], keep="first"
     )
-
-    train_df = all_labels.iloc[train_idx].copy()
-    test_df = all_labels.iloc[test_idx].copy()
-
-    console.print(f"  Train: {len(train_df)}, Test: {len(test_df)}")
-    console.print(f"  Train labels: {train_df['label'].value_counts().to_dict()}")
-    console.print(f"  Test labels: {test_df['label'].value_counts().to_dict()}")
-
-    # Save train labels to temp directory for training
-    import tempfile
-
-    from ..config import FEATURE_COLUMNS
-    from ..labeling.label_store import HUMAN_LABEL_COLUMNS
-
-    # Check for duplicate (gers_id, target_id, dataset) pairs and warn
-    # Duplicates can occur from multiple labeling sessions for the same pair
-    n_before = len(train_df)
-    train_df = train_df.drop_duplicates(subset=["gers_id", "target_id", "dataset"], keep="first")
-    n_dropped = n_before - len(train_df)
+    n_dropped = n_before - len(all_labels)
     if n_dropped > 0:
+        console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first)[/yellow]")
+
+    # Create segment groups for segment-aware CV
+    # Group by gers_id to prevent the same reference segment appearing in both train and test
+    all_labels["_group"] = all_labels["gers_id"].astype("category").cat.codes
+    groups = all_labels["_group"].values
+
+    n_groups = len(np.unique(groups))
+    actual_folds = min(cv_folds, n_groups)
+    if actual_folds < cv_folds:
         console.print(
-            f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first occurrence)[/yellow]"
+            f"  [yellow]Reduced to {actual_folds} folds (only {n_groups} segment groups)[/yellow]"
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        human_dir = tmpdir / "human"
-        features_dir = tmpdir / "features"
+    console.print(f"\n[blue]Running {actual_folds}-fold cross-validation...[/blue]")
 
-        # Save each dataset's train portion in the expected format
-        # LabelStore.load_all expects:
-        #   - human/dataset=*/data.csv (label metadata)
-        #   - features/dataset=*/data.parquet (computed features)
-        for ds in train_df["dataset"].unique():
-            ds_train = train_df[train_df["dataset"] == ds]
+    # Initialize MLMatcher to get feature extraction methods
+    matcher = MLMatcher()
 
-            # Write human labels (metadata only)
-            human_ds_dir = human_dir / f"dataset={ds}"
-            human_ds_dir.mkdir(parents=True, exist_ok=True)
-            label_cols = [c for c in HUMAN_LABEL_COLUMNS if c in ds_train.columns]
-            ds_train[label_cols].to_csv(human_ds_dir / "data.csv", index=False)
+    # Extract features and labels once
+    X, y = matcher._extract_features_and_labels(all_labels, binary=True)
+    X = matcher._impute_missing(X)
 
-            # Write features (key columns + feature columns)
-            features_ds_dir = features_dir / f"dataset={ds}"
-            features_ds_dir.mkdir(parents=True, exist_ok=True)
-            feature_cols = ["gers_id", "target_id"] + [
-                c for c in FEATURE_COLUMNS if c in ds_train.columns
-            ]
-            ds_train[feature_cols].to_parquet(features_ds_dir / "data.parquet", index=False)
+    # Track metrics across folds
+    fold_metrics = {
+        "accuracy": [],
+        "f1": [],
+        "precision": [],
+        "recall": [],
+    }
 
-        # Train model on train set only (no internal split since we already split)
-        console.print(f"\n[blue]Training model on {len(train_df)} samples...[/blue]")
-        matcher = MLMatcher()
-        matcher.train(labels_dir=str(tmpdir), binary=True, test_size=0.0)
+    # Per-dataset metrics across folds
+    dataset_fold_metrics: dict[str, dict[str, list]] = {}
 
-        # Save the model
-        model_dir = Path("data/models")
-        model_dir.mkdir(parents=True, exist_ok=True)
-        model_path = model_dir / "matcher_model_combined.joblib"
-        matcher.save_model(str(model_path))
-        console.print(f"  Model saved to {model_path}")
+    gkf = GroupKFold(n_splits=actual_folds)
 
-        # Evaluate on test set (completely unseen during training)
-        console.print(f"\n[blue]Evaluating on {len(test_df)} holdout samples...[/blue]")
+    for fold_idx, (train_idx, test_idx) in enumerate(gkf.split(X, y, groups)):
+        console.print(f"  Fold {fold_idx + 1}/{actual_folds}...")
 
-        X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
-        X_test = matcher._impute_missing(X_test)
-        y_pred = matcher.model.predict(X_test)
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
 
-        # Overall metrics
-        overall_acc = accuracy_score(y_test, y_pred)
-        overall_f1 = f1_score(y_test, y_pred, average="weighted")
-        overall_precision = precision_score(y_test, y_pred, average="weighted")
-        overall_recall = recall_score(y_test, y_pred, average="weighted")
+        # Train model for this fold
+        from xgboost import XGBClassifier
 
-        console.print(f"\n{'=' * 60}")
-        console.print(f"[bold]EVALUATION ON {test_pct}% HOLDOUT ({len(test_df)} samples)[/bold]")
-        console.print("=" * 60)
-        console.print("\nOverall:")
-        console.print(f"  Accuracy:  {overall_acc:.3f}")
-        console.print(f"  F1:        {overall_f1:.3f}")
-        console.print(f"  Precision: {overall_precision:.3f}")
-        console.print(f"  Recall:    {overall_recall:.3f}")
+        model = XGBClassifier(
+            n_estimators=500,
+            max_depth=6,
+            learning_rate=0.05,
+            random_state=seed,
+            n_jobs=-1,
+        )
+        model.fit(X_train, y_train)
 
-        # Extract top 10 feature importances
-        feature_importances = dict(zip(matcher.feature_names, matcher.model.feature_importances_))
-        top_features = sorted(feature_importances.items(), key=lambda x: -x[1])[:10]
+        # Predict on test fold
+        y_pred = model.predict(X_test)
 
-        console.print("\nTop 10 features by importance:")
-        for feat, imp in top_features:
-            console.print(f"  {feat}: {imp:.3f}")
+        # Compute overall metrics for this fold
+        fold_metrics["accuracy"].append(accuracy_score(y_test, y_pred))
+        fold_metrics["f1"].append(f1_score(y_test, y_pred, average="weighted"))
+        fold_metrics["precision"].append(precision_score(y_test, y_pred, average="weighted"))
+        fold_metrics["recall"].append(recall_score(y_test, y_pred, average="weighted"))
 
-        # Per-dataset metrics
-        results = {}
+        # Per-dataset metrics for this fold
         if by_dataset:
-            console.print("\nPer-dataset results:")
-            for ds in sorted(test_df["dataset"].unique()):
-                ds_test = test_df[test_df["dataset"] == ds]
-                X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
-                X_ds = matcher._impute_missing(X_ds)
-                y_ds_pred = matcher.model.predict(X_ds)
+            test_df = all_labels.iloc[test_idx]
+            for ds in test_df["dataset"].unique():
+                ds_mask = test_df["dataset"] == ds
+                ds_indices = np.where(ds_mask.values)[0]
+                if len(ds_indices) == 0:
+                    continue
 
-                ds_acc = accuracy_score(y_ds, y_ds_pred)
-                ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
-                ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
-                ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
-                n_match = int((y_ds == 1).sum())
-                n_no_match = int((y_ds == 0).sum())
+                y_ds = y_test[ds_indices]
+                y_ds_pred = y_pred[ds_indices]
 
-                console.print(
-                    f"  {ds}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
-                    f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
+                if ds not in dataset_fold_metrics:
+                    dataset_fold_metrics[ds] = {
+                        "accuracy": [],
+                        "f1": [],
+                        "precision": [],
+                        "recall": [],
+                        "n_samples": [],
+                    }
+
+                dataset_fold_metrics[ds]["accuracy"].append(accuracy_score(y_ds, y_ds_pred))
+                dataset_fold_metrics[ds]["f1"].append(
+                    f1_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
                 )
+                dataset_fold_metrics[ds]["precision"].append(
+                    precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                )
+                dataset_fold_metrics[ds]["recall"].append(
+                    recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                )
+                dataset_fold_metrics[ds]["n_samples"].append(len(ds_indices))
 
-                results[ds] = {
-                    "n_samples": len(ds_test),
-                    "n_match": n_match,
-                    "n_no_match": n_no_match,
-                    "accuracy": ds_acc,
-                    "f1": ds_f1,
-                    "precision": ds_precision,
-                    "recall": ds_recall,
-                }
-        else:
-            # Store overall results for CSV
-            results["overall"] = {
-                "n_samples": len(test_df),
-                "n_match": int((y_test == 1).sum()),
-                "n_no_match": int((y_test == 0).sum()),
-                "accuracy": overall_acc,
-                "f1": overall_f1,
-                "precision": overall_precision,
-                "recall": overall_recall,
+    # Compute mean and std for overall metrics
+    console.print(f"\n{'=' * 60}")
+    console.print(
+        f"[bold]{actual_folds}-FOLD CROSS-VALIDATION RESULTS ({len(all_labels)} samples)[/bold]"
+    )
+    console.print("=" * 60)
+
+    console.print("\nOverall (mean ± std):")
+    overall_results = {}
+    for metric in ["accuracy", "f1", "precision", "recall"]:
+        mean_val = np.mean(fold_metrics[metric])
+        std_val = np.std(fold_metrics[metric])
+        console.print(f"  {metric.capitalize():12s} {mean_val:.3f} ± {std_val:.3f}")
+        overall_results[f"{metric}_mean"] = mean_val
+        overall_results[f"{metric}_std"] = std_val
+
+    # Per-dataset results
+    dataset_results = {}
+    if by_dataset and dataset_fold_metrics:
+        console.print("\nPer-dataset results (mean ± std):")
+        for ds in sorted(dataset_fold_metrics.keys()):
+            ds_metrics = dataset_fold_metrics[ds]
+            f1_mean = np.mean(ds_metrics["f1"])
+            f1_std = np.std(ds_metrics["f1"])
+            acc_mean = np.mean(ds_metrics["accuracy"])
+            n_samples = sum(ds_metrics["n_samples"])
+
+            console.print(
+                f"  {ds}: F1={f1_mean:.3f}±{f1_std:.3f}, Acc={acc_mean:.3f} (n={n_samples})"
+            )
+
+            dataset_results[ds] = {
+                "f1_mean": f1_mean,
+                "f1_std": f1_std,
+                "accuracy_mean": acc_mean,
+                "accuracy_std": np.std(ds_metrics["accuracy"]),
+                "precision_mean": np.mean(ds_metrics["precision"]),
+                "recall_mean": np.mean(ds_metrics["recall"]),
+                "n_samples": n_samples,
             }
 
-        # Save results to CSV
-        if not skip_save:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            results_file = output_dir / "ml_eval_results.csv"
+    # Save results to CSV
+    if not skip_save:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results_file = output_dir / "ml_cv_results.csv"
 
-            fieldnames = [
-                "run_date",
-                "data_pull_date",
-                "dataset",
-                "n_train",
-                "n_test",
-                "train_size",
-                "n_samples",
-                "n_match",
-                "n_no_match",
-                "accuracy",
-                "f1",
-                "precision",
-                "recall",
-                "split_seed",
-                "model_name",
-                "top1_feature",
-                "top1_importance",
-                "top2_feature",
-                "top2_importance",
-                "top3_feature",
-                "top3_importance",
-                "top4_feature",
-                "top4_importance",
-                "top5_feature",
-                "top5_importance",
-                "top6_feature",
-                "top6_importance",
-                "top7_feature",
-                "top7_importance",
-                "top8_feature",
-                "top8_importance",
-                "top9_feature",
-                "top9_importance",
-                "top10_feature",
-                "top10_importance",
-            ]
+        fieldnames = [
+            "run_date",
+            "dataset",
+            "cv_folds",
+            "n_samples",
+            "f1_mean",
+            "f1_std",
+            "accuracy_mean",
+            "accuracy_std",
+            "precision_mean",
+            "recall_mean",
+            "seed",
+        ]
 
-            write_header = not results_file.exists()
+        write_header = not results_file.exists()
 
-            with open(results_file, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
+        with open(results_file, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
 
-                if write_header:
-                    writer.writeheader()
+            if write_header:
+                writer.writeheader()
 
-                for dataset_name, metrics in results.items():
-                    row = {
+            # Write overall row
+            writer.writerow(
+                {
+                    "run_date": run_date.isoformat(),
+                    "dataset": "overall",
+                    "cv_folds": actual_folds,
+                    "n_samples": len(all_labels),
+                    "f1_mean": f"{overall_results['f1_mean']:.4f}",
+                    "f1_std": f"{overall_results['f1_std']:.4f}",
+                    "accuracy_mean": f"{overall_results['accuracy_mean']:.4f}",
+                    "accuracy_std": f"{overall_results['accuracy_std']:.4f}",
+                    "precision_mean": f"{overall_results['precision_mean']:.4f}",
+                    "recall_mean": f"{overall_results['recall_mean']:.4f}",
+                    "seed": seed,
+                }
+            )
+
+            # Write per-dataset rows
+            for ds, metrics in dataset_results.items():
+                writer.writerow(
+                    {
                         "run_date": run_date.isoformat(),
-                        "data_pull_date": run_date.isoformat(),
-                        "dataset": dataset_name,
-                        "n_train": len(train_df),
-                        "n_test": len(test_df),
-                        "train_size": train_size,
-                        "n_samples": metrics.get("n_samples", 0),
-                        "n_match": metrics.get("n_match", 0),
-                        "n_no_match": metrics.get("n_no_match", 0),
-                        "accuracy": f"{metrics.get('accuracy', 0):.4f}",
-                        "f1": f"{metrics.get('f1', 0):.4f}",
-                        "precision": f"{metrics.get('precision', 0):.4f}",
-                        "recall": f"{metrics.get('recall', 0):.4f}",
-                        "split_seed": seed,
-                        "model_name": model_path.name,
-                        **{
-                            f"top{i + 1}_feature": top_features[i][0]
-                            if len(top_features) > i
-                            else ""
-                            for i in range(10)
-                        },
-                        **{
-                            f"top{i + 1}_importance": f"{top_features[i][1]:.4f}"
-                            if len(top_features) > i
-                            else ""
-                            for i in range(10)
-                        },
+                        "dataset": ds,
+                        "cv_folds": actual_folds,
+                        "n_samples": metrics["n_samples"],
+                        "f1_mean": f"{metrics['f1_mean']:.4f}",
+                        "f1_std": f"{metrics['f1_std']:.4f}",
+                        "accuracy_mean": f"{metrics['accuracy_mean']:.4f}",
+                        "accuracy_std": f"{metrics['accuracy_std']:.4f}",
+                        "precision_mean": f"{metrics['precision_mean']:.4f}",
+                        "recall_mean": f"{metrics['recall_mean']:.4f}",
+                        "seed": seed,
                     }
-                    writer.writerow(row)
+                )
 
-            console.print(f"\n[green]Results saved to {results_file}[/green]")
+        console.print(f"\n[green]Results saved to {results_file}[/green]")
 
-    console.print("\n[green]Evaluation complete![/green]")
+    console.print("\n[green]Cross-validation complete![/green]")
 
 
 @ml_app.command("features")
