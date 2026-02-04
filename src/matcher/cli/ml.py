@@ -697,12 +697,12 @@ def analyze_errors(
     console.print("[bold]ERROR ANALYSIS SUMMARY[/bold]")
     console.print("=" * 70)
 
-    console.print(f"\n[bold]Overall Performance[/bold]")
+    console.print("\n[bold]Overall Performance[/bold]")
     console.print(f"  Accuracy: {overall_acc:.3f}")
     console.print(f"  F1 Score: {overall_f1:.3f}")
     console.print(f"  Total errors: {all_labels['is_error'].sum()} / {len(all_labels)}")
 
-    console.print(f"\n[bold]Confusion Matrix[/bold]")
+    console.print("\n[bold]Confusion Matrix[/bold]")
     console.print("                  Predicted")
     console.print("                  no_match  match")
     console.print(f"  Actual no_match   {overall_cm[0, 0]:5d}    {overall_cm[0, 1]:5d}  (FP rate: {overall_cm[0, 1] / overall_cm[0].sum():.1%})")
@@ -730,7 +730,7 @@ def analyze_errors(
         console.print("    - Potential label quality issues (mislabeled examples)")
 
     # Per-dataset breakdown
-    console.print(f"\n[bold]Per-Dataset Error Analysis[/bold]")
+    console.print("\n[bold]Per-Dataset Error Analysis[/bold]")
     console.print("-" * 70)
 
     dataset_errors = []
@@ -761,7 +761,7 @@ def analyze_errors(
         )
 
     # Feature correlation with errors
-    console.print(f"\n[bold]Feature Analysis: Errors vs Correct[/bold]")
+    console.print("\n[bold]Feature Analysis: Errors vs Correct[/bold]")
     console.print("-" * 70)
 
     # Compute mean feature values for errors vs correct predictions

@@ -44,6 +44,7 @@ class TestTransformDownloadData:
             class_column="ROAD_TYPE",
             class_mapping=None,
             source_name="TestSource",
+            id_column="OBJECTID",
         )
 
         assert len(result) == 3
@@ -53,7 +54,7 @@ class TestTransformDownloadData:
         assert "subtype" in result.columns
         assert "sources" in result.columns
 
-        # Check ID format
+        # Check ID format (OBJECTID values are 1, 2, 3)
         assert result["id"].iloc[0] == "test_1"
 
         # Check names extraction
@@ -74,14 +75,15 @@ class TestTransformDownloadData:
             class_column="ROAD_TYPE",
             class_mapping=class_mapping,
             source_name="TestSource",
+            id_column="OBJECTID",
         )
 
         assert result["class"].iloc[0] == "major"
         assert result["class"].iloc[1] == "minor"
         assert result["class"].iloc[2] == "local"
 
-    def test_generated_ids(self):
-        """Test ID generation when no ID column exists."""
+    def test_missing_id_column_raises_error(self):
+        """Test that missing id_column raises ValueError."""
         gdf = gpd.GeoDataFrame(
             {
                 "NAME": ["Main St"],
@@ -90,16 +92,37 @@ class TestTransformDownloadData:
             crs="EPSG:4326",
         )
 
-        result = _transform_download_data(
-            gdf,
-            id_prefix="test",
-            name_column="NAME",
-            class_column=None,
-            class_mapping=None,
-            source_name="TestSource",
+        with pytest.raises(ValueError, match="id_column must be specified"):
+            _transform_download_data(
+                gdf,
+                id_prefix="test",
+                name_column="NAME",
+                class_column=None,
+                class_mapping=None,
+                source_name="TestSource",
+                id_column=None,
+            )
+
+    def test_invalid_id_column_raises_error(self):
+        """Test that invalid id_column raises ValueError."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "NAME": ["Main St"],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
         )
 
-        assert result["id"].iloc[0] == "test_0"
+        with pytest.raises(ValueError, match="not found in data"):
+            _transform_download_data(
+                gdf,
+                id_prefix="test",
+                name_column="NAME",
+                class_column=None,
+                class_mapping=None,
+                source_name="TestSource",
+                id_column="NONEXISTENT",
+            )
 
     def test_empty_dataframe(self):
         """Test handling of empty GeoDataFrame."""
