@@ -334,7 +334,7 @@ def render_label_list(df: pd.DataFrame) -> tuple[str, str] | None:
             st.caption(
                 f"**Ref:** `{gers_short}`  \n"
                 f"**Target:** `{target_short}`  \n"
-                f"**ML:** :{conf_color}[{ml_decision} ({ml_confidence*100:.0f}%)]  |  "
+                f"**ML:** :{conf_color}[{ml_decision} ({ml_confidence * 100:.0f}%)]  |  "
                 f"**By:** {labeler}"
             )
 
