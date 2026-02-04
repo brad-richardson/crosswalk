@@ -76,9 +76,9 @@ def render_comparison_view(label_store: LabelStore) -> None:
         label_a = str(df_a.loc[pair, "label"])
         label_b = str(df_b.loc[pair, "label"])
 
-        # Normalize labels for comparison (treat match_1n as match)
-        norm_a = "match" if "match" in label_a else label_a
-        norm_b = "match" if "match" in label_b else label_b
+        # Normalize labels for comparison
+        norm_a = label_a
+        norm_b = label_b
 
         if norm_a == norm_b:
             agreements.append((pair, label_a, label_b))
@@ -158,17 +158,12 @@ def render_comparison_view(label_store: LabelStore) -> None:
     st.subheader("Agreement by Label Type")
 
     # Create confusion matrix
-    label_types = ["match", "no_match", "associated", "unsure", "maybe", "skip"]
+    label_types = ["match", "no_match", "unsure", "maybe", "skip"]
     matrix_data = {la: {lb: 0 for lb in label_types} for la in label_types}
 
     for pair in common_pairs:
         label_a = str(df_a.loc[pair, "label"])
         label_b = str(df_b.loc[pair, "label"])
-        # Normalize match_1n to match
-        if "match" in label_a:
-            label_a = "match"
-        if "match" in label_b:
-            label_b = "match"
         if label_a in matrix_data and label_b in label_types:
             matrix_data[label_a][label_b] += 1
 

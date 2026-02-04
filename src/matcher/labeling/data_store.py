@@ -280,6 +280,24 @@ class DataStore:
         mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
         return mask.any()
 
+    def delete_pair(self, gers_id: str, target_id: str) -> bool:
+        """Delete data for a labeled pair.
+
+        Args:
+            gers_id: Overture reference segment ID
+            target_id: Target segment ID
+
+        Returns:
+            True if found and deleted, False if pair not found.
+        """
+        gdf = self.gdf
+        mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
+        if not mask.any():
+            return False
+        self._gdf = gdf[~mask].reset_index(drop=True)
+        self.save()
+        return True
+
     def update_lr_attributes(
         self,
         gers_id: str,

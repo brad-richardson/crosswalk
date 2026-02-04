@@ -163,6 +163,24 @@ class FeatureStore:
         mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
         return mask.any()
 
+    def delete_pair(self, gers_id: str, target_id: str) -> bool:
+        """Delete features for a labeled pair.
+
+        Args:
+            gers_id: Overture reference segment ID
+            target_id: Target segment ID
+
+        Returns:
+            True if found and deleted, False if pair not found.
+        """
+        df = self.df
+        mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
+        if not mask.any():
+            return False
+        self._df = df[~mask].reset_index(drop=True)
+        self.save()
+        return True
+
     def save(self) -> None:
         """Save features to Parquet atomically with backup.
 

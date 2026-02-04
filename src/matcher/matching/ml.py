@@ -9,7 +9,7 @@ Training Data Format:
 Uses labels from Hive-partitioned CSVs in labels/ which contains:
 - gers_id: Overture reference segment ID (GERS ID)
 - target_id: Target segment identifier
-- label: Human label (match, no_match, unsure; legacy: associated)
+- label: Human label (match, no_match, unsure)
 - Feature columns: hausdorff_distance, buffer_iou, etc.
 
 Model Architecture:
@@ -718,8 +718,8 @@ class MLMatcher:
         self.model_path = model_path
         self.feature_names = FEATURE_COLUMNS.copy()
         self.feature_medians = {}  # For imputing missing values during inference
-        self.label_encoder = {"match": 1, "no_match": 0, "associated": 2}
-        self.label_decoder = {1: "match", 0: "no_match", 2: "associated"}
+        self.label_encoder = {"match": 1, "no_match": 0}
+        self.label_decoder = {1: "match", 0: "no_match"}
         self.is_binary = True  # Track if model is binary or multiclass
         self.feature_version = None
         self._auto_select = auto_select
@@ -799,7 +799,7 @@ class MLMatcher:
         Args:
             labels_dir: Path to Hive-partitioned labels directory
             binary: If True (default), train binary classifier (match vs non-match)
-                   If False, train multiclass (legacy, includes associated)
+                   If False, train multiclass (not recommended)
             test_size: Fraction of data to hold out for testing
             exclude_semantic: If True, exclude semantic features (name_*, class_similarity)
                              for training a geometry-only model
@@ -893,7 +893,7 @@ class MLMatcher:
             logger.info(f"Training on {len(df)} labels from {df['dataset'].nunique()} datasets")
 
         # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
-        valid_labels = {"match", "no_match", "associated"}
+        valid_labels = {"match", "no_match"}
         invalid_mask = ~df["label"].isin(valid_labels)
         if invalid_mask.any():
             invalid_labels = df.loc[invalid_mask, "label"].value_counts().to_dict()
@@ -1101,7 +1101,7 @@ class MLMatcher:
             self.model.fit(X_train, y_train, verbose=False, **fit_kwargs)
 
         # Results dict
-        target_names = ["no_match", "match"] if binary else ["no_match", "match", "associated"]
+        target_names = ["no_match", "match"]
         results = {
             "n_train": len(X_train),
             "n_test": len(X_test),
@@ -2060,7 +2060,7 @@ def evaluate_by_dataset(
 
     # If holdout requested, split the data first using segment-aware splitting
     if holdout:
-        valid_labels = {"match", "no_match", "associated"}
+        valid_labels = {"match", "no_match"}
         eval_df = all_labels[all_labels["label"].isin(valid_labels)].copy()
         _, test_idx = segment_aware_split(eval_df, test_size=holdout_pct, random_state=seed)
         all_labels = eval_df.iloc[test_idx]
@@ -2084,7 +2084,7 @@ def evaluate_by_dataset(
         df = all_labels[all_labels["dataset"] == dataset_name].copy()
 
         # Filter to valid labels
-        valid_labels = {"match", "no_match", "associated"}
+        valid_labels = {"match", "no_match"}
         df = df[df["label"].isin(valid_labels)].copy()
 
         if len(df) == 0:
