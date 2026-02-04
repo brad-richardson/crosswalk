@@ -290,8 +290,8 @@ class TestGraphletScaling:
         assert features[0][0] == hub_degree
 
         # Should be fast even with high-degree node
-        # Threshold allows for CI environment variability (~2-4x slower than local)
-        assert elapsed < 2.0, f"Star graph with degree {hub_degree} took {elapsed:.2f}s"
+        # Threshold allows for first-run JIT compilation (~100ms) + CI variability
+        assert elapsed < 1.0, f"Star graph with degree {hub_degree} took {elapsed:.2f}s"
 
 
 class TestOptimizedVsOriginal:

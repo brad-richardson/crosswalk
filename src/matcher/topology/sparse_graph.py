@@ -438,19 +438,24 @@ def edge_is_bridge(graph: SparseGraph, edge: tuple[Any, Any]) -> bool:
 
 
 # Numba-accelerated functions for graphlet features
+_NUMBA_TRIANGLE_FUNCS: tuple | None = None
 
 
 def _get_numba_triangle_functions():
-    """Lazy-load numba-accelerated triangle/clustering functions.
+    """Get numba-accelerated triangle/clustering functions (cached after first call).
 
-    Returns None tuple if numba is not available.
+    Functions are compiled on first call and cached to disk via numba's cache=True.
+
+    Returns:
+        Tuple of (count_triangles_per_node, compute_clustering_coefficients) functions
     """
-    try:
-        from numba import njit
-    except ImportError:
-        return None, None
+    global _NUMBA_TRIANGLE_FUNCS
+    if _NUMBA_TRIANGLE_FUNCS is not None:
+        return _NUMBA_TRIANGLE_FUNCS
 
-    @njit
+    from numba import njit
+
+    @njit(cache=True)
     def count_triangles_per_node(
         n_nodes: int, indptr: np.ndarray, indices: np.ndarray
     ) -> np.ndarray:
@@ -507,7 +512,7 @@ def _get_numba_triangle_functions():
 
         return result
 
-    @njit
+    @njit(cache=True)
     def compute_clustering_coefficients(
         n_nodes: int, indptr: np.ndarray, indices: np.ndarray, triangles: np.ndarray
     ) -> np.ndarray:
@@ -536,7 +541,9 @@ def _get_numba_triangle_functions():
 
         return result
 
-    return count_triangles_per_node, compute_clustering_coefficients
+    # Cache the functions
+    _NUMBA_TRIANGLE_FUNCS = (count_triangles_per_node, compute_clustering_coefficients)
+    return _NUMBA_TRIANGLE_FUNCS
 
 
 def compute_triangles(graph: SparseGraph) -> dict[Any, int]:
