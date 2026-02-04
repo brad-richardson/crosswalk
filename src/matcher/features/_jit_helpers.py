@@ -438,3 +438,139 @@ def histogram_intersection_numba(h1: np.ndarray, h2: np.ndarray) -> float:
         Intersection similarity score (0-1)
     """
     return np.minimum(h1, h2).sum()
+
+
+@njit(cache=True)
+def compute_local_parallel_alignment_numba(
+    coords_a: np.ndarray,
+    coords_b: np.ndarray,
+    n_samples: int = 16,
+    parallel_threshold: float = 0.7,
+) -> tuple[float, float]:
+    """Compute local alignment by sampling both lines and comparing headings.
+
+    Instead of using overall heading (first to last point), this function:
+    1. Samples both lines at n_samples intervals
+    2. Computes local heading at each sample (direction to next sample)
+    3. Returns both mean alignment and fraction of samples that are parallel
+
+    This handles curved segments and segments that are only partially parallel
+    (e.g., split carriageways that diverge/converge at endpoints).
+
+    Args:
+        coords_a: Nx2 array of coordinates for line A
+        coords_b: Mx2 array of coordinates for line B
+        n_samples: Number of sample points (default 16)
+        parallel_threshold: Alignment threshold to count as "parallel" (default 0.7)
+
+    Returns:
+        Tuple of (mean_alignment, parallel_fraction) where:
+        - mean_alignment: Average alignment across all samples (0-1)
+        - parallel_fraction: Fraction of samples with alignment > threshold (0-1)
+    """
+    # Handle degenerate cases
+    if coords_a.shape[0] < 2 or coords_b.shape[0] < 2:
+        return 0.0, 0.0
+
+    # Get total length of each line for sampling
+    len_a = 0.0
+    for i in range(coords_a.shape[0] - 1):
+        dx = coords_a[i + 1, 0] - coords_a[i, 0]
+        dy = coords_a[i + 1, 1] - coords_a[i, 1]
+        len_a += np.sqrt(dx * dx + dy * dy)
+
+    len_b = 0.0
+    for i in range(coords_b.shape[0] - 1):
+        dx = coords_b[i + 1, 0] - coords_b[i, 0]
+        dy = coords_b[i + 1, 1] - coords_b[i, 1]
+        len_b += np.sqrt(dx * dx + dy * dy)
+
+    if len_a < 1e-10 or len_b < 1e-10:
+        return 0.0, 0.0
+
+    # Sample points along each line at regular intervals
+    # We need n_samples-1 segments to compare headings
+    sample_distances_a = np.linspace(0, len_a, n_samples)
+    sample_distances_b = np.linspace(0, len_b, n_samples)
+
+    # Interpolate points along line A
+    points_a = np.empty((n_samples, 2))
+    cumulative_dist = 0.0
+    seg_idx = 0
+    for i in range(n_samples):
+        target_dist = sample_distances_a[i]
+        # Walk along segments to find the right position
+        while seg_idx < coords_a.shape[0] - 1:
+            dx = coords_a[seg_idx + 1, 0] - coords_a[seg_idx, 0]
+            dy = coords_a[seg_idx + 1, 1] - coords_a[seg_idx, 1]
+            seg_len = np.sqrt(dx * dx + dy * dy)
+            if cumulative_dist + seg_len >= target_dist or seg_idx == coords_a.shape[0] - 2:
+                # Interpolate within this segment
+                if seg_len > 1e-10:
+                    t = (target_dist - cumulative_dist) / seg_len
+                    t = max(0.0, min(1.0, t))
+                else:
+                    t = 0.0
+                points_a[i, 0] = coords_a[seg_idx, 0] + t * dx
+                points_a[i, 1] = coords_a[seg_idx, 1] + t * dy
+                break
+            cumulative_dist += seg_len
+            seg_idx += 1
+
+    # Interpolate points along line B
+    points_b = np.empty((n_samples, 2))
+    cumulative_dist = 0.0
+    seg_idx = 0
+    for i in range(n_samples):
+        target_dist = sample_distances_b[i]
+        while seg_idx < coords_b.shape[0] - 1:
+            dx = coords_b[seg_idx + 1, 0] - coords_b[seg_idx, 0]
+            dy = coords_b[seg_idx + 1, 1] - coords_b[seg_idx, 1]
+            seg_len = np.sqrt(dx * dx + dy * dy)
+            if cumulative_dist + seg_len >= target_dist or seg_idx == coords_b.shape[0] - 2:
+                if seg_len > 1e-10:
+                    t = (target_dist - cumulative_dist) / seg_len
+                    t = max(0.0, min(1.0, t))
+                else:
+                    t = 0.0
+                points_b[i, 0] = coords_b[seg_idx, 0] + t * dx
+                points_b[i, 1] = coords_b[seg_idx, 1] + t * dy
+                break
+            cumulative_dist += seg_len
+            seg_idx += 1
+
+    # Compute local headings between consecutive samples and compare
+    total_alignment = 0.0
+    parallel_count = 0
+    n_comparisons = n_samples - 1
+
+    for i in range(n_comparisons):
+        # Local heading for line A
+        dx_a = points_a[i + 1, 0] - points_a[i, 0]
+        dy_a = points_a[i + 1, 1] - points_a[i, 1]
+        if abs(dx_a) < 1e-10 and abs(dy_a) < 1e-10:
+            continue
+        heading_a = compute_heading_numba(dx_a, dy_a)
+
+        # Local heading for line B
+        dx_b = points_b[i + 1, 0] - points_b[i, 0]
+        dy_b = points_b[i + 1, 1] - points_b[i, 1]
+        if abs(dx_b) < 1e-10 and abs(dy_b) < 1e-10:
+            continue
+        heading_b = compute_heading_numba(dx_b, dy_b)
+
+        # Compute alignment (handles bidirectional)
+        min_diff = angle_diff_numba(heading_a, heading_b)
+        alignment = max(0.0, 1.0 - min_diff / 90.0)
+
+        total_alignment += alignment
+        if alignment >= parallel_threshold:
+            parallel_count += 1
+
+    if n_comparisons == 0:
+        return 0.0, 0.0
+
+    mean_alignment = total_alignment / n_comparisons
+    parallel_fraction = float(parallel_count) / n_comparisons
+
+    return mean_alignment, parallel_fraction

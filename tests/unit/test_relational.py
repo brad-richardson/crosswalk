@@ -505,7 +505,7 @@ class TestParallelSiblingDetection:
         segment_data = [("eb", "I-90", "motorway"), ("wb", "I-90", "motorway")]
 
         # Eastbound should find westbound as sibling
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=eastbound,
             segment_id="eb",
             segment_name="I-90",
@@ -515,9 +515,10 @@ class TestParallelSiblingDetection:
         )
         assert has_sibling is True
         assert dist == pytest.approx(15.0, abs=1.0)
+        assert parallel_fraction > 0.8  # Fully parallel segments
 
         # Westbound should find eastbound as sibling
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=westbound,
             segment_id="wb",
             segment_name="I-90",
@@ -527,6 +528,7 @@ class TestParallelSiblingDetection:
         )
         assert has_sibling is True
         assert dist == pytest.approx(15.0, abs=1.0)
+        assert parallel_fraction > 0.8
 
     def test_find_parallel_sibling_no_sibling(self):
         """No sibling for isolated centerline road."""
@@ -546,7 +548,7 @@ class TestParallelSiblingDetection:
         ]
 
         # Main St should NOT find Oak Ave as sibling (too far)
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=main_st,
             segment_id="main",
             segment_name="Main Street",
@@ -556,6 +558,7 @@ class TestParallelSiblingDetection:
         )
         assert has_sibling is False
         assert dist == float("inf")
+        assert parallel_fraction == 0.0
 
     def test_find_parallel_sibling_too_close(self):
         """Siblings too close (<5m) should not be detected."""
@@ -571,7 +574,7 @@ class TestParallelSiblingDetection:
         spatial_index = STRtree(geometries)
         segment_data = [("a", "I-90", "motorway"), ("b", "I-90", "motorway")]
 
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=line_a,
             segment_id="a",
             segment_name="I-90",
@@ -595,7 +598,7 @@ class TestParallelSiblingDetection:
         spatial_index = STRtree(geometries)
         segment_data = [("h", "I-90", "motorway"), ("p", "Exit 5", "motorway")]
 
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=horizontal,
             segment_id="h",
             segment_name="I-90",
@@ -735,7 +738,7 @@ class TestParallelSiblingDetection:
         ]
 
         # Should find sibling because NAMES MATCH even though classes differ by 2 tiers
-        has_sibling, dist = find_parallel_sibling(
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
             segment=eastbound,
             segment_id="eb",
             segment_name="East Mountain Avenue",
@@ -747,3 +750,239 @@ class TestParallelSiblingDetection:
             "Should detect sibling when names match, even with 2-tier class difference"
         )
         assert dist == pytest.approx(15.0, abs=1.0)
+        assert parallel_fraction > 0.8  # Should be highly parallel
+
+
+class TestLocalParallelAlignment:
+    """Tests for local alignment algorithm that handles partial parallelism."""
+
+    def test_local_vs_overall_alignment_curved_segment(self):
+        """Local alignment should better handle curved segments."""
+        import math
+
+        from matcher.features.relational import compute_parallel_alignment
+
+        # Create two parallel curved segments (arcs)
+        # These are locally parallel but their overall direction differs
+
+        # Semicircular arcs - parallel at every point but overall heading differs by 180°
+        n_points = 20
+        radius_a = 100
+        radius_b = 115  # 15m offset
+        arc_a_points = []
+        arc_b_points = []
+        for i in range(n_points):
+            angle = math.pi * i / (n_points - 1)  # 0 to pi
+            arc_a_points.append((radius_a * math.cos(angle), radius_a * math.sin(angle)))
+            arc_b_points.append((radius_b * math.cos(angle), radius_b * math.sin(angle)))
+
+        arc_a = LineString(arc_a_points)
+        arc_b = LineString(arc_b_points)
+
+        # Local alignment - samples headings along the curves
+        local_alignment, parallel_fraction = compute_parallel_alignment(
+            arc_a, arc_b, return_fraction=True, use_local_alignment=True
+        )
+
+        # For parallel arcs, local alignment should be higher than overall
+        # because the curves are locally parallel at every sample point
+        assert local_alignment > 0.8, (
+            f"Local alignment {local_alignment} should be high for parallel arcs"
+        )
+        assert parallel_fraction > 0.7, (
+            f"Parallel fraction {parallel_fraction} should be high for parallel arcs"
+        )
+
+    def test_split_curve_remerge_scenario(self):
+        """Test split carriageway that detours around obstacle then rejoins.
+
+        One carriageway detours around terrain/buildings while the other stays
+        straight. The algorithm should detect the parallel portions even when
+        overall heading differs.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Straight carriageway (500m long)
+        straight = LineString([(0, 0), (500, 0)])
+
+        # Curved carriageway - starts parallel, curves around obstacle, then rejoins
+        # Parallel at start (0-150m), diverges (150-350m), parallel again (350-500m)
+        curved_points = [
+            (0, 15),  # Start parallel, 15m offset
+            (100, 15),  # Still parallel
+            (150, 15),  # Begin diverging
+            (200, 40),  # Diverged
+            (250, 50),  # Max divergence
+            (300, 40),  # Reconverging
+            (350, 15),  # Back to parallel
+            (400, 15),  # Parallel again
+            (500, 15),  # End parallel
+        ]
+        curved = LineString(curved_points)
+
+        geometries = [straight, curved]
+        spatial_index = STRtree(geometries)
+        segment_data = [("straight", "Highway 1", "trunk"), ("curved", "Highway 1", "trunk")]
+
+        # Should detect sibling despite the middle portion diverging
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=straight,
+            segment_id="straight",
+            segment_name="Highway 1",
+            segment_class="trunk",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+
+        assert has_sibling is True, "Should detect sibling even with curved section"
+        # Parallel fraction should reflect that ~60% of the segment is parallel
+        # (0-150m + 350-500m = 300m out of 500m)
+        assert parallel_fraction >= 0.3, (
+            f"Parallel fraction {parallel_fraction} should be >= 0.3 for partial parallel"
+        )
+
+    def test_diverging_at_endpoints_scenario(self):
+        """Test split carriageway that diverges at both ends (cloverleaf entry/exit).
+
+        This is the exact scenario from the user's case - segments that are
+        parallel in the middle but diverge at the ends (frontage roads merging
+        onto highway).
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Main highway (straight)
+        highway = LineString([(0, 0), (500, 0)])
+
+        # Frontage road - diverges at start, parallel in middle, diverges at end
+        frontage_points = [
+            (0, 50),  # Start diverged (50m away - merging from side road)
+            (75, 30),  # Converging
+            (150, 15),  # Now parallel
+            (200, 15),  # Parallel
+            (300, 15),  # Parallel
+            (350, 15),  # Still parallel
+            (425, 30),  # Diverging
+            (500, 50),  # End diverged (50m away - exit)
+        ]
+        frontage = LineString(frontage_points)
+
+        geometries = [highway, frontage]
+        spatial_index = STRtree(geometries)
+        segment_data = [("hwy", "I-90", "motorway"), ("frontage", "I-90", "motorway")]
+
+        # Should detect sibling - middle portion is clearly parallel
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=highway,
+            segment_id="hwy",
+            segment_name="I-90",
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+
+        assert has_sibling is True, (
+            "Should detect sibling even when endpoints diverge (frontage road case)"
+        )
+        # Distance should use p25, capturing the parallel portion's offset (~15m)
+        # not the mean which would be inflated by the diverging sections
+        assert dist < 25, f"Distance {dist} should reflect parallel portion, not diverging ends"
+        assert parallel_fraction >= 0.3, f"Parallel fraction {parallel_fraction} should be >= 0.3"
+
+    def test_intermittent_median_split_touch_split(self):
+        """Test segments that are parallel, touch briefly, split again.
+
+        This handles roads with intermittent medians that alternate between
+        divided and undivided sections.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # One carriageway (straight baseline)
+        baseline = LineString([(0, 0), (600, 0)])
+
+        # Other carriageway - parallel, touches, parallel again
+        other_points = [
+            (0, 15),  # Parallel section 1
+            (150, 15),
+            (175, 5),  # Converging (median ends)
+            (200, 0),  # Touching
+            (225, 0),  # Still touching
+            (250, 5),  # Diverging (median starts again)
+            (275, 15),
+            (450, 15),  # Parallel section 2
+            (600, 15),
+        ]
+        other = LineString(other_points)
+
+        geometries = [baseline, other]
+        spatial_index = STRtree(geometries)
+        segment_data = [("base", "Main St", "primary"), ("other", "Main St", "primary")]
+
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=baseline,
+            segment_id="base",
+            segment_name="Main St",
+            segment_class="primary",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+
+        # Should detect sibling - significant portions are parallel
+        assert has_sibling is True, "Should detect sibling with intermittent median"
+        assert parallel_fraction >= 0.3, (
+            f"Parallel fraction {parallel_fraction} should capture parallel portions"
+        )
+
+    def test_different_curvature_profiles(self):
+        """Test one side straight, other serpentine but still parallel at consistent offset.
+
+        This tests robustness to curvature differences - as long as the local
+        headings are similar at each sample, they should be considered parallel.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Straight baseline
+        baseline = LineString([(0, 0), (500, 0)])
+
+        # Serpentine parallel - wiggles but maintains ~15m offset
+        serpentine_points = [
+            (0, 15),
+            (50, 17),  # Slight wiggle
+            (100, 13),
+            (150, 17),
+            (200, 13),
+            (250, 15),
+            (300, 17),
+            (350, 13),
+            (400, 15),
+            (450, 17),
+            (500, 15),
+        ]
+        serpentine = LineString(serpentine_points)
+
+        geometries = [baseline, serpentine]
+        spatial_index = STRtree(geometries)
+        segment_data = [("base", "Road A", "secondary"), ("serp", "Road A", "secondary")]
+
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=baseline,
+            segment_id="base",
+            segment_name="Road A",
+            segment_class="secondary",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+
+        # The serpentine wiggles only a few meters - overall direction is still
+        # parallel. Local alignment should handle this well.
+        assert has_sibling is True, "Should detect sibling despite serpentine wiggles"
+        assert parallel_fraction > 0.6, (
+            f"Parallel fraction {parallel_fraction} should be high for locally parallel curves"
+        )

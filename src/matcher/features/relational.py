@@ -49,14 +49,28 @@ from ..config import (
     DEFAULT_EXPECTED_HALF_WIDTH_M,
     EXPECTED_HALF_WIDTH_BY_CLASS_M,
     PARALLEL_SIBLING_MAX_OFFSET_M,
-    PARALLEL_SIBLING_MIN_ALIGNMENT,
     PARALLEL_SIBLING_MIN_OFFSET_M,
 )
 from ._jit_helpers import (
     compute_endpoint_proximity_numba,
+    compute_local_parallel_alignment_numba,
     compute_parallel_alignment_numba,
     side_of_street_vote_numba,
 )
+
+
+class ParallelSiblingResult(NamedTuple):
+    """Result of parallel sibling detection.
+
+    Attributes:
+        has_sibling: True if a parallel sibling was found
+        sibling_distance: Lateral offset to sibling in meters (inf if no sibling)
+        parallel_fraction: Fraction of segment with nearby parallel sibling (0.0 if no sibling)
+    """
+
+    has_sibling: bool
+    sibling_distance: float
+    parallel_fraction: float
 
 
 @dataclass
@@ -140,7 +154,8 @@ def compute_perpendicular_offset(
     target_geom: LineString,
     anchor_geom: LineString,
     sample_interval: float = 5.0,
-) -> tuple[float, float, float]:
+    return_percentile: float | None = None,
+) -> tuple[float, float, float] | tuple[float, float, float, float]:
     """Compute perpendicular offset from target to anchor line.
 
     Samples points along the target line and measures perpendicular
@@ -156,12 +171,20 @@ def compute_perpendicular_offset(
         target_geom: Target geometry (sidewalk, bike lane) in projected CRS
         anchor_geom: Anchor geometry (road centerline) in projected CRS
         sample_interval: Distance between sample points (meters)
+        return_percentile: If provided, also return this percentile (e.g., 10 for p10)
+            which is useful for diverging carriageways where lower percentiles
+            capture the offset of the parallel portion rather than the diverging ends.
 
     Returns:
-        Tuple of (mean_offset, offset_iqr, offset_p95)
+        If return_percentile is None:
+            Tuple of (mean_offset, offset_iqr, offset_p95)
+        If return_percentile is provided:
+            Tuple of (mean_offset, offset_iqr, offset_p95, offset_pN)
+
         - mean_offset: Mean perpendicular distance (meters)
         - offset_iqr: Interquartile range (p75 - p25), robust to outliers
         - offset_p95: 95th percentile of offsets
+        - offset_pN: Nth percentile of offsets (only if return_percentile provided)
 
     Example:
         A sidewalk 3m from a road with consistent offset:
@@ -170,6 +193,8 @@ def compute_perpendicular_offset(
         Offset: 3.0m, IQR: 0.20m, P95: 3.5m
     """
     if target_geom.is_empty or anchor_geom.is_empty:
+        if return_percentile is not None:
+            return float("inf"), float("inf"), float("inf"), float("inf")
         return float("inf"), float("inf"), float("inf")
 
     # Sample points along target using vectorized interpolation
@@ -190,6 +215,10 @@ def compute_perpendicular_offset(
 
     # P95 - captures worst-case while ignoring extreme outliers
     offset_p95 = float(np.percentile(offsets, 95))
+
+    if return_percentile is not None:
+        offset_pN = float(np.percentile(offsets, return_percentile))
+        return mean_offset, offset_iqr, offset_p95, offset_pN
 
     return mean_offset, offset_iqr, offset_p95
 
@@ -353,29 +382,44 @@ def compute_parallel_alignment(
     *,
     coords_a: np.ndarray | None = None,
     coords_b: np.ndarray | None = None,
-) -> float:
+    return_fraction: bool = False,
+    use_local_alignment: bool = False,
+) -> float | tuple[float, float]:
     """Compute how parallel two lines are (0-1).
 
-    Based on the heading difference between the overall directions.
-    Returns 1.0 for perfectly parallel lines (0 or 180 degree difference),
-    0.0 for perpendicular lines.
+    By default, uses overall heading (first to last point) for backward compatibility.
+    When use_local_alignment=True, uses segment-wise local alignment that handles
+    curved segments and partial parallelism better.
 
     Args:
         line_a: First line geometry
         line_b: Second line geometry
         coords_a: Pre-extracted coordinates for line_a (optional)
         coords_b: Pre-extracted coordinates for line_b (optional)
+        return_fraction: If True, also return the parallel fraction (requires use_local_alignment)
+        use_local_alignment: If True, use local alignment sampling instead of overall heading
 
     Returns:
-        Alignment score (0-1) where 1 = parallel
+        If return_fraction=False: Alignment score (0-1) where 1 = parallel
+        If return_fraction=True: Tuple of (mean_alignment, parallel_fraction)
     """
     if line_a.is_empty or line_b.is_empty:
+        if return_fraction:
+            return 0.0, 0.0
         return 0.0
 
     if coords_a is None:
         coords_a = np.array(line_a.coords)
     if coords_b is None:
         coords_b = np.array(line_b.coords)
+
+    if use_local_alignment or return_fraction:
+        mean_alignment, parallel_fraction = compute_local_parallel_alignment_numba(
+            coords_a, coords_b
+        )
+        if return_fraction:
+            return mean_alignment, parallel_fraction
+        return mean_alignment
 
     return compute_parallel_alignment_numba(coords_a, coords_b)
 
@@ -660,12 +704,18 @@ def find_parallel_sibling(
     segment_data: list[tuple[str, str | None, str | None]],
     min_offset: float = PARALLEL_SIBLING_MIN_OFFSET_M,
     max_offset: float = PARALLEL_SIBLING_MAX_OFFSET_M,
-    min_alignment: float = PARALLEL_SIBLING_MIN_ALIGNMENT,
-) -> tuple[bool, float]:
+    min_alignment: float = 0.7,  # Lowered from 0.9 for local alignment
+    min_parallel_fraction: float = 0.3,  # At least 30% of segment must be parallel
+) -> ParallelSiblingResult:
     """Find parallel sibling segment (other half of split highway).
 
     Detects when a segment has a nearby parallel "twin" with same name/class,
     indicating it's part of a split carriageway representation.
+
+    Uses local alignment sampling to handle:
+    - Curved segments (local heading differs from overall heading)
+    - Partial parallelism (only a portion of segment is parallel)
+    - Split carriageways that converge/diverge at endpoints
 
     Args:
         segment: Geometry of the segment to check
@@ -676,13 +726,14 @@ def find_parallel_sibling(
         segment_data: List of (id, name, class) tuples parallel to spatial_index geometries
         min_offset: Minimum lateral offset for sibling detection (meters)
         max_offset: Maximum lateral offset for sibling detection (meters)
-        min_alignment: Minimum parallel alignment score (0-1)
+        min_alignment: Minimum mean parallel alignment score (0-1), default 0.7
+        min_parallel_fraction: Minimum fraction of segment that must be parallel (0-1), default 0.3
 
     Returns:
-        Tuple of (has_sibling, sibling_distance) where sibling_distance is inf if no sibling.
+        ParallelSiblingResult with has_sibling, sibling_distance, and parallel_fraction.
     """
     if segment.is_empty:
-        return False, float("inf")
+        return ParallelSiblingResult(False, float("inf"), 0.0)
 
     # Query spatial index with buffer
     buffer_geom = segment.buffer(max_offset)
@@ -690,6 +741,11 @@ def find_parallel_sibling(
 
     # Get segment coords once for efficiency
     segment_coords = np.array(segment.coords)
+
+    # Track best parallel_fraction across all candidates
+    best_parallel_fraction = 0.0
+    best_offset = float("inf")
+    found_sibling = False
 
     for candidate_idx in candidate_indices:
         # O(1) lookup using index directly - segment_data is parallel to spatial_index
@@ -704,17 +760,28 @@ def find_parallel_sibling(
         if candidate_geom is None or candidate_geom.is_empty:
             continue
 
-        # 1. Check parallel alignment (must be nearly parallel)
+        # 1. Check parallel alignment using LOCAL alignment (handles curves and partial parallelism)
         candidate_coords = np.array(candidate_geom.coords)
-        alignment = compute_parallel_alignment(
-            segment, candidate_geom, coords_a=segment_coords, coords_b=candidate_coords
+        alignment, parallel_fraction = compute_parallel_alignment(
+            segment,
+            candidate_geom,
+            coords_a=segment_coords,
+            coords_b=candidate_coords,
+            return_fraction=True,
+            use_local_alignment=True,
         )
-        if alignment < min_alignment:
+
+        # Require both mean alignment AND minimum parallel fraction
+        if alignment < min_alignment or parallel_fraction < min_parallel_fraction:
             continue
 
         # 2. Check lateral offset (must be in dual-carriageway range)
-        offset, _, _ = compute_perpendicular_offset(candidate_geom, segment)
-        if not (min_offset <= offset <= max_offset):
+        # Use p10/p25 for diverging cases - captures the parallel portion's offset
+        offset_result = compute_perpendicular_offset(candidate_geom, segment, return_percentile=25)
+        # Use p25 as the sibling distance - represents the parallel portion
+        # Mean would be inflated by diverging sections
+        _, _, _, offset_p25 = offset_result
+        if not (min_offset <= offset_p25 <= max_offset):
             continue
 
         # 3. Check name/class compatibility (same road)
@@ -730,7 +797,12 @@ def find_parallel_sibling(
         # If names positively match, accept regardless of class difference
         # (same road can be classified differently in different datasets)
         if name_match is True:
-            return True, offset
+            # Track best parallel_fraction but keep searching for better
+            if parallel_fraction > best_parallel_fraction:
+                best_parallel_fraction = parallel_fraction
+                best_offset = offset_p25
+                found_sibling = True
+            continue  # Keep looking for better match
 
         # Names are inconclusive (None) - fall back to class check
         # If classes explicitly conflict, skip
@@ -742,11 +814,13 @@ def find_parallel_sibling(
         if name_match is None and (not segment_class or not candidate_class):
             continue
 
-        # Found a sibling! Use first valid one for early termination
-        # (finding ANY sibling indicates split carriageway)
-        return True, offset
+        # Found a valid sibling - track if it's the best
+        if parallel_fraction > best_parallel_fraction:
+            best_parallel_fraction = parallel_fraction
+            best_offset = offset_p25
+            found_sibling = True
 
-    return False, float("inf")
+    return ParallelSiblingResult(found_sibling, best_offset, best_parallel_fraction)
 
 
 def precompute_parallel_siblings(
@@ -756,7 +830,7 @@ def precompute_parallel_siblings(
     classes: list[str | None],
     ids_to_compute: set[str] | None = None,
     spatial_index: STRtree | None = None,
-) -> dict[str, tuple[bool, float]]:
+) -> dict[str, ParallelSiblingResult]:
     """Pre-compute parallel sibling info for segments in a dataset.
 
     This is called once per dataset (ref and target) during Pass 1 of feature
@@ -777,7 +851,7 @@ def precompute_parallel_siblings(
             skips building a new one (saves O(N log N) construction time).
 
     Returns:
-        Dict mapping segment_id -> (has_sibling, sibling_distance)
+        Dict mapping segment_id -> ParallelSiblingResult
     """
     # Use provided spatial index or build a new one
     if spatial_index is None:
@@ -790,7 +864,7 @@ def precompute_parallel_siblings(
     id_to_idx = {seg_id: i for i, seg_id in enumerate(segment_ids)}
 
     # Compute sibling info - only for requested segments
-    result: dict[str, tuple[bool, float]] = {}
+    result: dict[str, ParallelSiblingResult] = {}
 
     # If filtered, only iterate through requested IDs (O(k) instead of O(N))
     ids_to_process = ids_to_compute if ids_to_compute is not None else segment_ids
@@ -803,7 +877,7 @@ def precompute_parallel_siblings(
         name = segment_data[idx][1]
         cls = segment_data[idx][2]
 
-        has_sibling, sibling_dist = find_parallel_sibling(
+        result[seg_id] = find_parallel_sibling(
             segment=geom,
             segment_id=seg_id,
             segment_name=name,
@@ -811,6 +885,5 @@ def precompute_parallel_siblings(
             spatial_index=spatial_index,
             segment_data=segment_data,
         )
-        result[seg_id] = (has_sibling, sibling_dist)
 
     return result

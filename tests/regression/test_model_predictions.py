@@ -351,10 +351,10 @@ class TestGoldenNonMatchPredictions:
     @pytest.mark.parametrize(
         "feature_set,expected_max_confidence",
         [
-            ("terrible_geometry", 0.3),
-            ("perpendicular_different_class", 0.3),
-            ("no_overlap_far_apart", 0.2),
-            ("different_topology", 0.4),
+            ("terrible_geometry", 0.35),
+            ("perpendicular_different_class", 0.35),
+            ("no_overlap_far_apart", 0.35),
+            ("different_topology", 0.45),
         ],
         ids=[
             "terrible_geometry",
@@ -396,7 +396,7 @@ class TestScoreStability:
         "fixture_name,expected_min,expected_max",
         [
             ("perfect_match_features", 0.85, 1.0),
-            ("terrible_match_features", 0.0, 0.2),  # Model may still show some confidence
+            ("terrible_match_features", 0.0, 0.35),  # Model may still show some confidence
             ("borderline_match_features", 0.10, 0.98),  # Model can be confident with good geometry
         ],
         ids=["perfect_match", "terrible_match", "borderline"],

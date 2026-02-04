@@ -123,7 +123,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-03"
+FEATURE_VERSION = "2026-02-04"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -229,6 +229,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
     ],
     "Parallel Sibling": [
         "has_parallel_sibling_ref",  # Whether ref segment has a parallel sibling
+        "parallel_fraction_ref",  # Fraction of ref segment with nearby parallel sibling (0-1)
         "offset_vs_half_corridor_ratio",  # Normalized offset for dual carriageway detection
         "offset_over_expected_halfwidth",  # Offset normalized by road class width
         "likely_representation_mismatch",  # Flag when ref/target have different representation

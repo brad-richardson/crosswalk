@@ -224,7 +224,7 @@ class TestExcludeSemanticFlag:
         # Total geometry-only features:
         # 11 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
-        # 3 (vertex_density) + 1 (length) + 3 (shape_complexity) + 4 (parallel_sibling) = 55
-        assert len(geom_only_features) == 55, (
-            f"Expected 55 geometry-only features, got {len(geom_only_features)}"
+        # 3 (vertex_density) + 1 (length) + 3 (shape_complexity) + 5 (parallel_sibling) = 56
+        assert len(geom_only_features) == 56, (
+            f"Expected 56 geometry-only features, got {len(geom_only_features)}"
         )
