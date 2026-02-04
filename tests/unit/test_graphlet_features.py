@@ -16,8 +16,8 @@ class TestBuildInferredGraph:
         gdf = gpd.GeoDataFrame({"id": [], "geometry": []}, crs="EPSG:4326")
         G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id")
 
-        assert G.number_of_nodes() == 0
-        assert G.number_of_edges() == 0
+        assert G.n_nodes == 0
+        assert G.n_edges == 0
         assert seg_to_start == {}
         assert seg_to_end == {}
 
@@ -31,8 +31,8 @@ class TestBuildInferredGraph:
         )
         G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
-        assert G.number_of_nodes() == 2
-        assert G.number_of_edges() == 1
+        assert G.n_nodes == 2
+        assert G.n_edges == 1
         assert "r1" in seg_to_start
         assert "r1" in seg_to_end
 
@@ -67,8 +67,8 @@ class TestBuildInferredGraph:
         )
         G, _, _ = build_inferred_graph(gdf, "id", tolerance_m=tolerance)
 
-        assert G.number_of_nodes() == expected_nodes
-        assert G.number_of_edges() == expected_edges
+        assert G.n_nodes == expected_nodes
+        assert G.n_edges == expected_edges
 
     def test_t_intersection_topology(self):
         """T-intersection creates correct topology."""
@@ -87,11 +87,11 @@ class TestBuildInferredGraph:
         G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
         # Should have 4 nodes: 3 dead-ends + 1 intersection
-        assert G.number_of_nodes() == 4
-        assert G.number_of_edges() == 3
+        assert G.n_nodes == 4
+        assert G.n_edges == 3
 
         # Find the intersection node (degree 3)
-        intersection_nodes = [n for n in G.nodes() if G.degree(n) == 3]
+        intersection_nodes = [n for n in G.node_ids if G.degree(n) == 3]
         assert len(intersection_nodes) == 1
 
     def test_loop_topology(self):
@@ -112,11 +112,11 @@ class TestBuildInferredGraph:
         G, _, _ = build_inferred_graph(gdf, "id", tolerance_m=1.0)
 
         # 4 corners = 4 nodes, 4 edges
-        assert G.number_of_nodes() == 4
-        assert G.number_of_edges() == 4
+        assert G.n_nodes == 4
+        assert G.n_edges == 4
 
         # All nodes should have degree 2 (2 roads meeting at each corner)
-        degrees = [G.degree(n) for n in G.nodes()]
+        degrees = [G.degree(n) for n in G.node_ids]
         assert all(d == 2 for d in degrees)
 
 
@@ -125,23 +125,27 @@ class TestComputeRoadGraphletFeatures:
 
     def test_empty_graph(self):
         """Empty graph returns empty features dict."""
-        import networkx as nx
+        from scipy.sparse import csr_matrix
 
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import SparseGraph
 
-        G = nx.Graph()
+        G = SparseGraph(
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
+            node_ids=[],
+            node_to_idx={},
+        )
         features = compute_road_graphlet_features(G)
 
         assert features == {}
 
     def test_single_node(self):
         """Single isolated node has degree 0."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
-        G = nx.Graph()
-        G.add_node(0)
+        # Create graph with single isolated node
+        G = build_graph_from_edges([], node_attrs={0: {}})
         features = compute_road_graphlet_features(G)
 
         assert len(features) == 1
@@ -159,25 +163,21 @@ class TestComputeRoadGraphletFeatures:
     )
     def test_node_degree(self, edges, node, expected_degree):
         """Node degree is computed correctly."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
-        G = nx.Graph()
-        G.add_edges_from(edges)
+        G = build_graph_from_edges(edges)
         features = compute_road_graphlet_features(G)
 
         assert features[node][0] == expected_degree
 
     def test_triangle_detection(self):
         """Triangles are detected correctly."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
         # Triangle: 0-1-2-0
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2), (2, 0)])
+        G = build_graph_from_edges([(0, 1), (1, 2), (2, 0)])
         features = compute_road_graphlet_features(G)
 
         # All nodes participate in 1 triangle
@@ -186,13 +186,11 @@ class TestComputeRoadGraphletFeatures:
 
     def test_square_detection(self):
         """4-cycles (squares) are detected correctly."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
         # Square: 0-1-2-3-0 (no diagonals)
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2), (2, 3), (3, 0)])
+        G = build_graph_from_edges([(0, 1), (1, 2), (2, 3), (3, 0)])
         features = compute_road_graphlet_features(G)
 
         # All corner nodes participate in squares
@@ -201,13 +199,11 @@ class TestComputeRoadGraphletFeatures:
 
     def test_articulation_point_detection(self):
         """Articulation points are correctly identified."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
         # Bridge topology: 0-1-2 where 1 is articulation point
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2)])
+        G = build_graph_from_edges([(0, 1), (1, 2)])
         features = compute_road_graphlet_features(G)
 
         # Node 1 is an articulation point (bridges the two ends)
@@ -218,13 +214,11 @@ class TestComputeRoadGraphletFeatures:
 
     def test_two_hop_count(self):
         """Two-hop neighbor count is computed correctly."""
-        import networkx as nx
-
         from matcher.features.spatial_context import compute_road_graphlet_features
+        from matcher.topology.sparse_graph import build_graph_from_edges
 
         # Chain: 0-1-2-3
-        G = nx.Graph()
-        G.add_edges_from([(0, 1), (1, 2), (2, 3)])
+        G = build_graph_from_edges([(0, 1), (1, 2), (2, 3)])
         features = compute_road_graphlet_features(G)
 
         # Node 0: neighbors={1}, two-hop={2}

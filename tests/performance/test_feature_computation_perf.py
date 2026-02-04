@@ -28,7 +28,6 @@ from matcher.features.relational import (
     compute_endpoint_proximity,
     compute_parallel_alignment,
     compute_perpendicular_offset,
-    compute_side_of_street,
 )
 
 # Number of synthetic lines to generate
@@ -486,32 +485,6 @@ class TestFeatureComputationPerformance:
         print(f"  Reuse coords:  {per_line_reuse_us:.2f} µs/line")
         savings = per_line_auto_us - per_line_reuse_us
         print(f"  Savings when reusing: {savings:.2f} µs/line")
-
-    def test_side_of_street_throughput(self, synthetic_lines):
-        """Benchmark compute_side_of_street with JIT voting."""
-        n_pairs = min(N_PAIRS, 2000)  # Side of street is slower, use fewer pairs
-        pairs = [
-            (
-                synthetic_lines[i % len(synthetic_lines)],
-                synthetic_lines[(i + 1) % len(synthetic_lines)],
-            )
-            for i in range(n_pairs)
-        ]
-
-        start = time.perf_counter()
-        for target, anchor in pairs:
-            compute_side_of_street(target, anchor)
-        elapsed = time.perf_counter() - start
-
-        throughput = n_pairs / elapsed
-        per_pair_us = (elapsed / n_pairs) * 1_000_000
-
-        print(
-            f"\nSide of street: {throughput:.0f} pairs/sec, {per_pair_us:.1f} µs/pair ({elapsed:.2f}s total)"
-        )
-
-        # Target: < 500 µs per pair (Shapely bottleneck limits gains)
-        assert per_pair_us < 1000, f"Side of street too slow: {per_pair_us:.1f} µs/pair"
 
     def test_query_nearby_endpoints_jit_throughput(self, synthetic_lines):
         """Benchmark query_nearby_endpoints JIT function directly."""

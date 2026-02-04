@@ -11,7 +11,6 @@ by the screen module.
 from typing import Any
 
 import geopandas as gpd
-import networkx as nx
 import numpy as np
 import pandas as pd
 from loguru import logger
@@ -21,6 +20,7 @@ from shapely.strtree import STRtree
 
 from ..topology.graph import build_graph, find_connected_components
 from ..topology.planarize import PlanarizedNetwork
+from ..topology.sparse_graph import SparseGraph
 from .provenance import ComponentStatus, EdgeSource
 
 
@@ -552,7 +552,7 @@ def detect_orphan_components(
 def _map_edges_to_components(
     edges: gpd.GeoDataFrame,
     components: list[set[int]],
-    G: nx.Graph,
+    graph: SparseGraph,
 ) -> dict[int, int]:
     """Map edge IDs to their component index."""
     # Build node to component mapping

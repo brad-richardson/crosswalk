@@ -17,7 +17,6 @@ from matcher.features._jit_helpers import (
     compute_parallel_alignment_numba,
     compute_shape_complexity_numba,
     query_nearby_endpoints_numba,
-    side_of_street_vote_numba,
 )
 from matcher.features.geometric import (
     _compute_hausdorff_stats,
@@ -633,97 +632,6 @@ class TestQueryNearbyEndpointsNumba:
         assert len(result_indices) == 2
         # Index 2 (distance 1m) should NOT be in results
         assert 2 not in result_indices
-
-
-class TestSideOfStreetVoteNumba:
-    """Tests for side_of_street_vote_numba function."""
-
-    def test_all_left(self):
-        """All points on left should return all left votes."""
-        # Target points are 5m to the left of a road going east
-        target_points = np.array([[0.0, 5.0], [50.0, 5.0], [100.0, 5.0]])
-        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
-        anchor_dir_norm = np.array([1.0, 0.0])  # East
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        assert left == 3
-        assert right == 0
-        assert undecided == 0
-
-    def test_all_right(self):
-        """All points on right should return all right votes."""
-        # Target points are 5m to the right of a road going east
-        target_points = np.array([[0.0, -5.0], [50.0, -5.0], [100.0, -5.0]])
-        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
-        anchor_dir_norm = np.array([1.0, 0.0])  # East
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        assert left == 0
-        assert right == 3
-        assert undecided == 0
-
-    def test_mixed_sides(self):
-        """Mixed points should return mixed votes."""
-        target_points = np.array([[0.0, 5.0], [50.0, -5.0], [100.0, 5.0]])
-        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
-        anchor_dir_norm = np.array([1.0, 0.0])  # East
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        assert left == 2
-        assert right == 1
-        assert undecided == 0
-
-    def test_undecided_when_on_line(self):
-        """Points very close to line should be undecided."""
-        # Points exactly on the anchor line (cross product ~0)
-        target_points = np.array([[0.0, 0.05], [50.0, 0.0], [100.0, -0.05]])
-        anchor_points = np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]])
-        anchor_dir_norm = np.array([1.0, 0.0])  # East
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        # With threshold of 0.1, these should all be undecided
-        assert undecided == 3
-
-    def test_north_road_direction(self):
-        """Should work for roads going north."""
-        # Target points are to the left of a road going north (west side)
-        target_points = np.array([[-5.0, 0.0], [-5.0, 50.0], [-5.0, 100.0]])
-        anchor_points = np.array([[0.0, 0.0], [0.0, 50.0], [0.0, 100.0]])
-        anchor_dir_norm = np.array([0.0, 1.0])  # North
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        assert left == 3
-        assert right == 0
-
-    def test_south_road_direction(self):
-        """Should correctly flip sides for roads going south."""
-        # Same west-side points, but road going south
-        target_points = np.array([[-5.0, 0.0], [-5.0, 50.0], [-5.0, 100.0]])
-        anchor_points = np.array([[0.0, 0.0], [0.0, 50.0], [0.0, 100.0]])
-        anchor_dir_norm = np.array([0.0, -1.0])  # South
-
-        left, right, undecided = side_of_street_vote_numba(
-            target_points, anchor_points, anchor_dir_norm
-        )
-
-        # Now they should be on the right (road going opposite direction)
-        assert left == 0
-        assert right == 3
 
 
 class TestComputeVertexDensityOptionalCoords:

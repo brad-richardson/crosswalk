@@ -1,7 +1,7 @@
 """Island detection for post-integration analysis.
 
-Detects disconnected components in integrated road networks using NetworkX
-graph analysis. Classifies islands by severity to guide review/repair.
+Detects disconnected components in integrated road networks using sparse graph
+analysis. Classifies islands by severity to guide review/repair.
 """
 
 from dataclasses import dataclass, field
@@ -9,12 +9,12 @@ from enum import Enum
 from typing import Any
 
 import geopandas as gpd
-import networkx as nx
 import numpy as np
 from loguru import logger
 from scipy.spatial import KDTree
 from shapely.geometry import Point
 
+from ..topology.sparse_graph import SparseGraph, build_graph_from_edges, connected_components
 from ..utils.dataframe import find_id_column
 from .constants import FAR_DISTANCE_M, ISLAND_SNAP_TOLERANCE_M, SMALL_CLUSTER_THRESHOLD
 
@@ -132,10 +132,10 @@ def detect_islands(
     G = _build_graph(edges_metric, id_col, snap_tolerance_m)
 
     # Find connected components
-    components = list(nx.connected_components(G))
-    logger.info(f"Found {len(components)} connected components")
+    n_components, components = connected_components(G)
+    logger.info(f"Found {n_components} connected components")
 
-    if len(components) == 0:
+    if n_components == 0:
         return IslandDetectionResult(
             total_edges=len(edges_gdf),
             total_components=0,
@@ -224,7 +224,7 @@ def detect_islands(
 
     return IslandDetectionResult(
         total_edges=len(edges_gdf),
-        total_components=len(components),
+        total_components=n_components,
         main_component_size=len(main_edges),
         main_component_ratio=main_component_ratio,
         islands=islands,
@@ -238,7 +238,7 @@ def _build_graph(
     edges_gdf: gpd.GeoDataFrame,
     id_col: str,
     snap_tolerance_m: float,
-) -> nx.Graph:
+) -> SparseGraph:
     """Build a graph from edge geometries using endpoint proximity.
 
     Creates a graph where edges are nodes and connections exist when
@@ -252,18 +252,17 @@ def _build_graph(
         snap_tolerance_m: Distance tolerance for endpoint connections
 
     Returns:
-        NetworkX graph with edge IDs as nodes
+        SparseGraph with edge IDs as nodes
     """
-    G = nx.Graph()
-
     # Collect all endpoints
     endpoints: list[tuple[float, float, str | int]] = []
     n_edges = len(edges_gdf)
+    all_edge_ids: list[str | int] = []
 
     for idx, (_, row) in enumerate(edges_gdf.iterrows()):
         geom = row.geometry
         edge_id = row[id_col]
-        G.add_node(edge_id)
+        all_edge_ids.append(edge_id)
 
         if geom is None or geom.is_empty:
             continue
@@ -281,7 +280,8 @@ def _build_graph(
             logger.info(f"Collected endpoints: {idx + 1}/{n_edges} edges")
 
     if len(endpoints) == 0:
-        return G
+        # Return graph with all edge IDs as isolated nodes
+        return build_graph_from_edges([], node_attrs={eid: {} for eid in all_edge_ids})
 
     points = np.array([(x, y) for x, y, _ in endpoints])
     edge_ids = [eid for _, _, eid in endpoints]
@@ -294,12 +294,14 @@ def _build_graph(
     pairs = tree.query_pairs(snap_tolerance_m)
     logger.debug(f"Found {len(pairs)} endpoint pairs within tolerance")
 
-    # Add edges between different road segments that share endpoints
+    # Collect edges between different road segments that share endpoints
+    graph_edges: list[tuple[str | int, str | int]] = []
     for i, j in pairs:
         if edge_ids[i] != edge_ids[j]:
-            G.add_edge(edge_ids[i], edge_ids[j])
+            graph_edges.append((edge_ids[i], edge_ids[j]))
 
-    return G
+    # Build sparse graph (include all edge IDs as nodes, even isolated ones)
+    return build_graph_from_edges(graph_edges, node_attrs={eid: {} for eid in all_edge_ids})
 
 
 def _classify_severity(

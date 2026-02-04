@@ -1152,8 +1152,6 @@ dependencies = [
     { name = "jellyfish" },
     { name = "loguru" },
     { name = "mercantile" },
-    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numba" },
     { name = "optuna" },
     { name = "osmium" },
@@ -1181,6 +1179,8 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "ipykernel" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
@@ -1210,7 +1210,7 @@ requires-dist = [
     { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.2" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "mercantile", specifier = ">=1.2" },
-    { name = "networkx", specifier = ">=3.2" },
+    { name = "networkx", marker = "extra == 'dev'", specifier = ">=3.2" },
     { name = "numba", specifier = ">=0.59" },
     { name = "optuna", specifier = ">=4.7.0" },
     { name = "osdatahub", marker = "extra == 'os'", specifier = ">=1.0.0" },

@@ -21,8 +21,9 @@ from shapely import LineString, Point
 from shapely.strtree import STRtree
 
 if TYPE_CHECKING:
-    import networkx as nx
     from pyproj import Transformer
+
+    from matcher.topology.sparse_graph import SparseGraph
 
 from matcher.config import MAX_DISTANCE_METERS
 
@@ -30,7 +31,6 @@ from ._jit_helpers import query_nearby_endpoints_numba
 from .relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
-    compute_side_of_street,
 )
 
 
@@ -56,12 +56,6 @@ class AnchorMatch:
     parallel_alignment: float
     """How parallel the segment is to anchor (0-1)."""
 
-    side_of_street: str
-    """Which side: 'left', 'right', or 'unknown'."""
-
-    side_confidence: float
-    """Confidence in side determination (0-1)."""
-
     score: float
     """Overall match score (0-1, higher is better)."""
 
@@ -77,7 +71,7 @@ class AnchorRoadMatcher:
         >>> matcher = AnchorRoadMatcher(roads_gdf, max_offset=30.0)
         >>> sidewalk_geom = sidewalks_gdf.iloc[0].geometry
         >>> match = matcher.find_anchor_road(sidewalk_geom)
-        >>> print(f"Anchor road: {match.anchor_id}, side: {match.side_of_street}")
+        >>> print(f"Anchor road: {match.anchor_id}, offset: {match.perpendicular_offset:.1f}m")
     """
 
     def __init__(
@@ -143,7 +137,6 @@ class AnchorRoadMatcher:
             # Compute features (now returns mean, iqr, p95)
             offset, offset_iqr, offset_p95 = compute_perpendicular_offset(target_geom, road_geom)
             alignment = compute_parallel_alignment(target_geom, road_geom)
-            side, side_conf = compute_side_of_street(target_geom, road_geom)
 
             # Skip if offset too large or not parallel enough
             if offset > self.max_offset or alignment < self.min_alignment:
@@ -152,7 +145,7 @@ class AnchorRoadMatcher:
             # Score: prefer low offset and high alignment
             # Normalize offset to 0-1 (lower is better)
             offset_score = max(0, 1 - offset / self.max_offset)
-            score = 0.4 * offset_score + 0.4 * alignment + 0.2 * side_conf
+            score = 0.5 * offset_score + 0.5 * alignment
 
             if score > best_score:
                 best_score = score
@@ -163,8 +156,6 @@ class AnchorRoadMatcher:
                     offset_iqr=offset_iqr,
                     offset_p95=offset_p95,
                     parallel_alignment=alignment,
-                    side_of_street=side,
-                    side_confidence=side_conf,
                     score=score,
                 )
 
@@ -1428,8 +1419,8 @@ def build_inferred_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     tolerance_m: float = 5.0,
-) -> tuple["nx.Graph", dict[str, int], dict[str, int]]:
-    """Build NetworkX graph from spaghetti geometry using endpoint clustering.
+) -> tuple["SparseGraph", dict[str, int], dict[str, int]]:
+    """Build sparse graph from spaghetti geometry using endpoint clustering.
 
     Uses Union-Find clustering to infer nodes from endpoint proximity.
     Each endpoint cluster becomes a node in the graph, and each segment
@@ -1444,14 +1435,21 @@ def build_inferred_graph(
         tolerance_m: Distance within which endpoints are considered connected (meters)
 
     Returns:
-        G: NetworkX graph where nodes=endpoint clusters, edges=segments
+        G: SparseGraph where nodes=endpoint clusters, edges=segments
         seg_to_start_node: Maps segment ID -> start node cluster ID
         seg_to_end_node: Maps segment ID -> end node cluster ID
     """
-    import networkx as nx
+    from scipy.sparse import csr_matrix
+
+    from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
 
     if gdf.empty:
-        return nx.Graph(), {}, {}
+        empty_graph = SparseGraph(
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
+            node_ids=[],
+            node_to_idx={},
+        )
+        return empty_graph, {}, {}
 
     t_start = time.perf_counter()
     logger.info(f"[graphlet] Building inferred graph from {len(gdf)} segments")
@@ -1476,7 +1474,12 @@ def build_inferred_graph(
     valid_seg_ids = segment_ids_arr[valid_mask]
 
     if len(valid_geoms) == 0:
-        return nx.Graph(), {}, {}
+        empty_graph = SparseGraph(
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
+            node_ids=[],
+            node_to_idx={},
+        )
+        return empty_graph, {}, {}
 
     start_points = shapely.get_point(valid_geoms, 0)
     end_points = shapely.get_point(valid_geoms, -1)
@@ -1508,44 +1511,47 @@ def build_inferred_graph(
     endpoint_coords_arr = np.array(endpoint_coords)
     uf = _cluster_endpoints_fast(endpoint_coords_arr, tolerance_m)
 
-    # Step 3: Build graph
-    G = nx.Graph()
+    # Step 3: Build node mappings
     seg_to_start_node: dict[str, int] = {}
     seg_to_end_node: dict[str, int] = {}
+    all_nodes: set[int] = set()
 
     for ep_idx in range(n_endpoints):
         seg_id = endpoint_segment_ids[ep_idx]
         is_start = endpoint_is_start[ep_idx]
         node_id = uf.find(ep_idx)
 
-        G.add_node(node_id)
+        all_nodes.add(node_id)
         if is_start:
             seg_to_start_node[seg_id] = node_id
         else:
             seg_to_end_node[seg_id] = node_id
 
-    # Add edges (segments connect their endpoint clusters)
+    # Collect edges (segments connect their endpoint clusters)
+    edges: list[tuple[int, int]] = []
     for seg_id in seg_to_start_node:
         start_node = seg_to_start_node[seg_id]
         end_node = seg_to_end_node.get(seg_id)
         if end_node is not None and start_node != end_node:
-            G.add_edge(start_node, end_node, segment_id=seg_id)
+            edges.append((start_node, end_node))
+
+    # Build SparseGraph
+    G = build_graph_from_edges(edges)
 
     logger.info(
-        f"[graphlet] Built graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges "
+        f"[graphlet] Built graph: {G.n_nodes} nodes, {G.n_edges} edges "
         f"in {time.perf_counter() - t_start:.2f}s"
     )
 
     return G, seg_to_start_node, seg_to_end_node
 
 
-# Threshold for using numba-accelerated graphlet computation
-# Below this, pure Python is fast enough and avoids JIT compilation overhead
-_NUMBA_THRESHOLD_NODES = 500
+# Cached numba functions (compiled on first use)
+_NUMBA_GRAPHLET_FUNCS: tuple | None = None
 
 
-def _build_csr_from_graph(G: "nx.Graph") -> tuple[np.ndarray, np.ndarray, list, dict]:
-    """Convert NetworkX graph to CSR format for numba processing.
+def _build_csr_from_graph(G: "SparseGraph") -> tuple[np.ndarray, np.ndarray, list, dict]:
+    """Extract CSR arrays from SparseGraph for numba processing.
 
     Returns:
         indptr: CSR row pointers
@@ -1553,39 +1559,27 @@ def _build_csr_from_graph(G: "nx.Graph") -> tuple[np.ndarray, np.ndarray, list, 
         node_list: List of original node IDs
         node_to_idx: Mapping from node ID to integer index
     """
-    from scipy import sparse
-
-    node_list = list(G.nodes())
-    node_to_idx = {n: i for i, n in enumerate(node_list)}
-    n = len(node_list)
-
-    rows, cols = [], []
-    for u, v in G.edges():
-        i, j = node_to_idx[u], node_to_idx[v]
-        rows.extend([i, j])
-        cols.extend([j, i])
-
-    if rows:
-        A = sparse.csr_matrix((np.ones(len(rows), dtype=np.int32), (rows, cols)), shape=(n, n))
-        # Ensure indices are sorted (required for merge-based intersection)
-        A.sort_indices()
-        return A.indptr.astype(np.int64), A.indices.astype(np.int64), node_list, node_to_idx
-    else:
-        # Empty graph
-        return np.zeros(n + 1, dtype=np.int64), np.array([], dtype=np.int64), node_list, node_to_idx
+    # SparseGraph already stores CSR format
+    indptr = G.adjacency.indptr.astype(np.int64)
+    indices = G.adjacency.indices.astype(np.int64)
+    return indptr, indices, G.node_ids, G.node_to_idx
 
 
 def _get_numba_graphlet_functions():
-    """Lazy-load numba-accelerated graphlet functions.
+    """Get numba-accelerated graphlet functions (cached after first call).
 
-    Returns None if numba is not available.
+    Functions are compiled on first call and cached to disk via numba's cache=True.
+
+    Returns:
+        Tuple of (count_squares_numba, count_two_hop_numba) functions
     """
-    try:
-        from numba import njit
-    except ImportError:
-        return None, None
+    global _NUMBA_GRAPHLET_FUNCS
+    if _NUMBA_GRAPHLET_FUNCS is not None:
+        return _NUMBA_GRAPHLET_FUNCS
 
-    @njit
+    from numba import njit
+
+    @njit(cache=True)
     def count_squares_numba(n_nodes, indptr, indices):
         """Count 4-cycles (squares) through each node using CSR adjacency.
 
@@ -1647,7 +1641,7 @@ def _get_numba_graphlet_functions():
 
         return result
 
-    @njit
+    @njit(cache=True)
     def count_two_hop_numba(n_nodes, indptr, indices):
         """Count two-hop neighbors for each node.
 
@@ -1701,18 +1695,19 @@ def _get_numba_graphlet_functions():
 
         return result
 
-    return count_squares_numba, count_two_hop_numba
+    # Cache the functions
+    _NUMBA_GRAPHLET_FUNCS = (count_squares_numba, count_two_hop_numba)
+    return _NUMBA_GRAPHLET_FUNCS
 
 
 def compute_road_graphlet_features(
-    G: "nx.Graph",
+    G: "SparseGraph",
     degrees_only: bool = False,
 ) -> dict[int, np.ndarray] | dict[int, int]:
     """Compute simplified graphlet features optimized for road networks.
 
-    For large graphs (>500 nodes), uses numba-accelerated computation for
-    square counting and two-hop neighbor counting, providing ~10-90x speedup.
-    Falls back to pure Python for smaller graphs or if numba is unavailable.
+    Uses numba-accelerated computation for square counting and two-hop neighbor
+    counting, providing ~10-90x speedup over pure Python.
 
     When degrees_only=True, returns only degree values for minimal memory usage.
     This is sufficient for the most discriminative feature (endpoint_degree_similarity)
@@ -1727,23 +1722,27 @@ def compute_road_graphlet_features(
     - is_articulation: Whether removal disconnects graph (bridge intersections)
 
     Args:
-        G: NetworkX graph from build_inferred_graph()
+        G: SparseGraph from build_inferred_graph()
         degrees_only: If True, return dict of node_id -> degree (int) only
 
     Returns:
         If degrees_only=False: Dictionary mapping node_id -> 6-dimensional numpy array
         If degrees_only=True: Dictionary mapping node_id -> degree (int)
     """
-    import networkx as nx
+    from matcher.topology.sparse_graph import (
+        compute_clustering,
+        compute_triangles,
+        find_articulation_points,
+    )
 
-    n_nodes = G.number_of_nodes()
+    n_nodes = G.n_nodes
     if n_nodes == 0:
         return {}
 
     # Fast path: only compute degrees for memory efficiency
     if degrees_only:
         t_start = time.perf_counter()
-        degrees = {node: G.degree(node) for node in G.nodes()}
+        degrees = G.degrees()
         logger.debug(
             f"[graphlet] Computed degrees for {len(degrees)} nodes in "
             f"{time.perf_counter() - t_start:.2f}s (degrees_only mode)"
@@ -1753,94 +1752,40 @@ def compute_road_graphlet_features(
     t_start = time.perf_counter()
     features: dict[int, np.ndarray] = {}
 
-    # Pre-compute graph-wide properties using NetworkX
-    triangles = nx.triangles(G)
-    clustering = nx.clustering(G)
+    # Pre-compute graph-wide properties using sparse_graph functions
+    triangles = compute_triangles(G)
+    clustering = compute_clustering(G)
 
-    # Articulation points only make sense for connected graphs
-    try:
-        if nx.is_connected(G):
-            articulation_points = set(nx.articulation_points(G))
-        else:
-            # For disconnected graphs, compute articulation points per component
-            articulation_points = set()
-            for component in nx.connected_components(G):
-                subgraph = G.subgraph(component)
-                if subgraph.number_of_nodes() > 2:
-                    articulation_points.update(nx.articulation_points(subgraph))
-    except nx.NetworkXError:
-        articulation_points = set()
+    # Find articulation points (handles disconnected graphs internally)
+    articulation_points = find_articulation_points(G)
 
-    # Try numba-accelerated path for large graphs
-    use_numba = False
-    if n_nodes >= _NUMBA_THRESHOLD_NODES:
-        count_squares_numba, count_two_hop_numba = _get_numba_graphlet_functions()
-        if count_squares_numba is not None:
-            use_numba = True
+    # Get numba-accelerated functions (cached and warmed up)
+    count_squares_numba, count_two_hop_numba = _get_numba_graphlet_functions()
 
-    if use_numba:
-        # Convert graph to CSR format for numba
-        indptr, indices, node_list, node_to_idx = _build_csr_from_graph(G)
+    # Get CSR arrays from SparseGraph
+    indptr, indices, node_list, _ = _build_csr_from_graph(G)
 
-        # Compute squares and two-hop counts using numba (vectorized over all nodes)
-        squares_arr = count_squares_numba(n_nodes, indptr, indices)
-        two_hop_arr = count_two_hop_numba(n_nodes, indptr, indices)
+    # Compute squares and two-hop counts using numba (vectorized over all nodes)
+    squares_arr = count_squares_numba(n_nodes, indptr, indices)
+    two_hop_arr = count_two_hop_numba(n_nodes, indptr, indices)
 
-        # Build feature dictionary
-        for i, node in enumerate(node_list):
-            features[node] = np.array(
-                [
-                    G.degree(node),
-                    triangles.get(node, 0),
-                    squares_arr[i],
-                    clustering.get(node, 0.0),
-                    two_hop_arr[i],
-                    1.0 if node in articulation_points else 0.0,
-                ]
-            )
-
-        logger.debug(
-            f"[graphlet] Computed features for {len(features)} nodes in "
-            f"{time.perf_counter() - t_start:.2f}s (numba-accelerated)"
+    # Build feature dictionary
+    for i, node in enumerate(node_list):
+        features[node] = np.array(
+            [
+                G.degree(node),
+                triangles.get(node, 0),
+                squares_arr[i],
+                clustering.get(node, 0.0),
+                two_hop_arr[i],
+                1.0 if node in articulation_points else 0.0,
+            ]
         )
-    else:
-        # Pure Python fallback for small graphs or when numba is unavailable
-        for node in G.nodes():
-            degree = G.degree(node)
-            neighbors = set(G.neighbors(node))
 
-            # Count 4-cycles (squares) through this node
-            # A square exists if two neighbors share a common neighbor (not this node)
-            square_count = 0
-            neighbor_list = list(neighbors)
-            for i, n1 in enumerate(neighbor_list):
-                for n2 in neighbor_list[i + 1 :]:
-                    # Check if n1 and n2 share a neighbor other than node
-                    common = set(G.neighbors(n1)) & set(G.neighbors(n2)) - {node}
-                    square_count += len(common)
-
-            # Two-hop neighbors (excluding direct neighbors and self)
-            two_hop = set()
-            for neighbor in neighbors:
-                two_hop.update(G.neighbors(neighbor))
-            two_hop -= neighbors
-            two_hop.discard(node)
-
-            features[node] = np.array(
-                [
-                    degree,
-                    triangles.get(node, 0),
-                    square_count,
-                    clustering.get(node, 0.0),
-                    len(two_hop),
-                    1.0 if node in articulation_points else 0.0,
-                ]
-            )
-
-        logger.debug(
-            f"[graphlet] Computed features for {len(features)} nodes in "
-            f"{time.perf_counter() - t_start:.2f}s"
-        )
+    logger.debug(
+        f"[graphlet] Computed features for {len(features)} nodes in "
+        f"{time.perf_counter() - t_start:.2f}s"
+    )
 
     return features
 
@@ -1852,9 +1797,9 @@ def build_connector_graph(
     tolerance_m: float = 5.0,
     degrees_only: bool = False,
 ) -> tuple[
-    "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
+    "SparseGraph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
 ]:
-    """Build NetworkX graph from Overture segments using explicit connector data.
+    """Build sparse graph from Overture segments using explicit connector data.
 
     Unlike build_inferred_graph() which clusters endpoints, this function uses
     explicit connector positions from Overture data. Each connector becomes a
@@ -1871,14 +1816,21 @@ def build_connector_graph(
         degrees_only: If True, only return node degrees for memory efficiency
 
     Returns:
-        G: NetworkX graph (None if degrees_only) where nodes=connectors, edges=segment connections
+        G: SparseGraph (None if degrees_only) where nodes=connectors, edges=segment connections
         seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
         node_features: Dict mapping node_id -> degree (int) if degrees_only else feature vector
     """
-    import networkx as nx
+    from scipy.sparse import csr_matrix
+
+    from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
 
     if gdf.empty:
-        return nx.Graph(), {}, {}
+        empty_graph = SparseGraph(
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
+            node_ids=[],
+            node_to_idx={},
+        )
+        return empty_graph, {}, {}
 
     t_start = time.perf_counter()
     logger.info(f"[graphlet-connector] Building connector graph from {len(gdf)} segments")
@@ -1911,9 +1863,10 @@ def build_connector_graph(
 
     logger.debug(f"[graphlet-connector] Found {node_counter} unique connectors")
 
-    # Build graph and segment->connectors mapping
-    G = nx.Graph()
+    # Build segment->connectors mapping and collect edges
     seg_to_connectors: dict[str, list[tuple[float, int]]] = {}
+    edges: list[tuple[int, int]] = []
+    all_nodes: set[int] = set()
 
     for seg_idx, connectors in enumerate(gdf[connectors_column].values):
         seg_id = segment_ids_arr[seg_idx]
@@ -1929,24 +1882,27 @@ def build_connector_graph(
                 conn_id = conn.get("connector_id")
                 if conn_id and conn_id in connector_to_node:
                     node_id = connector_to_node[conn_id]
-                    G.add_node(node_id)
+                    all_nodes.add(node_id)
                     segment_connectors.append((at_pos, node_id))
 
         # Sort by position along segment
         segment_connectors.sort(key=lambda x: x[0])
         seg_to_connectors[seg_id] = segment_connectors
 
-        # Add edges between consecutive connectors on this segment
+        # Collect edges between consecutive connectors on this segment
         for i in range(len(segment_connectors) - 1):
             _, node_a = segment_connectors[i]
             _, node_b = segment_connectors[i + 1]
             if node_a != node_b:
-                G.add_edge(node_a, node_b, segment_id=seg_id)
+                edges.append((node_a, node_b))
+
+    # Build SparseGraph
+    G = build_graph_from_edges(edges)
 
     # Compute graphlet features for all nodes (or just degrees for memory efficiency)
     t0 = time.perf_counter()
-    n_nodes = G.number_of_nodes()
-    n_edges = G.number_of_edges()
+    n_nodes = G.n_nodes
+    n_edges = G.n_edges
     node_features = compute_road_graphlet_features(G, degrees_only=degrees_only)
     logger.debug(
         f"[graphlet-connector] Computed {'degrees' if degrees_only else 'features'} "
@@ -1969,7 +1925,7 @@ def _build_inferred_graph_with_features(
     gdf: gpd.GeoDataFrame,
     id_column: str,
     tolerance_m: float,
-) -> tuple["nx.Graph", dict[str, int], dict[str, int], dict[int, np.ndarray]]:
+) -> tuple["SparseGraph", dict[str, int], dict[str, int], dict[int, np.ndarray]]:
     """Helper: build inferred graph and compute features in one step."""
     G, seg_to_start, seg_to_end = build_inferred_graph(gdf, id_column, tolerance_m)
     node_features = compute_road_graphlet_features(G)
@@ -1982,7 +1938,7 @@ def build_inferred_connector_graph(
     tolerance_m: float = 5.0,
     degrees_only: bool = False,
 ) -> tuple[
-    "nx.Graph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
+    "SparseGraph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
 ]:
     """Build connector graph by inferring connectivity from spatial proximity.
 
@@ -2005,16 +1961,23 @@ def build_inferred_connector_graph(
         degrees_only: If True, only return node degrees for memory efficiency
 
     Returns:
-        G: NetworkX graph (None if degrees_only) where nodes=connection points, edges=segment portions
+        G: SparseGraph (None if degrees_only) where nodes=connection points, edges=segment portions
         seg_to_connectors: Maps segment ID -> list of (at_position, node_id) sorted by position
         node_features: Dict mapping node_id -> degree (int) if degrees_only else feature vector
     """
-    import networkx as nx
+    from scipy.sparse import csr_matrix
     from shapely import STRtree
     from shapely.ops import nearest_points
 
+    from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
+
     if gdf.empty:
-        return nx.Graph(), {}, {}
+        empty_graph = SparseGraph(
+            adjacency=csr_matrix((0, 0), dtype=np.int32),
+            node_ids=[],
+            node_to_idx={},
+        )
+        return empty_graph, {}, {}
 
     t_start = time.perf_counter()
     logger.info(f"[graphlet-infer] Inferring connector graph from {len(gdf)} segments")
@@ -2141,30 +2104,24 @@ def build_inferred_connector_graph(
 
         seg_to_connectors[seg_id] = unique
 
-    # Step 5: Build graph
-    G = nx.Graph()
+    # Step 5: Build graph - collect edges
+    edges: list[tuple[int, int]] = []
 
-    # Add all unique nodes
-    all_nodes = set()
-    for connectors in seg_to_connectors.values():
-        for _, node_id in connectors:
-            all_nodes.add(node_id)
-
-    for node_id in all_nodes:
-        G.add_node(node_id)
-
-    # Add edges between consecutive connectors on each segment
-    for seg_id, connectors in seg_to_connectors.items():
+    # Collect edges between consecutive connectors on each segment
+    for _seg_id, connectors in seg_to_connectors.items():
         for i in range(len(connectors) - 1):
             _, node_a = connectors[i]
             _, node_b = connectors[i + 1]
             if node_a != node_b:
-                G.add_edge(node_a, node_b, segment_id=seg_id)
+                edges.append((node_a, node_b))
+
+    # Build SparseGraph
+    G = build_graph_from_edges(edges)
 
     # Compute graphlet features (or just degrees for memory efficiency)
     t0 = time.perf_counter()
-    n_nodes = G.number_of_nodes()
-    n_edges = G.number_of_edges()
+    n_nodes = G.n_nodes
+    n_edges = G.n_edges
     node_features = compute_road_graphlet_features(G, degrees_only=degrees_only)
     logger.debug(
         f"[graphlet-infer] Computed {'degrees' if degrees_only else 'features'} "

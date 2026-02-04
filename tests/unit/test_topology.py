@@ -4,6 +4,7 @@ import pytest
 
 from matcher.topology.graph import build_graph, compute_topology_features
 from matcher.topology.planarize import PlanarizedNetwork, planarize, should_intersect
+from matcher.topology.sparse_graph import is_connected
 
 
 class TestPlanarize:
@@ -72,11 +73,9 @@ class TestPlanarize:
         G = build_graph(result)
 
         # Should be fully connected (1 component)
-        assert G.number_of_nodes() > 2
+        assert G.n_nodes > 2
         # All nodes should be reachable from each other
-        import networkx as nx
-
-        assert nx.is_connected(G)
+        assert is_connected(G)
 
     def test_preserves_attributes(self, simple_cross):
         """Original attributes should be preserved on edges."""
@@ -139,18 +138,13 @@ class TestBuildGraph:
         G = build_graph(network)
 
         # Should have nodes and edges
-        assert G.number_of_nodes() == len(network.nodes)
-        assert G.number_of_edges() == len(network.edges)
-
-        # Check node attributes
-        for node in G.nodes():
-            assert "x" in G.nodes[node]
-            assert "y" in G.nodes[node]
+        assert G.n_nodes == len(network.nodes)
+        assert G.n_edges == len(network.edges)
 
         # Check edge attributes
-        for u, v in G.edges():
-            assert "length" in G.edges[u, v]
-            assert G.edges[u, v]["length"] > 0
+        for _edge_key, attrs in G.edge_data.items():
+            assert "length" in attrs
+            assert attrs["length"] > 0
 
     def test_topology_features(self, simple_grid):
         """Topology features should be computed correctly."""
@@ -182,9 +176,7 @@ class TestTJunctions:
 
         # Build graph to verify connectivity
         G = build_graph(result)
-        import networkx as nx
-
-        assert nx.is_connected(G)
+        assert is_connected(G)
 
 
 class TestBridgeStringParsing:

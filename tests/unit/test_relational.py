@@ -10,7 +10,6 @@ from matcher.features.relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
     compute_perpendicular_offset_batch,
-    compute_side_of_street,
 )
 from matcher.features.spatial_context import (
     AnchorRoadMatcher,
@@ -36,19 +35,6 @@ class TestRelationalFeatures:
         assert compute_parallel_alignment(line_a, line_b) == pytest.approx(
             expected_alignment, abs=0.1
         )
-
-    @pytest.mark.parametrize(
-        "sidewalk,expected_side",
-        [
-            (LineString([(0, 3), (100, 3)]), "left"),  # North of east-going road
-            (LineString([(0, -3), (100, -3)]), "right"),  # South of east-going road
-        ],
-    )
-    def test_side_of_street(self, sidewalk, expected_side):
-        road = LineString([(0, 0), (100, 0)])
-        side, confidence = compute_side_of_street(sidewalk, road)
-        assert side == expected_side
-        assert confidence > 0.8
 
     def test_perpendicular_offset(self):
         road = LineString([(0, 0), (100, 0)])
