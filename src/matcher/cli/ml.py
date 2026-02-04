@@ -37,10 +37,10 @@ def eval_model(
         help="Output directory for benchmark results",
     ),
     train_size: float = typer.Option(
-        0.7,
+        0.8,
         "--train-size",
         "-t",
-        help="Fraction of data for training (default: 0.7 = 70/30 split)",
+        help="Fraction of data for training (default: 0.8 = 80/20 split)",
     ),
     seed: int = typer.Option(
         999,

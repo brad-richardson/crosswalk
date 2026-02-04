@@ -1,7 +1,7 @@
 """Model evaluation regression test - ensure F1 score meets quality threshold.
 
 This test evaluates the trained model on a held-out test dataset and verifies
-that the F1 score is at least 0.85. This prevents model quality regressions.
+that the F1 score is at least 0.90. This prevents model quality regressions.
 """
 
 from pathlib import Path
@@ -13,7 +13,7 @@ from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import MLMatcher, segment_aware_split
 
 # Minimum acceptable F1 score on held-out test set
-MIN_TEST_F1_SCORE = 0.85
+MIN_TEST_F1_SCORE = 0.90
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestModelEvaluation:
     """Test that model meets F1 score quality threshold on held-out test data."""
 
     def test_f1_score_meets_threshold(self, trained_model_path, labels_dir):
-        """Model should achieve F1 >= 0.85 on held-out test set.
+        """Model should achieve F1 >= 0.90 on held-out test set.
 
         This test loads all labels, splits into train/test using segment-aware
         splitting (same as training), and evaluates the model's F1 score on the
