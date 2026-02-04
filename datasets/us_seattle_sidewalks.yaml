@@ -8,6 +8,7 @@ source:
   portal_url: https://data-seattlecitygis.opendata.arcgis.com/
 fetch:
   id_prefix: sea_sidewalk
+  id_column: OBJECTID
   bbox:
   - -122.45
   - 47.48

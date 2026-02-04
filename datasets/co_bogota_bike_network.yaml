@@ -7,7 +7,7 @@ source:
   url: https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/18
 fetch:
   id_prefix: bog_bike
-  # Note: Source data does not include path names - only codes (CICCODIGO, CICCIV)
+  id_column: OBJECTID
   class_column: CICTSUPERF
   bbox:
   - -74.25

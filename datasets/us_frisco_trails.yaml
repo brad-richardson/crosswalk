@@ -7,6 +7,7 @@ source:
   url: https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/10
 fetch:
   id_prefix: frisco_trail
+  id_column: OBJECTID
   name_column: Name
   class_column: TrailType
   class_mapping:

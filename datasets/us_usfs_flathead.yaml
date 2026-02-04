@@ -9,6 +9,7 @@ source:
   portal_url: https://data-usfs.hub.arcgis.com/datasets/national-forest-system-roads-feature-layer/about
 fetch:
   id_prefix: us_usfs_flathead
+  id_column: OBJECTID
   name_column: NAME
   class_column: OPER_MAINT_LEVEL
   class_mapping:

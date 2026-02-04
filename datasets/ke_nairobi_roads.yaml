@@ -8,7 +8,7 @@ source:
   file_format: shp
 fetch:
   id_prefix: ke_nairobi
-  # Note: Source data does not include street names - only route IDs (RID_8: A2S_R, B30, etc.)
+  id_column: FID
   class_column: CLASS
   bbox:
   - 36.65

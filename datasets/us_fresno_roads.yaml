@@ -8,6 +8,7 @@ source:
   where_clause: County_label = 'FRESNO'
 fetch:
   id_prefix: us_fresno_roads
+  id_column: OBJECTID
   name_column: RouteID
   class_column: F_System
   class_mapping:

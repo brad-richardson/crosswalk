@@ -8,6 +8,7 @@ source:
   portal_url: https://data.boston.gov/dataset/city-of-boston-managed-streets
 fetch:
   id_prefix: us_boston_streets
+  id_column: OBJECTID
   name_column: STREETNAME
   class_column: CLASS
   oneway_column: OP_DIR_SL

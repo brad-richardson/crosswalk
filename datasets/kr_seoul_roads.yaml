@@ -7,6 +7,7 @@ source:
   portal_url: https://www.data.go.kr/data/15146878/fileData.do
 fetch:
   id_prefix: kr_seoul
+  id_column: OBJECTID
   name_column: RN
   class_column: ROA_CLS_SE
   bbox:

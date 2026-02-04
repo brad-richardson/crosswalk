@@ -7,6 +7,7 @@ source:
   url: https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Sidewalks/FeatureServer/0
 fetch:
   id_prefix: fc_sidewalk
+  id_column: OBJECTID
   class_column: TYPE
   class_mapping:
     '1': footway

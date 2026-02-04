@@ -8,6 +8,7 @@ source:
   portal_url: https://msl.mt.gov/geoinfo/msdi/transportation/
 fetch:
   id_prefix: us_montana_helena
+  id_column: OBJECTID
   name_column: St_Name
   class_column: RoadClass
   class_mapping:

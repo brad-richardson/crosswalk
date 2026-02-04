@@ -8,6 +8,7 @@ source:
   portal_url: https://data.boston.gov/dataset/existing-bike-network-2024
 fetch:
   id_prefix: boston_bike
+  id_column: OBJECTID
   name_column: STREET_NAM
   class_column: ExisFacil
   class_mapping:

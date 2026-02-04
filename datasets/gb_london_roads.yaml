@@ -10,6 +10,7 @@ source:
   product_id: OpenRoads
 fetch:
   id_prefix: gb_london
+  id_column: OBJECTID
   name_column: name_1
   class_column: road_classification
   class_mapping:

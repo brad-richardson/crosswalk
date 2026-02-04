@@ -8,6 +8,7 @@ source:
   portal_url: https://walk.dvrpc.org/
 fetch:
   id_prefix: phila_sidewalk
+  id_column: OBJECTID
   class_column: feat_type
   class_mapping:
     PATH: footway

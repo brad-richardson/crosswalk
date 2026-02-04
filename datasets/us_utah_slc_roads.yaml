@@ -8,6 +8,7 @@ source:
   where_clause: COUNTY_L = '49035'
 fetch:
   id_prefix: us_utah_slc_roads
+  id_column: OBJECTID
   name_column: FULLNAME
   class_column: CARTOCODE
   class_mapping:

@@ -8,6 +8,7 @@ source:
   portal_url: https://gcgis-gwinnettcountyga.hub.arcgis.com/datasets/3e039e014f774429b44ac2f721e0cb0e_2/about
 fetch:
   id_prefix: us_gwinnett
+  id_column: OBJECTID
   name_column: FULLNAME
   class_column: ROADCLASS
   class_mapping:

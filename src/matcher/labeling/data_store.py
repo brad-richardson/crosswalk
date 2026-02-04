@@ -113,20 +113,36 @@ class DataStore:
 
     def _load(self) -> gpd.GeoDataFrame:
         """Load data from GeoParquet, returning empty GeoDataFrame if file doesn't exist."""
+        import pyarrow.parquet as pq
         from shapely import wkb
 
         if not self.parquet_path.exists():
             return self._empty_geodataframe()
 
         try:
-            gdf = gpd.read_parquet(self.parquet_path, **_hive_partitioning_kwargs())
+            # Read directly without Hive partitioning (single file, not dataset)
+            # This avoids schema merge issues when partition column types differ
+            pf = pq.ParquetFile(str(self.parquet_path))
+            table = pf.read()
+            df = table.to_pandas()
 
-            # Convert target_geometry from WKB if stored that way
-            if "target_geometry_wkb" in gdf.columns:
-                gdf["target_geometry"] = gdf["target_geometry_wkb"].apply(
+            # Convert WKB geometries to Shapely objects
+            if "ref_geometry" in df.columns:
+                df["ref_geometry"] = df["ref_geometry"].apply(
                     lambda b: wkb.loads(b) if b is not None else None
                 )
-                gdf = gdf.drop(columns=["target_geometry_wkb"])
+            if "target_geometry_wkb" in df.columns:
+                df["target_geometry"] = df["target_geometry_wkb"].apply(
+                    lambda b: wkb.loads(b) if b is not None else None
+                )
+                df = df.drop(columns=["target_geometry_wkb"])
+            elif "target_geometry" in df.columns:
+                df["target_geometry"] = df["target_geometry"].apply(
+                    lambda b: wkb.loads(b) if b is not None else None
+                )
+
+            # Convert to GeoDataFrame
+            gdf = gpd.GeoDataFrame(df, geometry="ref_geometry", crs="EPSG:4326")
 
             # Ensure all expected columns exist
             for col in DATA_COLUMNS:

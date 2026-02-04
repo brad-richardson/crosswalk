@@ -42,6 +42,7 @@ def fetch_arcgis_layer(
     oneway_column: str | None = None,
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
+    id_column: str | None = None,
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -113,6 +114,7 @@ def fetch_arcgis_layer(
         oneway_column=oneway_column,
         speed_limit_column=speed_limit_column,
         speed_limit_unit=speed_limit_unit,
+        id_column=id_column,
     )
 
     # Deduplicate by ID (ArcGIS pagination can return duplicates if data changes during fetch)
@@ -275,6 +277,7 @@ def _transform_to_overture_schema(
     oneway_column: str | None = None,
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
+    id_column: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
 
@@ -314,8 +317,23 @@ def _transform_to_overture_schema(
         if len(gdf) == 0:
             return gdf
 
-    # Find the ID column (OBJECTID, FID, or similar)
-    id_col = find_id_column(gdf)
+    # Find ID column - MUST be specified in config to ensure stable IDs
+    # Sequential or auto-detected IDs are NOT stable across data refreshes
+    # and break label linkage when data is re-fetched
+    if not id_column:
+        raise ValueError(
+            f"id_column must be specified in fetch config for {source_name}. "
+            f"Available columns: {list(gdf.columns)}. "
+            "Choose a stable upstream ID column (e.g., OBJECTID, FID)."
+        )
+
+    if id_column not in gdf.columns:
+        raise ValueError(
+            f"Configured id_column '{id_column}' not found in data for {source_name}. "
+            f"Available columns: {list(gdf.columns)}"
+        )
+
+    id_col = id_column
 
     # Store original columns for source_tags (before we modify anything)
     original_cols = [c for c in gdf.columns if c != "geometry"]

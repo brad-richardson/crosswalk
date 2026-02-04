@@ -10,8 +10,8 @@ source:
   file_format: gdb
 fetch:
   id_prefix: hk_hongkong
+  id_column: FID
   name_column: STREET_ENAME
-  # Note: Source data uses "-99" as placeholder for unnamed roads (~16% of rows)
   bbox:
   - 113.82
   - 22.15
