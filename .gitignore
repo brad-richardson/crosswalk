@@ -71,3 +71,7 @@ models/
 # Tracked agent labels go to labels_agent/
 
 best_params.json
+
+# Claude-mem auto-generated files (keep root CLAUDE.md)
+**/CLAUDE.md
+!/CLAUDE.md
