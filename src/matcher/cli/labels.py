@@ -314,7 +314,9 @@ def backfill_features(
         data_store = DataStore(dataset, data_dir=labels_dir / "data")
         has_stored_data = len(data_store.gdf) > 0
         if has_stored_data:
-            console.print(f"  Using stored geometries from labels/data ({len(data_store.gdf)} pairs)")
+            console.print(
+                f"  Using stored geometries from labels/data ({len(data_store.gdf)} pairs)"
+            )
         else:
             console.print("  [yellow]No stored geometries - using raw data lookup[/yellow]")
 
@@ -342,8 +344,12 @@ def backfill_features(
                     stored_target = pair_data.get("target_geometry")
                     if stored_ref is not None and stored_target is not None:
                         # Project to UTM
-                        ref_geom = gpd.GeoSeries([stored_ref], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
-                        target_geom = gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                        ref_geom = (
+                            gpd.GeoSeries([stored_ref], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                        )
+                        target_geom = (
+                            gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                        )
                         # Get attributes from stored data
                         ref_name = pair_data.get("ref_name")
                         target_name = pair_data.get("target_name")
@@ -369,9 +375,13 @@ def backfill_features(
                 # Get attributes from raw data
                 ref_row = ref_lookup.loc[gers_id]
                 target_row = target_lookup.loc[target_id]
-                ref_name = _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
+                ref_name = (
+                    _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
+                )
                 target_name = (
-                    _extract_name_string(target_row["names"]) if "names" in target_row.index else None
+                    _extract_name_string(target_row["names"])
+                    if "names" in target_row.index
+                    else None
                 )
                 ref_class = ref_row["class"] if "class" in ref_row.index else None
                 target_class = target_row["class"] if "class" in target_row.index else None
@@ -443,7 +453,9 @@ def backfill_features(
         if computed > 0:
             feature_store.save()
             source_info = f"(stored={used_stored}, lookup={used_lookup})" if used_stored > 0 else ""
-            console.print(f"  [green]Computed {computed} features {source_info}, skipped {skipped}[/green]")
+            console.print(
+                f"  [green]Computed {computed} features {source_info}, skipped {skipped}[/green]"
+            )
         else:
             console.print(f"  [yellow]Skipped all {skipped} pairs (IDs not in data)[/yellow]")
 

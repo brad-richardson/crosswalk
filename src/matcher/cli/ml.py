@@ -705,8 +705,12 @@ def analyze_errors(
     console.print("\n[bold]Confusion Matrix[/bold]")
     console.print("                  Predicted")
     console.print("                  no_match  match")
-    console.print(f"  Actual no_match   {overall_cm[0, 0]:5d}    {overall_cm[0, 1]:5d}  (FP rate: {overall_cm[0, 1] / overall_cm[0].sum():.1%})")
-    console.print(f"  Actual match      {overall_cm[1, 0]:5d}    {overall_cm[1, 1]:5d}  (FN rate: {overall_cm[1, 0] / overall_cm[1].sum():.1%})")
+    console.print(
+        f"  Actual no_match   {overall_cm[0, 0]:5d}    {overall_cm[0, 1]:5d}  (FP rate: {overall_cm[0, 1] / overall_cm[0].sum():.1%})"
+    )
+    console.print(
+        f"  Actual match      {overall_cm[1, 0]:5d}    {overall_cm[1, 1]:5d}  (FN rate: {overall_cm[1, 0] / overall_cm[1].sum():.1%})"
+    )
 
     n_fp = all_labels["is_fp"].sum()
     n_fn = all_labels["is_fn"].sum()
@@ -723,7 +727,9 @@ def analyze_errors(
     if len(high_conf_errors) > 0:
         hc_fp = high_conf_errors["is_fp"].sum()
         hc_fn = high_conf_errors["is_fn"].sum()
-        console.print(f"  High-conf FP: {hc_fp} (model confident it's a match, but labeled no_match)")
+        console.print(
+            f"  High-conf FP: {hc_fp} (model confident it's a match, but labeled no_match)"
+        )
         console.print(f"  High-conf FN: {hc_fn} (model confident it's no_match, but labeled match)")
         console.print("\n  [yellow]High-confidence errors suggest either:[/yellow]")
         console.print("    - Systematic model failure on certain patterns")
@@ -741,18 +747,22 @@ def analyze_errors(
         ds_n_errors = ds_df["is_error"].sum()
         ds_n_fp = ds_df["is_fp"].sum()
         ds_n_fn = ds_df["is_fn"].sum()
-        ds_hc_errors = len(ds_df[(ds_df["is_error"]) & (ds_df["pred_confidence"] >= min_confidence)])
+        ds_hc_errors = len(
+            ds_df[(ds_df["is_error"]) & (ds_df["pred_confidence"] >= min_confidence)]
+        )
 
-        dataset_errors.append({
-            "dataset": ds,
-            "n": len(ds_df),
-            "acc": ds_acc,
-            "f1": ds_f1,
-            "errors": ds_n_errors,
-            "fp": ds_n_fp,
-            "fn": ds_n_fn,
-            "hc_errors": ds_hc_errors,
-        })
+        dataset_errors.append(
+            {
+                "dataset": ds,
+                "n": len(ds_df),
+                "acc": ds_acc,
+                "f1": ds_f1,
+                "errors": ds_n_errors,
+                "fp": ds_n_fp,
+                "fn": ds_n_fn,
+                "hc_errors": ds_hc_errors,
+            }
+        )
 
         console.print(
             f"  {ds}: F1={ds_f1:.3f}, Acc={ds_acc:.3f}, "
@@ -780,12 +790,14 @@ def analyze_errors(
                 pct_diff = 0 if err_mean == cor_mean else float("inf")
             else:
                 pct_diff = np.nan  # Skip features with inf/nan means
-            feature_diffs.append({
-                "feature": feat_name,
-                "error_mean": err_mean,
-                "correct_mean": cor_mean,
-                "pct_diff": pct_diff,
-            })
+            feature_diffs.append(
+                {
+                    "feature": feat_name,
+                    "error_mean": err_mean,
+                    "correct_mean": cor_mean,
+                    "pct_diff": pct_diff,
+                }
+            )
 
     # Sort by absolute percentage difference (filter out nan values for sorting)
     feature_diffs = [fd for fd in feature_diffs if np.isfinite(fd["pct_diff"])]
@@ -808,14 +820,24 @@ def analyze_errors(
 
     # Select relevant columns for export
     export_cols = [
-        "dataset", "gers_id", "target_id", "label",
-        "y_pred", "match_prob", "pred_confidence",
-        "is_fp", "is_fn",
+        "dataset",
+        "gers_id",
+        "target_id",
+        "label",
+        "y_pred",
+        "match_prob",
+        "pred_confidence",
+        "is_fp",
+        "is_fn",
     ]
     # Add key features
     key_features = [
-        "name_jaro_winkler", "buffer_iou_5m", "hausdorff_distance_m",
-        "class_similarity", "lateral_offset_m", "min_coverage",
+        "name_jaro_winkler",
+        "buffer_iou_5m",
+        "hausdorff_distance_m",
+        "class_similarity",
+        "lateral_offset_m",
+        "min_coverage",
     ]
     for feat in key_features:
         if feat in error_export.columns:
@@ -833,7 +855,9 @@ def analyze_errors(
         hc_export = hc_export.sort_values("pred_confidence", ascending=False)
         hc_path = output_dir / "high_confidence_errors.csv"
         hc_export.to_csv(hc_path, index=False)
-        console.print(f"[green]Exported {len(hc_export)} high-confidence errors to {hc_path}[/green]")
+        console.print(
+            f"[green]Exported {len(hc_export)} high-confidence errors to {hc_path}[/green]"
+        )
 
     # Print top errors per dataset
     console.print(f"\n[bold]Top {top_n} Worst Errors Per Dataset[/bold]")
@@ -864,12 +888,8 @@ def analyze_errors(
                 f"  {i + 1}. [{error_type}] conf={row['pred_confidence']:.2f} "
                 f"pred={pred_label} actual={true_label}"
             )
-            console.print(
-                f"      gers={row['gers_id'][:20]}... target={row['target_id'][:20]}..."
-            )
-            console.print(
-                f"      name_jw={name_sim:.2f} buf_iou={buf_iou:.2f} haus={haus:.1f}m"
-            )
+            console.print(f"      gers={row['gers_id'][:20]}... target={row['target_id'][:20]}...")
+            console.print(f"      name_jw={name_sim:.2f} buf_iou={buf_iou:.2f} haus={haus:.1f}m")
 
     # Summary recommendations
     console.print(f"\n{'=' * 70}")
