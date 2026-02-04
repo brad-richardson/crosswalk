@@ -288,50 +288,6 @@ def query_nearby_endpoints_numba(
 
 
 @njit(cache=True)
-def side_of_street_vote_numba(
-    target_points: np.ndarray,
-    anchor_points: np.ndarray,
-    anchor_dir_norm: np.ndarray,
-) -> tuple[int, int, int]:
-    """JIT-compiled cross-product voting for side-of-street determination.
-
-    Computes which side of the anchor road each target point is on using
-    the cross product of the anchor direction and the vector from anchor
-    to target.
-
-    Args:
-        target_points: (N, 2) array of sampled target points
-        anchor_points: (N, 2) array of corresponding nearest anchor points
-        anchor_dir_norm: (2,) normalized direction vector of anchor line
-
-    Returns:
-        Tuple of (left_count, right_count, undecided_count)
-    """
-    n_points = len(target_points)
-    left_count = 0
-    right_count = 0
-    undecided_count = 0
-
-    for i in range(n_points):
-        # Vector from anchor to target
-        to_target_x = target_points[i, 0] - anchor_points[i, 0]
-        to_target_y = target_points[i, 1] - anchor_points[i, 1]
-
-        # Cross product z-component determines side
-        # Positive = left, Negative = right (using right-hand rule)
-        cross_z = anchor_dir_norm[0] * to_target_y - anchor_dir_norm[1] * to_target_x
-
-        if abs(cross_z) < 0.1:  # Too close to call
-            undecided_count += 1
-        elif cross_z > 0:
-            left_count += 1
-        else:
-            right_count += 1
-
-    return left_count, right_count, undecided_count
-
-
-@njit(cache=True)
 def compute_heading_consistency_numba(
     points: np.ndarray,
 ) -> float:

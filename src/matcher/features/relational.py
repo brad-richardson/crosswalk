@@ -25,14 +25,11 @@ Key Features:
    - offset_consistency: Variance in offset (low = consistent parallel)
    - parallel_alignment: How parallel the segments are (0-1)
 
-2. **Side of street**: Left/right relative to road direction of travel
-   - Uses cross product of direction vectors
-
-3. **Endpoint connectivity**: Inferred from proximity
+2. **Endpoint connectivity**: Inferred from proximity
    - endpoint_proximity: Distance to nearest endpoint of other segments
    - shared_endpoint_count: Segments with endpoints within tolerance
 
-4. **Context propagation**: Agreement with neighboring matches
+3. **Context propagation**: Agreement with neighboring matches
    - neighbor_agreement: Score based on nearby match confidence
 """
 
@@ -42,7 +39,7 @@ from typing import NamedTuple
 
 import numpy as np
 import shapely
-from shapely import LineString, Point, STRtree, line_interpolate_point
+from shapely import LineString, STRtree, line_interpolate_point
 from shapely import distance as shapely_distance
 
 from ..config import (
@@ -55,7 +52,6 @@ from ._jit_helpers import (
     compute_endpoint_proximity_numba,
     compute_local_parallel_alignment_numba,
     compute_parallel_alignment_numba,
-    side_of_street_vote_numba,
 )
 
 
@@ -140,14 +136,6 @@ class RelationalFeatures(NamedTuple):
     parallel_alignment: float
     """How parallel the segment is to anchor (0-1).
     Based on heading difference: 1.0 = parallel, 0.0 = perpendicular."""
-
-    side_of_street: str
-    """Which side of the anchor road: 'left', 'right', or 'unknown'.
-    Determined by cross product of direction vectors."""
-
-    side_confidence: float
-    """Confidence in side determination (0-1).
-    Low when segment crosses back and forth across anchor."""
 
 
 def compute_perpendicular_offset(
@@ -305,77 +293,6 @@ def compute_perpendicular_offset_batch(
     return mean_offsets, iqr_offsets, p95_offsets
 
 
-def compute_side_of_street(
-    target_geom: LineString,
-    anchor_geom: LineString,
-    sample_interval: float = 10.0,
-) -> tuple[str, float]:
-    """Determine which side of the anchor road the target is on.
-
-    Uses the cross product of the anchor's direction vector and the
-    vector from anchor to target. The sign determines left/right based
-    on the anchor's direction of travel.
-
-    Args:
-        target_geom: Target geometry (sidewalk, bike lane)
-        anchor_geom: Anchor geometry (road centerline)
-        sample_interval: Distance between sample points for voting
-
-    Returns:
-        Tuple of (side, confidence) where:
-        - side: 'left', 'right', or 'unknown'
-        - confidence: 0-1 based on consistency of side determination
-
-    Example:
-        >>> side, conf = compute_side_of_street(sidewalk, road)
-        >>> print(f"Side: {side}, Confidence: {conf:.2f}")
-        Side: left, Confidence: 0.95
-    """
-    if target_geom.is_empty or anchor_geom.is_empty:
-        return "unknown", 0.0
-
-    # Get anchor direction vector (overall direction)
-    anchor_coords = np.array(anchor_geom.coords)
-    anchor_dir = anchor_coords[-1] - anchor_coords[0]
-    anchor_dir_norm = anchor_dir / (np.linalg.norm(anchor_dir) + 1e-10)
-
-    # Sample points along target
-    n_samples = max(3, int(target_geom.length / sample_interval))
-    distances_along = np.linspace(0, target_geom.length, n_samples)
-
-    # Pre-sample target points (Shapely, outside JIT boundary)
-    target_points = np.array([target_geom.interpolate(d).coords[0] for d in distances_along])
-
-    # Pre-compute anchor projections (Shapely calls, outside JIT boundary)
-    anchor_points = np.empty((n_samples, 2), dtype=np.float64)
-    for i, tp in enumerate(target_points):
-        nearest_dist = anchor_geom.project(Point(tp))
-        anchor_points[i] = anchor_geom.interpolate(nearest_dist).coords[0][:2]
-
-    # JIT-compiled voting (pure NumPy, fast)
-    left_count, right_count, _ = side_of_street_vote_numba(
-        target_points[:, :2], anchor_points, anchor_dir_norm
-    )
-
-    total_decisive = left_count + right_count
-
-    if total_decisive == 0:
-        return "unknown", 0.0
-
-    # Determine side by majority vote
-    if left_count > right_count:
-        side = "left"
-        confidence = left_count / total_decisive
-    elif right_count > left_count:
-        side = "right"
-        confidence = right_count / total_decisive
-    else:
-        side = "unknown"
-        confidence = 0.5
-
-    return side, float(confidence)
-
-
 def compute_parallel_alignment(
     line_a: LineString,
     line_b: LineString,
@@ -455,9 +372,6 @@ def compute_relational_features(
         target_geom, anchor_geom, sample_interval
     )
 
-    # Side of street
-    side, side_conf = compute_side_of_street(target_geom, anchor_geom, sample_interval * 2)
-
     # Parallel alignment
     alignment = compute_parallel_alignment(target_geom, anchor_geom)
 
@@ -466,8 +380,6 @@ def compute_relational_features(
         offset_iqr=offset_iqr,
         offset_p95=offset_p95,
         parallel_alignment=alignment,
-        side_of_street=side,
-        side_confidence=side_conf,
     )
 
 

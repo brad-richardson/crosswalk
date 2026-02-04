@@ -9,7 +9,6 @@ from .relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
     compute_relational_features,
-    compute_side_of_street,
 )
 from .semantic import compute_class_similarity, compute_name_similarity
 from .spatial_context import (
@@ -30,7 +29,6 @@ __all__ = [
     # Relational features
     "compute_relational_features",
     "compute_perpendicular_offset",
-    "compute_side_of_street",
     "compute_parallel_alignment",
     "compute_endpoint_proximity",
     "compute_neighbor_agreement",

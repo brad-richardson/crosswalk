@@ -31,7 +31,6 @@ from ._jit_helpers import query_nearby_endpoints_numba
 from .relational import (
     compute_parallel_alignment,
     compute_perpendicular_offset,
-    compute_side_of_street,
 )
 
 
@@ -57,12 +56,6 @@ class AnchorMatch:
     parallel_alignment: float
     """How parallel the segment is to anchor (0-1)."""
 
-    side_of_street: str
-    """Which side: 'left', 'right', or 'unknown'."""
-
-    side_confidence: float
-    """Confidence in side determination (0-1)."""
-
     score: float
     """Overall match score (0-1, higher is better)."""
 
@@ -78,7 +71,7 @@ class AnchorRoadMatcher:
         >>> matcher = AnchorRoadMatcher(roads_gdf, max_offset=30.0)
         >>> sidewalk_geom = sidewalks_gdf.iloc[0].geometry
         >>> match = matcher.find_anchor_road(sidewalk_geom)
-        >>> print(f"Anchor road: {match.anchor_id}, side: {match.side_of_street}")
+        >>> print(f"Anchor road: {match.anchor_id}, offset: {match.perpendicular_offset:.1f}m")
     """
 
     def __init__(
@@ -144,7 +137,6 @@ class AnchorRoadMatcher:
             # Compute features (now returns mean, iqr, p95)
             offset, offset_iqr, offset_p95 = compute_perpendicular_offset(target_geom, road_geom)
             alignment = compute_parallel_alignment(target_geom, road_geom)
-            side, side_conf = compute_side_of_street(target_geom, road_geom)
 
             # Skip if offset too large or not parallel enough
             if offset > self.max_offset or alignment < self.min_alignment:
@@ -153,7 +145,7 @@ class AnchorRoadMatcher:
             # Score: prefer low offset and high alignment
             # Normalize offset to 0-1 (lower is better)
             offset_score = max(0, 1 - offset / self.max_offset)
-            score = 0.4 * offset_score + 0.4 * alignment + 0.2 * side_conf
+            score = 0.5 * offset_score + 0.5 * alignment
 
             if score > best_score:
                 best_score = score
@@ -164,8 +156,6 @@ class AnchorRoadMatcher:
                     offset_iqr=offset_iqr,
                     offset_p95=offset_p95,
                     parallel_alignment=alignment,
-                    side_of_street=side,
-                    side_confidence=side_conf,
                     score=score,
                 )
 
