@@ -61,6 +61,7 @@ def _transform_download_data(
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
@@ -178,7 +179,14 @@ def _transform_download_data(
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
-        data["class"] = ["footway"] * len(gdf)  # Default for sidewalks
+        # Default class based on dataset type
+        if dataset_type == "sidewalk":
+            default_class = "footway"
+        elif dataset_type == "bike":
+            default_class = "cycleway"
+        else:
+            default_class = "unknown"
+        data["class"] = [default_class] * len(gdf)
 
     # Subclass - use explicit column/mapping if provided, otherwise use default or None
     # (case-insensitive mapping)
@@ -315,6 +323,7 @@ def fetch_ogc_features(
     limit_per_page: int = 5000,
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> Path:
     """Fetch geospatial data from an OGC API Features endpoint.
 
@@ -387,6 +396,7 @@ def fetch_ogc_features(
         source_name=source_name,
         exclude=exclude,
         id_column=id_column,
+        dataset_type=dataset_type,
     )
 
     # Save to parquet
@@ -410,6 +420,7 @@ def fetch_wfs(
     max_features: int = 300000,
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> Path:
     """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
 
@@ -485,6 +496,7 @@ def fetch_wfs(
         source_name=source_name,
         exclude=exclude,
         id_column=id_column,
+        dataset_type=dataset_type,
     )
 
     # Save to parquet
@@ -629,6 +641,7 @@ def fetch_download(
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -839,6 +852,7 @@ def fetch_download(
             speed_limit_column=speed_limit_column,
             speed_limit_unit=speed_limit_unit,
             id_column=id_column,
+            dataset_type=dataset_type,
         )
 
         # Save to parquet
@@ -900,6 +914,7 @@ def fetch_os_downloads(
     cache_ttl_hours: int = 168,
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> Path:
     """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
 
@@ -1063,6 +1078,7 @@ def fetch_os_downloads(
         source_name=source_name,
         exclude=exclude,
         id_column=id_column,
+        dataset_type=dataset_type,
     )
 
     # Save to parquet
@@ -1168,6 +1184,7 @@ def fetch_dataset(
                 api_key=api_key,
                 exclude=exclude,
                 id_column=id_column,
+                dataset_type=config.type,
             )
 
         if url is None:
@@ -1237,6 +1254,7 @@ def fetch_dataset(
                 speed_limit_column=speed_limit_column,
                 speed_limit_unit=speed_limit_unit,
                 id_column=id_column,
+                dataset_type=config.type,
             )
 
         elif source_type == "ogc_features":
@@ -1252,6 +1270,7 @@ def fetch_dataset(
                 bbox=bbox,
                 exclude=exclude,
                 id_column=id_column,
+                dataset_type=config.type,
             )
 
         elif source_type == "wfs":
@@ -1273,6 +1292,7 @@ def fetch_dataset(
                 bbox=bbox,
                 exclude=exclude,
                 id_column=id_column,
+                dataset_type=config.type,
             )
 
         else:

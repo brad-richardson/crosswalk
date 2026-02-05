@@ -10,7 +10,7 @@ source:
   file_format: gdb
 fetch:
   id_prefix: hk_hongkong
-  id_column: FID
+  id_column: ROUTE_ID
   name_column: STREET_ENAME
   bbox:
   - 113.82

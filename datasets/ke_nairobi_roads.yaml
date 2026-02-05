@@ -8,8 +8,7 @@ source:
   file_format: shp
 fetch:
   id_prefix: ke_nairobi
-  id_column: FID
-  class_column: CLASS
+  id_column: OBJECTID
   bbox:
   - 36.65
   - -1.45
