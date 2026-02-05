@@ -8,8 +8,7 @@ source:
   file_format: shp
 fetch:
   id_prefix: ke_mombasa
-  id_column: FID
-  class_column: CLASS
+  id_column: OBJECTID
   bbox:
   - 39.55
   - -4.15
