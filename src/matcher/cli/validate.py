@@ -51,9 +51,9 @@ def validate_matching(
         help="Fraction to drop for 'random' strategy (0.0-1.0)",
     ),
     source_dataset: str = typer.Option(
-        "TomTom",
+        "OpenStreetMap",
         "--source-dataset",
-        help="Dataset to drop for 'source' strategy",
+        help="Dataset to drop for 'source' strategy (e.g., OpenStreetMap, Meta)",
     ),
     road_class: str = typer.Option(
         "residential",
@@ -88,11 +88,11 @@ def validate_matching(
             --strategy random --fraction 0.1 \\
             --output validation/random_10pct/
 
-        # Drop all TomTom segments
+        # Drop all segments from a specific source
         matcher validate matching data/raw/overture.parquet \\
             --bbox "-71.19,42.21,-70.92,42.40" \\
-            --strategy source --source-dataset TomTom \\
-            --output validation/tomtom_holdout/
+            --strategy source --source-dataset Meta \\
+            --output validation/meta_holdout/
 
         # Drop residential roads
         matcher validate matching data/raw/overture.parquet \\

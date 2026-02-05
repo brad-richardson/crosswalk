@@ -36,7 +36,7 @@ class ExperimentConfig:
     # Strategy-specific parameters
     fraction: float = 0.1  # For "random" strategy
     drop_bbox: tuple[float, float, float, float] | None = None  # For "bbox" strategy
-    source_dataset: str = "TomTom"  # For "source" strategy
+    source_dataset: str = "OpenStreetMap"  # For "source" strategy
     road_class: str = "residential"  # For "class" strategy
     seed: int = 42
     fast_mode: bool = False  # Only match dropped segments
@@ -66,7 +66,7 @@ def run_validation_experiment(
     matcher_method: str = "rule",
     fraction: float = 0.1,
     drop_bbox: tuple[float, float, float, float] | None = None,
-    source_dataset: str = "TomTom",
+    source_dataset: str = "OpenStreetMap",
     road_class: str = "residential",
     seed: int = 42,
     fast_mode: bool = False,

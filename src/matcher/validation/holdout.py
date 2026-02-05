@@ -23,7 +23,7 @@ def extract_record_ids(
 
     Args:
         sources_column: Series containing sources arrays
-        dataset_filter: Dataset name to filter by (e.g., "OpenStreetMap", "TomTom")
+        dataset_filter: Dataset name to filter by (e.g., "OpenStreetMap", "Meta")
 
     Returns:
         Series of sets containing record_ids for each row
@@ -113,10 +113,6 @@ def create_holdout(
 
     # Extract all record_ids from dropped segments
     dropped_record_ids = extract_all_record_ids(segments_to_drop, "OpenStreetMap")
-
-    # Also extract TomTom record_ids if present
-    tomtom_ids = extract_all_record_ids(segments_to_drop, "TomTom")
-    dropped_record_ids.update(tomtom_ids)
 
     # Create reduced reference
     reduced = overture.drop(index=drop_indices)
@@ -208,7 +204,7 @@ def drop_by_source(
 
     Args:
         overture: Full Overture reference dataset
-        source_dataset: Dataset name to drop (e.g., "TomTom")
+        source_dataset: Dataset name to drop (e.g., "OpenStreetMap", "Meta")
 
     Returns:
         reduced_reference: Overture without dropped segments
