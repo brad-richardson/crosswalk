@@ -266,3 +266,48 @@ class TestSchemaConsistency:
         expected = ["gers_id", "target_id", "ref_geometry", "target_geometry"]
         for col in expected:
             assert col in DATA_COLUMNS, f"Missing from DATA_COLUMNS: {col}"
+
+
+class TestFeatureDataQuality:
+    """Validate stored features have plausible values.
+
+    These tests catch corrupted features (e.g., stale geometry lookups during backfill)
+    before they reach training. If these fail, re-backfill the affected dataset.
+    """
+
+    @pytest.fixture
+    def features_df(self):
+        """Load all features, skip if no data."""
+        if not FEATURES_DIR.exists():
+            pytest.skip("No features directory found")
+        df = FeatureStore.load_all(FEATURES_DIR)
+        if len(df) == 0:
+            pytest.skip("No features data found")
+        return df
+
+    def test_centroid_distance_plausible(self, features_df):
+        """No pairs with centroid distance > 500m (blocking buffer is 50m)."""
+        if "centroid_distance_m" not in features_df.columns:
+            pytest.skip("centroid_distance_m not in features")
+        bad = features_df[features_df["centroid_distance_m"] > 500.0]
+        if len(bad) > 0:
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            pytest.fail(f"{len(bad)} pairs with centroid_distance_m > 500m: {by_dataset}")
+
+    def test_hausdorff_distance_plausible(self, features_df):
+        """No pairs with hausdorff_distance_m > 1000m."""
+        if "hausdorff_distance_m" not in features_df.columns:
+            pytest.skip("hausdorff_distance_m not in features")
+        bad = features_df[features_df["hausdorff_distance_m"] > 1000.0]
+        if len(bad) > 0:
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            pytest.fail(f"{len(bad)} pairs with hausdorff_distance_m > 1000m: {by_dataset}")
+
+    def test_no_all_nan_feature_rows(self, features_df):
+        """No rows where every feature is NaN."""
+        feature_cols = [c for c in FEATURE_COLUMNS if c in features_df.columns]
+        all_nan = features_df[feature_cols].isna().all(axis=1)
+        if all_nan.any():
+            count = all_nan.sum()
+            by_dataset = features_df[all_nan].groupby("dataset").size().to_dict()
+            pytest.fail(f"{count} rows with all-NaN features: {by_dataset}")
