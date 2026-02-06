@@ -13,10 +13,10 @@ fetch:
   class_mapping:
     '1': primary
     '2': secondary
-    '3': residential
-    '4': footway
+    '3': tertiary
+    '4': residential
     '5': unclassified
-    '6': residential
+    '6': pedestrian
     '7': unclassified
   bbox:
   - -74.25

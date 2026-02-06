@@ -41,3 +41,32 @@ last_fetch:
   geometry_types:
   - LineString
   output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-06T00:21:18.444992+00:00'
+  total_segments: 43369
+  total_length_km: 6674.09
+  length_min_m: 3.5299220339467015
+  length_max_m: 6424.475134472733
+  length_median_m: 121.50533269752323
+  length_p5_m: 32.38681314233752
+  length_p95_m: 359.13571591480473
+  vertex_density_mean: 0.03808240278462885
+  invalid_geometry_count: 0
+  sharp_angle_ratio: 0.00020752150153335332
+  mean_sinuosity: 1.0260246236720696
+  high_sinuosity_ratio: 0.005188037538333833
+  drift_affected_ratio: 0.0024902580184002396
+  near_duplicate_ratio: 0.0
+  island_count: 342
+  dead_end_ratio: 0.05586939980170168
+  connected_components: 343
+  largest_component_ratio: 0.9819686873112131
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.9999538841107704
+  class_distribution:
+    service: 34033
+    secondary: 3753
+    tertiary: 2867
+    residential: 1874
+    motorway: 840
+    unknown: 2

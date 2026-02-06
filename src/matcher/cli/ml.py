@@ -474,7 +474,9 @@ def _cross_validate(
         overall_results[f"{metric}_std"] = std_val
 
     # Per-dataset results
+    MIN_DATASET_SAMPLES = 10
     dataset_results = {}
+    skipped_datasets = []
     if by_dataset and dataset_fold_metrics:
         console.print("\nPer-dataset results (mean ± std):")
         for ds in sorted(dataset_fold_metrics.keys()):
@@ -483,6 +485,10 @@ def _cross_validate(
             f1_std = np.std(ds_metrics["f1"])
             acc_mean = np.mean(ds_metrics["accuracy"])
             n_samples = sum(ds_metrics["n_samples"])
+
+            if n_samples < MIN_DATASET_SAMPLES:
+                skipped_datasets.append((ds, n_samples))
+                continue
 
             console.print(
                 f"  {ds}: F1={f1_mean:.3f}±{f1_std:.3f}, Acc={acc_mean:.3f} (n={n_samples})"
@@ -497,6 +503,14 @@ def _cross_validate(
                 "recall_mean": np.mean(ds_metrics["recall"]),
                 "n_samples": n_samples,
             }
+
+        if skipped_datasets:
+            console.print(
+                f"\n  [yellow]Skipped {len(skipped_datasets)} dataset(s) with < "
+                f"{MIN_DATASET_SAMPLES} samples:[/yellow]"
+            )
+            for ds, n in skipped_datasets:
+                console.print(f"    {ds} (n={n})")
 
     # Save results to CSV
     if not skip_save:
