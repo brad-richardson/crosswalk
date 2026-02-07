@@ -14,7 +14,9 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from loguru import logger
-from shapely import Point
+from scipy.spatial import cKDTree
+from shapely import Point, points
+from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from ..spatial import SpatialIndex
@@ -98,32 +100,58 @@ def propagate_transitive_connectivity(
         connected_geoms = all_connected_so_far.geometry.values
         connected_tree = STRtree(connected_geoms)
 
-        # Check each remaining orphan for connection to connected segments
-        newly_connected_indices = []
-        closest_distances = []  # For debug logging
-        for idx, row in remaining_orphans.iterrows():
-            endpoints = _get_endpoints(row.geometry)
-            if not endpoints:
-                if debug:
-                    logger.debug(f"    Orphan {idx}: no endpoints extracted")
-                continue
+        # Vectorized endpoint proximity check for remaining orphans
+        orphan_geoms = remaining_orphans.geometry.values
+        n_orphans = len(orphan_geoms)
 
-            # Check if any endpoint is near the connected segments
-            min_dist = float("inf")
-            for pt in endpoints:
-                nearest_idx = connected_tree.nearest(pt)
-                dist = pt.distance(connected_geoms[nearest_idx])
-                min_dist = min(min_dist, dist)
-                if dist <= connection_tolerance_m:
-                    newly_connected_indices.append(idx)
-                    break
+        # Extract start/end coords
+        o_start = np.empty((n_orphans, 2))
+        o_end = np.empty((n_orphans, 2))
+        o_valid = np.ones(n_orphans, dtype=bool)
+        for i, geom in enumerate(orphan_geoms):
+            if geom is None or geom.is_empty:
+                o_valid[i] = False
+                o_start[i] = [0, 0]
+                o_end[i] = [0, 0]
+            else:
+                try:
+                    coords = geom.coords
+                    o_start[i] = coords[0][:2]
+                    o_end[i] = coords[-1][:2]
+                except Exception:
+                    o_valid[i] = False
+                    o_start[i] = [0, 0]
+                    o_end[i] = [0, 0]
 
-            closest_distances.append((idx, min_dist))
+        start_pts = points(o_start)
+        end_pts = points(o_end)
+        valid_idx = np.where(o_valid)[0]
 
-        if debug and closest_distances:
-            # Log the closest distances for remaining orphans
-            sorted_dists = sorted(closest_distances, key=lambda x: x[1])[:5]
-            logger.debug(f"    Hop {hop} closest orphan distances: {sorted_dists}")
+        if len(valid_idx) > 0:
+            # Batch nearest queries
+            s_result = connected_tree.query_nearest(start_pts[o_valid], all_matches=False)
+            e_result = connected_tree.query_nearest(end_pts[o_valid], all_matches=False)
+
+            s_dists = np.array(
+                [
+                    pt.distance(connected_geoms[ri])
+                    for pt, ri in zip(start_pts[o_valid], s_result[1])
+                ]
+            )
+            e_dists = np.array(
+                [pt.distance(connected_geoms[ri]) for pt, ri in zip(end_pts[o_valid], e_result[1])]
+            )
+            min_dists = np.minimum(s_dists, e_dists)
+
+            connected_in_valid = min_dists <= connection_tolerance_m
+            newly_connected_indices = list(remaining_orphans.index[valid_idx[connected_in_valid]])
+        else:
+            min_dists = np.array([])
+            newly_connected_indices = []
+
+        if debug and len(valid_idx) > 0:
+            closest_pairs = sorted(zip(valid_idx, min_dists), key=lambda x: x[1])[:5]
+            logger.debug(f"    Hop {hop} closest orphan distances: {closest_pairs}")
 
         if not newly_connected_indices:
             # No new connections at this hop level
@@ -153,6 +181,154 @@ def propagate_transitive_connectivity(
     return connected_targets, remaining_orphans
 
 
+def _check_bridges_components(
+    candidates: gpd.GeoDataFrame,
+    reference_edges: gpd.GeoDataFrame,
+    main_edges: gpd.GeoDataFrame,
+    tolerance_m: float,
+    min_overlap_m: float = 10.0,
+) -> pd.Series:
+    """Check which candidates bridge disconnected reference components.
+
+    A segment qualifies as a bridge if:
+    1. Its start half overlaps >= min_overlap_m with reference segment A
+    2. Its end half overlaps >= min_overlap_m with reference segment B
+    3. A != B
+    4. A and B are in different connected components of the main network
+
+    Args:
+        candidates: Filtered segments to check
+        reference_edges: Reference-only segments (for overlap check)
+        main_edges: Full main network (reference + connected targets, for components)
+        tolerance_m: Buffer for overlap computation
+        min_overlap_m: Minimum overlap at each end to qualify
+
+    Returns:
+        Boolean Series aligned to candidates index: True for bridge segments
+    """
+    if len(candidates) == 0 or len(reference_edges) == 0:
+        return pd.Series(dtype=bool)
+
+    # Step 1: Build spatial index of reference geometries
+    ref_geoms = reference_edges.geometry.values
+    ref_tree = STRtree(ref_geoms)
+
+    # Step 2: Build connected components of the main network using Union-Find
+    # Extract endpoints from all main edges, cluster within tolerance
+    main_geoms = main_edges.geometry.values
+    n_main = len(main_geoms)
+
+    # Vectorized endpoint extraction
+    start_coords = []
+    end_coords = []
+    seg_indices = []
+    for i, geom in enumerate(main_geoms):
+        if geom is None or geom.is_empty:
+            continue
+        try:
+            coords = geom.coords
+            start_coords.append(coords[0][:2])
+            end_coords.append(coords[-1][:2])
+            seg_indices.append(i)
+        except Exception:
+            continue
+
+    if not seg_indices:
+        return pd.Series(False, index=candidates.index)
+
+    # Stack start + end into single array for cKDTree
+    seg_indices_arr = np.array(seg_indices)
+    all_endpoints = np.vstack([np.array(start_coords), np.array(end_coords)])
+    all_seg_indices = np.concatenate([seg_indices_arr, seg_indices_arr])
+
+    # Union-Find on segment indices
+    parent = list(range(n_main))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # Cluster endpoints within tolerance using cKDTree
+    tree = cKDTree(all_endpoints)
+    pairs = tree.query_pairs(tolerance_m)
+
+    for i, j in pairs:
+        union(all_seg_indices[i], all_seg_indices[j])
+
+    # Step 3: Map reference segments to their component labels
+    # Reference edges are concatenated first into main_edges, so direct indexing works
+    ref_source_mask = main_edges["_source"] == EdgeSource.REFERENCE.value
+    ref_main_indices = np.where(ref_source_mask.values)[0]
+
+    # Direct array mapping — ref positional index -> main edge positional index
+    ref_to_main = ref_main_indices  # array indexing: ref_to_main[ref_pos] = main_pos
+
+    # Step 4: For each candidate, check bridge condition
+    results = []
+    for _idx, row in candidates.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty or geom.length < 1e-6:
+            results.append(False)
+            continue
+
+        # Split at midpoint
+        mid = geom.length / 2.0
+        start_half = substring(geom, 0, mid)
+        end_half = substring(geom, mid, geom.length)
+
+        # Find best overlapping reference for each half
+        def best_ref_overlap(half_geom):
+            """Return (ref_positional_index, overlap_length) for best match."""
+            if half_geom is None or half_geom.is_empty:
+                return None, 0.0
+
+            # Query nearby reference segments
+            buffered = half_geom.buffer(tolerance_m)
+            nearby_indices = ref_tree.query(buffered)
+
+            best_idx = None
+            best_overlap = 0.0
+            for ri in nearby_indices:
+                ref_buf = ref_geoms[ri].buffer(tolerance_m)
+                intersection = half_geom.intersection(ref_buf)
+                overlap = intersection.length
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_idx = ri
+            return best_idx, best_overlap
+
+        start_ref, start_overlap = best_ref_overlap(start_half)
+        end_ref, end_overlap = best_ref_overlap(end_half)
+
+        # Check all conditions
+        if (
+            start_ref is not None
+            and end_ref is not None
+            and start_overlap >= min_overlap_m
+            and end_overlap >= min_overlap_m
+            and start_ref != end_ref
+        ):
+            # Check if they're in different components
+            if (
+                start_ref < len(ref_to_main)
+                and end_ref < len(ref_to_main)
+                and find(ref_to_main[start_ref]) != find(ref_to_main[end_ref])
+            ):
+                results.append(True)
+                continue
+
+        results.append(False)
+
+    return pd.Series(results, index=candidates.index)
+
+
 def detect_orphans_by_proximity(
     combined_gdf: gpd.GeoDataFrame,
     connection_tolerance_m: float = 3.0,
@@ -162,6 +338,8 @@ def detect_orphans_by_proximity(
     max_hops: int = 2,
     transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
+    enable_connectivity_gating: bool = True,
+    min_bridge_overlap_m: float = 10.0,
 ) -> tuple[
     gpd.GeoDataFrame,
     gpd.GeoDataFrame,
@@ -202,6 +380,11 @@ def detect_orphans_by_proximity(
             target segments. Defaults to 2x connection_tolerance_m since trails often
             don't share exact endpoints. Set to connection_tolerance_m for strict mode.
         debug_connectivity: Enable debug logging for transitive connectivity analysis.
+        enable_connectivity_gating: Check if filtered segments bridge disconnected
+            reference components. Segments that bridge different components are promoted
+            back to main despite insufficient net-new coverage. Default True.
+        min_bridge_overlap_m: Minimum overlap (meters) at each end of a candidate
+            bridge segment with its reference segment to qualify. Default 10.0.
 
     Returns:
         Tuple of:
@@ -258,40 +441,57 @@ def detect_orphans_by_proximity(
     ref_geoms = reference_edges.geometry.values
     ref_tree = STRtree(ref_geoms)
 
-    # Check each target segment's endpoints for proximity to reference
-    connected_mask = []
-    min_distances = []
+    # Vectorized endpoint proximity check using shapely batch operations
+    target_geom_arr = target_edges.geometry.values
+    n_targets = len(target_geom_arr)
 
-    for _idx, row in target_edges.iterrows():
-        geom = row.geometry
+    # Extract start/end coordinates vectorized via get_coordinates
+    # For LineStrings, first coord = start, last coord = end
+    start_coords = np.empty((n_targets, 2))
+    end_coords = np.empty((n_targets, 2))
+    valid_mask = np.ones(n_targets, dtype=bool)
+
+    for i, geom in enumerate(target_geom_arr):
         if geom is None or geom.is_empty:
-            connected_mask.append(False)
-            min_distances.append(np.nan)
-            continue
+            valid_mask[i] = False
+            start_coords[i] = [0, 0]
+            end_coords[i] = [0, 0]
+        else:
+            try:
+                coords = geom.coords
+                start_coords[i] = coords[0][:2]
+                end_coords[i] = coords[-1][:2]
+            except Exception:
+                valid_mask[i] = False
+                start_coords[i] = [0, 0]
+                end_coords[i] = [0, 0]
 
-        # Get endpoints (LineStrings only, MultiLineStrings filtered at ingest)
-        try:
-            coords = list(geom.coords)
-            start_pt = Point(coords[0])
-            end_pt = Point(coords[-1])
-        except Exception:
-            connected_mask.append(False)
-            min_distances.append(np.nan)
-            continue
+    # Create point arrays for batch STRtree query
+    start_pts = points(start_coords)
+    end_pts = points(end_coords)
 
-        # Find nearest reference segment to each endpoint
-        start_nearest_idx = ref_tree.nearest(start_pt)
-        end_nearest_idx = ref_tree.nearest(end_pt)
+    # Batch nearest queries — returns (input_idx, tree_idx) arrays
+    start_nearest = ref_tree.query_nearest(start_pts[valid_mask], all_matches=False)
+    end_nearest = ref_tree.query_nearest(end_pts[valid_mask], all_matches=False)
 
-        start_dist = start_pt.distance(ref_geoms[start_nearest_idx])
-        end_dist = end_pt.distance(ref_geoms[end_nearest_idx])
+    # Compute distances vectorized
+    min_distances = np.full(n_targets, np.nan)
+    valid_indices = np.where(valid_mask)[0]
 
-        min_dist = min(start_dist, end_dist)
-        min_distances.append(min_dist)
+    # start_nearest[0] = input indices (into valid subset), start_nearest[1] = tree indices
+    start_ref_geoms = ref_geoms[start_nearest[1]]
+    end_ref_geoms = ref_geoms[end_nearest[1]]
 
-        # Connected if either endpoint is within tolerance
-        is_connected = min_dist <= connection_tolerance_m
-        connected_mask.append(is_connected)
+    start_dists = np.array(
+        [pt.distance(rg) for pt, rg in zip(start_pts[valid_mask], start_ref_geoms)]
+    )
+    end_dists = np.array([pt.distance(rg) for pt, rg in zip(end_pts[valid_mask], end_ref_geoms)])
+
+    valid_min_dists = np.minimum(start_dists, end_dists)
+    min_distances[valid_indices] = valid_min_dists
+
+    connected_mask = min_distances <= connection_tolerance_m
+    connected_mask[~valid_mask] = False
 
     target_edges["is_connected"] = connected_mask
     target_edges["nearest_ref_distance"] = min_distances
@@ -329,33 +529,60 @@ def detect_orphans_by_proximity(
             f"matched buffer: {matched_net_new_buffer_m}m)..."
         )
 
+        import shapely as shp
+
         ref_index = SpatialIndex(reference_edges.geometry.values)
+        ref_geoms = reference_edges.geometry.values
+        ref_tree = ref_index.tree
 
-        net_new_lengths = []
-        net_new_geoms = []
-        for _, row in connected_targets.iterrows():
-            geom = row.geometry
-            if geom is None or geom.is_empty:
-                net_new_lengths.append(0.0)
-                net_new_geoms.append(None)
-                continue
+        ct_geoms = connected_targets.geometry.values
+        ct_sources = (
+            connected_targets["_source"].values
+            if "_source" in connected_targets.columns
+            else np.full(len(connected_targets), "")
+        )
+        is_matched = ct_sources == EdgeSource.TARGET_MATCHED.value
 
-            # Use wider buffer for matched segments — geometry differences are
-            # digitization noise, not genuine new coverage
-            source = row.get("_source", "")
-            if source == EdgeSource.TARGET_MATCHED.value:
-                buffer = matched_net_new_buffer_m
-            else:
-                buffer = net_new_buffer_m
+        net_new_lengths = np.zeros(len(connected_targets))
+        net_new_geoms = np.empty(len(connected_targets), dtype=object)
 
-            net_new_geom = ref_index.compute_net_new(geom, buffer)
+        # Vectorized fast-path: batch nearest-ref containment check
+        # Skip targets fully inside their nearest ref's buffer (net-new = 0)
+        valid_mask = np.array([g is not None and not g.is_empty for g in ct_geoms], dtype=bool)
+        valid_indices = np.where(valid_mask)[0]
+        valid_geoms = ct_geoms[valid_indices]
 
-            if net_new_geom is None:
-                net_new_lengths.append(0.0)
-                net_new_geoms.append(None)
-            else:
-                net_new_lengths.append(net_new_geom.length)
-                net_new_geoms.append(net_new_geom)
+        if len(valid_geoms) > 0:
+            # Batch nearest-neighbor query (vectorized C)
+            _input_idxs, nearest_ref_idxs = ref_tree.query_nearest(valid_geoms, all_matches=False)
+
+            # Per-target buffer distance based on matched/unmatched
+            buffer_distances = np.where(
+                is_matched[valid_indices], matched_net_new_buffer_m, net_new_buffer_m
+            )
+
+            # Vectorized buffer + containment (vectorized C, no Python loop)
+            nearest_buffered = shp.buffer(ref_geoms[nearest_ref_idxs], buffer_distances)
+            contained = shp.contains(nearest_buffered, valid_geoms)
+
+            n_contained = int(contained.sum())
+            n_valid = len(valid_geoms)
+            logger.info(
+                f"  Net-new fast path: {n_contained}/{n_valid} fully covered by nearest ref"
+            )
+
+            # Full computation only for targets NOT fully covered
+            needs_full = valid_indices[~contained]
+            logger.info(f"  Computing net-new for {len(needs_full)} remaining targets...")
+            for count, i in enumerate(needs_full):
+                if count > 0 and count % 2000 == 0:
+                    logger.info(f"    Net-new progress: {count}/{len(needs_full)}")
+                geom = ct_geoms[i]
+                buffer = matched_net_new_buffer_m if is_matched[i] else net_new_buffer_m
+                net_new_geom = ref_index.compute_net_new(geom, buffer)
+                if net_new_geom is not None:
+                    net_new_lengths[i] = net_new_geom.length
+                    net_new_geoms[i] = net_new_geom
 
         connected_targets["_net_new_length_m"] = net_new_lengths
         connected_targets["_total_length_m"] = connected_targets.geometry.length
@@ -375,25 +602,59 @@ def detect_orphans_by_proximity(
 
         connected_targets = connected_targets[long_enough].copy()
 
+        # Connectivity gating: rescue filtered segments that bridge components
+        if enable_connectivity_gating and len(filtered_targets) > 0:
+            main_so_far = gpd.GeoDataFrame(
+                pd.concat([reference_edges, connected_targets], ignore_index=True),
+                crs=combined_gdf.crs,
+            )
+            bridges = _check_bridges_components(
+                candidates=filtered_targets,
+                reference_edges=reference_edges,
+                main_edges=main_so_far,
+                tolerance_m=connection_tolerance_m,
+                min_overlap_m=min_bridge_overlap_m,
+            )
+            if len(bridges) > 0:
+                promoted = filtered_targets[bridges].copy()
+                if len(promoted) > 0:
+                    promoted["_connectivity_role"] = "bridge"
+                    connected_targets = gpd.GeoDataFrame(
+                        pd.concat([connected_targets, promoted], ignore_index=True),
+                        crs=combined_gdf.crs,
+                    )
+                    filtered_targets = filtered_targets[~bridges].copy()
+                    logger.info(f"  Connectivity gating: promoted {len(promoted)} bridge segments")
+
         # Build net-new edges GeoDataFrame for visualization
         # Use the computed _net_new_geometry (subline) not the full segment
-        if len(connected_targets) > 0:
-            net_new_records = []
-            for _, row in connected_targets.iterrows():
-                net_new_geom = row.get("_net_new_geometry")
-                if net_new_geom is not None and not net_new_geom.is_empty:
-                    net_new_records.append(
-                        {
-                            "geometry": net_new_geom,
-                            "_original_id": row.get("_original_id"),
-                            "_source_dataset": row.get("_source_dataset"),
-                            "_net_new_length_m": row.get("_net_new_length_m"),
-                            "_total_length_m": row.get("_total_length_m"),
-                            "_connectivity_hop": row.get("_connectivity_hop", 0),
-                        }
-                    )
-            if net_new_records:
-                net_new_edges = gpd.GeoDataFrame(net_new_records, crs=combined_gdf.crs)
+        if len(connected_targets) > 0 and "_net_new_geometry" in connected_targets.columns:
+            has_net_new = connected_targets["_net_new_geometry"].apply(
+                lambda g: g is not None and not g.is_empty
+            )
+            if has_net_new.any():
+                nn_subset = connected_targets[has_net_new]
+                net_new_edges = gpd.GeoDataFrame(
+                    {
+                        "geometry": nn_subset["_net_new_geometry"].values,
+                        "_original_id": nn_subset["_original_id"].values
+                        if "_original_id" in nn_subset.columns
+                        else None,
+                        "_source_dataset": nn_subset["_source_dataset"].values
+                        if "_source_dataset" in nn_subset.columns
+                        else None,
+                        "_net_new_length_m": nn_subset["_net_new_length_m"].values
+                        if "_net_new_length_m" in nn_subset.columns
+                        else None,
+                        "_total_length_m": nn_subset["_total_length_m"].values
+                        if "_total_length_m" in nn_subset.columns
+                        else None,
+                        "_connectivity_hop": nn_subset["_connectivity_hop"].values
+                        if "_connectivity_hop" in nn_subset.columns
+                        else 0,
+                    },
+                    crs=combined_gdf.crs,
+                )
                 logger.info(f"  Net-new edges for visualization: {len(net_new_edges)}")
 
     logger.info(f"  Connected target edges (after length filter): {len(connected_targets)}")
@@ -448,12 +709,18 @@ def detect_orphans_by_proximity(
                 (connected_targets["_connectivity_hop"] == hop).sum()
             )
 
+    # Count bridge promotions
+    bridge_promoted = 0
+    if "_connectivity_role" in connected_targets.columns:
+        bridge_promoted = int((connected_targets["_connectivity_role"] == "bridge").sum())
+
     stats = {
         "total_segments": len(combined_gdf),
         "reference_edges": len(reference_edges),
         "connected_target_edges": len(connected_targets),
         "disconnected_edges": len(orphan_targets),
         "filtered_edges": len(filtered_targets),
+        "bridge_promoted": bridge_promoted,
         **hop_counts,
     }
 

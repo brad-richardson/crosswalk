@@ -744,3 +744,184 @@ class TestExtractUnmatchedRemnants:
 
         assert len(remnants) == 2
         assert all(remnants["name"] == "Main St")
+
+
+class TestConnectivityGating:
+    """Tests for connectivity gating (bridge promotion)."""
+
+    def _make_bridge_scenario(self):
+        """Create a scenario with two disconnected reference segments and a bridge target.
+
+        Layout (projected CRS, meters):
+            ref_1: (0,0) -> (100,0)     horizontal
+            ref_2: (200,0) -> (300,0)   horizontal, gap of 100m
+
+            bridge: (80,0) -> (220,0)   spans the gap, overlapping both refs
+                start half (80,0)-(150,0) overlaps ref_1 by 20m
+                end half (150,0)-(220,0) overlaps ref_2 by 20m
+        """
+        ref_1 = LineString([(0, 0), (100, 0)])
+        ref_2 = LineString([(200, 0), (300, 0)])
+        bridge = LineString([(80, 0), (220, 0)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "bridge_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_1, ref_2, bridge],
+            },
+            crs="EPSG:32610",
+        )
+        return combined
+
+    def test_bridge_promoted(self):
+        """A segment bridging two disconnected reference components is promoted."""
+        combined = self._make_bridge_scenario()
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=200.0,  # High threshold so bridge gets filtered first
+            net_new_buffer_m=5.0,
+            max_hops=0,
+            enable_connectivity_gating=True,
+            min_bridge_overlap_m=10.0,
+        )
+
+        # Bridge should be in main (promoted)
+        target_main = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_main) == 1
+        assert target_main.iloc[0]["_connectivity_role"] == "bridge"
+        assert stats["bridge_promoted"] == 1
+        assert len(filtered) == 0
+
+    def test_spur_rejected(self):
+        """A spur overlapping one reference at one end only is not promoted."""
+        ref_1 = LineString([(0, 0), (100, 0)])
+        ref_2 = LineString([(200, 0), (300, 0)])
+        # Spur only overlaps ref_1, other end goes to empty space
+        spur = LineString([(80, 0), (150, 50)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "spur_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_1, ref_2, spur],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=200.0,
+            net_new_buffer_m=5.0,
+            max_hops=0,
+            enable_connectivity_gating=True,
+            min_bridge_overlap_m=10.0,
+        )
+
+        # Spur should stay filtered (no overlap at far end)
+        target_main = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_main) == 0
+        assert stats["bridge_promoted"] == 0
+
+    def test_same_component_rejected(self):
+        """A segment overlapping two reference segments in the same component is not promoted."""
+        # Two connected reference segments (same component)
+        ref_1 = LineString([(0, 0), (100, 0)])
+        ref_2 = LineString([(100, 0), (200, 0)])  # Connected at (100, 0)
+        # Target overlaps both refs
+        target = LineString([(50, 2), (150, 2)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "t_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_1, ref_2, target],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=200.0,
+            net_new_buffer_m=5.0,
+            max_hops=0,
+            enable_connectivity_gating=True,
+            min_bridge_overlap_m=10.0,
+        )
+
+        # Should stay filtered — refs are in same component
+        target_main = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_main) == 0
+        assert stats["bridge_promoted"] == 0
+
+    def test_below_overlap_threshold(self):
+        """A bridge with insufficient overlap at one end is not promoted."""
+        ref_1 = LineString([(0, 0), (100, 0)])
+        ref_2 = LineString([(200, 0), (300, 0)])
+        # Only 5m overlap at start end (95-100 of ref_1), 20m at end
+        short_bridge = LineString([(95, 0), (220, 0)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "ref_2", "bridge_1"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [ref_1, ref_2, short_bridge],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=200.0,
+            net_new_buffer_m=5.0,
+            max_hops=0,
+            enable_connectivity_gating=True,
+            min_bridge_overlap_m=15.0,  # Higher threshold
+        )
+
+        # Start half is (95,0)-(157.5,0) — overlap with ref_1 is only 5m
+        # Should not be promoted
+        target_main = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_main) == 0
+        assert stats["bridge_promoted"] == 0
+
+    def test_gating_disabled(self):
+        """Bridge scenario with gating disabled stays filtered."""
+        combined = self._make_bridge_scenario()
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=200.0,
+            net_new_buffer_m=5.0,
+            max_hops=0,
+            enable_connectivity_gating=False,
+            min_bridge_overlap_m=10.0,
+        )
+
+        # Bridge should stay filtered
+        target_main = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
+        assert len(target_main) == 0
+        assert stats["bridge_promoted"] == 0
+        assert len(filtered) == 1

@@ -94,6 +94,16 @@ def integrate_run(
         "--debug-connectivity",
         help="Enable debug logging for transitive connectivity analysis",
     ),
+    no_connectivity_gating: bool = typer.Option(
+        False,
+        "--no-connectivity-gating",
+        help="Disable connectivity gating (don't promote bridge segments)",
+    ),
+    min_bridge_overlap_m: float = typer.Option(
+        10.0,
+        "--min-bridge-overlap-m",
+        help="Minimum overlap (meters) at each end with reference to qualify as bridge",
+    ),
 ):
     """Integrate unmatched segments into reference network.
 
@@ -182,6 +192,8 @@ def integrate_run(
                 enable_fringe_screening=not no_fringe_filter,
                 transitive_tolerance_m=transitive_tolerance_m,
                 debug_connectivity=debug_connectivity,
+                enable_connectivity_gating=not no_connectivity_gating,
+                min_bridge_overlap_m=min_bridge_overlap_m,
             )
             progress.update(task, completed=True)
 

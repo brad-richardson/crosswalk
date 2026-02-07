@@ -1,6 +1,9 @@
 """Streamlit app for integration QA."""
 
 import logging
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import geopandas as gpd
@@ -29,6 +32,84 @@ from matcher.integration_qa.map_view import create_integration_map
 from matcher.integration_qa.state import QASession, load_reviewer_name, save_reviewer_name
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Background pipeline runner — survives Streamlit reruns/reconnections
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PipelineJob:
+    """Tracks a running or completed pipeline job."""
+
+    dataset_name: str
+    stage: str = "queued"  # queued → matching → integrating → done / error
+    error: str | None = None
+    future: Future | None = field(default=None, repr=False)
+
+
+class _PipelineManager:
+    """Thread-pool backed pipeline manager.
+
+    Held in a @st.cache_resource so it persists across reruns.
+    """
+
+    def __init__(self):
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._jobs: dict[str, PipelineJob] = {}
+
+    def submit(self, dataset_name: str, fn, *args) -> PipelineJob:
+        job = PipelineJob(dataset_name=dataset_name)
+        job.future = self._executor.submit(self._run, job, fn, *args)
+        self._jobs[dataset_name] = job
+        return job
+
+    @staticmethod
+    def _run(job: PipelineJob, fn, *args):
+        """Wrapper that updates job.stage as the callable progresses."""
+        try:
+            fn(job, *args)
+            job.stage = "done"
+        except Exception as e:
+            job.stage = "error"
+            job.error = str(e)
+            logger.exception(f"Pipeline failed for {job.dataset_name}")
+
+    def get_job(self, dataset_name: str) -> PipelineJob | None:
+        return self._jobs.get(dataset_name)
+
+    def is_running(self, dataset_name: str) -> bool:
+        job = self._jobs.get(dataset_name)
+        return job is not None and job.future is not None and not job.future.done()
+
+
+@st.cache_resource
+def _get_pipeline_manager() -> _PipelineManager:
+    return _PipelineManager()
+
+
+def _pipeline_task(
+    job: PipelineJob,
+    dataset_name: str,
+    include_matching: bool,
+):
+    """Run match (if needed) + integration in a background thread."""
+    # Resolve inputs
+    inputs = None if include_matching else _find_integration_inputs(dataset_name)
+
+    if inputs is None or isinstance(inputs, str):
+        match_inputs = _find_matching_inputs(dataset_name)
+        if isinstance(match_inputs, str):
+            raise RuntimeError(match_inputs)
+        ref, target = match_inputs
+        job.stage = "matching"
+        bridge, unmatched = _run_matching(dataset_name, ref, target)
+        inputs = (ref, bridge, unmatched, target)
+
+    ref, bridge, unmatched, target = inputs
+    job.stage = "integrating"
+    _run_integration(dataset_name, ref, bridge, unmatched, target)
 
 
 def _list_datasets() -> list[tuple[str, str]]:
@@ -264,57 +345,45 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
     integration_dir = str(integration_cache_dir(dataset_name))
 
     # Action buttons based on status
-    if status == "cached":
-        if st.button("Re-run Integration", key="qa_run_integration"):
-            inputs = _find_integration_inputs(dataset_name)
-            if isinstance(inputs, str):
-                st.error(inputs)
-            else:
-                ref, bridge, unmatched, target = inputs
-                with st.spinner("Running integration pipeline..."):
-                    try:
-                        _run_integration(dataset_name, ref, bridge, unmatched, target)
-                        st.success("Integration complete!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Integration failed: {e}")
+    mgr = _get_pipeline_manager()
+    job = mgr.get_job(dataset_name)
 
-    elif status == "ready":
-        if st.button("Run Integration", type="primary", key="qa_run_integration"):
-            inputs = _find_integration_inputs(dataset_name)
-            if isinstance(inputs, str):
-                st.error(inputs)
-            else:
-                ref, bridge, unmatched, target = inputs
-                with st.spinner("Running integration pipeline..."):
-                    try:
-                        _run_integration(dataset_name, ref, bridge, unmatched, target)
-                        st.success("Integration complete!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Integration failed: {e}")
-
-    elif status == "needs_matching":
-        if st.button("Run Match + Integrate", type="primary", key="qa_run_match_integrate"):
-            match_inputs = _find_matching_inputs(dataset_name)
-            if isinstance(match_inputs, str):
-                st.error(match_inputs)
-            else:
-                ref, target = match_inputs
-                try:
-                    with st.spinner("Running matching pipeline (this may take a while)..."):
-                        bridge, unmatched = _run_matching(dataset_name, ref, target)
-                    with st.spinner("Running integration pipeline..."):
-                        _run_integration(dataset_name, ref, bridge, unmatched, target)
-                    st.success("Match + Integration complete!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Pipeline failed: {e}")
-
-    elif status == "missing":
+    if status == "missing":
         match_inputs = _find_matching_inputs(dataset_name)
         if isinstance(match_inputs, str):
             st.info(match_inputs)
+    elif mgr.is_running(dataset_name):
+        # Pipeline running in background — show progress and auto-refresh
+        stage_labels = {
+            "queued": "Queued...",
+            "matching": "Running matching pipeline...",
+            "integrating": "Running integration pipeline...",
+        }
+        st.info(stage_labels.get(job.stage, f"Running ({job.stage})..."))
+        time.sleep(2)
+        st.rerun()
+    elif job is not None and job.stage == "done":
+        # Just finished — show success and clear
+        st.success("Pipeline complete!")
+        # Show re-run controls
+        include_matching = st.checkbox("Include matching", key="qa_include_matching")
+        if st.button("Re-run Integration", key="qa_run_integration"):
+            mgr.submit(dataset_name, _pipeline_task, dataset_name, include_matching)
+            st.rerun()
+    elif job is not None and job.stage == "error":
+        st.error(f"Pipeline failed: {job.error}")
+        include_matching = st.checkbox("Include matching", key="qa_include_matching")
+        if st.button("Retry", type="primary", key="qa_run_integration"):
+            mgr.submit(dataset_name, _pipeline_task, dataset_name, include_matching)
+            st.rerun()
+    else:
+        # Normal idle state
+        button_label = "Re-run Integration" if status == "cached" else "Run Integration"
+        button_type = "secondary" if status == "cached" else "primary"
+        include_matching = st.checkbox("Include matching", key="qa_include_matching")
+        if st.button(button_label, type=button_type, key="qa_run_integration"):
+            mgr.submit(dataset_name, _pipeline_task, dataset_name, include_matching)
+            st.rerun()
 
     st.divider()
 
@@ -365,32 +434,36 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
         disconnected_edges = result.disconnected_edges
         filtered_edges = result.filtered_edges
         net_new_edges = result.net_new_edges
+        bridge_edges = result.bridge_edges
     except Exception as e:
         st.error(f"Error loading integration result: {e}")
         return
 
     # Summary metrics bar — compute from actual loaded data (pipeline stats
     # reflect pre-orphan-detection counts which can be misleading)
-    n_matched = (
-        int((edges["_source"] == "target_matched").sum())
-        if edges is not None and "_source" in edges.columns
-        else 0
-    )
-    n_unmatched = (
+    n_connected = (
         int((edges["_source"] == "target_new").sum())
         if edges is not None and "_source" in edges.columns
         else 0
     )
+    n_net_new = len(net_new_edges) if net_new_edges is not None else 0
     n_disconnected = len(disconnected_edges) if disconnected_edges is not None else 0
     n_filtered = len(filtered_edges) if filtered_edges is not None else 0
-    n_total = (len(edges) if edges is not None else 0) + n_disconnected + n_filtered
+    n_bridges = len(bridge_edges) if bridge_edges is not None else 0
 
-    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-    col_m1.metric("Total Edges", n_total)
-    col_m2.metric("Matched", n_matched)
-    col_m3.metric("Unmatched", n_unmatched)
-    col_m4.metric("Disconnected", n_disconnected)
-    col_m5.metric("Filtered", n_filtered)
+    cols = st.columns(7)
+    cols[0].metric("Net New", n_net_new)
+    cols[1].metric("To Merge", n_connected)
+    cols[2].metric("Bridges", n_bridges)
+    cols[3].metric("Disconnected", n_disconnected)
+    cols[4].metric("Filtered", n_filtered)
+    cols[5].metric(
+        "Reference",
+        len(edges[edges["_source"] == "reference"])
+        if edges is not None and "_source" in edges.columns
+        else 0,
+    )
+    cols[6].metric("Total", (len(edges) if edges is not None else 0) + n_disconnected + n_filtered)
 
     # Two tabs: Browse Map (default) and Edge Review
     tab_browse, tab_review = st.tabs(["Browse Map", "Edge Review"])
@@ -401,6 +474,7 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
             disconnected_edges=disconnected_edges,
             filtered_edges=filtered_edges,
             net_new_edges=net_new_edges,
+            bridge_edges=bridge_edges,
             basemap=session.basemap,
         )
 

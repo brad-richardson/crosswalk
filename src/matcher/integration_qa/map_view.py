@@ -12,6 +12,7 @@ SOURCE_COLORS = {
     "disconnected": "#dc3545",  # Red - truly disconnected
     "filtered": "#6c757d",  # Gray - connected but filtered
     "net_new": "#00ffff",  # Cyan - net new coverage portions
+    "bridge": "#e040fb",  # Purple - promoted bridge connectors
 }
 
 PRIORITY_COLORS = {
@@ -32,6 +33,7 @@ LAYER_NAMES = {
     "disconnected": "Disconnected",
     "filtered": "Filtered (Short Net-New)",
     "net_new": "Net New Coverage",
+    "bridge": "Bridges (Promoted)",
 }
 
 
@@ -138,6 +140,7 @@ def add_edges_layer(
     show: bool = True,
     add_markers: bool = False,
     marker_spacing: float = 30.0,
+    dash_array: str | None = None,
 ) -> folium.Map:
     """Add edges layer to map.
 
@@ -151,6 +154,7 @@ def add_edges_layer(
         show: Whether layer is visible by default
         add_markers: Whether to add circle markers along lines
         marker_spacing: Spacing between markers in meters (if add_markers=True)
+        dash_array: SVG dash pattern (e.g. "8 4" for dashed lines)
     """
     if edges is None or len(edges) == 0:
         return m
@@ -179,20 +183,25 @@ def add_edges_layer(
         if "component_size" in row:
             popup_html += f"<b>Component Size:</b> {row['component_size']}<br>"
 
-        # Add geometry
+        # Collect line coords (handle LineString and MultiLineString)
+        line_coords_list = []
         if geom.geom_type == "LineString":
-            coords = [[p[1], p[0]] for p in geom.coords]
-            folium.PolyLine(
-                coords,
-                color=color,
-                weight=weight,
-                opacity=opacity,
-                popup=folium.Popup(popup_html, max_width=300),
-            ).add_to(layer)
+            line_coords_list.append([[p[1], p[0]] for p in geom.coords])
+        elif geom.geom_type == "MultiLineString":
+            for part in geom.geoms:
+                line_coords_list.append([[p[1], p[0]] for p in part.coords])
 
-            # Add circle markers along line if requested
-            if add_markers:
-                _add_circle_markers_along_line(layer, geom, color, marker_spacing, radius=3)
+        popup = folium.Popup(popup_html, max_width=300)
+        line_kwargs = {"color": color, "weight": weight, "opacity": opacity, "popup": popup}
+        if dash_array:
+            line_kwargs["dash_array"] = dash_array
+
+        for coords in line_coords_list:
+            folium.PolyLine(coords, **line_kwargs).add_to(layer)
+
+        # Add circle markers along line if requested
+        if add_markers and geom.geom_type == "LineString":
+            _add_circle_markers_along_line(layer, geom, color, marker_spacing, radius=3)
 
     layer.add_to(m)
     return m
@@ -341,6 +350,7 @@ def create_integration_map(
     context_radius: float = 500.0,  # meters around selected edge
     disconnected_edges: gpd.GeoDataFrame | None = None,
     filtered_edges: gpd.GeoDataFrame | None = None,
+    bridge_edges: gpd.GeoDataFrame | None = None,
 ) -> folium.Map:
     """Create full integration QA map with all layers."""
     # Default center
@@ -436,6 +446,18 @@ def create_integration_map(
             opacity=0.9,
             add_markers=True,
             marker_spacing=15.0,
+        )
+
+    # Add bridge edges (promoted connectors between disconnected components)
+    if bridge_edges is not None and len(bridge_edges) > 0:
+        add_edges_layer(
+            m,
+            bridge_edges,
+            LAYER_NAMES["bridge"],
+            SOURCE_COLORS["bridge"],
+            weight=4,
+            add_markers=True,
+            marker_spacing=20.0,
         )
 
     # Add disconnected layers (with markers, priority-colored)

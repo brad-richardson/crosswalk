@@ -138,6 +138,7 @@ class IntegrationResult:
     dropped_overlaps: gpd.GeoDataFrame
     statistics: IntegrationStatistics
     net_new_edges: gpd.GeoDataFrame | None = None
+    bridge_edges: gpd.GeoDataFrame | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 

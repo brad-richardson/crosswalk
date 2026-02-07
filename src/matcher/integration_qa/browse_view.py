@@ -34,6 +34,7 @@ def render_browse_view(
     basemap: str = "Light",
     disconnected_edges: gpd.GeoDataFrame | None = None,
     filtered_edges: gpd.GeoDataFrame | None = None,
+    bridge_edges: gpd.GeoDataFrame | None = None,
 ) -> None:
     """Render the browse map view with all layers toggled via Folium LayerControl.
 
@@ -59,6 +60,7 @@ def render_browse_view(
         disconnected_edges=disconnected_edges,
         filtered_edges=filtered_edges,
         net_new_edges=net_new_edges,
+        bridge_edges=bridge_edges,
         basemap=basemap,
     )
 
@@ -71,6 +73,7 @@ def create_browse_map(
     basemap: str = "Light",
     disconnected_edges: gpd.GeoDataFrame | None = None,
     filtered_edges: gpd.GeoDataFrame | None = None,
+    bridge_edges: gpd.GeoDataFrame | None = None,
 ) -> folium.Map:
     """Create the browse map with heatmap and all layers.
 
@@ -120,6 +123,36 @@ def create_browse_map(
             opacity=0.9,
         )
 
+    # Bridge edges — two layers: dashed full geometry + solid subline
+    if bridge_edges is not None and len(bridge_edges) > 0:
+        browse_bridges = bridge_edges
+        if bridge_edges.crs and bridge_edges.crs.to_epsg() != 4326:
+            browse_bridges = bridge_edges.to_crs("EPSG:4326")
+
+        # Full geometry context (dashed, faded)
+        if "_full_geometry" in browse_bridges.columns:
+            full_gdf = browse_bridges.set_geometry("_full_geometry")
+            add_edges_layer(
+                m,
+                full_gdf,
+                "Bridges (Full)",
+                SOURCE_COLORS["bridge"],
+                weight=2,
+                opacity=0.4,
+                dash_array="8 4",
+                add_markers=False,
+            )
+
+        # Subline (solid, prominent)
+        add_edges_layer(
+            m,
+            browse_bridges,
+            "Bridges (Subline)",
+            SOURCE_COLORS["bridge"],
+            weight=4,
+            add_markers=False,
+        )
+
     # Disconnected edges — no per-edge markers in browse mode (too many objects),
     # and sample when dataset is very large to keep the map responsive
     if disconnected_edges is not None and len(disconnected_edges) > 0:
@@ -156,19 +189,7 @@ def create_browse_map(
                 add_markers=False,
             )
 
-    # Filtered edges — single gray layer
-    if filtered_edges is not None and len(filtered_edges) > 0:
-        browse_filtered = filtered_edges
-        if filtered_edges.crs and filtered_edges.crs.to_epsg() != 4326:
-            browse_filtered = filtered_edges.to_crs("EPSG:4326")
-        add_edges_layer(
-            m,
-            browse_filtered,
-            "Filtered (Short Net-New)",
-            SOURCE_COLORS["filtered"],
-            weight=2,
-            add_markers=False,
-        )
+    # Filtered edges are not shown in browse mode (too many features, use Edge Review)
 
     # Heatmap overlay from edge centroids (uses all non-reference data)
     heatmap_points = _compute_heatmap_points(working_edges, net_new_edges, disconnected_edges)

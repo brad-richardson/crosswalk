@@ -59,6 +59,8 @@ def run_integration_pipeline(
     enable_fringe_screening: bool = True,
     transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
+    enable_connectivity_gating: bool = True,
+    min_bridge_overlap_m: float = 10.0,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
     run_post_analysis: bool = False,
@@ -103,6 +105,10 @@ def run_integration_pipeline(
             target segments. Defaults to 2x connection_tolerance_m since trails often
             don't share exact endpoints. Set to connection_tolerance_m for strict mode.
         debug_connectivity: Enable debug logging for transitive connectivity analysis.
+        enable_connectivity_gating: Check if filtered segments bridge disconnected
+            reference components. Bridge segments are promoted back to main. Default True.
+        min_bridge_overlap_m: Minimum overlap (meters) at each end with reference to
+            qualify as a bridge segment. Default 10.0.
         ref_id_column: ID column in reference
         target_id_column: ID column in targets
         run_post_analysis: Run post-integration analysis (island detection, GPS drift)
@@ -233,6 +239,8 @@ def run_integration_pipeline(
             max_hops=max_hops,
             transitive_tolerance_m=transitive_tolerance_m,
             debug_connectivity=debug_connectivity,
+            enable_connectivity_gating=enable_connectivity_gating,
+            min_bridge_overlap_m=min_bridge_overlap_m,
         )
     )
     stats.main_component_edges = len(main_edges)
@@ -280,6 +288,36 @@ def run_integration_pipeline(
         )
         stats.main_component_edges = len(main_edges)
 
+    # Extract bridge edges as separate layer for QA visibility
+    # Show gap sublines: portions of bridge NOT overlapping nearest reference
+    bridge_edges = None
+    if "_connectivity_role" in main_edges.columns:
+        bridge_mask = main_edges["_connectivity_role"] == "bridge"
+        if bridge_mask.any():
+            import shapely as shp
+
+            bridge_full = main_edges[bridge_mask].copy()
+            bridge_geoms = bridge_full.geometry.values
+
+            ref_mask = main_edges["_source"] == "reference"
+            ref_geoms = main_edges[ref_mask].geometry.values
+            ref_tree = shp.STRtree(ref_geoms)
+
+            # Vectorized: find nearest ref per bridge, buffer it, difference
+            _b_idxs, nearest_ref_idxs = ref_tree.query_nearest(bridge_geoms, all_matches=False)
+            nearest_buffered = shp.buffer(ref_geoms[nearest_ref_idxs], connection_tolerance_m)
+            gap_geoms = shp.difference(bridge_geoms, nearest_buffered)
+
+            # Store full geometry as WKB for parquet serialization
+            bridge_edges = bridge_full.copy()
+            bridge_edges["_full_geometry_wkb"] = shp.to_wkb(bridge_geoms)
+
+            # Set active geometry to gap sublines; fall back to full where gap is empty
+            empty_mask = shp.is_empty(gap_geoms)
+            gap_geoms[empty_mask] = bridge_geoms[empty_mask]
+            bridge_edges = bridge_edges.set_geometry(gap_geoms)
+            logger.info(f"  Bridge edges for QA layer: {len(bridge_edges)}")
+
     # Step 5: Build result
     logger.info("Step 5: Building result...")
     result = IntegrationResult(
@@ -289,6 +327,7 @@ def run_integration_pipeline(
         filtered_edges=filtered_edges,
         dropped_overlaps=dropped_overlaps,
         net_new_edges=net_new_edges,
+        bridge_edges=bridge_edges,
         statistics=stats,
         created_at=datetime.now(UTC),
     )
@@ -338,6 +377,7 @@ def run_integration_pipeline(
     _layer_stats(main_edges, "Matched (target)", "target_matched")
     _layer_stats(main_edges, "To Merge (connected)", "target_new")
     _layer_stats(net_new_edges, "Net New Coverage")
+    _layer_stats(bridge_edges, "Bridges (promoted)")
     _layer_stats(disconnected_edges, "Disconnected")
     _layer_stats(filtered_edges, "Filtered (short net-new)")
     logger.info("")

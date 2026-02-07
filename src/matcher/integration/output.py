@@ -37,6 +37,7 @@ def write_integration_outputs(
     - disconnected.parquet: Truly disconnected segments for QA review
     - filtered.parquet: Connected segments with insufficient net-new coverage
     - net_new.parquet: Net-new geometry portions (for visualization)
+    - bridges.parquet: Bridge segments promoted via connectivity gating (for QA)
     - dropped_overlaps.parquet: Segments dropped due to priority conflicts
     - statistics.json: Integration statistics
 
@@ -88,6 +89,16 @@ def write_integration_outputs(
     elif net_new_path.exists():
         net_new_path.unlink()
         logger.info(f"Removed stale {net_new_path} (no net-new edges this run)")
+
+    # Write bridge edges (promoted connectors between disconnected components)
+    bridges_path = output_dir / "bridges.parquet"
+    if result.bridge_edges is not None and len(result.bridge_edges) > 0:
+        result.bridge_edges.to_parquet(bridges_path)
+        output_paths["bridges"] = bridges_path
+        logger.info(f"Wrote {len(result.bridge_edges)} bridge edges to {bridges_path}")
+    elif bridges_path.exists():
+        bridges_path.unlink()
+        logger.info(f"Removed stale {bridges_path} (no bridge edges this run)")
 
     # Write statistics
     stats_path = output_dir / "statistics.json"
@@ -256,6 +267,17 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
     net_new_path = output_dir / "net_new.parquet"
     net_new = gpd.read_parquet(net_new_path) if net_new_path.exists() else None
 
+    # Load bridge edges (restore _full_geometry from WKB)
+    bridges_path = output_dir / "bridges.parquet"
+    bridge_edges = None
+    if bridges_path.exists():
+        bridge_edges = gpd.read_parquet(bridges_path)
+        if "_full_geometry_wkb" in bridge_edges.columns:
+            import shapely
+
+            bridge_edges["_full_geometry"] = shapely.from_wkb(bridge_edges["_full_geometry_wkb"])
+            bridge_edges = bridge_edges.drop(columns=["_full_geometry_wkb"])
+
     # Load statistics
     stats_path = output_dir / "statistics.json"
     if stats_path.exists():
@@ -265,6 +287,9 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
             stats_data.pop("created_at", datetime.now(UTC).isoformat())
         )
         stats_data.pop("pipeline_version", None)
+        # Strip unknown keys from older pipeline versions
+        known_fields = {f.name for f in IntegrationStatistics.__dataclass_fields__.values()}
+        stats_data = {k: v for k, v in stats_data.items() if k in known_fields}
         statistics = IntegrationStatistics(**stats_data)
     else:
         statistics = IntegrationStatistics()
@@ -277,6 +302,7 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
         filtered_edges=filtered,
         dropped_overlaps=dropped,
         net_new_edges=net_new,
+        bridge_edges=bridge_edges,
         statistics=statistics,
         created_at=created_at,
     )
