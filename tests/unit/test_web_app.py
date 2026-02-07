@@ -2,7 +2,9 @@
 
 import pytest
 
-pytest.importorskip("fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')")
+pytest.importorskip(
+    "fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')"
+)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
