@@ -1,0 +1,23 @@
+{% if status == "ready" %}
+<div class="info-card map-overlay" id="pipeline-status"
+     style="border-left: 4px solid #4caf50; padding: 12px 16px;">
+    <span style="color: #4caf50; font-weight: 600;">Ready</span>
+    <span style="font-size: 0.8rem; color: #666; margin-left: 8px;">Integration output available for {{ dataset }}</span>
+</div>
+{% elif status == "running" %}
+<div class="info-card map-overlay" id="pipeline-status"
+     style="border-left: 4px solid #ff9800; padding: 12px 16px;"
+     hx-get="/qa/pipeline/{{ dataset }}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML">
+    <span class="spinner" style="display: inline-block; width: 14px; height: 14px; vertical-align: middle;"></span>
+    <span style="color: #ff9800; font-weight: 600; margin-left: 4px;">Running...</span>
+    <span style="font-size: 0.8rem; color: #666; margin-left: 8px;">Integration pipeline in progress for {{ dataset }}</span>
+</div>
+{% else %}
+<div class="info-card map-overlay" id="pipeline-status"
+     style="border-left: 4px solid #9e9e9e; padding: 12px 16px;">
+    <span style="color: #9e9e9e; font-weight: 600;">Not run yet</span>
+    <span style="font-size: 0.8rem; color: #666; margin-left: 8px;">No integration output for {{ dataset }}</span>
+</div>
+{% endif %}
