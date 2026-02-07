@@ -56,9 +56,7 @@ def _start_background_load(dataset_id: str) -> None:
             except Exception:
                 logger.exception("Background load failed for dataset %s", dataset_id)
                 with _load_lock:
-                    _loading_errors[dataset_id] = (
-                        "Feature computation failed. Check server logs."
-                    )
+                    _loading_errors[dataset_id] = "Feature computation failed. Check server logs."
             finally:
                 with _load_lock:
                     _loading_tasks.pop(dataset_id, None)
