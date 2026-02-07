@@ -1,0 +1,48 @@
+<div class="review-card" id="card-{{ label.gers_id }}-{{ label.target_id }}">
+    <div class="review-card-header">
+        {% if label.label == "match" %}
+        <span class="label-badge label-match">match</span>
+        {% elif label.label == "no_match" %}
+        <span class="label-badge label-no-match">no match</span>
+        {% else %}
+        <span class="label-badge label-unsure">unsure</span>
+        {% endif %}
+
+        <span class="review-card-names">
+            {{ label.ref_name_raw or label.gers_id[:16] }}
+            &rarr;
+            {{ label.target_name_raw or label.target_id[:16] }}
+        </span>
+    </div>
+
+    <div class="review-card-meta">
+        {% if label.labeler %}
+        <span class="review-card-labeler">by {{ label.labeler }}</span>
+        {% endif %}
+        {% if label.original_confidence %}
+        <span class="review-card-confidence">{{ "%.0f"|format(label.original_confidence * 100) }}% conf</span>
+        {% endif %}
+    </div>
+
+    <div class="review-actions">
+        <button class="review-btn review-btn-match"
+                hx-put="/review/{{ label.gers_id }}/{{ label.target_id }}"
+                hx-vals='{"dataset": "{{ dataset }}", "label": "match"}'
+                hx-target="#card-{{ label.gers_id }}-{{ label.target_id }}"
+                hx-swap="outerHTML"
+                title="Set to match">&#10003;</button>
+        <button class="review-btn review-btn-no-match"
+                hx-put="/review/{{ label.gers_id }}/{{ label.target_id }}"
+                hx-vals='{"dataset": "{{ dataset }}", "label": "no_match"}'
+                hx-target="#card-{{ label.gers_id }}-{{ label.target_id }}"
+                hx-swap="outerHTML"
+                title="Set to no match">&#10007;</button>
+        <button class="review-btn review-btn-delete"
+                hx-delete="/review/{{ label.gers_id }}/{{ label.target_id }}"
+                hx-vals='{"dataset": "{{ dataset }}"}'
+                hx-target="#card-{{ label.gers_id }}-{{ label.target_id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete this label?"
+                title="Delete label">&#128465;</button>
+    </div>
+</div>

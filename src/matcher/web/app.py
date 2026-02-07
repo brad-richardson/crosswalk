@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .routes.labeling import router as labeling_router
 from .routes.qa import router as qa_router
+from .routes.review import router as review_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -23,5 +24,6 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(labeling_router)
     app.include_router(qa_router)
+    app.include_router(review_router)
 
     return app
