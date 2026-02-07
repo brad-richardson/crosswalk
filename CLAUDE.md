@@ -31,7 +31,8 @@ matcher --help
 When adding a new ML feature (e.g., a new similarity metric), update ALL of these:
 
 1. **Add to config.py** (single source of truth):
-   - Add to `FEATURE_COLUMNS` list
+   - Add to `FEATURE_CATEGORIES` dict under the appropriate category
+   - `FEATURE_COLUMNS` is derived automatically from `FEATURE_CATEGORIES`
    - Add to `SEMANTIC_FEATURES` if it's a name/class feature
 
 2. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
@@ -40,25 +41,28 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
    - Add to `compute_pair_features()` return dict
    - Add to `_get_error_features()` with a sensible default
 
-4. **Save it in label_store.py**:
-   - Add to `LABEL_COLUMNS` list
-   - Add to `add()` method with `features.get("feature_name", default)`
+4. **Backfill existing labels**: Run `matcher labels backfill` to compute the new feature for all existing labeled pairs
 
 **Automated verification:**
 - Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
-- The test `test_all_computed_features_are_in_label_columns` will fail if you forget label_store.py
+- `test_compute_pair_features_returns_all_declared_features` verifies all config features are computed
+- `test_ml_feature_columns_match_computed_features` verifies ML uses the same features
 
-**Why this matters:**
-- Features computed but not saved to labels -> ML can't use them for training
-- Features in labels but not computed -> labels have stale/missing values
-- The test catches these mismatches automatically
+**Label storage architecture** (normalized format):
+- `labels/human/dataset=*/data.csv` - Human label metadata (no features)
+- `labels/agent/dataset=*/data.csv` - Agent label metadata (no features)
+- `labels/features/dataset=*/data.parquet` - Computed features (keyed by gers_id, target_id)
+- `labels/data/dataset=*/data.parquet` - Raw pair data (geometries, attributes)
+
+Features are stored separately from labels via `FeatureStore` (in `labeling/feature_store.py`).
+At training time, `LabelStore.load_all()` joins labels with features automatically.
 
 **Note:** `ml.py` imports `FEATURE_COLUMNS` from `config.py`, so no separate update needed there.
 
 ## Feature Computation Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture including:
-- 56 features across 14 categories (source of truth: `config.py::FEATURE_COLUMNS`)
+- 67 features across 15 categories (source of truth: `config.py::FEATURE_COLUMNS`)
 - Three computation paths (ML inference, labeling UI, training)
 - Pre-computation table (what's pre-computed and why)
 - Imputation consistency (training medians)

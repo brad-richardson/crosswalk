@@ -50,7 +50,7 @@ flowchart TB
 
     subgraph Match["2. Matching Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
-        E --> F[Compute 56 Features<br/>Geometric, semantic, topological]
+        E --> F[Compute 67 Features<br/>Geometric, semantic, topological]
         F --> G[Score with XGBoost<br/>Binary classifier]
         G --> H[Optimize 1:N Matches<br/>Hungarian algorithm]
         H --> I{Quality<br/>Acceptable?}
@@ -82,7 +82,7 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
-| **Features** | 56 features across 14 categories: geometric, semantic, topological, alignment, and more |
+| **Features** | 67 features across 15 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via Streamlit UI |
 
 ## Quick Start
@@ -101,7 +101,7 @@ matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_st
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
 # 4. If match quality needs improvement, label more examples (auto-discovers datasets)
-streamlit run src/matcher/labeling/app.py
+matcher ui
 
 # 5. Retrain and re-match until satisfied
 matcher train && matcher match ...
@@ -168,24 +168,25 @@ See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instruct
 
 ### Step 2: Feature Computation & Matching
 
-The matcher computes 56 features for each candidate pair across 14 categories:
+The matcher computes 67 features for each candidate pair across 15 categories:
 
 | Category | Count | Examples |
 |----------|-------|----------|
-| Geometric | 9 | Hausdorff distance, buffer IoU (5m/15m), heading delta, length ratio |
-| Semantic - Name | 8 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags |
-| Semantic - Class | 1 | Road class similarity |
+| Geometric | 11 | Hausdorff distance (mean, p95), buffer IoU (5m/15m), heading delta, length ratio, angle histogram, edge distance RMSE |
+| Name Similarity | 10 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags, numeric match, route prefix |
+| Class | 1 | Road class similarity |
 | Endpoint/Connectivity | 3 | Min/max endpoint proximity, shared endpoint count |
 | Lateral Offset | 3 | Median, IQR, 95th percentile |
 | Topology | 12 | Degree features, dead-end/intersection flags and matches |
 | Alignment Coverage | 4 | Ref/target/min coverage, coverage ratio |
 | Graphlet | 2 | Network topology similarity, endpoint degree similarity |
+| Clustering | 3 | Local clustering coefficient (ref/target), delta |
 | Sinuosity | 3 | Ref/target sinuosity, delta |
 | Heading Consistency | 3 | Ref/target consistency, delta |
 | Vertex Density | 3 | Ref/target density, ratio |
 | Length | 1 | Minimum length |
 | Shape Complexity | 3 | Ref/target complexity (significant turns), delta |
-| Numeric Route | 1 | Route number matching (I-90, US-101) |
+| Parallel Sibling | 5 | Parallel sibling detection, fraction, offset ratios, representation mismatch |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
 
@@ -200,14 +201,14 @@ When match quality isn't sufficient, use the labeling UI to create training data
 
 ```bash
 # Launch labeling app (auto-discovers all datasets with data in data/raw/)
-streamlit run src/matcher/labeling/app.py
+matcher ui
 ```
 
 Label pairs as `match`, `no_match`, or `unsure`, then retrain:
 
 ```bash
 matcher train
-matcher ml eval  # Trains fresh model on 70% of data, evaluates on 30% holdout
+matcher ml eval  # Cross-validation evaluation (default: 5-fold)
 ```
 
 ### Step 4: Integration
@@ -248,7 +249,7 @@ matcher class discover data/raw/new_dataset.parquet \
 |---------|-------------|
 | `matcher match` | Run the matching pipeline |
 | `matcher train` | Train ML model on labeled data |
-| `matcher label` | Launch labeling UI |
+| `matcher ui` | Launch combined UI (labeling, label review, integration QA) |
 | `matcher match-eval` | Evaluate bridge file (matching output) quality |
 | `matcher screen` | Screen segments for valid network additions |
 | `matcher version` | Show version information |
@@ -265,9 +266,11 @@ matcher class discover data/raw/new_dataset.parquet \
 | | `data repair` | Repair topology issues |
 | | `data quality` | Dataset quality fingerprint |
 | | `data validate` | Validate data file versions |
-| **ml** | `ml eval` | Train on subset, eval on holdout (or eval existing model with `--model`) |
-| | `ml features` | Compute and cache features |
-| | `ml backfill` | Backfill labels with features |
+| **ml** | `ml eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
+| | `ml errors` | Analyze prediction errors and diagnose model issues |
+| | `ml features` | Compute and cache features for dataset(s) |
+| **labels** | `labels backfill` | Recompute features for labeled pairs |
+| | `labels stats` | Show label statistics across datasets |
 | **integrate** | `integrate run` | Integrate unmatched segments |
 | | `integrate qa` | Launch integration QA app |
 | **class** | `class discover` | Discover class mappings |
@@ -293,20 +296,29 @@ src/matcher/
 ├── fetch/              # Data fetching (Overture, OSM, ArcGIS)
 ├── features/           # Feature computation (geometric, semantic, topological)
 ├── blocking/           # Candidate generation via spatial indexing
-├── matching/           # Matching algorithms (rules, ML, optimizer)
+├── matching/           # Matching algorithms (ML, optimizer)
 ├── pipeline/           # End-to-end pipeline orchestration
 ├── resolution/         # Bridge file generation
 ├── topology/           # Network topology reconstruction
-├── labeling/           # Streamlit labeling UI
-├── datasets/           # Dataset configuration discovery
+├── labeling/           # Streamlit labeling UI & label/feature/data stores
+├── datasets/           # Dataset configuration & discovery
+├── classification/     # Road class prediction
 ├── integration/        # Unmatched segment integration
 ├── integration_qa/     # QA app for integration review
+├── screen/             # Screening tests (water bodies, buildings, landcover)
+├── quality/            # Quality metrics, fingerprinting, reports
+├── post_integration/   # GPS drift detection, island detection, topology repair
 ├── validation/         # Ground-truth validation experiments
 ├── agent_labeling/     # AI agent labeling batch generation
+├── external/           # External tool integration (Hootenanny)
 └── utils/              # Shared utilities
 
 datasets/               # YAML dataset configs (us_boston_streets.yaml, etc.)
-labels/                 # Hive-partitioned training labels (dataset=*/data.csv)
+labels/                 # Normalized training labels
+│   ├── human/          #   Human labels (metadata CSV)
+│   ├── agent/          #   Agent labels (metadata CSV)
+│   ├── features/       #   Computed features (Parquet)
+│   └── data/           #   Raw pair data & geometries (Parquet)
 docs/                   # Architecture docs, dataset ingestion guide, benchmarks
 research/               # Point-in-time research documents
 ```

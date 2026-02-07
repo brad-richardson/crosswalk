@@ -1,589 +1,9 @@
-# Matcher TODO & Future Features
+# Matcher TODO
 
-This document consolidates all future feature ideas, technical debt, and improvement opportunities for the road network matcher.
+Actionable backlog for the road network matcher.
 
----
-
-## Table of Contents
-
-1. [Geometric Features](#geometric-features)
-2. [Semantic Features](#semantic-features)
-3. [Attribute Features](#attribute-features)
-4. [Topology Features](#topology-features)
-5. [Graph Embeddings (Research)](#graph-embeddings-research)
-6. [Blocking & Candidate Generation](#blocking--candidate-generation-optimization)
-7. [Sub-segment Matching](#sub-segment-matching)
-8. [Infrastructure & Tooling](#infrastructure--tooling)
-9. [Label Data Management](#label-data-management)
-10. [Other Ideas](#other-ideas)
-11. [Known Issues & Technical Debt](#known-issues--technical-debt)
-
----
-
-## Geometric Features
-
-### Fréchet Distance
-- **Feature**: `frechet_distance_m`
-- **Purpose**: Order-preserving distance metric that considers both position and traversal order
-- **Trade-off**: Heavier computation than Hausdorff (~O(n²) with Douglas-Peucker simplification)
-- **Critical issue**: Direction-sensitive - if datasets have inconsistent digitization direction (common), Fréchet gives poor scores for identical geometry. Would require `min(frechet(A, B), frechet(A, reverse(B)))` which doubles cost.
-- **Why Hausdorff is preferred**: Direction-agnostic by design; handles digitization direction differences without extra computation
-- **Use case**: Only useful if you encounter cases where Hausdorff fails but direction-corrected Fréchet succeeds
-- **Priority**: Low (direction sensitivity makes it problematic for road conflation)
-
-### Short Segment Flag
-- **Feature**: `short_segment_flag`, `min_length_m`
-- **Purpose**: Short segments (<10m) may need different matching logic
-- **Use case**: Improve matching for ramps, driveways, and connection segments
-
----
-
-## Semantic Features
-
-### Route Number Normalization
-- **Feature**: `route_number_similarity`
-- **Purpose**: Handle different representations of numbered routes
-- **Computation**: Normalize "I-5", "Interstate 5", "I 5" to canonical form; compare shield prefixes
-- **Use case**: Highway datasets often have inconsistent route number formatting
-
-### Reference/Alt Name Token Overlap
-- **Feature**: `ref_alt_name_overlap`
-- **Purpose**: Use alternative names and ref tags for matching
-- **Computation**: Token overlap between ref/alt_name fields when primary names don't match
-- **Use case**: Roads with multiple official names or abbreviations
-
----
-
-## Attribute Features
-
-Features derived from road attributes beyond names and classes.
-
-### Lane Count Similarity
-- **Feature**: `lane_count_match`, `lane_count_diff`
-- **Purpose**: Use lane count as matching signal
-- **Computation**: Compare lane counts; penalize large differences
-- **Data sources**: Already exposed in several dataset configs
-- **Use case**: Multi-lane highways vs. single-lane residential
-
-### Speed Limit Similarity
-- **Feature**: `speed_limit_diff`
-- **Purpose**: Speed limits correlate with road class and should match
-- **Computation**: Absolute difference in speed limits (when available)
-- **Use case**: Distinguish frontage roads from highways
-
-### One-Way Direction Features
-- **Features**: `is_oneway_ref`, `is_oneway_target`, `oneway_agreement`
-- **Purpose**: Distinguish parallel divided carriageway lanes from true duplicates; avoid matching one-way to two-way
-- **Computation**:
-  - `is_oneway_ref`: Binary flag from Overture `access.forward`/`access.backward` or road properties
-  - `is_oneway_target`: Binary flag from target dataset one-way attribute
-  - `oneway_agreement`: Categorical - both bidirectional (1.0), both oneway same direction (1.0), both oneway opposite direction (0.0), mixed one-way/bidirectional (0.5)
-- **Data sources**: Overture has direction info; many local datasets have one-way attributes
-- **Use case**: Parallel divided carriageway lanes are both one-way but opposite directions; this helps ML distinguish them from duplicate matches
-- **Priority**: Medium (addresses known edge case in split carriageway matching)
-- **Academic basis**: Hootenanny preserves one-way direction during conflation
-
-### Other Infrastructure Flags
-- **Features**: `surface_match`, `bridge_tunnel_match`
-- **Purpose**: Binary flags that should agree for matching segments
-- **Computation**: Direct comparison of surface, bridge/tunnel attributes
-- **Use case**: Additional signal for edge cases
-
----
-
-## Topology Features
-
-### Network Continuity Score
-- **Feature**: `network_continuity_score`
-- **Purpose**: Penalize matches that would create disconnected subgraphs
-- **Computation**: Check if match would maintain network connectivity
-- **Use case**: Prevent matching isolated segments when better-connected alternatives exist
-- **Priority**: Lower (requires global graph analysis)
-
-### K-Hop Path Continuity
-- **Feature**: `path_continuity_k`
-- **Purpose**: Check if segments continue into matching neighbors at k hops
-- **Computation**: Follow connected segments k hops; compare continuity patterns
-- **Academic basis**: Hootenanny network-style propagation
-- **Use case**: Validate matches by checking network context
-
-### Seed-and-Grow Neighbor Agreement
-- **Feature**: `neighbor_agreement_score`
-- **Purpose**: Reinforce confidence when nearby segments also have strong matches
-- **Computation**: Start from high-confidence "seed" matches; propagate scores to neighbors
-- **Academic basis**: Hootenanny-style propagation, Volz et al. MRF conflation
-- **Use case**: Catch erroneous matches that would isolate segments
-- **Priority**: Medium (requires iterative post-processing)
-
-### Enhanced Degree Signature Similarity
-- **Feature**: Improvement to existing `degree_signature_similarity`
-- **Problem**: Current implementation compares raw degree tuples - (1,2,3,4) vs (1,2,3,5) treated very differently
-- **Proposed**: Use Earth Mover's Distance (EMD) or optimal matching instead of simple comparison
-- **Use case**: More nuanced comparison of "4-way intersection" vs "5-way intersection"
-
-### Investigate Graphlet Performance
-- **Status**: Enabled full graphlet features (Jan 2026)
-- **Background**: Disabled `degrees_only` mode to compute full 6-dimensional graphlet vectors:
-  - degree, triangles, squares, clustering, two_hop_count, is_articulation
-- **Observation**: CV F1 improved slightly (0.905 vs 0.901), holdout metrics unchanged (99.6%)
-- **Open questions**:
-  - Are graphlet features providing signal or just noise?
-  - Which graphlet components are most predictive (triangles? clustering?)?
-  - Does performance vary by dataset type (urban grid vs suburban)?
-  - Memory/compute trade-off worth the marginal improvement?
-- **Suggested experiments**:
-  - Feature importance analysis for graphlet components
-  - Ablation study: train with/without each graphlet component
-  - Per-dataset breakdown of graphlet feature impact
-- **Priority**: Low-Medium (incremental improvement)
-
----
-
-## Graph Embeddings (Research)
-
-**Priority:** Low (exploratory research)
-**Status:** Idea
-
-### Problem
-
-Current topology features are hand-crafted and limited to local neighborhood. Graph neural networks could learn richer representations of segment context.
-
-### Proposed Approaches
-
-#### Node2Vec / GraphSAGE Embeddings
-- **Feature**: `graph_embedding_similarity`
-- **Purpose**: Use learned embeddings as segment context representation
-- **Computation**: Train node2vec or GraphSAGE on road network; use embeddings as feature vectors
-- **Trade-off**: Requires pre-training on full network; adds complexity
-
-#### Siamese GNN
-- **Purpose**: Learn to directly compare two segments' network contexts
-- **Computation**: Feed both segments through shared GNN; compare output embeddings
-- **Academic basis**: Graph neural networks for entity matching
-
-### Implementation Notes
-
-- Could use PyTorch Geometric or DGL
-- Pre-train on OSM or Overture network
-- Use as additional similarity signal, not replacement for interpretable features
-- May be overkill for current dataset sizes
-
----
-
-## Blocking & Candidate Generation Optimization
-
-### Adaptive Buffer Distance
-- **Problem**: Fixed 50m buffer may be too loose or too tight for different datasets
-- **Proposed**: Auto-detect optimal buffer via alignment statistics on sample
-  - If dataset has poor alignment: increase buffer to 100m
-  - If dataset is well-aligned: decrease to 25m
-- **Impact**: 10-15% reduction in false candidates
-
-### Heading-Based Candidate Pruning
-- **Problem**: Currently generates ALL spatial neighbors, then computes features
-- **Proposed**: Add max_heading_diff filter (e.g., < 45 degrees) BEFORE feature computation
-- **Impact**: 30-40% fewer features to compute, no accuracy loss (weak candidates already filtered by ML)
-
----
-
-## Dual Carriageway / Centerline Handling
-
-**Priority:** Medium
-**Status:** Deferred - using simple geometric overlap for now
-
-### Problem
-
-Datasets represent divided highways differently:
-- **Centerline representation**: Single line down the middle of a divided highway
-- **Split carriageway representation**: Two parallel lines for northbound/southbound lanes
-
-When matching between datasets with different representations:
-- Centerline vs one carriageway lane: Should this be a match?
-- Northbound vs southbound carriageways: Clearly no_match (parallel separate lanes)
-
-**Current approach**: Agent uses pure geometric overlap. If a centerline runs between the two carriageways without overlapping either, it will be no_match. If it happens to overlap one carriageway, it will be match. This may create inconsistency.
-
-### Future Options
-
-#### Option 1: Add ML Feature for Dual Carriageway Detection
-Add features to help the ML model recognize centerline scenarios:
-- `has_parallel_sibling`: Does the reference have a parallel segment with same name/class nearby?
-- `potential_dual_carriageway`: Heuristic based on road class + parallel detection
-- Use OSM tags if available (`dual_carriageway`, lane count, `oneway=yes` pairs)
-
-The ML model can then learn when to flag these for review vs auto-match.
-
-#### Option 2: Detect Split Carriageway Start/End Points
-At divergence/convergence points where a dual carriageway begins or ends, the segments are:
-- Separate (not the same road segment)
-- Same name and class
-- Close together (within sibling detection buffer)
-- But NOT parallel (diverging at ~90 degrees)
-
-Current `find_parallel_sibling()` correctly rejects these because they're not parallel, but we may want a separate feature to detect this edge case:
-- `at_carriageway_split`: Boolean indicating segment is at a divergence/convergence point
-- Could use angle between segments + endpoint proximity to detect Y-junction patterns
-- Useful for understanding why sibling detection returns false for nearby same-name segments
-
-#### Option 3: Pre-filter Dual Carriageway Cases
-Detect dual carriageway situations upstream and either:
-- Normalize representations before matching (convert centerlines to split or vice versa)
-- Exclude from standard matching pipeline (handle separately with specialized logic)
-- Flag for manual review
-
-### Context
-
-This was identified during agent accuracy analysis (Feb 2026). Sydney and Bogota datasets had ~51-54% agent accuracy partly due to class metadata mismatches (footway vs tertiary) but also potential centerline representation differences.
-
-The agent prompt was simplified to focus on geometric overlap only - avoiding the complexity of teaching the agent about centerline abstractions. The ML model is a better place for this logic since it can learn patterns from labeled examples.
-
----
-
-## Sub-segment Matching
-
-**Priority:** Medium
-**Status:** Deferred until initial ML model is trained
-
-### Problem
-
-Current matching is whole-segment only. When segments from different datasets have different segmentation (split at different intersections), we can identify that they match but not *which portions* overlap.
-
-Example: Overture segment A (Tremont to Head Place) partially overlaps Boston segment B (Tremont to Tamworth). They match, but only ~30% of each segment actually corresponds.
-
-### Why It Matters
-
-For actual conflation/merging of datasets, we need to know:
-- Which portion of segment A corresponds to segment B
-- Whether segment A also matches segment C (for the non-overlapping portion)
-- How to transfer attributes between partially-matching segments
-
-### Potential Approaches
-
-1. **Linear Referencing in Labels**
-   - Store match as: `(ref_id, target_id, ref_start_pct, ref_end_pct, target_start_pct, target_end_pct)`
-   - Requires UI changes to select sub-portions
-   - More precise training data
-
-2. **Post-ML Geometric Alignment**
-   - Run ML model first to identify candidate matches
-   - Then use geometric algorithms (e.g., Fréchet matching, point projection) to find exact correspondence
-   - Simpler labeling, alignment handled algorithmically
-
-3. **Segment Pre-processing**
-   - Re-segment both datasets at common break points before matching
-   - Could use intersection detection to find natural break points
-   - Makes matching easier but adds preprocessing complexity
-
-### Recommendation
-
-Start with **Approach 2** (post-ML geometric alignment):
-- Train ML model with current whole-segment labels
-- Add alignment step in conflation pipeline after matching
-- Evaluate if sub-segment labels (Approach 1) improve model quality
-
----
-
-## Infrastructure & Tooling
-
-### Unified Dataset Fetch/Load/Parse Utility
-
-**Problem**: Dataset loading logic is duplicated across multiple modules (backfill, ML scorer, labeling UI, etc.) with inconsistent handling of:
-- Dataset-specific vs shared Overture reference files
-- OSM variant datasets (e.g., `us_boston_streets_osm` using base `us_boston_streets` Overture)
-- Column naming conventions (id, gers_id, ref_id)
-- CRS projection and coordinate systems
-- Missing data file detection and fallbacks
-
-**Proposed Solution**: Create a unified `DatasetLoader` class that:
-1. **Auto-discovers** data files based on dataset config and naming conventions
-2. **Handles variants**: OSM datasets automatically use base dataset Overture files
-3. **Provides consistent projections**: Always returns data in appropriate CRS for the task
-4. **Validates data**: Fails fast with clear errors when data is missing or malformed
-5. **Caches loaded data**: Avoids redundant parquet reads within a session
-
-```python
-# Proposed API
-from matcher.datasets import DatasetLoader
-
-loader = DatasetLoader(data_dir="data/raw")
-ref_gdf, target_gdf = loader.load_pair("us_boston_streets")  # Returns projected GDFs
-ref_gdf, osm_gdf = loader.load_pair("us_boston_streets_osm")  # Auto-uses base Overture
-
-# For backfill/batch processing
-with loader.session():
-    for dataset in loader.list_available():
-        ref, target = loader.load_pair(dataset)
-        # Data cached within session
-```
-
-**Current workarounds**:
-- `backfill_features()` has its own `get_reference_data()` helper with caching
-- `ml.py` pre-loads data in `score_candidates()`
-- Labeling UI's `data_loader.py` has separate loading logic
-
-**Priority**: Medium-High (reduces code duplication and bug surface area)
-
----
-
-## Label Data Management
-
-### Robust Feature Backfill Validation
-
-**Priority:** High
-**Status:** Needed (discovered Feb 2026)
-
-**Problem**: Target IDs are sequential indices (e.g., `sp_road_0`, `sp_road_1`) that shift when data is re-fetched. When backfilling features, looking up geometries by stale target_id returns the wrong geometry, causing features to be computed for completely unrelated segment pairs. This led to br_sao_paulo_roads having extremely poor F1 (0.572) due to features computed against wrong geometries (Hausdorff distances of 13-33km for what should have been candidate pairs).
-
-**Current Fix**: Modified backfill to use stored geometries from `labels/data/` instead of raw data lookup. Stored geometries are captured at labeling time and remain stable.
-
-**Needed Improvements**:
-1. **Candidate validation**: After resolving geometries for backfill, verify the pair would still be a valid candidate (e.g., centroids within buffer distance). Fail/reject if not.
-2. **Fallback rejection**: When stored geometry isn't available and raw data lookup is used, validate that the resolved geometry matches expected characteristics.
-3. **Audit trail**: Log warnings when feature backfill uses fallback lookup, so issues can be detected.
-4. **Force mode**: Add `--force` flag to backfill that clears existing features for a dataset before recomputing, avoiding stale/incorrect features mixing with new ones.
-
-**Validation criteria** (proposed):
-- Centroid distance < 100m (or buffer distance from config)
-- Hausdorff distance < 500m
-- Geometries intersect or are within buffer
-
-**Implementation location**: `src/matcher/cli/labels.py:backfill_features()`
-
----
-
-### Stable ID Strategy
-
-**Problem**: Labels reference segments by ID, but IDs can change when data is re-fetched (e.g., `boston_streets_123` becomes `us_boston_streets_123`). This breaks the link between labels and their source data.
-
-**Best Practices**:
-1. **Never re-fetch data that has labels** without checking label compatibility
-2. **Use source-provided IDs when available**: Many datasets include stable FIDs (e.g., ArcGIS `source_tags.FID`) that persist across fetches
-3. **Consider geometry hashes**: For datasets without stable IDs, a hash of the geometry provides a reproducible identifier
-4. **Add `--id-column` option**: Allow users to specify which column to use for IDs during fetch
-
-**Proposed Improvements**:
-- Add `--id-column` flag to `matcher fetch` commands
-- Store source FID in parquet metadata for auditing
-- Create migration tool for updating label IDs when prefixes change
-
-### Feature Version Management
-
-**Current State**: Labels now track `feature_version` to identify which computation logic was used.
-
-**Future Improvements**:
-- Semantic versioning for features (e.g., `2.1.0`)
-- Automatic feature version bumps in CI when `features/*.py` changes
-- Deprecation warnings when loading labels with outdated feature versions
-- Migration tooling to backfill features when versions differ
-
-### Label Archive & History
-
-**Problem**: When labels become orphaned (IDs no longer match), they're either lost or manually fixed.
-
-**Proposed Solution**:
-- Archive orphaned labels to `labels/archived/` instead of deleting
-- Track label history (when labeled, when backfilled, version changes)
-- Provide recovery tooling to re-link archived labels when data issues are fixed
-
-### Data Lineage Documentation
-
-**Problem**: It's hard to trace which data version was used for which model.
-
-**Proposed Solution**:
-- Store data versions in model metadata
-- Add `matcher model-info` command to show training data provenance
-- Include data lineage in MLflow/experiment tracking
-
-### Data File Versioning / Schema Checksums
-
-**Priority:** Medium
-**Status:** Idea
-
-**Problem**: Data files in `data/raw/` can become stale when:
-- Feature computation logic changes (new features added, formulas updated)
-- Schema changes in the fetch pipeline (new columns, renamed fields)
-- Overture/OSM schema updates break assumptions
-
-**Proposed Solution**:
-
-1. **Schema Version in Config**
-   ```python
-   # config.py
-   DATA_SCHEMA_VERSION = "1.0"  # Bump when schema changes
-   ```
-
-2. **Version in Meta Files**
-   - Store `schema_version` in `.meta.yaml` files when fetching
-
-3. **Version Check on Load**
-   - When loading parquet files, verify schema version matches
-   - Fail fast with clear error
-
-4. **CLI Integration**
-   - `matcher validate-data` - Check all data files for version compatibility
-   - `matcher fetch --force` - Refetch even if data exists
-
-### Normalized Label Storage Architecture
-
-**Priority:** High
-**Status:** Planned
-
-**Problem**: Current label storage embeds 56 computed features directly in label CSVs. This causes issues:
-- Agent labels (`labels_agent/`) lack features entirely (only have ref_id, target_id, label, confidence)
-- Human labels (`labels/`) duplicate feature storage across datasets
-- Cannot easily merge human + agent labels for training (agent labels need feature backfill)
-- Feature recomputation requires updating all label files
-
-**Proposed Structure**:
-```
-labels/
-├── data/           # Raw candidate pair data (geometries, metadata)
-├── features/       # Computed features keyed by (ref_id, target_id, dataset)
-├── human/          # Human labels (ref_id, target_id, label, labeler, timestamp, etc.)
-└── agent/          # Agent labels (ref_id, target_id, label, confidence, reasoning, labeler)
-```
-
-**Benefits**:
-- Features computed once, shared by all label sources
-- Agent labels can be used for weak supervision by joining with features at training time
-- Sample weights can be assigned based on label source (human=1.0, agent=0.5)
-- Clean separation of concerns: data vs features vs labels
-
-**Implementation**:
-1. Create feature store keyed by `(ref_id, target_id, dataset)`
-2. Migrate human labels to store only metadata (not features)
-3. Update `LabelStore.load_all()` to join labels with feature store
-4. Add `sample_weight` parameter to `MLMatcher.train()` for weak supervision
-5. Update CLI: `matcher train --agent-labels labels/agent --agent-weight 0.5`
-
----
-
-## Other Ideas
-
-### Multi-dataset Support
-- Currently: Overture <-> single local dataset
-- Future: Support multiple local datasets, or chained matching
-
-### Active Learning
-- Use model uncertainty to prioritize labeling
-- Surface candidates the model is least confident about
-
-### Quality Metrics Dashboard
-- Track inter-labeler agreement
-- Identify systematic disagreements by edge case type
-
-### Bike/Sidewalk Networks
-
-**Status:** Deferred - decide whether to:
-1. Label in next round alongside roads
-2. Train separate model for non-road networks
-3. Wait until road model is more mature
-
-Considerations:
-- Bike/sidewalk have different geometry patterns (narrower, more curves)
-- Often lack names entirely
-- May benefit from geometry-only model approach
-
-### Bike Lane vs Cycleway Classification
-
-**Priority:** Medium
-**Status:** Investigation needed
-**Related PR:** #111
-
-**Problem**: The `us_boston_bike_network` dataset's source classification uses "cycleway" to mean "bike lane on a road" rather than "separate cycleway path". This causes the class predictor to map `cycleway -> primary` (the road class the bike lane is on).
-
-**Evidence** (from labeled matches):
-```
-cycleway -> primary    | Charles Street
-cycleway -> primary    | Stuart Street
-cycleway -> secondary  | Commercial Street
-path     -> footway    | Paul Revere Park
-path     -> cycleway   | North Bank Shared-Use Bridge
-```
-
-**The issue**: Source classification describes *bike infrastructure type*, not *road class*:
-- `cycleway` = bike lane painted on a vehicular road
-- `path` = shared-use path (separate from roads)
-
-**Potential solutions**:
-1. **Add bike_infrastructure attribute**: Store infrastructure type separately from road class
-2. **Use subclass**: Map to road class but preserve original as subclass
-3. **Dataset-specific handling**: Don't use class_mapping for bike network datasets
-4. **Dual classification**: Track both "road class" and "bike facility type"
-
-**Next steps**:
-- Analyze how other bike network datasets classify segments
-- Determine if this is Boston-specific or a general pattern
-- Design schema that captures both road class and bike infrastructure type
-
-### Improve Geometry-Only Model
-
-**Priority:** Medium
-**Status:** Planned
-
-**Problem**: Geometry-only model is worse than full model. Could be improved with:
-
-1. **New features**: Labels collected before `mean_hausdorff_distance` was added don't have it
-2. **More no_match examples**: Especially cases with similar names but different geometry
-3. **Relabeling pass**: Focus on geometry alignment, ignore names during labeling
-
----
-
-## Integration: Connectivity-Based Gating
-
-**Priority:** Medium
-**Status:** Designed and prototyped (branch: `feature/connectivity-gating-and-debug-logging`)
-
-### Problem
-
-Short segments (< 20m) are currently rejected during integration even if they provide valuable network connectivity. This leads to gaps in the integrated network where small connector segments would bridge disconnected components.
-
-### Proposed Solution
-
-Allow segments below `min_merge_length_m` but above a new `min_connectivity_length_m` threshold if they add network connectivity value.
-
-#### Connectivity Check Logic
-
-A segment "adds connectivity" if it:
-1. **Bridges two disconnected components** in the main network, OR
-2. **Creates a meaningful shortcut** (existing graph path > `connectivity_path_threshold_m`)
-
-#### Implementation
-
-```python
-def _check_adds_connectivity(
-    candidate_segments: gpd.GeoDataFrame,
-    main_network: gpd.GeoDataFrame,
-    tolerance_m: float,
-    path_threshold_m: float,
-) -> pd.Series:
-    """Check if segments add connectivity to the network."""
-    # Build graph from main network
-    # For each candidate:
-    #   1. Find nearest nodes to endpoints
-    #   2. Check if bridges disconnected components (no path exists)
-    #   3. Check if creates shortcut (existing path > threshold AND > 3x segment length)
-```
-
-#### CLI Options
-
-- `--enable-connectivity-gating` (default: False)
-- `--min-connectivity-length-m` (default: 5m) - Minimum length when gating applies
-- `--connectivity-path-threshold-m` (default: 500m) - Path threshold for shortcut detection
-
-### Related: Debug Logging for Transitive Connectivity
-
-The prototype also includes enhanced diagnostic logging for debugging transitive connectivity issues:
-
-- Log counts and tolerance at start of propagation
-- Log top 10 closest orphan distances per hop
-- Log distance distribution stats (min, median, max)
-- Suggest tolerance adjustments when orphans are within 2x/3x of current tolerance
-- Enable with `--debug-connectivity` flag
-
-### Location
-
-`src/matcher/integration/orphan_detector.py`
+- For tried-and-removed features, see [docs/RESEARCH_GRAVEYARD.md](docs/RESEARCH_GRAVEYARD.md).
+- For exploratory research ideas, see [docs/RESEARCH_IDEAS.md](docs/RESEARCH_IDEAS.md).
 
 ---
 
@@ -594,155 +14,96 @@ The prototype also includes enhanced diagnostic logging for debugging transitive
 - **Problem**: `runner.py` uses `geopandas.read_parquet` which loads entire dataset into memory
 - **Impact**: Will fail on state-sized or larger datasets
 - **Location**: `src/matcher/pipeline/runner.py`
-- **Solution**: Migrate to Spark/Sedona/GraphFrames (see research below)
+- **Solution**: Migrate to Spark/Sedona/GraphFrames (see [docs/RESEARCH_IDEAS.md](docs/RESEARCH_IDEAS.md#spark-migration-research-jan-2026))
 
----
+### HIGH: Robust Feature Backfill Validation
 
-## Spark Migration Research (Jan 2026)
+**Problem**: Backfill now uses stored geometries from `labels/data/` (stable), but fallback to raw data lookup can still produce wrong features if data has been re-fetched with different filtering or extent.
 
-**Status**: Research complete, implementation deferred pending labeling improvements
+**Needed**:
+1. Candidate validation after resolving geometries (centroids within buffer distance)
+2. Fallback rejection when stored geometry isn't available
+3. Audit trail logging when backfill uses fallback lookup
 
-**Summary**: Feature computation pipeline can be migrated from GDF/NetworkX to Spark/Sedona/GraphFrames in 5 stages. This is NOT one large refactor - stages have clear boundaries and can be delivered independently.
-
-### Migration Stages
-
-| Stage | Scope | Sedona/GraphFrames Coverage |
-|-------|-------|----------------------------|
-| 1. Infrastructure | Session setup, GeoParquet I/O | Direct Sedona support |
-| 2. Blocking | STRtree → Sedona spatial join | `ST_Intersects(ST_Buffer(...))` |
-| 3. Geometric features | 11 features | 6 direct SQL, 5 Pandas UDFs |
-| 4. Topology features | 12 features via GraphFrames | `g.degrees`, `connectedComponents()` |
-| 5. Integration | Wire to ML scoring | Collect to driver for XGBoost |
-
-### Key Findings
-
-**Sedona coverage**: ~60% direct SQL equivalents, ~25% Pandas UDFs, ~15% custom
-- Direct: `ST_HausdorffDistance`, `ST_Buffer`, `ST_Distance`, `ST_Centroid`, `ST_Length`
-- UDFs needed: mean_hausdorff, perpendicular_offset, collinear_gap (vertex sampling)
-- Numba works in Pandas UDFs (existing alignment code ported FROM Spark originally)
-
-**GraphFrames coverage**: Most algorithms available
-- Direct: `g.degrees`, `connectedComponents()`, `triangleCount()`, `pageRank()`
-- Skip: articulation points, edge betweenness (already disabled for >10K nodes/edges)
-- Graph construction: `ST_StartPoint`/`ST_EndPoint` → `ST_DWithin` proximity → connected components
-
-**Local dev**: Docker-based Spark recommended to avoid Java dependency issues
-- Use `apache/sedona:latest` base image with GraphFrames JAR
-- Mount source/data volumes, set `SPARK_DRIVER_MEMORY=8g`
-
-**Cloud deployment** (future): AWS Glue/EMR
-- Session factory pattern to abstract local vs Glue SparkSession
-- S3 GeoParquet with bbox pushdown
-- Sedona/GraphFrames JARs via `--extra-jars`
-
-### Files Affected
-
-**Replace** (wholesale, no legacy paths):
-- `blocking/spatial_index.py` → `spark/blocking.py`
-- `features/geometric.py` → `spark/features/geometric.py`
-- `features/spatial_context.py` → `spark/features/topology.py`
-- `pipeline/runner.py` → `spark/pipeline.py`
-
-**Keep**: `config.py` (FEATURE_COLUMNS source of truth), `matching/ml.py` (adapt interface)
-
-### Risks
-
-| Risk | Mitigation |
-|------|-----------|
-| Sedona function gaps | Pandas UDFs wrapping existing Shapely/Numba code |
-| GraphFrames missing algorithms | Skip (already disabled for large graphs) |
-| Memory during collect | Filter to scored candidates before driver collect |
-
-Full plan: `/home/brad/.claude/plans/eventual-prancing-koala.md`
-
-### LOW: Datasets with Polygon Geometries (Need Re-fetch)
-
-- **Problem**: Some target datasets have Polygon geometries instead of LineStrings
-- **Affected datasets** (files deleted, need re-fetch with correct data):
-  - `ca_toronto_roads` - 57,345 Polygons (wrong layer from source?)
-  - `co_bogota_bike_network` - 6,082 Polygons (wrong layer from source?)
-  - `co_bogota_sidewalks` - 164,868 Polygons (sidewalk polygons, not centerlines)
-- **Action needed**: Check source data portals for LineString road centerline layers
+**Location**: `src/matcher/cli/labels.py:backfill_features()`
 
 ### Medium: Robustness Issues
 
-#### Overly Broad Exception Handling
-- **Problem**: `except Exception: return None` silently swallows errors
-- **Location**: `blocking/spatial_index.py`
-- **Solution**: Catch specific exceptions and log warnings
+- **Overly broad exception handling** in `blocking/spatial_index.py` — `except Exception: return None` silently swallows errors
+- **Race condition in model selection** in `ml.py` — checks file existence but doesn't validate model is loadable
+- **CRS validation gap** in `pipeline/runner.py` — no check for null/invalid geometries after reprojection
 
-#### Race Condition in Model Selection
-- **Problem**: Checks file existence but doesn't validate model is loadable/valid
-- **Location**: `ml.py:135-197`
-- **Solution**: Attempt to load model to verify validity before selection
+### Low: Datasets with Polygon Geometries
 
-#### CRS Validation Gap
-- **Problem**: No check for null/invalid geometries after reprojection
-- **Location**: `pipeline/runner.py:127-130`
-- **Solution**: Validate geometries after CRS transformation
-
-#### Incomplete Config Migration
-- **Problem**: TODO indicates `discover-classes` falls back to old config format
-- **Location**: `cli.py:1308`
-- **Solution**: Complete migration to YAML-only config
-
-### Low Priority
-
-#### Version Tracking Allows None
-- **Problem**: Can't distinguish pre-version labels from missing versions
-- **Location**: `label_store.py:100-105`
-- **Solution**: Use sentinel value or require version
-
-#### Alignment Fraction Tolerance
-- **Problem**: 0.01 (1%) may be too loose for some segments
-- **Location**: `label_store.py:56-58`
-- **Solution**: Make tolerance configurable
-
-#### Memory Inefficiency
-- **Problem**: Deduplication after list building, should use set during build
-- **Location**: `ml.py:495-498`
-- **Solution**: Use set comprehension
+Some target datasets have Polygon geometries instead of LineStrings (files deleted, need re-fetch):
+- `ca_toronto_roads`, `co_bogota_bike_network`, `co_bogota_sidewalks`
 
 ---
 
-## Validation & Screening
+## Feature Ideas
 
-### Screen Module (Pre-Match Filtering)
-- [x] `screen/` module scaffold
-- [x] Water body screen test
-- [x] Building footprint screen test
-- [x] Fringe detection screen test
-- [x] Screen runner + CLI command
+### Dual Carriageway / Centerline Handling
 
-### Post-Integration Analysis
-- [x] Island detector (connected components)
-- [x] GPS drift detector (zigzag, spike, loop patterns)
-- [ ] Conflict detector (duplicate matches) - deferred
-- [x] Topology repair (snap endpoints, remove islands)
+**Priority:** Medium
+**Status:** Partially addressed via parallel sibling features
 
-### Quality Fingerprint
-- [x] QualityFingerprint dataclass
-- [x] Metric computations (vertex density, topology, coverage)
-- [x] JSON report generation
-- [x] CLI command
+Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, `offset_vs_half_corridor_ratio`, `offset_over_expected_halfwidth`, `likely_representation_mismatch`) partially address dual carriageway detection. Remaining work:
+- Detect split carriageway start/end points (Y-junction patterns)
+- Pre-filter dual carriageway cases with specialized logic
+
+### Sub-segment Matching
+
+**Priority:** Medium
+**Status:** Label storage supports linear referencing; algorithmic alignment deferred
+
+Recommended next step: post-ML geometric alignment (run ML first, then use geometric algorithms for exact sub-segment correspondence).
+
+### Improve Geometry-Only Model
+
+- Labels collected before some geometric features were added may be stale
+- More no_match examples with similar names but different geometry
+- Relabeling pass focused on geometry alignment
 
 ---
 
-## Implementation Priority Summary
+## Integration
 
-### Medium Priority
+### Connectivity-Based Gating
 
-| Feature/Fix | Category | Effort |
-|-------------|----------|--------|
-| Local clustering coefficient | Topology | Low |
+**Priority:** Medium
+**Status:** Designed and prototyped (branch: `feature/connectivity-gating-and-debug-logging`)
 
-### Lower Priority (Research)
+Allow short segments (< 20m) that add network connectivity value (bridge disconnected components or create meaningful shortcuts). Location: `src/matcher/integration/orphan_detector.py`
 
-| Feature/Fix | Category | Effort |
-|-------------|----------|--------|
-| Fréchet distance | Geometric | High |
-| Neighbor consistency (MRF) | Context | High |
-| Graph embeddings | Research | High |
+### Conflict Detector
+- Detect duplicate matches in integration output (deferred)
+
+---
+
+## Label Data Management
+
+### Label Archive & History
+- Archive orphaned labels to `labels/archived/` instead of losing them
+- Provide recovery tooling to re-link archived labels
+
+### Data Lineage
+- Store data versions in model metadata
+- Add `matcher model-info` command to show training data provenance
+
+---
+
+## Other Ideas
+
+### Adaptive Buffer Distance
+- Pipeline default is 75m with relaxed heading (90°) and length ratio (20.0) filters
+- Could auto-detect optimal buffer per dataset via alignment statistics on sample
+
+### Active Learning
+- Use model uncertainty to prioritize labeling candidates
+
+### Bike/Sidewalk Networks
+- May need separate model or geometry-only approach
+- Bike lane vs cycleway classification issue (PR #111)
 
 ---
 
