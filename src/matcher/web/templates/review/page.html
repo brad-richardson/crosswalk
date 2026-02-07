@@ -5,6 +5,7 @@
     <!-- Filter bar -->
     <div class="review-filter-bar">
         <h2 class="review-title">Labels ({{ total }})</h2>
+        {% if dataset %}
         <div class="review-filters">
             <a href="/review?dataset={{ dataset }}&filter=all&page=0"
                class="filter-pill {% if filter == 'all' %}active{% endif %}">All</a>
@@ -15,6 +16,7 @@
             <a href="/review?dataset={{ dataset }}&filter=unsure&page=0"
                class="filter-pill {% if filter == 'unsure' %}active{% endif %}">Unsure</a>
         </div>
+        {% endif %}
     </div>
 
     <!-- Label list -->
