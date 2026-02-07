@@ -125,7 +125,6 @@ async def labeling(
         unlabeled = get_unlabeled_candidates(dataset, all_candidates)
     except Exception:
         logger.exception("Failed to load candidates for dataset %s", dataset)
-        all_candidates = []
         unlabeled = []
 
     # Clamp index to valid range
