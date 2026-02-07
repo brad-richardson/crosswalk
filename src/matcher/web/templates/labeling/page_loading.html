@@ -1,13 +1,5 @@
-{% extends "base.html" %}
+{% extends "labeling/page.html" %}
 
-{% block overlay %}
-<!-- Progress indicator (top-left) -->
-<div class="pair-progress map-overlay" id="pair-progress">
-    Loading...
-</div>
-
-<!-- Pair content area (swapped by HTMX) -->
-<div id="pair-content">
+{% block pair_content %}
     {% include "labeling/loading.html" %}
-</div>
 {% endblock %}

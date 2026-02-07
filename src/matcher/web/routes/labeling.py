@@ -199,22 +199,27 @@ async def labeling(
     if dataset in _candidate_cache:
         return _render_pair(request, dataset, datasets, index)
 
+    # Shared defaults for templates that extend page.html but have no pair data
+    base_context = {
+        "mode": "labeling",
+        "datasets": datasets,
+        "dataset": dataset,
+        "pair": None,
+        "geojson": "{}",
+        "pair_index": 0,
+        "total_pairs": 0,
+    }
+
     # 2. Background load in progress → show loading spinner
     if dataset in _loading_tasks:
-        context = {"mode": "labeling", "datasets": datasets, "dataset": dataset}
         if is_htmx:
-            return templates.TemplateResponse(request, "labeling/loading.html", context)
-        return templates.TemplateResponse(request, "labeling/page_loading.html", context)
+            return templates.TemplateResponse(request, "labeling/loading.html", base_context)
+        return templates.TemplateResponse(request, "labeling/page_loading.html", base_context)
 
     # 3. Previous load error → show error
     if dataset in _loading_errors:
         error = _loading_errors.pop(dataset)
-        context = {
-            "mode": "labeling",
-            "datasets": datasets,
-            "dataset": dataset,
-            "error": error,
-        }
+        context = {**base_context, "error": error}
         if is_htmx:
             return templates.TemplateResponse(request, "labeling/not_cached.html", context)
         return templates.TemplateResponse(request, "labeling/page_not_cached.html", context)
@@ -222,16 +227,14 @@ async def labeling(
     # 4. Cache file exists on disk → start background load (will be fast)
     if is_dataset_cached(dataset):
         _start_background_load(dataset)
-        context = {"mode": "labeling", "datasets": datasets, "dataset": dataset}
         if is_htmx:
-            return templates.TemplateResponse(request, "labeling/loading.html", context)
-        return templates.TemplateResponse(request, "labeling/page_loading.html", context)
+            return templates.TemplateResponse(request, "labeling/loading.html", base_context)
+        return templates.TemplateResponse(request, "labeling/page_loading.html", base_context)
 
     # 5. No cache → prompt user to explicitly start computation
-    context = {"mode": "labeling", "datasets": datasets, "dataset": dataset}
     if is_htmx:
-        return templates.TemplateResponse(request, "labeling/not_cached.html", context)
-    return templates.TemplateResponse(request, "labeling/page_not_cached.html", context)
+        return templates.TemplateResponse(request, "labeling/not_cached.html", base_context)
+    return templates.TemplateResponse(request, "labeling/page_not_cached.html", base_context)
 
 
 @router.post("/labeling/compute")

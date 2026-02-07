@@ -369,7 +369,14 @@ body {
 .signal-good { background: #4caf50; }
 .signal-mid { background: #ff9800; }
 .signal-bad { background: #f44336; }
-.signal-error { background: #9e9e9e; border: 1px dashed #666; }
+.signal-error {
+    background: none;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    font-size: 14px;
+    line-height: 1;
+}
 
 /* === Features Backdrop === */
 .features-backdrop {

@@ -12,7 +12,7 @@
 
 <!-- Pair content area (swapped by HTMX) -->
 <div id="pair-content">
-    {% include "labeling/pair.html" %}
+    {% block pair_content %}{% include "labeling/pair.html" %}{% endblock %}
 </div>
 
 <!-- Features drawer backdrop (click to dismiss) -->
@@ -177,7 +177,7 @@
         if (cls === 'good') el.innerHTML = '<span class="signal signal-good" title="Good"></span>';
         else if (cls === 'mid') el.innerHTML = '<span class="signal signal-mid" title="Moderate"></span>';
         else if (cls === 'bad') el.innerHTML = '<span class="signal signal-bad" title="Poor"></span>';
-        else if (cls === 'error') el.innerHTML = '<span class="signal signal-error" title="Error/default value"></span>';
+        else if (cls === 'error') el.innerHTML = '<span class="signal signal-error" title="Error/default value">&#9888;</span>';
     });
 
     // Keyboard shortcuts for labeling
