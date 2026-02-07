@@ -31,9 +31,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 # Module-level cache for loaded candidates per dataset
 _candidate_cache: dict[str, list] = {}
 
-# Background loading state
+# Background loading state (guarded by _load_lock)
 _loading_tasks: dict[str, threading.Thread] = {}
 _loading_errors: dict[str, str] = {}
+_load_lock = threading.Lock()
 
 
 def _start_background_load(dataset_id: str) -> None:
@@ -43,23 +44,29 @@ def _start_background_load(dataset_id: str) -> None:
     On success, stores result in _candidate_cache.
     On error, stores error message in _loading_errors.
     """
-    if dataset_id in _loading_tasks:
-        return  # Already running
+    with _load_lock:
+        if dataset_id in _loading_tasks:
+            return  # Already running
 
-    def _do_load():
-        try:
-            result = load_candidates(dataset_id)
-            _candidate_cache[dataset_id] = result
-        except Exception:
-            logger.exception("Background load failed for dataset %s", dataset_id)
-            _loading_errors[dataset_id] = "Feature computation failed. Check server logs."
-        finally:
-            _loading_tasks.pop(dataset_id, None)
+        def _do_load():
+            try:
+                result = load_candidates(dataset_id)
+                with _load_lock:
+                    _candidate_cache[dataset_id] = result
+            except Exception:
+                logger.exception("Background load failed for dataset %s", dataset_id)
+                with _load_lock:
+                    _loading_errors[dataset_id] = (
+                        "Feature computation failed. Check server logs."
+                    )
+            finally:
+                with _load_lock:
+                    _loading_tasks.pop(dataset_id, None)
 
-    thread = threading.Thread(target=_do_load, daemon=True, name=f"load-{dataset_id}")
-    _loading_errors.pop(dataset_id, None)  # Clear any previous error
-    _loading_tasks[dataset_id] = thread
-    thread.start()
+        thread = threading.Thread(target=_do_load, daemon=True, name=f"load-{dataset_id}")
+        _loading_errors.pop(dataset_id, None)  # Clear any previous error
+        _loading_tasks[dataset_id] = thread
+        thread.start()
 
 
 def _get_candidates(dataset_id: str) -> list:
@@ -186,6 +193,10 @@ async def labeling(
             return templates.TemplateResponse(request, "labeling/pair.html", context)
         return templates.TemplateResponse(request, "labeling/page.html", context)
 
+    # Reject unknown dataset IDs before any cache/filesystem interaction
+    if dataset not in datasets:
+        return HTMLResponse(status_code=404, content="Unknown dataset")
+
     # 1. Already loaded in memory cache → render pair
     if dataset in _candidate_cache:
         return _render_pair(request, dataset, datasets, index)
@@ -229,6 +240,8 @@ async def labeling(
 async def compute_candidates(request: Request, dataset: str = Form(...)):
     """Start background feature computation for a dataset."""
     datasets = list_datasets()
+    if dataset not in datasets:
+        return HTMLResponse(status_code=404, content="Unknown dataset")
     if dataset not in _loading_tasks:
         _start_background_load(dataset)
     context = {"mode": "labeling", "datasets": datasets, "dataset": dataset}
@@ -239,6 +252,8 @@ async def compute_candidates(request: Request, dataset: str = Form(...)):
 async def loading_status(request: Request, dataset: str):
     """Polled by HTMX to check loading progress."""
     datasets = list_datasets()
+    if dataset not in datasets:
+        return HTMLResponse(status_code=404, content="Unknown dataset")
 
     # Done — return real pair content
     if dataset in _candidate_cache:

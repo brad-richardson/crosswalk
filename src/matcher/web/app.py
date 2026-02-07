@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if callable(original):
             original(signum, frame)
         else:
-            os._exit(1)
+            # Restore default handler and re-raise so the process exits cleanly
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
