@@ -24,6 +24,21 @@ ruff format src/ tests/ && ruff check src/ tests/
 matcher --help
 ```
 
+## Web UI
+
+```bash
+# Install web dependencies
+pip install -e ".[dev,web]"
+
+# Launch web UI
+matcher webui
+
+# Development mode with auto-reload
+matcher webui --reload
+```
+
+The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Three modes: Labeling (`/labeling`), Integration QA (`/qa`), Label Review (`/review`).
+
 ## Adding a New Feature
 
 **CRITICAL: Features must be added to multiple files to work end-to-end.**
