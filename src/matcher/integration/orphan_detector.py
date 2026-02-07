@@ -13,6 +13,7 @@ from typing import Any
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely as shp
 from loguru import logger
 from scipy.spatial import cKDTree
 from shapely import Point, points
@@ -132,15 +133,8 @@ def propagate_transitive_connectivity(
             s_result = connected_tree.query_nearest(start_pts[o_valid], all_matches=False)
             e_result = connected_tree.query_nearest(end_pts[o_valid], all_matches=False)
 
-            s_dists = np.array(
-                [
-                    pt.distance(connected_geoms[ri])
-                    for pt, ri in zip(start_pts[o_valid], s_result[1])
-                ]
-            )
-            e_dists = np.array(
-                [pt.distance(connected_geoms[ri]) for pt, ri in zip(end_pts[o_valid], e_result[1])]
-            )
+            s_dists = shp.distance(start_pts[o_valid], connected_geoms[s_result[1]])
+            e_dists = shp.distance(end_pts[o_valid], connected_geoms[e_result[1]])
             min_dists = np.minimum(s_dists, e_dists)
 
             connected_in_valid = min_dists <= connection_tolerance_m
@@ -482,10 +476,8 @@ def detect_orphans_by_proximity(
     start_ref_geoms = ref_geoms[start_nearest[1]]
     end_ref_geoms = ref_geoms[end_nearest[1]]
 
-    start_dists = np.array(
-        [pt.distance(rg) for pt, rg in zip(start_pts[valid_mask], start_ref_geoms)]
-    )
-    end_dists = np.array([pt.distance(rg) for pt, rg in zip(end_pts[valid_mask], end_ref_geoms)])
+    start_dists = shp.distance(start_pts[valid_mask], start_ref_geoms)
+    end_dists = shp.distance(end_pts[valid_mask], end_ref_geoms)
 
     valid_min_dists = np.minimum(start_dists, end_dists)
     min_distances[valid_indices] = valid_min_dists
@@ -528,8 +520,6 @@ def detect_orphans_by_proximity(
             f"  Computing net-new lengths (unmatched buffer: {net_new_buffer_m}m, "
             f"matched buffer: {matched_net_new_buffer_m}m)..."
         )
-
-        import shapely as shp
 
         ref_index = SpatialIndex(reference_edges.geometry.values)
         ref_geoms = reference_edges.geometry.values

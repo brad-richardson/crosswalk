@@ -472,7 +472,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
         render_browse_view(
             edges=edges,
             disconnected_edges=disconnected_edges,
-            filtered_edges=filtered_edges,
             net_new_edges=net_new_edges,
             bridge_edges=bridge_edges,
             basemap=session.basemap,

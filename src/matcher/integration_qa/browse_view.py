@@ -33,7 +33,6 @@ def render_browse_view(
     net_new_edges: gpd.GeoDataFrame | None = None,
     basemap: str = "Light",
     disconnected_edges: gpd.GeoDataFrame | None = None,
-    filtered_edges: gpd.GeoDataFrame | None = None,
     bridge_edges: gpd.GeoDataFrame | None = None,
 ) -> None:
     """Render the browse map view with all layers toggled via Folium LayerControl.
@@ -46,7 +45,7 @@ def render_browse_view(
         net_new_edges: Net-new coverage edges GeoDataFrame
         basemap: Default basemap name ("Light", "Satellite", "OpenStreetMap")
         disconnected_edges: Truly disconnected edges GeoDataFrame
-        filtered_edges: Connected but filtered edges GeoDataFrame
+        bridge_edges: Bridge edges GeoDataFrame
     """
     # Show sampling notice if disconnected count exceeds browse limit
     if disconnected_edges is not None and len(disconnected_edges) > MAX_BROWSE_FEATURES:
@@ -58,7 +57,6 @@ def render_browse_view(
     m = create_browse_map(
         edges=edges,
         disconnected_edges=disconnected_edges,
-        filtered_edges=filtered_edges,
         net_new_edges=net_new_edges,
         bridge_edges=bridge_edges,
         basemap=basemap,
@@ -72,20 +70,20 @@ def create_browse_map(
     net_new_edges: gpd.GeoDataFrame | None = None,
     basemap: str = "Light",
     disconnected_edges: gpd.GeoDataFrame | None = None,
-    filtered_edges: gpd.GeoDataFrame | None = None,
     bridge_edges: gpd.GeoDataFrame | None = None,
 ) -> folium.Map:
     """Create the browse map with heatmap and all layers.
 
     All layers are added to the map and can be toggled client-side
     via Folium's built-in LayerControl (no Streamlit round-trip).
+    Filtered edges are excluded (too many features; use Edge Review tab).
 
     Args:
         edges: All edges GeoDataFrame (with _source column)
         net_new_edges: Net-new coverage edges GeoDataFrame
         basemap: Default basemap name
         disconnected_edges: Truly disconnected edges GeoDataFrame
-        filtered_edges: Connected but filtered edges GeoDataFrame
+        bridge_edges: Bridge edges GeoDataFrame
     """
     # Create map without default tiles
     m = folium.Map(location=[0, 0], zoom_start=2, tiles=None)
