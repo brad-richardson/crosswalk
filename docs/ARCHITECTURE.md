@@ -7,7 +7,7 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 56 features across 14 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 67 features across 15 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Training**: `matcher train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
@@ -41,45 +41,49 @@ Applied during 1:N group optimization and to define the labeling UI review band:
 
 ## Model Evaluation
 
-Always use holdout evaluation for unbiased metrics:
+Use cross-validation or holdout evaluation for unbiased metrics:
 
 ```bash
-# Default: 20% holdout with seed=42 (recommended)
-matcher eval-model data/models/matcher_model_combined.joblib
+# Cross-validation (default: 5-fold, segment-aware splitting)
+matcher ml eval
 
-# Custom seed for different split
-matcher eval-model data/models/matcher_model_combined.joblib --seed 123
+# Evaluate an existing model on 20% holdout
+matcher ml eval --model data/models/matcher_model_combined.joblib
 
-# Evaluate on ALL data (may include training data - use with caution)
-matcher eval-model data/models/matcher_model_combined.joblib --no-holdout
+# Custom folds or seed
+matcher ml eval --cv-folds 10 --seed 123
+
+# Evaluate on specific dataset(s)
+matcher ml eval --model data/models/combined.joblib -d us_frisco_trails
 ```
 
-**Why holdout matters:**
+**Why holdout/CV matters:**
 - Evaluating on training data gives artificially inflated accuracy (~99%)
-- Holdout evaluation gives realistic generalization metrics (~95-96%)
+- Cross-validation gives realistic generalization metrics with variance estimates
+- Segment-aware splitting prevents data leakage (same gers_id never in both train and test)
 - Use consistent seed (default: 42) for comparable results across experiments
-- When comparing models or feature sets, always use the same holdout split
 
 ## Feature Categories
 
-56 features across 14 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+67 features across 15 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
-| Geometric | 9 | hausdorff_distance_m, mean_hausdorff_distance_m, hausdorff_p95_m, buffer_iou_5m, buffer_iou_15m, heading_delta, length_ratio, centroid_distance_m, collinear_gap_ratio |
-| Semantic - Name | 8 | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic |
+| Geometric | 11 | hausdorff_distance_m, mean_hausdorff_distance_m, hausdorff_p95_m, buffer_iou_5m, buffer_iou_15m, heading_delta, length_ratio, centroid_distance_m, collinear_gap_ratio, angle_histogram_similarity, edge_distance_rmse_m |
+| Semantic - Name | 10 | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic, name_numeric_match, route_prefix_match |
 | Semantic - Class | 1 | class_similarity |
 | Endpoint/Connectivity | 3 | min_endpoint_proximity_m, max_endpoint_proximity_m, shared_endpoint_count |
 | Lateral Offset | 3 | lateral_offset_m, lateral_offset_iqr_m, lateral_offset_p95_m |
 | Topology | 12 | from/to_degree_ref/target, degree_match_score, degree_signature_similarity, is_dead_end_ref/target, dead_end_match, is_intersection_ref/target, intersection_match |
 | Alignment Coverage | 4 | ref_coverage, target_coverage, min_coverage, coverage_ratio |
 | Graphlet | 2 | graphlet_similarity, endpoint_degree_similarity |
+| Clustering | 3 | clustering_coef_ref, clustering_coef_target, clustering_coef_delta |
 | Sinuosity | 3 | sinuosity_ref, sinuosity_target, sinuosity_delta |
 | Heading Consistency | 3 | heading_consistency_ref, heading_consistency_target, heading_consistency_delta |
 | Vertex Density | 3 | vertex_density_ref, vertex_density_target, vertex_density_ratio |
 | Length | 1 | min_length_m |
 | Shape Complexity | 3 | shape_complexity_ref, shape_complexity_target, shape_complexity_delta |
-| Numeric Route | 1 | name_numeric_match |
+| Parallel Sibling | 5 | has_parallel_sibling_ref, parallel_fraction_ref, offset_vs_half_corridor_ratio, offset_over_expected_halfwidth, likely_representation_mismatch |
 
 ## Feature Computation Paths
 
@@ -88,7 +92,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (56 features)
+config.py::FEATURE_COLUMNS (67 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |
@@ -96,7 +100,7 @@ config.py::FEATURE_COLUMNS (56 features)
          |           |
          |           +---> labeling UI (training data generation)
          |
-         +---> label_store.py::LABEL_COLUMNS (storage schema)
+         +---> feature_store.py (Parquet storage, keyed by gers_id + target_id)
 ```
 
 ### Computation Paths
@@ -121,7 +125,8 @@ labeling UI
     |
     +---> compute_pair_features() directly
             |
-            +---> LabelStore.add(features=computed_features)
+            +---> FeatureStore.add(features=computed_features)
+            +---> LabelStore.add(label metadata only)
 ```
 
 **Path 3: Training (loading labels)**
@@ -130,7 +135,7 @@ ml.py::train()
     |
     +---> LabelStore.load_all()
             |
-            +---> Features already stored in CSV (from labeling)
+            +---> Joins human labels (CSV) with features (Parquet)
 ```
 
 ### Pre-computation Table
