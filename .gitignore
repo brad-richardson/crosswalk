@@ -72,6 +72,9 @@ models/
 
 best_params.json
 
+# Git worktrees
+.worktrees/
+
 # Claude-mem auto-generated files (keep root CLAUDE.md)
 **/CLAUDE.md
 !/CLAUDE.md
