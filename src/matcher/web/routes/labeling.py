@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
@@ -78,6 +78,12 @@ def _pair_to_geojson(pair) -> str:
 async def index():
     """Redirect root to the labeling page."""
     return RedirectResponse(url="/labeling", status_code=307)
+
+
+@router.get("/datasets")
+async def datasets_endpoint():
+    """Return available datasets as JSON."""
+    return JSONResponse(content=list_datasets())
 
 
 @router.get("/labeling")

@@ -207,3 +207,16 @@ class TestRootRedirect:
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 307
         assert response.headers["location"] == "/labeling"
+
+
+class TestDatasetsEndpoint:
+    """Tests for GET /datasets."""
+
+    def test_datasets_endpoint_returns_json(self, client):
+        """GET /datasets returns JSON list of dataset IDs."""
+        response = client.get("/datasets")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+        data = response.json()
+        assert isinstance(data, list)
+        assert data == ["dataset_a", "dataset_b"]
