@@ -2,7 +2,6 @@
 
 import contextlib
 import json
-import json as _json
 import logging
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
 from ..services import (
+    CONFIG_FILE,
     get_unlabeled_candidates,
     list_datasets,
     load_candidates,
@@ -25,8 +25,6 @@ VALID_LABELS = {"match", "no_match", "unsure"}
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
-
-_CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
 # Module-level cache for loaded candidates per dataset
 _candidate_cache: dict[str, list] = {}
@@ -257,9 +255,9 @@ async def undo_label(
 async def set_labeler_name(name: str = Form(...)):
     """Save labeler name to config file."""
     config = {}
-    if _CONFIG_FILE.exists():
+    if CONFIG_FILE.exists():
         with contextlib.suppress(Exception):
-            config = _json.loads(_CONFIG_FILE.read_text())
+            config = json.loads(CONFIG_FILE.read_text())
     config["labeler_name"] = name
-    _CONFIG_FILE.write_text(_json.dumps(config))
+    CONFIG_FILE.write_text(json.dumps(config))
     return HTMLResponse(status_code=204)
