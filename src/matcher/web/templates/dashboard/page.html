@@ -1,0 +1,292 @@
+{% extends "dashboard_base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Overall metrics -->
+{% if overall %}
+<div class="metrics-row">
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(overall.f1_mean * 100) }}%</div>
+        <div class="metric-label">F1 Score</div>
+        <div class="metric-sub">&plusmn;{{ "%.1f"|format(overall.f1_std * 100) }}%</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(overall.accuracy_mean * 100) }}%</div>
+        <div class="metric-label">Accuracy</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(overall.precision_mean * 100) }}%</div>
+        <div class="metric-label">Precision</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(overall.recall_mean * 100) }}%</div>
+        <div class="metric-label">Recall</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value">{{ overall.n_samples }}</div>
+        <div class="metric-label">Samples</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value metric-value-sm">{{ overall.run_date.split('T')[0] }}</div>
+        <div class="metric-label">Last Eval</div>
+    </div>
+</div>
+{% else %}
+<div class="metrics-row">
+    <div class="metric-card">
+        <div class="metric-label">No CV evaluation results found</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Filter bar -->
+<div class="filter-bar">
+    <div class="filter-bar-header">
+        <span class="filter-bar-label">Filters</span>
+        <button class="filter-toggle" id="filter-toggle" onclick="document.getElementById('filter-fields').classList.toggle('hidden')">Show</button>
+        <a href="/dashboard/admin" class="action-btn" style="margin-left:auto;text-decoration:none;">Admin</a>
+    </div>
+    <div class="filter-fields hidden" id="filter-fields">
+        <div class="filter-row">
+            <span class="filter-row-label">Labels:</span>
+            <input type="number" id="filter-min-labels" value="0" min="0" style="width:70px;" placeholder="min">
+            <span class="filter-range-sep">&ndash;</span>
+            <input type="number" id="filter-max-labels" value="" min="0" style="width:70px;" placeholder="max">
+        </div>
+        <div class="filter-row">
+            <span class="filter-row-label">F1:</span>
+            <input type="number" id="filter-min-f1" value="0" min="0" max="1" step="0.01" style="width:70px;" placeholder="min">
+            <span class="filter-range-sep">&ndash;</span>
+            <input type="number" id="filter-max-f1" value="1" min="0" max="1" step="0.01" style="width:70px;" placeholder="max">
+        </div>
+        <div class="filter-actions">
+            <button class="action-btn" onclick="applyFilters()">Apply</button>
+            <button class="action-btn" onclick="clearFilters()">Clear</button>
+        </div>
+        <div class="filter-presets">
+            <span class="filter-row-label">Quick:</span>
+            <button class="filter-preset-btn" onclick="presetFewLabels()">&lt; 50 labels</button>
+            <button class="filter-preset-btn" onclick="presetBelowAvgF1()">&lt; avg F1</button>
+        </div>
+    </div>
+</div>
+
+<!-- Dataset table -->
+<table class="dataset-table" id="dataset-table">
+    <thead>
+        <tr>
+            <th data-sortable="dataset_id" data-sort-type="string">Dataset</th>
+            <th data-sortable="label_count" data-sort-type="number">Labels</th>
+            <th data-sortable="match" data-sort-type="number">Match</th>
+            <th data-sortable="no_match" data-sort-type="number">No Match</th>
+            <th data-sortable="unsure" data-sort-type="number">Unsure</th>
+            <th data-sortable="f1" data-sort-type="number">F1</th>
+            <th data-sortable="accuracy" data-sort-type="number">Accuracy</th>
+            <th data-sortable="cache" data-sort-type="string">Cache</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ds in datasets %}
+        <tr data-labels="{{ ds.label_count }}" data-f1="{{ ds.f1 if ds.f1 is not none else '' }}">
+            <td><a href="/dashboard/{{ ds.dataset_id }}">{{ ds.dataset_id }}</a></td>
+            <td>{{ ds.label_count }}</td>
+            <td>{{ ds.label_dist.match }}</td>
+            <td>{{ ds.label_dist.no_match }}</td>
+            <td>{{ ds.label_dist.unsure }}</td>
+            <td>{% if ds.f1 is not none %}{{ "%.2f"|format(ds.f1) }}{% else %}&mdash;{% endif %}</td>
+            <td>{% if ds.accuracy is not none %}{{ "%.2f"|format(ds.accuracy) }}{% else %}&mdash;{% endif %}</td>
+            <td>{% if ds.cache_exists %}<span title="Age: {{ ds.cache_age_hours|round(1) if ds.cache_age_hours else '?' }}h">{{ 'Fresh' if ds.cache_is_fresh else 'Stale' }}</span>{% else %}None{% endif %}</td>
+            <td class="action-links">
+                <a href="/labeling?dataset={{ ds.dataset_id }}">Label</a>
+                <a href="/review?dataset={{ ds.dataset_id }}">Review</a>
+                <a href="/qa?dataset={{ ds.dataset_id }}">QA</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Trends chart -->
+<div class="chart-container">
+    <h3>CV Evaluation Trends</h3>
+    <canvas id="trends-chart"></canvas>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// --- Sorting ---
+var sortCol = null, sortAsc = true;
+document.querySelectorAll('#dataset-table th[data-sortable]').forEach(function(th) {
+    th.addEventListener('click', function() {
+        var col = this.dataset.sortable;
+        var type = this.dataset.sortType;
+        if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+
+        // Update header indicators
+        document.querySelectorAll('#dataset-table th[data-sortable]').forEach(function(h) {
+            h.classList.remove('sort-asc', 'sort-desc');
+        });
+        this.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+
+        var tbody = document.querySelector('#dataset-table tbody');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        var colIndex = Array.from(this.parentNode.children).indexOf(this);
+
+        rows.sort(function(a, b) {
+            var aVal = a.children[colIndex].textContent.trim();
+            var bVal = b.children[colIndex].textContent.trim();
+            if (type === 'number') {
+                aVal = parseFloat(aVal) || 0;
+                bVal = parseFloat(bVal) || 0;
+            }
+            if (aVal < bVal) return sortAsc ? -1 : 1;
+            if (aVal > bVal) return sortAsc ? 1 : -1;
+            return 0;
+        });
+        rows.forEach(function(row) { tbody.appendChild(row); });
+    });
+});
+
+// --- Filter defaults ---
+var FILTER_DEFAULTS = {min_labels: '0', max_labels: '', min_f1: '0', max_f1: '1'};
+
+// --- URL param helpers ---
+function filterToParams() {
+    var p = new URLSearchParams();
+    var fields = {
+        min_labels: document.getElementById('filter-min-labels').value,
+        max_labels: document.getElementById('filter-max-labels').value,
+        min_f1: document.getElementById('filter-min-f1').value,
+        max_f1: document.getElementById('filter-max-f1').value,
+    };
+    var hasFilter = false;
+    for (var k in fields) {
+        if (fields[k] !== FILTER_DEFAULTS[k]) {
+            p.set(k, fields[k]);
+            hasFilter = true;
+        }
+    }
+    var url = window.location.pathname;
+    if (hasFilter) url += '?' + p.toString();
+    history.replaceState(null, '', url);
+}
+
+function paramsToFilter() {
+    var p = new URLSearchParams(window.location.search);
+    var hasFilter = false;
+    for (var k in FILTER_DEFAULTS) {
+        var val = p.get(k);
+        if (val !== null) hasFilter = true;
+    }
+    document.getElementById('filter-min-labels').value = p.get('min_labels') || FILTER_DEFAULTS.min_labels;
+    document.getElementById('filter-max-labels').value = p.get('max_labels') || FILTER_DEFAULTS.max_labels;
+    document.getElementById('filter-min-f1').value = p.get('min_f1') || FILTER_DEFAULTS.min_f1;
+    document.getElementById('filter-max-f1').value = p.get('max_f1') || FILTER_DEFAULTS.max_f1;
+    if (hasFilter) {
+        document.getElementById('filter-fields').classList.remove('hidden');
+    }
+    return hasFilter;
+}
+
+// --- Filtering ---
+function applyFilters() {
+    var minLabels = parseInt(document.getElementById('filter-min-labels').value) || 0;
+    var maxLabelsVal = document.getElementById('filter-max-labels').value;
+    var maxLabels = maxLabelsVal ? parseInt(maxLabelsVal) : Infinity;
+    var minF1 = parseFloat(document.getElementById('filter-min-f1').value) || 0;
+    var maxF1Val = document.getElementById('filter-max-f1').value;
+    var maxF1 = maxF1Val !== '' ? parseFloat(maxF1Val) : 1;
+    if (isNaN(maxF1)) maxF1 = 1;
+
+    document.querySelectorAll('#dataset-table tbody tr').forEach(function(row) {
+        var labels = parseInt(row.dataset.labels) || 0;
+        var f1Str = row.dataset.f1;
+        var f1 = f1Str ? parseFloat(f1Str) : null;
+
+        var show = labels >= minLabels && labels <= maxLabels;
+        if (f1 !== null) {
+            show = show && f1 >= minF1 && f1 <= maxF1;
+        }
+        row.style.display = show ? '' : 'none';
+    });
+    filterToParams();
+}
+
+function clearFilters() {
+    document.getElementById('filter-min-labels').value = '0';
+    document.getElementById('filter-max-labels').value = '';
+    document.getElementById('filter-min-f1').value = '0';
+    document.getElementById('filter-max-f1').value = '1';
+    applyFilters();
+}
+
+function presetFewLabels() {
+    document.getElementById('filter-min-labels').value = '0';
+    document.getElementById('filter-max-labels').value = '50';
+    document.getElementById('filter-min-f1').value = '0';
+    document.getElementById('filter-max-f1').value = '1';
+    document.getElementById('filter-fields').classList.remove('hidden');
+    applyFilters();
+}
+
+function presetBelowAvgF1() {
+    // Compute average F1 across all datasets (not just visible)
+    var rows = document.querySelectorAll('#dataset-table tbody tr');
+    var sum = 0, count = 0;
+    rows.forEach(function(row) {
+        var f1Str = row.dataset.f1;
+        if (f1Str) { sum += parseFloat(f1Str); count++; }
+    });
+    var avg = count > 0 ? sum / count : 0.9;
+    document.getElementById('filter-min-labels').value = '0';
+    document.getElementById('filter-max-labels').value = '';
+    document.getElementById('filter-min-f1').value = '0';
+    document.getElementById('filter-max-f1').value = avg.toFixed(2);
+    document.getElementById('filter-fields').classList.remove('hidden');
+    applyFilters();
+}
+
+// --- Restore filters from URL on page load ---
+if (paramsToFilter()) {
+    applyFilters();
+}
+
+// --- Trends Chart ---
+var trendsData = {{ trends_json | safe }};
+if (trendsData.dates && trendsData.dates.length > 0) {
+    new Chart(document.getElementById('trends-chart'), {
+        type: 'line',
+        data: {
+            labels: trendsData.dates,
+            datasets: [
+                {
+                    label: 'F1 Score',
+                    data: trendsData.f1,
+                    borderColor: '#1976d2',
+                    backgroundColor: 'rgba(25,118,210,0.1)',
+                    tension: 0.3,
+                    fill: true,
+                },
+                {
+                    label: 'Accuracy',
+                    data: trendsData.accuracy,
+                    borderColor: '#4caf50',
+                    backgroundColor: 'rgba(76,175,80,0.1)',
+                    tension: 0.3,
+                    fill: true,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { position: 'top' } },
+            scales: {
+                y: { min: 0.8, max: 1, ticks: { callback: function(v) { return (v*100).toFixed(0)+'%'; } } }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

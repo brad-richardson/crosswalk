@@ -1,0 +1,77 @@
+{% extends "dashboard_base.html" %}
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+<p style="margin-bottom:16px;"><a href="/dashboard">&larr; Back to Dashboard</a></p>
+
+<h2 style="margin-bottom:24px;">System Admin</h2>
+
+<!-- Model actions -->
+<h3 style="margin-bottom:12px;">Model Actions</h3>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px;">
+    <form hx-post="/dashboard/task/train" hx-target="#task-area" hx-swap="innerHTML">
+        <button type="submit" class="action-btn">Train Model</button>
+    </form>
+    <form hx-post="/dashboard/task/eval" hx-target="#task-area" hx-swap="innerHTML">
+        <button type="submit" class="action-btn">Run CV Eval</button>
+    </form>
+    <form hx-post="/dashboard/task/backfill" hx-target="#task-area" hx-swap="innerHTML">
+        <button type="submit" class="action-btn">Backfill Features (missing only)</button>
+    </form>
+    <form hx-post="/dashboard/task/backfill" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="force" value="true">
+        <button type="submit" class="action-btn">Backfill Features (force all)</button>
+    </form>
+</div>
+
+<!-- Cache management -->
+<h3 style="margin-bottom:12px;">Cache Management</h3>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px;">
+    <form hx-post="/dashboard/task/clear-cache" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="cache_type" value="features">
+        <button type="submit" class="action-btn action-btn-danger">Clear Feature Caches</button>
+    </form>
+    <form hx-post="/dashboard/task/clear-cache" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="cache_type" value="candidates">
+        <button type="submit" class="action-btn action-btn-danger">Clear Candidate Caches</button>
+    </form>
+    <form hx-post="/dashboard/task/clear-cache" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="cache_type" value="integration">
+        <button type="submit" class="action-btn action-btn-danger">Clear Integration Caches</button>
+    </form>
+    <form hx-post="/dashboard/task/clear-cache" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="cache_type" value="all">
+        <button type="submit" class="action-btn action-btn-danger">Clear All Caches</button>
+    </form>
+</div>
+
+<!-- Task status area -->
+<div id="task-area" style="margin-bottom:24px;"></div>
+
+<!-- Active tasks -->
+{% if active_tasks %}
+<h3 style="margin-bottom:12px;">Active Tasks</h3>
+<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;">
+    {% for t in active_tasks %}
+    <div class="task-output" hx-get="/dashboard/task/{{ t.id }}" hx-trigger="every 2s" hx-swap="outerHTML">
+        <span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>
+        {{ t.message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Recent tasks -->
+{% if recent_tasks %}
+<h3 style="margin-bottom:12px;">Recent Tasks</h3>
+<div style="display:flex;flex-direction:column;gap:8px;">
+    {% for t in recent_tasks %}
+    <div class="task-output {% if t.status == 'failed' %}task-failed{% endif %}">
+        {% if t.status == 'completed' %}&#10003;{% else %}&#10007;{% endif %}
+        {{ t.message }}
+        {% if t.output %}<pre style="margin-top:4px;font-size:0.8rem;max-height:100px;overflow-y:auto;">{{ t.output }}</pre>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

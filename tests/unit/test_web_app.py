@@ -41,11 +41,11 @@ class TestAppCreation:
 class TestRoutes:
     """Tests for web UI routes."""
 
-    def test_root_redirects_to_labeling(self, client):
-        """GET / should redirect to /labeling."""
+    def test_root_redirects_to_dashboard(self, client):
+        """GET / should redirect to /dashboard."""
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 307
-        assert response.headers["location"] == "/labeling"
+        assert response.headers["location"] == "/dashboard"
 
     def test_labeling_page_returns_html(self, client):
         """GET /labeling should return HTML content."""

@@ -218,10 +218,10 @@ class TestRootRedirect:
     """Tests for GET /."""
 
     def test_root_redirects(self, client):
-        """GET / should redirect to /labeling."""
+        """GET / should redirect to /dashboard."""
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 307
-        assert response.headers["location"] == "/labeling"
+        assert response.headers["location"] == "/dashboard"
 
 
 class TestDatasetsEndpoint:

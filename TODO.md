@@ -51,29 +51,9 @@ Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, 
 - Detect split carriageway start/end points (Y-junction patterns)
 - Pre-filter dual carriageway cases with specialized logic
 
-### Sub-segment Matching
-
-**Priority:** Medium
-**Status:** Label storage supports linear referencing; algorithmic alignment deferred
-
-Recommended next step: post-ML geometric alignment (run ML first, then use geometric algorithms for exact sub-segment correspondence).
-
-### Improve Geometry-Only Model
-
-- Labels collected before some geometric features were added may be stale
-- More no_match examples with similar names but different geometry
-- Relabeling pass focused on geometry alignment
-
 ---
 
 ## Integration
-
-### Connectivity-Based Gating
-
-**Priority:** Medium
-**Status:** Designed and prototyped (branch: `feature/connectivity-gating-and-debug-logging`)
-
-Allow short segments (< 20m) that add network connectivity value (bridge disconnected components or create meaningful shortcuts). Location: `src/matcher/integration/orphan_detector.py`
 
 ### Conflict Detector
 - Detect duplicate matches in integration output (deferred)
