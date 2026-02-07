@@ -173,8 +173,8 @@ The matcher computes 67 features for each candidate pair across 15 categories:
 | Category | Count | Examples |
 |----------|-------|----------|
 | Geometric | 11 | Hausdorff distance (mean, p95), buffer IoU (5m/15m), heading delta, length ratio, angle histogram, edge distance RMSE |
-| Semantic - Name | 10 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags, numeric match, route prefix |
-| Semantic - Class | 1 | Road class similarity |
+| Name Similarity | 10 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags, numeric match, route prefix |
+| Class | 1 | Road class similarity |
 | Endpoint/Connectivity | 3 | Min/max endpoint proximity, shared endpoint count |
 | Lateral Offset | 3 | Median, IQR, 95th percentile |
 | Topology | 12 | Degree features, dead-end/intersection flags and matches |

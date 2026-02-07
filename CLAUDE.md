@@ -45,7 +45,8 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
 
 **Automated verification:**
 - Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
-- The test `test_all_computed_features_are_in_label_columns` will fail if features are missing
+- `test_compute_pair_features_returns_all_declared_features` verifies all config features are computed
+- `test_ml_feature_columns_match_computed_features` verifies ML uses the same features
 
 **Label storage architecture** (normalized format):
 - `labels/human/dataset=*/data.csv` - Human label metadata (no features)

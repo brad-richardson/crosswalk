@@ -54,13 +54,13 @@ matcher ml eval --model data/models/matcher_model_combined.joblib
 matcher ml eval --cv-folds 10 --seed 123
 
 # Evaluate on specific dataset(s)
-matcher ml eval --model data/models/combined.joblib -d us_frisco_trails
+matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_trails
 ```
 
 **Why holdout/CV matters:**
 - Evaluating on training data gives artificially inflated accuracy (~99%)
 - Cross-validation gives realistic generalization metrics with variance estimates
-- Segment-aware splitting prevents data leakage (same gers_id never in both train and test)
+- Segment-aware splitting prevents data leakage (the same segment ID—either gers_id or target_id—never appears in both train and test)
 - Use consistent seed (default: 42) for comparable results across experiments
 
 ## Feature Categories
@@ -70,8 +70,8 @@ matcher ml eval --model data/models/combined.joblib -d us_frisco_trails
 | Category | Count | Features |
 |----------|-------|----------|
 | Geometric | 11 | hausdorff_distance_m, mean_hausdorff_distance_m, hausdorff_p95_m, buffer_iou_5m, buffer_iou_15m, heading_delta, length_ratio, centroid_distance_m, collinear_gap_ratio, angle_histogram_similarity, edge_distance_rmse_m |
-| Semantic - Name | 10 | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic, name_numeric_match, route_prefix_match |
-| Semantic - Class | 1 | class_similarity |
+| Name Similarity | 10 | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic, name_numeric_match, route_prefix_match |
+| Class | 1 | class_similarity |
 | Endpoint/Connectivity | 3 | min_endpoint_proximity_m, max_endpoint_proximity_m, shared_endpoint_count |
 | Lateral Offset | 3 | lateral_offset_m, lateral_offset_iqr_m, lateral_offset_p95_m |
 | Topology | 12 | from/to_degree_ref/target, degree_match_score, degree_signature_similarity, is_dead_end_ref/target, dead_end_match, is_intersection_ref/target, intersection_match |
@@ -100,7 +100,7 @@ config.py::FEATURE_COLUMNS (67 features)
          |           |
          |           +---> labeling UI (training data generation)
          |
-         +---> feature_store.py (Parquet storage, keyed by gers_id + target_id)
+         +---> src/matcher/labeling/feature_store.py (Parquet storage, keyed by gers_id + target_id)
 ```
 
 ### Computation Paths
