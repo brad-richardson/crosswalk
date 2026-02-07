@@ -1,9 +1,12 @@
 """Tests for the matcher web UI application."""
 
 import pytest
-from fastapi.testclient import TestClient
 
-from matcher.web.app import create_app
+pytest.importorskip("fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from matcher.web.app import create_app  # noqa: E402
 
 
 @pytest.fixture

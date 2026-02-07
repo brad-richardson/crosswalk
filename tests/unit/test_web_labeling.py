@@ -3,11 +3,14 @@
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
-from shapely.geometry import LineString
 
-from matcher.labeling.data_loader import CandidatePairView
-from matcher.web.app import create_app
+pytest.importorskip("fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')")
+
+from fastapi.testclient import TestClient  # noqa: E402
+from shapely.geometry import LineString  # noqa: E402
+
+from matcher.labeling.data_loader import CandidatePairView  # noqa: E402
+from matcher.web.app import create_app  # noqa: E402
 
 
 def _make_pair(ref_id="ref_001", target_id="target_001", confidence=0.65):
