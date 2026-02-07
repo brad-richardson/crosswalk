@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<div class="review-page">
+    <!-- Filter bar -->
+    <div class="review-filter-bar">
+        <h2 class="review-title">Labels ({{ total }})</h2>
+        {% if dataset %}
+        <div class="review-filters">
+            <a href="/review?dataset={{ dataset }}&filter=all&page=0"
+               class="filter-pill {% if filter == 'all' %}active{% endif %}">All</a>
+            <a href="/review?dataset={{ dataset }}&filter=match&page=0"
+               class="filter-pill {% if filter == 'match' %}active{% endif %}">Match</a>
+            <a href="/review?dataset={{ dataset }}&filter=no_match&page=0"
+               class="filter-pill {% if filter == 'no_match' %}active{% endif %}">No Match</a>
+            <a href="/review?dataset={{ dataset }}&filter=unsure&page=0"
+               class="filter-pill {% if filter == 'unsure' %}active{% endif %}">Unsure</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Label list -->
+    <div class="review-list">
+        {% if labels %}
+            {% for label in labels %}
+                {% include "review/card.html" %}
+            {% endfor %}
+        {% elif dataset %}
+            <div class="review-empty">No labels found.</div>
+        {% else %}
+            <div class="review-empty">Select a dataset from the menu to review labels.</div>
+        {% endif %}
+    </div>
+
+    {% if has_more %}
+    <!-- Load more -->
+    <div class="review-load-more">
+        <a href="/review?dataset={{ dataset }}&filter={{ filter }}&page={{ page + 1 }}"
+           class="filter-pill">Load more...</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
