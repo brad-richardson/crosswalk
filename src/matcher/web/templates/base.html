@@ -2,10 +2,77 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Matcher - {{ mode|default('Labeling') }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Matcher - {{ mode|default('Labeling')|title }}</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="anonymous">
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
+    <!-- Fullscreen map container -->
     <div id="map"></div>
+
+    <!-- Hamburger menu (top-right) -->
+    <button class="menu-toggle map-overlay" id="menu-toggle" aria-label="Open menu">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <nav class="menu map-overlay hidden" id="menu">
+        <h3>Mode</h3>
+        <ul>
+            <li><a href="/labeling" class="{% if mode == 'labeling' %}active{% endif %}">Labeling</a></li>
+            <li><a href="/review" class="{% if mode == 'review' %}active{% endif %}">Review</a></li>
+            <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">QA</a></li>
+        </ul>
+
+        <h3>Dataset</h3>
+        <select id="dataset-picker" name="dataset"
+                hx-get="/labeling"
+                hx-target="#overlay-content"
+                hx-swap="innerHTML"
+                hx-include="this">
+            <option value="">Select dataset...</option>
+            {% for ds in datasets %}
+            <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{{ ds }}</option>
+            {% endfor %}
+        </select>
+    </nav>
+
+    <!-- Overlay content block for HTMX swaps -->
+    <div id="overlay-content">
+        {% block overlay %}{% endblock %}
+    </div>
+
+    <!-- Progress indicator -->
+    <div class="progress-indicator map-overlay hidden" id="progress">
+        <span class="spinner"></span>
+        <span id="progress-text">Loading...</span>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin="anonymous"></script>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@2.0/dist/htmx.min.js"
+            crossorigin="anonymous"></script>
+
+    <!-- App JS -->
+    <script src="/static/js/map.js"></script>
+
+    <!-- Menu toggle script -->
+    <script>
+        document.getElementById('menu-toggle').addEventListener('click', function() {
+            document.getElementById('menu').classList.toggle('hidden');
+        });
+    </script>
 </body>
 </html>

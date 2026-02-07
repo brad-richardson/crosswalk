@@ -54,16 +54,101 @@ class TestRoutes:
         assert '<div id="map">' in response.text
 
 
+class TestBaseTemplate:
+    """Tests for the base HTML template content."""
+
+    def test_leaflet_css_included(self, client):
+        """Template should include Leaflet CSS from CDN."""
+        response = client.get("/labeling")
+        assert "leaflet.css" in response.text
+        assert "unpkg.com/leaflet@1.9" in response.text
+
+    def test_leaflet_js_included(self, client):
+        """Template should include Leaflet JS from CDN."""
+        response = client.get("/labeling")
+        assert "leaflet.js" in response.text
+
+    def test_htmx_included(self, client):
+        """Template should include HTMX from CDN."""
+        response = client.get("/labeling")
+        assert "htmx" in response.text
+        assert "unpkg.com/htmx.org@2.0" in response.text
+
+    def test_app_css_linked(self, client):
+        """Template should link to app.css."""
+        response = client.get("/labeling")
+        assert "/static/css/app.css" in response.text
+
+    def test_map_js_linked(self, client):
+        """Template should link to map.js."""
+        response = client.get("/labeling")
+        assert "/static/js/map.js" in response.text
+
+    def test_menu_toggle_present(self, client):
+        """Template should include the hamburger menu toggle button."""
+        response = client.get("/labeling")
+        assert 'id="menu-toggle"' in response.text
+
+    def test_menu_has_mode_links(self, client):
+        """Template should include navigation links for modes."""
+        response = client.get("/labeling")
+        assert "/labeling" in response.text
+        assert "/review" in response.text
+        assert "/qa" in response.text
+
+    def test_dataset_picker_present(self, client):
+        """Template should include the dataset picker select."""
+        response = client.get("/labeling")
+        assert 'id="dataset-picker"' in response.text
+
+    def test_overlay_content_present(self, client):
+        """Template should include the overlay content container."""
+        response = client.get("/labeling")
+        assert 'id="overlay-content"' in response.text
+
+    def test_viewport_meta_tag(self, client):
+        """Template should include a viewport meta tag for mobile."""
+        response = client.get("/labeling")
+        assert "viewport" in response.text
+        assert "width=device-width" in response.text
+
+
 class TestStaticFiles:
     """Tests for static file serving."""
 
     def test_static_css_served(self, client):
-        """CSS files should be served from /static/css/."""
+        """CSS file should be served successfully."""
         response = client.get("/static/css/app.css")
-        # File exists and is served (or 404 if not yet created)
-        assert response.status_code in (200, 404)
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]
 
     def test_static_js_served(self, client):
-        """JS files should be served from /static/js/."""
+        """JS file should be served successfully."""
         response = client.get("/static/js/map.js")
-        assert response.status_code in (200, 404)
+        assert response.status_code == 200
+        assert "javascript" in response.headers["content-type"]
+
+    def test_css_contains_map_styles(self, client):
+        """CSS should contain map-first fullscreen styles."""
+        response = client.get("/static/css/app.css")
+        assert "#map" in response.text
+        assert "position: fixed" in response.text
+        assert "inset: 0" in response.text
+
+    def test_css_contains_mobile_breakpoint(self, client):
+        """CSS should contain mobile responsive breakpoint."""
+        response = client.get("/static/css/app.css")
+        assert "768px" in response.text
+
+    def test_js_creates_leaflet_map(self, client):
+        """JS should initialize a Leaflet map."""
+        response = client.get("/static/js/map.js")
+        assert "L.map" in response.text
+        assert "42.36" in response.text
+        assert "-71.06" in response.text
+
+    def test_js_handles_htmx_afterswap(self, client):
+        """JS should listen for htmx:afterSwap events."""
+        response = client.get("/static/js/map.js")
+        assert "htmx:afterSwap" in response.text
+        assert "data-geometry" in response.text
