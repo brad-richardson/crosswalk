@@ -125,7 +125,15 @@ def create_browse_map(
     if bridge_edges is not None and len(bridge_edges) > 0:
         browse_bridges = bridge_edges
         if bridge_edges.crs and bridge_edges.crs.to_epsg() != 4326:
-            browse_bridges = bridge_edges.to_crs("EPSG:4326")
+            # Reproject _full_geometry too (it's stored in same CRS as active geometry)
+            if "_full_geometry" in browse_bridges.columns:
+                full_geoseries = gpd.GeoSeries(
+                    browse_bridges["_full_geometry"], crs=bridge_edges.crs
+                )
+                browse_bridges = bridge_edges.to_crs("EPSG:4326")
+                browse_bridges["_full_geometry"] = full_geoseries.to_crs("EPSG:4326").values
+            else:
+                browse_bridges = bridge_edges.to_crs("EPSG:4326")
 
         # Full geometry context (dashed, faded)
         if "_full_geometry" in browse_bridges.columns:

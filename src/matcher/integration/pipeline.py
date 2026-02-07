@@ -297,10 +297,17 @@ def run_integration_pipeline(
             import shapely as shp
 
             bridge_full = main_edges[bridge_mask].copy()
-            bridge_geoms = bridge_full.geometry.values
 
-            ref_mask = main_edges["_source"] == "reference"
-            ref_geoms = main_edges[ref_mask].geometry.values
+            # Project to UTM for accurate buffer/difference (main_edges may be geographic)
+            working = bridge_full
+            ref_working = main_edges[main_edges["_source"] == "reference"]
+            if main_edges.crs and main_edges.crs.is_geographic:
+                utm_crs = main_edges.estimate_utm_crs()
+                working = bridge_full.to_crs(utm_crs)
+                ref_working = ref_working.to_crs(utm_crs)
+
+            bridge_geoms = working.geometry.values
+            ref_geoms = ref_working.geometry.values
             ref_tree = shp.STRtree(ref_geoms)
 
             # Vectorized: find nearest ref per bridge, buffer it, difference
@@ -308,13 +315,20 @@ def run_integration_pipeline(
             nearest_buffered = shp.buffer(ref_geoms[nearest_ref_idxs], connection_tolerance_m)
             gap_geoms = shp.difference(bridge_geoms, nearest_buffered)
 
-            # Store full geometry as WKB for parquet serialization
-            bridge_edges = bridge_full.copy()
-            bridge_edges["_full_geometry_wkb"] = shp.to_wkb(bridge_geoms)
-
             # Set active geometry to gap sublines; fall back to full where gap is empty
             empty_mask = shp.is_empty(gap_geoms)
             gap_geoms[empty_mask] = bridge_geoms[empty_mask]
+
+            # Build output in original CRS
+            bridge_edges = bridge_full.copy()
+            bridge_edges["_full_geometry_wkb"] = shp.to_wkb(bridge_full.geometry.values)
+
+            # Convert gap geoms back to original CRS if we projected
+            if main_edges.crs and main_edges.crs.is_geographic:
+                gap_gdf = gpd.GeoDataFrame(geometry=gap_geoms, crs=utm_crs)
+                gap_gdf = gap_gdf.to_crs(main_edges.crs)
+                gap_geoms = gap_gdf.geometry.values
+
             bridge_edges = bridge_edges.set_geometry(gap_geoms)
             logger.info(f"  Bridge edges for QA layer: {len(bridge_edges)}")
 

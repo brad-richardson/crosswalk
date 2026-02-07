@@ -201,7 +201,7 @@ def _check_bridges_components(
         Boolean Series aligned to candidates index: True for bridge segments
     """
     if len(candidates) == 0 or len(reference_edges) == 0:
-        return pd.Series(dtype=bool)
+        return pd.Series(False, index=candidates.index, dtype=bool)
 
     # Step 1: Build spatial index of reference geometries
     ref_geoms = reference_edges.geometry.values
@@ -464,26 +464,29 @@ def detect_orphans_by_proximity(
     start_pts = points(start_coords)
     end_pts = points(end_coords)
 
-    # Batch nearest queries — returns (input_idx, tree_idx) arrays
-    start_nearest = ref_tree.query_nearest(start_pts[valid_mask], all_matches=False)
-    end_nearest = ref_tree.query_nearest(end_pts[valid_mask], all_matches=False)
-
     # Compute distances vectorized
     min_distances = np.full(n_targets, np.nan)
-    valid_indices = np.where(valid_mask)[0]
+    connected_mask = np.zeros(n_targets, dtype=bool)
 
-    # start_nearest[0] = input indices (into valid subset), start_nearest[1] = tree indices
-    start_ref_geoms = ref_geoms[start_nearest[1]]
-    end_ref_geoms = ref_geoms[end_nearest[1]]
+    if valid_mask.any():
+        # Batch nearest queries — returns (input_idx, tree_idx) arrays
+        start_nearest = ref_tree.query_nearest(start_pts[valid_mask], all_matches=False)
+        end_nearest = ref_tree.query_nearest(end_pts[valid_mask], all_matches=False)
 
-    start_dists = shp.distance(start_pts[valid_mask], start_ref_geoms)
-    end_dists = shp.distance(end_pts[valid_mask], end_ref_geoms)
+        valid_indices = np.where(valid_mask)[0]
 
-    valid_min_dists = np.minimum(start_dists, end_dists)
-    min_distances[valid_indices] = valid_min_dists
+        # start_nearest[0] = input indices (into valid subset), start_nearest[1] = tree indices
+        start_ref_geoms = ref_geoms[start_nearest[1]]
+        end_ref_geoms = ref_geoms[end_nearest[1]]
 
-    connected_mask = min_distances <= connection_tolerance_m
-    connected_mask[~valid_mask] = False
+        start_dists = shp.distance(start_pts[valid_mask], start_ref_geoms)
+        end_dists = shp.distance(end_pts[valid_mask], end_ref_geoms)
+
+        valid_min_dists = np.minimum(start_dists, end_dists)
+        min_distances[valid_indices] = valid_min_dists
+
+        connected_mask = min_distances <= connection_tolerance_m
+        connected_mask[~valid_mask] = False
 
     target_edges["is_connected"] = connected_mask
     target_edges["nearest_ref_distance"] = min_distances
