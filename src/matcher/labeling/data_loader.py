@@ -26,40 +26,35 @@ from ..utils import ensure_projected_crs, filter_to_linestrings
 logger = logging.getLogger(__name__)
 
 
-def get_cached_matcher() -> MLMatcher | None:
-    """Get cached ML matcher, loading model if needed.
+_cached_matcher: MLMatcher | None = None
+_matcher_loaded: bool = False
 
-    Uses Streamlit cache_resource to persist across reruns.
+
+def get_cached_matcher() -> MLMatcher | None:
+    """Get ML matcher, loading model if needed.
+
+    Uses module-level caching to persist across calls.
 
     Returns:
         Loaded MLMatcher or None if model doesn't exist.
     """
-    try:
-        import streamlit as st
+    global _cached_matcher, _matcher_loaded
+    if _matcher_loaded:
+        return _cached_matcher
 
-        # Check model exists BEFORE calling cached function to avoid caching None
-        model_path = settings.model_path
-        if not model_path.exists():
-            logger.warning(f"ML model not found at {model_path}")
-            return None
+    model_path = settings.model_path
+    if not model_path.exists():
+        logger.warning(f"ML model not found at {model_path}")
+        _matcher_loaded = True
+        return None
 
-        @st.cache_resource
-        def _load_matcher():
-            logger.info(f"Loading ML model from {model_path}...")
-            matcher = MLMatcher(auto_select=True)
-            matcher.load_model(str(model_path))
-            logger.info("ML model loaded successfully")
-            return matcher
-
-        return _load_matcher()
-    except ImportError:
-        # Fallback for non-Streamlit contexts
-        model_path = settings.model_path
-        if not model_path.exists():
-            return None
-        matcher = MLMatcher(auto_select=True)
-        matcher.load_model(str(model_path))
-        return matcher
+    logger.info(f"Loading ML model from {model_path}...")
+    matcher = MLMatcher(auto_select=True)
+    matcher.load_model(str(model_path))
+    logger.info("ML model loaded successfully")
+    _cached_matcher = matcher
+    _matcher_loaded = True
+    return matcher
 
 
 def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[str, float]:
