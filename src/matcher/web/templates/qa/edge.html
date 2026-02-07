@@ -24,51 +24,39 @@
         {% endif %}
     </div>
 
-    <!-- Notes textarea -->
-    <div style="margin: 8px 0;">
-        <textarea id="qa-note" rows="2" placeholder="Optional note..."
-                  style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; resize: vertical;"></textarea>
-    </div>
+    <form id="qa-form">
+        <!-- Hidden inputs for edge metadata -->
+        <input type="hidden" name="edge_id" value="{{ edge.edge_id }}">
+        <input type="hidden" name="original_id" value="{{ edge.original_id }}">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="edge_type" value="{{ edge_type }}">
 
-    <!-- Accept / Reject buttons -->
-    <div class="decision-buttons">
-        <button class="btn-match"
-                hx-post="/qa/decision"
-                hx-target="#edge-detail"
-                hx-swap="innerHTML"
-                hx-vals='js:{
-                    "edge_id": {{ edge.edge_id }},
-                    "original_id": "{{ edge.original_id }}",
-                    "dataset": "{{ dataset }}",
-                    "edge_type": "{{ edge_type }}",
-                    "decision": "correct",
-                    "reason": "accepted",
-                    "note": document.getElementById("qa-note").value
-                }'>
-            Accept
-        </button>
-        <button class="btn-no-match"
-                hx-post="/qa/decision"
-                hx-target="#edge-detail"
-                hx-swap="innerHTML"
-                hx-vals='js:{
-                    "edge_id": {{ edge.edge_id }},
-                    "original_id": "{{ edge.original_id }}",
-                    "dataset": "{{ dataset }}",
-                    "edge_type": "{{ edge_type }}",
-                    "decision": "incorrect",
-                    "reason": "rejected",
-                    "note": document.getElementById("qa-note").value
-                }'>
-            Reject
-        </button>
-    </div>
+        <!-- Notes textarea -->
+        <div style="margin: 8px 0;">
+            <textarea name="note" id="qa-note" rows="2" placeholder="Optional note..."
+                      style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; resize: vertical;"></textarea>
+        </div>
 
-    <!-- Hidden form fields -->
-    <input type="hidden" name="edge_id" value="{{ edge.edge_id }}">
-    <input type="hidden" name="original_id" value="{{ edge.original_id }}">
-    <input type="hidden" name="dataset" value="{{ dataset }}">
-    <input type="hidden" name="edge_type" value="{{ edge_type }}">
+        <!-- Accept / Reject buttons -->
+        <div class="decision-buttons">
+            <button type="button" class="btn-match"
+                    hx-post="/qa/decision"
+                    hx-include="closest form"
+                    hx-vals='{"decision": "correct", "reason": "accepted"}'
+                    hx-target="#edge-detail"
+                    hx-swap="innerHTML">
+                Accept
+            </button>
+            <button type="button" class="btn-no-match"
+                    hx-post="/qa/decision"
+                    hx-include="closest form"
+                    hx-vals='{"decision": "incorrect", "reason": "rejected"}'
+                    hx-target="#edge-detail"
+                    hx-swap="innerHTML">
+                Reject
+            </button>
+        </div>
+    </form>
 </div>
 {% else %}
 <div></div>

@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pytest
 
-pytest.importorskip("fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')")
+pytest.importorskip(
+    "fastapi", reason="fastapi not installed (install with: pip install -e '.[web]')"
+)
 
 from fastapi.testclient import TestClient  # noqa: E402
 from shapely.geometry import LineString  # noqa: E402
@@ -18,7 +20,7 @@ def _make_edges_gdf():
     return gpd.GeoDataFrame(
         {
             "edge_id": [1, 2, 3],
-            "original_id": ["orig_1", "orig_2", "orig_3"],
+            "_original_id": ["orig_1", "orig_2", "orig_3"],
             "geometry": [
                 LineString([(0, 0), (1, 1)]),
                 LineString([(1, 1), (2, 2)]),
@@ -37,7 +39,7 @@ def _make_net_new_gdf():
     return gpd.GeoDataFrame(
         {
             "edge_id": [10, 11],
-            "original_id": ["new_1", "new_2"],
+            "_original_id": ["new_1", "new_2"],
             "geometry": [
                 LineString([(5, 5), (6, 6)]),
                 LineString([(6, 6), (7, 7)]),
@@ -61,10 +63,10 @@ def mock_qa_services():
         mock_list.return_value = ["dataset_a", "dataset_b"]
         mock_load.return_value = {
             "edges": _make_edges_gdf(),
-            "net_new_edges": _make_net_new_gdf(),
-            "disconnected_edges": None,
-            "filtered_edges": None,
-            "bridge_edges": None,
+            "net_new": _make_net_new_gdf(),
+            "disconnected": None,
+            "filtered": None,
+            "bridges": None,
         }
         # Mock cache dir to return a non-existent path by default
         mock_cache_dir.return_value = MagicMock()

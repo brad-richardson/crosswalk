@@ -171,10 +171,10 @@ def undo_last_label(dataset_id: str) -> dict | None:
 
 EDGE_FILES = [
     "edges",
-    "net_new_edges",
-    "disconnected_edges",
-    "filtered_edges",
-    "bridge_edges",
+    "net_new",
+    "disconnected",
+    "filtered",
+    "bridges",
 ]
 
 

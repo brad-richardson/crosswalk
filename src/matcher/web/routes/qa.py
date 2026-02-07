@@ -52,7 +52,7 @@ def _edges_to_geojson(edge_data: dict) -> str:
     edges_gdf = edge_data.get("edges")
     if edges_gdf is not None and len(edges_gdf) > 0:
         for _, row in edges_gdf.iterrows():
-            source = row.get("_source", "")
+            source = row.get("_source", row.get("source", ""))
             if source == "reference":
                 layer = "reference"
                 color = LAYER_COLORS["reference"]
@@ -67,7 +67,7 @@ def _edges_to_geojson(edge_data: dict) -> str:
                     "layer": layer,
                     "color": color,
                     "edge_id": int(row.get("edge_id", 0)),
-                    "original_id": str(row.get("original_id", "")),
+                    "original_id": str(row.get("_original_id", row.get("original_id", ""))),
                     "road_class": str(row.get("road_class", "")),
                     "length_m": float(row.get("length_m", 0)),
                     "_source": str(source),
@@ -75,12 +75,12 @@ def _edges_to_geojson(edge_data: dict) -> str:
             }
             features.append(feature)
 
-    # Process other edge files
+    # Process other edge files (filenames match integration output.py)
     other_files = {
-        "net_new_edges": ("net_new", LAYER_COLORS["net_new"]),
-        "disconnected_edges": ("disconnected", LAYER_COLORS["disconnected"]),
-        "filtered_edges": ("filtered", LAYER_COLORS["filtered"]),
-        "bridge_edges": ("bridge", LAYER_COLORS["bridge"]),
+        "net_new": ("net_new", LAYER_COLORS["net_new"]),
+        "disconnected": ("disconnected", LAYER_COLORS["disconnected"]),
+        "filtered": ("filtered", LAYER_COLORS["filtered"]),
+        "bridges": ("bridge", LAYER_COLORS["bridge"]),
     }
 
     for file_key, (layer_name, color) in other_files.items():
@@ -94,7 +94,7 @@ def _edges_to_geojson(edge_data: dict) -> str:
                         "layer": layer_name,
                         "color": color,
                         "edge_id": int(row.get("edge_id", 0)),
-                        "original_id": str(row.get("original_id", "")),
+                        "original_id": str(row.get("_original_id", row.get("original_id", ""))),
                         "road_class": str(row.get("road_class", "")),
                         "length_m": float(row.get("length_m", 0)),
                     },
@@ -173,13 +173,27 @@ async def edge_detail(
                     matches = gdf[gdf["edge_id"] == edge_id]
                     if len(matches) > 0:
                         row = matches.iloc[0]
+                        source = str(row.get("_source", row.get("source", "")))
+
+                        # Derive layer label consistently
+                        if gdf_name == "edges":
+                            layer = "reference" if source == "reference" else "non_reference"
+                        else:
+                            # Use the file key directly (net_new, disconnected, etc.)
+                            layer = gdf_name
+
                         edge = {
                             "edge_id": int(row.get("edge_id", 0)),
-                            "original_id": str(row.get("original_id", "")),
+                            "original_id": str(
+                                row.get(
+                                    "_original_id",
+                                    row.get("original_id", ""),
+                                )
+                            ),
                             "road_class": str(row.get("road_class", "")),
                             "length_m": float(row.get("length_m", 0)),
-                            "_source": str(row.get("_source", "")),
-                            "layer": gdf_name,
+                            "_source": source,
+                            "layer": layer,
                         }
                         break
         except Exception:

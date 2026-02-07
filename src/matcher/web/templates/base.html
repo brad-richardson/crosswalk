@@ -64,18 +64,21 @@
     <!-- App JS -->
     <script src="/static/js/map.js"></script>
 
-    <!-- Menu toggle and dataset switcher script -->
+    <!-- Menu toggle and dataset switcher -->
     <script>
         document.getElementById('menu-toggle').addEventListener('click', function() {
             document.getElementById('menu').classList.toggle('hidden');
         });
 
-        function switchDataset(ds) {
-            if (!ds) return;
-            var url = new URL(window.location);
-            url.searchParams.set('dataset', ds);
-            url.searchParams.delete('index');
-            window.location = url;
+        function switchDataset(datasetId) {
+            // Navigate to the current mode's URL with the selected dataset
+            var path = window.location.pathname.split('?')[0];
+            if (!path || path === '/') path = '/labeling';
+            if (datasetId) {
+                window.location.href = path + '?dataset=' + encodeURIComponent(datasetId);
+            } else {
+                window.location.href = path;
+            }
         }
     </script>
 

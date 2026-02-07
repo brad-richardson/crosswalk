@@ -10,9 +10,9 @@
 {% block scripts %}
 {% if dataset and edge_geojson != '{}' %}
 <script>
-    const edgeGeojson = {{ edge_geojson|safe }};
-    const dataset = '{{ dataset }}';
-    const edgeType = '{{ edge_type }}';
+    const edgeGeojson = JSON.parse({{ edge_geojson|tojson }});
+    const dataset = {{ dataset|tojson }};
+    const edgeType = {{ edge_type|tojson }};
 </script>
 <script src="/static/js/qa-map.js"></script>
 {% elif not dataset %}
