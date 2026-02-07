@@ -64,12 +64,20 @@
 </div>
 {% endif %}
 
-<!-- OOB swap to update the progress indicator -->
+<!-- OOB swap to update the progress indicator (only on HTMX requests to avoid duplicate IDs) -->
+{% if request.headers.get('HX-Request') %}
 <span id="pair-progress" hx-swap-oob="innerHTML">
-    {% if total_pairs > 0 %}Pair {{ pair_index + 1 }} of {{ total_pairs }}{% else %}All pairs labeled!{% endif %}
+    {% if dataset %}
+        {% if total_pairs > 0 %}Pair {{ pair_index + 1 }} of {{ total_pairs }}{% else %}All pairs labeled!{% endif %}
+    {% else %}
+        Select a dataset
+    {% endif %}
 </span>
+{% endif %}
 
 <!-- Update URL to reflect current position (bookmarkable) -->
+{% if pair and dataset %}
 <script>
     history.replaceState(null, '', '/labeling?dataset={{ dataset }}&index={{ pair_index }}');
 </script>
+{% endif %}

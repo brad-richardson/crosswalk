@@ -33,11 +33,7 @@
         </ul>
 
         <h3>Dataset</h3>
-        <select id="dataset-picker" name="dataset"
-                hx-get="/labeling"
-                hx-target="#overlay-content"
-                hx-swap="innerHTML"
-                hx-include="this">
+        <select id="dataset-picker" name="dataset" onchange="switchDataset(this.value)">
             <option value="">Select dataset...</option>
             {% for ds in datasets %}
             <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{{ ds }}</option>
@@ -68,11 +64,19 @@
     <!-- App JS -->
     <script src="/static/js/map.js"></script>
 
-    <!-- Menu toggle script -->
+    <!-- Menu toggle and dataset switcher script -->
     <script>
         document.getElementById('menu-toggle').addEventListener('click', function() {
             document.getElementById('menu').classList.toggle('hidden');
         });
+
+        function switchDataset(ds) {
+            if (!ds) return;
+            var url = new URL(window.location);
+            url.searchParams.set('dataset', ds);
+            url.searchParams.delete('index');
+            window.location = url;
+        }
     </script>
 
     {% block scripts %}{% endblock %}

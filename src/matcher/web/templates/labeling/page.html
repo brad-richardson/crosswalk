@@ -62,40 +62,29 @@
             return;
         }
 
-        var dataset = '{{ dataset or "" }}';
-        var pairIndex = {{ pair_index|default(0) }};
+        var params = new URLSearchParams(window.location.search);
+        var dataset = params.get('dataset');
+        var pairIndex = parseInt(params.get('index') || '0', 10);
 
         if (!dataset) return;
 
+        var label = null;
         switch(e.key.toLowerCase()) {
-            case 'm':
-                htmx.ajax('POST', '/labeling/label', {
-                    target: '#pair-content',
-                    swap: 'innerHTML',
-                    values: { dataset: dataset, index: pairIndex, label: 'match' }
-                });
-                break;
-            case 'n':
-                htmx.ajax('POST', '/labeling/label', {
-                    target: '#pair-content',
-                    swap: 'innerHTML',
-                    values: { dataset: dataset, index: pairIndex, label: 'no_match' }
-                });
-                break;
-            case 'u':
-                htmx.ajax('POST', '/labeling/label', {
-                    target: '#pair-content',
-                    swap: 'innerHTML',
-                    values: { dataset: dataset, index: pairIndex, label: 'unsure' }
-                });
-                break;
+            case 'm': label = 'match'; break;
+            case 'n': label = 'no_match'; break;
+            case 'u': label = 'unsure'; break;
             case 'z':
                 htmx.ajax('POST', '/labeling/undo', {
-                    target: '#pair-content',
-                    swap: 'innerHTML',
-                    values: { dataset: dataset }
+                    values: { dataset: dataset },
+                    target: '#pair-content'
                 });
-                break;
+                return;
+        }
+        if (label) {
+            htmx.ajax('POST', '/labeling/label', {
+                values: { dataset: dataset, index: pairIndex, label: label },
+                target: '#pair-content'
+            });
         }
     });
 </script>

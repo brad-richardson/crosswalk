@@ -136,6 +136,15 @@
         }
     }
 
+    // --- Initial geometry load ---
+    // Read geometry from the page on first load (before any HTMX swaps)
+    document.addEventListener("DOMContentLoaded", function () {
+        var geomEl = document.querySelector("[data-geometry]");
+        if (geomEl) {
+            showPairGeometry(geomEl.dataset.geometry);
+        }
+    });
+
     // --- HTMX integration ---
     // After HTMX swaps in new content, check for geometry data and display it
     document.addEventListener("htmx:afterSwap", function (event) {

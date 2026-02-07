@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
@@ -18,6 +18,8 @@ from ..services import (
 )
 
 logger = logging.getLogger(__name__)
+
+VALID_LABELS = {"match", "no_match", "unsure"}
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -126,6 +128,10 @@ async def labeling(
         all_candidates = []
         unlabeled = []
 
+    # Clamp index to valid range
+    if unlabeled:
+        index = max(0, min(index, len(unlabeled) - 1))
+
     # Get the current pair
     pair = None
     geojson = "{}"
@@ -163,6 +169,12 @@ async def label_pair(
         index: Current index in unlabeled candidates
         label: Label value (match, no_match, unsure)
     """
+    if label not in VALID_LABELS:
+        return HTMLResponse(status_code=400, content="Invalid label value")
+
+    if dataset not in list_datasets():
+        return HTMLResponse(status_code=404, content="Unknown dataset")
+
     # Get the current candidates
     all_candidates = _get_candidates(dataset)
     unlabeled = get_unlabeled_candidates(dataset, all_candidates)
@@ -209,6 +221,9 @@ async def undo_label(
         request: FastAPI request
         dataset: Dataset ID
     """
+    if dataset not in list_datasets():
+        return HTMLResponse(status_code=404, content="Unknown dataset")
+
     undo_last_label(dataset)
 
     # Re-filter candidates
