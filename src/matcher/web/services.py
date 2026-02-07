@@ -154,6 +154,69 @@ def record_label(
     )
 
 
+def get_labels_for_review(
+    dataset_id: str,
+    filter_type: str | None = None,
+    page: int = 0,
+    page_size: int = 50,
+) -> tuple[list[dict], int]:
+    """Get paginated labels for review.
+
+    Args:
+        dataset_id: Dataset identifier
+        filter_type: Filter by label type (match, no_match, unsure) or None/all for all
+        page: Zero-based page number
+        page_size: Number of labels per page
+
+    Returns:
+        Tuple of (list of label dicts, total count after filtering).
+    """
+    store = LabelStore(dataset_id)
+    df = store.df
+    if df.empty:
+        return [], 0
+    if filter_type and filter_type != "all":
+        df = df[df["label"] == filter_type]
+    total = len(df)
+    if "labeled_at" in df.columns:
+        df = df.sort_values("labeled_at", ascending=False)
+    start = page * page_size
+    page_df = df.iloc[start : start + page_size]
+    return page_df.to_dict("records"), total
+
+
+def update_review_label(dataset_id: str, gers_id: str, target_id: str, new_label: str) -> bool:
+    """Update an existing label's value.
+
+    Args:
+        dataset_id: Dataset identifier
+        gers_id: Overture reference segment ID
+        target_id: Target segment ID
+        new_label: New label value (match, no_match, unsure)
+
+    Returns:
+        True if found and updated, False if pair not found.
+    """
+    store = LabelStore(dataset_id)
+    labeler = get_labeler_name()
+    return store.update_label(gers_id, target_id, new_label, labeler)
+
+
+def delete_review_label(dataset_id: str, gers_id: str, target_id: str) -> bool:
+    """Delete an existing label.
+
+    Args:
+        dataset_id: Dataset identifier
+        gers_id: Overture reference segment ID
+        target_id: Target segment ID
+
+    Returns:
+        True if found and deleted, False if pair not found.
+    """
+    store = LabelStore(dataset_id)
+    return store.delete_label(gers_id, target_id)
+
+
 def undo_last_label(dataset_id: str) -> dict | None:
     """Undo the last label for a dataset.
 
