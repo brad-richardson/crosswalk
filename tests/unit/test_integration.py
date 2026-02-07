@@ -19,8 +19,14 @@ from matcher.integration import (
     compute_reference_coverage,
     detect_orphan_components,
     detect_orphans_by_proximity,
+    extract_unmatched_remnants,
     filter_fringe_segments,
     filter_short_segments,
+)
+from matcher.integration.combiner import (
+    _build_multi_match_ranges,
+    _complement_ranges,
+    _merge_ranges,
 )
 from matcher.screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
 from matcher.topology.planarize import planarize
@@ -177,14 +183,17 @@ class TestIntegrationStatistics:
             total_nodes=200,
             total_edges=175,
             main_component_edges=170,
-            orphan_edges=5,
-            orphan_components=2,
+            disconnected_edges=3,
+            filtered_edges=2,
             datasets_integrated=["boston_streets"],
         )
 
         d = stats.to_dict()
 
         assert d["reference_edges"] == 100
+        assert d["disconnected_edges"] == 3
+        assert d["filtered_edges"] == 2
+        assert "orphan_edges" not in d
         assert d["datasets_integrated"] == ["boston_streets"]
 
 
@@ -222,7 +231,7 @@ class TestTransitiveConnectivity:
             crs="EPSG:32610",
         )
 
-        main, orphans, net_new, stats = detect_orphans_by_proximity(
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
             combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=2
         )
 
@@ -255,7 +264,7 @@ class TestTransitiveConnectivity:
             crs="EPSG:32610",
         )
 
-        main, orphans, net_new, stats = detect_orphans_by_proximity(
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
             combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=2
         )
 
@@ -291,16 +300,64 @@ class TestTransitiveConnectivity:
             crs="EPSG:32610",
         )
 
-        # With max_hops=1, t3 should be orphan
-        main, orphans, net_new, stats = detect_orphans_by_proximity(
+        # With max_hops=1, t3 should be disconnected
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
             combined, connection_tolerance_m=3.0, min_merge_length_m=0, max_hops=1
         )
 
         connected = main[main["_source"] == EdgeSource.TARGET_UNMATCHED.value]
         assert len(connected) == 2  # t1 and t2
 
-        orphan_targets = orphans[orphans["_source"] == EdgeSource.TARGET_UNMATCHED.value]
-        assert len(orphan_targets) == 1  # t3
+        disconnected_targets = disconnected[
+            disconnected["_source"] == EdgeSource.TARGET_UNMATCHED.value
+        ]
+        assert len(disconnected_targets) == 1  # t3
+
+    def test_disconnected_vs_filtered_separation(self):
+        """Disconnected and filtered segments are separated correctly."""
+        # Reference: horizontal line
+        reference_geom = LineString([(0, 0), (100, 0)])
+
+        # Target 1: connects to reference but short (5m), will be filtered
+        t1_geom = LineString([(50, 0), (50, 5)])
+
+        # Target 2: far from reference, will be disconnected
+        t2_geom = LineString([(500, 500), (500, 550)])
+
+        combined = gpd.GeoDataFrame(
+            {
+                "_original_id": ["ref_1", "t_1", "t_2"],
+                "_source": [
+                    EdgeSource.REFERENCE.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                    EdgeSource.TARGET_UNMATCHED.value,
+                ],
+                "geometry": [reference_geom, t1_geom, t2_geom],
+            },
+            crs="EPSG:32610",
+        )
+
+        main, disconnected, filtered, net_new, stats = detect_orphans_by_proximity(
+            combined,
+            connection_tolerance_m=3.0,
+            min_merge_length_m=20.0,
+            net_new_buffer_m=5.0,
+            max_hops=2,
+        )
+
+        # t1 should be filtered (connected but too short net-new)
+        assert len(filtered) > 0
+        assert filtered.iloc[0]["component_status"] == "filtered"
+        assert filtered.iloc[0]["unmatched_reason"] == "insufficient_net_new_length"
+
+        # t2 should be disconnected
+        assert len(disconnected) > 0
+        assert disconnected.iloc[0]["component_status"] == "disconnected"
+        assert disconnected.iloc[0]["unmatched_reason"] == "not_connected_to_network"
+
+        # Stats should reflect the split
+        assert stats["disconnected_edges"] == len(disconnected)
+        assert stats["filtered_edges"] == len(filtered)
 
 
 class TestFringeDetection:
@@ -417,3 +474,273 @@ class TestBoundingBoxExpand:
         # Centers should remain the same (within floating point tolerance)
         assert abs(center_x - expanded_center_x) < 1e-6
         assert abs(center_y - expanded_center_y) < 1e-6
+
+
+class TestMergeRanges:
+    """Tests for _merge_ranges helper."""
+
+    def test_empty_input(self):
+        assert _merge_ranges([]) == []
+
+    def test_single_range(self):
+        assert _merge_ranges([(0.2, 0.5)]) == [(0.2, 0.5)]
+
+    def test_non_overlapping(self):
+        result = _merge_ranges([(0.1, 0.3), (0.5, 0.8)])
+        assert result == [(0.1, 0.3), (0.5, 0.8)]
+
+    def test_overlapping(self):
+        result = _merge_ranges([(0.1, 0.5), (0.3, 0.8)])
+        assert result == [(0.1, 0.8)]
+
+    def test_adjacent_within_tolerance(self):
+        """Ranges within tolerance gap are merged."""
+        result = _merge_ranges([(0.1, 0.5), (0.505, 0.8)], tolerance=0.01)
+        assert result == [(0.1, 0.8)]
+
+    def test_unsorted_input(self):
+        result = _merge_ranges([(0.5, 0.8), (0.1, 0.3)])
+        assert result == [(0.1, 0.3), (0.5, 0.8)]
+
+    def test_three_ranges_with_chain_merge(self):
+        result = _merge_ranges([(0.0, 0.3), (0.25, 0.6), (0.55, 0.9)])
+        assert result == [(0.0, 0.9)]
+
+
+class TestComplementRanges:
+    """Tests for _complement_ranges helper."""
+
+    def test_empty_matched(self):
+        assert _complement_ranges([]) == [(0.0, 1.0)]
+
+    def test_full_match(self):
+        assert _complement_ranges([(0.0, 1.0)]) == []
+
+    def test_middle_match(self):
+        result = _complement_ranges([(0.3, 0.7)])
+        assert result == [(0.0, 0.3), (0.7, 1.0)]
+
+    def test_start_match(self):
+        result = _complement_ranges([(0.0, 0.5)])
+        assert result == [(0.5, 1.0)]
+
+    def test_end_match(self):
+        result = _complement_ranges([(0.5, 1.0)])
+        assert result == [(0.0, 0.5)]
+
+    def test_two_matches_with_gaps(self):
+        result = _complement_ranges([(0.1, 0.3), (0.6, 0.9)])
+        assert result == [(0.0, 0.1), (0.3, 0.6), (0.9, 1.0)]
+
+
+class TestBuildMultiMatchRanges:
+    """Tests for _build_multi_match_ranges."""
+
+    def test_single_match_dict(self):
+        results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.3,
+                "local_end_frac": 0.7,
+                "match_decision": "match",
+            }
+        ]
+        ranges = _build_multi_match_ranges(results)
+        assert ranges == {"seg1": [(0.3, 0.7)]}
+
+    def test_multiple_matches_same_target(self):
+        results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.0,
+                "local_end_frac": 0.3,
+                "match_decision": "match",
+            },
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.6,
+                "local_end_frac": 1.0,
+                "match_decision": "match",
+            },
+        ]
+        ranges = _build_multi_match_ranges(results)
+        assert len(ranges["seg1"]) == 2
+        assert (0.0, 0.3) in ranges["seg1"]
+        assert (0.6, 1.0) in ranges["seg1"]
+
+    def test_review_decisions_excluded(self):
+        results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.3,
+                "local_end_frac": 0.7,
+                "match_decision": "review",
+            },
+        ]
+        ranges = _build_multi_match_ranges(results)
+        assert ranges == {}
+
+    def test_none_fractions_skipped(self):
+        results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": None,
+                "local_end_frac": None,
+                "match_decision": "match",
+            },
+        ]
+        ranges = _build_multi_match_ranges(results)
+        assert ranges == {}
+
+
+class TestExtractUnmatchedRemnants:
+    """Tests for extract_unmatched_remnants."""
+
+    def test_partial_match_produces_remnants(self):
+        """A segment matched at 30-70% should produce remnants at 0-30% and 70-100%."""
+        # 100m horizontal line in projected CRS
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        match_results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.3,
+                "local_end_frac": 0.7,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=1.0)
+
+        assert len(remnants) == 2
+        # Remnants should be ~30m each
+        for _, row in remnants.iterrows():
+            assert 25 < row.geometry.length < 35
+
+        # Check IDs
+        ids = set(remnants["local_id"])
+        assert "seg1_remnant_0" in ids
+        assert "seg1_remnant_1" in ids
+
+    def test_full_match_no_remnants(self):
+        """A fully matched segment produces no remnants."""
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        match_results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.0,
+                "local_end_frac": 1.0,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=1.0)
+        assert len(remnants) == 0
+
+    def test_short_remnants_filtered(self):
+        """Remnants shorter than min_remnant_length_m are filtered out."""
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        # Match covers 0-98%, leaving only 2m remnant
+        match_results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.0,
+                "local_end_frac": 0.98,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=3.0)
+        assert len(remnants) == 0
+
+    def test_1_to_n_match_merges_ranges(self):
+        """Multiple matches on same target merge their ranges correctly."""
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        # Two matches covering 0-40% and 60-100%, leaving 40-60% unmatched
+        match_results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.0,
+                "local_end_frac": 0.4,
+                "match_decision": "match",
+            },
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.6,
+                "local_end_frac": 1.0,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=1.0)
+
+        assert len(remnants) == 1
+        # The gap remnant should be ~20m (40% to 60% of 100m)
+        assert 15 < remnants.iloc[0].geometry.length < 25
+
+    def test_empty_matched_returns_empty(self):
+        """Empty matched GeoDataFrame returns empty result."""
+        matched = gpd.GeoDataFrame(columns=["local_id", "geometry"], crs="EPSG:32610")
+        remnants = extract_unmatched_remnants(matched, [], min_remnant_length_m=1.0)
+        assert len(remnants) == 0
+
+    def test_no_matching_ids_returns_empty(self):
+        """If no match_results reference any matched segment, returns empty."""
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        match_results = [
+            {
+                "local_id": "seg_other",
+                "local_start_frac": 0.3,
+                "local_end_frac": 0.7,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=1.0)
+        assert len(remnants) == 0
+
+    def test_attributes_carried_over(self):
+        """Remnants carry over non-geometry, non-ID attributes from parent."""
+        line = LineString([(0, 0), (100, 0)])
+        matched = gpd.GeoDataFrame(
+            {"local_id": ["seg1"], "name": ["Main St"], "geometry": [line]},
+            crs="EPSG:32610",
+        )
+
+        match_results = [
+            {
+                "local_id": "seg1",
+                "local_start_frac": 0.3,
+                "local_end_frac": 0.7,
+                "match_decision": "match",
+            },
+        ]
+
+        remnants = extract_unmatched_remnants(matched, match_results, min_remnant_length_m=1.0)
+
+        assert len(remnants) == 2
+        assert all(remnants["name"] == "Main St")

@@ -397,6 +397,196 @@ def _build_dropped_gdf(
     return gpd.GeoDataFrame(records, crs=crs)
 
 
+def _build_multi_match_ranges(
+    match_results: list, id_column: str = "local_id"
+) -> dict[str, list[tuple[float, float]]]:
+    """Build lookup of all matched fraction ranges per target segment.
+
+    Unlike _build_match_lookup() which uses last-write-wins, this collects
+    ALL ranges for 1:N matches where a single target maps to multiple references.
+
+    Args:
+        match_results: List of match results (MatchResult objects or dicts from bridge file)
+        id_column: ID column name in match results
+
+    Returns:
+        Dict mapping target_id to list of (start_frac, end_frac) tuples
+    """
+    from ..matching.types import MatchDecision
+
+    ranges: dict[str, list[tuple[float, float]]] = {}
+    for result in match_results:
+        # Only include high-confidence MATCH decisions (same logic as separate_matched_unmatched)
+        if hasattr(result, "decision"):
+            if result.decision != MatchDecision.MATCH:
+                continue
+        elif isinstance(result, dict):
+            decision = result.get("match_decision", "match")
+            if decision != "match":
+                continue
+
+        if hasattr(result, "target_id"):
+            target_id = str(result.target_id)
+        elif isinstance(result, dict):
+            target_id = str(result.get(id_column, ""))
+        else:
+            continue
+
+        if hasattr(result, "local_start_frac"):
+            start = result.local_start_frac
+            end = result.local_end_frac
+        elif isinstance(result, dict):
+            start = result.get("local_start_frac")
+            end = result.get("local_end_frac")
+        else:
+            start = None
+            end = None
+
+        if start is not None and end is not None:
+            ranges.setdefault(target_id, []).append((start, end))
+    return ranges
+
+
+def _merge_ranges(
+    ranges: list[tuple[float, float]], tolerance: float = 0.01
+) -> list[tuple[float, float]]:
+    """Merge overlapping or near-adjacent fraction ranges.
+
+    Args:
+        ranges: List of (start, end) fraction tuples
+        tolerance: Gap tolerance for merging adjacent ranges
+
+    Returns:
+        List of merged (start, end) tuples, sorted by start
+    """
+    if not ranges:
+        return []
+    sorted_ranges = sorted(ranges)
+    merged = [list(sorted_ranges[0])]
+    for start, end in sorted_ranges[1:]:
+        if start <= merged[-1][1] + tolerance:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e) for s, e in merged]
+
+
+def _complement_ranges(
+    matched_ranges: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Get the complement of matched ranges within [0, 1].
+
+    Args:
+        matched_ranges: Sorted, merged list of (start, end) fraction tuples
+
+    Returns:
+        List of unmatched (start, end) tuples
+    """
+    complement = []
+    pos = 0.0
+    for start, end in matched_ranges:
+        if start > pos:
+            complement.append((pos, start))
+        pos = max(pos, end)
+    if pos < 1.0:
+        complement.append((pos, 1.0))
+    return complement
+
+
+def extract_unmatched_remnants(
+    matched: gpd.GeoDataFrame,
+    match_results: list,
+    id_column: str = "local_id",
+    min_remnant_length_m: float = 3.0,
+) -> gpd.GeoDataFrame:
+    """Extract unmatched subline remnants from partially-matched segments.
+
+    When a target segment partially matches a reference (e.g., 30-70% of its
+    length), this function extracts the complement portions (0-30% and 70-100%)
+    as separate geometries that can be fed into the integration pipeline as
+    unmatched candidates.
+
+    Handles 1:N matches by merging all matched ranges before computing the
+    complement, preventing double-counting of overlapping alignments.
+
+    Args:
+        matched: GeoDataFrame of matched target segments (full original geometries)
+        match_results: List of match results (MatchResult objects or dicts)
+        id_column: ID column name in matched GeoDataFrame
+        min_remnant_length_m: Minimum length (meters) for a remnant to be kept
+
+    Returns:
+        GeoDataFrame of remnant geometries with same CRS as input
+    """
+    if matched is None or len(matched) == 0:
+        return gpd.GeoDataFrame(
+            columns=["geometry", id_column], crs=matched.crs if matched is not None else None
+        )
+
+    # Build multi-match ranges lookup
+    multi_ranges = _build_multi_match_ranges(match_results, id_column)
+
+    if not multi_ranges:
+        return gpd.GeoDataFrame(columns=["geometry", id_column], crs=matched.crs)
+
+    # Project to UTM for metric length checks
+    working_crs = matched.crs
+    need_project = working_crs is not None and working_crs.is_geographic
+    if need_project:
+        matched_proj = matched.to_crs(matched.estimate_utm_crs())
+    else:
+        matched_proj = matched
+
+    remnants = []
+    for idx, row in matched.iterrows():
+        original_id = str(row.get(id_column, idx))
+        geom = row.geometry
+
+        if geom is None or geom.is_empty:
+            continue
+
+        ranges = multi_ranges.get(original_id)
+        if not ranges:
+            continue
+
+        # Merge overlapping ranges, then compute complement
+        merged = _merge_ranges(ranges)
+        complement = _complement_ranges(merged)
+
+        if not complement:
+            continue
+
+        for i, (start_frac, end_frac) in enumerate(complement):
+            subline = create_subline(geom, start_frac, end_frac)
+            if subline is None or subline.is_empty:
+                continue
+
+            # Check metric length
+            if need_project:
+                # Project the subline to check length
+                proj_subline = create_subline(matched_proj.loc[idx].geometry, start_frac, end_frac)
+                length_m = proj_subline.length if proj_subline is not None else 0.0
+            else:
+                length_m = subline.length
+
+            if length_m < min_remnant_length_m:
+                continue
+
+            # Build remnant record with carried-over attributes
+            record = {"geometry": subline, id_column: f"{original_id}_remnant_{i}"}
+            for col in matched.columns:
+                if col not in ["geometry", id_column] and not col.startswith("_"):
+                    record[col] = row[col]
+            remnants.append(record)
+
+    if not remnants:
+        return gpd.GeoDataFrame(columns=["geometry", id_column], crs=matched.crs)
+
+    result = gpd.GeoDataFrame(remnants, crs=matched.crs)
+    logger.debug(f"Extracted {len(result)} unmatched remnants from {len(matched)} matched segments")
+    return result
+
+
 def separate_matched_unmatched(
     target: gpd.GeoDataFrame,
     match_results: list,

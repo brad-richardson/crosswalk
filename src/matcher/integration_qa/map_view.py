@@ -9,7 +9,8 @@ SOURCE_COLORS = {
     "reference": "#3388ff",  # Blue
     "target_matched": "#28a745",  # Green
     "target_new": "#fd7e14",  # Orange - connected but unmatched
-    "orphan": "#dc3545",  # Red - disconnected
+    "disconnected": "#dc3545",  # Red - truly disconnected
+    "filtered": "#6c757d",  # Gray - connected but filtered
     "net_new": "#00ffff",  # Cyan - net new coverage portions
 }
 
@@ -28,7 +29,8 @@ LAYER_NAMES = {
     "reference": "Reference (Overture)",
     "target_matched": "Matched",
     "target_new": "To Merge (Connected)",
-    "orphan": "Orphan (Disconnected)",
+    "disconnected": "Disconnected",
+    "filtered": "Filtered (Short Net-New)",
     "net_new": "Net New Coverage",
 }
 
@@ -115,6 +117,14 @@ def create_base_map(
         show=(default_tiles == "light"),
     ).add_to(m)
 
+    # Add OpenStreetMap
+    folium.TileLayer(
+        tiles="openstreetmap",
+        name="OpenStreetMap",
+        max_zoom=19,
+        show=(default_tiles == "osm"),
+    ).add_to(m)
+
     return m
 
 
@@ -188,30 +198,30 @@ def add_edges_layer(
     return m
 
 
-def add_orphan_layers(
+def add_disconnected_layers(
     m: folium.Map,
-    orphan_edges: gpd.GeoDataFrame,
+    disconnected_edges: gpd.GeoDataFrame,
     by_priority: bool = True,
 ) -> folium.Map:
-    """Add orphan edges to map, optionally grouped by priority.
+    """Add disconnected edges to map, optionally grouped by priority.
 
-    Orphan edges get circle markers to distinguish them from reference edges.
+    Disconnected edges get circle markers to distinguish them from reference edges.
     """
-    if orphan_edges is None or len(orphan_edges) == 0:
+    if disconnected_edges is None or len(disconnected_edges) == 0:
         return m
 
     # Ensure WGS84 for Folium
-    if orphan_edges.crs and orphan_edges.crs.to_epsg() != 4326:
-        orphan_edges = orphan_edges.to_crs("EPSG:4326")
+    if disconnected_edges.crs and disconnected_edges.crs.to_epsg() != 4326:
+        disconnected_edges = disconnected_edges.to_crs("EPSG:4326")
 
-    if by_priority and "qa_priority" in orphan_edges.columns:
+    if by_priority and "qa_priority" in disconnected_edges.columns:
         for priority in ["high", "medium", "low"]:
-            priority_edges = orphan_edges[orphan_edges["qa_priority"] == priority]
+            priority_edges = disconnected_edges[disconnected_edges["qa_priority"] == priority]
             if len(priority_edges) > 0:
                 add_edges_layer(
                     m,
                     priority_edges,
-                    f"Orphan ({priority.title()})",
+                    f"Disconnected ({priority.title()})",
                     PRIORITY_COLORS[priority],
                     weight=3,
                     add_markers=True,
@@ -220,9 +230,9 @@ def add_orphan_layers(
     else:
         add_edges_layer(
             m,
-            orphan_edges,
-            LAYER_NAMES["orphan"],
-            SOURCE_COLORS["orphan"],
+            disconnected_edges,
+            LAYER_NAMES["disconnected"],
+            SOURCE_COLORS["disconnected"],
             weight=3,
             add_markers=True,
             marker_spacing=30.0,
@@ -325,11 +335,12 @@ def fit_bounds(m: folium.Map, gdf: gpd.GeoDataFrame) -> folium.Map:
 
 def create_integration_map(
     edges: gpd.GeoDataFrame,
-    orphan_edges: gpd.GeoDataFrame,
     net_new_edges: gpd.GeoDataFrame | None = None,
     selected_edge_id: int | None = None,
     focus_on_selected: bool = True,
     context_radius: float = 500.0,  # meters around selected edge
+    disconnected_edges: gpd.GeoDataFrame | None = None,
+    filtered_edges: gpd.GeoDataFrame | None = None,
 ) -> folium.Map:
     """Create full integration QA map with all layers."""
     # Default center
@@ -348,7 +359,9 @@ def create_integration_map(
                 return gdf[gdf[id_col] == edge_id].iloc[0]
             return None
 
-        selected_edge = find_edge(orphan_edges, selected_edge_id)
+        selected_edge = find_edge(disconnected_edges, selected_edge_id)
+        if selected_edge is None:
+            selected_edge = find_edge(filtered_edges, selected_edge_id)
         if selected_edge is None:
             selected_edge = find_edge(edges, selected_edge_id)
 
@@ -425,8 +438,20 @@ def create_integration_map(
             marker_spacing=15.0,
         )
 
-    # Add orphan layers (with markers)
-    add_orphan_layers(m, orphan_edges)
+    # Add disconnected layers (with markers, priority-colored)
+    add_disconnected_layers(m, disconnected_edges)
+
+    # Add filtered layer (single gray layer)
+    if filtered_edges is not None and len(filtered_edges) > 0:
+        add_edges_layer(
+            m,
+            filtered_edges,
+            LAYER_NAMES["filtered"],
+            SOURCE_COLORS["filtered"],
+            weight=2,
+            add_markers=True,
+            marker_spacing=30.0,
+        )
 
     # Highlight selected edge LAST so it's on top
     if selected_edge is not None:

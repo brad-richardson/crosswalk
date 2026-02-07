@@ -6,9 +6,9 @@ before integration.
 
 import geopandas as gpd
 from loguru import logger
-from shapely.strtree import STRtree
 
 from ..config import settings
+from ..spatial import SpatialIndex
 
 
 def _compute_buffer_iou(line_a, line_b, radius: float) -> float:
@@ -140,7 +140,7 @@ def detect_near_duplicates(
 
     # Build spatial index of matched segments (using projected geometries)
     matched_geoms = working_matched.geometry.values
-    tree = STRtree(matched_geoms)
+    matched_index = SpatialIndex(matched_geoms)
 
     potential_duplicates = []
     clean_indices = []
@@ -154,15 +154,14 @@ def detect_near_duplicates(
         _original_id = row.get(id_column, idx)  # noqa: F841 - reserved for debugging
 
         # Find nearby matched segments (using projected geometries)
-        buffered = geom.buffer(distance_tolerance_m)
-        candidate_indices = tree.query(buffered)
+        candidate_indices = matched_index.query_nearby(geom, distance_tolerance_m)
 
         is_duplicate = False
         best_overlap = 0.0
         best_matched_id = None
 
         for matched_idx in candidate_indices:
-            matched_geom = matched_geoms[matched_idx]
+            matched_geom = matched_index.geometries[matched_idx]
 
             # Compute overlap (using projected geometries for accurate IoU)
             iou = _compute_buffer_iou(geom, matched_geom, distance_tolerance_m)
@@ -190,7 +189,7 @@ def detect_near_duplicates(
         duplicates = gpd.GeoDataFrame(potential_duplicates, crs=unmatched.crs)
         logger.info(f"Found {len(duplicates)} potential near-duplicates")
     else:
-        duplicates = gpd.GeoDataFrame(crs=unmatched.crs)
+        duplicates = gpd.GeoDataFrame(geometry=[], crs=unmatched.crs)
 
     return clean, duplicates
 

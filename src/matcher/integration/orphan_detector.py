@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 from shapely import Point
-from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
+from ..spatial import SpatialIndex
 from ..topology.graph import build_graph, find_connected_components
 from ..topology.planarize import PlanarizedNetwork
 from ..topology.sparse_graph import SparseGraph
@@ -158,22 +158,30 @@ def detect_orphans_by_proximity(
     connection_tolerance_m: float = 3.0,
     min_merge_length_m: float = 20.0,
     net_new_buffer_m: float = 5.0,
+    matched_net_new_buffer_m: float = 15.0,
     max_hops: int = 2,
     transitive_tolerance_m: float | None = None,
     debug_connectivity: bool = False,
-) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame | None, dict[str, Any]]:
+) -> tuple[
+    gpd.GeoDataFrame,
+    gpd.GeoDataFrame,
+    gpd.GeoDataFrame,
+    gpd.GeoDataFrame | None,
+    dict[str, Any],
+]:
     """Identify orphan segments based on endpoint proximity to reference network.
 
     A segment is considered connected if at least one of its endpoints is within
     connection_tolerance_m of any reference segment. Target segments not connected
-    to the reference network are flagged as orphans.
+    to the reference network are flagged as disconnected.
 
     Transitive connectivity: If trail A connects to a road, and trail B connects
     to trail A (but not the road), trail B is also considered connected via
     transitive connectivity (up to max_hops).
 
-    Additionally, connected segments shorter than min_merge_length_m are treated
-    as orphans since they don't add meaningful new coverage.
+    Connected segments with less than min_merge_length_m of net-new coverage are
+    separated into filtered_edges — they are connected but don't add meaningful
+    new coverage.
 
     Note: Pre-integration screening (fringe detection, water/building checks) should
     be performed before calling this function using the screen module.
@@ -182,9 +190,12 @@ def detect_orphans_by_proximity(
         combined_gdf: Combined GeoDataFrame with _source column
         connection_tolerance_m: Distance in meters to consider "connected"
         min_merge_length_m: Minimum segment length (meters) to merge into network.
-            Connected segments shorter than this are treated as orphans.
-        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation.
-            Segments within this buffer are considered "covered" by reference.
+            Connected segments shorter than this are filtered out.
+        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation
+            of unmatched (target_new) segments. Tight buffer to detect genuine new coverage.
+        matched_net_new_buffer_m: Buffer distance (meters) for matched (target_matched)
+            segments. Wider buffer since geometry differences are digitization noise, not
+            real new coverage.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             0 = only direct connections, 1 = direct + 1 hop, 2 = direct + 2 hops.
         transitive_tolerance_m: Tolerance (meters) for transitive connections between
@@ -195,7 +206,8 @@ def detect_orphans_by_proximity(
     Returns:
         Tuple of:
         - main_edges: Reference edges + connected target edges meeting length requirement
-        - orphan_edges: Target edges not connected or too short
+        - disconnected_edges: Target edges not connected to reference network
+        - filtered_edges: Connected target edges with insufficient net-new coverage
         - net_new_edges: GeoDataFrame with net-new geometry portions (for visualization)
         - stats: Statistics including connectivity hop breakdown
     """
@@ -207,7 +219,8 @@ def detect_orphans_by_proximity(
     logger.info(f"  Connection tolerance: {connection_tolerance_m}m")
     logger.info(f"  Transitive tolerance: {transitive_tolerance_m}m")
     logger.info(f"  Min merge length: {min_merge_length_m}m")
-    logger.info(f"  Net-new buffer: {net_new_buffer_m}m")
+    logger.info(f"  Net-new buffer (unmatched): {net_new_buffer_m}m")
+    logger.info(f"  Net-new buffer (matched): {matched_net_new_buffer_m}m")
     logger.info(f"  Max transitive hops: {max_hops}")
 
     # Work in a projected CRS for accurate distance calculations
@@ -231,14 +244,15 @@ def detect_orphans_by_proximity(
         main_edges = reference_edges.copy()
         main_edges["component_status"] = ComponentStatus.MAIN.value
         main_edges["is_connected"] = True
-        orphan_edges = gpd.GeoDataFrame(columns=main_edges.columns, crs=combined_gdf.crs)
+        empty = gpd.GeoDataFrame(columns=main_edges.columns, crs=combined_gdf.crs)
         stats = {
             "total_segments": len(combined_gdf),
             "reference_edges": len(reference_edges),
             "connected_target_edges": 0,
-            "orphan_edges": 0,
+            "disconnected_edges": 0,
+            "filtered_edges": 0,
         }
-        return main_edges, orphan_edges, None, stats
+        return main_edges, empty, empty.copy(), None, stats
 
     # Build spatial index of reference segments
     ref_geoms = reference_edges.geometry.values
@@ -308,26 +322,35 @@ def detect_orphans_by_proximity(
 
     # Filter connected targets by minimum NET NEW length
     net_new_edges = None
+    filtered_targets = gpd.GeoDataFrame(columns=connected_targets.columns, crs=combined_gdf.crs)
     if min_merge_length_m > 0 and len(connected_targets) > 0:
-        # Create a buffer around reference network to define "existing coverage"
-        logger.info(f"  Computing net-new lengths (coverage buffer: {net_new_buffer_m}m)...")
+        logger.info(
+            f"  Computing net-new lengths (unmatched buffer: {net_new_buffer_m}m, "
+            f"matched buffer: {matched_net_new_buffer_m}m)..."
+        )
 
-        ref_union = unary_union(reference_edges.geometry.values)
-        ref_buffered = ref_union.buffer(net_new_buffer_m)
+        ref_index = SpatialIndex(reference_edges.geometry.values)
 
-        # Compute net-new length and geometry for each connected target
         net_new_lengths = []
         net_new_geoms = []
-        for geom in connected_targets.geometry:
+        for _, row in connected_targets.iterrows():
+            geom = row.geometry
             if geom is None or geom.is_empty:
                 net_new_lengths.append(0.0)
                 net_new_geoms.append(None)
                 continue
 
-            # Subtract the reference coverage from the target segment
-            net_new_geom = geom.difference(ref_buffered)
+            # Use wider buffer for matched segments — geometry differences are
+            # digitization noise, not genuine new coverage
+            source = row.get("_source", "")
+            if source == EdgeSource.TARGET_MATCHED.value:
+                buffer = matched_net_new_buffer_m
+            else:
+                buffer = net_new_buffer_m
 
-            if net_new_geom.is_empty:
+            net_new_geom = ref_index.compute_net_new(geom, buffer)
+
+            if net_new_geom is None:
                 net_new_lengths.append(0.0)
                 net_new_geoms.append(None)
             else:
@@ -343,10 +366,7 @@ def detect_orphans_by_proximity(
 
         if len(too_short) > 0:
             too_short["unmatched_reason"] = "insufficient_net_new_length"
-            orphan_targets = gpd.GeoDataFrame(
-                pd.concat([orphan_targets, too_short], ignore_index=True),
-                crs=combined_gdf.crs,
-            )
+            filtered_targets = too_short
             avg_net_new = too_short["_net_new_length_m"].mean()
             logger.info(
                 f"  Insufficient net-new length (<{min_merge_length_m}m): {len(too_short)} "
@@ -356,14 +376,15 @@ def detect_orphans_by_proximity(
         connected_targets = connected_targets[long_enough].copy()
 
         # Build net-new edges GeoDataFrame for visualization
+        # Use the computed _net_new_geometry (subline) not the full segment
         if len(connected_targets) > 0:
             net_new_records = []
             for _, row in connected_targets.iterrows():
-                full_geom = row.geometry
-                if full_geom is not None and not full_geom.is_empty:
+                net_new_geom = row.get("_net_new_geometry")
+                if net_new_geom is not None and not net_new_geom.is_empty:
                     net_new_records.append(
                         {
-                            "geometry": full_geom,
+                            "geometry": net_new_geom,
                             "_original_id": row.get("_original_id"),
                             "_source_dataset": row.get("_source_dataset"),
                             "_net_new_length_m": row.get("_net_new_length_m"),
@@ -376,7 +397,8 @@ def detect_orphans_by_proximity(
                 logger.info(f"  Net-new edges for visualization: {len(net_new_edges)}")
 
     logger.info(f"  Connected target edges (after length filter): {len(connected_targets)}")
-    logger.info(f"  Orphan edges (disconnected/too short): {len(orphan_targets)}")
+    logger.info(f"  Disconnected edges: {len(orphan_targets)}")
+    logger.info(f"  Filtered edges (insufficient net-new): {len(filtered_targets)}")
 
     # Build main edges (reference + connected targets)
     reference_edges["component_status"] = ComponentStatus.MAIN.value
@@ -396,32 +418,27 @@ def detect_orphans_by_proximity(
         if col in main_edges.columns:
             main_edges = main_edges.drop(columns=[col])
 
-    # Mark orphans
-    orphan_targets["component_status"] = ComponentStatus.ORPHAN.value
+    # Mark disconnected segments
+    orphan_targets["component_status"] = ComponentStatus.DISCONNECTED.value
+    orphan_targets["unmatched_reason"] = "not_connected_to_network"
 
-    # Set unmatched_reason for truly disconnected segments (no reason yet)
-    if "unmatched_reason" in orphan_targets.columns:
-        no_reason_mask = orphan_targets["unmatched_reason"].isna()
-        if no_reason_mask.any():
-            orphan_targets.loc[no_reason_mask, "unmatched_reason"] = "not_connected_to_network"
-    else:
-        orphan_targets["unmatched_reason"] = "not_connected_to_network"
+    # Mark filtered segments
+    if len(filtered_targets) > 0:
+        filtered_targets["component_status"] = ComponentStatus.FILTERED.value
+        # unmatched_reason already set to "insufficient_net_new_length" above
 
-    # Drop internal columns from orphans too
+    # Drop internal columns from both
     for col in drop_cols:
         if col in orphan_targets.columns:
             orphan_targets = orphan_targets.drop(columns=[col])
+        if col in filtered_targets.columns:
+            filtered_targets = filtered_targets.drop(columns=[col])
 
-    # Add QA priority to orphans
+    # Add QA priority to both
     if len(orphan_targets) > 0:
         orphan_targets = _add_orphan_qa_priority(orphan_targets, main_edges)
-
-    # Count how many were filtered for being too short
-    too_short_count = (
-        len(orphan_targets[orphan_targets.get("unmatched_reason") == "insufficient_net_new_length"])
-        if "unmatched_reason" in orphan_targets.columns
-        else 0
-    )
+    if len(filtered_targets) > 0:
+        filtered_targets = _add_orphan_qa_priority(filtered_targets, main_edges)
 
     # Count connectivity by hop level
     hop_counts = {}
@@ -435,8 +452,8 @@ def detect_orphans_by_proximity(
         "total_segments": len(combined_gdf),
         "reference_edges": len(reference_edges),
         "connected_target_edges": len(connected_targets),
-        "orphan_edges": len(orphan_targets),
-        "too_short_to_merge": too_short_count,
+        "disconnected_edges": len(orphan_targets),
+        "filtered_edges": len(filtered_targets),
         **hop_counts,
     }
 
@@ -446,12 +463,14 @@ def detect_orphans_by_proximity(
         main_edges = main_edges.to_crs(original_crs)
         if len(orphan_targets) > 0:
             orphan_targets = orphan_targets.to_crs(original_crs)
+        if len(filtered_targets) > 0:
+            filtered_targets = filtered_targets.to_crs(original_crs)
         if net_new_edges is not None and len(net_new_edges) > 0:
             net_new_edges = net_new_edges.to_crs(original_crs)
 
     logger.info(f"Orphan detection complete: {stats}")
 
-    return main_edges, orphan_targets, net_new_edges, stats
+    return main_edges, orphan_targets, filtered_targets, net_new_edges, stats
 
 
 def detect_orphan_components(
@@ -600,7 +619,7 @@ def _annotate_edges_with_components(
         lambda cid: (
             ComponentStatus.MAIN.value
             if cid in main_component_ids
-            else ComponentStatus.ORPHAN.value
+            else ComponentStatus.DISCONNECTED.value
         )
     )
     annotated["component_size"] = annotated["component_id"].map(component_sizes)
@@ -667,7 +686,7 @@ def annotate_nodes_with_components(
         lambda cid: (
             ComponentStatus.MAIN.value
             if cid in main_component_ids
-            else ComponentStatus.ORPHAN.value
+            else ComponentStatus.DISCONNECTED.value
         )
     )
 
