@@ -148,8 +148,8 @@ def _render_pair(request, dataset, datasets, index=0):
 
 @router.get("/")
 async def index():
-    """Redirect root to the labeling page."""
-    return RedirectResponse(url="/labeling", status_code=307)
+    """Redirect root to the dashboard."""
+    return RedirectResponse(url="/dashboard", status_code=307)
 
 
 @router.get("/datasets")

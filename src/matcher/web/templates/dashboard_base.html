@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matcher - {% block title %}Dashboard{% endblock %}</title>
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/static/css/app.css">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body class="dashboard-body">
+    <!-- Hamburger menu (top-right) -->
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"
+            style="position:fixed;top:12px;right:12px;z-index:1100;background:white;box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:8px;">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <nav class="menu hidden" id="menu"
+         style="position:fixed;top:60px;right:12px;z-index:1100;background:white;box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:8px;">
+        <h3>Mode</h3>
+        <ul>
+            <li><a href="/dashboard" class="{% if mode == 'dashboard' %}active{% endif %}">Dashboard</a></li>
+            <li><a href="/labeling" class="{% if mode == 'labeling' %}active{% endif %}">Label Creation</a></li>
+            <li><a href="/review" class="{% if mode == 'review' %}active{% endif %}">Label Review</a></li>
+            <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">Integration QA</a></li>
+        </ul>
+    </nav>
+
+    <div class="dashboard-container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@2.0/dist/htmx.min.js"
+            crossorigin="anonymous"></script>
+
+    <!-- Menu toggle -->
+    <script>
+        document.getElementById('menu-toggle').addEventListener('click', function() {
+            document.getElementById('menu').classList.toggle('hidden');
+        });
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -4,6 +4,7 @@ Provides business logic functions for dataset loading, candidate management,
 label recording, configuration access, and integration QA.
 """
 
+import csv
 import json
 import logging
 import uuid
@@ -18,6 +19,7 @@ from ..labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
     generate_scored_candidates_with_cache,
+    get_feature_cache_info,
     get_feature_cache_path,
     load_geodataframe,
 )
@@ -336,3 +338,141 @@ def record_qa_decision(
             length_m=kwargs.get("length_m", 0.0),
             road_class=kwargs.get("road_class", ""),
         )
+
+
+# --- Dashboard service functions ---
+
+CV_RESULTS_PATH = PROJECT_ROOT / "benchmarks" / "ml_cv_results.csv"
+
+
+def _read_cv_results() -> list[dict]:
+    """Read CV results CSV and return list of row dicts."""
+    if not CV_RESULTS_PATH.exists():
+        return []
+    with open(CV_RESULTS_PATH, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def get_overall_metrics() -> dict | None:
+    """Latest overall CV metrics from benchmarks/ml_cv_results.csv."""
+    rows = _read_cv_results()
+    overall_rows = [r for r in rows if r.get("dataset") == "overall"]
+    if not overall_rows:
+        return None
+    latest = overall_rows[-1]
+    return {
+        "f1_mean": float(latest["f1_mean"]),
+        "f1_std": float(latest["f1_std"]),
+        "accuracy_mean": float(latest["accuracy_mean"]),
+        "precision_mean": float(latest["precision_mean"]),
+        "recall_mean": float(latest["recall_mean"]),
+        "n_samples": int(latest["n_samples"]),
+        "run_date": latest["run_date"],
+    }
+
+
+def get_dataset_metrics() -> list[dict]:
+    """Per-dataset metrics combining labels + CV results + cache status."""
+    datasets = list_datasets()
+    rows = _read_cv_results()
+
+    # Build lookup: dataset -> latest CV row
+    cv_latest: dict[str, dict] = {}
+    for r in rows:
+        ds = r.get("dataset", "")
+        if ds and ds != "overall":
+            cv_latest[ds] = r
+
+    result = []
+    for ds in datasets:
+        store = LabelStore(ds)
+        df = store.df
+        label_count = len(df)
+        label_dist = {"match": 0, "no_match": 0, "unsure": 0}
+        if not df.empty and "label" in df.columns:
+            counts = df["label"].value_counts().to_dict()
+            for k in label_dist:
+                label_dist[k] = int(counts.get(k, 0))
+
+        cv = cv_latest.get(ds)
+        f1 = float(cv["f1_mean"]) if cv else None
+        accuracy = float(cv["accuracy_mean"]) if cv else None
+        n_samples = int(cv["n_samples"]) if cv else None
+
+        cache_info = get_feature_cache_info(ds)
+
+        result.append(
+            {
+                "dataset_id": ds,
+                "label_count": label_count,
+                "label_dist": label_dist,
+                "f1": f1,
+                "accuracy": accuracy,
+                "n_samples": n_samples,
+                "cache_exists": cache_info["exists"],
+                "cache_age_hours": cache_info.get("age_hours"),
+                "cache_is_fresh": cache_info.get("is_fresh"),
+            }
+        )
+
+    result.sort(key=lambda x: x["dataset_id"])
+    return result
+
+
+def get_cv_trends() -> dict:
+    """CV eval time series for Chart.js."""
+    rows = _read_cv_results()
+    overall_rows = [r for r in rows if r.get("dataset") == "overall"]
+    dates = []
+    f1_values = []
+    accuracy_values = []
+    for r in overall_rows:
+        date_str = r["run_date"]
+        # Truncate to date portion for display
+        if "T" in date_str:
+            date_str = date_str.split("T")[0]
+        dates.append(date_str)
+        f1_values.append(float(r["f1_mean"]))
+        accuracy_values.append(float(r["accuracy_mean"]))
+    return {"dates": dates, "f1": f1_values, "accuracy": accuracy_values}
+
+
+def get_dataset_detail(dataset_id: str) -> dict | None:
+    """Detailed info for one dataset."""
+    datasets = list_datasets()
+    if dataset_id not in datasets:
+        return None
+
+    store = LabelStore(dataset_id)
+    df = store.df
+    label_count = len(df)
+    label_dist = {"match": 0, "no_match": 0, "unsure": 0}
+    if not df.empty and "label" in df.columns:
+        counts = df["label"].value_counts().to_dict()
+        for k in label_dist:
+            label_dist[k] = int(counts.get(k, 0))
+
+    # CV metrics
+    rows = _read_cv_results()
+    cv_rows = [r for r in rows if r.get("dataset") == dataset_id]
+    cv = cv_rows[-1] if cv_rows else None
+
+    cache_info = get_feature_cache_info(dataset_id)
+
+    return {
+        "dataset_id": dataset_id,
+        "label_count": label_count,
+        "label_dist": label_dist,
+        "f1": float(cv["f1_mean"]) if cv else None,
+        "f1_std": float(cv["f1_std"]) if cv else None,
+        "accuracy": float(cv["accuracy_mean"]) if cv else None,
+        "precision": float(cv["precision_mean"]) if cv else None,
+        "recall": float(cv["recall_mean"]) if cv else None,
+        "n_samples": int(cv["n_samples"]) if cv else None,
+        "run_date": cv["run_date"] if cv else None,
+        "cache_exists": cache_info["exists"],
+        "cache_age_hours": cache_info.get("age_hours"),
+        "cache_is_fresh": cache_info.get("is_fresh"),
+        "cache_version": cache_info.get("version"),
+        "cache_candidate_count": cache_info.get("candidate_count"),
+    }

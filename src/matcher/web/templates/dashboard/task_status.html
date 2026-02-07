@@ -1,0 +1,16 @@
+{% if task.status in ('starting', 'running') %}
+<div class="task-output" hx-get="/dashboard/task/{{ task_id }}" hx-trigger="every 2s" hx-swap="outerHTML">
+    <span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>
+    {{ task.message }}
+</div>
+{% elif task.status == 'completed' %}
+<div class="task-output task-completed">
+    &#10003; {{ task.message }}
+    {% if task.output %}<pre style="margin-top:4px;font-size:0.8rem;max-height:150px;overflow-y:auto;">{{ task.output }}</pre>{% endif %}
+</div>
+{% elif task.status == 'failed' %}
+<div class="task-output task-failed">
+    &#10007; {{ task.message }}
+    {% if task.output %}<pre style="margin-top:4px;font-size:0.8rem;max-height:150px;overflow-y:auto;">{{ task.output }}</pre>{% endif %}
+</div>
+{% endif %}

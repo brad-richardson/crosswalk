@@ -27,6 +27,7 @@
     <nav class="menu map-overlay hidden" id="menu">
         <h3>Mode</h3>
         <ul>
+            <li><a href="/dashboard" class="{% if mode == 'dashboard' %}active{% endif %}">Dashboard</a></li>
             <li><a href="/labeling" class="{% if mode == 'labeling' %}active{% endif %}">Label Creation</a></li>
             <li><a href="/review" class="{% if mode == 'review' %}active{% endif %}">Label Review</a></li>
             <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">Integration QA</a></li>

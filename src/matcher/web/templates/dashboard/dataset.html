@@ -1,0 +1,93 @@
+{% extends "dashboard_base.html" %}
+{% block title %}{{ dataset }}{% endblock %}
+
+{% block content %}
+<p style="margin-bottom:16px;"><a href="/dashboard">&larr; Back to Dashboard</a></p>
+
+<h2 style="margin-bottom:16px;">{{ dataset }}</h2>
+
+<!-- Metrics card -->
+<div class="metrics-row">
+    <div class="metric-card">
+        <div class="metric-value">{{ detail.label_count }}</div>
+        <div class="metric-label">Labels</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value" style="color:#4caf50;">{{ detail.label_dist.match }}</div>
+        <div class="metric-label">Match</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value" style="color:#f44336;">{{ detail.label_dist.no_match }}</div>
+        <div class="metric-label">No Match</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-value" style="color:#ff9800;">{{ detail.label_dist.unsure }}</div>
+        <div class="metric-label">Unsure</div>
+    </div>
+    {% if detail.f1 is not none %}
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(detail.f1 * 100) }}%</div>
+        <div class="metric-label">F1</div>
+        {% if detail.f1_std is not none %}
+        <div class="metric-sub">&plusmn;{{ "%.1f"|format(detail.f1_std * 100) }}%</div>
+        {% endif %}
+    </div>
+    <div class="metric-card">
+        <div class="metric-value">{{ "%.1f"|format(detail.accuracy * 100) }}%</div>
+        <div class="metric-label">Accuracy</div>
+    </div>
+    {% endif %}
+    <div class="metric-card">
+        <div class="metric-value metric-value-sm">{{ 'Fresh' if detail.cache_is_fresh else ('Stale' if detail.cache_exists else 'None') }}</div>
+        <div class="metric-label">Feature Cache</div>
+        {% if detail.cache_age_hours is not none %}
+        <div class="metric-sub">{{ detail.cache_age_hours|round(1) }}h old</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Data actions -->
+<h3 style="margin:24px 0 12px;">Data Actions</h3>
+<div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <form hx-post="/dashboard/task/fetch" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="fetch_type" value="target">
+        <button type="submit" class="action-btn">Fetch Target Data</button>
+    </form>
+    <form hx-post="/dashboard/task/fetch" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="fetch_type" value="reference">
+        <button type="submit" class="action-btn">Fetch Reference Data</button>
+    </form>
+    <form hx-post="/dashboard/task/fetch" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="fetch_type" value="all">
+        <button type="submit" class="action-btn">Fetch All Data</button>
+    </form>
+</div>
+
+<!-- ML actions -->
+<h3 style="margin:24px 0 12px;">ML Actions</h3>
+<div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <form hx-post="/dashboard/task/features" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <button type="submit" class="action-btn">Regenerate Features</button>
+    </form>
+    <form hx-post="/dashboard/task/features" hx-target="#task-area" hx-swap="innerHTML">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="force" value="true">
+        <button type="submit" class="action-btn">Force Regenerate Features</button>
+    </form>
+</div>
+
+<!-- Task status area -->
+<div id="task-area" style="margin-top:16px;"></div>
+
+<!-- Quick links -->
+<h3 style="margin:24px 0 12px;">Quick Links</h3>
+<div style="display:flex;gap:8px;">
+    <a href="/labeling?dataset={{ dataset }}" class="action-btn" style="text-decoration:none;">Labeling</a>
+    <a href="/review?dataset={{ dataset }}" class="action-btn" style="text-decoration:none;">Review</a>
+    <a href="/qa?dataset={{ dataset }}" class="action-btn" style="text-decoration:none;">QA</a>
+</div>
+{% endblock %}
