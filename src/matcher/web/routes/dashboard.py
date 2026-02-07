@@ -28,6 +28,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 # Project root for CLI commands
 PROJECT_ROOT = Path(__file__).parents[4]
 
+VALID_FETCH_TYPES = {"target", "reference", "all"}
+VALID_CACHE_TYPES = {"features", "candidates", "integration", "all"}
+MAX_COMPLETED_TASKS = 50
+
 # Background task state
 _tasks: dict[str, dict] = {}
 _task_lock = threading.Lock()
@@ -70,6 +74,14 @@ def _run_subprocess(task_id: str, cmd: list[str], description: str) -> None:
             _tasks[task_id]["output"] = str(e)
 
 
+def _prune_tasks() -> None:
+    """Remove oldest completed/failed tasks beyond MAX_COMPLETED_TASKS. Caller holds _task_lock."""
+    done = [tid for tid, t in _tasks.items() if t["status"] in ("completed", "failed")]
+    if len(done) > MAX_COMPLETED_TASKS:
+        for tid in done[: len(done) - MAX_COMPLETED_TASKS]:
+            del _tasks[tid]
+
+
 def _start_task(cmd: list[str], description: str) -> str:
     """Start a background task and return its ID."""
     task_id = str(uuid.uuid4())[:8]
@@ -80,6 +92,7 @@ def _start_task(cmd: list[str], description: str) -> str:
             "output": "",
             "description": description,
         }
+        _prune_tasks()
     thread = threading.Thread(
         target=_run_subprocess,
         args=(task_id, cmd, description),
@@ -163,6 +176,8 @@ async def task_fetch(
     fetch_type: str = Form("target"),
 ):
     """Start a data fetch task."""
+    if fetch_type not in VALID_FETCH_TYPES:
+        return HTMLResponse(status_code=400, content="Invalid fetch type")
     if dataset not in list_datasets():
         return HTMLResponse(status_code=404, content="Unknown dataset")
     cmd = ["uv", "run", "matcher", "data", "fetch", fetch_type, dataset]
@@ -223,33 +238,40 @@ async def task_clear_cache(
     cache_type: str = Form("all"),
 ):
     """Clear caches directly (not via subprocess)."""
+    if cache_type not in VALID_CACHE_TYPES:
+        return HTMLResponse(status_code=400, content="Invalid cache type")
+
     task_id = str(uuid.uuid4())[:8]
     cleared = []
+    errors = []
 
     from ..services import PROJECT_ROOT as PROJ
 
-    if cache_type in ("features", "all"):
-        cache_dir = PROJ / "cache" / "features"
+    cache_dirs = {"features": "features", "candidates": "candidates", "integration": "integration"}
+    for name, dirname in cache_dirs.items():
+        if cache_type not in (name, "all"):
+            continue
+        cache_dir = PROJ / "cache" / dirname
         if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-            cleared.append("features")
+            try:
+                shutil.rmtree(cache_dir)
+                cleared.append(name)
+            except OSError as e:
+                logger.exception("Failed to clear %s cache", name)
+                errors.append(f"{name}: {e}")
 
-    if cache_type in ("candidates", "all"):
-        cache_dir = PROJ / "cache" / "candidates"
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-            cleared.append("candidates")
-
-    if cache_type in ("integration", "all"):
-        cache_dir = PROJ / "cache" / "integration"
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-            cleared.append("integration")
+    status = "failed" if errors else "completed"
+    parts = []
+    if cleared:
+        parts.append(f"Cleared: {', '.join(cleared)}")
+    if errors:
+        parts.append(f"Errors: {'; '.join(errors)}")
+    message = ". ".join(parts) if parts else "No caches found"
 
     with _task_lock:
         _tasks[task_id] = {
-            "status": "completed",
-            "message": f"Cleared caches: {', '.join(cleared) if cleared else 'none found'}",
+            "status": status,
+            "message": message,
             "output": "",
             "description": f"Clear {cache_type} caches",
         }
