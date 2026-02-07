@@ -39,6 +39,14 @@
             <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{{ ds }}</option>
             {% endfor %}
         </select>
+
+        <hr>
+        <label for="labeler-name">Labeler</label>
+        <input id="labeler-name" type="text" value="{{ request.state.labeler_name }}"
+               hx-post="/settings/labeler"
+               hx-trigger="change"
+               hx-swap="none"
+               name="name">
     </nav>
 
     <!-- Overlay content block for HTMX swaps -->

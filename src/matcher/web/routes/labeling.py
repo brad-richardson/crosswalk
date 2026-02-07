@@ -1,6 +1,7 @@
 """Labeling mode routes for the matcher web UI."""
 
 import json
+import json as _json
 import logging
 from pathlib import Path
 
@@ -23,6 +24,8 @@ VALID_LABELS = {"match", "no_match", "unsure"}
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
+
+_CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
 # Module-level cache for loaded candidates per dataset
 _candidate_cache: dict[str, list] = {}
@@ -247,3 +250,17 @@ async def undo_label(
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)
+
+
+@router.post("/settings/labeler")
+async def set_labeler_name(name: str = Form(...)):
+    """Save labeler name to config file."""
+    config = {}
+    if _CONFIG_FILE.exists():
+        try:
+            config = _json.loads(_CONFIG_FILE.read_text())
+        except Exception:
+            pass
+    config["labeler_name"] = name
+    _CONFIG_FILE.write_text(_json.dumps(config))
+    return HTMLResponse(status_code=204)
