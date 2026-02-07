@@ -1,0 +1,63 @@
+{% if edge %}
+<div class="info-card map-overlay" id="edge-card">
+    <h4>Edge {{ edge.edge_id }}</h4>
+    <div class="pair-names">
+        <div class="pair-row">
+            <span class="pair-label gers-label">Type</span>
+            <span class="pair-name">{{ edge.layer|replace("_", " ")|title }}</span>
+        </div>
+        {% if edge.road_class %}
+        <div class="pair-row">
+            <span class="pair-label local-label">Class</span>
+            <span class="pair-name">{{ edge.road_class }}</span>
+        </div>
+        {% endif %}
+        {% if edge.length_m %}
+        <div class="pair-row">
+            <span class="pair-class">Length: {{ "%.1f"|format(edge.length_m) }}m</span>
+        </div>
+        {% endif %}
+        {% if edge.original_id %}
+        <div class="pair-row">
+            <span class="pair-id">ID: {{ edge.original_id }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <form id="qa-form">
+        <!-- Hidden inputs for edge metadata -->
+        <input type="hidden" name="edge_id" value="{{ edge.edge_id }}">
+        <input type="hidden" name="original_id" value="{{ edge.original_id }}">
+        <input type="hidden" name="dataset" value="{{ dataset }}">
+        <input type="hidden" name="edge_type" value="{{ edge_type }}">
+
+        <!-- Notes textarea -->
+        <div style="margin: 8px 0;">
+            <textarea name="note" id="qa-note" rows="2" placeholder="Optional note..."
+                      style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; resize: vertical;"></textarea>
+        </div>
+
+        <!-- Accept / Reject buttons -->
+        <div class="decision-buttons">
+            <button type="button" class="btn-match"
+                    hx-post="/qa/decision"
+                    hx-include="closest form"
+                    hx-vals='{"decision": "correct", "reason": "accepted"}'
+                    hx-target="#edge-detail"
+                    hx-swap="innerHTML">
+                Accept
+            </button>
+            <button type="button" class="btn-no-match"
+                    hx-post="/qa/decision"
+                    hx-include="closest form"
+                    hx-vals='{"decision": "incorrect", "reason": "rejected"}'
+                    hx-target="#edge-detail"
+                    hx-swap="innerHTML">
+                Reject
+            </button>
+        </div>
+    </form>
+</div>
+{% else %}
+<div></div>
+{% endif %}
