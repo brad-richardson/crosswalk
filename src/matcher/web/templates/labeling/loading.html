@@ -1,0 +1,13 @@
+<div class="info-card map-overlay" id="pair-card"
+     hx-get="/labeling/status?dataset={{ dataset }}"
+     hx-trigger="every 2s"
+     hx-target="#pair-content"
+     hx-swap="innerHTML">
+    <h4>Loading candidates...</h4>
+    <p>Computing features for <strong>{{ dataset }}</strong>. This may take a few minutes.</p>
+    <div class="spinner" style="width: 28px; height: 28px; border-width: 3px; margin: 8px auto;"></div>
+</div>
+
+{% if request.headers.get('HX-Request') %}
+<span id="pair-progress" hx-swap-oob="innerHTML">Loading...</span>
+{% endif %}

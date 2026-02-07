@@ -185,5 +185,3 @@ class TestMergedDecisionStore:
         assert stats["total"] == 2
         assert stats["correct"] == 1
         assert stats["incorrect"] == 1
-
-

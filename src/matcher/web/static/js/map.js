@@ -57,27 +57,27 @@
         .addTo(map);
 
     // --- Pair geometry layer group ---
-    var pairLayer = L.layerGroup().addTo(map);
+    var pairLayer = L.featureGroup().addTo(map);
 
     // Style definitions for geometry types
     var styles = {
-        gers: {
+        reference: {
             color: "#2196F3",
             weight: 4,
             opacity: 0.9,
         },
-        local: {
+        target: {
             color: "#FF5722",
             weight: 4,
             opacity: 0.9,
             dashArray: "8, 6",
         },
-        gersFull: {
+        referenceFull: {
             color: "#2196F3",
             weight: 2,
             opacity: 0.3,
         },
-        localFull: {
+        targetFull: {
             color: "#FF5722",
             weight: 2,
             opacity: 0.3,
@@ -90,10 +90,10 @@
      *
      * Expected JSON structure:
      * {
-     *   "gers": <GeoJSON>,
-     *   "local": <GeoJSON>,
-     *   "gers_full": <GeoJSON> (optional),
-     *   "local_full": <GeoJSON> (optional)
+     *   "reference": <GeoJSON>,
+     *   "target": <GeoJSON>,
+     *   "reference_full": <GeoJSON> (optional),
+     *   "target_full": <GeoJSON> (optional)
      * }
      */
     function showPairGeometry(geojsonData) {
@@ -114,49 +114,58 @@
         }
 
         // Add full geometries first (underneath, faded)
-        if (data.gers_full) {
-            L.geoJSON(data.gers_full, { style: styles.gersFull }).addTo(pairLayer);
+        if (data.reference_full) {
+            L.geoJSON(data.reference_full, { style: styles.referenceFull }).addTo(pairLayer);
         }
-        if (data.local_full) {
-            L.geoJSON(data.local_full, { style: styles.localFull }).addTo(pairLayer);
+        if (data.target_full) {
+            L.geoJSON(data.target_full, { style: styles.targetFull }).addTo(pairLayer);
         }
 
         // Add primary geometries on top
-        if (data.gers) {
-            L.geoJSON(data.gers, { style: styles.gers }).addTo(pairLayer);
+        if (data.reference) {
+            L.geoJSON(data.reference, { style: styles.reference }).addTo(pairLayer);
         }
-        if (data.local) {
-            L.geoJSON(data.local, { style: styles.local }).addTo(pairLayer);
+        if (data.target) {
+            L.geoJSON(data.target, { style: styles.target }).addTo(pairLayer);
         }
 
-        // Fit map bounds to the pair with padding
-        var bounds = pairLayer.getBounds();
+        // Fit map bounds to the aligned sublines (not full segments)
+        var sublineBounds = L.featureGroup();
+        if (data.reference) {
+            L.geoJSON(data.reference).addTo(sublineBounds);
+        }
+        if (data.target) {
+            L.geoJSON(data.target).addTo(sublineBounds);
+        }
+        var bounds = sublineBounds.getBounds();
         if (bounds.isValid()) {
             map.fitBounds(bounds, { padding: [60, 60] });
         }
     }
 
-    // --- Initial geometry load ---
-    // Read geometry from the page on first load (before any HTMX swaps)
-    document.addEventListener("DOMContentLoaded", function () {
-        var geomEl = document.querySelector("[data-geometry]");
-        if (geomEl) {
-            showPairGeometry(geomEl.dataset.geometry);
+    /**
+     * Read geometry from a <script type="application/json" id="pair-geometry">
+     * element and render it on the map.
+     */
+    function loadPairGeometry() {
+        var el = document.getElementById("pair-geometry");
+        if (el) {
+            try {
+                var data = JSON.parse(el.textContent);
+                showPairGeometry(data);
+            } catch (e) {
+                console.error("Failed to parse pair geometry:", e);
+            }
         }
-    });
+    }
+
+    // --- Initial load ---
+    loadPairGeometry();
 
     // --- HTMX integration ---
-    // After HTMX swaps in new content, check for geometry data and display it
-    document.addEventListener("htmx:afterSwap", function (event) {
-        var target = event.detail.target;
-        if (!target) return;
-
-        // Look for data-geometry attribute in the swapped content
-        var geometryEl = target.querySelector("[data-geometry]");
-        if (geometryEl) {
-            var geojsonStr = geometryEl.getAttribute("data-geometry");
-            showPairGeometry(geojsonStr);
-        }
+    // After HTMX swaps in new content, re-read the geometry data
+    document.addEventListener("htmx:afterSwap", function () {
+        loadPairGeometry();
     });
 
     // Expose map and helpers for console debugging

@@ -16,7 +16,7 @@ from shapely.geometry import LineString
 from shapely.ops import transform
 
 from ..blocking import generate_candidates
-from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
+from ..config import FEATURE_COLUMNS, FEATURE_VERSION, default_worker_count, settings
 from ..features.alignment import create_subline
 from ..features.semantic import _extract_name_string
 from ..filenames import feature_cache_path, scored_cache_path
@@ -530,8 +530,6 @@ def compute_features_only(
         - ref_start_frac, ref_end_frac, target_start_frac, target_end_frac (alignment)
         - All features from FEATURE_COLUMNS
     """
-    import multiprocessing as mp
-
     import numpy as np
 
     from ..config import DEFAULT_TOPOLOGY_FEATURES
@@ -714,7 +712,7 @@ def compute_features_only(
 
     # Determine number of workers
     if n_jobs == -1:
-        n_workers = max(1, mp.cpu_count() - 2)
+        n_workers = default_worker_count()
     else:
         n_workers = n_jobs
 

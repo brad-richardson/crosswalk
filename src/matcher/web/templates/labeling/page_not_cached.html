@@ -1,0 +1,13 @@
+{% extends "labeling/page.html" %}
+
+{% block pair_content %}
+    {% include "labeling/not_cached.html" %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<!-- Auto-open the menu so user can see dataset context -->
+<script>
+    document.getElementById('menu').classList.remove('hidden');
+</script>
+{% endblock %}

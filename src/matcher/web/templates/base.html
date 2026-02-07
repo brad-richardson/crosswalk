@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Matcher - {{ mode|default('Labeling')|title }}</title>
+    <title>Matcher - {% if mode == 'labeling' %}Label Creation{% elif mode == 'review' %}Label Review{% elif mode == 'qa' %}Integration QA{% else %}Label Creation{% endif %}</title>
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css"
@@ -27,9 +27,9 @@
     <nav class="menu map-overlay hidden" id="menu">
         <h3>Mode</h3>
         <ul>
-            <li><a href="/labeling" class="{% if mode == 'labeling' %}active{% endif %}">Labeling</a></li>
-            <li><a href="/review" class="{% if mode == 'review' %}active{% endif %}">Review</a></li>
-            <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">QA</a></li>
+            <li><a href="/labeling" class="{% if mode == 'labeling' %}active{% endif %}">Label Creation</a></li>
+            <li><a href="/review" class="{% if mode == 'review' %}active{% endif %}">Label Review</a></li>
+            <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">Integration QA</a></li>
         </ul>
 
         <h3>Dataset</h3>
@@ -40,6 +40,15 @@
             {% endfor %}
         </select>
 
+        {% if dataset %}
+        <form method="post" action="/labeling/refresh" style="margin-top: 8px;">
+            <input type="hidden" name="dataset" value="{{ dataset }}">
+            <button type="submit" class="menu-btn" onclick="showLoading('Recomputing candidates\u2026')">
+                Refresh candidates
+            </button>
+        </form>
+        {% endif %}
+
         <hr>
         <label for="labeler-name">Labeler</label>
         <input id="labeler-name" type="text" value="{{ request.state.labeler_name }}"
@@ -48,6 +57,14 @@
                hx-swap="none"
                name="name">
     </nav>
+
+    <!-- Loading overlay (covers entire screen during dataset loads) -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-card">
+            <span class="spinner"></span>
+            <span id="loading-text">Loading...</span>
+        </div>
+    </div>
 
     <!-- Overlay content block for HTMX swaps -->
     <div id="overlay-content">
@@ -78,9 +95,26 @@
             document.getElementById('menu').classList.toggle('hidden');
         });
 
+        function showLoading(message) {
+            var overlay = document.getElementById('loading-overlay');
+            if (overlay) {
+                overlay.classList.remove('hidden');
+                document.getElementById('loading-text').textContent = message || 'Loading\u2026';
+            }
+        }
+
         function switchDataset(datasetId) {
-            // Navigate to the current mode's URL with the selected dataset
-            var path = window.location.pathname.split('?')[0];
+            // Guard: don't reload if we're already on this dataset
+            var currentDataset = new URLSearchParams(window.location.search).get('dataset') || '';
+            if ((datasetId || '') === (currentDataset || '')) return;
+
+            showLoading('Loading dataset\u2026');
+
+            // Disable picker to prevent double-switches
+            var picker = document.getElementById('dataset-picker');
+            if (picker) picker.disabled = true;
+
+            var path = window.location.pathname;
             if (!path || path === '/') path = '/labeling';
             if (datasetId) {
                 window.location.href = path + '?dataset=' + encodeURIComponent(datasetId);
