@@ -12,6 +12,18 @@ from loguru import logger
 
 from .provenance import IntegrationResult, IntegrationStatistics
 
+# Legacy files that should be removed on new runs
+_LEGACY_FILES = ["orphans.parquet"]
+
+
+def _cleanup_stale_files(output_dir: Path) -> None:
+    """Remove legacy files from previous pipeline versions."""
+    for name in _LEGACY_FILES:
+        path = output_dir / name
+        if path.exists():
+            path.unlink()
+            logger.info(f"Removed legacy file: {path}")
+
 
 def write_integration_outputs(
     result: IntegrationResult,
@@ -22,7 +34,8 @@ def write_integration_outputs(
     Creates:
     - nodes.parquet: All nodes with component annotations
     - edges.parquet: All edges with provenance and component annotations
-    - orphans.parquet: Orphan edges for QA review
+    - disconnected.parquet: Truly disconnected segments for QA review
+    - filtered.parquet: Connected segments with insufficient net-new coverage
     - net_new.parquet: Net-new geometry portions (for visualization)
     - dropped_overlaps.parquet: Segments dropped due to priority conflicts
     - statistics.json: Integration statistics
@@ -37,6 +50,9 @@ def write_integration_outputs(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Clean up legacy files from previous runs
+    _cleanup_stale_files(output_dir)
+
     output_paths = {}
 
     # Write nodes
@@ -49,10 +65,15 @@ def write_integration_outputs(
     _write_edges(result.edges, edges_path)
     output_paths["edges"] = edges_path
 
-    # Write orphans
-    orphans_path = output_dir / "orphans.parquet"
-    _write_orphans(result.orphan_edges, orphans_path)
-    output_paths["orphans"] = orphans_path
+    # Write disconnected edges
+    disconnected_path = output_dir / "disconnected.parquet"
+    _write_orphan_layer(result.disconnected_edges, disconnected_path, "disconnected")
+    output_paths["disconnected"] = disconnected_path
+
+    # Write filtered edges
+    filtered_path = output_dir / "filtered.parquet"
+    _write_orphan_layer(result.filtered_edges, filtered_path, "filtered")
+    output_paths["filtered"] = filtered_path
 
     # Write dropped overlaps
     dropped_path = output_dir / "dropped_overlaps.parquet"
@@ -60,10 +81,13 @@ def write_integration_outputs(
     output_paths["dropped_overlaps"] = dropped_path
 
     # Write net-new edges (geometry portions that add new coverage)
-    if result.net_new_edges is not None:
-        net_new_path = output_dir / "net_new.parquet"
+    net_new_path = output_dir / "net_new.parquet"
+    if result.net_new_edges is not None and len(result.net_new_edges) > 0:
         _write_net_new(result.net_new_edges, net_new_path)
         output_paths["net_new"] = net_new_path
+    elif net_new_path.exists():
+        net_new_path.unlink()
+        logger.info(f"Removed stale {net_new_path} (no net-new edges this run)")
 
     # Write statistics
     stats_path = output_dir / "statistics.json"
@@ -121,10 +145,10 @@ def _write_edges(edges: gpd.GeoDataFrame, path: Path) -> None:
     logger.info(f"Wrote {len(edges)} edges to {path}")
 
 
-def _write_orphans(orphans: gpd.GeoDataFrame, path: Path) -> None:
-    """Write orphan edges to parquet for QA."""
-    if orphans is None or len(orphans) == 0:
-        logger.info("No orphan edges to write")
+def _write_orphan_layer(gdf: gpd.GeoDataFrame, path: Path, label: str) -> None:
+    """Write a disconnected or filtered edges layer to parquet for QA."""
+    if gdf is None or len(gdf) == 0:
+        logger.info(f"No {label} edges to write")
         # Write empty file with schema
         empty = gpd.GeoDataFrame(
             columns=[
@@ -142,8 +166,8 @@ def _write_orphans(orphans: gpd.GeoDataFrame, path: Path) -> None:
         empty.to_parquet(path)
         return
 
-    orphans.to_parquet(path)
-    logger.info(f"Wrote {len(orphans)} orphan edges to {path}")
+    gdf.to_parquet(path)
+    logger.info(f"Wrote {len(gdf)} {label} edges to {path}")
 
 
 def _write_dropped_overlaps(dropped: gpd.GeoDataFrame, path: Path) -> None:
@@ -215,9 +239,14 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
     edges_path = output_dir / "edges.parquet"
     edges = gpd.read_parquet(edges_path) if edges_path.exists() else gpd.GeoDataFrame()
 
-    # Load orphans
-    orphans_path = output_dir / "orphans.parquet"
-    orphans = gpd.read_parquet(orphans_path) if orphans_path.exists() else gpd.GeoDataFrame()
+    # Load disconnected and filtered edges
+    disconnected_path = output_dir / "disconnected.parquet"
+    disconnected = (
+        gpd.read_parquet(disconnected_path) if disconnected_path.exists() else gpd.GeoDataFrame()
+    )
+
+    filtered_path = output_dir / "filtered.parquet"
+    filtered = gpd.read_parquet(filtered_path) if filtered_path.exists() else gpd.GeoDataFrame()
 
     # Load dropped overlaps
     dropped_path = output_dir / "dropped_overlaps.parquet"
@@ -244,7 +273,8 @@ def load_integration_result(output_dir: Path) -> IntegrationResult:
     return IntegrationResult(
         nodes=nodes,
         edges=edges,
-        orphan_edges=orphans,
+        disconnected_edges=disconnected,
+        filtered_edges=filtered,
         dropped_overlaps=dropped,
         net_new_edges=net_new,
         statistics=statistics,

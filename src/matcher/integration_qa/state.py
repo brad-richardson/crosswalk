@@ -17,6 +17,7 @@ class QASession:
     reviewer_name: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     current_view: str = "orphans"  # "orphans" or "merged"
+    basemap: str = "Light"  # "Light", "Satellite", "OpenStreetMap"
     current_index: int = 0
     filter_by_component: int | None = None
     filter_by_source: str | None = None

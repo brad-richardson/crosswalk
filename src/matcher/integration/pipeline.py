@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 from loguru import logger
 
 from ..config import settings
@@ -20,7 +21,7 @@ from ..post_integration.constants import SNAP_TOLERANCE_M
 from ..resolution.bridge import load_bridge_file
 from ..screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
 from ..screen.tests.fringe_test import filter_fringe_segments
-from .combiner import combine_networks, separate_matched_unmatched
+from .combiner import combine_networks, extract_unmatched_remnants, separate_matched_unmatched
 from .filters import detect_near_duplicates, filter_short_segments
 from .orphan_detector import detect_orphans_by_proximity
 from .output import write_integration_outputs
@@ -52,6 +53,7 @@ def run_integration_pipeline(
     connection_tolerance_m: float = 3.0,
     min_merge_length_m: float = 20.0,
     net_new_buffer_m: float = 5.0,
+    matched_net_new_buffer_m: float = 15.0,
     max_hops: int = 2,
     fringe_buffer_m: float = FRINGE_BUFFER_M,
     enable_fringe_screening: bool = True,
@@ -87,8 +89,11 @@ def run_integration_pipeline(
             Default 3m requires actual physical connection to infrastructure.
         min_merge_length_m: Minimum net-new length (meters) to merge a segment.
             Connected segments with less than this much new coverage are orphaned.
-        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation.
-            Segments within this buffer are considered "covered" by reference.
+        net_new_buffer_m: Buffer distance (meters) around reference for net-new calculation
+            of unmatched segments. Segments within this buffer are considered "covered".
+        matched_net_new_buffer_m: Buffer distance (meters) for matched segments' net-new
+            calculation. Wider than net_new_buffer_m because matched segments have known
+            correspondence and geometry differences are digitization noise.
         max_hops: Maximum transitive connectivity hops from reference (default 2).
             Segments connected via other target segments are included up to this depth.
         fringe_buffer_m: Buffer distance (meters) around reference coverage for fringe
@@ -150,6 +155,20 @@ def run_integration_pipeline(
             # For matched, we need the full target - create empty if not provided
             matched = gpd.GeoDataFrame()
 
+        # Extract unmatched remnants from partially-matched segments
+        if len(matched) > 0:
+            remnants = extract_unmatched_remnants(
+                matched, match_results, target_id_column, min_segment_length_m
+            )
+            if len(remnants) > 0:
+                logger.info(
+                    f"    Extracted {len(remnants)} unmatched remnants from partial matches"
+                )
+                unmatched = gpd.GeoDataFrame(
+                    pd.concat([unmatched, remnants], ignore_index=True),
+                    crs=unmatched.crs,
+                )
+
         # Apply length filter
         if min_segment_length_m > 0:
             unmatched, filtered_short = filter_short_segments(unmatched, min_segment_length_m)
@@ -159,7 +178,7 @@ def run_integration_pipeline(
         # Detect near-duplicates
         if filter_near_duplicates_flag and len(matched) > 0 and len(unmatched) > 0:
             unmatched, duplicates = detect_near_duplicates(
-                unmatched, matched, target_id_column=target_id_column
+                unmatched, matched, id_column=target_id_column
             )
             if len(duplicates) > 0:
                 logger.info(f"    Detected {len(duplicates)} potential near-duplicates")
@@ -204,18 +223,21 @@ def run_integration_pipeline(
     # Step 4: Detect orphans by endpoint proximity (connectivity analysis)
     # Note: Fringe detection is now done in pre-screening step above
     logger.info("Step 4: Detecting orphans by endpoint proximity...")
-    main_edges, orphan_edges, net_new_edges, orphan_stats = detect_orphans_by_proximity(
-        combined_gdf,
-        connection_tolerance_m=connection_tolerance_m,
-        min_merge_length_m=min_merge_length_m,
-        net_new_buffer_m=net_new_buffer_m,
-        max_hops=max_hops,
-        transitive_tolerance_m=transitive_tolerance_m,
-        debug_connectivity=debug_connectivity,
+    main_edges, disconnected_edges, filtered_edges, net_new_edges, orphan_stats = (
+        detect_orphans_by_proximity(
+            combined_gdf,
+            connection_tolerance_m=connection_tolerance_m,
+            min_merge_length_m=min_merge_length_m,
+            net_new_buffer_m=net_new_buffer_m,
+            matched_net_new_buffer_m=matched_net_new_buffer_m,
+            max_hops=max_hops,
+            transitive_tolerance_m=transitive_tolerance_m,
+            debug_connectivity=debug_connectivity,
+        )
     )
     stats.main_component_edges = len(main_edges)
-    stats.orphan_edges = len(orphan_edges)
-    stats.orphan_components = len(orphan_edges)  # Each orphan is its own "component"
+    stats.disconnected_edges = len(disconnected_edges)
+    stats.filtered_edges = len(filtered_edges)
 
     # Step 4.5: Optional post-integration analysis
     island_result = None
@@ -263,7 +285,8 @@ def run_integration_pipeline(
     result = IntegrationResult(
         nodes=gpd.GeoDataFrame(),  # No nodes without planarization
         edges=main_edges,
-        orphan_edges=orphan_edges,
+        disconnected_edges=disconnected_edges,
+        filtered_edges=filtered_edges,
         dropped_overlaps=dropped_overlaps,
         net_new_edges=net_new_edges,
         statistics=stats,
@@ -282,7 +305,8 @@ def run_integration_pipeline(
     logger.info(f"  Dropped overlaps: {stats.dropped_overlaps}")
     logger.info(f"  Total edges: {stats.total_edges}")
     logger.info(f"  Main (connected) edges: {stats.main_component_edges}")
-    logger.info(f"  Orphan edges: {stats.orphan_edges}")
+    logger.info(f"  Disconnected edges: {stats.disconnected_edges}")
+    logger.info(f"  Filtered edges: {stats.filtered_edges}")
     logger.info("=" * 60)
 
     # Log detailed layer summary with lengths
@@ -314,7 +338,8 @@ def run_integration_pipeline(
     _layer_stats(main_edges, "Matched (target)", "target_matched")
     _layer_stats(main_edges, "To Merge (connected)", "target_new")
     _layer_stats(net_new_edges, "Net New Coverage")
-    _layer_stats(orphan_edges, "Orphan")
+    _layer_stats(disconnected_edges, "Disconnected")
+    _layer_stats(filtered_edges, "Filtered (short net-new)")
     logger.info("")
 
     return result

@@ -1,8 +1,5 @@
 """Integration workflow commands."""
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -28,7 +25,7 @@ def integrate_run(
         ...,
         "--target",
         "-t",
-        help="Target dataset: name:bridge_path:unmatched_path:priority (can specify multiple)",
+        help="Target dataset: name:bridge_path:unmatched_path:priority[:target_path] (can specify multiple). Optional target_path enables partial-match remnant extraction.",
     ),
     output_dir: Path = typer.Option(
         Path("data/integrated"),
@@ -65,7 +62,12 @@ def integrate_run(
     net_new_buffer_m: float = typer.Option(
         5.0,
         "--net-new-buffer-m",
-        help="Buffer around reference (meters) for net-new calculation",
+        help="Buffer around reference (meters) for net-new calculation (unmatched segments)",
+    ),
+    matched_net_new_buffer_m: float = typer.Option(
+        15.0,
+        "--matched-net-new-buffer-m",
+        help="Buffer around reference (meters) for net-new calculation (matched segments)",
     ),
     max_hops: int = typer.Option(
         2,
@@ -131,19 +133,24 @@ def integrate_run(
         target_configs = []
         for t in target:
             parts = t.split(":")
-            if len(parts) != 4:
+            if len(parts) == 5:
+                name, bridge_path, unmatched_path, priority, target_path = parts
+            elif len(parts) == 4:
+                name, bridge_path, unmatched_path, priority = parts
+                target_path = None
+            else:
                 console.print(
-                    "[red]Error: Target must be name:bridge_path:unmatched_path:priority[/red]"
+                    "[red]Error: Target must be name:bridge_path:unmatched_path:priority[:target_path][/red]"
                 )
                 raise typer.Exit(1)
 
-            name, bridge_path, unmatched_path, priority = parts
             target_configs.append(
                 TargetConfig(
                     name=name,
                     bridge_path=Path(bridge_path),
                     unmatched_path=Path(unmatched_path),
                     priority=int(priority),
+                    target_path=Path(target_path) if target_path else None,
                 )
             )
 
@@ -169,6 +176,7 @@ def integrate_run(
                 connection_tolerance_m=connection_tolerance_m,
                 min_merge_length_m=min_merge_length_m,
                 net_new_buffer_m=net_new_buffer_m,
+                matched_net_new_buffer_m=matched_net_new_buffer_m,
                 max_hops=max_hops,
                 fringe_buffer_m=fringe_buffer_m,
                 enable_fringe_screening=not no_fringe_filter,
@@ -188,75 +196,7 @@ def integrate_run(
     console.print(f"  Total nodes: {stats.total_nodes}")
     console.print(f"  Total edges: {stats.total_edges}")
     console.print(f"  Main component edges: {stats.main_component_edges}")
-    console.print(f"  Orphan edges: {stats.orphan_edges}")
-    console.print(f"  Orphan components: {stats.orphan_components}")
+    console.print(f"  Disconnected edges: {stats.disconnected_edges}")
+    console.print(f"  Filtered edges: {stats.filtered_edges}")
     console.print()
     console.print(f"[green]Outputs saved to {output_dir}[/green]")
-
-
-@integrate_app.command("qa")
-def integrate_qa(
-    output_dir: Path = typer.Option(
-        Path("data/integrated"),
-        "--output",
-        "-o",
-        help="Integration output directory",
-    ),
-    port: int = typer.Option(
-        8502,
-        "--port",
-        "-p",
-        help="Streamlit server port",
-    ),
-    host: str = typer.Option(
-        "localhost",
-        "--host",
-        "-H",
-        help="Server host (use 0.0.0.0 to expose on all interfaces)",
-    ),
-):
-    """Launch the integration QA app.
-
-    Review orphan components and merged edges from the integration pipeline.
-
-    Example:
-        matcher integrate qa -o data/integrated
-        matcher integrate qa -o data/integrated --host 0.0.0.0
-    """
-    # Set environment variables
-    env = {
-        **os.environ,
-        "INTEGRATION_DIR": str(output_dir.absolute()),
-    }
-
-    # Find the app.py path
-    app_path = Path(__file__).parent.parent / "integration_qa" / "app.py"
-
-    if not app_path.exists():
-        console.print(f"[red]Error: QA app not found at {app_path}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[blue]Starting integration QA on port {port}...[/blue]")
-    console.print(f"  Integration output: {output_dir}")
-    console.print()
-    display_host = "localhost" if host == "0.0.0.0" else host
-    console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
-
-    # Launch Streamlit
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(app_path),
-            "--server.port",
-            str(port),
-            "--server.address",
-            host,
-        ],
-        env=env,
-    )
-    if result.returncode != 0:
-        console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
-        raise typer.Exit(result.returncode)

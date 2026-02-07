@@ -12,7 +12,7 @@ Architecture:
 
 # Re-export fringe functions from screen module for backward compatibility
 from ..screen.tests.fringe_test import compute_reference_coverage, filter_fringe_segments
-from .combiner import combine_networks, separate_matched_unmatched
+from .combiner import combine_networks, extract_unmatched_remnants, separate_matched_unmatched
 from .filters import detect_near_duplicates, filter_by_road_class, filter_short_segments
 from .orphan_detector import (
     detect_orphan_components,
@@ -44,6 +44,7 @@ __all__ = [
     "run_integration_from_config",
     # Combiner
     "combine_networks",
+    "extract_unmatched_remnants",
     "separate_matched_unmatched",
     # Filters
     "filter_short_segments",

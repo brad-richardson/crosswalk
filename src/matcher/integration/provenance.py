@@ -24,7 +24,8 @@ class ComponentStatus(Enum):
     """Status of a connected component after integration."""
 
     MAIN = "main"  # Connected to reference network
-    ORPHAN = "orphan"  # Disconnected, flagged for QA review
+    DISCONNECTED = "disconnected"  # Not connected to reference network
+    FILTERED = "filtered"  # Connected but insufficient net-new coverage
 
 
 @dataclass
@@ -83,8 +84,8 @@ class IntegrationStatistics:
         total_nodes: Total nodes after planarization
         total_edges: Total edges after planarization
         main_component_edges: Edges in main connected component
-        orphan_edges: Edges in orphan components
-        orphan_components: Number of orphan components
+        disconnected_edges: Edges truly disconnected from network
+        filtered_edges: Edges connected but with insufficient net-new coverage
         datasets_integrated: List of dataset names integrated
     """
 
@@ -95,8 +96,8 @@ class IntegrationStatistics:
     total_nodes: int = 0
     total_edges: int = 0
     main_component_edges: int = 0
-    orphan_edges: int = 0
-    orphan_components: int = 0
+    disconnected_edges: int = 0
+    filtered_edges: int = 0
     datasets_integrated: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -109,8 +110,8 @@ class IntegrationStatistics:
             "total_nodes": self.total_nodes,
             "total_edges": self.total_edges,
             "main_component_edges": self.main_component_edges,
-            "orphan_edges": self.orphan_edges,
-            "orphan_components": self.orphan_components,
+            "disconnected_edges": self.disconnected_edges,
+            "filtered_edges": self.filtered_edges,
             "datasets_integrated": self.datasets_integrated,
         }
 
@@ -122,7 +123,8 @@ class IntegrationResult:
     Attributes:
         nodes: GeoDataFrame of all nodes with component annotations
         edges: GeoDataFrame of all edges with provenance and component annotations
-        orphan_edges: GeoDataFrame of edges in orphan components (for QA)
+        disconnected_edges: GeoDataFrame of edges truly disconnected from network
+        filtered_edges: GeoDataFrame of edges connected but insufficient net-new coverage
         dropped_overlaps: GeoDataFrame of segments dropped due to priority conflicts
         net_new_edges: GeoDataFrame of net-new geometry portions (for visualization)
         statistics: Integration statistics
@@ -131,7 +133,8 @@ class IntegrationResult:
 
     nodes: gpd.GeoDataFrame
     edges: gpd.GeoDataFrame
-    orphan_edges: gpd.GeoDataFrame
+    disconnected_edges: gpd.GeoDataFrame
+    filtered_edges: gpd.GeoDataFrame
     dropped_overlaps: gpd.GeoDataFrame
     statistics: IntegrationStatistics
     net_new_edges: gpd.GeoDataFrame | None = None
@@ -151,6 +154,6 @@ PROVENANCE_COLUMNS = {
 # Column names for component tracking
 COMPONENT_COLUMNS = {
     "component_id": "Connected component ID",
-    "component_status": "main or orphan",
+    "component_status": "main, disconnected, or filtered",
     "component_size": "Number of edges in the component",
 }

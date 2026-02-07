@@ -1,13 +1,23 @@
 """Streamlit app for integration QA."""
 
-import os
+import logging
 from pathlib import Path
 
 import geopandas as gpd
 import streamlit as st
 from streamlit_folium import st_folium
 
+from matcher.datasets.schema import get_dataset_config, list_dataset_configs
+from matcher.filenames import (
+    PROJECT_ROOT,
+    bridge_filename,
+    find_overture_segments,
+    find_target_file,
+    integration_cache_dir,
+    unmatched_filename,
+)
 from matcher.integration.output import load_integration_result
+from matcher.integration_qa.browse_view import render_browse_view
 from matcher.integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from matcher.integration_qa.edge_panel import (
     render_decision_buttons,
@@ -17,6 +27,184 @@ from matcher.integration_qa.edge_panel import (
 )
 from matcher.integration_qa.map_view import create_integration_map
 from matcher.integration_qa.state import QASession, load_reviewer_name, save_reviewer_name
+
+logger = logging.getLogger(__name__)
+
+
+def _list_datasets() -> list[tuple[str, str]]:
+    """List available datasets with display names.
+
+    Returns:
+        List of (dataset_name, display_label) tuples, sorted by display_label.
+    """
+    names = list_dataset_configs()
+    result = []
+    for name in names:
+        config = get_dataset_config(name)
+        if config and config.display_name:
+            label = f"{config.display_name} ({name})"
+        else:
+            label = name
+        result.append((name, label))
+    result.sort(key=lambda x: x[1])
+    return result
+
+
+def _find_integration_inputs(
+    dataset_name: str,
+) -> tuple[Path, Path, Path, Path | None] | str:
+    """Find reference, bridge, unmatched, and target files for a dataset.
+
+    Searches for bridge/unmatched in two locations:
+    1. data/output/{name}_bridge.parquet + {name}_unmatched.parquet
+    2. data/output/{name}/bridge.parquet + unmatched.parquet (subdir convention)
+
+    Also locates the full target file so the integration pipeline can
+    extract matched geometries from the bridge.
+
+    Returns:
+        (reference_path, bridge_path, unmatched_path, target_path) or error message string.
+        target_path may be None if the raw target file doesn't exist.
+    """
+    raw_dir = PROJECT_ROOT / "data" / "raw"
+    output_dir = PROJECT_ROOT / "data" / "output"
+
+    ref = find_overture_segments(raw_dir, dataset_name)
+    if not ref:
+        return f"Reference (Overture) segments not found for {dataset_name}"
+
+    # Locate full target file (optional but important for matched edge extraction)
+    target = find_target_file(raw_dir, dataset_name)
+
+    # Try flat layout: data/output/{name}_bridge.parquet
+    bridge = output_dir / bridge_filename(dataset_name)
+    if bridge.exists():
+        unmatched = output_dir / unmatched_filename(dataset_name)
+        if not unmatched.exists():
+            # Also check generic unmatched sibling
+            unmatched = output_dir / "unmatched.parquet"
+        if unmatched.exists():
+            return ref, bridge, unmatched, target
+
+    # Try subdir layout: data/output/{name}/bridge.parquet
+    subdir = output_dir / dataset_name
+    bridge_sub = subdir / "bridge.parquet"
+    if bridge_sub.exists():
+        unmatched_sub = subdir / "unmatched.parquet"
+        if unmatched_sub.exists():
+            return ref, bridge_sub, unmatched_sub, target
+
+    return (
+        f"Bridge file not found for {dataset_name}. Click **Run Match + Integrate** to generate it."
+    )
+
+
+def _find_matching_inputs(dataset_name: str) -> tuple[Path, Path] | str:
+    """Find reference and target raw files for running the matching pipeline.
+
+    Returns:
+        (reference_path, target_path) or error message string.
+    """
+    raw_dir = PROJECT_ROOT / "data" / "raw"
+
+    ref = find_overture_segments(raw_dir, dataset_name)
+    if not ref:
+        return f"Reference (Overture) segments not found in {raw_dir}"
+
+    target = find_target_file(raw_dir, dataset_name)
+    if not target:
+        return f"Target data file not found for {dataset_name} in {raw_dir}"
+
+    return ref, target
+
+
+def _run_matching(dataset_name: str, ref: Path, target: Path) -> tuple[Path, Path]:
+    """Run the matching pipeline to produce bridge and unmatched files.
+
+    Outputs to data/output/{dataset_name}/ to avoid filename collisions.
+
+    Returns:
+        (bridge_path, unmatched_path)
+    """
+    from matcher.pipeline.runner import run_pipeline
+
+    output_dir = PROJECT_ROOT / "data" / "output" / dataset_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    bridge_path = output_dir / "bridge.parquet"
+    run_pipeline(
+        reference_path=ref,
+        target_path=target,
+        output_path=bridge_path,
+        method="xgboost",
+    )
+
+    unmatched_path = output_dir / "unmatched.parquet"
+    return bridge_path, unmatched_path
+
+
+def _run_integration(
+    dataset_name: str,
+    ref: Path,
+    bridge: Path,
+    unmatched: Path,
+    target: Path | None = None,
+) -> bool:
+    """Run integration pipeline, store results in cache.
+
+    Args:
+        dataset_name: Dataset identifier
+        ref: Reference (Overture) segments path
+        bridge: Bridge file path (match results)
+        unmatched: Unmatched segments path
+        target: Full target data path (needed to extract matched geometries)
+
+    Returns:
+        True on success, raises on failure.
+    """
+    from matcher.integration import TargetConfig, run_integration_pipeline
+
+    output_dir = integration_cache_dir(dataset_name)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    config = TargetConfig(
+        name=dataset_name,
+        bridge_path=bridge,
+        unmatched_path=unmatched,
+        priority=1,
+        target_path=target,
+    )
+    run_integration_pipeline(
+        reference_path=ref,
+        target_configs=[config],
+        output_dir=output_dir,
+        target_id_column="id",
+    )
+    return True
+
+
+def _get_dataset_status(dataset_name: str) -> str:
+    """Get integration status for a dataset.
+
+    Returns:
+        "cached" if integration results exist,
+        "ready" if integration inputs (bridge/unmatched) are available,
+        "needs_matching" if raw data exists but matching hasn't been run,
+        "missing" if raw data files are missing.
+    """
+    cache_dir = integration_cache_dir(dataset_name)
+    if (cache_dir / "edges.parquet").exists():
+        return "cached"
+
+    integration_inputs = _find_integration_inputs(dataset_name)
+    if not isinstance(integration_inputs, str):
+        return "ready"
+
+    matching_inputs = _find_matching_inputs(dataset_name)
+    if not isinstance(matching_inputs, str):
+        return "needs_matching"
+
+    return "missing"
 
 
 def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
@@ -32,13 +220,114 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
 
     session = st.session_state.qa_session
 
-    # Integration output directory
-    integration_dir = st.text_input(
-        "Integration Output Directory",
-        value=os.environ.get("INTEGRATION_DIR", "data/integrated"),
-        help="Directory containing edges.parquet, orphans.parquet, etc.",
-        key="qa_integration_dir",
+    # Dataset selector
+    datasets = _list_datasets()
+    if not datasets:
+        st.warning("No datasets found in datasets/*.yaml")
+        return "", session
+
+    dataset_labels = [label for _, label in datasets]
+    dataset_names = [name for name, _ in datasets]
+
+    # Restore selected index from URL param, then session state
+    selected_idx = 0
+    url_dataset = st.query_params.get("dataset")
+    if url_dataset and url_dataset in dataset_names:
+        selected_idx = dataset_names.index(url_dataset)
+    elif "qa_selected_dataset" in st.session_state:
+        prev = st.session_state.qa_selected_dataset
+        if prev in dataset_names:
+            selected_idx = dataset_names.index(prev)
+
+    chosen_idx = st.selectbox(
+        "Dataset",
+        range(len(dataset_labels)),
+        index=selected_idx,
+        format_func=lambda i: dataset_labels[i],
+        key="qa_dataset_selector",
     )
+    dataset_name = dataset_names[chosen_idx]
+    st.session_state.qa_selected_dataset = dataset_name
+    st.query_params["dataset"] = dataset_name
+
+    # Status indicator
+    status = _get_dataset_status(dataset_name)
+    status_labels = {
+        "cached": "Cached",
+        "ready": "Ready to integrate",
+        "needs_matching": "Needs matching",
+        "missing": "Missing raw data",
+    }
+    st.caption(f"Status: {status_labels.get(status, status)}")
+
+    # Integration directory (derived from cache)
+    integration_dir = str(integration_cache_dir(dataset_name))
+
+    # Action buttons based on status
+    if status == "cached":
+        if st.button("Re-run Integration", key="qa_run_integration"):
+            inputs = _find_integration_inputs(dataset_name)
+            if isinstance(inputs, str):
+                st.error(inputs)
+            else:
+                ref, bridge, unmatched, target = inputs
+                with st.spinner("Running integration pipeline..."):
+                    try:
+                        _run_integration(dataset_name, ref, bridge, unmatched, target)
+                        st.success("Integration complete!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Integration failed: {e}")
+
+    elif status == "ready":
+        if st.button("Run Integration", type="primary", key="qa_run_integration"):
+            inputs = _find_integration_inputs(dataset_name)
+            if isinstance(inputs, str):
+                st.error(inputs)
+            else:
+                ref, bridge, unmatched, target = inputs
+                with st.spinner("Running integration pipeline..."):
+                    try:
+                        _run_integration(dataset_name, ref, bridge, unmatched, target)
+                        st.success("Integration complete!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Integration failed: {e}")
+
+    elif status == "needs_matching":
+        if st.button("Run Match + Integrate", type="primary", key="qa_run_match_integrate"):
+            match_inputs = _find_matching_inputs(dataset_name)
+            if isinstance(match_inputs, str):
+                st.error(match_inputs)
+            else:
+                ref, target = match_inputs
+                try:
+                    with st.spinner("Running matching pipeline (this may take a while)..."):
+                        bridge, unmatched = _run_matching(dataset_name, ref, target)
+                    with st.spinner("Running integration pipeline..."):
+                        _run_integration(dataset_name, ref, bridge, unmatched, target)
+                    st.success("Match + Integration complete!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Pipeline failed: {e}")
+
+    elif status == "missing":
+        match_inputs = _find_matching_inputs(dataset_name)
+        if isinstance(match_inputs, str):
+            st.info(match_inputs)
+
+    st.divider()
+
+    # Basemap selector
+    basemap = st.radio(
+        "Basemap",
+        ["Light", "Satellite", "OpenStreetMap"],
+        index=["Light", "Satellite", "OpenStreetMap"].index(session.basemap),
+        horizontal=True,
+        key="qa_basemap_selector",
+    )
+    if basemap != session.basemap:
+        session.basemap = basemap
 
     # Reviewer name
     reviewer = st.text_input(
@@ -51,29 +340,6 @@ def render_integration_qa_sidebar() -> tuple[str, "QASession"]:
         session.reviewer_name = reviewer
         save_reviewer_name(reviewer)
 
-    # Load data button (forces a rerun when clicked)
-    st.button(
-        "Load Integration Data",
-        type="primary",
-        key="qa_load_integration_data",
-    )
-
-    st.divider()
-
-    # View selection
-    view = st.radio(
-        "View",
-        ["Orphans", "Merged Edges"],
-        index=0 if session.current_view == "orphans" else 1,
-        key="qa_view_selector",
-    )
-    new_view = "orphans" if view == "Orphans" else "merged"
-    if new_view != session.current_view:
-        session.current_view = new_view
-        # Reset index and clear click state when view changes
-        session.current_index = 0
-        st.session_state.pop("qa_last_processed_click", None)
-
     return integration_dir, session
 
 
@@ -84,23 +350,93 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
         integration_dir: Path to integration output directory
         session: QA session state
     """
-    # Load data
     integration_path = Path(integration_dir)
-    if not integration_path.exists():
-        st.error(f"Integration directory not found: {integration_dir}")
-        st.info("Run the integration pipeline first: `matcher integrate ...`")
+    if not integration_path.exists() or not (integration_path / "edges.parquet").exists():
+        st.info(
+            "No integration results for this dataset. "
+            "Select a dataset and click **Run Integration** in the sidebar."
+        )
         return
 
     # Load integration result
     try:
         result = load_integration_result(integration_path)
         edges = result.edges
-        orphan_edges = result.orphan_edges
+        disconnected_edges = result.disconnected_edges
+        filtered_edges = result.filtered_edges
         net_new_edges = result.net_new_edges
     except Exception as e:
         st.error(f"Error loading integration result: {e}")
         return
 
+    # Summary metrics bar — compute from actual loaded data (pipeline stats
+    # reflect pre-orphan-detection counts which can be misleading)
+    n_matched = (
+        int((edges["_source"] == "target_matched").sum())
+        if edges is not None and "_source" in edges.columns
+        else 0
+    )
+    n_unmatched = (
+        int((edges["_source"] == "target_new").sum())
+        if edges is not None and "_source" in edges.columns
+        else 0
+    )
+    n_disconnected = len(disconnected_edges) if disconnected_edges is not None else 0
+    n_filtered = len(filtered_edges) if filtered_edges is not None else 0
+    n_total = (len(edges) if edges is not None else 0) + n_disconnected + n_filtered
+
+    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+    col_m1.metric("Total Edges", n_total)
+    col_m2.metric("Matched", n_matched)
+    col_m3.metric("Unmatched", n_unmatched)
+    col_m4.metric("Disconnected", n_disconnected)
+    col_m5.metric("Filtered", n_filtered)
+
+    # Two tabs: Browse Map (default) and Edge Review
+    tab_browse, tab_review = st.tabs(["Browse Map", "Edge Review"])
+
+    with tab_browse:
+        render_browse_view(
+            edges=edges,
+            disconnected_edges=disconnected_edges,
+            filtered_edges=filtered_edges,
+            net_new_edges=net_new_edges,
+            basemap=session.basemap,
+        )
+
+    with tab_review:
+        _render_review_view(edges, disconnected_edges, filtered_edges, net_new_edges, session)
+
+
+def _render_review_view(
+    edges: gpd.GeoDataFrame,
+    disconnected_edges: gpd.GeoDataFrame,
+    filtered_edges: gpd.GeoDataFrame,
+    net_new_edges: gpd.GeoDataFrame | None,
+    session: "QASession",
+) -> None:
+    """Render the existing edge-by-edge review view.
+
+    This is the original review flow, now in a tab.
+    """
+    # Combine disconnected + filtered for orphan review (they share the same QA flow)
+    import pandas as pd
+
+    if disconnected_edges is not None and filtered_edges is not None:
+        orphan_edges = (
+            gpd.GeoDataFrame(
+                pd.concat([disconnected_edges, filtered_edges], ignore_index=True),
+                crs=disconnected_edges.crs if disconnected_edges.crs else filtered_edges.crs,
+            )
+            if len(disconnected_edges) > 0 or len(filtered_edges) > 0
+            else gpd.GeoDataFrame()
+        )
+    elif disconnected_edges is not None:
+        orphan_edges = disconnected_edges
+    elif filtered_edges is not None:
+        orphan_edges = filtered_edges
+    else:
+        orphan_edges = gpd.GeoDataFrame()
     # Initialize decision stores
     labels_dir = Path("data/labels")
     orphan_store = OrphanDecisionStore(labels_dir / "integration_orphans.parquet")
@@ -110,6 +446,20 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
     reviewed_orphan_ids = orphan_store.get_reviewed_edges(session.reviewer_name)
     reviewed_merged_ids = merged_store.get_reviewed_edges(session.reviewer_name)
 
+    # View selection
+    view = st.radio(
+        "Review Mode",
+        ["Orphans", "Merged Edges"],
+        index=0 if session.current_view == "orphans" else 1,
+        horizontal=True,
+        key="qa_review_view_selector",
+    )
+    new_view = "orphans" if view == "Orphans" else "merged"
+    if new_view != session.current_view:
+        session.current_view = new_view
+        session.current_index = 0
+        st.session_state.pop("qa_last_processed_click", None)
+
     # Main content area
     col_map, col_details = st.columns([3, 1])
 
@@ -118,7 +468,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
         if session.current_view == "orphans":
             filtered_edges = orphan_edges.copy() if orphan_edges is not None else gpd.GeoDataFrame()
 
-            # Use _original_id as edge identifier
             id_col = "edge_id" if "edge_id" in filtered_edges.columns else "_original_id"
             if (
                 not session.show_reviewed
@@ -146,15 +495,12 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                 ]
 
             display_edges = filtered_edges
-            _current_store = orphan_store  # noqa: F841 - reserved for future use
             is_orphan = True
         else:
-            # Filter to non-reference edges
             filtered_edges = edges.copy() if edges is not None else gpd.GeoDataFrame()
             if len(filtered_edges) > 0:
                 filtered_edges = filtered_edges[filtered_edges["_source"] != "reference"]
 
-            # Use _original_id as edge identifier
             id_col = "edge_id" if "edge_id" in filtered_edges.columns else "_original_id"
             if (
                 not session.show_reviewed
@@ -169,7 +515,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                 ]
 
             display_edges = filtered_edges
-            _current_store = merged_store  # noqa: F841 - reserved for future use
             is_orphan = False
 
         # Navigation
@@ -178,10 +523,8 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                 f"{'Orphan' if is_orphan else 'Merged'} Edges ({len(display_edges)} remaining)"
             )
 
-            # Clamp current_index to valid range first
             session.current_index = min(session.current_index, len(display_edges) - 1)
 
-            # Get current edge
             current_edge = display_edges.iloc[session.current_index]
             current_edge_dict = current_edge.to_dict()
 
@@ -189,27 +532,24 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
             selected_id = current_edge.get("edge_id", current_edge.get("_original_id"))
             m = create_integration_map(
                 edges=edges,
-                orphan_edges=orphan_edges if is_orphan else None,
                 net_new_edges=net_new_edges,
                 selected_edge_id=selected_id,
+                disconnected_edges=disconnected_edges if is_orphan else None,
+                filtered_edges=filtered_edges if is_orphan else None,
             )
-            # Use a stable key based on view type to reduce unnecessary map recreation
-            # The key changes when we switch views, but stays stable during navigation
             map_key = f"qa_map_{session.current_view}"
             map_data = st_folium(
                 m, width=None, height=500, returned_objects=["last_clicked"], key=map_key
             )
 
-            # Handle map clicks - find nearest edge and select it
+            # Handle map clicks
             if map_data and map_data.get("last_clicked"):
                 click_lat = map_data["last_clicked"]["lat"]
                 click_lon = map_data["last_clicked"]["lng"]
                 click_key = f"{click_lat:.6f},{click_lon:.6f}"
 
-                # Only process if this is a new click (not the same as last processed)
                 last_click = st.session_state.get("qa_last_processed_click")
                 if click_key != last_click:
-                    # Find nearest edge in display_edges
                     from shapely.geometry import Point
 
                     click_point = Point(click_lon, click_lat)
@@ -223,21 +563,17 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                                 min_dist = dist
                                 nearest_pos = pos
 
-                    # If click is reasonably close to an edge (within ~0.001 degrees ≈ 100m)
                     if nearest_pos is not None and min_dist < 0.001:
-                        # Always update the processed click to prevent re-processing
                         st.session_state.qa_last_processed_click = click_key
                         if nearest_pos != session.current_index:
                             session.current_index = nearest_pos
                             st.rerun()
                     else:
-                        # Click was not near any edge - still update to prevent re-processing
                         st.session_state.qa_last_processed_click = click_key
 
-            # Navigation controls (below map)
+            # Navigation controls
             col_prev, col_idx, col_next = st.columns([1, 2, 1])
 
-            # Check if at boundaries for navigation feedback
             at_start = session.current_index == 0
             at_end = session.current_index >= len(display_edges) - 1
 
@@ -247,7 +583,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                     st.rerun()
 
             with col_idx:
-                # Show position indicator with total count
                 st.caption(f"Edge {session.current_index + 1} of {len(display_edges)}")
                 new_index = st.number_input(
                     "Index",
@@ -266,22 +601,18 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)
                     st.rerun()
 
-            # Show end of list indicator
             if at_end:
-                st.info("📍 Last edge in filtered list. Apply different filters to see more.")
+                st.info("Last edge in filtered list. Apply different filters to see more.")
 
             # Decision buttons and edge details in right panel
             with col_details:
-                # Decision callback (defined first so it can be used by buttons)
+
                 def on_decision(decision: str, reason: str):
-                    # Use _original_id if edge_id not available
                     edge_id_val = current_edge.get("edge_id", current_edge.get("_original_id", 0))
                     try:
                         edge_id_int = int(edge_id_val) if edge_id_val else 0
                     except (ValueError, TypeError):
-                        edge_id_int = hash(str(edge_id_val)) % (
-                            10**9
-                        )  # Create numeric ID from string
+                        edge_id_int = hash(str(edge_id_val)) % (10**9)
 
                     if is_orphan:
                         orphan_store.add_decision(
@@ -332,7 +663,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                             road_class=str(current_edge.get("road_class", "")),
                         )
 
-                    # Save undo action
                     session.push_undo(
                         {
                             "type": "orphan" if is_orphan else "merged",
@@ -340,14 +670,11 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                         }
                     )
 
-                    # Move to next
                     session.current_index = min(len(display_edges) - 1, session.current_index + 1)
                     st.rerun()
 
-                # Decision buttons FIRST (most important)
                 render_decision_buttons(is_orphan, on_decision)
 
-                # Undo button
                 if st.button("Undo (Z)", key="qa_undo"):
                     undo_action = session.pop_undo()
                     if undo_action:
@@ -357,17 +684,16 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                             merged_store.remove_last()
                         st.rerun()
 
-                # Edge details below decision
                 render_edge_details(current_edge_dict, is_orphan)
 
-                # Filters in expander
                 with st.expander("Filters", expanded=False):
                     new_show_reviewed = st.checkbox(
-                        "Show reviewed", value=session.show_reviewed, key="qa_filter_show_reviewed"
+                        "Show reviewed",
+                        value=session.show_reviewed,
+                        key="qa_filter_show_reviewed",
                     )
                     if new_show_reviewed != session.show_reviewed:
                         session.show_reviewed = new_show_reviewed
-                        # Reset index and clear click state when filter changes
                         session.current_index = 0
                         st.session_state.pop("qa_last_processed_click", None)
                         st.rerun()
@@ -382,7 +708,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                         new_priority = None if priority_filter == "All" else priority_filter.lower()
                         if new_priority != session.filter_by_priority:
                             session.filter_by_priority = new_priority
-                            # Reset index and clear click state when filter changes
                             session.current_index = 0
                             st.session_state.pop("qa_last_processed_click", None)
                             st.rerun()
@@ -404,39 +729,35 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                             )
                             if new_component != session.filter_by_component:
                                 session.filter_by_component = new_component
-                                # Reset index and clear click state when filter changes
                                 session.current_index = 0
                                 st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
                     else:
                         if edges is not None and len(edges) > 0:
-                            datasets = sorted(edges["_source_dataset"].dropna().unique())
+                            all_datasets = sorted(edges["_source_dataset"].dropna().unique())
                             dataset_filter = st.selectbox(
                                 "Source Dataset",
-                                ["All"] + list(datasets),
+                                ["All"] + list(all_datasets),
                                 index=0,
                                 key="qa_filter_dataset",
                             )
                             new_source = None if dataset_filter == "All" else dataset_filter
                             if new_source != session.filter_by_source:
                                 session.filter_by_source = new_source
-                                # Reset index and clear click state when filter changes
                                 session.current_index = 0
                                 st.session_state.pop("qa_last_processed_click", None)
                                 st.rerun()
 
-                # Statistics in expander
                 with st.expander("Statistics", expanded=False):
                     render_stats(orphan_store.get_stats(), merged_store.get_stats())
 
-                # Map legend / help
                 with st.expander("Help / Legend", expanded=False):
                     render_map_legend()
 
         else:
             st.info("No edges to review. All done or adjust filters.")
 
-    # Keyboard shortcuts (via JavaScript)
+    # Keyboard shortcuts
     st.markdown(
         """
         <script>
@@ -457,7 +778,6 @@ def render_integration_qa_content(integration_dir: str, session: "QASession") ->
                     document.querySelector('button[kind="secondary"]')?.click();
                     break;
                 case 'z':
-                    // Find undo button by text
                     const buttons = document.querySelectorAll('button');
                     buttons.forEach(b => {
                         if (b.textContent.includes('Undo')) b.click();

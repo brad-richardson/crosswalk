@@ -34,11 +34,11 @@ class TestTopLevelCommands:
         assert result.exit_code == 0
         assert "Train" in result.output
 
-    def test_label_help(self):
-        """Test label command is at top level."""
-        result = runner.invoke(app, ["label", "--help"])
+    def test_ui_help(self):
+        """Test ui command is at top level."""
+        result = runner.invoke(app, ["ui", "--help"])
         assert result.exit_code == 0
-        assert "labeling" in result.output.lower()
+        assert "ui" in result.output.lower() or "labeling" in result.output.lower()
 
     def test_match_eval_help(self):
         """Test match-eval command is at top level."""
@@ -148,19 +148,12 @@ class TestIntegrateCommandGroup:
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "run" in output.lower()
-        assert "qa" in output.lower()
 
     def test_integrate_run_help(self):
         """Test integrate run command."""
         result = runner.invoke(app, ["integrate", "run", "--help"])
         assert result.exit_code == 0
         assert "Integrate" in result.output
-
-    def test_integrate_qa_help(self):
-        """Test integrate qa command."""
-        result = runner.invoke(app, ["integrate", "qa", "--help"])
-        assert result.exit_code == 0
-        assert "QA" in result.output or "qa" in result.output.lower()
 
 
 class TestClassCommandGroup:
@@ -314,7 +307,7 @@ class TestMainAppStructure:
         # Top-level commands
         assert "match" in output.lower()
         assert "train" in output.lower()
-        assert "label" in output.lower()
+        assert "ui" in output.lower()
         assert "match-eval" in output.lower()
         assert "screen" in output.lower()
         assert "version" in output.lower()
@@ -370,7 +363,18 @@ class TestOldCommandsRemoved:
         assert "No such command" in result.output
 
     def test_old_qa_integration_not_at_top_level(self):
-        """Old 'matcher qa-integration' should not work (now integrate qa)."""
+        """Old 'matcher qa-integration' should not work (now matcher ui)."""
         result = runner.invoke(app, ["qa-integration", "--help"])
         assert result.exit_code != 0
         assert "No such command" in result.output
+
+    def test_old_label_not_at_top_level(self):
+        """Old 'matcher label' should not work (now matcher ui)."""
+        result = runner.invoke(app, ["label", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_integrate_qa_not_available(self):
+        """Old 'matcher integrate qa' should not work (now matcher ui)."""
+        result = runner.invoke(app, ["integrate", "qa", "--help"])
+        assert result.exit_code != 0

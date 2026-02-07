@@ -18,6 +18,9 @@ PROJECT_ROOT = Path(__file__).parents[2]
 # Cache directory for labeling UI
 LABELING_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "labeling"
 
+# Cache directory for integration results
+INTEGRATION_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "integration"
+
 # ============================================================================
 # FILENAME PATTERNS (with version suffix)
 # ============================================================================
@@ -66,6 +69,14 @@ def osm_connectors_filename(name: str) -> str:
 def bridge_filename(dataset_name: str) -> str:
     """Bridge file filename (no version suffix - output files)."""
     return f"{dataset_name}_bridge.parquet"
+
+
+def unmatched_filename(dataset_name: str) -> str:
+    """Unmatched segments filename (no version suffix - output files).
+
+    Example: us_boston_streets -> us_boston_streets_unmatched.parquet
+    """
+    return f"{dataset_name}_unmatched.parquet"
 
 
 # ============================================================================
@@ -211,3 +222,23 @@ def feature_cache_path(dataset_id: str) -> Path:
         us_boston_streets -> data/cache/labeling/us_boston_streets_features_v2026-01-24.parquet
     """
     return LABELING_CACHE_DIR / f"{dataset_id}_features_v{FEATURE_VERSION}.parquet"
+
+
+# ============================================================================
+# CACHE PATHS (integration QA)
+# ============================================================================
+
+
+def integration_cache_dir(dataset_name: str) -> Path:
+    """Get integration cache directory for a dataset.
+
+    Args:
+        dataset_name: Dataset identifier (e.g., "us_boston_streets")
+
+    Returns:
+        Path to cache directory (may not exist)
+
+    Example:
+        us_boston_streets -> data/cache/integration/us_boston_streets/
+    """
+    return INTEGRATION_CACHE_DIR / dataset_name

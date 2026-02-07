@@ -357,6 +357,16 @@ class MatcherSettings(BaseSettings):
         "Otherwise, uses geometry-only model if available.",
     )
 
+    # Training data validation
+    training_max_centroid_distance_m: float = Field(
+        default=500.0,
+        description="Max centroid distance for valid training pairs (meters)",
+    )
+    training_max_hausdorff_m: float = Field(
+        default=1000.0,
+        description="Max Hausdorff distance for valid training pairs (meters)",
+    )
+
     # Error handling settings
     error_hard_fail_threshold: float = Field(
         default=0.50,

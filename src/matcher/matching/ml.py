@@ -792,6 +792,8 @@ class MLMatcher:
         exclude_features: list[str] | None = None,
         agent_weight: float = 0.0,
         min_agent_confidence: float = 0.0,
+        max_centroid_distance_m: float = 500.0,
+        max_hausdorff_m: float = 1000.0,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
@@ -811,6 +813,10 @@ class MLMatcher:
                          When > 0, agent labels are included with this sample weight.
             min_agent_confidence: Minimum confidence threshold for including agent labels.
                                  Only agent labels with confidence >= this value are included.
+            max_centroid_distance_m: Max centroid distance for valid training pairs (meters).
+                                    Pairs exceeding this are dropped as corrupted.
+            max_hausdorff_m: Max Hausdorff distance for valid training pairs (meters).
+                            Pairs exceeding this are dropped as corrupted.
             **kwargs: Additional XGBoost parameters
 
         Returns:
@@ -901,6 +907,13 @@ class MLMatcher:
         df = df[df["label"].isin(valid_labels)].copy()
         logger.info(f"After filtering to valid labels: {len(df)} pairs")
 
+        # Validate feature plausibility (drop corrupted/stale pairs)
+        df = self._validate_training_pairs(
+            df,
+            max_centroid_distance_m=max_centroid_distance_m,
+            max_hausdorff_m=max_hausdorff_m,
+        )
+
         # Initialize sample weights (human labels get weight 1.0)
         sample_weights = np.ones(len(df), dtype=np.float32)
         n_human = len(df)
@@ -959,6 +972,13 @@ class MLMatcher:
                                 logger.info(
                                     f"Merged {len(agent_with_features)} agent labels with features "
                                     f"({len(agent_labels) - len(agent_with_features)} missing features)"
+                                )
+
+                                # Validate agent labels too
+                                agent_with_features = self._validate_training_pairs(
+                                    agent_with_features,
+                                    max_centroid_distance_m=max_centroid_distance_m,
+                                    max_hausdorff_m=max_hausdorff_m,
                                 )
 
                                 # Create agent sample weights
@@ -1245,6 +1265,87 @@ class MLMatcher:
             y = df["label"].map(self.label_encoder).values
 
         return X, y
+
+    def _validate_training_pairs(
+        self,
+        df: pd.DataFrame,
+        max_centroid_distance_m: float = 500.0,
+        max_hausdorff_m: float = 1000.0,
+    ) -> pd.DataFrame:
+        """Validate training pairs and drop those with implausible features.
+
+        Detects pairs with corrupted or stale geometry lookups by checking
+        feature values against physically plausible thresholds.
+
+        Args:
+            df: Training DataFrame with feature columns
+            max_centroid_distance_m: Max allowed centroid distance (default 500m)
+            max_hausdorff_m: Max allowed Hausdorff distance (default 1000m)
+
+        Returns:
+            Filtered DataFrame with implausible pairs removed
+        """
+        n_before = len(df)
+        drop_mask = pd.Series(False, index=df.index)
+
+        # Check centroid distance
+        if "centroid_distance_m" in df.columns:
+            bad_centroid = df["centroid_distance_m"].notna() & (
+                df["centroid_distance_m"] > max_centroid_distance_m
+            )
+            if bad_centroid.any():
+                logger.warning(
+                    f"Validation: {bad_centroid.sum()} pairs with "
+                    f"centroid_distance_m > {max_centroid_distance_m}m"
+                )
+            drop_mask |= bad_centroid
+
+        # Check Hausdorff distance
+        if "hausdorff_distance_m" in df.columns:
+            bad_hausdorff = df["hausdorff_distance_m"].notna() & (
+                df["hausdorff_distance_m"] > max_hausdorff_m
+            )
+            if bad_hausdorff.any():
+                logger.warning(
+                    f"Validation: {bad_hausdorff.sum()} pairs with "
+                    f"hausdorff_distance_m > {max_hausdorff_m}m"
+                )
+            drop_mask |= bad_hausdorff
+
+        # Check all-NaN feature rows
+        feature_cols = [c for c in self.feature_names if c in df.columns]
+        if feature_cols:
+            all_nan = df[feature_cols].isna().all(axis=1)
+            if all_nan.any():
+                logger.warning(f"Validation: {all_nan.sum()} pairs with all-NaN features")
+            drop_mask |= all_nan
+
+        if drop_mask.any():
+            # Log per-dataset breakdown
+            if "dataset" in df.columns:
+                dropped_df = df[drop_mask]
+                by_dataset = dropped_df.groupby("dataset").size()
+                total_by_dataset = df.groupby("dataset").size()
+                for dataset_name in by_dataset.index:
+                    n_dropped = by_dataset[dataset_name]
+                    n_total = total_by_dataset[dataset_name]
+                    pct = n_dropped / n_total * 100
+                    logger.info(
+                        f"  {dataset_name}: dropped {n_dropped}/{n_total} pairs ({pct:.1f}%)"
+                    )
+                    if pct > 20:
+                        logger.warning(
+                            f"  {dataset_name}: >20% dropped — possible systematic data issue"
+                        )
+
+            n_dropped = drop_mask.sum()
+            pct = n_dropped / n_before * 100
+            logger.info(f"Validation: dropped {n_dropped}/{n_before} pairs ({pct:.1f}%)")
+            df = df[~drop_mask].copy()
+        else:
+            logger.info("Validation: all training pairs passed plausibility checks")
+
+        return df
 
     def _impute_missing(self, X: np.ndarray) -> np.ndarray:
         """Impute missing and infinite values using stored medians.
