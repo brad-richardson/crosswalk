@@ -1,14 +1,19 @@
 """Service layer for the matcher web UI.
 
 Provides business logic functions for dataset loading, candidate management,
-label recording, and configuration access.
+label recording, configuration access, and integration QA.
 """
 
 import json
+import logging
 import uuid
 from pathlib import Path
 
+import geopandas as gpd
+
 from ..datasets.loader import DatasetLoader
+from ..filenames import integration_cache_dir
+from ..integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from ..labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
@@ -16,6 +21,8 @@ from ..labeling.data_loader import (
     load_geodataframe,
 )
 from ..labeling.label_store import LabelStore
+
+logger = logging.getLogger(__name__)
 
 # Project root: src/matcher/web/services.py -> project root is 3 levels up
 PROJECT_ROOT = Path(__file__).parents[3]
@@ -158,3 +165,105 @@ def undo_last_label(dataset_id: str) -> dict | None:
     """
     store = LabelStore(dataset_id)
     return store.remove_last()
+
+
+# --- Integration QA service functions ---
+
+EDGE_FILES = [
+    "edges",
+    "net_new_edges",
+    "disconnected_edges",
+    "filtered_edges",
+    "bridge_edges",
+]
+
+
+def load_qa_edges(dataset_id: str) -> dict[str, gpd.GeoDataFrame | None]:
+    """Load integration edges for QA review.
+
+    Uses integration_cache_dir(dataset_id) to find parquet files.
+
+    Args:
+        dataset_id: Dataset identifier
+
+    Returns:
+        Dict with keys: edges, net_new_edges, disconnected_edges,
+        filtered_edges, bridge_edges. Each value is a GeoDataFrame
+        or None if the file doesn't exist.
+    """
+    cache_dir = integration_cache_dir(dataset_id)
+    result: dict[str, gpd.GeoDataFrame | None] = {}
+
+    for name in EDGE_FILES:
+        path = cache_dir / f"{name}.parquet"
+        if path.exists():
+            try:
+                result[name] = gpd.read_parquet(path)
+            except Exception:
+                logger.exception("Failed to load %s for dataset %s", path, dataset_id)
+                result[name] = None
+        else:
+            result[name] = None
+
+    return result
+
+
+def record_qa_decision(
+    edge_id: int,
+    original_id: str,
+    dataset_id: str,
+    edge_type: str,
+    decision: str,
+    reason: str,
+    note: str = "",
+    **kwargs,
+) -> None:
+    """Record a QA accept/reject decision.
+
+    Args:
+        edge_id: Edge identifier
+        original_id: Original edge ID from source dataset
+        dataset_id: Dataset identifier
+        edge_type: Either "orphan" or "merged"
+        decision: Decision value ("correct" or "incorrect")
+        reason: Reason for the decision
+        note: Optional reviewer note (currently stored as part of reason)
+        **kwargs: Additional fields passed to the decision store
+    """
+    reviewer = get_labeler_name()
+    session_id = get_session_id()
+
+    full_reason = f"{reason}: {note}" if note else reason
+
+    if edge_type == "orphan":
+        store = OrphanDecisionStore()
+        store.add_decision(
+            edge_id=edge_id,
+            original_id=original_id,
+            dataset_id=dataset_id,
+            component_id=kwargs.get("component_id", 0),
+            decision=decision,
+            reason=full_reason,
+            reviewer=reviewer,
+            session_id=session_id,
+            length_m=kwargs.get("length_m", 0.0),
+            road_class=kwargs.get("road_class", ""),
+            nearest_main_dist_m=kwargs.get("nearest_main_dist_m", 0.0),
+            component_size=kwargs.get("component_size", 0),
+        )
+    else:
+        store = MergedDecisionStore()
+        store.add_decision(
+            edge_id=edge_id,
+            original_id=original_id,
+            dataset_id=dataset_id,
+            source_type=kwargs.get("source_type", ""),
+            match_ref_id=kwargs.get("match_ref_id"),
+            decision=decision,
+            reason=full_reason,
+            reviewer=reviewer,
+            session_id=session_id,
+            match_confidence=kwargs.get("match_confidence", 0.0),
+            length_m=kwargs.get("length_m", 0.0),
+            road_class=kwargs.get("road_class", ""),
+        )
