@@ -1,0 +1,83 @@
+{% if pair %}
+<div class="info-card map-overlay" id="pair-card" data-geometry='{{ geojson }}'>
+    <!-- Pair names -->
+    <div class="pair-names">
+        <div class="pair-row">
+            <span class="pair-label gers-label">GERS</span>
+            <span class="pair-name">{{ pair.ref_name or "unnamed" }}</span>
+            <span class="pair-id">{{ pair.ref_id[:12] }}...</span>
+        </div>
+        <div class="pair-row">
+            <span class="pair-label local-label">Local</span>
+            <span class="pair-name">{{ pair.target_name or "unnamed" }}</span>
+            <span class="pair-id">{{ pair.target_id[:12] }}...</span>
+        </div>
+    </div>
+
+    <!-- Class info and confidence -->
+    <div class="pair-meta">
+        <span class="pair-class">{{ pair.ref_class or "?" }} / {{ pair.target_class or "?" }}</span>
+        <span class="pair-confidence">{{ "%.0f"|format(pair.confidence * 100) }}%</span>
+    </div>
+
+    <!-- Decision buttons -->
+    <div class="decision-buttons">
+        <button class="btn-match"
+                hx-post="/labeling/label"
+                hx-target="#pair-content"
+                hx-swap="innerHTML"
+                hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "match"}'>
+            Match
+        </button>
+        <button class="btn-no-match"
+                hx-post="/labeling/label"
+                hx-target="#pair-content"
+                hx-swap="innerHTML"
+                hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "no_match"}'>
+            No Match
+        </button>
+        <button class="btn-skip"
+                hx-post="/labeling/label"
+                hx-target="#pair-content"
+                hx-swap="innerHTML"
+                hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "unsure"}'>
+            Unsure ?
+        </button>
+        <button class="btn-undo"
+                hx-post="/labeling/undo"
+                hx-target="#pair-content"
+                hx-swap="innerHTML"
+                hx-vals='{"dataset": "{{ dataset }}"}'>
+            Undo
+        </button>
+    </div>
+</div>
+{% elif dataset %}
+<div class="info-card map-overlay" id="pair-card">
+    <h4>All pairs labeled!</h4>
+    <p>No more unlabeled pairs in this dataset. Choose another dataset or review your labels.</p>
+</div>
+{% else %}
+<div class="info-card map-overlay" id="pair-card">
+    <h4>Select a dataset</h4>
+    <p>Open the menu and choose a dataset to start labeling.</p>
+</div>
+{% endif %}
+
+<!-- OOB swap to update the progress indicator (only on HTMX requests to avoid duplicate IDs) -->
+{% if request.headers.get('HX-Request') %}
+<span id="pair-progress" hx-swap-oob="innerHTML">
+    {% if dataset %}
+        {% if total_pairs > 0 %}Pair {{ pair_index + 1 }} of {{ total_pairs }}{% else %}All pairs labeled!{% endif %}
+    {% else %}
+        Select a dataset
+    {% endif %}
+</span>
+{% endif %}
+
+<!-- Update URL to reflect current position (bookmarkable) -->
+{% if pair and dataset %}
+<script>
+    history.replaceState(null, '', '/labeling?dataset={{ dataset }}&index={{ pair_index }}');
+</script>
+{% endif %}
