@@ -83,7 +83,7 @@ flowchart TB
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
 | **Features** | 67 features across 15 categories: geometric, semantic, topological, alignment, and more |
-| **Labeling** | Human-in-the-loop training data creation via Streamlit UI |
+| **Labeling** | Human-in-the-loop training data creation via web UI |
 
 ## Quick Start
 
@@ -132,11 +132,11 @@ If not available, the system falls back to pyosmium (slower but no system deps).
 # For machine learning matching (XGBoost, LightGBM)
 pip install -e ".[ml]"
 
-# For labeling UI (Streamlit)
-pip install -e ".[label]"
+# For web UI (labeling, QA, review)
+pip install -e ".[web]"
 
 # All optional dependencies
-pip install -e ".[dev,ml,label]"
+pip install -e ".[dev,ml,web]"
 ```
 
 ## Workflow Details
@@ -200,7 +200,7 @@ matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_st
 When match quality isn't sufficient, use the labeling UI to create training data:
 
 ```bash
-# Launch labeling app (auto-discovers all datasets with data in data/raw/)
+# Launch web UI (auto-discovers all datasets with data in data/raw/)
 matcher ui
 ```
 
@@ -249,7 +249,7 @@ matcher class discover data/raw/new_dataset.parquet \
 |---------|-------------|
 | `matcher match` | Run the matching pipeline |
 | `matcher train` | Train ML model on labeled data |
-| `matcher ui` | Launch combined UI (labeling, label review, integration QA) |
+| `matcher ui` | Launch web UI (labeling, label review, integration QA) |
 | `matcher match-eval` | Evaluate bridge file (matching output) quality |
 | `matcher screen` | Screen segments for valid network additions |
 | `matcher version` | Show version information |

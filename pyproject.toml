@@ -40,11 +40,6 @@ ml = [
     "xgboost>=2.0",
     "lightgbm>=4.2",
 ]
-label = [
-    "streamlit>=1.28",
-    "streamlit-folium>=0.15",
-    "folium>=0.15",
-]
 os = [
     "osdatahub>=1.0.0",
 ]
