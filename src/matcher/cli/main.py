@@ -1,8 +1,6 @@
 """Top-level CLI commands."""
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -434,60 +432,11 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command()
     def ui(
-        port: int = typer.Option(
-            8501,
-            "--port",
-            "-p",
-            help="Streamlit server port",
-        ),
-        host: str = typer.Option(
-            "localhost",
-            "--host",
-            "-H",
-            help="Server host (use 0.0.0.0 to expose on all interfaces)",
-        ),
-    ):
-        """Launch the combined UI (labeling, label review, integration QA).
-
-        Examples:
-            matcher ui
-            matcher ui --port 8503
-            matcher ui --host 0.0.0.0
-        """
-        app_path = Path(__file__).parent.parent / "labeling" / "app.py"
-
-        if not app_path.exists():
-            console.print(f"[red]Error: UI app not found at {app_path}[/red]")
-            raise typer.Exit(1)
-
-        display_host = "localhost" if host == "0.0.0.0" else host
-        console.print(f"[blue]Starting matcher UI on port {port}...[/blue]")
-        console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "streamlit",
-                "run",
-                str(app_path),
-                "--server.port",
-                str(port),
-                "--server.address",
-                host,
-            ],
-        )
-        if result.returncode != 0:
-            console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
-            raise typer.Exit(result.returncode)
-
-    @app.command()
-    def webui(
         port: int = typer.Option(8000, "--port", "-p", help="Server port"),
         host: str = typer.Option("0.0.0.0", "--host", "-H", help="Server host"),
         reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
     ):
-        """Launch the new web UI (FastAPI + HTMX)."""
+        """Launch the web UI (labeling, label review, integration QA)."""
         import uvicorn
 
         display_host = "localhost" if host == "0.0.0.0" else host

@@ -1,5 +1,6 @@
 """Labeling mode routes for the matcher web UI."""
 
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -10,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
 from ..services import (
+    CONFIG_FILE,
     get_unlabeled_candidates,
     list_datasets,
     load_candidates,
@@ -247,3 +249,15 @@ async def undo_label(
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)
+
+
+@router.post("/settings/labeler")
+async def set_labeler_name(name: str = Form(...)):
+    """Save labeler name to config file."""
+    config = {}
+    if CONFIG_FILE.exists():
+        with contextlib.suppress(Exception):
+            config = json.loads(CONFIG_FILE.read_text())
+    config["labeler_name"] = name
+    CONFIG_FILE.write_text(json.dumps(config))
+    return HTMLResponse(status_code=204)

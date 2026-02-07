@@ -9,7 +9,7 @@ For ML pipeline architecture and feature details, see [docs/ARCHITECTURE.md](doc
 
 ```bash
 # Install with all dependencies
-pip install -e ".[dev,ml,label]"
+pip install -e ".[dev,ml,web]"
 
 # Train ML model (required after fresh clone)
 matcher train
@@ -23,6 +23,21 @@ ruff format src/ tests/ && ruff check src/ tests/
 # CLI help
 matcher --help
 ```
+
+## Web UI
+
+```bash
+# Install web dependencies
+pip install -e ".[dev,web]"
+
+# Launch web UI
+matcher ui
+
+# Development mode with auto-reload
+matcher ui --reload
+```
+
+The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Three modes: Labeling (`/labeling`), Integration QA (`/qa`), Label Review (`/review`).
 
 ## Adding a New Feature
 

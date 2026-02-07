@@ -4,7 +4,6 @@ from matcher.integration_qa.decision_store import (
     MergedDecisionStore,
     OrphanDecisionStore,
 )
-from matcher.integration_qa.state import QASession
 
 
 class TestOrphanDecisionStore:
@@ -188,39 +187,3 @@ class TestMergedDecisionStore:
         assert stats["incorrect"] == 1
 
 
-class TestQASession:
-    """Tests for QASession."""
-
-    def test_session_initialization(self):
-        """Session initializes with defaults."""
-        session = QASession()
-
-        assert session.session_id is not None
-        assert len(session.session_id) == 8
-        assert session.current_view == "orphans"
-        assert session.current_index == 0
-        assert session.undo_stack == []
-
-    def test_undo_stack(self):
-        """Undo stack works correctly."""
-        session = QASession()
-
-        session.push_undo({"type": "orphan", "edge_id": 1})
-        session.push_undo({"type": "merged", "edge_id": 2})
-
-        assert len(session.undo_stack) == 2
-
-        action = session.pop_undo()
-        assert action["edge_id"] == 2
-        assert len(session.undo_stack) == 1
-
-    def test_undo_stack_limit(self):
-        """Undo stack is limited to 50 items."""
-        session = QASession()
-
-        for i in range(60):
-            session.push_undo({"type": "orphan", "edge_id": i})
-
-        assert len(session.undo_stack) == 50
-        # Oldest should be dropped
-        assert session.undo_stack[0]["edge_id"] == 10
