@@ -199,6 +199,124 @@ body {
     background: #ff9800;
 }
 
+/* === Pair Progress (top-left) === */
+.pair-progress {
+    top: 12px;
+    left: 12px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    color: #555;
+    font-weight: 500;
+}
+
+/* === Pair Card Content === */
+.pair-names {
+    margin-bottom: 8px;
+}
+
+.pair-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.pair-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    min-width: 48px;
+    text-align: center;
+}
+
+.gers-label {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.local-label {
+    background: #fbe9e7;
+    color: #bf360c;
+}
+
+.pair-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #333;
+    flex: 1;
+}
+
+.pair-id {
+    font-size: 0.75rem;
+    color: #999;
+    font-family: monospace;
+}
+
+.pair-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    border-top: 1px solid #eee;
+    margin-bottom: 4px;
+}
+
+.pair-class {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.pair-confidence {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1976d2;
+}
+
+/* === Features Toggle Button (bottom-left) === */
+.features-toggle {
+    bottom: 24px;
+    left: 12px;
+    padding: 8px 16px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #555;
+}
+
+.features-toggle:hover {
+    background: #f5f5f5;
+}
+
+/* === Features Table === */
+.features-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.features-table th {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid #eee;
+    color: #666;
+    font-weight: 600;
+}
+
+.features-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid #f5f5f5;
+    color: #333;
+}
+
+.features-table td:last-child {
+    font-family: monospace;
+    text-align: right;
+}
+
 /* === Features Drawer (slide-up) === */
 .features-drawer {
     position: absolute;

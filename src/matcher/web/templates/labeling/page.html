@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<!-- Progress indicator (top-left) -->
+<div class="pair-progress map-overlay" id="pair-progress">
+    {% if total_pairs > 0 %}
+    Pair {{ pair_index + 1 }} of {{ total_pairs }}
+    {% elif dataset %}
+    All pairs labeled!
+    {% endif %}
+</div>
+
+<!-- Pair content area (swapped by HTMX) -->
+<div id="pair-content">
+    {% include "labeling/pair.html" %}
+</div>
+
+<!-- Features drawer toggle button (bottom-left) -->
+{% if pair %}
+<button class="features-toggle map-overlay" id="features-toggle" onclick="toggleFeatures()">
+    Features
+</button>
+{% endif %}
+
+<!-- Features drawer panel (slide-up, closed by default) -->
+<div class="features-drawer" id="features-drawer">
+    <div class="handle"></div>
+    <h4>Feature Details</h4>
+    {% if pair and pair.features %}
+    <table class="features-table">
+        <thead>
+            <tr><th>Feature</th><th>Value</th></tr>
+        </thead>
+        <tbody>
+            {% for key, value in pair.features.items() %}
+            <tr>
+                <td>{{ key }}</td>
+                <td>{{ "%.4f"|format(value) if value is number else value }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No features available.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleFeatures() {
+        var drawer = document.getElementById('features-drawer');
+        if (drawer) {
+            drawer.classList.toggle('open');
+        }
+    }
+
+    // Keyboard shortcuts for labeling
+    document.addEventListener('keydown', function(e) {
+        // Don't trigger shortcuts when typing in input fields
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+
+        var dataset = '{{ dataset or "" }}';
+        var pairIndex = {{ pair_index|default(0) }};
+
+        if (!dataset) return;
+
+        switch(e.key.toLowerCase()) {
+            case 'm':
+                htmx.ajax('POST', '/labeling/label', {
+                    target: '#pair-content',
+                    swap: 'innerHTML',
+                    values: { dataset: dataset, index: pairIndex, label: 'match' }
+                });
+                break;
+            case 'n':
+                htmx.ajax('POST', '/labeling/label', {
+                    target: '#pair-content',
+                    swap: 'innerHTML',
+                    values: { dataset: dataset, index: pairIndex, label: 'no_match' }
+                });
+                break;
+            case 'u':
+                htmx.ajax('POST', '/labeling/label', {
+                    target: '#pair-content',
+                    swap: 'innerHTML',
+                    values: { dataset: dataset, index: pairIndex, label: 'unsure' }
+                });
+                break;
+            case 'z':
+                htmx.ajax('POST', '/labeling/undo', {
+                    target: '#pair-content',
+                    swap: 'innerHTML',
+                    values: { dataset: dataset }
+                });
+                break;
+        }
+    });
+</script>
+{% endblock %}
