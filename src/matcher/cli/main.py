@@ -482,6 +482,20 @@ def register_commands(app: typer.Typer) -> None:
             raise typer.Exit(result.returncode)
 
     @app.command()
+    def webui(
+        port: int = typer.Option(8000, "--port", "-p", help="Server port"),
+        host: str = typer.Option("0.0.0.0", "--host", "-H", help="Server host"),
+        reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
+    ):
+        """Launch the new web UI (FastAPI + HTMX)."""
+        import uvicorn
+
+        display_host = "localhost" if host == "0.0.0.0" else host
+        console.print(f"[blue]Starting matcher web UI on port {port}...[/blue]")
+        console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
+        uvicorn.run("matcher.web.app:create_app", factory=True, host=host, port=port, reload=reload)
+
+    @app.command()
     def version():
         """Show version information."""
         from .. import __version__
