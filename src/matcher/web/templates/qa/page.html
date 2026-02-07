@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<div class="map-overlay progress-indicator">
+    <span>{{ edge_type|title }} &middot; {{ dataset or "No dataset" }}</span>
+</div>
+<div id="edge-detail"></div>
+{% endblock %}
+
+{% block scripts %}
+{% if dataset and edge_geojson != '{}' %}
+<script>
+    const edgeGeojson = {{ edge_geojson|safe }};
+    const dataset = '{{ dataset }}';
+    const edgeType = '{{ edge_type }}';
+</script>
+<script src="/static/js/qa-map.js"></script>
+{% elif not dataset %}
+<script>
+    // Clear any existing layers when no dataset selected
+    if (window.matcherPairLayer) {
+        window.matcherPairLayer.clearLayers();
+    }
+</script>
+{% endif %}
+{% endblock %}
