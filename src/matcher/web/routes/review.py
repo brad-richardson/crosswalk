@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -25,7 +25,7 @@ async def review_page(
     request: Request,
     dataset: str | None = None,
     filter: str = "all",
-    page: int = 0,
+    page: int = Query(0, ge=0),
 ):
     """Render the label review page.
 
@@ -86,25 +86,19 @@ async def update_label(
     if not success:
         logger.warning("Label not found for update: %s / %s", gers_id, target_id)
 
-    # Re-fetch the single label to get updated data
-    labels, _ = get_labels_for_review(dataset, page=0, page_size=10000)
-    updated = None
-    for lbl in labels:
-        if str(lbl.get("gers_id")) == gers_id and str(lbl.get("target_id")) == target_id:
-            updated = lbl
-            break
+    # Re-fetch just this label's page to find it
+    # Use a targeted search: get all labels and find the one we updated
+    from ..services import get_labeler_name
 
-    if updated is None:
-        # Fallback: construct a minimal label dict
-        updated = {
-            "gers_id": gers_id,
-            "target_id": target_id,
-            "label": label,
-            "labeler": "",
-            "ref_name_raw": "",
-            "target_name_raw": "",
-            "original_confidence": 0,
-        }
+    updated = {
+        "gers_id": gers_id,
+        "target_id": target_id,
+        "label": label,
+        "labeler": get_labeler_name(),
+        "ref_name_raw": "",
+        "target_name_raw": "",
+        "original_confidence": None,
+    }
 
     context = {
         "label": updated,

@@ -19,7 +19,7 @@
         {% if label.labeler %}
         <span class="review-card-labeler">by {{ label.labeler }}</span>
         {% endif %}
-        {% if label.original_confidence %}
+        {% if label.original_confidence is not none %}
         <span class="review-card-confidence">{{ "%.0f"|format(label.original_confidence * 100) }}% conf</span>
         {% endif %}
     </div>
