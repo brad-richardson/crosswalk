@@ -201,65 +201,6 @@ def register_commands(app: typer.Typer) -> None:
         console.print(f"\n[green]Model saved to {output}[/green]")
         console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
 
-    @app.command()
-    def label(
-        reference: Path = typer.Argument(
-            ...,
-            help="Reference edges (Overture segments parquet)",
-        ),
-        target: Path = typer.Argument(
-            ...,
-            help="Target edges (local data parquet)",
-        ),
-        labels_path: Path = typer.Option(
-            Path("data/labels/labels.parquet"),
-            "--labels",
-            "-l",
-            help="Path to labels file (created if not exists)",
-        ),
-        port: int = typer.Option(
-            8501,
-            "--port",
-            "-p",
-            help="Streamlit server port",
-        ),
-    ):
-        """Launch the labeling UI for creating training data.
-
-        Example:
-            matcher label data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet
-        """
-        # Set environment variables for the Streamlit app
-        env = {
-            **os.environ,
-            "MATCHER_REFERENCE_PATH": str(reference.absolute()),
-            "MATCHER_TARGET_PATH": str(target.absolute()),
-            "MATCHER_LABELS_PATH": str(labels_path.absolute()),
-        }
-
-        # Find the app.py path
-        app_path = Path(__file__).parent.parent / "labeling" / "app.py"
-
-        if not app_path.exists():
-            console.print(f"[red]Error: Labeling app not found at {app_path}[/red]")
-            raise typer.Exit(1)
-
-        console.print(f"[blue]Starting labeling UI on port {port}...[/blue]")
-        console.print(f"  Reference: {reference}")
-        console.print(f"  Target: {target}")
-        console.print(f"  Labels: {labels_path}")
-        console.print()
-        console.print(f"[green]Open http://localhost:{port} in your browser[/green]")
-
-        # Launch Streamlit
-        result = subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
-            env=env,
-        )
-        if result.returncode != 0:
-            console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
-            raise typer.Exit(result.returncode)
-
     @app.command("match-eval")
     def match_eval(
         bridge_file: Path = typer.Argument(..., help="Bridge file to evaluate"),
@@ -490,6 +431,55 @@ def register_commands(app: typer.Typer) -> None:
         except Exception as e:
             console.print(f"[red]Screen tests failed: {e}[/red]")
             raise typer.Exit(1) from None
+
+    @app.command()
+    def ui(
+        port: int = typer.Option(
+            8501,
+            "--port",
+            "-p",
+            help="Streamlit server port",
+        ),
+        host: str = typer.Option(
+            "localhost",
+            "--host",
+            "-H",
+            help="Server host (use 0.0.0.0 to expose on all interfaces)",
+        ),
+    ):
+        """Launch the combined UI (labeling, label review, integration QA).
+
+        Examples:
+            matcher ui
+            matcher ui --port 8503
+            matcher ui --host 0.0.0.0
+        """
+        app_path = Path(__file__).parent.parent / "labeling" / "app.py"
+
+        if not app_path.exists():
+            console.print(f"[red]Error: UI app not found at {app_path}[/red]")
+            raise typer.Exit(1)
+
+        display_host = "localhost" if host == "0.0.0.0" else host
+        console.print(f"[blue]Starting matcher UI on port {port}...[/blue]")
+        console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(app_path),
+                "--server.port",
+                str(port),
+                "--server.address",
+                host,
+            ],
+        )
+        if result.returncode != 0:
+            console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
+            raise typer.Exit(result.returncode)
 
     @app.command()
     def version():

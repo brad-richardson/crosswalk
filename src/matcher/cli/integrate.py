@@ -1,8 +1,5 @@
 """Integration workflow commands."""
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -203,75 +200,3 @@ def integrate_run(
     console.print(f"  Filtered edges: {stats.filtered_edges}")
     console.print()
     console.print(f"[green]Outputs saved to {output_dir}[/green]")
-
-
-@integrate_app.command("qa")
-def integrate_qa(
-    output_dir: Path = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Integration output directory (default: scans data/cache/integration/)",
-    ),
-    port: int = typer.Option(
-        8502,
-        "--port",
-        "-p",
-        help="Streamlit server port",
-    ),
-    host: str = typer.Option(
-        "localhost",
-        "--host",
-        "-H",
-        help="Server host (use 0.0.0.0 to expose on all interfaces)",
-    ),
-):
-    """Launch the integration QA app.
-
-    Review orphan components and merged edges from the integration pipeline.
-    Without -o, the app shows a dataset selector and uses data/cache/integration/.
-
-    Example:
-        matcher integrate qa
-        matcher integrate qa -o data/integrated
-        matcher integrate qa --host 0.0.0.0
-    """
-    # Set environment variables
-    env = {**os.environ}
-    if output_dir is not None:
-        env["INTEGRATION_DIR"] = str(output_dir.absolute())
-
-    # Find the app.py path
-    app_path = Path(__file__).parent.parent / "integration_qa" / "app.py"
-
-    if not app_path.exists():
-        console.print(f"[red]Error: QA app not found at {app_path}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[blue]Starting integration QA on port {port}...[/blue]")
-    if output_dir is not None:
-        console.print(f"  Integration output: {output_dir}")
-    else:
-        console.print("  Using dataset selector (data/cache/integration/)")
-    console.print()
-    display_host = "localhost" if host == "0.0.0.0" else host
-    console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
-
-    # Launch Streamlit
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(app_path),
-            "--server.port",
-            str(port),
-            "--server.address",
-            host,
-        ],
-        env=env,
-    )
-    if result.returncode != 0:
-        console.print(f"[red]Error: Streamlit exited with code {result.returncode}[/red]")
-        raise typer.Exit(result.returncode)
