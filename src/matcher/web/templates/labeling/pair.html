@@ -63,3 +63,13 @@
     <p>Open the menu and choose a dataset to start labeling.</p>
 </div>
 {% endif %}
+
+<!-- OOB swap to update the progress indicator -->
+<span id="pair-progress" hx-swap-oob="innerHTML">
+    {% if total_pairs > 0 %}Pair {{ pair_index + 1 }} of {{ total_pairs }}{% else %}All pairs labeled!{% endif %}
+</span>
+
+<!-- Update URL to reflect current position (bookmarkable) -->
+<script>
+    history.replaceState(null, '', '/labeling?dataset={{ dataset }}&index={{ pair_index }}');
+</script>
