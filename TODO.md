@@ -18,7 +18,7 @@ Actionable backlog for the road network matcher.
 
 ### HIGH: Robust Feature Backfill Validation
 
-**Problem**: Target IDs are sequential indices that shift when data is re-fetched. Backfill now uses stored geometries from `labels/data/` (stable), but fallback to raw data lookup can still produce wrong features.
+**Problem**: Backfill now uses stored geometries from `labels/data/` (stable), but fallback to raw data lookup can still produce wrong features if data has been re-fetched with different filtering or extent.
 
 **Needed**:
 1. Candidate validation after resolving geometries (centroids within buffer distance)
@@ -82,11 +82,6 @@ Allow short segments (< 20m) that add network connectivity value (bridge disconn
 
 ## Label Data Management
 
-### Stable ID Strategy
-- Add `--id-column` flag to `matcher fetch` commands for source-provided IDs
-- Store source FID in parquet metadata for auditing
-- Create migration tool for updating label IDs when prefixes change
-
 ### Label Archive & History
 - Archive orphaned labels to `labels/archived/` instead of losing them
 - Provide recovery tooling to re-link archived labels
@@ -100,7 +95,8 @@ Allow short segments (< 20m) that add network connectivity value (bridge disconn
 ## Other Ideas
 
 ### Adaptive Buffer Distance
-- Auto-detect optimal buffer via alignment statistics on sample (currently fixed at 50m)
+- Pipeline default is 75m with relaxed heading (90°) and length ratio (20.0) filters
+- Could auto-detect optimal buffer per dataset via alignment statistics on sample
 
 ### Active Learning
 - Use model uncertainty to prioritize labeling candidates
