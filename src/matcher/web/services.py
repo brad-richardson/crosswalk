@@ -18,6 +18,7 @@ from ..labeling.data_loader import (
     CandidatePairView,
     filter_candidates,
     generate_scored_candidates_with_cache,
+    get_feature_cache_path,
     load_geodataframe,
 )
 from ..labeling.label_store import LabelStore
@@ -39,6 +40,11 @@ def list_datasets() -> list[str]:
     """
     loader = DatasetLoader(DATA_DIR)
     return loader.list_available()
+
+
+def is_dataset_cached(dataset_id: str) -> bool:
+    """Check if feature cache exists for this dataset (file existence only)."""
+    return get_feature_cache_path(dataset_id).exists()
 
 
 def load_candidates(dataset_id: str) -> list[CandidatePairView]:

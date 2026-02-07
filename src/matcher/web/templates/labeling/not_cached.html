@@ -1,0 +1,18 @@
+<div class="info-card map-overlay" id="pair-card">
+    <h4>Dataset not cached</h4>
+    {% if error %}
+    <p class="error-text">{{ error }}</p>
+    {% endif %}
+    <p>Feature computation is required for <strong>{{ dataset }}</strong>. This may take several minutes.</p>
+    <button class="btn-match"
+            hx-post="/labeling/compute"
+            hx-target="#pair-content"
+            hx-swap="innerHTML"
+            hx-vals='{"dataset": "{{ dataset }}"}'>
+        Compute candidates
+    </button>
+</div>
+
+{% if request.headers.get('HX-Request') %}
+<span id="pair-progress" hx-swap-oob="innerHTML">Not cached</span>
+{% endif %}

@@ -3,12 +3,12 @@
     <h4>Edge {{ edge.edge_id }}</h4>
     <div class="pair-names">
         <div class="pair-row">
-            <span class="pair-label gers-label">Type</span>
+            <span class="pair-label ref-label">Type</span>
             <span class="pair-name">{{ edge.layer|replace("_", " ")|title }}</span>
         </div>
         {% if edge.road_class %}
         <div class="pair-row">
-            <span class="pair-label local-label">Class</span>
+            <span class="pair-label target-label">Class</span>
             <span class="pair-name">{{ edge.road_class }}</span>
         </div>
         {% endif %}

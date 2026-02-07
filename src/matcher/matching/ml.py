@@ -19,7 +19,6 @@ Model Architecture:
 - Handles class imbalance via scale_pos_weight or class_weight
 """
 
-import multiprocessing as mp
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -39,6 +38,7 @@ from ..config import (
     FEATURE_VERSION,
     MAX_DISTANCE_METERS,
     SEMANTIC_FEATURES,
+    default_worker_count,
 )
 from ..features.semantic import _extract_name_string
 from ..utils.crs import validate_projected_crs
@@ -1793,9 +1793,9 @@ class MLMatcher:
                 f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
             )
 
-        # Determine number of workers (leave 2 cores for system)
+        # Determine number of workers (reserve ~10% of cores)
         if n_jobs == -1:
-            n_workers = max(1, mp.cpu_count() - 2)
+            n_workers = default_worker_count()
         else:
             n_workers = n_jobs
 

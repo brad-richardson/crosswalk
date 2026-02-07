@@ -43,11 +43,13 @@ def mock_services():
         patch("matcher.web.routes.labeling.get_unlabeled_candidates") as mock_unlabeled,
         patch("matcher.web.routes.labeling.record_label") as mock_record,
         patch("matcher.web.routes.labeling.undo_last_label") as mock_undo,
+        patch("matcher.web.routes.labeling.is_dataset_cached") as mock_cached,
     ):
         mock_list.return_value = ["dataset_a", "dataset_b"]
         pairs = [_make_pair(), _make_pair("ref_002", "target_002", 0.55)]
         mock_get_cands.return_value = pairs
         mock_unlabeled.return_value = pairs
+        mock_cached.return_value = True
 
         yield {
             "list_datasets": mock_list,
@@ -55,16 +57,24 @@ def mock_services():
             "get_unlabeled": mock_unlabeled,
             "record_label": mock_record,
             "undo_last_label": mock_undo,
+            "is_dataset_cached": mock_cached,
         }
 
 
 @pytest.fixture
 def client(mock_services):
     """Create a test client with mocked services."""
-    # Clear the candidate cache before each test
-    from matcher.web.routes.labeling import _candidate_cache
+    from matcher.web.routes.labeling import _candidate_cache, _loading_errors, _loading_tasks
 
     _candidate_cache.clear()
+    _loading_tasks.clear()
+    _loading_errors.clear()
+
+    # Pre-populate cache so the labeling route hits the fast path (step 1)
+    # instead of starting a background load
+    pairs = [_make_pair(), _make_pair("ref_002", "target_002", 0.55)]
+    _candidate_cache["dataset_a"] = pairs
+    _candidate_cache["dataset_b"] = pairs
 
     app = create_app()
     return TestClient(app)
@@ -132,9 +142,9 @@ class TestLabelingPageRoute:
         assert "ref_002" in response.text
 
     def test_labeling_page_geojson_in_attribute(self, client):
-        """GET /labeling with dataset should embed geojson in data attribute."""
+        """GET /labeling with dataset should embed geojson in script tag."""
         response = client.get("/labeling?dataset=dataset_a")
-        assert "data-geometry" in response.text
+        assert "pair-geometry" in response.text
         # Should contain GeoJSON coordinate data
         assert "coordinates" in response.text
 

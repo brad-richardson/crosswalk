@@ -11,7 +11,6 @@ Key functions:
 - geodetic_length: Compute geodetic length in meters (consistent with Overture)
 """
 
-import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
@@ -26,6 +25,7 @@ from ..config import (
     DIVERGENCE_DISTANCE_MULTIPLIER,
     DIVERGENCE_MIN_DISTANCE_M,
     DIVERGENCE_PARALLELNESS_THRESHOLD,
+    default_worker_count,
 )
 
 # WGS84 ellipsoid for geodetic calculations (consistent with Overture)
@@ -886,7 +886,7 @@ def compute_alignment_batch(
 
     # Determine number of workers
     if n_jobs == -1:
-        n_workers = max(1, mp.cpu_count() - 2)
+        n_workers = default_worker_count()
     else:
         n_workers = max(1, n_jobs)
 

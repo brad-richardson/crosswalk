@@ -1,5 +1,6 @@
 """Configuration settings for the matcher pipeline."""
 
+import multiprocessing
 from pathlib import Path
 
 from pydantic import ConfigDict, Field, field_validator
@@ -258,6 +259,12 @@ SEMANTIC_FEATURES = [
     "name_numeric_match",
     "route_prefix_match",
 ]
+
+
+def default_worker_count() -> int:
+    """Number of parallel workers, reserving ~10% of cores for other processes."""
+    total = multiprocessing.cpu_count()
+    return max(1, int(total * 0.9) - 1)
 
 
 class MatcherSettings(BaseSettings):

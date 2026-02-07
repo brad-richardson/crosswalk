@@ -1,16 +1,18 @@
 {% if pair %}
-<div class="info-card map-overlay" id="pair-card" data-geometry='{{ geojson }}'>
+<div class="info-card map-overlay" id="pair-card">
     <!-- Pair names -->
     <div class="pair-names">
         <div class="pair-row">
-            <span class="pair-label gers-label">GERS</span>
+            <span class="pair-label ref-label">REF</span>
             <span class="pair-name">{{ pair.ref_name or "unnamed" }}</span>
-            <span class="pair-id">{{ pair.ref_id[:12] }}...</span>
+            <span class="pair-id" title="{{ pair.ref_id }}"
+                  data-short="{{ pair.ref_id[:16] }}&hellip;" data-full="{{ pair.ref_id }}">{{ pair.ref_id[:16] }}&hellip;</span>
         </div>
         <div class="pair-row">
-            <span class="pair-label local-label">Local</span>
+            <span class="pair-label target-label">TRGT</span>
             <span class="pair-name">{{ pair.target_name or "unnamed" }}</span>
-            <span class="pair-id">{{ pair.target_id[:12] }}...</span>
+            <span class="pair-id" title="{{ pair.target_id }}"
+                  data-short="{{ pair.target_id[:16] }}&hellip;" data-full="{{ pair.target_id }}">{{ pair.target_id[:16] }}&hellip;</span>
         </div>
     </div>
 
@@ -51,7 +53,12 @@
             Undo
         </button>
     </div>
+
+    <!-- Features toggle (inside the card, below buttons) -->
+    <button class="features-toggle-inline" onclick="toggleFeatures()">Features</button>
 </div>
+<!-- Geometry data (not executed, read by map.js after load) -->
+<script id="pair-geometry" type="application/json">{{ geojson|safe }}</script>
 {% elif dataset %}
 <div class="info-card map-overlay" id="pair-card">
     <h4>All pairs labeled!</h4>

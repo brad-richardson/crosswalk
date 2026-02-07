@@ -432,17 +432,34 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command()
     def ui(
-        port: int = typer.Option(8000, "--port", "-p", help="Server port"),
+        port: int = typer.Option(8505, "--port", "-p", help="Server port"),
         host: str = typer.Option("0.0.0.0", "--host", "-H", help="Server host"),
         reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
     ):
-        """Launch the web UI (labeling, label review, integration QA)."""
+        """Launch the web UI (Label Creation, Label Review, Integration QA)."""
         import uvicorn
 
         display_host = "localhost" if host == "0.0.0.0" else host
         console.print(f"[blue]Starting matcher web UI on port {port}...[/blue]")
         console.print(f"[green]Open http://{display_host}:{port} in your browser[/green]")
-        uvicorn.run("matcher.web.app:create_app", factory=True, host=host, port=port, reload=reload)
+
+        reload_kwargs = {}
+        if reload:
+            # Only watch source code — not data/, labels/, or cache files
+            from importlib.util import find_spec
+
+            spec = find_spec("matcher")
+            if spec and spec.submodule_search_locations:
+                reload_kwargs["reload_dirs"] = list(spec.submodule_search_locations)
+
+        uvicorn.run(
+            "matcher.web.app:create_app",
+            factory=True,
+            host=host,
+            port=port,
+            reload=reload,
+            **reload_kwargs,
+        )
 
     @app.command()
     def version():
