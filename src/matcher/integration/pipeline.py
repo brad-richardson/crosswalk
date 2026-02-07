@@ -164,7 +164,10 @@ def run_integration_pipeline(
                 logger.info(
                     f"    Extracted {len(remnants)} unmatched remnants from partial matches"
                 )
-                unmatched = pd.concat([unmatched, remnants], ignore_index=True)
+                unmatched = gpd.GeoDataFrame(
+                    pd.concat([unmatched, remnants], ignore_index=True),
+                    crs=unmatched.crs,
+                )
 
         # Apply length filter
         if min_segment_length_m > 0:

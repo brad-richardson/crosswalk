@@ -524,7 +524,9 @@ def extract_unmatched_remnants(
         )
 
     # Build multi-match ranges lookup
-    multi_ranges = _build_multi_match_ranges(match_results, id_column)
+    # Bridge records always use "local_id" as the key, regardless of the
+    # GeoDataFrame's id_column name
+    multi_ranges = _build_multi_match_ranges(match_results, "local_id")
 
     if not multi_ranges:
         return gpd.GeoDataFrame(columns=["geometry", id_column], crs=matched.crs)
