@@ -57,8 +57,9 @@ class TestTransformDownloadData:
         assert "subtype" in result.columns
         assert "sources" in result.columns
 
-        # Check ID format (OBJECTID values are 1, 2, 3)
-        assert result["id"].iloc[0] == "test_1"
+        # Check ID format: {prefix}_{upstreamID}_{h3suffix}
+        assert result["id"].iloc[0].startswith("test_1_")
+        assert len(result["id"].iloc[0].split("_")) == 3  # prefix_id_suffix
 
         # Check names extraction
         assert result["names"].iloc[0] == {"primary": "Main St"}
