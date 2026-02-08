@@ -62,7 +62,7 @@ classification:
   - source_value: 6
     target_class: service
 quality_fingerprint:
-  computed_at: '2026-02-08T05:29:21.607282+00:00'
+  computed_at: '2026-02-08T13:38:08.543290+00:00'
   total_segments: 10844
   name_coverage_ratio: 1.0
   class_coverage_ratio: 1.0
