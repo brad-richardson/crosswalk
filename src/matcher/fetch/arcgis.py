@@ -370,8 +370,11 @@ def _transform_to_overture_schema(
     # Build result data dict
     data = {}
 
-    # ID: prefix + objectid
-    data["id"] = [f"{id_prefix}_{uid}" for uid in gdf[id_col]]
+    # ID: prefix + objectid + spatial suffix (H3 hex for disambiguation)
+    from ..utils.spatial_id import compute_spatial_suffix
+
+    suffixes = gdf.geometry.apply(compute_spatial_suffix)
+    data["id"] = [f"{id_prefix}_{uid}_{sfx}" for uid, sfx in zip(gdf[id_col], suffixes)]
 
     # Names struct
     if name_column and name_column in gdf.columns:

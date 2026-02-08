@@ -57,8 +57,12 @@ class TestTransformDownloadData:
         assert "subtype" in result.columns
         assert "sources" in result.columns
 
-        # Check ID format (OBJECTID values are 1, 2, 3)
-        assert result["id"].iloc[0] == "test_1"
+        # Check ID format: {prefix}_{upstreamID}_{h3suffix}
+        # Use rsplit to extract the H3 suffix (last component) regardless of prefix structure
+        first_id = result["id"].iloc[0]
+        assert first_id.startswith("test_1_")
+        h3_suffix = first_id.rsplit("_", 1)[-1]
+        assert len(h3_suffix) == 10  # 15-char H3 index minus 5 trailing f's
 
         # Check names extraction
         assert result["names"].iloc[0] == {"primary": "Main St"}
