@@ -224,14 +224,6 @@ def _transform_download_data(
 
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
 
-    # Deduplicate by ID (upstream data can have duplicate IDs for different geometries)
-    if len(result) > 0 and "id" in result.columns:
-        n_before = len(result)
-        result = result.drop_duplicates(subset=["id"], keep="first")
-        n_dropped = n_before - len(result)
-        if n_dropped > 0:
-            logger.info(f"{source_name}: {n_dropped} duplicate IDs removed (kept first occurrence)")
-
     # Add trivial linear-referenced columns
     result = _add_trivial_lr_columns(result)
 
