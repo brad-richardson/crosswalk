@@ -849,7 +849,7 @@ def compute_angle_histogram_similarity(
 
     Returns:
         Similarity score (0-1) where 1 = identical angle distributions
-        Returns 1.0 for degenerate cases (< 3 points in either line)
+        Returns 0.5 (neutral) for degenerate cases (< 3 points in either line)
     """
     if line_a.is_empty or line_b.is_empty:
         return 1.0

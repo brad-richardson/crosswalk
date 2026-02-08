@@ -29,7 +29,7 @@ BOUNDARY_VALUES = {
     0.0: "zero",
     1.0: "one",
     MAX_DISTANCE_METERS: "MAX_DIST",
-    100.0: "100.0",
+    10.0: "sinuosity_cap",
     180.0: "180.0",
     0.5: "neutral_0.5",
 }
@@ -315,11 +315,11 @@ def format_report(
             ah_pct = ah_ones / n * 100 if n > 0 else 0
             lines.append(f"- angle_histogram_similarity == 1.0: {ah_ones}/{n} ({ah_pct:.0f}%)")
 
-        # Check sinuosity for outliers
+        # Check sinuosity for outliers and cap saturation
         if "sinuosity_ref" in ds_df.columns:
             sin_max = ds_df["sinuosity_ref"].max()
-            sin_100 = (ds_df["sinuosity_ref"] >= 100.0).sum()
-            lines.append(f"- sinuosity_ref max: {sin_max:.1f}, n>=100: {sin_100}")
+            sin_cap = (ds_df["sinuosity_ref"] >= 10.0).sum()
+            lines.append(f"- sinuosity_ref max: {sin_max:.1f}, n>=10.0 (cap hits): {sin_cap}")
 
         # Check collinear_gap_ratio dominance
         if "collinear_gap_ratio" in ds_df.columns:
