@@ -1,0 +1,25 @@
+name: nl_netherlands_paths
+display_name: NWB Wegen (Path Network)
+type: road
+description: Netherlands National Road Database - Filtered for Paths/Cycleways
+source:
+  type: download
+  url: "https://geo.rijkswaterstaat.nl/services/ogc/gdr/nwb_wegen/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=wegvakken&outputFormat=application/geopackage%2Bsqlite3&content-disposition=attachment"
+  file_format: gpkg
+  cache_download: true
+fetch:
+  id_prefix: nl_nwb
+  id_column: wvk_id
+  name_column: stt_naam
+  class_column: wegtype
+  # Coding based on NWB documentation: 
+  # V = Voetpad (Footpath), F = Fietspad (Cycle path)
+  # W = Weg (Road) - generic
+  class_mapping:
+    V: footway
+    F: cycleway
+    W: residential # fallback
+  crs: EPSG:28992 # Amersfoort / RD New - Standard for Dutch data, but WFS might return 4326. Checked: sample was 28992 in gpkg_spatial_ref_sys usually, but let's check output. 
+  # Actually the WFS might output 4326 if not specified, but usually GML/GPKG preserves source.
+  # Let's assume standard RD New or check if we can force it.
+notes: The URL returns a GeoPackage. Use 'wegtype' to filter for paths.

@@ -1,0 +1,23 @@
+name: gb_great_britain_highways
+display_name: OS Open Highways
+type: road
+description: Ordnance Survey Open TOID Highways Network (Free Alternative)
+source:
+  type: wfs
+  url: "https://api.os.uk/features/v1/wfs"
+  where_clause: "osfeatures:OpenTOID_HighwaysNetwork"
+  api_key_env_var: OS_API_KEY
+fetch:
+  id_prefix: gb_os_open
+  id_column: gml_id
+  name_column: name
+  class_column: road_classification
+  class_mapping:
+    Motorway: motorway
+    A Road: primary
+    B Road: secondary
+    Minor Road: tertiary
+    Local Road: residential
+    Other: service
+  crs: EPSG:27700 # British National Grid
+notes: "Use this as a free alternative to NGD Pavement Link. Contains OpenTOIDs for highways."

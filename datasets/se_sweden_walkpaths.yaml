@@ -1,0 +1,12 @@
+name: se_sweden_walkpaths
+display_name: NVDB Gangbana (Walkpaths)
+type: road
+description: Swedish National Road Database - Walkpaths
+source:
+  type: manual_download
+  url: "https://lastkajen.trafikverket.se/"
+  instructions: "Download 'Gångnät' from Lastkajen. Requires login."
+fetch:
+  id_prefix: se_nvdb_walk
+  id_column: objectid
+  crs: EPSG:3006 # SWEREF99 TM

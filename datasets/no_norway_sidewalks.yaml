@@ -1,0 +1,12 @@
+name: no_norway_sidewalks
+display_name: NVDB Fortau (Sidewalks)
+type: road
+description: Norwegian National Road Database - Sidewalks (Fortau)
+source:
+  type: custom_fetch
+  module: src.matcher.fetch.norway_nvdb
+  function: fetch_nvdb_fortau
+fetch:
+  id_prefix: no_nvdb_fortau
+  id_column: id
+  crs: EPSG:4326

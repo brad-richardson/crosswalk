@@ -1,0 +1,16 @@
+name: gb_great_britain_pavements
+display_name: OS NGD Pavement Link
+type: road
+description: Ordnance Survey National Geographic Database - Pavement Links
+source:
+  type: os_ngd_api
+  api_key_env_var: OS_NGD_API_KEY
+  collection: trn_pavement_link
+  # Fallback to manual download if API key fails
+fetch:
+  id_prefix: os_ngd_pavement
+  id_column: osid
+  class_column: formofway # Check actual column name
+  class_mapping:
+    Pavement: footway
+  crs: EPSG:27700 # British National Grid

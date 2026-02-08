@@ -1,0 +1,19 @@
+name: ch_switzerland_hiking
+display_name: SwissTLM3D Hiking Trails
+type: road
+description: Official Swiss Hiking Trail Network (Swisstopo)
+source:
+  type: download
+  url: "https://data.geo.admin.ch/ch.swisstopo.swisstlm3d-wanderwege/swisstlm3d-wanderwege/swisstlm3d-wanderwege_2056_5728.gpkg.zip"
+  file_format: gpkg
+  cache_download: true
+fetch:
+  id_prefix: ch_hiking
+  id_column: UUID # swissTLM3D usually uses UUID
+  name_column: name
+  class_column: objektart # Object type in German
+  class_mapping:
+    Wanderweg: footway
+    Bergwanderweg: footway
+    Alpinwanderweg: footway
+  crs: EPSG:2056 # LV95 - Swiss coordinate system
