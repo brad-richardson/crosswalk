@@ -49,11 +49,9 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
-notes: 'ArcGIS REST services endpoint no longer publicly accessible (404 as of Jan
-  2026).
-
-  Portal has moved from sdi.abudhabi.ae to sdi.gov.abudhabi.
-
-  Contact SDI for data access or check portal for updated service URLs.
-
-  '
+notes: 'BLOCKED: ArcGIS REST services no longer publicly accessible (404 as of Jan
+  2026). Portal moved from sdi.abudhabi.ae to sdi.gov.abudhabi but new ArcGIS domain
+  (arcgis.sdi.gov.abudhabi) does not resolve externally. Data catalogue API (ssdi.gov.abudhabi)
+  is also internal-only. Entire GIS infrastructure appears to be behind authentication
+  or VPN now. Alternative open data portal at data.bayanat.ae also unreachable. No
+  public endpoint found as of Feb 2026.'

@@ -3,14 +3,13 @@ display_name: LTA Singapore Roads
 type: road
 description: Road section lines from Singapore LTA DataMall
 source:
-  type: download
-  url: https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip
-  file_format: shp
+  type: manual
+  portal_url: https://datamall.lta.gov.sg/content/datamall/en/static-data.html
   api_key_env_var: LTA_API_KEY
   api_key_header: AccountKey
 fetch:
   id_prefix: sg_road
-  id_column: FID
+  id_column: RD_CD
   name_column: RD_CD_DESC
   class_column: RD_CATG__1
   class_mapping:
@@ -47,3 +46,8 @@ last_fetch:
 classification:
   source_classification:
     column: RD_CATG__1
+notes: 'LTA ships RD_CD (road code) column completely empty as of Aug 2025 quarterly
+  release. No stable unique ID column available - only RD_CD_DESC (road name, 3818
+  unique across 15326 segments) and RD_CATG__1 (6 classification categories). Revisit
+  if LTA restores RD_CD in a future release. LTA API works (GeospatialWholeIsland?ID=RoadSectionLine)
+  but data lacks usable IDs.'
