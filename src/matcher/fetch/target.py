@@ -154,9 +154,14 @@ def _transform_download_data(
     original_cols = [c for c in gdf.columns if c != "geometry"]
     source_tags_data = gdf[original_cols].to_dict(orient="records")
 
+    # Compute spatial suffix for ID disambiguation (H3 hex)
+    from ..utils.spatial_id import compute_spatial_suffix
+
+    suffixes = gdf.geometry.apply(compute_spatial_suffix)
+
     # Build result
     data: dict[str, Any] = {
-        "id": [f"{id_prefix}_{uid}" for uid in gdf[id_col]],
+        "id": [f"{id_prefix}_{uid}_{sfx}" for uid, sfx in zip(gdf[id_col], suffixes)],
         "subtype": ["road"] * len(gdf),
         "sources": gdf[id_col]
         .apply(lambda x: [{"dataset": source_name, "record_id": str(x)}])
@@ -220,6 +225,14 @@ def _transform_download_data(
         data["speed_limit_kph"] = [None] * len(gdf)
 
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
+
+    # Deduplicate by composite ID (same upstream ID + same H3 cell = true duplicate)
+    if len(result) > 0 and "id" in result.columns:
+        n_before = len(result)
+        result = result.drop_duplicates(subset=["id"], keep="first")
+        n_dropped = n_before - len(result)
+        if n_dropped > 0:
+            logger.info(f"{source_name}: {n_dropped} duplicate IDs removed (kept first occurrence)")
 
     # Add trivial linear-referenced columns
     result = _add_trivial_lr_columns(result)
