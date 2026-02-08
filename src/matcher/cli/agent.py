@@ -518,6 +518,7 @@ def generate_basemap_sweep(
         {"basemap": "road_context", "format": "svg"},
         {"basemap": "subline_geometry_only", "format": "png"},
         {"basemap": "subline_road_context", "format": "png"},
+        {"basemap": "subline_carto_positron", "format": "png"},
     ]
 
     # Load labels and geometries per dataset, sample candidates
@@ -799,7 +800,7 @@ def run_agent(
     few_shot_source: Path | None = typer.Option(
         None, "--few-shot-source", help="Explicit batch to source few-shot examples from"
     ),
-    timeout: int = typer.Option(300, "--timeout", help="Timeout per chunk in seconds"),
+    timeout: int = typer.Option(600, "--timeout", help="Timeout per chunk in seconds"),
     chunk_size: int = typer.Option(25, "--chunk-size", help="Candidates per CLI invocation"),
 ):
     """Run Claude agent in batch mode on labeling candidates.

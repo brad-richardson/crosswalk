@@ -362,7 +362,7 @@ def invoke_claude_batch(
     model: str,
     prompt_path: Path,
     batch_dir: Path,
-    timeout: int = 300,
+    timeout: int = 600,
 ) -> subprocess.CompletedProcess:
     """Invoke Claude Code CLI with a prompt file for batch processing.
 
@@ -493,7 +493,7 @@ def run_agent_batch(
     overwrite: bool = False,
     n_few_shot: int = 4,
     few_shot_source: Path | None = None,
-    timeout: int = 300,
+    timeout: int = 600,
     chunk_size: int = 25,
 ) -> None:
     """Run Claude agent in batch mode on a set of labeling candidates.
