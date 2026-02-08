@@ -1,6 +1,9 @@
 """Geometry utility functions."""
 
 import geopandas as gpd
+import numpy as np
+import pandas as pd
+import shapely
 from loguru import logger
 
 
@@ -68,3 +71,143 @@ def filter_to_linestrings(
         )
 
     return filtered
+
+
+def _remove_tiny_holes(polygon: shapely.Polygon, min_hole_area: float = 1e-10) -> shapely.Polygon:
+    """Remove interior holes smaller than a threshold from a polygon.
+
+    Tiny holes create junk branches in centerline extraction.
+
+    Args:
+        polygon: Input polygon (may have holes)
+        min_hole_area: Minimum hole area to keep (in CRS units squared)
+
+    Returns:
+        Polygon with tiny holes removed
+    """
+    if not polygon.interiors:
+        return polygon
+
+    kept = [ring for ring in polygon.interiors if shapely.Polygon(ring).area >= min_hole_area]
+    return shapely.Polygon(polygon.exterior, kept)
+
+
+def convert_polygons_to_centerlines(
+    gdf: gpd.GeoDataFrame,
+    source_name: str = "dataset",
+) -> gpd.GeoDataFrame:
+    """Convert polygon geometries to centerline LineStrings, preserving existing LineStrings.
+
+    Uses pygeoops.centerline() (medial axis via Voronoi diagrams) to extract
+    centerlines from polygon features, typically road/path features served as
+    polygons rather than LineStrings.
+
+    Args:
+        gdf: Input GeoDataFrame with mixed geometry types
+        source_name: Name of the data source for logging
+
+    Returns:
+        GeoDataFrame with polygons converted to LineStrings.
+        Existing LineStrings are passed through unchanged.
+        Failed conversions are dropped with a warning.
+    """
+    if gdf.empty:
+        return gdf
+
+    try:
+        import pygeoops
+    except ImportError as err:
+        raise ImportError(
+            "pygeoops package required for polygon-to-centerline conversion. "
+            'Install with: pip install "matcher[ml]"'
+        ) from err
+
+    geom_types = gdf.geometry.geom_type
+
+    # Separate LineStrings, MultiLineStrings, and Polygons/MultiPolygons
+    line_mask = geom_types == "LineString"
+    multiline_mask = geom_types == "MultiLineString"
+    poly_mask = geom_types.isin(["Polygon", "MultiPolygon"])
+
+    lines_gdf = gdf[line_mask].copy()
+    polys_gdf = gdf[poly_mask].copy()
+
+    # Explode MultiLineStrings into individual LineStrings (unsupported downstream)
+    multilines_gdf = gdf[multiline_mask]
+    if not multilines_gdf.empty:
+        logger.warning(
+            f"Exploding {len(multilines_gdf)} MultiLineString geometries in {source_name}"
+        )
+        multilines_gdf = multilines_gdf.explode(index_parts=False)
+        lines_gdf = gpd.GeoDataFrame(
+            pd.concat([lines_gdf, multilines_gdf], ignore_index=True), crs=gdf.crs
+        )
+
+    # Anything else (Point, etc.) is dropped
+    other_count = len(gdf) - line_mask.sum() - multiline_mask.sum() - poly_mask.sum()
+    if other_count > 0:
+        logger.warning(f"Dropping {other_count} non-line/polygon geometries from {source_name}")
+
+    if polys_gdf.empty:
+        logger.info(f"No polygon geometries found in {source_name}, nothing to convert")
+        return lines_gdf
+
+    logger.info(
+        f"Converting {len(polys_gdf)} polygon(s) to centerlines in {source_name} "
+        f"(passing through {len(lines_gdf)} existing line geometries)"
+    )
+
+    # Explode MultiPolygons into individual Polygons
+    polys_gdf = polys_gdf.explode(index_parts=False)
+
+    # Preprocess: make_valid + remove tiny holes
+    polys_gdf.geometry = shapely.make_valid(polys_gdf.geometry)
+    polys_gdf.geometry = polys_gdf.geometry.apply(
+        lambda g: _remove_tiny_holes(g) if g.geom_type == "Polygon" else g
+    )
+
+    # Filter out any geometries that became non-polygons after make_valid
+    valid_poly_mask = polys_gdf.geometry.geom_type == "Polygon"
+    if not valid_poly_mask.all():
+        n_invalid = (~valid_poly_mask).sum()
+        logger.warning(f"{n_invalid} geometries became non-polygon after make_valid, dropping")
+        polys_gdf = polys_gdf[valid_poly_mask].copy()
+
+    if polys_gdf.empty:
+        return lines_gdf
+
+    # Extract centerlines using pygeoops
+    centerlines = pygeoops.centerline(np.array(polys_gdf.geometry))
+
+    # Replace geometry column with centerlines
+    polys_gdf = polys_gdf.copy()
+    polys_gdf.geometry = centerlines
+
+    # Drop rows where centerline extraction failed (None results)
+    null_mask = polys_gdf.geometry.isna()
+    n_failed = null_mask.sum()
+    if n_failed > 0:
+        logger.warning(
+            f"Centerline extraction failed for {n_failed}/{len(polys_gdf)} polygons "
+            f"in {source_name}, dropping these features"
+        )
+        polys_gdf = polys_gdf[~null_mask].copy()
+
+    if polys_gdf.empty:
+        return lines_gdf
+
+    # Explode any MultiLineString results to individual LineStrings
+    polys_gdf = polys_gdf.explode(index_parts=False)
+
+    # Recombine with passthrough LineStrings
+    result = gpd.GeoDataFrame(
+        pd.concat([lines_gdf, polys_gdf], ignore_index=True),
+        crs=gdf.crs,
+    )
+
+    logger.info(
+        f"Centerline conversion complete: {len(result)} features "
+        f"({len(lines_gdf)} passthrough + {len(polys_gdf)} converted)"
+    )
+
+    return result

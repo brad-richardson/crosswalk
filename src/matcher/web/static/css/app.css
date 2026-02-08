@@ -996,3 +996,23 @@ body {
     color: #333;
     margin-bottom: 12px;
 }
+
+/* === Dataset Browser === */
+.browser-info {
+    bottom: 24px;
+    left: 12px;
+    max-width: 320px;
+    padding: 12px 16px;
+}
+
+.browser-info h4 {
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+    color: #333;
+}
+
+.browser-stats {
+    font-size: 0.8rem;
+    color: #666;
+    line-height: 1.5;
+}

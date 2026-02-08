@@ -1,9 +1,9 @@
 """Tests for geometry utility functions."""
 
 import geopandas as gpd
-from shapely import LineString, MultiLineString, Point, Polygon
+from shapely import LineString, MultiLineString, MultiPolygon, Point, Polygon
 
-from matcher.utils.geometry import filter_to_linestrings
+from matcher.utils.geometry import convert_polygons_to_centerlines, filter_to_linestrings
 
 
 class TestFilterToLinestrings:
@@ -137,3 +137,91 @@ class TestFilterToLinestrings:
         result = filter_to_linestrings(gdf, "test")
         assert len(result) == 2
         assert list(result.index) == ["a", "c"]
+
+
+# Helper: a rectangle polygon wide enough for centerline extraction
+def _make_road_polygon(x0=0, y0=0, width=0.001, length=0.01):
+    """Create a rectangular polygon representing a road surface."""
+    return Polygon(
+        [
+            (x0, y0),
+            (x0 + length, y0),
+            (x0 + length, y0 + width),
+            (x0, y0 + width),
+            (x0, y0),
+        ]
+    )
+
+
+class TestConvertPolygonsToCenterlines:
+    """Tests for convert_polygons_to_centerlines function."""
+
+    def test_rectangle_produces_linestring(self):
+        """A simple rectangle polygon should produce a LineString centerline."""
+        poly = _make_road_polygon()
+        gdf = gpd.GeoDataFrame({"id": [1]}, geometry=[poly], crs="EPSG:4326")
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert len(result) > 0
+        for geom in result.geometry:
+            assert geom.geom_type == "LineString"
+
+    def test_mixed_linestring_polygon_preserves_lines(self):
+        """Existing LineStrings should pass through, polygons should be converted."""
+        line = LineString([(0, 0), (1, 1)])
+        poly = _make_road_polygon(x0=2)
+        gdf = gpd.GeoDataFrame(
+            {"id": [1, 2]},
+            geometry=[line, poly],
+            crs="EPSG:4326",
+        )
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert len(result) >= 2
+        # The original line should be present
+        geom_types = set(result.geometry.geom_type)
+        assert "LineString" in geom_types
+
+    def test_multipolygon_exploded_and_converted(self):
+        """MultiPolygon should be exploded into individual polygons and converted."""
+        mp = MultiPolygon([_make_road_polygon(x0=0), _make_road_polygon(x0=0.02)])
+        gdf = gpd.GeoDataFrame({"id": [1]}, geometry=[mp], crs="EPSG:4326")
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert len(result) >= 2
+        for geom in result.geometry:
+            assert geom.geom_type == "LineString"
+
+    def test_empty_geodataframe_returns_empty(self):
+        """Empty GeoDataFrame should be returned unchanged."""
+        gdf = gpd.GeoDataFrame({"id": []}, geometry=[], crs="EPSG:4326")
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert len(result) == 0
+
+    def test_no_polygons_returns_unchanged(self):
+        """GeoDataFrame with only LineStrings should be returned unchanged."""
+        line = LineString([(0, 0), (1, 1)])
+        gdf = gpd.GeoDataFrame({"id": [1]}, geometry=[line], crs="EPSG:4326")
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert len(result) == 1
+        assert result.geometry.iloc[0].geom_type == "LineString"
+
+    def test_crs_preserved(self):
+        """CRS should be preserved through conversion."""
+        poly = _make_road_polygon()
+        gdf = gpd.GeoDataFrame({"id": [1]}, geometry=[poly], crs="EPSG:4326")
+        result = convert_polygons_to_centerlines(gdf, "test")
+        assert result.crs is not None
+        assert result.crs.to_epsg() == 4326
+
+    def test_failed_extraction_dropped_with_warning(self):
+        """Degenerate polygon that fails extraction should be dropped with warning."""
+        # A degenerate polygon (nearly zero-width sliver)
+        degen = Polygon([(0, 0), (0.0000001, 0), (0.0000001, 0.0000001), (0, 0.0000001)])
+        # Include a valid rectangle to ensure at least some succeed
+        valid = _make_road_polygon(x0=1)
+        gdf = gpd.GeoDataFrame(
+            {"id": [1, 2]},
+            geometry=[degen, valid],
+            crs="EPSG:4326",
+        )
+        result = convert_polygons_to_centerlines(gdf, "test")
+        # Should have at least the valid polygon's centerline
+        assert len(result) >= 1

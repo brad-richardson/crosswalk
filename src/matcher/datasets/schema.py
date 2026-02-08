@@ -59,6 +59,8 @@ class FetchConfig(BaseModel):
     # Speed limit
     speed_limit_column: str | None = None  # Column for speed limit
     speed_limit_unit: str = "kph"  # Unit: "kph" or "mph" (normalized to kph internally)
+    # Polygon-to-centerline conversion
+    polygon_to_centerline: bool = False  # Convert polygon geometries to centerline LineStrings
 
 
 class MatchingConfig(BaseModel):

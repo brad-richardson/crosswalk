@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<!-- Info overlay (bottom-left) -->
+<div class="browser-info map-overlay hidden" id="browser-info">
+    <h4 id="browser-dataset-name">No dataset loaded</h4>
+    <div id="browser-stats" class="browser-stats"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/browser.js"></script>
+{% if dataset %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.browserLoadDataset) {
+            window.browserLoadDataset('{{ dataset }}');
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

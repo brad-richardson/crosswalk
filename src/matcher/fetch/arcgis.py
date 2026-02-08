@@ -15,6 +15,7 @@ from loguru import logger
 
 from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
 from ..utils.dataframe import find_id_column
+from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
 from .normalize import normalize_oneway_value, normalize_speed_to_kph
@@ -43,6 +44,7 @@ def fetch_arcgis_layer(
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -70,6 +72,7 @@ def fetch_arcgis_layer(
         oneway_column: Column name for one-way direction
         speed_limit_column: Column name for speed limit
         speed_limit_unit: Unit of speed limit values ("kph" or "mph")
+        polygon_to_centerline: Convert polygon geometries to centerline LineStrings
 
     Returns:
         Path to the output GeoParquet file
@@ -115,6 +118,7 @@ def fetch_arcgis_layer(
         speed_limit_column=speed_limit_column,
         speed_limit_unit=speed_limit_unit,
         id_column=id_column,
+        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Deduplicate by ID (ArcGIS pagination can return duplicates if data changes during fetch)
@@ -152,7 +156,8 @@ def fetch_arcgis_layer(
         feature_count=len(gdf),
         geometry_types=geom_types,
         filters=filters_dict if filters_dict else {},
-        notes=f"Fetched from {source_name}",
+        notes=f"Fetched from {source_name}"
+        + (" (polygon-to-centerline conversion applied)" if polygon_to_centerline else ""),
         # Version tracking
         transform_version=TRANSFORM_VERSION,
         schema_version=SCHEMA_VERSION,
@@ -278,6 +283,7 @@ def _transform_to_overture_schema(
     speed_limit_column: str | None = None,
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
 
@@ -298,12 +304,19 @@ def _transform_to_overture_schema(
         oneway_column: Column name for one-way direction
         speed_limit_column: Column name for speed limit
         speed_limit_unit: Unit of speed limit values ("kph" or "mph")
+        polygon_to_centerline: Convert polygon geometries to centerline LineStrings
 
     Returns:
         GeoDataFrame with Overture-compatible schema
     """
     if len(gdf) == 0:
         return gdf
+
+    # Convert polygons to centerlines if enabled (before schema transform)
+    if polygon_to_centerline:
+        gdf = convert_polygons_to_centerlines(gdf, source_name=source_name)
+        if len(gdf) == 0:
+            return gdf
 
     # Apply exclude filter if configured
     if exclude:

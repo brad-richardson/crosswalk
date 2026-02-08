@@ -38,6 +38,7 @@ from loguru import logger
 
 from ..datasets.schema import get_dataset_config, list_dataset_configs
 from ..filenames import target_filename
+from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .arcgis import fetch_arcgis_layer
 from .normalize import normalize_oneway_value, normalize_speed_to_kph
@@ -62,6 +63,7 @@ def _transform_download_data(
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
     dataset_type: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
@@ -76,9 +78,16 @@ def _transform_download_data(
         subclass_mapping: Dict mapping source values to subclass values
         default_subclass: Default subclass if no column provided
         id_column: Column to use as stable ID (auto-detected if None)
+        polygon_to_centerline: Convert polygon geometries to centerline LineStrings
     """
     if len(gdf) == 0:
         return gdf
+
+    # Convert polygons to centerlines if enabled (before any other processing)
+    if polygon_to_centerline:
+        gdf = convert_polygons_to_centerlines(gdf, source_name=source_name)
+        if len(gdf) == 0:
+            return gdf
 
     # Apply exclude filter if configured
     if exclude:
@@ -324,6 +333,7 @@ def fetch_ogc_features(
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
     dataset_type: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from an OGC API Features endpoint.
 
@@ -397,6 +407,7 @@ def fetch_ogc_features(
         exclude=exclude,
         id_column=id_column,
         dataset_type=dataset_type,
+        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -421,6 +432,7 @@ def fetch_wfs(
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
     dataset_type: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
 
@@ -497,6 +509,7 @@ def fetch_wfs(
         exclude=exclude,
         id_column=id_column,
         dataset_type=dataset_type,
+        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -642,6 +655,7 @@ def fetch_download(
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
     dataset_type: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -853,6 +867,7 @@ def fetch_download(
             speed_limit_unit=speed_limit_unit,
             id_column=id_column,
             dataset_type=dataset_type,
+            polygon_to_centerline=polygon_to_centerline,
         )
 
         # Save to parquet
@@ -915,6 +930,7 @@ def fetch_os_downloads(
     exclude: dict[str, list[str]] | None = None,
     id_column: str | None = None,
     dataset_type: str | None = None,
+    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
 
@@ -1079,6 +1095,7 @@ def fetch_os_downloads(
         exclude=exclude,
         id_column=id_column,
         dataset_type=dataset_type,
+        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -1159,6 +1176,7 @@ def fetch_dataset(
         oneway_column = fetch_config.oneway_column if fetch_config else None
         speed_limit_column = fetch_config.speed_limit_column if fetch_config else None
         speed_limit_unit = fetch_config.speed_limit_unit if fetch_config else "kph"
+        polygon_to_centerline = fetch_config.polygon_to_centerline if fetch_config else False
 
         # Handle os_downloads before URL check (it uses product_id, not url)
         if source_type == "os_downloads":
@@ -1185,6 +1203,7 @@ def fetch_dataset(
                 exclude=exclude,
                 id_column=id_column,
                 dataset_type=config.type,
+                polygon_to_centerline=polygon_to_centerline,
             )
 
         if url is None:
@@ -1255,6 +1274,7 @@ def fetch_dataset(
                 speed_limit_unit=speed_limit_unit,
                 id_column=id_column,
                 dataset_type=config.type,
+                polygon_to_centerline=polygon_to_centerline,
             )
 
         elif source_type == "ogc_features":
@@ -1271,6 +1291,7 @@ def fetch_dataset(
                 exclude=exclude,
                 id_column=id_column,
                 dataset_type=config.type,
+                polygon_to_centerline=polygon_to_centerline,
             )
 
         elif source_type == "wfs":
@@ -1293,6 +1314,7 @@ def fetch_dataset(
                 exclude=exclude,
                 id_column=id_column,
                 dataset_type=config.type,
+                polygon_to_centerline=polygon_to_centerline,
             )
 
         else:
@@ -1326,6 +1348,8 @@ def fetch_dataset(
             # Pass id_column for stable IDs
             if id_column:
                 arcgis_kwargs["id_column"] = id_column
+            if polygon_to_centerline:
+                arcgis_kwargs["polygon_to_centerline"] = polygon_to_centerline
 
             return fetch_arcgis_layer(**arcgis_kwargs)
 
