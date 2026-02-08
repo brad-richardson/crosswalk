@@ -21,8 +21,6 @@ from loguru import logger
 VARIANT_CONFIG: dict[str, dict] = {
     "geometry_only": {"filename": "geometry_only.png", "is_svg": False},
     "carto_positron": {"filename": "carto_positron.png", "is_svg": False},
-    "road_context": {"filename": "road_context.png", "is_svg": False},
-    "road_context_svg": {"filename": "road_context.svg", "is_svg": True},
     "subline_geometry_only": {"filename": "subline_geometry_only.png", "is_svg": False},
     "subline_road_context": {"filename": "subline_road_context.png", "is_svg": False},
 }
@@ -35,14 +33,6 @@ IMAGE_DESCRIPTIONS: dict[str, str] = {
     "carto_positron": (
         "carto_positron.png: geometry overlay on CartoDB light map "
         "(blue circles=reference, red circles=target)"
-    ),
-    "road_context": (
-        "road_context.png: geometry with nearby roads shown as gray lines for context "
-        "(blue circles=reference, red circles=target)"
-    ),
-    "road_context_svg": (
-        "SVG content inline below: geometry with nearby roads shown as gray lines "
-        "for context (blue=reference, red=target)"
     ),
     "subline_geometry_only": (
         "subline_geometry_only.png: alignment view on white background. "
