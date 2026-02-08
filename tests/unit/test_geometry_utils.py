@@ -211,7 +211,7 @@ class TestConvertPolygonsToCenterlines:
         assert result.crs is not None
         assert result.crs.to_epsg() == 4326
 
-    def test_failed_extraction_dropped_with_warning(self, caplog):
+    def test_failed_extraction_dropped_with_warning(self):
         """Degenerate polygon that fails extraction should be dropped with warning."""
         # A degenerate polygon (nearly zero-width sliver)
         degen = Polygon([(0, 0), (0.0000001, 0), (0.0000001, 0.0000001), (0, 0.0000001)])

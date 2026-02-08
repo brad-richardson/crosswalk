@@ -124,21 +124,33 @@ def convert_polygons_to_centerlines(
 
     geom_types = gdf.geometry.geom_type
 
-    # Separate LineStrings (passthrough) from Polygons/MultiPolygons
-    line_mask = geom_types.isin(["LineString", "MultiLineString"])
+    # Separate LineStrings, MultiLineStrings, and Polygons/MultiPolygons
+    line_mask = geom_types == "LineString"
+    multiline_mask = geom_types == "MultiLineString"
     poly_mask = geom_types.isin(["Polygon", "MultiPolygon"])
 
     lines_gdf = gdf[line_mask].copy()
     polys_gdf = gdf[poly_mask].copy()
 
+    # Explode MultiLineStrings into individual LineStrings (unsupported downstream)
+    multilines_gdf = gdf[multiline_mask]
+    if not multilines_gdf.empty:
+        logger.warning(
+            f"Exploding {len(multilines_gdf)} MultiLineString geometries in {source_name}"
+        )
+        multilines_gdf = multilines_gdf.explode(index_parts=False)
+        lines_gdf = gpd.GeoDataFrame(
+            pd.concat([lines_gdf, multilines_gdf], ignore_index=True), crs=gdf.crs
+        )
+
     # Anything else (Point, etc.) is dropped
-    other_count = len(gdf) - len(lines_gdf) - len(polys_gdf)
+    other_count = len(gdf) - line_mask.sum() - multiline_mask.sum() - poly_mask.sum()
     if other_count > 0:
         logger.warning(f"Dropping {other_count} non-line/polygon geometries from {source_name}")
 
     if polys_gdf.empty:
         logger.info(f"No polygon geometries found in {source_name}, nothing to convert")
-        return gdf
+        return lines_gdf
 
     logger.info(
         f"Converting {len(polys_gdf)} polygon(s) to centerlines in {source_name} "

@@ -44,6 +44,14 @@ async def browser_page(request: Request, dataset: str | None = None):
 @router.get("/features")
 async def browser_features(dataset: str = Query(...)):
     """Return GeoJSON FeatureCollection for a dataset's target parquet file."""
+    # Validate dataset against known configs to prevent path traversal
+    known_datasets = list_dataset_configs()
+    if dataset not in known_datasets:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Unknown dataset: {dataset}"},
+        )
+
     # Find the target file
     target_path = find_target_file(DATA_DIR, dataset)
     if target_path is None or not target_path.exists():
@@ -54,11 +62,11 @@ async def browser_features(dataset: str = Query(...)):
 
     try:
         gdf = gpd.read_parquet(target_path)
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to read %s", target_path)
         return JSONResponse(
             status_code=500,
-            content={"error": f"Failed to read data: {e}"},
+            content={"error": "Failed to read data"},
         )
 
     total_count = len(gdf)
