@@ -738,7 +738,7 @@ def fetch_all(
             except Exception as e:
                 return ("reference", e)
 
-        # Run target + reference in parallel for this dataset
+        # Run target + reference in parallel (always 2 tasks per dataset)
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
                 executor.submit(fetch_target_data),

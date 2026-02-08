@@ -1357,15 +1357,18 @@ def fetch_dataset(
         logger.error(f"Failed to fetch {dataset_name}: {e}")
         return None
 
-    # Quality regression check against saved fingerprint
-    if (
-        result_path is not None
-        and result_path.exists()
-        and not skip_quality_check
-        and config.quality_fingerprint is not None
-    ):
+    # Quality regression check and fingerprint auto-update
+    if result_path is not None and result_path.exists() and not skip_quality_check:
+        from .exceptions import QualityRegressionError
+
         try:
             fetched_gdf = gpd.read_parquet(result_path)
+        except Exception:
+            logger.warning(f"Could not read {result_path} for quality check, skipping")
+            return result_path
+
+        # Check for regression if fingerprint exists
+        if config.quality_fingerprint is not None:
             from ..quality.regression import check_quality_regression
 
             violations = check_quality_regression(
@@ -1375,8 +1378,6 @@ def fetch_dataset(
                 # Rename output to .suspect so it's not used accidentally
                 suspect_path = result_path.with_suffix(".parquet.suspect")
                 result_path.rename(suspect_path)
-                from .exceptions import QualityRegressionError
-
                 raise QualityRegressionError(
                     f"Quality regression detected for {dataset_name}: "
                     f"{len(violations)} violation(s). "
@@ -1384,8 +1385,17 @@ def fetch_dataset(
                     f"Use --skip-quality-check to override.\n"
                     + "\n".join(f"  - {v.message}" for v in violations)
                 )
-        except Exception:
-            logger.warning(f"Could not read {result_path} for quality check, skipping")
+
+        # Auto-update fingerprint after successful fetch (passed checks or first fetch)
+        from ..datasets.schema import update_quality_fingerprint
+        from ..quality.regression import compute_quick_fingerprint
+
+        new_fp = compute_quick_fingerprint(fetched_gdf)
+        update_quality_fingerprint(dataset_name, new_fp)
+        if config.quality_fingerprint is None:
+            logger.info(f"Created quality fingerprint for {dataset_name}")
+        else:
+            logger.debug(f"Updated quality fingerprint for {dataset_name}")
 
     return result_path
 

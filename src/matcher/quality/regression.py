@@ -8,6 +8,7 @@ dropping from 80% to 0%).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import geopandas as gpd
 import pandas as pd
@@ -132,3 +133,39 @@ def check_quality_regression(
             logger.warning(f"  {v.message}")
 
     return violations
+
+
+def compute_quick_fingerprint(gdf: gpd.GeoDataFrame) -> QualityFingerprintConfig:
+    """Compute a lightweight quality fingerprint from a fetched GeoDataFrame.
+
+    Captures the metrics used by check_quality_regression so the fingerprint
+    can be auto-updated after each successful fetch.
+
+    Args:
+        gdf: Fetched GeoDataFrame (Overture-compatible schema)
+
+    Returns:
+        QualityFingerprintConfig with key metrics populated
+    """
+    total = len(gdf)
+
+    name_ratio = 0.0
+    if total > 0 and "names" in gdf.columns:
+        has_name = gdf["names"].apply(
+            lambda x: x is not None and isinstance(x, dict) and bool(x.get("primary"))
+        )
+        name_ratio = has_name.sum() / total
+
+    class_ratio = 0.0
+    if total > 0 and "class" in gdf.columns:
+        has_class = gdf["class"].apply(
+            lambda x: pd.notna(x) and str(x) not in ("", "unknown", "unclassified")
+        )
+        class_ratio = has_class.sum() / total
+
+    return QualityFingerprintConfig(
+        computed_at=datetime.now(UTC),
+        total_segments=total,
+        name_coverage_ratio=round(name_ratio, 4),
+        class_coverage_ratio=round(class_ratio, 4),
+    )

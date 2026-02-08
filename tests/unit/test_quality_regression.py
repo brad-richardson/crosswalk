@@ -4,7 +4,7 @@ import geopandas as gpd
 from shapely.geometry import LineString
 
 from matcher.datasets.schema import QualityFingerprintConfig
-from matcher.quality.regression import check_quality_regression
+from matcher.quality.regression import check_quality_regression, compute_quick_fingerprint
 
 
 def _make_fetched_gdf(
@@ -147,6 +147,42 @@ class TestQualityRegression:
 
         violations = check_quality_regression(gdf, fp, "test_dataset")
         assert len(violations) == 3  # segments, names, classes
+
+
+class TestComputeQuickFingerprint:
+    """Tests for compute_quick_fingerprint()."""
+
+    def test_computes_correct_metrics(self):
+        """Quick fingerprint should capture segment count, name and class coverage."""
+        gdf = _make_fetched_gdf(n=100, name_ratio=0.75, class_ratio=0.6)
+        fp = compute_quick_fingerprint(gdf)
+
+        assert fp.total_segments == 100
+        assert fp.name_coverage_ratio == 0.75
+        assert fp.class_coverage_ratio == 0.6
+        assert fp.computed_at is not None
+
+    def test_empty_gdf_fingerprint(self):
+        """Empty GDF should produce zero metrics."""
+        gdf = gpd.GeoDataFrame(
+            {"id": [], "names": [], "class": []},
+            geometry=[],
+            crs="EPSG:4326",
+        )
+        fp = compute_quick_fingerprint(gdf)
+
+        assert fp.total_segments == 0
+        assert fp.name_coverage_ratio == 0.0
+        assert fp.class_coverage_ratio == 0.0
+
+    def test_fingerprint_matches_regression_check(self):
+        """Quick fingerprint should produce values consistent with regression check."""
+        gdf = _make_fetched_gdf(n=200, name_ratio=0.5, class_ratio=0.8)
+        fp = compute_quick_fingerprint(gdf)
+
+        # Using the computed fingerprint as baseline should produce no violations
+        violations = check_quality_regression(gdf, fp, "test")
+        assert violations == []
 
 
 class TestLastFetchMigration:
