@@ -1268,6 +1268,138 @@ def render_subline_road_context(
     return result
 
 
+def render_subline_carto_positron(
+    ref_geom: LineString | MultiLineString,
+    target_geom: LineString | MultiLineString,
+    ref_start_frac: float = 0.0,
+    ref_end_frac: float = 1.0,
+    target_start_frac: float = 0.0,
+    target_end_frac: float = 1.0,
+    size: tuple[int, int] | None = None,
+    padding_ratio: float = 0.3,
+) -> Image.Image:
+    """Render subline alignment view on CartoDB Positron map tiles.
+
+    Same as render_subline_geometry_only but with Carto Positron tiles
+    as background instead of white.
+
+    Args:
+        ref_geom: Reference geometry (blue)
+        target_geom: Target geometry (red)
+        ref_start_frac: Start fraction on reference line (0.0-1.0)
+        ref_end_frac: End fraction on reference line (0.0-1.0)
+        target_start_frac: Start fraction on target line (0.0-1.0)
+        target_end_frac: End fraction on target line (0.0-1.0)
+        size: Output image size, or None for dynamic sizing
+        padding_ratio: Padding around geometries
+
+    Returns:
+        PIL Image with subline visualization on map tiles
+    """
+    from ..features.alignment import create_subline
+
+    # Full alignment → standard carto_positron rendering
+    if _is_full_alignment(ref_start_frac, ref_end_frac, target_start_frac, target_end_frac):
+        ref_line = _to_linestring(ref_geom)
+        target_line = _to_linestring(target_geom)
+
+        if not ref_line or not target_line:
+            if size is None:
+                size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+            return Image.new("RGB", size, BACKGROUND_COLOR)
+
+        target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+        bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+        bbox = _make_bbox_square(bbox)
+
+        if size is None:
+            size = _calculate_size_from_bbox(bbox)
+
+        bg = fetch_raster_tiles(bbox, CARTO_POSITRON_TILE_URL, size=size)
+        if bg is None:
+            bg = Image.new("RGB", size, BACKGROUND_COLOR)
+
+        return render_with_overlay(bg, ref_geom, target_geom, bbox)
+
+    ref_line = _to_linestring(ref_geom)
+    target_line = _to_linestring(target_geom)
+
+    if not ref_line or not target_line:
+        if size is None:
+            size = (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE)
+        return Image.new("RGB", size, BACKGROUND_COLOR)
+
+    target_bbox = _expand_bbox(target_line.bounds, padding_ratio)
+    bbox = _expand_bbox_for_reference(target_bbox, ref_line, MIN_REFERENCE_VISIBLE_M)
+    bbox = _make_bbox_square(bbox)
+
+    if size is None:
+        size = _calculate_size_from_bbox(bbox)
+
+    # Fetch CartoDB Positron tiles as background
+    bg = fetch_raster_tiles(bbox, CARTO_POSITRON_TILE_URL, size=size)
+    if bg is None:
+        bg = Image.new("RGB", size, BACKGROUND_COLOR)
+    result = bg.convert("RGB")
+    draw = ImageDraw.Draw(result)
+
+    # Layer 1: Faded dashed full segments
+    _draw_dashed_linestring(draw, ref_line, bbox, size, REFERENCE_FADED_COLOR, FADED_LINE_WIDTH)
+    _draw_dashed_linestring(draw, target_line, bbox, size, TARGET_FADED_COLOR, FADED_LINE_WIDTH)
+
+    # Layer 2: Bright solid aligned sublines
+    ref_sub = create_subline(ref_line, ref_start_frac, ref_end_frac)
+    target_sub = create_subline(target_line, target_start_frac, target_end_frac)
+
+    if ref_sub:
+        _draw_linestring(
+            draw,
+            ref_sub,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+    else:
+        _draw_linestring(
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=25,
+        )
+
+    if target_sub:
+        _draw_linestring(
+            draw,
+            target_sub,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+    else:
+        _draw_linestring(
+            draw,
+            target_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            GEOMETRY_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=40,
+        )
+
+    return result
+
+
 def _svg_geo_to_pixel(
     lon: float,
     lat: float,
@@ -1585,8 +1717,23 @@ def render_candidate_variant(
         )
         return img, {"size": img.size, "basemap": basemap, "format": "png"}
 
+    elif basemap == "subline_carto_positron":
+        fracs = alignment_fracs or {}
+        img = render_subline_carto_positron(
+            ref_geom,
+            target_geom,
+            ref_start_frac=fracs.get("ref_start_frac", 0.0),
+            ref_end_frac=fracs.get("ref_end_frac", 1.0),
+            target_start_frac=fracs.get("target_start_frac", 0.0),
+            target_end_frac=fracs.get("target_end_frac", 1.0),
+            size=size,
+            padding_ratio=padding_ratio,
+        )
+        return img, {"size": img.size, "basemap": basemap, "format": "png"}
+
     else:
         raise ValueError(
             f"Unknown basemap: {basemap}. Use 'geometry_only', 'carto_positron', "
-            f"'road_context', 'subline_geometry_only', or 'subline_road_context'."
+            f"'road_context', 'subline_geometry_only', 'subline_road_context', "
+            f"or 'subline_carto_positron'."
         )

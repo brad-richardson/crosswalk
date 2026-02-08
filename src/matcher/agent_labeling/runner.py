@@ -19,21 +19,12 @@ from loguru import logger
 # ---------------------------------------------------------------------------
 
 VARIANT_CONFIG: dict[str, dict] = {
-    "geometry_only": {"filename": "geometry_only.png", "is_svg": False},
-    "carto_positron": {"filename": "carto_positron.png", "is_svg": False},
     "subline_geometry_only": {"filename": "subline_geometry_only.png", "is_svg": False},
     "subline_road_context": {"filename": "subline_road_context.png", "is_svg": False},
+    "subline_carto_positron": {"filename": "subline_carto_positron.png", "is_svg": False},
 }
 
 IMAGE_DESCRIPTIONS: dict[str, str] = {
-    "geometry_only": (
-        "geometry_only.png: clean geometry view on white background "
-        "(blue circles=reference, red circles=target)"
-    ),
-    "carto_positron": (
-        "carto_positron.png: geometry overlay on CartoDB light map "
-        "(blue circles=reference, red circles=target)"
-    ),
     "subline_geometry_only": (
         "subline_geometry_only.png: alignment view on white background. "
         "Faint dashed lines show full segments (light blue=reference, light red=target). "
@@ -45,6 +36,12 @@ IMAGE_DESCRIPTIONS: dict[str, str] = {
         "Gray dashed lines show nearby roads (for context only, ignore them). "
         "Faint dashed colored lines show full segments "
         "(light blue=reference, light red=target). "
+        "Bright solid lines with circles show aligned/overlapping portions "
+        "(blue=reference, red=target)"
+    ),
+    "subline_carto_positron": (
+        "subline_carto_positron.png: alignment view on CartoDB light map tiles. "
+        "Faint dashed lines show full segments (light blue=reference, light red=target). "
         "Bright solid lines with circles show aligned/overlapping portions "
         "(blue=reference, red=target)"
     ),
