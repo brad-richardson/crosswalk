@@ -858,7 +858,7 @@ def generate_scored_candidates(
         target_class_column: Class column in target
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by decision priority, then confidence
     """
     # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
@@ -1071,7 +1071,7 @@ def generate_scored_candidates_with_cache(
         n_jobs: Number of parallel jobs (-1 for all cores)
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by uncertainty (most uncertain first)
     """
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")
@@ -1156,7 +1156,7 @@ def build_views_from_feature_df(
         target_class_column: Class column in target
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by uncertainty (most uncertain first)
     """
     if len(feature_df) == 0:
         return []
@@ -1431,18 +1431,16 @@ def filter_candidates(
 def filter_by_confidence_band(
     views: list[CandidatePairView],
     review_only: bool = True,
-    buffer: float = 0.05,
 ) -> list[CandidatePairView]:
-    """Filter candidates to review band (near decision boundaries) or return all.
+    """Filter candidates to the review band or return all.
 
-    The review band catches edge cases near the production thresholds by adding
-    a small buffer on each side. This helps labelers focus on the most uncertain
-    cases that would most benefit from human review.
+    The review band uses the production thresholds (review_threshold to
+    match_threshold) without additional buffer, focusing labelers on pairs
+    where the model is most uncertain.
 
     Args:
         views: List of candidate views
         review_only: If True, filter to review band. If False, return all.
-        buffer: Buffer to add around thresholds (default 0.05)
 
     Returns:
         Filtered list of views within the confidence band
