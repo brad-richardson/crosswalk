@@ -28,22 +28,40 @@ fetch:
   - 60.3
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:32:31.543315+00:00'
-  bbox:
-  - 24.8
-  - 60.1
-  - 25.2
-  - 60.3
-  bbox_buffered:
-  - 24.7819243814478
-  - 60.09101688825009
-  - 25.2180756185522
-  - 60.30898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 169748
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:32:31.543315+00:00'
+    bbox:
+    - 24.8
+    - 60.1
+    - 25.2
+    - 60.3
+    bbox_buffered:
+    - 24.7819243814478
+    - 60.09101688825009
+    - 25.2180756185522
+    - 60.30898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 169748
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:20:18.832991+00:00'
+    bbox:
+    - 24.8
+    - 60.1
+    - 25.2
+    - 60.3
+    bbox_buffered:
+    - 24.7819243814478
+    - 60.09101688825009
+    - 25.2180756185522
+    - 60.30898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 169748
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: toiminn_lk

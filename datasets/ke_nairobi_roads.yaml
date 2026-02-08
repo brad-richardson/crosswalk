@@ -16,20 +16,38 @@ fetch:
   - -1.15
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:35:24.080884+00:00'
-  bbox:
-  - 36.65
-  - -1.45
-  - 37.15
-  - -1.15
-  bbox_buffered:
-  - 36.641014575485585
-  - -1.4589831117499101
-  - 37.15898542451441
-  - -1.1410168882500897
-  bbox_buffer_m: 1000.0
-  feature_count: 131086
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:35:24.080884+00:00'
+    bbox:
+    - 36.65
+    - -1.45
+    - 37.15
+    - -1.15
+    bbox_buffered:
+    - 36.641014575485585
+    - -1.4589831117499101
+    - 37.15898542451441
+    - -1.1410168882500897
+    bbox_buffer_m: 1000.0
+    feature_count: 131086
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:22:22.921958+00:00'
+    bbox:
+    - 36.65
+    - -1.45
+    - 37.15
+    - -1.15
+    bbox_buffered:
+    - 36.641014575485585
+    - -1.4589831117499101
+    - 37.15898542451441
+    - -1.1410168882500897
+    bbox_buffer_m: 1000.0
+    feature_count: 131086
+    geometry_types:
+    - LineString
+    output_path: data/raw
 notes: Regional subset of Kenya Roads Board data for efficient processing.

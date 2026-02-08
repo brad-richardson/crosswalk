@@ -9,27 +9,45 @@ fetch:
   id_prefix: bog_bike
   id_column: OBJECTID
   class_column: CICTSUPERF
-  polygon_to_centerline: true
   bbox:
   - -74.25
   - 4.45
   - -73.95
   - 4.85
   crs: EPSG:4326
+  polygon_to_centerline: true
 last_fetch:
-  fetched_at: '2026-02-03T12:30:32.134895+00:00'
-  bbox:
-  - -74.25
-  - 4.45
-  - -73.95
-  - 4.85
-  bbox_buffered:
-  - -74.2590127771965
-  - 4.44101688825009
-  - -73.9409872228035
-  - 4.85898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 177344
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:30:32.134895+00:00'
+    bbox:
+    - -74.25
+    - 4.45
+    - -73.95
+    - 4.85
+    bbox_buffered:
+    - -74.2590127771965
+    - 4.44101688825009
+    - -73.9409872228035
+    - 4.85898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 177344
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:19:01.299806+00:00'
+    bbox:
+    - -74.25
+    - 4.45
+    - -73.95
+    - 4.85
+    bbox_buffered:
+    - -74.2590127771965
+    - 4.44101688825009
+    - -73.9409872228035
+    - 4.85898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 177344
+    geometry_types:
+    - LineString
+    output_path: data/raw

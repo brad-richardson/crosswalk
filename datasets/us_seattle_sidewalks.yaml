@@ -33,6 +33,23 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:27:51.516802+00:00'
+    bbox:
+    - -122.45
+    - 47.48
+    - -122.22
+    - 47.78
+    bbox_buffered:
+    - -122.46332972735057
+    - 47.471016888250084
+    - -122.20667027264943
+    - 47.788983111749914
+    bbox_buffer_m: 1000.0
+    feature_count: 165503
+    geometry_types:
+    - LineString
+    output_path: data/raw
 quality_fingerprint:
   computed_at: '2026-02-08T13:49:23.045695+00:00'
   total_segments: 46145

@@ -10,9 +10,6 @@ fetch:
   id_column: OBJECTID
   name_column: ROAD_NAME
   class_column: SUBTYPE
-  oneway_column: ONEWAY
-  speed_limit_column: MPH
-  speed_limit_unit: mph
   class_mapping:
     1: motorway
     2: primary
@@ -29,23 +26,44 @@ fetch:
   - -96.75
   - 33.2
   crs: EPSG:4326
+  oneway_column: ONEWAY
+  speed_limit_column: MPH
+  speed_limit_unit: mph
 last_fetch:
-  fetched_at: '2026-02-03T12:40:35.483657+00:00'
-  bbox:
-  - -96.9
-  - 33.1
-  - -96.75
-  - 33.2
-  bbox_buffered:
-  - -96.91072941100988
-  - 33.09101688825009
-  - -96.73927058899012
-  - 33.208983111749916
-  bbox_buffer_m: 1000.0
-  feature_count: 31241
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:40:35.483657+00:00'
+    bbox:
+    - -96.9
+    - 33.1
+    - -96.75
+    - 33.2
+    bbox_buffered:
+    - -96.91072941100988
+    - 33.09101688825009
+    - -96.73927058899012
+    - 33.208983111749916
+    bbox_buffer_m: 1000.0
+    feature_count: 31241
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:26:03.081346+00:00'
+    bbox:
+    - -96.9
+    - 33.1
+    - -96.75
+    - 33.2
+    bbox_buffered:
+    - -96.91072941100988
+    - 33.09101688825009
+    - -96.73927058899012
+    - 33.208983111749916
+    bbox_buffer_m: 1000.0
+    feature_count: 31241
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: SUBTYPE

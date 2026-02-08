@@ -19,22 +19,40 @@ fetch:
   source_crs: EPSG:5179
   encoding: EUC-KR
 last_fetch:
-  fetched_at: '2026-02-03T12:35:57.868994+00:00'
-  bbox:
-  - 126.75
-  - 37.4
-  - 127.2
-  - 37.7
-  bbox_buffered:
-  - 126.73866944397693
-  - 37.391016888250086
-  - 127.21133055602307
-  - 37.708983111749916
-  bbox_buffer_m: 1000.0
-  feature_count: 246114
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:35:57.868994+00:00'
+    bbox:
+    - 126.75
+    - 37.4
+    - 127.2
+    - 37.7
+    bbox_buffered:
+    - 126.73866944397693
+    - 37.391016888250086
+    - 127.21133055602307
+    - 37.708983111749916
+    bbox_buffer_m: 1000.0
+    feature_count: 246114
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:22:38.203882+00:00'
+    bbox:
+    - 126.75
+    - 37.4
+    - 127.2
+    - 37.7
+    bbox_buffered:
+    - 126.73866944397693
+    - 37.391016888250086
+    - 127.21133055602307
+    - 37.708983111749916
+    bbox_buffer_m: 1000.0
+    feature_count: 246114
+    geometry_types:
+    - LineString
+    output_path: data/raw
 notes: 'Requires manual download from data.go.kr (free registration required).
 
   Source data uses EPSG:5179 (UTM-K) and EUC-KR encoding.
