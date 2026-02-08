@@ -37,6 +37,8 @@ from ..config import (
     FEATURE_COLUMNS,
     FEATURE_VERSION,
     MAX_DISTANCE_METERS,
+    METRIC_AVERAGE,
+    METRIC_SCORING,
     SEMANTIC_FEATURES,
     default_worker_count,
 )
@@ -1142,7 +1144,7 @@ class MLMatcher:
                 n_splits = min(5, n_groups)
                 gkf = GroupKFold(n_splits=n_splits)
                 cv_scores = cross_val_score(
-                    self.model, X_imputed, y, cv=gkf, groups=groups, scoring="f1_weighted"
+                    self.model, X_imputed, y, cv=gkf, groups=groups, scoring=METRIC_SCORING
                 )
             else:
                 # Cannot do CV with < 2 groups
@@ -2203,9 +2205,9 @@ def evaluate_by_dataset(
 
         # Compute metrics
         accuracy = accuracy_score(y, y_pred)
-        f1 = f1_score(y, y_pred, average="weighted")
-        precision = precision_score(y, y_pred, average="weighted", zero_division=0)
-        recall = recall_score(y, y_pred, average="weighted", zero_division=0)
+        f1 = f1_score(y, y_pred, average=METRIC_AVERAGE)
+        precision = precision_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        recall = recall_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
         # Count labels
         n_match = (y == 1).sum() if binary else (df["label"] == "match").sum()
@@ -2238,7 +2240,7 @@ def evaluate_by_dataset(
     # Overall metrics
     if all_y_true:
         overall_accuracy = accuracy_score(all_y_true, all_y_pred)
-        overall_f1 = f1_score(all_y_true, all_y_pred, average="weighted")
+        overall_f1 = f1_score(all_y_true, all_y_pred, average=METRIC_AVERAGE)
 
         if show_by_dataset:
             print("\n" + "-" * 60)

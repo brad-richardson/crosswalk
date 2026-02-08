@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sklearn.metrics import f1_score
 
+from matcher.config import METRIC_AVERAGE
 from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import MLMatcher, segment_aware_split
 
@@ -76,8 +77,8 @@ class TestModelEvaluation:
         # Predict on test set - use model.predict for class labels (0/1)
         y_pred = matcher.model.predict(X_test)
 
-        # Calculate F1 score (weighted average for multiclass, binary here)
-        test_f1 = f1_score(y_test, y_pred, average="weighted")
+        # Calculate F1 score (binary: positive class only)
+        test_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE)
 
         # Assert F1 meets threshold
         assert test_f1 >= MIN_TEST_F1_SCORE, (
