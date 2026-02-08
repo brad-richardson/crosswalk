@@ -61,6 +61,7 @@ def select_few_shot_examples(
     variant: str,
     n_examples: int = 4,
     exclude_batch: Path | None = None,
+    few_shot_source: Path | None = None,
 ) -> list[dict]:
     """Select balanced few-shot examples from ground truth in other batches.
 
@@ -73,6 +74,7 @@ def select_few_shot_examples(
         variant: Image variant name (to verify image exists).
         n_examples: Total number of examples to select.
         exclude_batch: Explicit batch to exclude (defaults to *batch_dir*).
+        few_shot_source: If provided, only use examples from this batch.
 
     Returns:
         List of dicts with keys: ref_id, target_id, label,
@@ -83,9 +85,14 @@ def select_few_shot_examples(
 
     # Resolve to absolute for reliable comparison
     exclude_batch = exclude_batch.resolve()
-    batches_root = batch_dir.parent  # data/agents/batches/
 
-    gt_files = sorted(batches_root.glob("*/labels/ground_truth/data.csv"))
+    if few_shot_source is not None:
+        # Only scan the specified source batch
+        gt_file = Path(few_shot_source) / "labels" / "ground_truth" / "data.csv"
+        gt_files = [gt_file] if gt_file.exists() else []
+    else:
+        batches_root = batch_dir.parent  # data/agents/batches/
+        gt_files = sorted(batches_root.glob("*/labels/ground_truth/data.csv"))
 
     matches: list[dict] = []
     no_matches: list[dict] = []
@@ -103,7 +110,8 @@ def select_few_shot_examples(
         except Exception:
             continue
 
-        if "ref_id" not in df.columns or "label" not in df.columns:
+        required = {"ref_id", "target_id", "label"}
+        if not required.issubset(df.columns):
             continue
 
         for _, row in df.iterrows():
@@ -184,8 +192,12 @@ def prepare_few_shot_dir(
         link_name = examples_dir / f"{ex['ref_id']}__{ex['target_id']}"
         source_cand = ex["source_batch_dir"] / "candidates" / f"{ex['ref_id']}__{ex['target_id']}"
 
-        if link_name.exists() or link_name.is_symlink():
+        if link_name.is_symlink() or link_name.is_file():
             link_name.unlink()
+        elif link_name.is_dir():
+            import shutil
+
+            shutil.rmtree(link_name)
 
         if source_cand.exists():
             os.symlink(source_cand.resolve(), link_name)
@@ -446,7 +458,8 @@ def validate_output_csv(
             invalid_rows.append(idx)
 
     if invalid_rows:
-        warnings.append(f"{len(invalid_rows)} rows with invalid label or confidence")
+        warnings.append(f"{len(invalid_rows)} rows with invalid label or confidence (dropped)")
+        df = df.drop(index=invalid_rows).reset_index(drop=True)
 
     # Check for missing candidates
     found_pairs = set()
@@ -500,6 +513,13 @@ def run_agent_batch(
         timeout: Timeout per chunk in seconds.
         chunk_size: Candidates per CLI invocation.
     """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if timeout <= 0:
+        raise ValueError(f"timeout must be positive, got {timeout}")
+    if n_few_shot < 0:
+        raise ValueError(f"n_few_shot must be non-negative, got {n_few_shot}")
+
     batch_dir = Path(batch_dir)
     candidates_dir = batch_dir / "candidates"
     if not candidates_dir.exists():
@@ -572,6 +592,10 @@ def run_agent_batch(
         ref_id, target_id = parts
         all_candidates.append((ref_id, target_id, dir_name))
 
+    # Apply limit to total candidates (before filtering out existing)
+    if limit > 0:
+        all_candidates = all_candidates[:limit]
+
     # Filter out already-labeled candidates (resume)
     if existing_pairs:
         remaining = [(r, t, d) for r, t, d in all_candidates if (r, t) not in existing_pairs]
@@ -582,10 +606,6 @@ def run_agent_batch(
         )
         all_candidates = remaining
 
-    # Apply limit
-    if limit > 0:
-        all_candidates = all_candidates[:limit]
-
     if not all_candidates:
         logger.info("No candidates to process")
         return
@@ -593,12 +613,11 @@ def run_agent_batch(
     logger.info(f"Processing {len(all_candidates)} candidates in chunks of {chunk_size}")
 
     # Select few-shot examples
-    exclude = few_shot_source or batch_dir
     few_shot_examples = select_few_shot_examples(
         batch_dir=batch_dir,
         variant=variant,
         n_examples=n_few_shot,
-        exclude_batch=exclude if few_shot_source is None else None,
+        few_shot_source=few_shot_source,
     )
     if few_shot_examples:
         logger.info(
