@@ -8,12 +8,9 @@ source:
   portal_url: https://data.boston.gov/dataset/city-of-boston-managed-streets
 fetch:
   id_prefix: us_boston_streets
-  id_column: OBJECTID
+  id_column: FID
   name_column: STREETNAME
   class_column: CLASS
-  oneway_column: OP_DIR_SL
-  speed_limit_column: SPEED_LIM
-  speed_limit_unit: mph
   class_mapping:
     '1': motorway
     '2': primary
@@ -27,23 +24,27 @@ fetch:
   - -70.92
   - 42.4
   crs: EPSG:4326
+  oneway_column: OP_DIR_SL
+  speed_limit_column: SPEED_LIM
+  speed_limit_unit: mph
 last_fetch:
-  fetched_at: '2026-02-03T12:39:21.919675+00:00'
-  bbox:
-  - -71.19
-  - 42.21
-  - -70.92
-  - 42.4
-  bbox_buffered:
-  - -71.20214635947308
-  - 42.20101688825009
-  - -70.90785364052692
-  - 42.40898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 125769
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:39:21.919675+00:00'
+    bbox:
+    - -71.19
+    - 42.21
+    - -70.92
+    - 42.4
+    bbox_buffered:
+    - -71.20214635947308
+    - 42.20101688825009
+    - -70.90785364052692
+    - 42.40898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 125769
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: CLASS
@@ -60,3 +61,8 @@ classification:
     target_class: residential
   - source_value: 6
     target_class: service
+quality_fingerprint:
+  computed_at: '2026-02-08T13:38:08.543290+00:00'
+  total_segments: 10844
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 1.0

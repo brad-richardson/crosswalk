@@ -67,6 +67,22 @@ def map_column(series: pd.Series, mapping: dict, fallback: str | None = None):
     return result.values
 
 
+def default_class_for_type(dataset_type: str | None) -> str:
+    """Return the default road class for a dataset type when no class column exists.
+
+    Args:
+        dataset_type: Dataset type from config (e.g., "road", "sidewalk", "bike").
+
+    Returns:
+        Default class string.
+    """
+    if dataset_type == "sidewalk":
+        return "footway"
+    elif dataset_type == "bike":
+        return "cycleway"
+    return "unknown"
+
+
 def normalize_oneway_value(value: str | int | None) -> str | None:
     """Normalize one-way value to standard format.
 

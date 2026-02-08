@@ -61,27 +61,9 @@ def _deserialize_lr_data(raw: str | None) -> list | None:
         return None
 
 
-def _hive_partitioning_kwargs() -> dict:
-    """Return kwargs for read_parquet to handle Hive partitioning consistently.
-
-    Forces the 'dataset' partition column to be a plain string type instead of
-    dictionary-encoded, avoiding type mismatches (int8 vs int32 indices) when
-    reading files written at different times or with different pyarrow versions.
-    """
-    import pyarrow as pa
-    import pyarrow.dataset as ds
-
-    return {
-        "partitioning": ds.partitioning(
-            pa.schema([("dataset", pa.string())]),
-            flavor="hive",
-        )
-    }
-
-
 @dataclass
 class DataStore:
-    """Manages raw pair data (geometries + attributes) in GeoParquet.
+    """Manages raw pair data (geometries + attributes) in Parquet.
 
     Stores a companion GeoParquet file that captures geometries and attributes
     for labeled pairs. This allows features to be recomputed when feature
@@ -112,7 +94,7 @@ class DataStore:
         return self._gdf
 
     def _load(self) -> gpd.GeoDataFrame:
-        """Load data from GeoParquet, returning empty GeoDataFrame if file doesn't exist."""
+        """Load data from Parquet, returning empty GeoDataFrame if file doesn't exist."""
         import pyarrow.parquet as pq
         from shapely import wkb
 
@@ -377,10 +359,11 @@ class DataStore:
         return True
 
     def save(self) -> None:
-        """Save data to GeoParquet atomically with backup.
+        """Save data to Parquet atomically with backup.
 
         Uses write-to-temp-then-rename pattern for atomic writes.
-        Both geometry columns are saved as WKB in the GeoParquet file.
+        Both geometry columns are serialized as WKB bytes in a plain
+        Parquet file (not GeoParquet) since we have two geometry columns.
         """
         from shapely import wkb
 
@@ -389,19 +372,19 @@ class DataStore:
         temp_path = self.parquet_path.with_suffix(".parquet.tmp")
         backup_path = self.parquet_path.with_suffix(".parquet.bak")
 
-        # Convert to GeoDataFrame with ref_geometry as active geometry
-        # and target_geometry stored as WKB bytes
-        gdf = self._gdf.copy()
-
-        # Store target_geometry as WKB (bytes) so pyarrow can handle it
-        if "target_geometry" in gdf.columns and len(gdf) > 0:
-            gdf["target_geometry_wkb"] = gdf["target_geometry"].apply(
-                lambda g: wkb.dumps(g) if g is not None else None
-            )
-            gdf = gdf.drop(columns=["target_geometry"])
+        # Build a plain DataFrame with geometry columns as WKB bytes.
+        # Must use .tolist() to fully escape GeoSeries geometry dtype,
+        # otherwise pyarrow can't serialize the column.
+        data = {}
+        for col in self._gdf.columns:
+            if col in ("ref_geometry", "target_geometry") and len(self._gdf) > 0:
+                data[col] = [wkb.dumps(g) if g is not None else None for g in self._gdf[col]]
+            else:
+                data[col] = self._gdf[col].tolist()
+        df = pd.DataFrame(data)
 
         # Write to temp file first
-        gdf.to_parquet(temp_path, compression="zstd")
+        df.to_parquet(temp_path, compression="zstd", index=False)
 
         # Backup existing file (if present)
         if self.parquet_path.exists():
@@ -429,7 +412,7 @@ class DataStore:
         if not data_dir.exists():
             return gpd.GeoDataFrame(columns=DATA_COLUMNS + ["dataset"])
 
-        gdfs = []
+        dfs = []
 
         for partition_dir in data_dir.glob("dataset=*"):
             if not partition_dir.is_dir():
@@ -438,25 +421,32 @@ class DataStore:
             parquet_path = partition_dir / "data.parquet"
             if parquet_path.exists():
                 try:
-                    gdf = gpd.read_parquet(parquet_path, **_hive_partitioning_kwargs())
+                    df = pd.read_parquet(parquet_path)
 
-                    # Convert target_geometry from WKB if stored that way
-                    if "target_geometry_wkb" in gdf.columns:
-                        gdf["target_geometry"] = gdf["target_geometry_wkb"].apply(
+                    # Convert WKB geometries to Shapely objects
+                    for geom_col in ("ref_geometry", "target_geometry"):
+                        if geom_col in df.columns:
+                            df[geom_col] = df[geom_col].apply(
+                                lambda b: wkb.loads(b) if b is not None else None
+                            )
+
+                    # Handle legacy target_geometry_wkb column name
+                    if "target_geometry_wkb" in df.columns:
+                        df["target_geometry"] = df["target_geometry_wkb"].apply(
                             lambda b: wkb.loads(b) if b is not None else None
                         )
-                        gdf = gdf.drop(columns=["target_geometry_wkb"])
+                        df = df.drop(columns=["target_geometry_wkb"])
 
-                    gdf["dataset"] = dataset_id
-                    gdfs.append(gdf)
+                    df["dataset"] = dataset_id
+                    dfs.append(df)
                 except Exception as e:
                     logger.warning(f"Failed to load {parquet_path}: {e}")
 
-        if gdfs:
-            result = pd.concat(gdfs, ignore_index=True)
+        if dfs:
+            combined = pd.concat(dfs, ignore_index=True)
             # Ensure all expected columns exist (fill missing with None)
             for col in DATA_COLUMNS:
-                if col not in result.columns:
-                    result[col] = None
-            return result
+                if col not in combined.columns:
+                    combined[col] = None
+            return gpd.GeoDataFrame(combined, geometry="ref_geometry", crs="EPSG:4326")
         return gpd.GeoDataFrame(columns=DATA_COLUMNS + ["dataset"])

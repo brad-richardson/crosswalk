@@ -26,21 +26,27 @@ fetch:
   - -37.55
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:28:03.865861+00:00'
-  bbox:
-  - 144.55
-  - -38.1
-  - 145.35
-  - -37.55
-  bbox_buffered:
-  - 144.53862735303255
-  - -38.108983111749914
-  - 145.36137264696745
-  - -37.541016888250084
-  bbox_buffer_m: 1000.0
-  feature_count: 553250
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:28:03.865861+00:00'
+    bbox:
+    - 144.55
+    - -38.1
+    - 145.35
+    - -37.55
+    bbox_buffered:
+    - 144.53862735303255
+    - -38.108983111749914
+    - 145.36137264696745
+    - -37.541016888250084
+    bbox_buffer_m: 1000.0
+    feature_count: 553250
+    geometry_types:
+    - LineString
+    output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-08T05:11:28.363616+00:00'
+  total_segments: 2927
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.9952
 notes: This covers declared roads only. For complete network, use Vicmap Transport
   download from data.vic.gov.au

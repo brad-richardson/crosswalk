@@ -1,6 +1,7 @@
 """Tests for DataStore - GeoParquet storage for pair geometries and attributes."""
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
@@ -146,12 +147,12 @@ class TestDataStorePersistence:
         assert backup_path.exists()
 
         # Backup should have only 1 row (original save)
-        backup_gdf = gpd.read_parquet(backup_path)
-        assert len(backup_gdf) == 1
+        backup_df = pd.read_parquet(backup_path)
+        assert len(backup_df) == 1
 
         # Primary should have 2 rows
-        primary_gdf = gpd.read_parquet(store.parquet_path)
-        assert len(primary_gdf) == 2
+        primary_df = pd.read_parquet(store.parquet_path)
+        assert len(primary_df) == 2
 
     def test_save_does_not_leave_tmp_file(self, tmp_data_dir, sample_pair_data):
         """Temp file is cleaned up after save."""

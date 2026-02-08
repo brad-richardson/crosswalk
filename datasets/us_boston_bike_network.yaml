@@ -36,22 +36,23 @@ fetch:
   - 42.4
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:38:34.485155+00:00'
-  bbox:
-  - -71.19
-  - 42.21
-  - -70.92
-  - 42.4
-  bbox_buffered:
-  - -71.20214635947308
-  - 42.20101688825009
-  - -70.90785364052692
-  - 42.40898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 125769
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:38:34.485155+00:00'
+    bbox:
+    - -71.19
+    - 42.21
+    - -70.92
+    - 42.4
+    bbox_buffered:
+    - -71.20214635947308
+    - 42.20101688825009
+    - -70.90785364052692
+    - 42.40898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 125769
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: ExisFacil
@@ -90,3 +91,8 @@ classification:
     target_class: pedestrian
   - source_value: WALK
     target_class: footway
+quality_fingerprint:
+  computed_at: '2026-02-08T05:07:34.582521+00:00'
+  total_segments: 3477
+  name_coverage_ratio: 0.9514
+  class_coverage_ratio: 0.9997

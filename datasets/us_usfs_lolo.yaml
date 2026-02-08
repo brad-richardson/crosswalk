@@ -25,21 +25,27 @@ fetch:
   - 47.5
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:43:45.768865+00:00'
-  bbox:
-  - -115.0
-  - 46.5
-  - -114.0
-  - 47.5
-  bbox_buffered:
-  - -115.01317174978116
-  - 46.49101688825009
-  - -113.98682825021884
-  - 47.50898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 33724
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:43:45.768865+00:00'
+    bbox:
+    - -115.0
+    - 46.5
+    - -114.0
+    - 47.5
+    bbox_buffered:
+    - -115.01317174978116
+    - 46.49101688825009
+    - -113.98682825021884
+    - 47.50898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 33724
+    geometry_types:
+    - LineString
+    output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-08T05:11:23.744040+00:00'
+  total_segments: 783
+  name_coverage_ratio: 0.9745
+  class_coverage_ratio: 0.7254
 notes: Regional subset for efficient processing. Part of USFS National Forest System
   Roads.
