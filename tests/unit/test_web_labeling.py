@@ -156,7 +156,7 @@ class TestLabelingPageRoute:
     def test_labeling_page_shows_progress(self, client):
         """GET /labeling with dataset should show pair progress."""
         response = client.get("/labeling?dataset=dataset_a")
-        assert "Pair 1 of 2" in response.text
+        assert "1 / 2" in response.text
 
 
 class TestLabelRoute:
