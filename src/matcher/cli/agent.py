@@ -475,13 +475,10 @@ def generate_basemap_sweep(
     """Generate basemap sweep batch for comparing AI agent accuracy across visualization variants.
 
     Samples stratified match/no_match candidates from existing human labels,
-    then generates 6 image variants per candidate:
-      - geometry_only.png: white background with geometry lines
-      - carto_positron.png: CartoDB light map basemap
-      - road_context.png: nearby Overture roads as gray context lines
-      - road_context.svg: same as above in SVG format
-      - subline_geometry_only.png: faded dashed full segments + solid bright aligned sublines
+    then generates 3 subline image variants per candidate:
+      - subline_geometry_only.png: white background with faded full segments + bright aligned sublines
       - subline_road_context.png: same + gray dashed context roads
+      - subline_carto_positron.png: same on CartoDB light map tiles
 
     Examples:
         matcher agent sweep \\
@@ -510,12 +507,8 @@ def generate_basemap_sweep(
 
     rng = np.random.default_rng(seed)
 
-    # Sweep variants
+    # Sweep variants (subline only — highlights aligned portions)
     variants = [
-        {"basemap": "geometry_only", "format": "png"},
-        {"basemap": "carto_positron", "format": "png"},
-        {"basemap": "road_context", "format": "png"},
-        {"basemap": "road_context", "format": "svg"},
         {"basemap": "subline_geometry_only", "format": "png"},
         {"basemap": "subline_road_context", "format": "png"},
         {"basemap": "subline_carto_positron", "format": "png"},
@@ -805,7 +798,7 @@ def generate_basemap_sweep(
     console.print(f"  Variants: {', '.join(v['basemap'] + '.' + v['format'] for v in variants)}")
     console.print()
     console.print("Next steps:")
-    console.print(f"  matcher agent run claude --batch {batch_dir} --variant geometry_only")
+    console.print(f"  matcher agent run --batch {batch_dir} --variant subline_road_context")
     console.print(f"  matcher agent eval-sweep {batch_dir}")
 
 
@@ -836,14 +829,14 @@ def run_agent(
     Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
 
     Examples:
-        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
-            --model opus --variant geometry_only --limit 5
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model opus --variant subline_road_context --limit 5
 
-        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
-            --model sonnet --variant road_context --overwrite
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model sonnet --variant subline_carto_positron --overwrite
 
-        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
-            --model opus --variant subline_road_context --few-shot 8 --chunk-size 20
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model opus --variant subline_geometry_only --few-shot 8 --chunk-size 20
     """
     from ..agent_labeling.runner import run_agent_batch
 
