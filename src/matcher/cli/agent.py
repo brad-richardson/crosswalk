@@ -172,7 +172,7 @@ def generate_agent_test_batch(
         help="Output directory for agent labeling batches",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels",
         "-l",
         help="Directory containing human labels (Hive-partitioned)",
@@ -455,7 +455,7 @@ def generate_basemap_sweep(
         help="Output directory for agent labeling batches",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels",
         "-l",
         help="Directory containing human labels (Hive-partitioned)",
@@ -527,12 +527,17 @@ def generate_basemap_sweep(
 
     for dataset in datasets:
         label_file = labels_dir / f"dataset={dataset}" / "data.csv"
-        geom_file = geom_dir / f"dataset={dataset}" / "data.csv"
+        geom_csv = geom_dir / f"dataset={dataset}" / "data.csv"
+        geom_parquet = geom_dir / f"dataset={dataset}" / "data.parquet"
 
         if not label_file.exists():
             console.print(f"[yellow]Warning: No labels for {dataset}, skipping[/yellow]")
             continue
-        if not geom_file.exists():
+        if geom_parquet.exists():
+            geom_file = geom_parquet
+        elif geom_csv.exists():
+            geom_file = geom_csv
+        else:
             console.print(f"[yellow]Warning: No geometries for {dataset}, skipping[/yellow]")
             continue
 
@@ -568,7 +573,10 @@ def generate_basemap_sweep(
         sampled = pd.concat([sampled_match, sampled_no_match], ignore_index=True)
 
         # Load geometries
-        geom_df = pd.read_csv(geom_file)
+        if geom_file.suffix == ".parquet":
+            geom_df = pd.read_parquet(geom_file)
+        else:
+            geom_df = pd.read_csv(geom_file)
         geom_lookup = {}
         for _, row in geom_df.iterrows():
             key = (str(row["gers_id"]), str(row["target_id"]))
@@ -600,10 +608,26 @@ def generate_basemap_sweep(
 
             geom_row = geom_lookup[key]
             try:
-                ref_geom = wkt.loads(geom_row["ref_geometry_wkt"])
-                target_geom = wkt.loads(geom_row["target_geometry_wkt"])
+                # Handle both WKT (CSV) and WKB (parquet) geometry formats
+                if "ref_geometry_wkt" in geom_row.index:
+                    ref_geom = wkt.loads(geom_row["ref_geometry_wkt"])
+                elif "ref_geometry" in geom_row.index:
+                    from shapely import wkb
+
+                    ref_geom = wkb.loads(geom_row["ref_geometry"])
+                else:
+                    raise KeyError("No ref geometry column found")
+
+                if "target_geometry_wkt" in geom_row.index:
+                    target_geom = wkt.loads(geom_row["target_geometry_wkt"])
+                elif "target_geometry_wkb" in geom_row.index:
+                    from shapely import wkb
+
+                    target_geom = wkb.loads(geom_row["target_geometry_wkb"])
+                else:
+                    raise KeyError("No target geometry column found")
             except Exception:
-                console.print(f"  [yellow]Skipping {ref_id}: invalid WKT geometry[/yellow]")
+                console.print(f"  [yellow]Skipping {ref_id}: invalid geometry[/yellow]")
                 continue
 
             # Find nearby roads for road_context variant
