@@ -734,15 +734,15 @@ class TestAngleHistogramSimilarity:
         result = compute_angle_histogram_similarity(curve1, curve2)
         assert result >= 0.9  # Should be very similar
 
-    def test_short_lines_return_one(self):
-        """Lines with < 3 points should return 1.0 (no turns to compare)."""
+    def test_short_lines_return_neutral(self):
+        """Lines with < 3 points should return 0.5 (neutral — no signal)."""
         from matcher.features.geometric import compute_angle_histogram_similarity
 
         short1 = LineString([(0, 0), (10, 0)])
         short2 = LineString([(0, 0), (20, 10)])
 
         result = compute_angle_histogram_similarity(short1, short2)
-        assert result == pytest.approx(1.0)
+        assert result == pytest.approx(0.5)
 
     def test_empty_line_returns_one(self):
         """Empty lines should return 1.0."""
