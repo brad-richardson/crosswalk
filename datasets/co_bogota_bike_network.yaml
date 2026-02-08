@@ -9,6 +9,7 @@ fetch:
   id_prefix: bog_bike
   id_column: OBJECTID
   class_column: CICTSUPERF
+  polygon_to_centerline: true
   bbox:
   - -74.25
   - 4.45

@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .routes.browser import router as browser_router
 from .routes.dashboard import router as dashboard_router
 from .routes.labeling import router as labeling_router
 from .routes.qa import router as qa_router
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Include routers
+    app.include_router(browser_router)
     app.include_router(dashboard_router)
     app.include_router(labeling_router)
     app.include_router(qa_router)

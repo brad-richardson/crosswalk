@@ -39,6 +39,7 @@ dependencies = [
 ml = [
     "xgboost>=2.0",
     "lightgbm>=4.2",
+    "pygeoops>=0.4",
 ]
 os = [
     "osdatahub>=1.0.0",
