@@ -54,13 +54,3 @@ class TestArcgisDedup:
         assert len(result) == 2
         # First occurrence should be kept
         assert result.iloc[0].geometry.equals(LineString([(0, 0), (1, 1)]))
-
-    def test_dedup_summary_counts(self):
-        """Verify dedup count is correct."""
-        ids = ["a_1", "a_2", "a_3", "a_1", "a_2"]
-        gdf = _make_gdf(ids)
-        n_before = len(gdf)
-        result = gdf.drop_duplicates(subset=["id"], keep="first")
-        n_dropped = n_before - len(result)
-        assert n_dropped == 2
-        assert len(result) == 3

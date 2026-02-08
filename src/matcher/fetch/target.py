@@ -36,7 +36,7 @@ import requests
 import shapely
 from loguru import logger
 
-from ..datasets.schema import get_dataset_config, list_dataset_configs
+from ..datasets.schema import FetchConfig, get_dataset_config, list_dataset_configs
 from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
@@ -49,39 +49,36 @@ DEFAULT_DATA_DIR = Path("data/raw")
 
 def _transform_download_data(
     gdf: gpd.GeoDataFrame,
-    id_prefix: str,
-    name_column: str | None,
-    class_column: str | None,
-    class_mapping: dict | None,
+    fetch_config: FetchConfig,
     source_name: str,
-    subclass_column: str | None = None,
-    subclass_mapping: dict | None = None,
-    default_subclass: str | None = None,
-    exclude: dict[str, list[str]] | None = None,
-    oneway_column: str | None = None,
-    speed_limit_column: str | None = None,
-    speed_limit_unit: str = "kph",
-    id_column: str | None = None,
     dataset_type: str | None = None,
-    polygon_to_centerline: bool = False,
+    default_subclass: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform downloaded data to Overture-compatible schema.
 
     Args:
         gdf: Input GeoDataFrame
-        id_prefix: Prefix for generated IDs
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
-        source_name: Name for the data source
-        subclass_column: Column name for subclass (optional)
-        subclass_mapping: Dict mapping source values to subclass values
+        fetch_config: FetchConfig with column mappings and transform settings
+        source_name: Name for the data source (used as id_prefix fallback)
+        dataset_type: Dataset type (e.g., "sidewalk", "bike") for default class
         default_subclass: Default subclass if no column provided
-        id_column: Column to use as stable ID (auto-detected if None)
-        polygon_to_centerline: Convert polygon geometries to centerline LineStrings
     """
     if len(gdf) == 0:
         return gdf
+
+    # Read settings from fetch_config, with fallbacks
+    id_prefix = fetch_config.id_prefix if fetch_config.id_prefix else source_name
+    id_column = fetch_config.id_column
+    name_column = fetch_config.name_column
+    class_column = fetch_config.class_column
+    class_mapping = fetch_config.class_mapping
+    subclass_column = fetch_config.subclass_column
+    subclass_mapping = fetch_config.subclass_mapping
+    exclude = fetch_config.exclude
+    oneway_column = fetch_config.oneway_column
+    speed_limit_column = fetch_config.speed_limit_column
+    speed_limit_unit = fetch_config.speed_limit_unit
+    polygon_to_centerline = fetch_config.polygon_to_centerline
 
     # Convert polygons to centerlines if enabled (before any other processing)
     if polygon_to_centerline:
@@ -311,17 +308,11 @@ def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 def fetch_ogc_features(
     url: str,
     output_path: Path,
-    id_prefix: str,
-    name_column: str | None = None,
-    class_column: str | None = None,
-    class_mapping: dict | None = None,
+    fetch_config: FetchConfig,
     source_name: str = "OGC API Features",
     bbox: tuple | None = None,
     limit_per_page: int = 5000,
-    exclude: dict[str, list[str]] | None = None,
-    id_column: str | None = None,
     dataset_type: str | None = None,
-    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from an OGC API Features endpoint.
 
@@ -331,13 +322,11 @@ def fetch_ogc_features(
     Args:
         url: OGC API Features items endpoint URL
         output_path: Path for output GeoParquet file
-        id_prefix: Prefix for generated IDs
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
+        fetch_config: FetchConfig with column mappings and transform settings
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
         limit_per_page: Number of features per API request
+        dataset_type: Dataset type for default class assignment
 
     Returns:
         Path to the output GeoParquet file
@@ -387,15 +376,9 @@ def fetch_ogc_features(
     # Transform to Overture schema
     gdf = _transform_download_data(
         gdf,
-        id_prefix=id_prefix,
-        name_column=name_column,
-        class_column=class_column,
-        class_mapping=class_mapping,
+        fetch_config=fetch_config,
         source_name=source_name,
-        exclude=exclude,
-        id_column=id_column,
         dataset_type=dataset_type,
-        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -410,17 +393,11 @@ def fetch_wfs(
     url: str,
     type_name: str,
     output_path: Path,
-    id_prefix: str,
-    name_column: str | None = None,
-    class_column: str | None = None,
-    class_mapping: dict | None = None,
+    fetch_config: FetchConfig,
     source_name: str = "WFS",
     bbox: tuple | None = None,
     max_features: int = 300000,
-    exclude: dict[str, list[str]] | None = None,
-    id_column: str | None = None,
     dataset_type: str | None = None,
-    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from a WFS (Web Feature Service) endpoint.
 
@@ -428,13 +405,11 @@ def fetch_wfs(
         url: WFS service base URL
         type_name: Layer/type name to fetch (e.g., 'geoportal:segmento_logradouro')
         output_path: Path for output GeoParquet file
-        id_prefix: Prefix for generated IDs
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
+        fetch_config: FetchConfig with column mappings and transform settings
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
         max_features: Maximum features to fetch (pagination limit)
+        dataset_type: Dataset type for default class assignment
 
     Returns:
         Path to the output GeoParquet file
@@ -489,15 +464,9 @@ def fetch_wfs(
     # Transform to Overture schema
     gdf = _transform_download_data(
         gdf,
-        id_prefix=id_prefix,
-        name_column=name_column,
-        class_column=class_column,
-        class_mapping=class_mapping,
+        fetch_config=fetch_config,
         source_name=source_name,
-        exclude=exclude,
-        id_column=id_column,
         dataset_type=dataset_type,
-        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -511,15 +480,12 @@ def fetch_wfs(
 def fetch_lta_geospatial(
     layer_id: str,
     output_path: Path,
-    id_prefix: str,
+    fetch_config: FetchConfig,
     api_key: str,
-    name_column: str | None = None,
-    class_column: str | None = None,
-    class_mapping: dict | None = None,
     source_name: str = "LTA DataMall",
     bbox: tuple | None = None,
     bbox_filter: bool = False,
-    id_column: str | None = None,
+    dataset_type: str | None = None,
 ) -> Path:
     """Fetch geospatial data from Singapore LTA DataMall API.
 
@@ -529,14 +495,12 @@ def fetch_lta_geospatial(
     Args:
         layer_id: Geospatial layer ID (e.g., 'RoadSectionLine', 'Footpath')
         output_path: Path for output GeoParquet file
-        id_prefix: Prefix for generated IDs
+        fetch_config: FetchConfig with column mappings and transform settings
         api_key: LTA DataMall API key
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
         bbox_filter: Whether to apply bbox filter after loading
+        dataset_type: Dataset type for default class assignment
 
     Returns:
         Path to the output GeoParquet file
@@ -569,14 +533,11 @@ def fetch_lta_geospatial(
         url=download_url,
         output_path=output_path,
         file_format="shp",
-        id_prefix=id_prefix,
-        name_column=name_column,
-        class_column=class_column,
-        class_mapping=class_mapping,
+        fetch_config=fetch_config,
         source_name=source_name,
         bbox=bbox,
         bbox_filter=bbox_filter,
-        id_column=id_column,
+        dataset_type=dataset_type,
     )
 
 
@@ -624,26 +585,15 @@ def fetch_download(
     url: str,
     output_path: Path,
     file_format: str,
-    id_prefix: str,
-    name_column: str | None = None,
-    class_column: str | None = None,
-    class_mapping: dict | None = None,
+    fetch_config: FetchConfig,
     source_name: str = "Download",
     bbox: tuple | None = None,
     bbox_filter: bool = False,
     api_key: str | None = None,
     api_key_header: str | None = None,
-    encoding: str | None = None,
-    source_crs: str | None = None,
     cache_download: bool = False,
     cache_ttl_hours: int = 168,
-    exclude: dict[str, list[str]] | None = None,
-    oneway_column: str | None = None,
-    speed_limit_column: str | None = None,
-    speed_limit_unit: str = "kph",
-    id_column: str | None = None,
     dataset_type: str | None = None,
-    polygon_to_centerline: bool = False,
 ) -> Path:
     """Download and process geospatial file (Shapefile, GeoPackage, GML).
 
@@ -651,27 +601,24 @@ def fetch_download(
         url: URL to download from
         output_path: Path for output GeoParquet file
         file_format: Format of downloaded file (shp, gpkg, gml, geojson)
-        id_prefix: Prefix for generated IDs
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
+        fetch_config: FetchConfig with column mappings and transform settings
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
         bbox_filter: Whether to apply bbox filter after loading
         api_key: Optional API key for authenticated downloads
         api_key_header: Header name for API key (e.g., "AccountKey")
-        encoding: File encoding for non-UTF8 files (e.g., "EUC-KR")
-        source_crs: Source CRS if different from data file (e.g., "EPSG:5179")
         cache_download: If True, cache the downloaded file for future use
         cache_ttl_hours: Hours before cache expires (default: 168 = 7 days)
-        oneway_column: Column name for one-way direction
-        speed_limit_column: Column name for speed limit
-        speed_limit_unit: Unit of speed limit values ("kph" or "mph")
+        dataset_type: Dataset type for default class assignment
 
     Returns:
         Path to the output GeoParquet file
     """
     import hashlib
+
+    # Read encoding and source_crs from fetch_config
+    encoding = fetch_config.encoding
+    source_crs = fetch_config.source_crs
 
     logger.info(f"Downloading {file_format} from: {url}")
 
@@ -844,18 +791,9 @@ def fetch_download(
         # Transform to Overture schema
         gdf = _transform_download_data(
             gdf,
-            id_prefix=id_prefix,
-            name_column=name_column,
-            class_column=class_column,
-            class_mapping=class_mapping,
+            fetch_config=fetch_config,
             source_name=source_name,
-            exclude=exclude,
-            oneway_column=oneway_column,
-            speed_limit_column=speed_limit_column,
-            speed_limit_unit=speed_limit_unit,
-            id_column=id_column,
             dataset_type=dataset_type,
-            polygon_to_centerline=polygon_to_centerline,
         )
 
         # Save to parquet
@@ -907,18 +845,12 @@ def _get_cached_os_data(product_id: str, cache_ttl_hours: int = 168) -> Path | N
 def fetch_os_downloads(
     product_id: str,
     output_path: Path,
-    id_prefix: str,
-    name_column: str | None = None,
-    class_column: str | None = None,
-    class_mapping: dict | None = None,
+    fetch_config: FetchConfig,
     source_name: str = "OS Data Hub",
     bbox: tuple | None = None,
     api_key: str | None = None,
     cache_ttl_hours: int = 168,
-    exclude: dict[str, list[str]] | None = None,
-    id_column: str | None = None,
     dataset_type: str | None = None,
-    polygon_to_centerline: bool = False,
 ) -> Path:
     """Fetch geospatial data from Ordnance Survey Data Hub Downloads API.
 
@@ -929,14 +861,12 @@ def fetch_os_downloads(
     Args:
         product_id: OS Data Hub product ID (e.g., "OpenRoads", "OpenMapLocal")
         output_path: Path for output GeoParquet file
-        id_prefix: Prefix for generated IDs
-        name_column: Column name for feature names
-        class_column: Column name for classification
-        class_mapping: Dict mapping source values to standard classes
+        fetch_config: FetchConfig with column mappings and transform settings
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter after download
         api_key: Not used for OpenData (kept for API compatibility)
         cache_ttl_hours: Cache TTL in hours (default: 168 = 7 days)
+        dataset_type: Dataset type for default class assignment
 
     Returns:
         Path to the output GeoParquet file
@@ -1075,15 +1005,9 @@ def fetch_os_downloads(
     # Transform to Overture schema
     gdf = _transform_download_data(
         gdf,
-        id_prefix=id_prefix,
-        name_column=name_column,
-        class_column=class_column,
-        class_mapping=class_mapping,
+        fetch_config=fetch_config,
         source_name=source_name,
-        exclude=exclude,
-        id_column=id_column,
         dataset_type=dataset_type,
-        polygon_to_centerline=polygon_to_centerline,
     )
 
     # Save to parquet
@@ -1152,23 +1076,15 @@ def fetch_dataset(
             )
             return None
 
-        # Common parameters from config
-        fetch_config = config.fetch
-        id_prefix = fetch_config.id_prefix if fetch_config else dataset_name
-        id_column = fetch_config.id_column if fetch_config else None
-        name_column = fetch_config.name_column if fetch_config else None
-        class_column = fetch_config.class_column if fetch_config else None
-        class_mapping = fetch_config.class_mapping if fetch_config else None
-        subclass_column = fetch_config.subclass_column if fetch_config else None
-        subclass_mapping = fetch_config.subclass_mapping if fetch_config else None
-        bbox = fetch_config.bbox if fetch_config else None
-        encoding = fetch_config.encoding if fetch_config else None
-        source_crs = fetch_config.source_crs if fetch_config else None
-        exclude = fetch_config.exclude if fetch_config else None
-        oneway_column = fetch_config.oneway_column if fetch_config else None
-        speed_limit_column = fetch_config.speed_limit_column if fetch_config else None
-        speed_limit_unit = fetch_config.speed_limit_unit if fetch_config else "kph"
-        polygon_to_centerline = fetch_config.polygon_to_centerline if fetch_config else False
+        # Build FetchConfig - use config.fetch or create a default one
+        fetch_config = config.fetch or FetchConfig(id_prefix=dataset_name)
+        # If id_prefix is not set, default to dataset_name
+        if not fetch_config.id_prefix:
+            fetch_config = fetch_config.model_copy(update={"id_prefix": dataset_name})
+        source_name = config.display_name or dataset_name
+
+        # Extract bbox from fetch_config for server-side filtering
+        bbox = fetch_config.bbox
 
         # Handle os_downloads before URL check (it uses product_id, not url)
         if source_type == "os_downloads":
@@ -1185,17 +1101,11 @@ def fetch_dataset(
             result_path = fetch_os_downloads(
                 product_id=product_id,
                 output_path=output_path,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                source_name=config.display_name or dataset_name,
+                fetch_config=fetch_config,
+                source_name=source_name,
                 bbox=bbox,
                 api_key=api_key,
-                exclude=exclude,
-                id_column=id_column,
                 dataset_type=config.type,
-                polygon_to_centerline=polygon_to_centerline,
             )
 
         elif url is None:
@@ -1228,15 +1138,12 @@ def fetch_dataset(
                 result_path = fetch_lta_geospatial(
                     layer_id=layer_id,
                     output_path=output_path,
-                    id_prefix=id_prefix,
+                    fetch_config=fetch_config,
                     api_key=api_key,
-                    name_column=name_column,
-                    class_column=class_column,
-                    class_mapping=class_mapping,
-                    source_name=config.display_name or dataset_name,
+                    source_name=source_name,
                     bbox=bbox,
                     bbox_filter=bool(bbox),
-                    id_column=id_column,
+                    dataset_type=config.type,
                 )
             else:
                 # Check if caching is enabled for this download
@@ -1247,26 +1154,15 @@ def fetch_dataset(
                     url=url,
                     output_path=output_path,
                     file_format=file_format,
-                    id_prefix=id_prefix,
-                    name_column=name_column,
-                    class_column=class_column,
-                    class_mapping=class_mapping,
-                    source_name=config.display_name or dataset_name,
+                    fetch_config=fetch_config,
+                    source_name=source_name,
                     bbox=bbox,
                     bbox_filter=bool(bbox),
                     api_key=api_key,
                     api_key_header=api_key_header,
-                    encoding=encoding,
-                    source_crs=source_crs,
                     cache_download=cache_download,
                     cache_ttl_hours=cache_ttl_hours,
-                    exclude=exclude,
-                    oneway_column=oneway_column,
-                    speed_limit_column=speed_limit_column,
-                    speed_limit_unit=speed_limit_unit,
-                    id_column=id_column,
                     dataset_type=config.type,
-                    polygon_to_centerline=polygon_to_centerline,
                 )
 
         elif source_type == "ogc_features":
@@ -1274,16 +1170,10 @@ def fetch_dataset(
             result_path = fetch_ogc_features(
                 url=url,
                 output_path=output_path,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                source_name=config.display_name or dataset_name,
+                fetch_config=fetch_config,
+                source_name=source_name,
                 bbox=bbox,
-                exclude=exclude,
-                id_column=id_column,
                 dataset_type=config.type,
-                polygon_to_centerline=polygon_to_centerline,
             )
 
         elif source_type == "wfs":
@@ -1297,31 +1187,25 @@ def fetch_dataset(
                 url=url,
                 type_name=type_name,
                 output_path=output_path,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                source_name=config.display_name or dataset_name,
+                fetch_config=fetch_config,
+                source_name=source_name,
                 bbox=bbox,
-                exclude=exclude,
-                id_column=id_column,
                 dataset_type=config.type,
-                polygon_to_centerline=polygon_to_centerline,
             )
 
         else:
             # Default: ArcGIS FeatureServer/MapServer fetch
-            # Build kwargs, only pass page_size if specified
+            # ArcGIS still uses individual params (separate module, not part of this refactor)
             arcgis_kwargs: dict[str, Any] = {
                 "url": url,
                 "output_path": output_path,
-                "id_prefix": id_prefix,
-                "name_column": name_column,
-                "class_column": class_column,
-                "class_mapping": class_mapping,
-                "subclass_column": subclass_column,
-                "subclass_mapping": subclass_mapping,
-                "source_name": config.display_name or dataset_name,
+                "id_prefix": fetch_config.id_prefix,
+                "name_column": fetch_config.name_column,
+                "class_column": fetch_config.class_column,
+                "class_mapping": fetch_config.class_mapping,
+                "subclass_column": fetch_config.subclass_column,
+                "subclass_mapping": fetch_config.subclass_mapping,
+                "source_name": source_name,
             }
             if page_size is not None:
                 arcgis_kwargs["page_size"] = page_size
@@ -1329,19 +1213,19 @@ def fetch_dataset(
             if bbox:
                 arcgis_kwargs["bbox"] = bbox
             # Pass exclude filter
-            if exclude:
-                arcgis_kwargs["exclude"] = exclude
+            if fetch_config.exclude:
+                arcgis_kwargs["exclude"] = fetch_config.exclude
             # Pass oneway/speed columns
-            if oneway_column:
-                arcgis_kwargs["oneway_column"] = oneway_column
-            if speed_limit_column:
-                arcgis_kwargs["speed_limit_column"] = speed_limit_column
-                arcgis_kwargs["speed_limit_unit"] = speed_limit_unit
+            if fetch_config.oneway_column:
+                arcgis_kwargs["oneway_column"] = fetch_config.oneway_column
+            if fetch_config.speed_limit_column:
+                arcgis_kwargs["speed_limit_column"] = fetch_config.speed_limit_column
+                arcgis_kwargs["speed_limit_unit"] = fetch_config.speed_limit_unit
             # Pass id_column for stable IDs
-            if id_column:
-                arcgis_kwargs["id_column"] = id_column
-            if polygon_to_centerline:
-                arcgis_kwargs["polygon_to_centerline"] = polygon_to_centerline
+            if fetch_config.id_column:
+                arcgis_kwargs["id_column"] = fetch_config.id_column
+            if fetch_config.polygon_to_centerline:
+                arcgis_kwargs["polygon_to_centerline"] = fetch_config.polygon_to_centerline
 
             result_path = fetch_arcgis_layer(**arcgis_kwargs)
 
@@ -1450,7 +1334,7 @@ def _parallel_fetch_with_progress(
     """Execute parallel fetches with periodic progress reporting.
 
     Args:
-        tasks: List of (name, output_dir, page_size, force) tuples
+        tasks: List of (name, output_dir, page_size, force, skip_quality_check) tuples
         max_workers: Maximum number of parallel workers
         total: Total number of tasks
         progress_interval: Seconds between progress reports (default: 30)

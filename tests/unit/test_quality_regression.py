@@ -119,7 +119,7 @@ class TestQualityRegression:
         assert len(seg_violations) == 1
 
     def test_large_segment_decrease_fails(self):
-        """60% decrease in segment count should also fail."""
+        """70% decrease in segment count should also fail."""
         gdf = _make_fetched_gdf(n=30)
         fp = _make_fingerprint(total_segments=100)
 

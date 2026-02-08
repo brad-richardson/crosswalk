@@ -472,7 +472,10 @@ def backfill_features(
             parts.append(f"skipped={skipped}[/green]")
             console.print("  " + ", ".join(parts))
         else:
-            console.print(f"  [yellow]Skipped all {skipped} pairs (IDs not in data)[/yellow]")
+            reason = "IDs not in data"
+            if no_stored_rejected > 0:
+                reason += f", {no_stored_rejected} rejected (no stored data)"
+            console.print(f"  [yellow]Skipped all {skipped} pairs ({reason})[/yellow]")
 
         total_computed += computed
         total_skipped += skipped

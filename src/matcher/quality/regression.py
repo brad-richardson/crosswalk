@@ -16,14 +16,18 @@ from loguru import logger
 
 from ..datasets.schema import QualityFingerprintConfig
 
+# Regression detection thresholds
+SEGMENT_COUNT_CHANGE_THRESHOLD = 0.50  # 50% change in segment count (either direction)
+COVERAGE_DROP_THRESHOLD = 0.30  # 30 percentage point drop in name or class coverage
+
 
 @dataclass
 class RegressionViolation:
     """A single quality regression violation."""
 
     metric: str
-    expected: float
-    actual: float
+    expected: float | int
+    actual: float | int
     threshold: float
     message: str
 
@@ -60,14 +64,14 @@ def check_quality_regression(
     expected_segments = fingerprint.total_segments
     if expected_segments > 0:
         pct_change = abs(total_segments - expected_segments) / expected_segments
-        if pct_change > 0.50:
+        if pct_change > SEGMENT_COUNT_CHANGE_THRESHOLD:
             direction = "increase" if total_segments > expected_segments else "decrease"
             violations.append(
                 RegressionViolation(
                     metric="total_segments",
                     expected=expected_segments,
                     actual=total_segments,
-                    threshold=0.50,
+                    threshold=SEGMENT_COUNT_CHANGE_THRESHOLD,
                     message=(
                         f"{dataset_name}: segment count {direction} of {pct_change:.0%} "
                         f"({expected_segments} -> {total_segments})"
@@ -86,13 +90,13 @@ def check_quality_regression(
 
     expected_name_ratio = fingerprint.name_coverage_ratio
     name_drop = expected_name_ratio - actual_name_ratio
-    if name_drop > 0.30:
+    if name_drop > COVERAGE_DROP_THRESHOLD:
         violations.append(
             RegressionViolation(
                 metric="name_coverage_ratio",
                 expected=expected_name_ratio,
                 actual=actual_name_ratio,
-                threshold=0.30,
+                threshold=COVERAGE_DROP_THRESHOLD,
                 message=(
                     f"{dataset_name}: name coverage dropped {name_drop:.0%} "
                     f"({expected_name_ratio:.1%} -> {actual_name_ratio:.1%})"
@@ -111,13 +115,13 @@ def check_quality_regression(
 
     expected_class_ratio = fingerprint.class_coverage_ratio
     class_drop = expected_class_ratio - actual_class_ratio
-    if class_drop > 0.30:
+    if class_drop > COVERAGE_DROP_THRESHOLD:
         violations.append(
             RegressionViolation(
                 metric="class_coverage_ratio",
                 expected=expected_class_ratio,
                 actual=actual_class_ratio,
-                threshold=0.30,
+                threshold=COVERAGE_DROP_THRESHOLD,
                 message=(
                     f"{dataset_name}: class coverage dropped {class_drop:.0%} "
                     f"({expected_class_ratio:.1%} -> {actual_class_ratio:.1%})"
