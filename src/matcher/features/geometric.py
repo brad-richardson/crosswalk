@@ -556,6 +556,10 @@ def compute_heading_consistency(
 
     Returns a value 0-1 where 1 means perfectly straight.
 
+    For short segments (< 2 * sample_interval), uses the line's own vertices
+    instead of interpolated samples. This avoids masking all short segments
+    as "perfectly straight" (1.0) when they may actually have turns.
+
     Args:
         line: LineString geometry
         sample_interval: Distance between sample points (meters)
@@ -564,15 +568,22 @@ def compute_heading_consistency(
     Returns:
         Consistency score (0-1) where 1 = perfectly straight
     """
-    if line.length < sample_interval * 2:
-        return 1.0
+    if sampled_points is not None:
+        return compute_heading_consistency_numba(sampled_points)
 
-    if sampled_points is None:
-        # Sample points along the line using vectorized Shapely interpolation
-        n_samples = max(3, int(line.length / sample_interval))
-        distances = np.linspace(0, line.length, n_samples)
-        pts = line_interpolate_point(line, distances)
-        sampled_points = get_coordinates(pts)
+    if line.length < sample_interval * 2:
+        # Short segment: use actual vertices instead of skipping entirely.
+        # Need >= 3 vertices to compute any heading change.
+        coords = get_coordinates(line)
+        if len(coords) < 3:
+            return 1.0  # Genuinely straight (only 2 points = a line)
+        return compute_heading_consistency_numba(coords)
+
+    # Normal path: sample points along the line using vectorized Shapely interpolation
+    n_samples = max(3, int(line.length / sample_interval))
+    distances = np.linspace(0, line.length, n_samples)
+    pts = line_interpolate_point(line, distances)
+    sampled_points = get_coordinates(pts)
 
     return compute_heading_consistency_numba(sampled_points)
 
@@ -587,15 +598,17 @@ def compute_sinuosity(
     Sinuosity = line_length / straight_distance
     - 1.0 = perfectly straight
     - >1.0 = increasingly curvy
-    - Loop (start == end): returns 100.0 to indicate loop
+    - Capped at 10.0 to prevent outliers from distorting XGBoost splits
 
     Args:
         line: LineString geometry
         coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
-        Sinuosity ratio (>= 1.0, or 100.0 for loops)
+        Sinuosity ratio (1.0 to 10.0)
     """
+    MAX_SINUOSITY = 10.0
+
     if line is None or line.is_empty:
         return 1.0
 
@@ -613,11 +626,13 @@ def compute_sinuosity(
     end = coords[-1]
     straight_distance = np.sqrt(np.sum((end - start) ** 2))
 
-    # Handle loop case (start == end)
+    # Handle loop case (start == end) — cap instead of returning extreme outlier.
+    # Previously returned 100.0, which distorted sinuosity_delta for any pair
+    # involving a loop/cul-de-sac.
     if straight_distance < 1e-9:
-        return 100.0
+        return MAX_SINUOSITY
 
-    return line_length / straight_distance
+    return min(line_length / straight_distance, MAX_SINUOSITY)
 
 
 def compute_vertex_density(
@@ -753,6 +768,13 @@ def compute_collinear_gap_ratio(
 ) -> float:
     """Detect collinear segments that barely touch (tip-to-tip penalty).
 
+    NOTE: Ablation study shows this feature has near-zero importance
+    (f1_delta=+0.000016 — removing it slightly *improves* the model). This is
+    because the feature returns 1.0 (no penalty) for the vast majority of pairs
+    (non-collinear, degenerate, zero-extent), and is only informative for the
+    rare case of collinear tip-to-tip segments. Candidate for removal in future
+    feature pruning.
+
     This feature addresses the problem where consecutive road segments
     (same street, same direction, but end-to-end) score artificially high
     because name similarity and heading alignment are perfect.
@@ -827,7 +849,7 @@ def compute_angle_histogram_similarity(
 
     Returns:
         Similarity score (0-1) where 1 = identical angle distributions
-        Returns 1.0 for degenerate cases (< 3 points in either line)
+        Returns 0.5 (neutral) for degenerate cases (< 3 points in either line)
     """
     if line_a.is_empty or line_b.is_empty:
         return 1.0
@@ -837,9 +859,11 @@ def compute_angle_histogram_similarity(
     if coords_b is None:
         coords_b = np.array(line_b.coords)
 
-    # Lines with < 3 points have no turn angles - treat as compatible
+    # Lines with < 3 points have no turn angles — return neutral value.
+    # Previously returned 1.0 ("identical shapes"), which falsely rewarded
+    # sparse geometry pairs. 0.5 is neutral: doesn't penalize or reward.
     if len(coords_a) < 3 or len(coords_b) < 3:
-        return 1.0
+        return 0.5
 
     hist_a = compute_angle_histogram_numba(coords_a, n_bins)
     hist_b = compute_angle_histogram_numba(coords_b, n_bins)

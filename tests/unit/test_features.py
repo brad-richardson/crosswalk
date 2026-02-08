@@ -691,6 +691,133 @@ class TestComputePairFeaturesWithAlignment:
         )
 
 
+class TestLengthRatioUsesFullGeometry:
+    """Regression tests: length_ratio must use original geometries, not sublines.
+
+    Subline alignment clips both geometries to the matching portion, which makes
+    their lengths nearly identical (ratio ~1.0). The length_ratio feature should
+    reflect the actual segmentation difference between the full original geometries.
+    """
+
+    def test_length_ratio_reflects_original_lengths_with_alignment(self):
+        """When target is 3x longer than ref, length_ratio should be ~0.33."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (100, 0)])  # 100m
+        target = LineString([(0, 0), (300, 0)])  # 300m
+
+        # Alignment says ref covers the first 1/3 of target
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.0,
+            dataset_end_frac=0.333,
+        )
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+        )
+
+        # length_ratio = min/max = 100/300 ≈ 0.333
+        assert features["length_ratio"] == pytest.approx(1 / 3, abs=0.01), (
+            f"length_ratio={features['length_ratio']:.3f}, expected ~0.333. "
+            "Should use original geometry lengths, not subline lengths."
+        )
+
+    def test_length_ratio_without_alignment(self):
+        """Without alignment, length_ratio should still reflect original lengths."""
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (50, 0)])  # 50m
+        target = LineString([(0, 0), (200, 0)])  # 200m
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+        )
+
+        # length_ratio = 50/200 = 0.25
+        assert features["length_ratio"] == pytest.approx(0.25, abs=0.01)
+
+
+class TestEndpointProximityInfCapping:
+    """Regression tests: endpoint proximity must never contain Inf values.
+
+    The JIT helper returns np.inf when no endpoints are found. compute.py must
+    cap these to MAX_DISTANCE_METERS so the ML model sees finite values.
+    """
+
+    def test_inf_endpoint_proximity_capped(self):
+        """Inf values from endpoint computation should be capped to MAX_DISTANCE_METERS."""
+        from matcher.config import MAX_DISTANCE_METERS
+        from matcher.features.compute import compute_pair_features
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+
+        # Pass endpoint features with Inf (simulating the JIT helper bug)
+        endpoint_features = {
+            "min_endpoint_proximity_m": float("inf"),
+            "max_endpoint_proximity_m": float("inf"),
+            "shared_endpoint_count": 0,
+        }
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            endpoint_features=endpoint_features,
+        )
+
+        assert features["min_endpoint_proximity_m"] == MAX_DISTANCE_METERS
+        assert features["max_endpoint_proximity_m"] == MAX_DISTANCE_METERS
+
+    def test_finite_endpoint_proximity_unchanged(self):
+        """Finite endpoint values below MAX_DISTANCE_METERS should pass through unchanged."""
+        from matcher.features.compute import compute_pair_features
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+
+        endpoint_features = {
+            "min_endpoint_proximity_m": 5.0,
+            "max_endpoint_proximity_m": 42.0,
+            "shared_endpoint_count": 1,
+        }
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            endpoint_features=endpoint_features,
+        )
+
+        assert features["min_endpoint_proximity_m"] == 5.0
+        assert features["max_endpoint_proximity_m"] == 42.0
+        assert features["shared_endpoint_count"] == 1
+
+
 class TestAngleHistogramSimilarity:
     """Tests for compute_angle_histogram_similarity function."""
 
@@ -734,15 +861,15 @@ class TestAngleHistogramSimilarity:
         result = compute_angle_histogram_similarity(curve1, curve2)
         assert result >= 0.9  # Should be very similar
 
-    def test_short_lines_return_one(self):
-        """Lines with < 3 points should return 1.0 (no turns to compare)."""
+    def test_short_lines_return_neutral(self):
+        """Lines with < 3 points should return 0.5 (neutral — no signal)."""
         from matcher.features.geometric import compute_angle_histogram_similarity
 
         short1 = LineString([(0, 0), (10, 0)])
         short2 = LineString([(0, 0), (20, 10)])
 
         result = compute_angle_histogram_similarity(short1, short2)
-        assert result == pytest.approx(1.0)
+        assert result == pytest.approx(0.5)
 
     def test_empty_line_returns_one(self):
         """Empty lines should return 1.0."""

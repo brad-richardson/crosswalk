@@ -505,11 +505,13 @@ def _compute_non_geometric_features(
         # Semantic - class
         "class_similarity": class_sim,
         # Endpoint proximity
-        "min_endpoint_proximity_m": endpoint_features.get(
-            "min_endpoint_proximity_m", MAX_DISTANCE_METERS
+        "min_endpoint_proximity_m": min(
+            endpoint_features.get("min_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            MAX_DISTANCE_METERS,
         ),
-        "max_endpoint_proximity_m": endpoint_features.get(
-            "max_endpoint_proximity_m", MAX_DISTANCE_METERS
+        "max_endpoint_proximity_m": min(
+            endpoint_features.get("max_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            MAX_DISTANCE_METERS,
         ),
         "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
         # Lateral offset
@@ -628,6 +630,7 @@ def compute_pair_features(
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
     """
+    _current_phase = "init"
     try:
         # Determine geometries for similarity features
         # If alignment is provided, extract sublines for computing similarity features
@@ -643,6 +646,7 @@ def compute_pair_features(
         # divergent portions that were deliberately trimmed.
         HIGH_COVERAGE_THRESHOLD = 0.995
 
+        _current_phase = "subline_extraction"
         with timed_section("subline_extraction"):
             if alignment is not None:
                 # Calculate coverage for each geometry
@@ -669,12 +673,14 @@ def compute_pair_features(
                 geom_for_similarity_ref = ref_geom
                 geom_for_similarity_target = target_geom
 
+        _current_phase = "coord_extraction"
         # Extract coords once for functions that accept optional coords parameter
         # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
         with timed_section("coord_extraction"):
             coords_ref = np.array(geom_for_similarity_ref.coords)
             coords_target = np.array(geom_for_similarity_target.coords)
 
+        _current_phase = "geometric_features"
         # Compute geometric features on aligned sublines (or full geom if no alignment)
         with timed_section("geometric_features"):
             geom_features = compute_geometric_features(
@@ -682,6 +688,7 @@ def compute_pair_features(
                 geom_for_similarity_target,
             )
 
+        _current_phase = "non_geometric_features"
         # Compute non-geometric features (semantic, topology, etc.)
         non_geom = _compute_non_geometric_features(
             geom_sim_ref=geom_for_similarity_ref,
@@ -708,6 +715,7 @@ def compute_pair_features(
             target_sibling_context=target_sibling_context,
         )
 
+        _current_phase = "merge_features"
         # Merge batchable geometric features with non-geometric features
         features = {
             # Batchable geometric features (from compute_geometric_features)
@@ -715,7 +723,14 @@ def compute_pair_features(
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
-            "length_ratio": geom_features.length_ratio,
+            # Use original geometries for length_ratio, NOT sublines.
+            # Subline alignment clips both geometries to matching portions,
+            # making their lengths nearly identical (ratio ~1.0 always).
+            # The full-geometry ratio captures actual segmentation differences.
+            "length_ratio": min(ref_geom.length, target_geom.length)
+            / max(ref_geom.length, target_geom.length)
+            if max(ref_geom.length, target_geom.length) > 0
+            else 0.0,
             "centroid_distance_m": geom_features.centroid_distance,
             # Non-geometric and per-pair geometric features
             **non_geom,
@@ -731,10 +746,12 @@ def compute_pair_features(
         return features
 
     except Exception as e:
-        # Log at warning level to catch bugs early (see TODO.md for planned improvements)
-        logger.warning(f"Feature computation failed: {type(e).__name__}: {e}")
+        # Log at warning level with phase context for debugging
+        logger.warning(
+            f"Feature computation failed during '{_current_phase}': {type(e).__name__}: {e}"
+        )
         # Return error values with metadata for tracking
-        return _get_error_features(error=e, phase="compute_pair_features")
+        return _get_error_features(error=e, phase=f"compute_pair_features/{_current_phase}")
 
 
 def _get_error_features(
@@ -835,7 +852,7 @@ def _get_error_features(
         "offset_over_expected_halfwidth": 0.0,
         "likely_representation_mismatch": 0.0,
         # Shape/geometric features - default to neutral values
-        "angle_histogram_similarity": 1.0,  # Treat as compatible in error case
+        "angle_histogram_similarity": 0.5,  # Neutral: no signal in error case
         "edge_distance_rmse_m": MAX_DISTANCE_METERS,
         # Road properties - default to neutral values
     }

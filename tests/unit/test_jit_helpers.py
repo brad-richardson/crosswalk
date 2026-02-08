@@ -532,13 +532,13 @@ class TestSinuosityOptionalCoords:
         result = compute_sinuosity(line, coords=coords)
         assert result > 1.0  # Path is longer than straight-line distance
 
-    def test_loop_returns_high_value(self):
-        """Loop (start == end) should return 100.0."""
+    def test_loop_returns_capped_value(self):
+        """Loop (start == end) should return MAX_SINUOSITY (10.0)."""
         line = LineString([(0, 0), (50, 50), (100, 0), (50, -50), (0, 0)])
         coords = np.array(line.coords)
 
         result = compute_sinuosity(line, coords=coords)
-        assert result == pytest.approx(100.0)
+        assert result == pytest.approx(10.0)
 
 
 class TestQueryNearbyEndpointsNumba:
