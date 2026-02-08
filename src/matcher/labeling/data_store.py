@@ -251,17 +251,21 @@ class DataStore:
 
         row = matches.iloc[-1]  # Latest entry
 
+        def _str_or_none(val):
+            """Convert NaN/non-string values to None for string fields."""
+            return val if isinstance(val, str) else None
+
         return {
             "gers_id": row["gers_id"],
             "target_id": row["target_id"],
             "ref_geometry": row["ref_geometry"],
             "target_geometry": row["target_geometry"],
-            "ref_name": row.get("ref_name"),
-            "target_name": row.get("target_name"),
-            "ref_class": row.get("ref_class"),
-            "target_class": row.get("target_class"),
-            "ref_subclass": row.get("ref_subclass"),
-            "target_subclass": row.get("target_subclass"),
+            "ref_name": _str_or_none(row.get("ref_name")),
+            "target_name": _str_or_none(row.get("target_name")),
+            "ref_class": _str_or_none(row.get("ref_class")),
+            "target_class": _str_or_none(row.get("target_class")),
+            "ref_subclass": _str_or_none(row.get("ref_subclass")),
+            "target_subclass": _str_or_none(row.get("target_subclass")),
             "ref_names_lr": _deserialize_lr_data(row.get("ref_names_lr")),
             "target_names_lr": _deserialize_lr_data(row.get("target_names_lr")),
             "ref_subclass_lr": _deserialize_lr_data(row.get("ref_subclass_lr")),

@@ -121,7 +121,7 @@ def get_traffic_tier(road_class: str | None) -> str | None:
     Returns:
         Traffic tier string or None if unknown
     """
-    if not road_class:
+    if not road_class or not isinstance(road_class, str):
         return None
     return TRAFFIC_TIERS.get(road_class.lower().strip())
 
@@ -359,7 +359,7 @@ def _normalize_street_name(name: str) -> str:
     - Remove extra whitespace
     - Remove common punctuation
     """
-    if not name:
+    if not name or not isinstance(name, str):
         return ""
 
     # Lowercase
@@ -413,7 +413,7 @@ def compute_class_similarity(
     Returns:
         Similarity score (0-1)
     """
-    if not class_a or not class_b:
+    if not class_a or not isinstance(class_a, str) or not class_b or not isinstance(class_b, str):
         return 0.5  # Unknown, neutral
 
     class_a = class_a.lower().strip()
@@ -481,7 +481,7 @@ def compute_class_match(
     Returns:
         True if classes are compatible
     """
-    if not class_a or not class_b:
+    if not class_a or not isinstance(class_a, str) or not class_b or not isinstance(class_b, str):
         return True  # Unknown is compatible with anything
 
     class_a = class_a.lower().strip()
@@ -508,7 +508,7 @@ def get_class_info(class_value: str | None) -> dict:
 
     Useful for debugging class similarity issues.
     """
-    if not class_value:
+    if not class_value or not isinstance(class_value, str):
         return {"normalized": None, "known": False, "rank": None}
 
     normalized = class_value.lower().strip()
@@ -575,7 +575,7 @@ def canonicalize_route_name(name: str | None) -> tuple[str | None, int | None]:
         - prefix_type: "interstate", "us_route", "state_route", "county_road", "highway", or None
         - route_number: The numeric route number, or None if not found
     """
-    if not name:
+    if not name or not isinstance(name, str):
         return None, None
 
     name_lower = name.lower().strip()
@@ -673,7 +673,7 @@ def names_likely_same_road(name_a: str | None, name_b: str | None) -> bool:
 
     Uses multiple heuristics for a quick yes/no decision.
     """
-    if not name_a or not name_b:
+    if not name_a or not isinstance(name_a, str) or not name_b or not isinstance(name_b, str):
         return False
 
     # Quick exact match
