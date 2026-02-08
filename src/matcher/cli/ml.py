@@ -168,9 +168,9 @@ def _eval_existing_model(
 
     # Overall metrics
     overall_acc = accuracy_score(y_test, y_pred)
-    overall_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE)
-    overall_precision = precision_score(y_test, y_pred, average=METRIC_AVERAGE)
-    overall_recall = recall_score(y_test, y_pred, average=METRIC_AVERAGE)
+    overall_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    overall_precision = precision_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    overall_recall = recall_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
     console.print(f"\n{'=' * 60}")
     console.print(f"[bold]EVALUATION ON 20% HOLDOUT ({len(test_df)} samples)[/bold]")
@@ -429,9 +429,13 @@ def _cross_validate(
 
         # Compute overall metrics for this fold
         fold_metrics["accuracy"].append(accuracy_score(y_test, y_pred))
-        fold_metrics["f1"].append(f1_score(y_test, y_pred, average=METRIC_AVERAGE))
-        fold_metrics["precision"].append(precision_score(y_test, y_pred, average=METRIC_AVERAGE))
-        fold_metrics["recall"].append(recall_score(y_test, y_pred, average=METRIC_AVERAGE))
+        fold_metrics["f1"].append(f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0))
+        fold_metrics["precision"].append(
+            precision_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        )
+        fold_metrics["recall"].append(
+            recall_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        )
 
         # Per-dataset metrics for this fold
         if by_dataset:
@@ -714,7 +718,7 @@ def analyze_errors(
 
     # Overall metrics
     overall_acc = accuracy_score(y_true, y_pred)
-    overall_f1 = f1_score(y_true, y_pred, average=METRIC_AVERAGE)
+    overall_f1 = f1_score(y_true, y_pred, average=METRIC_AVERAGE, zero_division=0)
     overall_cm = confusion_matrix(y_true, y_pred)
 
     console.print(f"\n{'=' * 70}")
@@ -767,7 +771,7 @@ def analyze_errors(
     for ds in sorted(all_labels["dataset"].unique()):
         ds_df = all_labels[all_labels["dataset"] == ds]
         ds_acc = accuracy_score(ds_df["y_true"], ds_df["y_pred"])
-        ds_f1 = f1_score(ds_df["y_true"], ds_df["y_pred"], average=METRIC_AVERAGE)
+        ds_f1 = f1_score(ds_df["y_true"], ds_df["y_pred"], average=METRIC_AVERAGE, zero_division=0)
         ds_n_errors = ds_df["is_error"].sum()
         ds_n_fp = ds_df["is_fp"].sum()
         ds_n_fn = ds_df["is_fn"].sum()

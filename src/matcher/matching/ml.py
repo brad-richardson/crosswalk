@@ -2205,7 +2205,7 @@ def evaluate_by_dataset(
 
         # Compute metrics
         accuracy = accuracy_score(y, y_pred)
-        f1 = f1_score(y, y_pred, average=METRIC_AVERAGE)
+        f1 = f1_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
         precision = precision_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
         recall = recall_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
@@ -2240,7 +2240,7 @@ def evaluate_by_dataset(
     # Overall metrics
     if all_y_true:
         overall_accuracy = accuracy_score(all_y_true, all_y_pred)
-        overall_f1 = f1_score(all_y_true, all_y_pred, average=METRIC_AVERAGE)
+        overall_f1 = f1_score(all_y_true, all_y_pred, average=METRIC_AVERAGE, zero_division=0)
 
         if show_by_dataset:
             print("\n" + "-" * 60)
