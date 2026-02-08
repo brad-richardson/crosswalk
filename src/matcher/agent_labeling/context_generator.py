@@ -12,6 +12,7 @@ import yaml
 from loguru import logger
 from shapely.ops import transform
 
+from ..config import FEATURE_CATEGORIES
 from .image_renderer import render_candidate_images, render_candidate_variant
 from .sampler import SampledCandidate
 
@@ -79,30 +80,18 @@ def generate_metadata_yaml(
     else:
         bbox = [0, 0, 0, 0]
 
-    # Organize features by category
+    # Organize features by category using config as source of truth
     features = candidate.features
-    geometric_features = {
-        "hausdorff_distance": _round_value(features.get("hausdorff_distance")),
-        "mean_hausdorff_distance": _round_value(features.get("mean_hausdorff_distance")),
-        "buffer_iou": _round_value(features.get("buffer_iou")),
-        "overlap_ratio": _round_value(features.get("overlap_ratio")),
-        "heading_delta": _round_value(features.get("heading_delta")),
-        "length_ratio": _round_value(features.get("length_ratio")),
-        "centroid_distance": _round_value(features.get("centroid_distance")),
-    }
-
-    semantic_features = {
-        "name_levenshtein": _round_value(features.get("name_levenshtein")),
-        "name_jaro_winkler": _round_value(features.get("name_jaro_winkler")),
-        "name_token_sort": _round_value(features.get("name_token_sort")),
-        "class_similarity": _round_value(features.get("class_similarity")),
-    }
-
-    topological_features = {
-        "degree_match_score": _round_value(features.get("degree_match_score")),
-        "dead_end_match": bool(features.get("dead_end_match", False)),
-        "intersection_match": bool(features.get("intersection_match", False)),
-    }
+    feature_sections = {}
+    for category, col_names in FEATURE_CATEGORIES.items():
+        section = {}
+        for col in col_names:
+            val = features.get(col)
+            if isinstance(val, bool) or (isinstance(val, (int, float)) and col.startswith(("is_", "has_", "dead_end", "intersection_match", "likely_"))):
+                section[col] = bool(val) if val is not None else False
+            else:
+                section[col] = _round_value(val)
+        feature_sections[category.lower().replace(" ", "_").replace("/", "_")] = section
 
     # Build metadata structure
     metadata = {
@@ -129,11 +118,7 @@ def generate_metadata_yaml(
             "target_length_m": _round_value(target_length),
             "bbox": [_round_value(v) for v in bbox],
         },
-        "features": {
-            "geometric": geometric_features,
-            "semantic": semantic_features,
-            "topological": topological_features,
-        },
+        "features": feature_sections,
         "images": {
             "satellite": "satellite.png",
             "geometry": "geometry.png",

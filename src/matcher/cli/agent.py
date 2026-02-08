@@ -494,7 +494,9 @@ def generate_basemap_sweep(
 
     from ..agent_labeling.context_generator import write_candidate_sweep_package
     from ..agent_labeling.sampler import SampledCandidate
+    from ..config import FEATURE_COLUMNS
     from ..filenames import find_overture_segments
+    from ..labeling.feature_store import FeatureStore
 
     # Validate directories
     if not labels_dir.exists():
@@ -575,6 +577,15 @@ def generate_basemap_sweep(
             key = (str(row["gers_id"]), str(row["target_id"]))
             geom_lookup[key] = row
 
+        # Load features from feature store and merge into sampled labels
+        feat_store = FeatureStore(dataset)
+        if len(feat_store.df) > 0:
+            sampled = sampled.merge(
+                feat_store.df,
+                on=["gers_id", "target_id"],
+                how="left",
+            )
+
         # Load Overture segments for road context
         overture_path = find_overture_segments(data_dir, dataset)
         ref_gdf = None
@@ -613,10 +624,10 @@ def generate_basemap_sweep(
 
                 if "target_geometry_wkt" in geom_row.index:
                     target_geom = wkt.loads(geom_row["target_geometry_wkt"])
-                elif "target_geometry_wkb" in geom_row.index:
+                elif "target_geometry" in geom_row.index:
                     from shapely import wkb
 
-                    target_geom = wkb.loads(geom_row["target_geometry_wkb"])
+                    target_geom = wkb.loads(geom_row["target_geometry"])
                 else:
                     raise KeyError("No target geometry column found")
             except Exception:
@@ -648,23 +659,12 @@ def generate_basemap_sweep(
                 except Exception:
                     pass  # Non-critical, proceed without context roads
 
-            # Extract features from label row
-            feature_cols = [
-                "hausdorff_distance",
-                "buffer_iou",
-                "heading_delta",
-                "length_ratio",
-                "name_levenshtein",
-                "name_jaro_winkler",
-                "class_similarity",
-                "centroid_distance",
-                "overlap_ratio",
-                "mean_hausdorff_distance",
-                "degree_match_score",
-                "dead_end_match",
-                "intersection_match",
-            ]
-            features = {col: row.get(col, 0.0) for col in feature_cols if col in row.index}
+            # Extract features from label row (merged from FeatureStore)
+            features = {}
+            for col in FEATURE_COLUMNS:
+                if col in row.index:
+                    val = row[col]
+                    features[col] = None if pd.isna(val) else val
 
             # Parse names/classes from geometry attributes if available
             import json
@@ -687,6 +687,16 @@ def generate_basemap_sweep(
                     target_class = attrs.get("class")
                 except Exception:
                     pass  # Malformed JSON attributes - continue with None values
+
+            # Fallback: read names/classes from direct columns
+            if ref_name is None and "ref_name" in geom_row.index:
+                ref_name = geom_row["ref_name"]
+            if target_name is None and "target_name" in geom_row.index:
+                target_name = geom_row["target_name"]
+            if ref_class is None and "ref_class" in geom_row.index:
+                ref_class = geom_row["ref_class"]
+            if target_class is None and "target_class" in geom_row.index:
+                target_class = geom_row["target_class"]
 
             # Read alignment fractions from labels CSV (NaN → defaults)
             def _safe_frac(val, default):

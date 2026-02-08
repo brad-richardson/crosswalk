@@ -715,6 +715,13 @@ def run_agent_batch(
             total_success += len(chunk_df)
             logger.info(f"Chunk {chunk_idx + 1}: {len(chunk_df)} labels written")
 
+            # Periodic backup
+            if (chunk_idx + 1) % 5 == 0:
+                backup_path = output_dir / f"data_backup_chunk{chunk_idx + 1}.csv"
+                import shutil
+                shutil.copy2(output_file, backup_path)
+                logger.info(f"Backup saved: {backup_path}")
+
             missing_count = len(chunk_expected) - len(chunk_df)
             if missing_count > 0:
                 total_missing += missing_count
