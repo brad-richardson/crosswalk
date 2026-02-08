@@ -60,6 +60,15 @@ Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, 
 
 ---
 
+## Agent Labeling
+
+### Manually Curate Few-Shot Examples
+- Current few-shot selection is automatic (random balanced sample from ground truth in other batches)
+- Manually curate a set of high-quality examples covering key edge cases: split carriageways, parallel sidewalks, bike lanes, short overlaps, name mismatches
+- Store in a dedicated directory (e.g. `data/agents/few_shot/`) so they're reused across batches
+
+---
+
 ## Label Data Management
 
 ### Label Archive & History
