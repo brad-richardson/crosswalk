@@ -41,7 +41,13 @@ from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .arcgis import fetch_arcgis_layer
-from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph, resolve_column
+from .normalize import (
+    default_class_for_type,
+    map_column,
+    normalize_oneway_value,
+    normalize_speed_to_kph,
+    resolve_column,
+)
 
 # Default output directory
 DEFAULT_DATA_DIR = Path("data/raw")
@@ -188,14 +194,7 @@ def _transform_download_data(
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
-        # Default class based on dataset type
-        if dataset_type == "sidewalk":
-            default_class = "footway"
-        elif dataset_type == "bike":
-            default_class = "cycleway"
-        else:
-            default_class = "unknown"
-        data["class"] = [default_class] * len(gdf)
+        data["class"] = [default_class_for_type(dataset_type)] * len(gdf)
 
     # Subclass with mapping
     if subclass_column and subclass_column in gdf.columns:
@@ -1239,6 +1238,8 @@ def fetch_dataset(
                 arcgis_kwargs["id_column"] = fetch_config.id_column
             if fetch_config.polygon_to_centerline:
                 arcgis_kwargs["polygon_to_centerline"] = fetch_config.polygon_to_centerline
+            if config.type:
+                arcgis_kwargs["dataset_type"] = config.type
 
             result_path = fetch_arcgis_layer(**arcgis_kwargs)
 

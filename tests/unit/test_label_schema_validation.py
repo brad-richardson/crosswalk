@@ -378,7 +378,12 @@ class TestTargetIdFormat:
         if not raw_dir.exists():
             pytest.skip("No data/raw directory found")
 
-        parquets = list(raw_dir.glob("*_v*.parquet"))
+        # Only check target dataset parquets, not OSM/overture segment files
+        parquets = [
+            pq
+            for pq in raw_dir.glob("*_v*.parquet")
+            if "_osm_" not in pq.name and "overture_" not in pq.name
+        ]
         if not parquets:
             pytest.skip("No target parquets found")
 

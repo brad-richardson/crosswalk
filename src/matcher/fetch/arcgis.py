@@ -18,7 +18,13 @@ from ..utils.dataframe import find_id_column
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
-from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph, resolve_column
+from .normalize import (
+    default_class_for_type,
+    map_column,
+    normalize_oneway_value,
+    normalize_speed_to_kph,
+    resolve_column,
+)
 
 
 def fetch_arcgis_layer(
@@ -45,6 +51,7 @@ def fetch_arcgis_layer(
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
     polygon_to_centerline: bool = False,
+    dataset_type: str | None = None,
 ) -> Path:
     """Fetch features from ArcGIS REST API and save as GeoParquet.
 
@@ -73,6 +80,7 @@ def fetch_arcgis_layer(
         speed_limit_column: Column name for speed limit
         speed_limit_unit: Unit of speed limit values ("kph" or "mph")
         polygon_to_centerline: Convert polygon geometries to centerline LineStrings
+        dataset_type: Dataset type (e.g., "sidewalk", "bike") for default class
 
     Returns:
         Path to the output GeoParquet file
@@ -119,6 +127,7 @@ def fetch_arcgis_layer(
         speed_limit_unit=speed_limit_unit,
         id_column=id_column,
         polygon_to_centerline=polygon_to_centerline,
+        dataset_type=dataset_type,
     )
 
     # Deduplicate by ID (ArcGIS pagination can return duplicates if data changes during fetch)
@@ -287,6 +296,7 @@ def _transform_to_overture_schema(
     speed_limit_unit: str = "kph",
     id_column: str | None = None,
     polygon_to_centerline: bool = False,
+    dataset_type: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
 
@@ -393,7 +403,7 @@ def _transform_to_overture_schema(
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
-        data["class"] = ["unknown"] * len(gdf)
+        data["class"] = [default_class_for_type(dataset_type)] * len(gdf)
 
     # Subtype (constant)
     data["subtype"] = ["road"] * len(gdf)
