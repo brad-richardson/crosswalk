@@ -3,7 +3,33 @@
 Provides standardized conversions for road attributes from various source formats.
 """
 
+import geopandas as gpd
 import pandas as pd
+
+
+def resolve_column(gdf: gpd.GeoDataFrame, name: str | None) -> str | None:
+    """Resolve a configured column name against actual DataFrame columns, case-insensitively.
+
+    Data sources sometimes return columns in different cases than configured
+    (e.g., ArcGIS returning 'objectid' when config says 'OBJECTID').
+
+    Args:
+        gdf: GeoDataFrame to search.
+        name: Configured column name (may be None).
+
+    Returns:
+        The actual column name from gdf that matches case-insensitively,
+        or None if name is None or no match found.
+    """
+    if name is None:
+        return None
+    if name in gdf.columns:
+        return name
+    lower = name.lower()
+    for col in gdf.columns:
+        if col.lower() == lower:
+            return col
+    return None
 
 
 def _str_key(value) -> str:

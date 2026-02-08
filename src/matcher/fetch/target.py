@@ -41,7 +41,7 @@ from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .arcgis import fetch_arcgis_layer
-from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
+from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph, resolve_column
 
 # Default output directory
 DEFAULT_DATA_DIR = Path("data/raw")
@@ -89,15 +89,23 @@ def _transform_download_data(
         if len(gdf) == 0:
             return gdf
 
+    # Resolve configured column names case-insensitively
+    name_column = resolve_column(gdf, name_column)
+    class_column = resolve_column(gdf, class_column)
+    subclass_column = resolve_column(gdf, subclass_column)
+    oneway_column = resolve_column(gdf, oneway_column)
+    speed_limit_column = resolve_column(gdf, speed_limit_column)
+
     # Apply exclude filter if configured
     if exclude:
         for column, values in exclude.items():
-            if column in gdf.columns:
+            resolved = resolve_column(gdf, column)
+            if resolved:
                 before_count = len(gdf)
-                gdf = gdf[~gdf[column].isin(values)]
+                gdf = gdf[~gdf[resolved].isin(values)]
                 excluded = before_count - len(gdf)
                 if excluded > 0:
-                    logger.info(f"Excluded {excluded} features where {column} in {values}")
+                    logger.info(f"Excluded {excluded} features where {resolved} in {values}")
         if len(gdf) == 0:
             return gdf
 
@@ -137,13 +145,13 @@ def _transform_download_data(
             "Choose a stable upstream ID column (e.g., OBJECTID, FID, CENTLNID)."
         )
 
-    if id_column not in gdf.columns:
+    # Resolve id_column case-insensitively
+    id_col = resolve_column(gdf, id_column)
+    if not id_col:
         raise ValueError(
             f"Configured id_column '{id_column}' not found in data for {source_name}. "
             f"Available columns: {list(gdf.columns)}"
         )
-
-    id_col = id_column
 
     # Store original columns
     original_cols = [c for c in gdf.columns if c != "geometry"]
