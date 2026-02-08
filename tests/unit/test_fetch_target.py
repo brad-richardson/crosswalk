@@ -6,6 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString
 
+from matcher.datasets.schema import FetchConfig
 from matcher.fetch.target import (
     _transform_download_data,
     fetch_dataset,
@@ -37,14 +38,16 @@ class TestTransformDownloadData:
 
     def test_basic_transform(self, sample_gdf):
         """Test basic transformation to Overture schema."""
-        result = _transform_download_data(
-            sample_gdf,
+        fetch_config = FetchConfig(
             id_prefix="test",
             name_column="NAME",
             class_column="ROAD_TYPE",
-            class_mapping=None,
-            source_name="TestSource",
             id_column="OBJECTID",
+        )
+        result = _transform_download_data(
+            sample_gdf,
+            fetch_config=fetch_config,
+            source_name="TestSource",
         )
 
         assert len(result) == 3
@@ -68,14 +71,17 @@ class TestTransformDownloadData:
         """Test class mapping transformation."""
         class_mapping = {"primary": "major", "secondary": "minor", "tertiary": "local"}
 
-        result = _transform_download_data(
-            sample_gdf,
+        fetch_config = FetchConfig(
             id_prefix="test",
             name_column="NAME",
             class_column="ROAD_TYPE",
             class_mapping=class_mapping,
-            source_name="TestSource",
             id_column="OBJECTID",
+        )
+        result = _transform_download_data(
+            sample_gdf,
+            fetch_config=fetch_config,
+            source_name="TestSource",
         )
 
         assert result["class"].iloc[0] == "major"
@@ -92,15 +98,15 @@ class TestTransformDownloadData:
             crs="EPSG:4326",
         )
 
+        fetch_config = FetchConfig(
+            id_prefix="test",
+            name_column="NAME",
+        )
         with pytest.raises(ValueError, match="id_column must be specified"):
             _transform_download_data(
                 gdf,
-                id_prefix="test",
-                name_column="NAME",
-                class_column=None,
-                class_mapping=None,
+                fetch_config=fetch_config,
                 source_name="TestSource",
-                id_column=None,
             )
 
     def test_invalid_id_column_raises_error(self):
@@ -113,27 +119,26 @@ class TestTransformDownloadData:
             crs="EPSG:4326",
         )
 
+        fetch_config = FetchConfig(
+            id_prefix="test",
+            name_column="NAME",
+            id_column="NONEXISTENT",
+        )
         with pytest.raises(ValueError, match="not found in data"):
             _transform_download_data(
                 gdf,
-                id_prefix="test",
-                name_column="NAME",
-                class_column=None,
-                class_mapping=None,
+                fetch_config=fetch_config,
                 source_name="TestSource",
-                id_column="NONEXISTENT",
             )
 
     def test_empty_dataframe(self):
         """Test handling of empty GeoDataFrame."""
         gdf = gpd.GeoDataFrame({"geometry": []}, crs="EPSG:4326")
 
+        fetch_config = FetchConfig(id_prefix="test")
         result = _transform_download_data(
             gdf,
-            id_prefix="test",
-            name_column=None,
-            class_column=None,
-            class_mapping=None,
+            fetch_config=fetch_config,
             source_name="TestSource",
         )
 
@@ -204,13 +209,11 @@ class TestFetchDataset:
         mock_config.description = "Test dataset"
         mock_config.source.type = "arcgis"
         mock_config.source.url = "https://example.com/arcgis/0"
-        mock_config.fetch.id_prefix = "test"
-        mock_config.fetch.name_column = "NAME"
-        mock_config.fetch.class_column = "TYPE"
-        mock_config.fetch.class_mapping = None
-        mock_config.fetch.subclass_column = None
-        mock_config.fetch.subclass_mapping = None
-        mock_config.fetch.bbox = None
+        mock_config.fetch = FetchConfig(
+            id_prefix="test",
+            name_column="NAME",
+            class_column="TYPE",
+        )
         mock_config.display_name = "Test Dataset"
         mock_get_config.return_value = mock_config
 

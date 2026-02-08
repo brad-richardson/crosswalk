@@ -69,8 +69,8 @@ class MatchingConfig(BaseModel):
     block_cross_tier: bool = False  # Hard block vehicle↔pedestrian candidate pairs
 
 
-class LastFetch(BaseModel):
-    """Provenance information about the last data fetch."""
+class LastFetchInfo(BaseModel):
+    """Provenance for a single fetch (target, reference, or OSM)."""
 
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     bbox: tuple[float, float, float, float] | None = None  # Original requested bbox
@@ -80,6 +80,14 @@ class LastFetch(BaseModel):
     geometry_types: list[str] = Field(default_factory=list)
     output_path: str | None = None  # Path to the fetched parquet file
     notes: str | None = None
+
+
+class LastFetch(BaseModel):
+    """Provenance information about data fetches, tracked per source type."""
+
+    target: LastFetchInfo | None = None
+    reference: LastFetchInfo | None = None
+    osm: LastFetchInfo | None = None
 
 
 class SourceClassification(BaseModel):
@@ -236,9 +244,12 @@ def save_dataset_config(config: DatasetConfig, path: Path) -> Path:
     # Convert to dict, handling datetime and tuple serialization
     data = config.model_dump(exclude_none=True, exclude_unset=True)
 
-    # Handle datetime serialization
-    if "last_fetch" in data and "fetched_at" in data["last_fetch"]:
-        data["last_fetch"]["fetched_at"] = data["last_fetch"]["fetched_at"].isoformat()
+    # Handle datetime serialization in last_fetch sub-fields
+    if "last_fetch" in data:
+        for fetch_type in ("target", "reference", "osm"):
+            sub = data["last_fetch"].get(fetch_type)
+            if isinstance(sub, dict) and "fetched_at" in sub:
+                sub["fetched_at"] = sub["fetched_at"].isoformat()
 
     if "quality_fingerprint" in data and "computed_at" in data["quality_fingerprint"]:
         data["quality_fingerprint"]["computed_at"] = data["quality_fingerprint"][
@@ -274,9 +285,20 @@ def load_dataset_config(path: Path) -> DatasetConfig:
     if not data or not isinstance(data, dict):
         raise ValueError(f"Empty or invalid YAML file: {path}")
 
-    # Parse datetime fields
-    if "last_fetch" in data and isinstance(data["last_fetch"].get("fetched_at"), str):
-        data["last_fetch"]["fetched_at"] = datetime.fromisoformat(data["last_fetch"]["fetched_at"])
+    # Migrate old flat last_fetch format to new nested format
+    # Old format has fetched_at directly under last_fetch; new format has target/reference/osm
+    if "last_fetch" in data and isinstance(data["last_fetch"], dict):
+        if "fetched_at" in data["last_fetch"]:
+            # Old flat format — migrate to target sub-field
+            old_fetch = data["last_fetch"]
+            data["last_fetch"] = {"target": old_fetch}
+
+    # Parse datetime fields in last_fetch sub-fields
+    if "last_fetch" in data and isinstance(data["last_fetch"], dict):
+        for fetch_type in ("target", "reference", "osm"):
+            sub = data["last_fetch"].get(fetch_type)
+            if isinstance(sub, dict) and isinstance(sub.get("fetched_at"), str):
+                sub["fetched_at"] = datetime.fromisoformat(sub["fetched_at"])
 
     if "quality_fingerprint" in data and isinstance(
         data["quality_fingerprint"].get("computed_at"), str
@@ -336,6 +358,7 @@ def get_dataset_config(name: str) -> DatasetConfig | None:
 
 def update_last_fetch(
     name: str,
+    fetch_type: str = "target",
     fetched_at: datetime | None = None,
     bbox: tuple[float, float, float, float] | None = None,
     bbox_buffered: tuple[float, float, float, float] | None = None,
@@ -349,17 +372,28 @@ def update_last_fetch(
 
     Args:
         name: Dataset name
-        **kwargs: LastFetch fields to update
+        fetch_type: Which fetch to update: "target", "reference", or "osm"
+        fetched_at: When the fetch occurred
+        bbox: Original requested bounding box
+        bbox_buffered: Expanded bounding box
+        bbox_buffer_m: Buffer distance in meters
+        feature_count: Number of features fetched
+        geometry_types: List of geometry types in the data
+        output_path: Path to the output file
+        notes: Additional notes
 
     Returns:
         Updated DatasetConfig if found, None if dataset doesn't exist
     """
+    if fetch_type not in ("target", "reference", "osm"):
+        raise ValueError(f"fetch_type must be 'target', 'reference', or 'osm', got '{fetch_type}'")
+
     config = get_dataset_config(name)
     if config is None:
         return None
 
-    # Update last_fetch
-    config.last_fetch = LastFetch(
+    # Build the fetch info
+    fetch_info = LastFetchInfo(
         fetched_at=fetched_at or datetime.now(UTC),
         bbox=bbox,
         bbox_buffered=bbox_buffered,
@@ -369,6 +403,13 @@ def update_last_fetch(
         output_path=output_path,
         notes=notes,
     )
+
+    # Initialize last_fetch if needed
+    if config.last_fetch is None:
+        config.last_fetch = LastFetch()
+
+    # Update the correct sub-field
+    setattr(config.last_fetch, fetch_type, fetch_info)
 
     # Save back
     config_path = get_datasets_dir() / f"{name}.yaml"

@@ -63,6 +63,11 @@ def fetch_target(
         "-w",
         help="Number of parallel download workers (default: 4)",
     ),
+    skip_quality_check: bool = typer.Option(
+        False,
+        "--skip-quality-check",
+        help="Skip quality regression check against saved fingerprint",
+    ),
 ):
     """Fetch target/local road data from municipal GIS portals.
 
@@ -82,7 +87,9 @@ def fetch_target(
 
     if fetch_all:
         console.print(f"[blue]Fetching all datasets ({workers} workers)...[/blue]")
-        results = target_module.fetch_all_datasets(output_dir, page_size, force, workers)
+        results = target_module.fetch_all_datasets(
+            output_dir, page_size, force, workers, skip_quality_check
+        )
         success = sum(1 for p in results.values() if p is not None)
         console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
 
@@ -91,7 +98,7 @@ def fetch_target(
             f"[blue]Fetching datasets with prefix '{prefix}' ({workers} workers)...[/blue]"
         )
         results = target_module.fetch_datasets_by_prefix(
-            prefix, output_dir, page_size, force, workers
+            prefix, output_dir, page_size, force, workers, skip_quality_check
         )
         if not results:
             console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
@@ -101,7 +108,9 @@ def fetch_target(
 
     elif dataset_name:
         console.print(f"[blue]Fetching dataset: {dataset_name}[/blue]")
-        result = target_module.fetch_dataset(dataset_name, output_dir, page_size, force)
+        result = target_module.fetch_dataset(
+            dataset_name, output_dir, page_size, force, skip_quality_check
+        )
         if result:
             console.print(f"[green]Saved to {result}[/green]")
         else:
@@ -318,46 +327,39 @@ def _fetch_reference_impl(
             console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
             console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
 
-    # Update last_fetch in dataset config
-    from datetime import UTC, datetime
-
-    from ..datasets.schema import LastFetch, get_datasets_dir, save_dataset_config
+    # Update last_fetch in dataset config (per source type)
+    from ..datasets.schema import update_last_fetch
     from ..fetch.metadata import load_metadata
 
-    config = get_dataset_config(dataset_name)
-    if config:
-        buffer_m = overture_buffer if "overture" in sources else osm_buffer
-        feature_count = 0
-        geometry_types: list[str] = []
-
-        if "overture" in sources:
-            overture_seg_file = overture_segments_filename(dataset_name)
-            meta = load_metadata(output_dir / overture_seg_file)
-            if meta:
-                feature_count = meta.feature_count
-                geometry_types = meta.geometry_types
-        elif "osm" in sources:
-            osm_seg_file = osm_segments_filename(dataset_name)
-            meta = load_metadata(output_dir / osm_seg_file)
-            if meta:
-                feature_count = meta.feature_count
-                geometry_types = meta.geometry_types
-
-        config.last_fetch = LastFetch(
-            fetched_at=datetime.now(UTC),
+    if "overture" in sources:
+        overture_seg_file = overture_segments_filename(dataset_name)
+        meta = load_metadata(output_dir / overture_seg_file)
+        update_last_fetch(
+            dataset_name,
+            fetch_type="reference",
             bbox=original_bbox.to_tuple(),
-            bbox_buffered=(overture_bbox if "overture" in sources else osm_bbox).to_tuple()
-            if buffer_m
-            else None,
-            bbox_buffer_m=buffer_m,
-            feature_count=feature_count,
-            geometry_types=geometry_types,
+            bbox_buffered=overture_bbox.to_tuple() if overture_buffer else None,
+            bbox_buffer_m=overture_buffer,
+            feature_count=meta.feature_count if meta else 0,
+            geometry_types=meta.geometry_types if meta else [],
             output_path=str(output_dir),
         )
+        console.print(f"[blue]Updated last_fetch.reference for {dataset_name}[/blue]")
 
-        config_path = get_datasets_dir() / f"{dataset_name}.yaml"
-        save_dataset_config(config, config_path)
-        console.print(f"[blue]Updated last_fetch in {config_path.name}[/blue]")
+    if "osm" in sources:
+        osm_seg_file = osm_segments_filename(dataset_name)
+        meta = load_metadata(output_dir / osm_seg_file)
+        update_last_fetch(
+            dataset_name,
+            fetch_type="osm",
+            bbox=original_bbox.to_tuple(),
+            bbox_buffered=osm_bbox.to_tuple() if osm_buffer else None,
+            bbox_buffer_m=osm_buffer,
+            feature_count=meta.feature_count if meta else 0,
+            geometry_types=meta.geometry_types if meta else [],
+            output_path=str(output_dir),
+        )
+        console.print(f"[blue]Updated last_fetch.osm for {dataset_name}[/blue]")
 
 
 @fetch_app.command("overture")
@@ -393,6 +395,12 @@ def fetch_overture(
         "--force",
         help="Re-fetch even if files already exist",
     ),
+    workers: int = typer.Option(
+        2,
+        "--workers",
+        "-w",
+        help="Number of parallel workers for batch fetch (default: 2, Overture uses DuckDB parallelism internally)",
+    ),
 ):
     """Fetch Overture reference data for dataset(s).
 
@@ -400,6 +408,7 @@ def fetch_overture(
         matcher data fetch overture us_boston_streets      # Single dataset
         matcher data fetch overture --prefix us_           # All US datasets
         matcher data fetch overture --all                  # All datasets
+        matcher data fetch overture --all --workers 3      # Parallel batch
     """
     from ..datasets.schema import list_dataset_configs
 
@@ -421,21 +430,14 @@ def fetch_overture(
 
     console.print(f"[blue]Fetching Overture data for {len(datasets)} dataset(s)...[/blue]")
 
-    errors = []
-    for name in sorted(datasets):
-        try:
-            console.print(f"\n[blue]{'=' * 60}[/blue]")
-            console.print(f"[blue]Fetching Overture for: {name}[/blue]")
-            _fetch_reference_impl(
-                dataset_name=name,
-                output_dir=output_dir,
-                sources={"overture"},
-                bbox_buffer=bbox_buffer,
-                force=force,
-            )
-        except Exception as e:
-            console.print(f"[red]Error fetching {name}: {e}[/red]")
-            errors.append(name)
+    errors = _parallel_reference_fetch(
+        datasets=datasets,
+        output_dir=output_dir,
+        sources={"overture"},
+        bbox_buffer=bbox_buffer,
+        force=force,
+        workers=workers,
+    )
 
     if errors:
         console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
@@ -443,6 +445,87 @@ def fetch_overture(
     console.print(
         f"\n[green]Successfully fetched Overture data for {len(datasets)} dataset(s)[/green]"
     )
+
+
+def _parallel_reference_fetch(
+    datasets: list[str],
+    output_dir: Path,
+    sources: set[str],
+    bbox_buffer: float | None = None,
+    force: bool = False,
+    workers: int = 2,
+    cache_dir: Path | None = None,
+    no_cache: bool = False,
+    keep_pbf: bool = False,
+) -> list[str]:
+    """Run reference fetch across multiple datasets in parallel.
+
+    Args:
+        datasets: List of dataset names to fetch
+        output_dir: Output directory
+        sources: Set of sources ("overture", "osm")
+        bbox_buffer: Bbox buffer in meters
+        force: Re-fetch even if files exist
+        workers: Number of parallel workers
+        cache_dir: Cache directory for PBF files
+        no_cache: Force fresh download
+        keep_pbf: Keep PBF files
+
+    Returns:
+        List of dataset names that failed
+    """
+    errors: list[str] = []
+
+    # Single dataset — no threading needed
+    if len(datasets) == 1:
+        name = datasets[0]
+        try:
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources=sources,
+                bbox_buffer=bbox_buffer,
+                force=force,
+                cache_dir=cache_dir,
+                no_cache=no_cache,
+                keep_pbf=keep_pbf,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            errors.append(name)
+        return errors
+
+    # Multiple datasets — parallelize
+    console.print(f"[blue]Using {workers} parallel worker(s)[/blue]")
+
+    def _fetch_one(name: str) -> tuple[str, Exception | None]:
+        try:
+            _fetch_reference_impl(
+                dataset_name=name,
+                output_dir=output_dir,
+                sources=sources,
+                bbox_buffer=bbox_buffer,
+                force=force,
+                cache_dir=cache_dir,
+                no_cache=no_cache,
+                keep_pbf=keep_pbf,
+            )
+            return (name, None)
+        except Exception as e:
+            return (name, e)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_fetch_one, name): name for name in sorted(datasets)}
+
+        for future in as_completed(futures):
+            name, error = future.result()
+            if error is not None:
+                console.print(f"[red]Error fetching {name}: {error}[/red]")
+                errors.append(name)
+            else:
+                console.print(f"[green]Fetched reference data for {name}[/green]")
+
+    return errors
 
 
 @fetch_app.command("osm")
@@ -493,6 +576,12 @@ def fetch_osm(
         "--force",
         help="Re-fetch even if files already exist",
     ),
+    workers: int = typer.Option(
+        4,
+        "--workers",
+        "-w",
+        help="Number of parallel workers for batch fetch (default: 4)",
+    ),
 ):
     """Fetch OSM reference data for dataset(s).
 
@@ -500,6 +589,7 @@ def fetch_osm(
         matcher data fetch osm us_boston_streets      # Single dataset
         matcher data fetch osm --prefix us_           # All US datasets
         matcher data fetch osm --all                  # All datasets
+        matcher data fetch osm --all --workers 4      # Parallel batch
     """
     from ..datasets.schema import list_dataset_configs
 
@@ -521,24 +611,17 @@ def fetch_osm(
 
     console.print(f"[blue]Fetching OSM data for {len(datasets)} dataset(s)...[/blue]")
 
-    errors = []
-    for name in sorted(datasets):
-        try:
-            console.print(f"\n[blue]{'=' * 60}[/blue]")
-            console.print(f"[blue]Fetching OSM for: {name}[/blue]")
-            _fetch_reference_impl(
-                dataset_name=name,
-                output_dir=output_dir,
-                sources={"osm"},
-                cache_dir=cache_dir,
-                no_cache=no_cache,
-                keep_pbf=keep_pbf,
-                bbox_buffer=bbox_buffer,
-                force=force,
-            )
-        except Exception as e:
-            console.print(f"[red]Error fetching {name}: {e}[/red]")
-            errors.append(name)
+    errors = _parallel_reference_fetch(
+        datasets=datasets,
+        output_dir=output_dir,
+        sources={"osm"},
+        bbox_buffer=bbox_buffer,
+        force=force,
+        workers=workers,
+        cache_dir=cache_dir,
+        no_cache=no_cache,
+        keep_pbf=keep_pbf,
+    )
 
     if errors:
         console.print(f"\n[red]Failed: {', '.join(errors)}[/red]")
@@ -549,8 +632,20 @@ def fetch_osm(
 @fetch_app.command("all")
 def fetch_all(
     dataset_name: str = typer.Argument(
-        ...,
+        None,
         help="Dataset name to fetch all data for",
+    ),
+    prefix: str | None = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Fetch all data for datasets matching this prefix",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Fetch all data for all datasets",
     ),
     output_dir: Path = typer.Option(
         Path("data/raw"),
@@ -573,63 +668,115 @@ def fetch_all(
         "--force",
         help="Re-fetch even if files already exist",
     ),
+    workers: int = typer.Option(
+        4,
+        "--workers",
+        "-w",
+        help="Number of parallel workers for batch mode (default: 4)",
+    ),
+    skip_quality_check: bool = typer.Option(
+        False,
+        "--skip-quality-check",
+        help="Skip quality regression checks when re-fetching",
+    ),
 ):
-    """Fetch both target and reference data for a dataset.
+    """Fetch both target and reference data for dataset(s).
 
     Fetches target (local/ArcGIS) data and Overture reference data in parallel.
     This is the command to use when setting up a new dataset for labeling.
     By default, skips files that already exist (use --force to re-fetch).
 
     Examples:
-        matcher data fetch all us_boston_streets    # Fetch both target + Overture
+        matcher data fetch all us_boston_streets       # Single dataset
+        matcher data fetch all --prefix us_boston      # All Boston datasets
+        matcher data fetch all --all --workers 4      # All datasets, parallel
     """
+    from ..datasets.schema import list_dataset_configs
     from ..fetch import target as target_module
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    console.print(f"[blue]Fetching all data for {dataset_name}...[/blue]")
+    # Determine which datasets to process
+    if all_datasets:
+        datasets = list_dataset_configs()
+    elif prefix:
+        all_configs = list_dataset_configs()
+        datasets = [d for d in all_configs if d.startswith(prefix)]
+    elif dataset_name:
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide a dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
 
-    errors = []
+    if not datasets:
+        console.print("[yellow]No datasets found[/yellow]")
+        raise typer.Exit(0)
 
-    def fetch_target_data():
-        try:
-            result = target_module.fetch_dataset(dataset_name, output_dir, page_size, force)
-            return ("target", result)
-        except Exception as e:
-            return ("target", e)
+    def _fetch_all_for_one(ds_name: str) -> list[tuple[str, str | Exception]]:
+        """Fetch target + reference for a single dataset. Returns list of errors."""
+        ds_errors: list[tuple[str, str | Exception]] = []
 
-    def fetch_reference_data():
-        try:
-            _fetch_reference_impl(
-                dataset_name=dataset_name,
-                output_dir=output_dir,
-                sources={"overture"},
-                bbox_buffer=bbox_buffer,
-                force=force,
-            )
-            return ("reference", True)
-        except Exception as e:
-            return ("reference", e)
+        def fetch_target_data():
+            try:
+                result = target_module.fetch_dataset(
+                    ds_name, output_dir, page_size, force, skip_quality_check
+                )
+                return ("target", result)
+            except Exception as e:
+                return ("target", e)
 
-    # Run both fetches in parallel
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(fetch_target_data),
-            executor.submit(fetch_reference_data),
-        ]
+        def fetch_reference_data():
+            try:
+                _fetch_reference_impl(
+                    dataset_name=ds_name,
+                    output_dir=output_dir,
+                    sources={"overture"},
+                    bbox_buffer=bbox_buffer,
+                    force=force,
+                )
+                return ("reference", True)
+            except Exception as e:
+                return ("reference", e)
 
-        for future in as_completed(futures):
-            name, result = future.result()
-            if isinstance(result, Exception):
-                errors.append((name, result))
-                console.print(f"[red]Error fetching {name}: {result}[/red]")
-            elif name == "target":
-                if result:
-                    console.print(f"[green]Target data saved to {result}[/green]")
+        # Run target + reference in parallel (always 2 tasks per dataset)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(fetch_target_data),
+                executor.submit(fetch_reference_data),
+            ]
+
+            for future in as_completed(futures):
+                fetch_name, result = future.result()
+                if isinstance(result, Exception):
+                    ds_errors.append((f"{ds_name}/{fetch_name}", result))
+                    console.print(f"[red]Error fetching {ds_name}/{fetch_name}: {result}[/red]")
+                elif fetch_name == "target":
+                    if result:
+                        console.print(f"[green]{ds_name}: target saved to {result}[/green]")
+                    else:
+                        ds_errors.append(
+                            (f"{ds_name}/target", "Fetch failed or requires manual download")
+                        )
                 else:
-                    errors.append((name, "Fetch failed or requires manual download"))
-            else:
-                console.print("[green]Reference data fetched successfully[/green]")
+                    console.print(f"[green]{ds_name}: reference fetched[/green]")
+
+        return ds_errors
+
+    # Single dataset — run directly
+    if len(datasets) == 1:
+        console.print(f"[blue]Fetching all data for {datasets[0]}...[/blue]")
+        errors = _fetch_all_for_one(datasets[0])
+    else:
+        # Multiple datasets — parallelize across datasets
+        console.print(
+            f"[blue]Fetching all data for {len(datasets)} dataset(s) ({workers} workers)...[/blue]"
+        )
+        errors = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_fetch_all_for_one, ds): ds for ds in sorted(datasets)}
+            for future in as_completed(futures):
+                ds_errors = future.result()
+                errors.extend(ds_errors)
 
     if errors:
         console.print(f"[yellow]Completed with {len(errors)} error(s)[/yellow]")
