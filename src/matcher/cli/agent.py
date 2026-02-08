@@ -172,7 +172,7 @@ def generate_agent_test_batch(
         help="Output directory for agent labeling batches",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels",
         "-l",
         help="Directory containing human labels (Hive-partitioned)",
@@ -455,7 +455,7 @@ def generate_basemap_sweep(
         help="Output directory for agent labeling batches",
     ),
     labels_dir: Path = typer.Option(
-        Path("labels"),
+        Path("labels/human"),
         "--labels",
         "-l",
         help="Directory containing human labels (Hive-partitioned)",
@@ -475,13 +475,10 @@ def generate_basemap_sweep(
     """Generate basemap sweep batch for comparing AI agent accuracy across visualization variants.
 
     Samples stratified match/no_match candidates from existing human labels,
-    then generates 6 image variants per candidate:
-      - geometry_only.png: white background with geometry lines
-      - carto_positron.png: CartoDB light map basemap
-      - road_context.png: nearby Overture roads as gray context lines
-      - road_context.svg: same as above in SVG format
-      - subline_geometry_only.png: faded dashed full segments + solid bright aligned sublines
+    then generates 3 subline image variants per candidate:
+      - subline_geometry_only.png: white background with faded full segments + bright aligned sublines
       - subline_road_context.png: same + gray dashed context roads
+      - subline_carto_positron.png: same on CartoDB light map tiles
 
     Examples:
         matcher agent sweep \\
@@ -510,14 +507,11 @@ def generate_basemap_sweep(
 
     rng = np.random.default_rng(seed)
 
-    # Sweep variants
+    # Sweep variants (subline only — highlights aligned portions)
     variants = [
-        {"basemap": "geometry_only", "format": "png"},
-        {"basemap": "carto_positron", "format": "png"},
-        {"basemap": "road_context", "format": "png"},
-        {"basemap": "road_context", "format": "svg"},
         {"basemap": "subline_geometry_only", "format": "png"},
         {"basemap": "subline_road_context", "format": "png"},
+        {"basemap": "subline_carto_positron", "format": "png"},
     ]
 
     # Load labels and geometries per dataset, sample candidates
@@ -526,12 +520,17 @@ def generate_basemap_sweep(
 
     for dataset in datasets:
         label_file = labels_dir / f"dataset={dataset}" / "data.csv"
-        geom_file = geom_dir / f"dataset={dataset}" / "data.csv"
+        geom_csv = geom_dir / f"dataset={dataset}" / "data.csv"
+        geom_parquet = geom_dir / f"dataset={dataset}" / "data.parquet"
 
         if not label_file.exists():
             console.print(f"[yellow]Warning: No labels for {dataset}, skipping[/yellow]")
             continue
-        if not geom_file.exists():
+        if geom_parquet.exists():
+            geom_file = geom_parquet
+        elif geom_csv.exists():
+            geom_file = geom_csv
+        else:
             console.print(f"[yellow]Warning: No geometries for {dataset}, skipping[/yellow]")
             continue
 
@@ -567,7 +566,10 @@ def generate_basemap_sweep(
         sampled = pd.concat([sampled_match, sampled_no_match], ignore_index=True)
 
         # Load geometries
-        geom_df = pd.read_csv(geom_file)
+        if geom_file.suffix == ".parquet":
+            geom_df = pd.read_parquet(geom_file)
+        else:
+            geom_df = pd.read_csv(geom_file)
         geom_lookup = {}
         for _, row in geom_df.iterrows():
             key = (str(row["gers_id"]), str(row["target_id"]))
@@ -599,10 +601,26 @@ def generate_basemap_sweep(
 
             geom_row = geom_lookup[key]
             try:
-                ref_geom = wkt.loads(geom_row["ref_geometry_wkt"])
-                target_geom = wkt.loads(geom_row["target_geometry_wkt"])
+                # Handle both WKT (CSV) and WKB (parquet) geometry formats
+                if "ref_geometry_wkt" in geom_row.index:
+                    ref_geom = wkt.loads(geom_row["ref_geometry_wkt"])
+                elif "ref_geometry" in geom_row.index:
+                    from shapely import wkb
+
+                    ref_geom = wkb.loads(geom_row["ref_geometry"])
+                else:
+                    raise KeyError("No ref geometry column found")
+
+                if "target_geometry_wkt" in geom_row.index:
+                    target_geom = wkt.loads(geom_row["target_geometry_wkt"])
+                elif "target_geometry_wkb" in geom_row.index:
+                    from shapely import wkb
+
+                    target_geom = wkb.loads(geom_row["target_geometry_wkb"])
+                else:
+                    raise KeyError("No target geometry column found")
             except Exception:
-                console.print(f"  [yellow]Skipping {ref_id}: invalid WKT geometry[/yellow]")
+                console.print(f"  [yellow]Skipping {ref_id}: invalid geometry[/yellow]")
                 continue
 
             # Find nearby roads for road_context variant
@@ -780,47 +798,58 @@ def generate_basemap_sweep(
     console.print(f"  Variants: {', '.join(v['basemap'] + '.' + v['format'] for v in variants)}")
     console.print()
     console.print("Next steps:")
-    console.print(f"  matcher agent run claude --batch {batch_dir} --variant geometry_only")
+    console.print(f"  matcher agent run --batch {batch_dir} --variant subline_road_context")
     console.print(f"  matcher agent eval-sweep {batch_dir}")
 
 
 @agent_app.command("run")
 def run_agent(
-    agent: str = typer.Argument(help="Agent: claude, gemini, codex, ollama"),
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch directory"),
-    model: str = typer.Option(
-        "opus", "--model", "-m", help="Model variant (default: opus for claude, flash for gemini)"
-    ),
-    variant: str = typer.Option("", "--variant", "-v", help="Image variant name"),
+    model: str = typer.Option("opus", "--model", "-m", help="Model variant (e.g. opus, sonnet)"),
+    variant: str = typer.Option(..., "--variant", "-v", help="Image variant name"),
     limit: int = typer.Option(0, "--limit", "-l", help="Max candidates to process (0=no limit)"),
     overwrite: bool = typer.Option(
         False, "--overwrite", help="Start fresh, discard existing labels"
     ),
-    bail_after: int = typer.Option(
-        10, "--bail-after", help="Stop after N consecutive failures (0=never bail)"
+    few_shot: int = typer.Option(
+        4, "--few-shot", "-f", help="Number of few-shot examples (0=none)"
     ),
+    few_shot_source: Path | None = typer.Option(
+        None, "--few-shot-source", help="Explicit batch to source few-shot examples from"
+    ),
+    timeout: int = typer.Option(600, "--timeout", help="Timeout per chunk in seconds"),
+    chunk_size: int = typer.Option(25, "--chunk-size", help="Candidates per CLI invocation"),
 ):
-    """Run an AI agent on a batch of labeling candidates.
+    """Run Claude agent in batch mode on labeling candidates.
 
-    Invokes the specified agent CLI on each candidate in the batch directory,
-    collecting structured label responses (match/no_match/unsure with confidence).
+    Builds a prompt with few-shot examples from other batches, then invokes
+    Claude Code CLI to process candidates in chunks. The agent reads images
+    and metadata itself and writes results to a CSV file.
 
     Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
 
     Examples:
-        matcher agent run claude --batch data/agents/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
-        matcher agent run gemini --batch data/agents/batches/sweep_2026-01-28 --model flash --variant road_context
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model opus --variant subline_road_context --limit 5
+
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model sonnet --variant subline_carto_positron --overwrite
+
+        matcher agent run --batch data/agents/batches/sweep_2026-02-08_131609 \\
+            --model opus --variant subline_geometry_only --few-shot 8 --chunk-size 20
     """
     from ..agent_labeling.runner import run_agent_batch
 
     run_agent_batch(
-        agent=agent,
         model=model,
         variant=variant,
         batch_dir=batch_dir,
         limit=limit,
         overwrite=overwrite,
-        bail_after=bail_after,
+        n_few_shot=few_shot,
+        few_shot_source=few_shot_source,
+        timeout=timeout,
+        chunk_size=chunk_size,
     )
 
 
