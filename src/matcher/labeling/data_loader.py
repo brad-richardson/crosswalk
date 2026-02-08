@@ -858,7 +858,7 @@ def generate_scored_candidates(
         target_class_column: Class column in target
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by decision priority, then confidence
     """
     # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
@@ -1071,7 +1071,7 @@ def generate_scored_candidates_with_cache(
         n_jobs: Number of parallel jobs (-1 for all cores)
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by uncertainty (most uncertain first)
     """
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")
@@ -1156,7 +1156,7 @@ def build_views_from_feature_df(
         target_class_column: Class column in target
 
     Returns:
-        List of CandidatePairView objects sorted by confidence (REVIEW first)
+        List of CandidatePairView objects sorted by uncertainty (most uncertain first)
     """
     if len(feature_df) == 0:
         return []
@@ -1195,9 +1195,10 @@ def build_views_from_feature_df(
     logger.info(f"[3/5] ML prediction completed in {time.perf_counter() - t0:.1f}s")
 
     # Filter to review band BEFORE building views (huge speedup for large datasets)
-    # Review band: review_threshold - 0.05 to match_threshold + 0.05
-    review_lower = settings.optimizer_review_threshold - 0.05
-    review_upper = settings.optimizer_match_threshold + 0.05
+    # Review band: review_threshold to match_threshold (no buffer beyond thresholds —
+    # pairs above match_threshold are already auto-matched, pairs below review are no_match)
+    review_lower = settings.optimizer_review_threshold
+    review_upper = settings.optimizer_match_threshold
 
     # Create mask for review band
     import numpy as np
@@ -1375,12 +1376,14 @@ def build_views_from_feature_df(
             "(feature cache may be stale)"
         )
 
-    # Sort: REVIEW first, then by confidence descending
-    logger.info("Sorting views by decision priority...")
+    # Sort: REVIEW first, then by uncertainty (closest to band midpoint first)
+    # This surfaces the most informative pairs — where the model is genuinely unsure
+    logger.info("Sorting views by uncertainty (most uncertain first)...")
+    band_midpoint = (settings.optimizer_review_threshold + settings.optimizer_match_threshold) / 2
 
     def sort_key(v):
         decision_order = {"review": 0, "match": 1, "no_match": 2}
-        return (decision_order.get(v.decision, 3), -v.confidence)
+        return (decision_order.get(v.decision, 3), abs(v.confidence - band_midpoint))
 
     views.sort(key=sort_key)
     logger.info(f"View building complete: {len(views):,} candidates ready")
@@ -1428,18 +1431,16 @@ def filter_candidates(
 def filter_by_confidence_band(
     views: list[CandidatePairView],
     review_only: bool = True,
-    buffer: float = 0.05,
 ) -> list[CandidatePairView]:
-    """Filter candidates to review band (near decision boundaries) or return all.
+    """Filter candidates to the review band or return all.
 
-    The review band catches edge cases near the production thresholds by adding
-    a small buffer on each side. This helps labelers focus on the most uncertain
-    cases that would most benefit from human review.
+    The review band uses the production thresholds (review_threshold to
+    match_threshold) without additional buffer, focusing labelers on pairs
+    where the model is most uncertain.
 
     Args:
         views: List of candidate views
         review_only: If True, filter to review band. If False, return all.
-        buffer: Buffer to add around thresholds (default 0.05)
 
     Returns:
         Filtered list of views within the confidence band
@@ -1447,8 +1448,8 @@ def filter_by_confidence_band(
     if not review_only:
         return views
 
-    # Use production thresholds from settings
-    lower = settings.optimizer_review_threshold - buffer  # e.g., 0.50 - 0.05 = 0.45
-    upper = settings.optimizer_match_threshold + buffer  # e.g., 0.75 + 0.05 = 0.80
+    # Use production thresholds from settings (no buffer — stay within the review band)
+    lower = settings.optimizer_review_threshold
+    upper = settings.optimizer_match_threshold
 
     return [v for v in views if lower <= v.confidence <= upper]

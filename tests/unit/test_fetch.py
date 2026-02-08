@@ -12,12 +12,59 @@ import pandas as pd
 import pytest
 
 from matcher.fetch.arcgis import _is_truthy
-from matcher.fetch.normalize import normalize_oneway_value, normalize_speed_to_kph
+from matcher.fetch.normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
 from matcher.fetch.overture import (
     parse_names_lr,
     parse_oneway_lr,
     parse_speed_limit_lr,
 )
+
+
+class TestMapColumn:
+    """Tests for map_column in normalize.py."""
+
+    def test_string_keys_match(self):
+        """String keys match string values."""
+        series = pd.Series(["a", "b", "c"])
+        mapping = {"a": "alpha", "b": "beta"}
+        result = map_column(series, mapping, fallback="unknown")
+        assert list(result) == ["alpha", "beta", "unknown"]
+
+    def test_int_keys_match_string_values(self):
+        """Integer mapping keys match string series values."""
+        series = pd.Series(["1", "2", "3"])
+        mapping = {1: "one", 2: "two"}
+        result = map_column(series, mapping, fallback="unknown")
+        assert list(result) == ["one", "two", "unknown"]
+
+    def test_case_insensitive(self):
+        """Matching is case-insensitive."""
+        series = pd.Series(["Residential", "COMMERCIAL", "other"])
+        mapping = {"residential": "res", "commercial": "com"}
+        result = map_column(series, mapping, fallback="unknown")
+        assert list(result) == ["res", "com", "unknown"]
+
+    def test_float_upcast(self):
+        """Float values like 1.0 match integer keys like 1."""
+        series = pd.Series([1.0, 2.0, 3.0])
+        mapping = {1: "one", 2: "two"}
+        result = map_column(series, mapping, fallback="unknown")
+        assert list(result) == ["one", "two", "unknown"]
+
+    def test_nan_values_use_fallback(self):
+        """NaN values in series get the fallback."""
+        series = pd.Series(["a", None, np.nan])
+        mapping = {"a": "alpha"}
+        result = map_column(series, mapping, fallback="unknown")
+        assert list(result) == ["alpha", "unknown", "unknown"]
+
+    def test_no_fallback_keeps_nan(self):
+        """Without fallback, unmatched rows stay NaN."""
+        series = pd.Series(["a", "b"])
+        mapping = {"a": "alpha"}
+        result = map_column(series, mapping)
+        assert result[0] == "alpha"
+        assert pd.isna(result[1])
 
 
 class TestNormalizeOnewayValue:

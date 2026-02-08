@@ -6,6 +6,41 @@ Provides standardized conversions for road attributes from various source format
 import pandas as pd
 
 
+def _str_key(value) -> str:
+    """Convert a value to a normalized string key.
+
+    Handles the float-upcast problem: pandas often stores int-like values
+    as float64 (e.g., 1 → 1.0), so str(1.0) gives "1.0" instead of "1".
+    This normalizes integral floats back to their int representation.
+    """
+    if isinstance(value, float) and value == int(value):
+        return str(int(value)).lower()
+    return str(value).lower()
+
+
+def map_column(series: pd.Series, mapping: dict, fallback: str | None = None):
+    """Map a Series using a dict with automatic str/case normalization.
+
+    Converts both mapping keys and series values to lowercase strings
+    so that int-vs-string and case mismatches are handled transparently.
+    Also normalizes integral floats (e.g., 1.0 → "1") so that YAML int
+    keys match pandas float64 column values.
+
+    Args:
+        series: Pandas Series to map.
+        mapping: Dict of source values to target values.
+        fallback: Value to fill for unmatched rows (None = keep NaN).
+
+    Returns:
+        Numpy array of mapped values.
+    """
+    normalized = {_str_key(k): v for k, v in mapping.items()}
+    result = series.fillna("").apply(_str_key).map(normalized)
+    if fallback is not None:
+        result = result.fillna(fallback)
+    return result.values
+
+
 def normalize_oneway_value(value: str | int | None) -> str | None:
     """Normalize one-way value to standard format.
 

@@ -18,7 +18,7 @@ from ..utils.dataframe import find_id_column
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
-from .normalize import normalize_oneway_value, normalize_speed_to_kph
+from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
 
 
 def fetch_arcgis_layer(
@@ -371,7 +371,7 @@ def _transform_to_overture_schema(
     # Class with mapping
     if class_column and class_column in gdf.columns:
         if class_mapping:
-            data["class"] = gdf[class_column].map(class_mapping).fillna("unknown").values
+            data["class"] = map_column(gdf[class_column], class_mapping, fallback="unknown")
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
@@ -380,10 +380,10 @@ def _transform_to_overture_schema(
     # Subtype (constant)
     data["subtype"] = ["road"] * len(gdf)
 
-    # Subclass with mapping (e.g., sidewalk vs crosswalk)
+    # Subclass with mapping
     if subclass_column and subclass_column in gdf.columns:
         if subclass_mapping:
-            data["subclass"] = gdf[subclass_column].map(subclass_mapping).values
+            data["subclass"] = map_column(gdf[subclass_column], subclass_mapping)
         else:
             data["subclass"] = gdf[subclass_column].astype(str).values
     else:
@@ -406,7 +406,7 @@ def _transform_to_overture_schema(
     # Status (lifecycle: proposed, construction, etc.)
     if status_column and status_column in gdf.columns:
         if status_mapping:
-            data["status"] = gdf[status_column].map(status_mapping).values
+            data["status"] = map_column(gdf[status_column], status_mapping)
         else:
             data["status"] = gdf[status_column].astype(str).values
     else:
