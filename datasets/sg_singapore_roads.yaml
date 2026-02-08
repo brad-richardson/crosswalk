@@ -26,6 +26,24 @@ fetch:
   - 104.05
   - 1.5
   crs: EPSG:4326
+last_fetch:
+  reference:
+    fetched_at: '2026-02-08T14:23:40.324035+00:00'
+    bbox:
+    - 103.6
+    - 1.2
+    - 104.05
+    - 1.5
+    bbox_buffered:
+    - 103.59101439411742
+    - 1.1910168882500898
+    - 104.05898560588257
+    - 1.5089831117499102
+    bbox_buffer_m: 1000.0
+    feature_count: 220345
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: RD_CATG__1

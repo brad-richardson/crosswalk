@@ -10,9 +10,6 @@ fetch:
   id_column: OBJECTID
   name_column: StName
   class_column: FuncClass
-  oneway_column: OneWay
-  speed_limit_column: PostSpeed
-  speed_limit_unit: mph
   class_mapping:
     Interstate: motorway
     Principal Arterial: primary
@@ -30,23 +27,44 @@ fetch:
   - -115.95
   - 43.81
   crs: EPSG:4326
+  oneway_column: OneWay
+  speed_limit_column: PostSpeed
+  speed_limit_unit: mph
 last_fetch:
-  fetched_at: '2026-02-03T12:37:44.088444+00:00'
-  bbox:
-  - -116.52
-  - 43.12
-  - -115.95
-  - 43.81
-  bbox_buffered:
-  - -116.53237693167115
-  - 43.111016888250084
-  - -115.93762306832885
-  - 43.818983111749915
-  bbox_buffer_m: 1000.0
-  feature_count: 122361
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:37:44.088444+00:00'
+    bbox:
+    - -116.52
+    - 43.12
+    - -115.95
+    - 43.81
+    bbox_buffered:
+    - -116.53237693167115
+    - 43.111016888250084
+    - -115.93762306832885
+    - 43.818983111749915
+    bbox_buffer_m: 1000.0
+    feature_count: 122361
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:23:33.619672+00:00'
+    bbox:
+    - -116.52
+    - 43.12
+    - -115.95
+    - 43.81
+    bbox_buffered:
+    - -116.53237693167115
+    - 43.111016888250084
+    - -115.93762306832885
+    - 43.818983111749915
+    bbox_buffer_m: 1000.0
+    feature_count: 122361
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: FuncClass

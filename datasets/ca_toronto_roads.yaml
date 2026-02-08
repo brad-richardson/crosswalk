@@ -46,6 +46,24 @@ fetch:
     - Geostatistical line
     - Ferry Route
     - Minor Shoreline (Land locked)
+last_fetch:
+  reference:
+    fetched_at: '2026-02-08T14:19:01.532540+00:00'
+    bbox:
+    - -79.65
+    - 43.58
+    - -79.1
+    - 43.86
+    bbox_buffered:
+    - -79.66242948574622
+    - 43.571016888250085
+    - -79.08757051425378
+    - 43.86898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 232391
+    geometry_types:
+    - LineString
+    output_path: data/raw
 quality_fingerprint:
   computed_at: '2026-02-08T05:23:52.575920+00:00'
   total_segments: 62411

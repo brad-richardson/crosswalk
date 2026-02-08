@@ -727,6 +727,121 @@ class TestDatasetConfigCoverage:
             pytest.fail(f"Data partitions without dataset config: {sorted(orphaned)}")
 
 
+class TestMatchLabelFeatureQuality:
+    """Validate that 'match' labels have plausible feature values.
+
+    Catches computation failures that produce error features on match labels,
+    or pairs with extreme values that should never have been labeled as matches
+    (indicating a labeling or candidate generation bug).
+    """
+
+    @pytest.fixture
+    def match_features_df(self):
+        """Load match labels joined with features."""
+        if not HUMAN_DIR.exists() or not FEATURES_DIR.exists():
+            pytest.skip("Labels or features directory not found")
+
+        labels = LabelStore.load_human_labels(HUMAN_DIR)
+        features = FeatureStore.load_all(FEATURES_DIR)
+
+        if len(labels) == 0:
+            pytest.skip("No human labels found")
+        if len(features) == 0:
+            pytest.skip("No features found")
+
+        match_labels = labels[labels["label"] == "match"]
+        if len(match_labels) == 0:
+            pytest.skip("No match labels found")
+
+        merged = match_labels.merge(
+            features,
+            on=["gers_id", "target_id", "dataset"],
+            how="inner",
+        )
+        if len(merged) == 0:
+            pytest.skip("No match labels with features found")
+        return merged
+
+    def test_no_error_features_on_match_labels(self, match_features_df):
+        """Match labels should not have error-default feature values.
+
+        Error features have hausdorff=10000, centroid=10000, buffer_iou=0,
+        indicating a computation failure that returned all defaults.
+        """
+        from matcher.config import MAX_DISTANCE_METERS
+
+        df = match_features_df
+        error_mask = (
+            (df["hausdorff_distance_m"] >= MAX_DISTANCE_METERS)
+            & (df["centroid_distance_m"] >= MAX_DISTANCE_METERS)
+            & (df["buffer_iou_5m"] == 0.0)
+            & (df["buffer_iou_15m"] == 0.0)
+        )
+        bad = df[error_mask]
+        if len(bad) > 0:
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            pytest.fail(
+                f"{len(bad)} match labels have error-default features "
+                f"(hausdorff={MAX_DISTANCE_METERS}, buffer_iou=0): {by_dataset}\n"
+                f"This indicates feature computation failures. "
+                f"Run 'matcher labels backfill' to recompute."
+            )
+
+    def test_match_labels_centroid_distance_reasonable(self, match_features_df):
+        """Match labels should not be extremely far apart (> 5km).
+
+        Candidate generation uses a ~50m buffer, so matches should be
+        geographically close. A centroid distance > 5km suggests broken
+        features or a labeling error.
+        """
+        df = match_features_df
+        threshold = 5000.0
+        bad = df[df["centroid_distance_m"] > threshold]
+        if len(bad) > 0:
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            worst = bad.nlargest(3, "centroid_distance_m")[
+                ["dataset", "gers_id", "target_id", "centroid_distance_m"]
+            ]
+            pytest.fail(
+                f"{len(bad)} match labels with centroid_distance > {threshold}m: {by_dataset}\n"
+                f"Worst offenders:\n{worst.to_string(index=False)}"
+            )
+
+    def test_match_labels_have_nonzero_overlap(self, match_features_df):
+        """Match labels should have some geometric overlap at 15m buffer.
+
+        If buffer_iou_15m is exactly 0.0, the geometries don't overlap
+        at all even with a generous buffer, suggesting either a feature
+        computation error or an incorrect match label.
+        """
+        df = match_features_df
+        bad = df[df["buffer_iou_15m"] == 0.0]
+        if len(bad) > 0:
+            pct = len(bad) / len(df) * 100
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            if pct >= 1.0:
+                pytest.fail(
+                    f"{len(bad)} match labels ({pct:.1f}%) with zero buffer_iou_15m: "
+                    f"{by_dataset}\n"
+                    f"These pairs have no geometric overlap and may have "
+                    f"error features or incorrect labels."
+                )
+
+    def test_match_labels_hausdorff_reasonable(self, match_features_df):
+        """Match labels should not have hausdorff at error default (10000m)."""
+        from matcher.config import MAX_DISTANCE_METERS
+
+        df = match_features_df
+        bad = df[df["hausdorff_distance_m"] >= MAX_DISTANCE_METERS]
+        if len(bad) > 0:
+            by_dataset = bad.groupby("dataset").size().to_dict()
+            pytest.fail(
+                f"{len(bad)} match labels with hausdorff_distance >= "
+                f"{MAX_DISTANCE_METERS}m: {by_dataset}\n"
+                f"This indicates error features on match labels."
+            )
+
+
 class TestGeometryCoordinateBounds:
     """Validate stored geometries have valid WGS84 coordinates.
 

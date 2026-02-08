@@ -214,10 +214,15 @@ def backfill_features(
     from ..filenames import find_overture_segments, find_target_file
     from ..utils.geometry import filter_to_linestrings
 
+    def _str_or_none(val):
+        """Convert NaN/non-string values to None for string fields."""
+        return val if isinstance(val, str) else None
+
     # Process by dataset - get unique datasets from keys to process
     datasets = sorted(set(d for _, _, d in keys_to_process))
     total_computed = 0
     total_skipped = 0
+    total_errored = 0
 
     for dataset in datasets:
         dataset_keys = [(g, t) for g, t, d in keys_to_process if d == dataset]
@@ -327,6 +332,7 @@ def backfill_features(
 
         computed = 0
         skipped = 0
+        errored = 0
         used_stored = 0
         used_lookup = 0
         no_stored_rejected = 0
@@ -357,12 +363,12 @@ def backfill_features(
                             gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
                         )
                         # Get attributes from stored data
-                        ref_name = pair_data.get("ref_name")
-                        target_name = pair_data.get("target_name")
-                        ref_class = pair_data.get("ref_class")
-                        target_class = pair_data.get("target_class")
-                        ref_subclass = pair_data.get("ref_subclass")
-                        target_subclass = pair_data.get("target_subclass")
+                        ref_name = _str_or_none(pair_data.get("ref_name"))
+                        target_name = _str_or_none(pair_data.get("target_name"))
+                        ref_class = _str_or_none(pair_data.get("ref_class"))
+                        target_class = _str_or_none(pair_data.get("target_class"))
+                        ref_subclass = _str_or_none(pair_data.get("ref_subclass"))
+                        target_subclass = _str_or_none(pair_data.get("target_subclass"))
                         used_stored += 1
 
             # Fall back to raw data lookup if stored data not available
@@ -395,10 +401,16 @@ def backfill_features(
                     if "names" in target_row.index
                     else None
                 )
-                ref_class = ref_row["class"] if "class" in ref_row.index else None
-                target_class = target_row["class"] if "class" in target_row.index else None
-                ref_subclass = ref_row["subclass"] if "subclass" in ref_row.index else None
-                target_subclass = target_row["subclass"] if "subclass" in target_row.index else None
+                ref_class = _str_or_none(ref_row["class"]) if "class" in ref_row.index else None
+                target_class = (
+                    _str_or_none(target_row["class"]) if "class" in target_row.index else None
+                )
+                ref_subclass = (
+                    _str_or_none(ref_row["subclass"]) if "subclass" in ref_row.index else None
+                )
+                target_subclass = (
+                    _str_or_none(target_row["subclass"]) if "subclass" in target_row.index else None
+                )
                 used_lookup += 1
 
             if ref_geom is None or ref_geom.is_empty or target_geom is None or target_geom.is_empty:
@@ -457,6 +469,10 @@ def backfill_features(
                 target_sibling_context=target_sibling_context,
             )
 
+            # Track error features
+            if "_error" in features:
+                errored += 1
+
             # Add to feature store
             feature_store.add(gers_id=gers_id, target_id=target_id, features=features)
             computed += 1
@@ -464,12 +480,15 @@ def backfill_features(
         # Save feature store
         if computed > 0:
             feature_store.save()
-            parts = [f"[green]Computed {computed} features"]
+            parts = [f"Computed {computed} features"]
             if used_stored > 0 or used_lookup > 0:
                 parts[0] += f" (stored={used_stored}, lookup={used_lookup})"
             if no_stored_rejected > 0:
                 parts.append(f"rejected={no_stored_rejected} (no stored data)")
-            parts.append(f"skipped={skipped}[/green]")
+            if errored > 0:
+                error_rate = errored / computed
+                parts.append(f"[red]errored={errored} ({error_rate:.0%})[/red]")
+            parts.append(f"skipped={skipped}")
             console.print("  " + ", ".join(parts))
         else:
             reason = "IDs not in data"
@@ -479,10 +498,24 @@ def backfill_features(
 
         total_computed += computed
         total_skipped += skipped
+        total_errored += errored
 
+    # Report results
     console.print(
-        f"\n[green]Backfill complete: {total_computed} features computed, {total_skipped} skipped[/green]"
+        f"\nBackfill complete: {total_computed} features computed, {total_skipped} skipped"
     )
+    if total_errored > 0:
+        error_rate = total_errored / total_computed if total_computed > 0 else 0
+        console.print(
+            f"[red]WARNING: {total_errored} pairs ({error_rate:.1%}) fell back to error features. "
+            f"This likely indicates a bug in feature computation or bad input data.[/red]"
+        )
+        if error_rate > 0.05:
+            console.print(
+                "[red]ERROR: Error rate exceeds 5% threshold. "
+                "Features were saved but should NOT be committed until the issue is resolved.[/red]"
+            )
+            raise typer.Exit(1)
 
 
 @labels_app.command("stats")

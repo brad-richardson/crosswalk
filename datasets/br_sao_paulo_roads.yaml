@@ -46,6 +46,23 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:18:54.694745+00:00'
+    bbox:
+    - -46.83
+    - -24.0
+    - -46.36
+    - -23.35
+    bbox_buffered:
+    - -46.839808626458975
+    - -24.00898311174991
+    - -46.35019137354102
+    - -23.341016888250092
+    bbox_buffer_m: 1000.0
+    feature_count: 407337
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: dc_tipo_classificacao_viaria

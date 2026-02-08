@@ -53,6 +53,23 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:24:23.603448+00:00'
+    bbox:
+    - -71.19
+    - 42.21
+    - -70.92
+    - 42.4
+    bbox_buffered:
+    - -71.20214635947308
+    - 42.20101688825009
+    - -70.90785364052692
+    - 42.40898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 125769
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: ExisFacil

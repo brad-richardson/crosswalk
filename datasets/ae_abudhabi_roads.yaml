@@ -15,22 +15,40 @@ fetch:
   - 24.6
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:27:06.979836+00:00'
-  bbox:
-  - 54.25
-  - 24.3
-  - 54.6
-  - 24.6
-  bbox_buffered:
-  - 54.24013194920869
-  - 24.29101688825009
-  - 54.60986805079131
-  - 24.60898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 80518
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:27:06.979836+00:00'
+    bbox:
+    - 54.25
+    - 24.3
+    - 54.6
+    - 24.6
+    bbox_buffered:
+    - 54.24013194920869
+    - 24.29101688825009
+    - 54.60986805079131
+    - 24.60898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 80518
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:17:43.431856+00:00'
+    bbox:
+    - 54.25
+    - 24.3
+    - 54.6
+    - 24.6
+    bbox_buffered:
+    - 54.24013194920869
+    - 24.29101688825009
+    - 54.60986805079131
+    - 24.60898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 80518
+    geometry_types:
+    - LineString
+    output_path: data/raw
 notes: 'ArcGIS REST services endpoint no longer publicly accessible (404 as of Jan
   2026).
 

@@ -518,7 +518,7 @@ def extract_route_number(name: str | None) -> str | None:
     return None
 
 
-def names_compatible(name_a: str | None, name_b: str | None) -> bool:
+def names_compatible(name_a: str | None, name_b: str | None) -> bool | None:
     """Check if names are compatible for sibling matching.
 
     Philosophy: Require BOTH segments to have names for name-based matching.
@@ -535,8 +535,8 @@ def names_compatible(name_a: str | None, name_b: str | None) -> bool:
     """
     # If either is unnamed, we can't use names for matching
     # Return None to signal "no opinion" - must rely on class
-    if not name_a or not name_b:
-        return None  # type: ignore[return-value]
+    if not name_a or not isinstance(name_a, str) or not name_b or not isinstance(name_b, str):
+        return None
 
     # Both have names - require match
     name_a_norm = name_a.lower().strip()
@@ -583,7 +583,7 @@ def classes_compatible(class_a: str | None, class_b: str | None, max_tier_diff: 
         True if classes are within max_tier_diff tiers of each other
     """
     # If either is None/unknown, be permissive
-    if not class_a or not class_b:
+    if not class_a or not isinstance(class_a, str) or not class_b or not isinstance(class_b, str):
         return True
 
     tier_a = _CLASS_HIERARCHY.get(class_a.lower(), 5)  # Default to unclassified
@@ -601,7 +601,7 @@ def get_expected_half_width(road_class: str | None) -> float:
     Returns:
         Expected half-width in meters
     """
-    if not road_class:
+    if not road_class or not isinstance(road_class, str):
         return DEFAULT_EXPECTED_HALF_WIDTH_M
 
     return EXPECTED_HALF_WIDTH_BY_CLASS_M.get(road_class.lower(), DEFAULT_EXPECTED_HALF_WIDTH_M)

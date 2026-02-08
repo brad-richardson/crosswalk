@@ -15,19 +15,37 @@ fetch:
   - 4.85
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:31:23.173391+00:00'
-  bbox:
-  - -74.25
-  - 4.45
-  - -73.95
-  - 4.85
-  bbox_buffered:
-  - -74.2590127771965
-  - 4.44101688825009
-  - -73.9409872228035
-  - 4.85898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 177344
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:31:23.173391+00:00'
+    bbox:
+    - -74.25
+    - 4.45
+    - -73.95
+    - 4.85
+    bbox_buffered:
+    - -74.2590127771965
+    - 4.44101688825009
+    - -73.9409872228035
+    - 4.85898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 177344
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-08T14:19:52.893519+00:00'
+    bbox:
+    - -74.25
+    - 4.45
+    - -73.95
+    - 4.85
+    bbox_buffered:
+    - -74.2590127771965
+    - 4.44101688825009
+    - -73.9409872228035
+    - 4.85898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 177344
+    geometry_types:
+    - LineString
+    output_path: data/raw
