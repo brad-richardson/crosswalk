@@ -518,7 +518,7 @@ def extract_route_number(name: str | None) -> str | None:
     return None
 
 
-def names_compatible(name_a: str | None, name_b: str | None) -> bool:
+def names_compatible(name_a: str | None, name_b: str | None) -> bool | None:
     """Check if names are compatible for sibling matching.
 
     Philosophy: Require BOTH segments to have names for name-based matching.
@@ -536,7 +536,7 @@ def names_compatible(name_a: str | None, name_b: str | None) -> bool:
     # If either is unnamed, we can't use names for matching
     # Return None to signal "no opinion" - must rely on class
     if not name_a or not isinstance(name_a, str) or not name_b or not isinstance(name_b, str):
-        return None  # type: ignore[return-value]
+        return None
 
     # Both have names - require match
     name_a_norm = name_a.lower().strip()
