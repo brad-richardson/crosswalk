@@ -256,10 +256,22 @@ DATASET REPRESENTATION DIFFERENCES:
 - A centerline matched to one carriageway of a split road = match (same physical road, different representation).
 - Opposite carriageways of a divided road matched to each other = no_match (physically separate lanes; each should match to its own reference segment).
 
+BIKE LANE DECISION GUIDE:
+- Painted bike lane / sharrows / flexpost-separated lane (same pavement surface) = same feature as road → match to road, no_match to cycleway
+- Raised/curbed bike lane or separated cycle track (different surface/grade) = separate feature → no_match to road, match to cycleway
+- If facility type is unclear from data and image, prefer unsure over guessing
+
+ML FEATURE REFERENCE (rough thresholds for context):
+- buffer_iou: >0.7 suggests match, <0.3 suggests no_match
+- overlap_ratio: >0.8 suggests match, <0.3 suggests no_match
+- hausdorff_distance: <15m suggests match, >50m suggests no_match
+- heading_delta: <10 degrees suggests match, >45 degrees suggests no_match
+These are guidelines only - always defer to the image over raw numbers.
+
 NO_MATCH EXAMPLES:
 - Two lines running parallel but visually offset (separate infrastructure)
 - Northbound vs southbound lanes of divided highway
-- Road centerline vs sidewalk that runs alongside it
+- Road centerline vs adjacent sidewalk (different surface and grade - raised curb separates them)
 - Main road vs adjacent service road/alley
 - Perpendicular/intersecting segments
 - Segments that share an intersection endpoint but continue in different directions
