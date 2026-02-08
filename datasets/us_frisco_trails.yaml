@@ -24,22 +24,23 @@ fetch:
   - 33.2
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:40:54.680935+00:00'
-  bbox:
-  - -96.9
-  - 33.1
-  - -96.75
-  - 33.2
-  bbox_buffered:
-  - -96.91072941100988
-  - 33.09101688825009
-  - -96.73927058899012
-  - 33.208983111749916
-  bbox_buffer_m: 1000.0
-  feature_count: 31241
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:40:54.680935+00:00'
+    bbox:
+    - -96.9
+    - 33.1
+    - -96.75
+    - 33.2
+    bbox_buffered:
+    - -96.91072941100988
+    - 33.09101688825009
+    - -96.73927058899012
+    - 33.208983111749916
+    bbox_buffer_m: 1000.0
+    feature_count: 31241
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: TrailType
@@ -56,3 +57,8 @@ classification:
     target_class: path
   - source_value: Golf Course
     target_class: path
+quality_fingerprint:
+  computed_at: '2026-02-08T05:11:13.001675+00:00'
+  total_segments: 529
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 1.0

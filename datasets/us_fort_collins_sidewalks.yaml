@@ -29,22 +29,23 @@ fetch:
   - 40.65
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-08T01:19:58.276006+00:00'
-  bbox:
-  - -105.15
-  - 40.45
-  - -104.95
-  - 40.65
-  bbox_buffered:
-  - -105.1618223895157
-  - 40.44101688825009
-  - -104.9381776104843
-  - 40.65898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 42651
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-08T01:19:58.276006+00:00'
+    bbox:
+    - -105.15
+    - 40.45
+    - -104.95
+    - 40.65
+    bbox_buffered:
+    - -105.1618223895157
+    - 40.44101688825009
+    - -104.9381776104843
+    - 40.65898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 42651
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: TYPE
@@ -59,3 +60,8 @@ classification:
     target_class: footway
   - source_value: 5
     target_class: footway
+quality_fingerprint:
+  computed_at: '2026-02-08T05:07:57.857814+00:00'
+  total_segments: 38714
+  name_coverage_ratio: 0.0
+  class_coverage_ratio: 1.0

@@ -29,6 +29,12 @@ fetch:
     Access Road: service
     Busway: service
     Other Ramp: unclassified
+  bbox:
+  - -79.65
+  - 43.58
+  - -79.1
+  - 43.86
+  crs: EPSG:4326
   exclude:
     FEATURE_CODE_DESC:
     - River
@@ -40,9 +46,8 @@ fetch:
     - Geostatistical line
     - Ferry Route
     - Minor Shoreline (Land locked)
-  bbox:
-  - -79.65
-  - 43.58
-  - -79.1
-  - 43.86
-  crs: EPSG:4326
+quality_fingerprint:
+  computed_at: '2026-02-08T05:23:52.575920+00:00'
+  total_segments: 62411
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.9549

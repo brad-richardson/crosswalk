@@ -30,48 +30,25 @@ fetch:
   - -33.65
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:28:42.384396+00:00'
-  bbox:
-  - 150.85
-  - -34.15
-  - 151.35
-  - -33.65
-  bbox_buffered:
-  - 150.839177133988
-  - -34.15898311174991
-  - 151.360822866012
-  - -33.641016888250086
-  bbox_buffer_m: 1000.0
-  feature_count: 285641
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:28:42.384396+00:00'
+    bbox:
+    - 150.85
+    - -34.15
+    - 151.35
+    - -33.65
+    bbox_buffered:
+    - 150.839177133988
+    - -34.15898311174991
+    - 151.360822866012
+    - -33.641016888250086
+    bbox_buffer_m: 1000.0
+    feature_count: 285641
+    geometry_types:
+    - LineString
+    output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-01T13:00:21.855124+00:00'
-  total_segments: 178210
-  total_length_km: 18867.18
-  length_min_m: 0.013359932296627552
-  length_max_m: 8119.078583899923
-  length_median_m: 73.99064834482212
-  length_p5_m: 8.134280915647157
-  length_p95_m: 308.7786571187094
-  vertex_density_mean: 0.13553625913257566
-  invalid_geometry_count: 0
-  sharp_angle_ratio: 6.1724931260872e-05
-  mean_sinuosity: 1.0586182773372486
-  high_sinuosity_ratio: 0.01606531619998878
-  drift_affected_ratio: 0.06361595870040963
-  near_duplicate_ratio: 0.0
-  island_count: 42
-  dead_end_ratio: 0.058111217103417316
-  connected_components: 43
-  largest_component_ratio: 0.999298580326581
-  name_coverage_ratio: 0.7499074126031087
-  class_coverage_ratio: 1.0
-  class_distribution:
-    residential: 111961
-    unclassified: 26188
-    tertiary: 24037
-    secondary: 12590
-    primary: 2464
-    motorway: 970
+  computed_at: '2026-02-08T05:14:48.305115+00:00'
+  total_segments: 178227
+  name_coverage_ratio: 0.7499
+  class_coverage_ratio: 0.9658

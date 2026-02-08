@@ -268,6 +268,134 @@ class TestSchemaConsistency:
             assert col in DATA_COLUMNS, f"Missing from DATA_COLUMNS: {col}"
 
 
+class TestTargetIdFormat:
+    """Validate that all target IDs use the H3-suffixed format.
+
+    After the H3 spatial suffix migration, all target IDs should be in the
+    format: {prefix}_{upstreamID}_{h3suffix} where h3suffix is 10 hex chars.
+
+    Exception: OSM datasets use the format w{number}@{index}.
+    """
+
+    H3_ID_PATTERN = r"^.+_[0-9a-f]{10}$"
+    OSM_ID_PATTERN = r"^w\d+@\d+$"
+    OSM_DATASET_SUFFIX = "_osm"
+
+    def _check_ids(self, df, source_name):
+        """Check target_id format, return list of bad IDs."""
+        import re
+
+        bad_ids = []
+        for _, row in df.iterrows():
+            tid = str(row["target_id"])
+            ds = str(row.get("dataset", ""))
+
+            if ds.endswith(self.OSM_DATASET_SUFFIX):
+                if not re.match(self.OSM_ID_PATTERN, tid):
+                    bad_ids.append((ds, tid))
+            else:
+                if not re.match(self.H3_ID_PATTERN, tid):
+                    bad_ids.append((ds, tid))
+        return bad_ids
+
+    def test_human_label_ids_h3_format(self):
+        """Human label target_ids use H3-suffixed format."""
+        if not HUMAN_DIR.exists():
+            pytest.skip("No human labels directory found")
+        df = LabelStore.load_human_labels(HUMAN_DIR)
+        if len(df) == 0:
+            pytest.skip("No human labels found")
+
+        bad = self._check_ids(df, "human labels")
+        if bad:
+            by_ds = {}
+            for ds, tid in bad:
+                by_ds.setdefault(ds, []).append(tid)
+            summary = {ds: len(ids) for ds, ids in by_ds.items()}
+            sample = bad[:5]
+            pytest.fail(
+                f"{len(bad)} human labels with non-H3 target_ids: {summary}\nSample: {sample}"
+            )
+
+    def test_agent_label_ids_h3_format(self):
+        """Agent label target_ids use H3-suffixed format."""
+        if not AGENT_DIR.exists():
+            pytest.skip("No agent labels directory found")
+        df = LabelStore.load_agent_labels(AGENT_DIR)
+        if len(df) == 0:
+            pytest.skip("No agent labels found")
+
+        bad = self._check_ids(df, "agent labels")
+        if bad:
+            by_ds = {}
+            for ds, tid in bad:
+                by_ds.setdefault(ds, []).append(tid)
+            summary = {ds: len(ids) for ds, ids in by_ds.items()}
+            sample = bad[:5]
+            pytest.fail(
+                f"{len(bad)} agent labels with non-H3 target_ids: {summary}\nSample: {sample}"
+            )
+
+    def test_feature_ids_h3_format(self):
+        """Feature store target_ids use H3-suffixed format."""
+        if not FEATURES_DIR.exists():
+            pytest.skip("No features directory found")
+        df = FeatureStore.load_all(FEATURES_DIR)
+        if len(df) == 0:
+            pytest.skip("No features found")
+
+        bad = self._check_ids(df, "features")
+        if bad:
+            by_ds = {}
+            for ds, tid in bad:
+                by_ds.setdefault(ds, []).append(tid)
+            summary = {ds: len(ids) for ds, ids in by_ds.items()}
+            sample = bad[:5]
+            pytest.fail(f"{len(bad)} features with non-H3 target_ids: {summary}\nSample: {sample}")
+
+    def test_data_ids_h3_format(self):
+        """Data store target_ids use H3-suffixed format."""
+        if not DATA_DIR.exists():
+            pytest.skip("No data directory found")
+        gdf = DataStore.load_all(DATA_DIR)
+        if len(gdf) == 0:
+            pytest.skip("No data found")
+
+        bad = self._check_ids(gdf, "data")
+        if bad:
+            by_ds = {}
+            for ds, tid in bad:
+                by_ds.setdefault(ds, []).append(tid)
+            summary = {ds: len(ids) for ds, ids in by_ds.items()}
+            sample = bad[:5]
+            pytest.fail(f"{len(bad)} data rows with non-H3 target_ids: {summary}\nSample: {sample}")
+
+    def test_target_parquets_have_h3_ids(self):
+        """Re-fetched target parquets use H3-suffixed IDs."""
+        import re
+
+        raw_dir = Path("data/raw")
+        if not raw_dir.exists():
+            pytest.skip("No data/raw directory found")
+
+        parquets = list(raw_dir.glob("*_v*.parquet"))
+        if not parquets:
+            pytest.skip("No target parquets found")
+
+        import pandas as pd
+
+        pattern = re.compile(self.H3_ID_PATTERN)
+        bad_files = {}
+        for pq in parquets:
+            df = pd.read_parquet(pq, columns=["id"])
+            non_h3 = df[~df["id"].apply(lambda x: bool(pattern.match(str(x))))]
+            if len(non_h3) > 0:
+                bad_files[pq.name] = len(non_h3)
+
+        if bad_files:
+            pytest.fail(f"Target parquets with non-H3 IDs: {bad_files}")
+
+
 class TestFeatureDataQuality:
     """Validate stored features have plausible values.
 

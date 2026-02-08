@@ -25,22 +25,23 @@ fetch:
   - 4.85
   crs: EPSG:4326
 last_fetch:
-  fetched_at: '2026-02-03T12:30:57.700354+00:00'
-  bbox:
-  - -74.25
-  - 4.45
-  - -73.95
-  - 4.85
-  bbox_buffered:
-  - -74.2590127771965
-  - 4.44101688825009
-  - -73.9409872228035
-  - 4.85898311174991
-  bbox_buffer_m: 1000.0
-  feature_count: 177344
-  geometry_types:
-  - LineString
-  output_path: data/raw
+  target:
+    fetched_at: '2026-02-03T12:30:57.700354+00:00'
+    bbox:
+    - -74.25
+    - 4.45
+    - -73.95
+    - 4.85
+    bbox_buffered:
+    - -74.2590127771965
+    - 4.44101688825009
+    - -73.9409872228035
+    - 4.85898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 177344
+    geometry_types:
+    - LineString
+    output_path: data/raw
 classification:
   source_classification:
     column: MVITCLA
@@ -59,3 +60,8 @@ classification:
     target_class: pedestrian
   - source_value: 7
     target_class: unclassified
+quality_fingerprint:
+  computed_at: '2026-02-08T05:28:23.309110+00:00'
+  total_segments: 138516
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.9776
