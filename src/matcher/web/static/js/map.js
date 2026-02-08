@@ -12,6 +12,7 @@
     var map = L.map("map", {
         center: [42.36, -71.06],
         zoom: 14,
+        maxZoom: 22,
         zoomControl: false,
     });
 
@@ -24,7 +25,8 @@
         {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
             subdomains: "abcd",
-            maxZoom: 20,
+            maxNativeZoom: 20,
+            maxZoom: 22,
         }
     );
 
@@ -32,7 +34,8 @@
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         {
             attribution: "&copy; Esri",
-            maxZoom: 19,
+            maxNativeZoom: 19,
+            maxZoom: 22,
         }
     );
 
@@ -40,7 +43,8 @@
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-            maxZoom: 19,
+            maxNativeZoom: 19,
+            maxZoom: 22,
         }
     );
 

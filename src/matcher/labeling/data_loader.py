@@ -1195,9 +1195,10 @@ def build_views_from_feature_df(
     logger.info(f"[3/5] ML prediction completed in {time.perf_counter() - t0:.1f}s")
 
     # Filter to review band BEFORE building views (huge speedup for large datasets)
-    # Review band: review_threshold - 0.05 to match_threshold + 0.05
-    review_lower = settings.optimizer_review_threshold - 0.05
-    review_upper = settings.optimizer_match_threshold + 0.05
+    # Review band: review_threshold to match_threshold (no buffer beyond thresholds —
+    # pairs above match_threshold are already auto-matched, pairs below review are no_match)
+    review_lower = settings.optimizer_review_threshold
+    review_upper = settings.optimizer_match_threshold
 
     # Create mask for review band
     import numpy as np
@@ -1375,12 +1376,14 @@ def build_views_from_feature_df(
             "(feature cache may be stale)"
         )
 
-    # Sort: REVIEW first, then by confidence descending
-    logger.info("Sorting views by decision priority...")
+    # Sort: REVIEW first, then by uncertainty (closest to band midpoint first)
+    # This surfaces the most informative pairs — where the model is genuinely unsure
+    logger.info("Sorting views by uncertainty (most uncertain first)...")
+    band_midpoint = (settings.optimizer_review_threshold + settings.optimizer_match_threshold) / 2
 
     def sort_key(v):
         decision_order = {"review": 0, "match": 1, "no_match": 2}
-        return (decision_order.get(v.decision, 3), -v.confidence)
+        return (decision_order.get(v.decision, 3), abs(v.confidence - band_midpoint))
 
     views.sort(key=sort_key)
     logger.info(f"View building complete: {len(views):,} candidates ready")
@@ -1447,8 +1450,8 @@ def filter_by_confidence_band(
     if not review_only:
         return views
 
-    # Use production thresholds from settings
-    lower = settings.optimizer_review_threshold - buffer  # e.g., 0.50 - 0.05 = 0.45
-    upper = settings.optimizer_match_threshold + buffer  # e.g., 0.75 + 0.05 = 0.80
+    # Use production thresholds from settings (no buffer — stay within the review band)
+    lower = settings.optimizer_review_threshold
+    upper = settings.optimizer_match_threshold
 
     return [v for v in views if lower <= v.confidence <= upper]

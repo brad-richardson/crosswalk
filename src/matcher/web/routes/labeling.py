@@ -131,6 +131,9 @@ def _render_pair(request, dataset, datasets, index=0):
         pair = unlabeled[index]
         geojson = _pair_to_geojson(pair)
 
+    total_candidates = len(all_candidates)
+    labeled_count = total_candidates - len(unlabeled)
+
     context = {
         "mode": "labeling",
         "datasets": datasets,
@@ -139,6 +142,8 @@ def _render_pair(request, dataset, datasets, index=0):
         "geojson": geojson,
         "pair_index": index,
         "total_pairs": len(unlabeled),
+        "labeled_count": labeled_count,
+        "total_candidates": total_candidates,
     }
 
     if is_htmx:
@@ -186,6 +191,8 @@ async def labeling(
             "geojson": "{}",
             "pair_index": 0,
             "total_pairs": 0,
+            "labeled_count": 0,
+            "total_candidates": 0,
         }
         if is_htmx:
             return templates.TemplateResponse(request, "labeling/pair.html", context)
@@ -208,6 +215,8 @@ async def labeling(
         "geojson": "{}",
         "pair_index": 0,
         "total_pairs": 0,
+        "labeled_count": 0,
+        "total_candidates": 0,
     }
 
     # 2. Background load in progress → show loading spinner
@@ -327,6 +336,8 @@ async def label_pair(
         "geojson": geojson,
         "pair_index": next_index,
         "total_pairs": len(unlabeled),
+        "labeled_count": len(all_candidates) - len(unlabeled),
+        "total_candidates": len(all_candidates),
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)
@@ -367,6 +378,8 @@ async def undo_label(
         "geojson": geojson,
         "pair_index": pair_index,
         "total_pairs": len(unlabeled),
+        "labeled_count": len(all_candidates) - len(unlabeled),
+        "total_candidates": len(all_candidates),
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)

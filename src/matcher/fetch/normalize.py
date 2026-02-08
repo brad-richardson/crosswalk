@@ -6,6 +6,27 @@ Provides standardized conversions for road attributes from various source format
 import pandas as pd
 
 
+def map_column(series: pd.Series, mapping: dict, fallback: str | None = None):
+    """Map a Series using a dict with automatic str/case normalization.
+
+    Converts both mapping keys and series values to lowercase strings
+    so that int-vs-string and case mismatches are handled transparently.
+
+    Args:
+        series: Pandas Series to map.
+        mapping: Dict of source values to target values.
+        fallback: Value to fill for unmatched rows (None = keep NaN).
+
+    Returns:
+        Numpy array of mapped values.
+    """
+    normalized = {str(k).lower(): v for k, v in mapping.items()}
+    result = series.fillna("").astype(str).str.lower().map(normalized)
+    if fallback is not None:
+        result = result.fillna(fallback)
+    return result.values
+
+
 def normalize_oneway_value(value: str | int | None) -> str | None:
     """Normalize one-way value to standard format.
 

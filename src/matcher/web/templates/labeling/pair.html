@@ -75,11 +75,44 @@
 {% if request.headers.get('HX-Request') %}
 <span id="pair-progress" hx-swap-oob="innerHTML">
     {% if dataset %}
-        {% if total_pairs > 0 %}Pair {{ pair_index + 1 }} of {{ total_pairs }}{% else %}All pairs labeled!{% endif %}
+        {% if total_pairs > 0 %}
+        <span class="progress-label" onclick="showJumpInput()" title="Click to jump to a pair">{{ (labeled_count|default(0)) + pair_index + 1 }} / {{ total_candidates|default(0) }}</span>
+        <form class="jump-form hidden" id="jump-form" onsubmit="jumpToPair(event)">
+            <input type="number" id="jump-input" min="1" max="{{ total_pairs }}"
+                   placeholder="1–{{ total_pairs }}" class="jump-input">
+            <button type="submit" class="jump-btn">Go</button>
+        </form>
+        {% else %}All pairs labeled!{% endif %}
     {% else %}
         Select a dataset
     {% endif %}
 </span>
+<!-- OOB swap to update features drawer with current pair's features -->
+<div id="features-drawer" hx-swap-oob="innerHTML">
+    <div class="features-drawer-header">
+        <div class="handle" onclick="closeFeatures()"></div>
+        <h4>Feature Details</h4>
+        <button class="features-close" onclick="closeFeatures()">&times;</button>
+    </div>
+    {% if pair and pair.features %}
+    <table class="features-table">
+        <thead>
+            <tr><th>Feature</th><th>Value</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for key, value in pair.features.items() %}
+            <tr>
+                <td>{{ key }}</td>
+                <td class="feature-value">{{ "%.4f"|format(value) if value is number else value }}</td>
+                <td class="feature-signal" data-feature="{{ key }}" data-value="{{ value }}"></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No features available.</p>
+    {% endif %}
+</div>
 {% endif %}
 
 <!-- Update URL to reflect current position (bookmarkable) -->

@@ -41,7 +41,7 @@ from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines
 from ..utils.linear_ref import create_trivial_lr
 from .arcgis import fetch_arcgis_layer
-from .normalize import normalize_oneway_value, normalize_speed_to_kph
+from .normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
 
 # Default output directory
 DEFAULT_DATA_DIR = Path("data/raw")
@@ -171,20 +171,10 @@ def _transform_download_data(
     else:
         data["names"] = [None] * len(gdf)
 
-    # Class (case-insensitive mapping)
+    # Class with mapping
     if class_column and class_column in gdf.columns:
         if class_mapping:
-            # Normalize mapping keys to lowercase for case-insensitive matching
-            lower_mapping = {str(k).lower(): v for k, v in class_mapping.items()}
-            data["class"] = (
-                gdf[class_column]
-                .fillna("")
-                .astype(str)
-                .str.lower()
-                .map(lower_mapping)
-                .fillna("unknown")
-                .values
-            )
+            data["class"] = map_column(gdf[class_column], class_mapping, fallback="unknown")
         else:
             data["class"] = gdf[class_column].fillna("unknown").astype(str).values
     else:
@@ -197,20 +187,10 @@ def _transform_download_data(
             default_class = "unknown"
         data["class"] = [default_class] * len(gdf)
 
-    # Subclass - use explicit column/mapping if provided, otherwise use default or None
-    # (case-insensitive mapping)
+    # Subclass with mapping
     if subclass_column and subclass_column in gdf.columns:
         if subclass_mapping:
-            # Normalize mapping keys to lowercase for case-insensitive matching
-            lower_subclass_mapping = {str(k).lower(): v for k, v in subclass_mapping.items()}
-            data["subclass"] = (
-                gdf[subclass_column]
-                .fillna("")
-                .astype(str)
-                .str.lower()
-                .map(lower_subclass_mapping)
-                .values
-            )
+            data["subclass"] = map_column(gdf[subclass_column], subclass_mapping)
         else:
             data["subclass"] = gdf[subclass_column].astype(str).values
     elif default_subclass is not None:
