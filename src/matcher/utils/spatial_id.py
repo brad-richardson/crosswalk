@@ -25,14 +25,14 @@ H3_RESOLUTION = 8
 H3_TRAILING_F_COUNT = 5
 
 
-def compute_spatial_suffix(geom, resolution: int = H3_RESOLUTION) -> str:
+def compute_spatial_suffix(geom) -> str:
     """Compute a stable spatial suffix for ID disambiguation.
 
     Steps:
     1. Compute midpoint along the line via interpolation (not centroid —
        centroid can fall outside the geometry for curved/horseshoe roads)
-    2. Get H3 cell at the given resolution
-    3. Return the H3 index with trailing "fffff" stripped (10 chars for res 8)
+    2. Get H3 cell at resolution 8
+    3. Return the H3 index with trailing "fffff" stripped (10 chars)
 
     To restore the full H3 index for spatial lookups:
         full_h3 = suffix.ljust(15, "f")
@@ -43,11 +43,10 @@ def compute_spatial_suffix(geom, resolution: int = H3_RESOLUTION) -> str:
 
     Args:
         geom: Shapely geometry (must be in WGS84/EPSG:4326, LineString)
-        resolution: H3 resolution (default 8, ~1km hexagons)
 
     Returns:
-        Trimmed H3 index string (10 chars for res 8), e.g. "882a306603"
+        Trimmed H3 index string (10 chars), e.g. "882a306603"
     """
     midpoint = shapely.line_interpolate_point(geom, 0.5, normalized=True)
-    h3_index = h3.latlng_to_cell(midpoint.y, midpoint.x, resolution)
+    h3_index = h3.latlng_to_cell(midpoint.y, midpoint.x, H3_RESOLUTION)
     return h3_index[:-H3_TRAILING_F_COUNT]

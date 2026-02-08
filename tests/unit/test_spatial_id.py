@@ -324,14 +324,6 @@ class TestEdgeCases:
         assert h3.is_valid_cell(_restore_h3(suffix))
         assert compute_spatial_suffix(zigzag) == suffix
 
-    def test_custom_resolution(self):
-        """Custom H3 resolution should work and produce a valid cell."""
-        line = LineString([(-71.0589, 42.3601), (-71.0510, 42.3640)])
-        suffix_res8 = compute_spatial_suffix(line)
-        suffix_res10 = compute_spatial_suffix(line, resolution=10)
-        assert suffix_res8 != suffix_res10
-        assert h3.get_resolution(_restore_h3(suffix_res8)) == 8
-
     def test_multipoint_line_deterministic(self):
         """A multi-vertex line should be deterministic."""
         coords = [

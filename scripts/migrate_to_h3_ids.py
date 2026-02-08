@@ -2,7 +2,7 @@
 """Migrate label files from old ID format to H3-suffixed IDs.
 
 Old format: {prefix}_{upstreamID}        e.g. us_boston_streets_10067
-New format: {prefix}_{upstreamID}_{h3sfx} e.g. us_boston_streets_10067_b5ffff
+New format: {prefix}_{upstreamID}_{h3sfx} e.g. us_boston_streets_10067_882a306603
 
 The H3 suffix is computed from each segment's geometry using the same
 compute_spatial_suffix() function used by the fetch pipeline.
@@ -49,6 +49,7 @@ def build_id_mapping(target_parquet: Path) -> dict[str, str]:
     """
     gdf = gpd.read_parquet(target_parquet)
     mapping = {}
+    conflicts = 0
 
     for _idx, row in gdf.iterrows():
         old_id = row["id"]
@@ -65,7 +66,20 @@ def build_id_mapping(target_parquet: Path) -> dict[str, str]:
         if old_id == new_id or old_id.endswith(f"_{suffix}"):
             continue
 
+        # Warn on duplicate old_id with different new_id (data quality issue)
+        if old_id in mapping and mapping[old_id] != new_id:
+            conflicts += 1
+            if conflicts <= 5:
+                logger.warning(
+                    f"Duplicate old_id '{old_id}' maps to different new IDs: "
+                    f"'{mapping[old_id]}' vs '{new_id}' (keeping first)"
+                )
+            continue
+
         mapping[old_id] = new_id
+
+    if conflicts:
+        logger.warning(f"{conflicts} duplicate old_id(s) with conflicting new IDs (kept first)")
 
     return mapping
 
