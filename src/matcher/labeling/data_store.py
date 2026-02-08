@@ -372,12 +372,16 @@ class DataStore:
         temp_path = self.parquet_path.with_suffix(".parquet.tmp")
         backup_path = self.parquet_path.with_suffix(".parquet.bak")
 
-        # Convert to plain DataFrame with both geometries as WKB bytes
-        df = pd.DataFrame(self._gdf.drop(columns=["geometry"], errors="ignore"))
-
-        for geom_col in ("ref_geometry", "target_geometry"):
-            if geom_col in df.columns and len(df) > 0:
-                df[geom_col] = df[geom_col].apply(lambda g: wkb.dumps(g) if g is not None else None)
+        # Build a plain DataFrame with geometry columns as WKB bytes.
+        # Must use .tolist() to fully escape GeoSeries geometry dtype,
+        # otherwise pyarrow can't serialize the column.
+        data = {}
+        for col in self._gdf.columns:
+            if col in ("ref_geometry", "target_geometry") and len(self._gdf) > 0:
+                data[col] = [wkb.dumps(g) if g is not None else None for g in self._gdf[col]]
+            else:
+                data[col] = self._gdf[col].tolist()
+        df = pd.DataFrame(data)
 
         # Write to temp file first
         df.to_parquet(temp_path, compression="zstd", index=False)
