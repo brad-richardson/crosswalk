@@ -195,22 +195,15 @@ def _analyze_with_reference(
             logger.warning("Dataset missing 'id' column for merge")
             return result
 
-        # Extract numeric ID if needed (handle "dataset_N" format)
+        # Use the full composite ID for joining with the bridge file.
+        # Bridge local_id stores the full target ID (e.g., "prefix_123_882a306603").
         gdf = gdf.copy()
-        if not gdf.empty and "id" in gdf.columns:
-            first_id = gdf["id"].iloc[0]
-            if pd.notna(first_id) and "_" in str(first_id):
-                gdf["id_numeric"] = gdf["id"].astype(str).str.split("_").str[-1]
-            else:
-                gdf["id_numeric"] = gdf["id"].astype(str)
-        else:
-            gdf["id_numeric"] = gdf["id"].astype(str)
+        gdf["local_id"] = gdf["id"].astype(str)
 
         # Join with source data
         matches = matches.merge(
-            gdf[["id_numeric", source_class_col, "names"]].rename(
+            gdf[["local_id", source_class_col, "names"]].rename(
                 columns={
-                    "id_numeric": "local_id",
                     source_class_col: "source_class",
                     "names": "source_name",
                 }

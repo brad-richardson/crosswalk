@@ -58,8 +58,11 @@ class TestTransformDownloadData:
         assert "sources" in result.columns
 
         # Check ID format: {prefix}_{upstreamID}_{h3suffix}
-        assert result["id"].iloc[0].startswith("test_1_")
-        assert len(result["id"].iloc[0].split("_")) == 3  # prefix_id_suffix
+        # Use rsplit to extract the H3 suffix (last component) regardless of prefix structure
+        first_id = result["id"].iloc[0]
+        assert first_id.startswith("test_1_")
+        h3_suffix = first_id.rsplit("_", 1)[-1]
+        assert len(h3_suffix) == 10  # 15-char H3 index minus 5 trailing f's
 
         # Check names extraction
         assert result["names"].iloc[0] == {"primary": "Main St"}
