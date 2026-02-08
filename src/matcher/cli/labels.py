@@ -53,6 +53,11 @@ def backfill_features(
         "--missing-only",
         help="Only compute features for labels without any features (skip existing)",
     ),
+    require_stored_data: bool = typer.Option(
+        False,
+        "--require-stored-data",
+        help="Reject pairs without stored geometries (no fallback to raw data)",
+    ),
 ):
     """Recompute features for human labels using current feature computation code.
 
@@ -324,6 +329,7 @@ def backfill_features(
         skipped = 0
         used_stored = 0
         used_lookup = 0
+        no_stored_rejected = 0
 
         for gers_id, target_id in dataset_keys:
             ref_geom = None
@@ -361,6 +367,12 @@ def backfill_features(
 
             # Fall back to raw data lookup if stored data not available
             if ref_geom is None or target_geom is None:
+                # If require_stored_data is set, reject fallback lookups
+                if require_stored_data:
+                    no_stored_rejected += 1
+                    skipped += 1
+                    continue
+
                 if gers_id not in ref_lookup.index or target_id not in target_lookup.index:
                     skipped += 1
                     continue
@@ -452,10 +464,13 @@ def backfill_features(
         # Save feature store
         if computed > 0:
             feature_store.save()
-            source_info = f"(stored={used_stored}, lookup={used_lookup})" if used_stored > 0 else ""
-            console.print(
-                f"  [green]Computed {computed} features {source_info}, skipped {skipped}[/green]"
-            )
+            parts = [f"[green]Computed {computed} features"]
+            if used_stored > 0 or used_lookup > 0:
+                parts[0] += f" (stored={used_stored}, lookup={used_lookup})"
+            if no_stored_rejected > 0:
+                parts.append(f"rejected={no_stored_rejected} (no stored data)")
+            parts.append(f"skipped={skipped}[/green]")
+            console.print("  " + ", ".join(parts))
         else:
             console.print(f"  [yellow]Skipped all {skipped} pairs (IDs not in data)[/yellow]")
 

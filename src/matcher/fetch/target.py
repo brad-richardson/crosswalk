@@ -159,7 +159,7 @@ def _transform_download_data(
 
     # Build result
     data: dict[str, Any] = {
-        "id": gdf[id_col].apply(lambda x: f"{id_prefix}_{x}").values,
+        "id": [f"{id_prefix}_{uid}" for uid in gdf[id_col]],
         "subtype": ["road"] * len(gdf),
         "sources": gdf[id_col]
         .apply(lambda x: [{"dataset": source_name, "record_id": str(x)}])
@@ -223,6 +223,14 @@ def _transform_download_data(
         data["speed_limit_kph"] = [None] * len(gdf)
 
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs=gdf.crs)
+
+    # Deduplicate by ID (upstream data can have duplicate IDs for different geometries)
+    if len(result) > 0 and "id" in result.columns:
+        n_before = len(result)
+        result = result.drop_duplicates(subset=["id"], keep="first")
+        n_dropped = n_before - len(result)
+        if n_dropped > 0:
+            logger.info(f"{source_name}: {n_dropped} duplicate IDs removed (kept first occurrence)")
 
     # Add trivial linear-referenced columns
     result = _add_trivial_lr_columns(result)
@@ -1099,6 +1107,7 @@ def fetch_dataset(
     output_dir: Path | None = None,
     page_size: int | None = None,
     force: bool = False,
+    skip_quality_check: bool = False,
 ) -> Path | None:
     """Fetch a single dataset based on its YAML configuration.
 
@@ -1107,6 +1116,7 @@ def fetch_dataset(
         output_dir: Directory for output files (default: data/raw)
         page_size: Override page size for ArcGIS fetches (default: use arcgis module default)
         force: If False (default), skip if output file already exists
+        skip_quality_check: If True, skip quality regression check against saved fingerprint
 
     Returns:
         Path to output file, or None if fetch failed or requires manual download
@@ -1134,6 +1144,8 @@ def fetch_dataset(
 
     source_type = config.source.type if config.source else "unknown"
     url = config.source.url if config.source else None
+
+    result_path: Path | None = None
 
     try:
         # Handle manual download datasets first
@@ -1178,7 +1190,7 @@ def fetch_dataset(
             if api_key_env_var:
                 api_key = os.environ.get(api_key_env_var)
 
-            return fetch_os_downloads(
+            result_path = fetch_os_downloads(
                 product_id=product_id,
                 output_path=output_path,
                 id_prefix=id_prefix,
@@ -1194,11 +1206,11 @@ def fetch_dataset(
                 polygon_to_centerline=polygon_to_centerline,
             )
 
-        if url is None:
+        elif url is None:
             logger.error(f"No URL in config for {dataset_name}")
             return None
 
-        if source_type == "download":
+        elif source_type == "download":
             # Get file format from source config
             file_format = config.source.file_format if config.source else "shp"
 
@@ -1221,7 +1233,7 @@ def fetch_dataset(
                 # Extract layer ID from URL (e.g., RoadSectionLine.zip -> RoadSectionLine)
                 layer_id = url.split("/")[-1].replace(".zip", "").split("_")[0]
                 logger.info(f"Using LTA DataMall API for layer: {layer_id}")
-                return fetch_lta_geospatial(
+                result_path = fetch_lta_geospatial(
                     layer_id=layer_id,
                     output_path=output_path,
                     id_prefix=id_prefix,
@@ -1234,40 +1246,40 @@ def fetch_dataset(
                     bbox_filter=bool(bbox),
                     id_column=id_column,
                 )
+            else:
+                # Check if caching is enabled for this download
+                cache_download = config.source.cache_download if config.source else False
+                cache_ttl_hours = config.source.cache_ttl_hours if config.source else 168
 
-            # Check if caching is enabled for this download
-            cache_download = config.source.cache_download if config.source else False
-            cache_ttl_hours = config.source.cache_ttl_hours if config.source else 168
-
-            return fetch_download(
-                url=url,
-                output_path=output_path,
-                file_format=file_format,
-                id_prefix=id_prefix,
-                name_column=name_column,
-                class_column=class_column,
-                class_mapping=class_mapping,
-                source_name=config.display_name or dataset_name,
-                bbox=bbox,
-                bbox_filter=bool(bbox),
-                api_key=api_key,
-                api_key_header=api_key_header,
-                encoding=encoding,
-                source_crs=source_crs,
-                cache_download=cache_download,
-                cache_ttl_hours=cache_ttl_hours,
-                exclude=exclude,
-                oneway_column=oneway_column,
-                speed_limit_column=speed_limit_column,
-                speed_limit_unit=speed_limit_unit,
-                id_column=id_column,
-                dataset_type=config.type,
-                polygon_to_centerline=polygon_to_centerline,
-            )
+                result_path = fetch_download(
+                    url=url,
+                    output_path=output_path,
+                    file_format=file_format,
+                    id_prefix=id_prefix,
+                    name_column=name_column,
+                    class_column=class_column,
+                    class_mapping=class_mapping,
+                    source_name=config.display_name or dataset_name,
+                    bbox=bbox,
+                    bbox_filter=bool(bbox),
+                    api_key=api_key,
+                    api_key_header=api_key_header,
+                    encoding=encoding,
+                    source_crs=source_crs,
+                    cache_download=cache_download,
+                    cache_ttl_hours=cache_ttl_hours,
+                    exclude=exclude,
+                    oneway_column=oneway_column,
+                    speed_limit_column=speed_limit_column,
+                    speed_limit_unit=speed_limit_unit,
+                    id_column=id_column,
+                    dataset_type=config.type,
+                    polygon_to_centerline=polygon_to_centerline,
+                )
 
         elif source_type == "ogc_features":
             # OGC API Features (modern REST API for geospatial data)
-            return fetch_ogc_features(
+            result_path = fetch_ogc_features(
                 url=url,
                 output_path=output_path,
                 id_prefix=id_prefix,
@@ -1289,7 +1301,7 @@ def fetch_dataset(
             if not type_name:
                 logger.error("WFS source requires type_name in where_clause field")
                 return None
-            return fetch_wfs(
+            result_path = fetch_wfs(
                 url=url,
                 type_name=type_name,
                 output_path=output_path,
@@ -1339,20 +1351,52 @@ def fetch_dataset(
             if polygon_to_centerline:
                 arcgis_kwargs["polygon_to_centerline"] = polygon_to_centerline
 
-            return fetch_arcgis_layer(**arcgis_kwargs)
+            result_path = fetch_arcgis_layer(**arcgis_kwargs)
 
     except Exception as e:
         logger.error(f"Failed to fetch {dataset_name}: {e}")
         return None
 
+    # Quality regression check against saved fingerprint
+    if (
+        result_path is not None
+        and result_path.exists()
+        and not skip_quality_check
+        and config.quality_fingerprint is not None
+    ):
+        try:
+            fetched_gdf = gpd.read_parquet(result_path)
+            from ..quality.regression import check_quality_regression
+
+            violations = check_quality_regression(
+                fetched_gdf, config.quality_fingerprint, dataset_name
+            )
+            if violations:
+                # Rename output to .suspect so it's not used accidentally
+                suspect_path = result_path.with_suffix(".parquet.suspect")
+                result_path.rename(suspect_path)
+                from .exceptions import QualityRegressionError
+
+                raise QualityRegressionError(
+                    f"Quality regression detected for {dataset_name}: "
+                    f"{len(violations)} violation(s). "
+                    f"Output renamed to {suspect_path.name}. "
+                    f"Use --skip-quality-check to override.\n"
+                    + "\n".join(f"  - {v.message}" for v in violations)
+                )
+        except Exception:
+            logger.warning(f"Could not read {result_path} for quality check, skipping")
+
+    return result_path
+
 
 def _fetch_dataset_worker(
-    args: tuple[str, Path | None, int | None, bool],
+    args: tuple[str, Path | None, int | None, bool, bool],
 ) -> tuple[str, Path | None]:
     """Worker function for parallel dataset fetching."""
-    name, output_dir, page_size, force = args
+    name, output_dir, page_size, force, skip_quality_check = args
     try:
-        result = fetch_dataset(name, output_dir, page_size, force)
+        result = fetch_dataset(name, output_dir, page_size, force, skip_quality_check)
         return (name, result)
     except Exception as e:
         logger.error(f"Failed to fetch {name}: {e}")
@@ -1365,6 +1409,7 @@ def fetch_datasets_by_prefix(
     page_size: int | None = None,
     force: bool = False,
     max_workers: int = 4,
+    skip_quality_check: bool = False,
 ) -> dict[str, Path | None]:
     """Fetch all datasets matching a prefix.
 
@@ -1374,6 +1419,7 @@ def fetch_datasets_by_prefix(
         page_size: Override page size for ArcGIS fetches
         force: If False (default), skip datasets whose files already exist
         max_workers: Maximum number of parallel downloads (default: 4)
+        skip_quality_check: If True, skip quality regression checks
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
@@ -1388,7 +1434,7 @@ def fetch_datasets_by_prefix(
     logger.info(f"Found {len(matching)} datasets matching prefix '{prefix}'")
     logger.info(f"Fetching with {max_workers} parallel workers")
 
-    tasks = [(name, output_dir, page_size, force) for name in sorted(matching)]
+    tasks = [(name, output_dir, page_size, force, skip_quality_check) for name in sorted(matching)]
 
     return _parallel_fetch_with_progress(tasks, max_workers, len(matching))
 
@@ -1471,6 +1517,7 @@ def fetch_all_datasets(
     page_size: int | None = None,
     force: bool = False,
     max_workers: int = 4,
+    skip_quality_check: bool = False,
 ) -> dict[str, Path | None]:
     """Fetch all available datasets.
 
@@ -1479,6 +1526,7 @@ def fetch_all_datasets(
         page_size: Override page size for ArcGIS fetches
         force: If False (default), skip datasets whose files already exist
         max_workers: Maximum number of parallel downloads (default: 4)
+        skip_quality_check: If True, skip quality regression checks
 
     Returns:
         Dict mapping dataset names to output paths (None if failed)
@@ -1486,7 +1534,9 @@ def fetch_all_datasets(
     all_datasets = list_dataset_configs()
     logger.info(f"Fetching {len(all_datasets)} datasets with {max_workers} parallel workers")
 
-    tasks = [(name, output_dir, page_size, force) for name in sorted(all_datasets)]
+    tasks = [
+        (name, output_dir, page_size, force, skip_quality_check) for name in sorted(all_datasets)
+    ]
 
     return _parallel_fetch_with_progress(tasks, max_workers, len(all_datasets))
 

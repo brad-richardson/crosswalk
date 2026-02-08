@@ -127,7 +127,10 @@ def fetch_arcgis_layer(
         gdf = gdf.drop_duplicates(subset=["id"], keep="first")
         n_dropped = n_before - len(gdf)
         if n_dropped > 0:
-            logger.warning(f"Dropped {n_dropped} duplicate IDs from ArcGIS fetch")
+            logger.info(
+                f"{source_name}: {n_dropped} duplicate IDs removed "
+                f"(pagination artifacts, kept first occurrence)"
+            )
 
     # Save to parquet with bbox metadata for DuckDB spatial predicate pushdown
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -368,7 +371,7 @@ def _transform_to_overture_schema(
     data = {}
 
     # ID: prefix + objectid
-    data["id"] = gdf[id_col].apply(lambda x: f"{id_prefix}_{x}").values
+    data["id"] = [f"{id_prefix}_{uid}" for uid in gdf[id_col]]
 
     # Names struct
     if name_column and name_column in gdf.columns:
