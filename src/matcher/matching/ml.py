@@ -28,9 +28,9 @@ import joblib
 import numpy as np
 import pandas as pd
 from loguru import logger
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, f1_score
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit, cross_val_score
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 
 from ..config import (
     DEFAULT_TOPOLOGY_FEATURES,
@@ -38,7 +38,6 @@ from ..config import (
     FEATURE_VERSION,
     MAX_DISTANCE_METERS,
     METRIC_AVERAGE,
-    METRIC_SCORING,
     SEMANTIC_FEATURES,
     default_worker_count,
 )
@@ -1134,18 +1133,44 @@ class MLMatcher:
         if len(X_test) > 0:
             y_pred = self.model.predict(X_test)
 
-            # Cross-validation score with segment-aware folding to prevent data leakage
-            # (pairs sharing a segment must stay in the same fold)
-            # Note: CV is computed on the full dataset to estimate generalization error;
-            # the holdout test set provides an independent metric.
-            X_imputed = self._impute_missing(X.copy())
+            # Cross-validation score with segment-aware folding and per-fold imputation
+            # to prevent data leakage (imputation medians computed from each fold's
+            # training data only, matching the approach in `matcher ml eval`).
             n_groups = groups.nunique()
             if n_groups >= 2:
                 n_splits = min(5, n_groups)
                 gkf = GroupKFold(n_splits=n_splits)
-                cv_scores = cross_val_score(
-                    self.model, X_imputed, y, cv=gkf, groups=groups, scoring=METRIC_SCORING
-                )
+                cv_scores = []
+                for cv_train_idx, cv_test_idx in gkf.split(X, y, groups):
+                    X_cv_train, X_cv_test = X[cv_train_idx], X[cv_test_idx]
+                    y_cv_train, y_cv_test = y[cv_train_idx], y[cv_test_idx]
+
+                    # Compute imputation medians from CV training fold only
+                    cv_medians = {}
+                    for i, feat_name in enumerate(self.feature_names):
+                        col_vals = X_cv_train[:, i]
+                        median_val = np.nanmedian(col_vals)
+                        cv_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
+
+                    # Impute using fold-specific medians
+                    saved_medians = self.feature_medians
+                    self.feature_medians = cv_medians
+                    X_cv_train = self._impute_missing(X_cv_train)
+                    X_cv_test = self._impute_missing(X_cv_test)
+                    self.feature_medians = saved_medians
+
+                    # Train and score this fold
+                    cv_model = xgb.XGBClassifier(**params)
+                    cv_model.fit(X_cv_train, y_cv_train)
+                    y_cv_pred = cv_model.predict(X_cv_test)
+                    fold_f1 = f1_score(
+                        y_cv_test,
+                        y_cv_pred,
+                        average=METRIC_AVERAGE,
+                        zero_division=0,
+                    )
+                    cv_scores.append(fold_f1)
+                cv_scores = np.array(cv_scores)
             else:
                 # Cannot do CV with < 2 groups
                 logger.warning("Skipping CV: fewer than 2 segment groups")

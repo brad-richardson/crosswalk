@@ -611,7 +611,10 @@ class LabelStore:
             csv_path = partition_dir / "data.csv"
             if csv_path.exists():
                 try:
-                    df = pd.read_csv(csv_path)
+                    df = pd.read_csv(
+                        csv_path,
+                        dtype={"gers_id": str, "ref_id": str, "target_id": str},
+                    )
                     df["dataset"] = dataset_id
                     # Handle ref_id -> gers_id rename
                     if "ref_id" in df.columns and "gers_id" not in df.columns:
@@ -653,7 +656,10 @@ class LabelStore:
             csv_path = partition_dir / "data.csv"
             if csv_path.exists():
                 try:
-                    df = pd.read_csv(csv_path)
+                    df = pd.read_csv(
+                        csv_path,
+                        dtype={"gers_id": str, "ref_id": str, "target_id": str},
+                    )
                     df["dataset"] = dataset_id
                     # Handle ref_id -> gers_id rename
                     if "ref_id" in df.columns and "gers_id" not in df.columns:
