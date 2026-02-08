@@ -786,41 +786,52 @@ def generate_basemap_sweep(
 
 @agent_app.command("run")
 def run_agent(
-    agent: str = typer.Argument(help="Agent: claude, gemini, codex, ollama"),
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch directory"),
-    model: str = typer.Option(
-        "opus", "--model", "-m", help="Model variant (default: opus for claude, flash for gemini)"
-    ),
-    variant: str = typer.Option("", "--variant", "-v", help="Image variant name"),
+    model: str = typer.Option("opus", "--model", "-m", help="Model variant (e.g. opus, sonnet)"),
+    variant: str = typer.Option(..., "--variant", "-v", help="Image variant name"),
     limit: int = typer.Option(0, "--limit", "-l", help="Max candidates to process (0=no limit)"),
     overwrite: bool = typer.Option(
         False, "--overwrite", help="Start fresh, discard existing labels"
     ),
-    bail_after: int = typer.Option(
-        10, "--bail-after", help="Stop after N consecutive failures (0=never bail)"
+    few_shot: int = typer.Option(
+        4, "--few-shot", "-f", help="Number of few-shot examples (0=none)"
     ),
+    few_shot_source: Path | None = typer.Option(
+        None, "--few-shot-source", help="Explicit batch to source few-shot examples from"
+    ),
+    timeout: int = typer.Option(300, "--timeout", help="Timeout per chunk in seconds"),
+    chunk_size: int = typer.Option(25, "--chunk-size", help="Candidates per CLI invocation"),
 ):
-    """Run an AI agent on a batch of labeling candidates.
+    """Run Claude agent in batch mode on labeling candidates.
 
-    Invokes the specified agent CLI on each candidate in the batch directory,
-    collecting structured label responses (match/no_match/unsure with confidence).
+    Builds a prompt with few-shot examples from other batches, then invokes
+    Claude Code CLI to process candidates in chunks. The agent reads images
+    and metadata itself and writes results to a CSV file.
 
     Resumes by default - existing labels are skipped. Use --overwrite to start fresh.
 
     Examples:
-        matcher agent run claude --batch data/agents/batches/sweep_2026-01-28 --model sonnet --variant subline_geometry_only
-        matcher agent run gemini --batch data/agents/batches/sweep_2026-01-28 --model flash --variant road_context
+        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
+            --model opus --variant geometry_only --limit 5
+
+        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
+            --model sonnet --variant road_context --overwrite
+
+        matcher agent run --batch data/agents/batches/sweep_2026-02-01_001051 \\
+            --model opus --variant subline_road_context --few-shot 8 --chunk-size 20
     """
     from ..agent_labeling.runner import run_agent_batch
 
     run_agent_batch(
-        agent=agent,
         model=model,
         variant=variant,
         batch_dir=batch_dir,
         limit=limit,
         overwrite=overwrite,
-        bail_after=bail_after,
+        n_few_shot=few_shot,
+        few_shot_source=few_shot_source,
+        timeout=timeout,
+        chunk_size=chunk_size,
     )
 
 
