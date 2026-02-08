@@ -35,7 +35,7 @@ from sklearn.model_selection import GroupKFold
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from matcher.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
-from matcher.config import FEATURE_COLUMNS
+from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
 from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import MLMatcher, segment_aware_split
 
@@ -214,7 +214,7 @@ def train_and_evaluate(
     # Evaluate on test set
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average="weighted")
+    f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
     # Cross-validation with segment-aware folding
     X_imputed = matcher._impute_missing(X.copy())
@@ -230,7 +230,7 @@ def train_and_evaluate(
             cv_model = xgb.XGBClassifier(**params)
             cv_model.fit(X_cv_train, y_cv_train, verbose=False)
             y_cv_pred = cv_model.predict(X_cv_val)
-            cv_scores.append(f1_score(y_cv_val, y_cv_pred, average="weighted"))
+            cv_scores.append(f1_score(y_cv_val, y_cv_pred, average=METRIC_AVERAGE, zero_division=0))
 
         cv_f1_mean = np.mean(cv_scores)
         cv_f1_std = np.std(cv_scores)

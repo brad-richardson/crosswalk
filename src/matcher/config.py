@@ -10,6 +10,12 @@ from pydantic_settings import BaseSettings
 # 10km represents "very far" for road segment matching
 MAX_DISTANCE_METERS = 10000.0
 
+# Metric averaging mode for binary classification evaluation
+# "binary" reports precision/recall/F1 for the positive class (match=1),
+# giving distinct, actionable metrics. "weighted" makes F1 ≈ accuracy.
+METRIC_AVERAGE = "binary"
+METRIC_SCORING = "f1"  # sklearn scoring string for cross_val_score
+
 # Default topology features for empty/missing geometries
 # Represents an isolated dead-end segment (degree 1 at both endpoints)
 DEFAULT_TOPOLOGY_FEATURES = {

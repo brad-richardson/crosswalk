@@ -118,6 +118,7 @@ def _eval_existing_model(
     """Evaluate an existing trained model on labeled data using 20% holdout."""
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
+    from ..config import METRIC_AVERAGE
     from ..labeling.label_store import LabelStore
     from ..matching.ml import MLMatcher, segment_aware_split
 
@@ -167,9 +168,9 @@ def _eval_existing_model(
 
     # Overall metrics
     overall_acc = accuracy_score(y_test, y_pred)
-    overall_f1 = f1_score(y_test, y_pred, average="weighted")
-    overall_precision = precision_score(y_test, y_pred, average="weighted")
-    overall_recall = recall_score(y_test, y_pred, average="weighted")
+    overall_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    overall_precision = precision_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    overall_recall = recall_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
     console.print(f"\n{'=' * 60}")
     console.print(f"[bold]EVALUATION ON 20% HOLDOUT ({len(test_df)} samples)[/bold]")
@@ -200,9 +201,9 @@ def _eval_existing_model(
             y_ds_pred = matcher.model.predict(X_ds)
 
             ds_acc = accuracy_score(y_ds, y_ds_pred)
-            ds_f1 = f1_score(y_ds, y_ds_pred, average="weighted")
-            ds_precision = precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
-            ds_recall = recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+            ds_f1 = f1_score(y_ds, y_ds_pred, average=METRIC_AVERAGE)
+            ds_precision = precision_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
+            ds_recall = recall_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
             n_match = int((y_ds == 1).sum())
             n_no_match = int((y_ds == 0).sum())
 
@@ -331,8 +332,9 @@ def _cross_validate(
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
     from sklearn.model_selection import GroupKFold
 
+    from ..config import METRIC_AVERAGE
     from ..labeling.label_store import LabelStore
-    from ..matching.ml import MLMatcher
+    from ..matching.ml import MLMatcher, create_segment_groups
 
     if not labels_dir.exists():
         console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
@@ -363,10 +365,9 @@ def _cross_validate(
     if n_dropped > 0:
         console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first)[/yellow]")
 
-    # Create segment groups for segment-aware CV
-    # Group by gers_id to prevent the same reference segment appearing in both train and test
-    all_labels["_group"] = all_labels["gers_id"].astype("category").cat.codes
-    groups = all_labels["_group"].values
+    # Create segment groups for segment-aware CV using Union-Find
+    # Pairs sharing any segment (gers_id or target_id) are grouped together
+    groups = create_segment_groups(all_labels).values
 
     n_groups = len(np.unique(groups))
     actual_folds = min(cv_folds, n_groups)
@@ -380,9 +381,8 @@ def _cross_validate(
     # Initialize MLMatcher to get feature extraction methods
     matcher = MLMatcher()
 
-    # Extract features and labels once
+    # Extract features and labels once (imputation is done per-fold below)
     X, y = matcher._extract_features_and_labels(all_labels, binary=True)
-    X = matcher._impute_missing(X)
 
     # Track metrics across folds
     fold_metrics = {
@@ -403,6 +403,15 @@ def _cross_validate(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
+        # Compute imputation medians from training fold only, then impute both
+        matcher.feature_medians = {}
+        for i, feat_name in enumerate(matcher.feature_names):
+            col_vals = X_train[:, i]
+            median_val = np.nanmedian(col_vals)
+            matcher.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
+        X_train = matcher._impute_missing(X_train)
+        X_test = matcher._impute_missing(X_test)
+
         # Train model for this fold
         from xgboost import XGBClassifier
 
@@ -420,9 +429,13 @@ def _cross_validate(
 
         # Compute overall metrics for this fold
         fold_metrics["accuracy"].append(accuracy_score(y_test, y_pred))
-        fold_metrics["f1"].append(f1_score(y_test, y_pred, average="weighted"))
-        fold_metrics["precision"].append(precision_score(y_test, y_pred, average="weighted"))
-        fold_metrics["recall"].append(recall_score(y_test, y_pred, average="weighted"))
+        fold_metrics["f1"].append(f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0))
+        fold_metrics["precision"].append(
+            precision_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        )
+        fold_metrics["recall"].append(
+            recall_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        )
 
         # Per-dataset metrics for this fold
         if by_dataset:
@@ -447,13 +460,13 @@ def _cross_validate(
 
                 dataset_fold_metrics[ds]["accuracy"].append(accuracy_score(y_ds, y_ds_pred))
                 dataset_fold_metrics[ds]["f1"].append(
-                    f1_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                    f1_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
                 )
                 dataset_fold_metrics[ds]["precision"].append(
-                    precision_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                    precision_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
                 )
                 dataset_fold_metrics[ds]["recall"].append(
-                    recall_score(y_ds, y_ds_pred, average="weighted", zero_division=0)
+                    recall_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
                 )
                 dataset_fold_metrics[ds]["n_samples"].append(len(ds_indices))
 
@@ -646,6 +659,7 @@ def analyze_errors(
     import numpy as np
     from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
+    from ..config import METRIC_AVERAGE
     from ..labeling.label_store import LabelStore
     from ..matching.ml import MLMatcher
 
@@ -704,7 +718,7 @@ def analyze_errors(
 
     # Overall metrics
     overall_acc = accuracy_score(y_true, y_pred)
-    overall_f1 = f1_score(y_true, y_pred, average="weighted")
+    overall_f1 = f1_score(y_true, y_pred, average=METRIC_AVERAGE, zero_division=0)
     overall_cm = confusion_matrix(y_true, y_pred)
 
     console.print(f"\n{'=' * 70}")
@@ -757,7 +771,7 @@ def analyze_errors(
     for ds in sorted(all_labels["dataset"].unique()):
         ds_df = all_labels[all_labels["dataset"] == ds]
         ds_acc = accuracy_score(ds_df["y_true"], ds_df["y_pred"])
-        ds_f1 = f1_score(ds_df["y_true"], ds_df["y_pred"], average="weighted")
+        ds_f1 = f1_score(ds_df["y_true"], ds_df["y_pred"], average=METRIC_AVERAGE, zero_division=0)
         ds_n_errors = ds_df["is_error"].sum()
         ds_n_fp = ds_df["is_fp"].sum()
         ds_n_fn = ds_df["is_fn"].sum()
