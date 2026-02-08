@@ -65,12 +65,14 @@ class TestPrecomputedFeaturePassthrough:
             endpoint_features=precomputed,
         )
 
-        # Pre-computed values should pass through exactly
+        # Pre-computed values should pass through (capped at MAX_DISTANCE_METERS)
         assert features["min_endpoint_proximity_m"] == precomputed["min_endpoint_proximity_m"]
-        assert features["max_endpoint_proximity_m"] == precomputed["max_endpoint_proximity_m"]
         assert features["shared_endpoint_count"] == precomputed["shared_endpoint_count"]
         # Should have real values (network has nearby endpoints)
         assert precomputed["min_endpoint_proximity_m"] < MAX_DISTANCE_METERS
+        # max_endpoint_proximity_m may be Inf from JIT helper when endpoints
+        # are not found — compute.py caps it to MAX_DISTANCE_METERS
+        assert features["max_endpoint_proximity_m"] <= MAX_DISTANCE_METERS
 
     def test_topology_features_passed_through(self, t_network):
         """Pre-computed topology features should be used unchanged."""

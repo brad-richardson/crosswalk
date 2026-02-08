@@ -505,11 +505,13 @@ def _compute_non_geometric_features(
         # Semantic - class
         "class_similarity": class_sim,
         # Endpoint proximity
-        "min_endpoint_proximity_m": endpoint_features.get(
-            "min_endpoint_proximity_m", MAX_DISTANCE_METERS
+        "min_endpoint_proximity_m": min(
+            endpoint_features.get("min_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            MAX_DISTANCE_METERS,
         ),
-        "max_endpoint_proximity_m": endpoint_features.get(
-            "max_endpoint_proximity_m", MAX_DISTANCE_METERS
+        "max_endpoint_proximity_m": min(
+            endpoint_features.get("max_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            MAX_DISTANCE_METERS,
         ),
         "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
         # Lateral offset
@@ -721,7 +723,14 @@ def compute_pair_features(
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
-            "length_ratio": geom_features.length_ratio,
+            # Use original geometries for length_ratio, NOT sublines.
+            # Subline alignment clips both geometries to matching portions,
+            # making their lengths nearly identical (ratio ~1.0 always).
+            # The full-geometry ratio captures actual segmentation differences.
+            "length_ratio": min(ref_geom.length, target_geom.length)
+            / max(ref_geom.length, target_geom.length)
+            if max(ref_geom.length, target_geom.length) > 0
+            else 0.0,
             "centroid_distance_m": geom_features.centroid_distance,
             # Non-geometric and per-pair geometric features
             **non_geom,
