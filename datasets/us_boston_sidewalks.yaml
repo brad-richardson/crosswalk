@@ -49,7 +49,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:24:28.483920+00:00'
+    fetched_at: '2026-02-08T23:34:09.207102+00:00'
     bbox:
     - -71.19
     - 42.21
@@ -84,7 +84,7 @@ classification:
   - source_value: Privatewalk centerline
     target_class: footway
 quality_fingerprint:
-  computed_at: '2026-02-08T05:07:31.693103+00:00'
+  computed_at: '2026-02-08T23:35:00.137556+00:00'
   total_segments: 110031
   name_coverage_ratio: 0.0
   class_coverage_ratio: 1.0

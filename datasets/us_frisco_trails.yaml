@@ -42,7 +42,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:25:57.273101+00:00'
+    fetched_at: '2026-02-08T23:34:41.326778+00:00'
     bbox:
     - -96.9
     - 33.1
@@ -75,7 +75,7 @@ classification:
   - source_value: Golf Course
     target_class: path
 quality_fingerprint:
-  computed_at: '2026-02-08T05:11:13.001675+00:00'
+  computed_at: '2026-02-08T23:34:14.687318+00:00'
   total_segments: 529
   name_coverage_ratio: 1.0
   class_coverage_ratio: 1.0

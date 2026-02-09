@@ -27,7 +27,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T14:26:54.636755+00:00'
+    fetched_at: '2026-02-08T23:35:58.086119+00:00'
     bbox:
     - -112.25
     - 46.45
@@ -44,7 +44,7 @@ last_fetch:
     - LineString
     output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-08T05:11:18.976385+00:00'
+  computed_at: '2026-02-08T23:34:51.985577+00:00'
   total_segments: 8174
   name_coverage_ratio: 1.0
   class_coverage_ratio: 0.9886

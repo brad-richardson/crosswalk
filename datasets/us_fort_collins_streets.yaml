@@ -47,7 +47,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:24:53.842176+00:00'
+    fetched_at: '2026-02-08T23:34:33.950136+00:00'
     bbox:
     - -105.15
     - 40.45
@@ -88,7 +88,7 @@ classification:
   - source_value: ALLEY
     target_class: service
 quality_fingerprint:
-  computed_at: '2026-02-08T05:08:06.970469+00:00'
+  computed_at: '2026-02-08T23:34:06.150439+00:00'
   total_segments: 10994
   name_coverage_ratio: 0.9976
   class_coverage_ratio: 0.9988

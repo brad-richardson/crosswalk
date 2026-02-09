@@ -54,7 +54,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:24:23.603448+00:00'
+    fetched_at: '2026-02-08T23:33:43.784542+00:00'
     bbox:
     - -71.19
     - 42.21
@@ -109,7 +109,7 @@ classification:
   - source_value: WALK
     target_class: footway
 quality_fingerprint:
-  computed_at: '2026-02-08T05:07:34.582521+00:00'
+  computed_at: '2026-02-08T23:33:00.724617+00:00'
   total_segments: 3477
   name_coverage_ratio: 0.9514
   class_coverage_ratio: 0.9997

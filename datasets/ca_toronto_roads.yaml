@@ -48,7 +48,7 @@ fetch:
     - Minor Shoreline (Land locked)
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T14:19:01.532540+00:00'
+    fetched_at: '2026-02-08T23:29:02.033348+00:00'
     bbox:
     - -79.65
     - 43.58
