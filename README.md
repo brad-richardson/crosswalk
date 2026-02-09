@@ -18,9 +18,11 @@ The bridge file enables:
 
 ## What Is a Match?
 
-A **match** means: this fraction of this GERS segment best represents this fraction of this local segment. They are the same physical road, even if the datasets differ in segmentation, naming, or classification.
+A **match** means: the aligned overlapping portion(s) of the GERS segment and the local segment represent the same physical traveled way — the same road in the real world — even if segmentation, naming, or classification differ.
 
-A **no match** means: either a better option exists for this local segment, or no corresponding Overture feature exists at all (the local segment is genuinely new).
+A **no match** means: this pair is not the correct correspondence. Either it's a different physical feature, or the correct corresponding feature is a different candidate.
+
+A segment is **new** (unmatched) only when no plausible correspondence exists in Overture after considering all nearby candidates and road continuity. "New" is distinct from "no match" — a no-match label on one candidate pair says nothing about whether the local segment has a correct match elsewhere.
 
 ### Common Edge Cases
 
@@ -28,9 +30,17 @@ A **no match** means: either a better option exists for this local segment, or n
 |----------|--------|-----|
 | Different segmentation points | Match | Same road, just split differently between datasets |
 | Split carriageways vs single centerline | 1:N match | One Overture centerline corresponds to multiple local segments (e.g., divided highway) |
-| Road vs parallel sidewalk | No match | Different physical features, even if close together |
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | Match (each to its own GERS segment) | Each carriageway matches independently |
+| Road vs parallel sidewalk | No match | Different physical features, even if close together |
+| Overlap only at/inside intersection | No match | Shared intersection area alone does not establish correspondence |
+| Colinear overlap < 10 m near node then diverge | No match | Brief overlap near a junction without continuation is not a match |
+
+### Overlap Near Nodes
+
+Never match based on overlap alone. For a match, the target must continue past the reference node by **≥ 10 m** along the shared direction **and** stay aligned (small heading delta and small lateral offset). Overlap that exists only within an intersection does not count.
+
+**Exception:** if both segments are fully contained within the same intersection footprint and represent the same through-movement, they may be considered a match even if the overlap is short.
 
 ### 1:N Matching
 

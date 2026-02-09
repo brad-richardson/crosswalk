@@ -237,18 +237,18 @@ def prepare_batch_prompt(
     prompt = """You are labeling transportation network segment matches in batch mode.
 Segments may be roads, sidewalks, bike lanes, trails, or other features in road/pedestrian/cycling networks.
 
-TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL FEATURE.
+TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL TRAVELED WAY.
 
-A "match" means: this reference segment best represents this target segment. They cover the same physical movement space, even if the datasets differ in segmentation, naming, or classification.
+A "match" means: the aligned overlapping portion(s) of the reference and target segments represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
-A "no_match" means: either a better option exists for this target segment, or these are genuinely different features.
+A "no_match" means: this pair is not the correct correspondence. Either it's a different physical feature, or the correct corresponding feature is a different candidate.
 
 """
 
     # Section 2: Label definitions
     prompt += """LABELS:
-- match: Same physical feature with >=10% spatial overlap of either segment's length
-- no_match: Different features, or segments on the same road that do not spatially overlap
+- match: Same physical traveled way with meaningful spatial overlap along the shared direction
+- no_match: Different features, wrong candidate, or overlap only at/inside an intersection
 - unsure: Ambiguous cases where reasonable people would disagree
 
 """
@@ -262,6 +262,12 @@ A "no_match" means: either a better option exists for this target segment, or th
 5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable IF lines follow same path.
 6. NAMES ARE SUPPORTING EVIDENCE ONLY: Same name does NOT guarantee match. Two segments can share a street name but be different spans of that street or different features alongside it. Different names don't prevent match either.
 7. ML FEATURES ARE CONTEXT ONLY: The metadata includes computed ML features (hausdorff_distance, buffer_iou, etc.) for context, but do not rely on them as the primary basis for your decision. Many of these candidates are subjective cases where the features may not be well-tuned for the dataset. Focus on the image and primary attributes (geometry, names, classes) over raw feature values.
+
+OVERLAP NEAR NODES / INTERSECTIONS:
+- Never match based on overlap alone. The target must continue past the reference node by >= 10 m along the shared direction AND stay aligned (small heading delta and lateral offset).
+- Overlap only at/inside an intersection = no_match. Shared intersection area alone does not establish correspondence.
+- Colinear overlap < 10 m near a node that then diverges = no_match.
+- Exception: if both segments are fully contained within the same intersection footprint and represent the same through-movement, they may be considered a match even if the overlap is short.
 
 DATASET REPRESENTATION DIFFERENCES:
 - The reference dataset (Overture) often uses a single centerline for divided roads, while local datasets may have separate segments for each carriageway (split carriageways).
@@ -287,11 +293,13 @@ NO_MATCH EXAMPLES:
 - Main road vs adjacent service road/alley
 - Perpendicular/intersecting segments
 - Segments that share an intersection endpoint but continue in different directions
+- Segments that overlap only within an intersection area
+- Colinear segments that share < 10 m near a node then diverge
 
 MATCH EXAMPLES:
 - Lines that overlap on the same path (even with different class labels)
 - Same road with 3-5m digitization offset along its length
-- Segments of different lengths that share overlapping portions (>=10%)
+- Segments of different lengths that share overlapping portions where target continues >= 10 m past a shared node
 - Centerline matched to one carriageway of a divided road
 - Same feature with different names or abbreviations
 
