@@ -2,8 +2,8 @@
 
 import json
 import logging
-import threading
 from pathlib import Path
+from threading import Thread
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
@@ -19,6 +19,9 @@ from ..services import (
     list_datasets,
     load_batch,
     load_batch_manifest,
+    loading_errors,
+    loading_lock,
+    loading_tasks,
     record_label,
     undo_last_label,
 )
@@ -32,11 +35,6 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 
 # Module-level cache for loaded batch candidates per dataset
 _batch_cache: dict[str, list] = {}
-
-# Background loading state
-_loading_tasks: dict[str, threading.Thread] = {}
-_loading_errors: dict[str, str] = {}
-_load_lock = threading.Lock()
 
 
 def _pair_to_geojson(pair) -> str:
@@ -61,51 +59,51 @@ def _pair_to_geojson(pair) -> str:
 
 def _start_background_generate(dataset_id: str) -> None:
     """Start batch generation in a background thread."""
-    with _load_lock:
-        if dataset_id in _loading_tasks:
+    with loading_lock:
+        if dataset_id in loading_tasks:
             return
 
         def _do_generate():
             try:
                 result = generate_batch(dataset_id)
-                with _load_lock:
+                with loading_lock:
                     _batch_cache[dataset_id] = result
             except Exception:
                 logger.exception("Batch generation failed for dataset %s", dataset_id)
-                with _load_lock:
-                    _loading_errors[dataset_id] = "Batch generation failed. Check server logs."
+                with loading_lock:
+                    loading_errors[dataset_id] = "Batch generation failed. Check server logs."
             finally:
-                with _load_lock:
-                    _loading_tasks.pop(dataset_id, None)
+                with loading_lock:
+                    loading_tasks.pop(dataset_id, None)
 
-        thread = threading.Thread(target=_do_generate, daemon=True, name=f"batch-{dataset_id}")
-        _loading_errors.pop(dataset_id, None)
-        _loading_tasks[dataset_id] = thread
+        thread = Thread(target=_do_generate, daemon=True, name=f"batch-{dataset_id}")
+        loading_errors.pop(dataset_id, None)
+        loading_tasks[dataset_id] = thread
         thread.start()
 
 
 def _start_background_load(dataset_id: str) -> None:
     """Start loading an existing batch in a background thread."""
-    with _load_lock:
-        if dataset_id in _loading_tasks:
+    with loading_lock:
+        if dataset_id in loading_tasks:
             return
 
         def _do_load():
             try:
                 result = load_batch(dataset_id)
-                with _load_lock:
+                with loading_lock:
                     _batch_cache[dataset_id] = result
             except Exception:
                 logger.exception("Batch load failed for dataset %s", dataset_id)
-                with _load_lock:
-                    _loading_errors[dataset_id] = "Failed to load batch. Check server logs."
+                with loading_lock:
+                    loading_errors[dataset_id] = "Failed to load batch. Check server logs."
             finally:
-                with _load_lock:
-                    _loading_tasks.pop(dataset_id, None)
+                with loading_lock:
+                    loading_tasks.pop(dataset_id, None)
 
-        thread = threading.Thread(target=_do_load, daemon=True, name=f"batch-load-{dataset_id}")
-        _loading_errors.pop(dataset_id, None)
-        _loading_tasks[dataset_id] = thread
+        thread = Thread(target=_do_load, daemon=True, name=f"batch-load-{dataset_id}")
+        loading_errors.pop(dataset_id, None)
+        loading_tasks[dataset_id] = thread
         thread.start()
 
 
@@ -246,14 +244,14 @@ async def batch_page(
     }
 
     # 2. Background load in progress -> show loading spinner
-    if dataset in _loading_tasks:
+    if dataset in loading_tasks:
         if is_htmx:
             return templates.TemplateResponse(request, "batch/loading.html", base_context)
         return templates.TemplateResponse(request, "batch/page_loading.html", base_context)
 
     # 3. Previous load error -> show error
-    if dataset in _loading_errors:
-        error = _loading_errors.pop(dataset)
+    if dataset in loading_errors:
+        error = loading_errors.pop(dataset)
         context = {**base_context, "error": error}
         if is_htmx:
             return templates.TemplateResponse(request, "batch/empty.html", context)
@@ -292,7 +290,7 @@ async def generate_batch_endpoint(request: Request, dataset: str = Form(...)):
     if dataset not in datasets:
         return HTMLResponse(status_code=404, content="Unknown dataset")
 
-    if dataset not in _loading_tasks:
+    if dataset not in loading_tasks:
         _start_background_generate(dataset)
 
     context = {"mode": "batch", "datasets": datasets, "dataset": dataset}
@@ -311,8 +309,8 @@ async def batch_status(request: Request, dataset: str):
         return _render_pair(request, dataset, datasets)
 
     # Failed -> show error with retry option
-    if dataset in _loading_errors:
-        error = _loading_errors.pop(dataset)
+    if dataset in loading_errors:
+        error = loading_errors.pop(dataset)
         context = {
             "mode": "batch",
             "datasets": datasets,
@@ -443,7 +441,7 @@ async def regenerate_batch(request: Request, dataset: str = Form(...)):
     delete_batch_manifest(dataset)
 
     # Start new generation
-    if dataset not in _loading_tasks:
+    if dataset not in loading_tasks:
         _start_background_generate(dataset)
 
     context = {"mode": "batch", "datasets": datasets, "dataset": dataset}

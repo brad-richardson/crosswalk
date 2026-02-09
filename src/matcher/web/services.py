@@ -37,6 +37,14 @@ PROJECT_ROOT = Path(__file__).parents[3]
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
 CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
+# Shared loading state — prevents duplicate background work across routes
+# (e.g., labeling and batch both trying to load the same dataset)
+import threading
+
+loading_lock = threading.Lock()
+loading_tasks: dict[str, threading.Thread] = {}
+loading_errors: dict[str, str] = {}
+
 
 def list_datasets() -> list[str]:
     """List available dataset IDs.
