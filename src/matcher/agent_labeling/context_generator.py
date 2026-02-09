@@ -87,7 +87,10 @@ def generate_metadata_yaml(
         section = {}
         for col in col_names:
             val = features.get(col)
-            if isinstance(val, bool) or (isinstance(val, (int, float)) and col.startswith(("is_", "has_", "dead_end", "intersection_match", "likely_"))):
+            if isinstance(val, bool) or (
+                isinstance(val, (int, float))
+                and col.startswith(("is_", "has_", "dead_end", "intersection_match", "likely_"))
+            ):
                 section[col] = bool(val) if val is not None else False
             else:
                 section[col] = _round_value(val)
