@@ -25,28 +25,28 @@
     <!-- Decision buttons -->
     <div class="decision-buttons">
         <button class="btn-match"
-                hx-post="/labeling/label"
+                hx-post="{{ url_prefix|default('/labeling') }}/label"
                 hx-target="#pair-content"
                 hx-swap="innerHTML"
                 hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "match"}'>
             Match
         </button>
         <button class="btn-no-match"
-                hx-post="/labeling/label"
+                hx-post="{{ url_prefix|default('/labeling') }}/label"
                 hx-target="#pair-content"
                 hx-swap="innerHTML"
                 hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "no_match"}'>
             No Match
         </button>
         <button class="btn-skip"
-                hx-post="/labeling/label"
+                hx-post="{{ url_prefix|default('/labeling') }}/label"
                 hx-target="#pair-content"
                 hx-swap="innerHTML"
                 hx-vals='{"dataset": "{{ dataset }}", "index": {{ pair_index }}, "label": "unsure"}'>
             Unsure ?
         </button>
         <button class="btn-undo"
-                hx-post="/labeling/undo"
+                hx-post="{{ url_prefix|default('/labeling') }}/undo"
                 hx-target="#pair-content"
                 hx-swap="innerHTML"
                 hx-vals='{"dataset": "{{ dataset }}"}'>
@@ -75,7 +75,9 @@
 {% if request.headers.get('HX-Request') %}
 <span id="pair-progress" hx-swap-oob="innerHTML">
     {% if dataset %}
-        {% if total_pairs > 0 %}
+        {% if batch_total is defined and batch_total > 0 %}
+        <span class="progress-label">{{ batch_labeled|default(0) }} / {{ batch_total }}</span>
+        {% elif total_pairs > 0 %}
         <span class="progress-label" onclick="showJumpInput()" title="Click to jump to a pair">{{ (labeled_count|default(0)) + pair_index + 1 }} / {{ total_candidates|default(0) }}</span>
         <form class="jump-form hidden" id="jump-form" onsubmit="jumpToPair(event)">
             <input type="number" id="jump-input" min="1" max="{{ total_pairs }}"
@@ -118,6 +120,6 @@
 <!-- Update URL to reflect current position (bookmarkable) -->
 {% if pair and dataset %}
 <script>
-    history.replaceState(null, '', '/labeling?dataset={{ dataset }}&index={{ pair_index }}');
+    history.replaceState(null, '', '{{ url_prefix|default("/labeling") }}?dataset={{ dataset }}&index={{ pair_index }}');
 </script>
 {% endif %}

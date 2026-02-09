@@ -1138,6 +1138,7 @@ def build_views_from_feature_df(
     target_name_column: str = "names",
     ref_class_column: str = "class",
     target_class_column: str = "class",
+    filter_to_review_band: bool = True,
 ) -> list[CandidatePairView]:
     """Build CandidatePairView objects from a feature DataFrame.
 
@@ -1154,6 +1155,8 @@ def build_views_from_feature_df(
         target_name_column: Name column in target
         ref_class_column: Class column in reference
         target_class_column: Class column in target
+        filter_to_review_band: If True (default), only build views for candidates
+            in the review band. If False, build views for ALL candidates.
 
     Returns:
         List of CandidatePairView objects sorted by uncertainty (most uncertain first)
@@ -1197,24 +1200,30 @@ def build_views_from_feature_df(
     # Filter to review band BEFORE building views (huge speedup for large datasets)
     # Review band: review_threshold to match_threshold (no buffer beyond thresholds —
     # pairs above match_threshold are already auto-matched, pairs below review are no_match)
-    review_lower = settings.optimizer_review_threshold
-    review_upper = settings.optimizer_match_threshold
-
-    # Create mask for review band
     import numpy as np
 
     probs_arr = np.array(probs)
-    review_mask = (probs_arr >= review_lower) & (probs_arr <= review_upper)
-    review_count = review_mask.sum()
-
-    logger.info(
-        f"[3.5/5] Filtering to review band ({review_lower:.2f}-{review_upper:.2f}): {review_count:,}/{total:,} candidates"
-    )
-
-    # Filter records and probs
     records = feature_df.to_dict("records")
-    filtered_records = [r for r, m in zip(records, review_mask) if m]
-    filtered_probs = probs_arr[review_mask].tolist()
+
+    if filter_to_review_band:
+        review_lower = settings.optimizer_review_threshold
+        review_upper = settings.optimizer_match_threshold
+
+        # Create mask for review band
+        review_mask = (probs_arr >= review_lower) & (probs_arr <= review_upper)
+        review_count = review_mask.sum()
+
+        logger.info(
+            f"[3.5/5] Filtering to review band ({review_lower:.2f}-{review_upper:.2f}): {review_count:,}/{total:,} candidates"
+        )
+
+        # Filter records and probs
+        filtered_records = [r for r, m in zip(records, review_mask) if m]
+        filtered_probs = probs_arr[review_mask].tolist()
+    else:
+        logger.info(f"[3.5/5] Skipping review band filter — keeping all {total:,} candidates")
+        filtered_records = records
+        filtered_probs = probs_arr.tolist()
 
     # Update total for progress reporting
     total = len(filtered_records)

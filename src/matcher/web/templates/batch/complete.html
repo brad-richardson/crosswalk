@@ -1,0 +1,24 @@
+<div class="info-card map-overlay" id="pair-card">
+    <h4>Batch complete!</h4>
+    <p>All {{ batch_total }} candidates in this batch have been labeled for <strong>{{ dataset }}</strong>.</p>
+    <button class="btn-match"
+            hx-post="/batch/regenerate"
+            hx-target="#pair-content"
+            hx-swap="innerHTML"
+            hx-vals='{"dataset": "{{ dataset }}"}'>
+        Generate New Batch
+    </button>
+</div>
+
+{% if request.headers.get('HX-Request') %}
+<span id="pair-progress" hx-swap-oob="innerHTML">{{ batch_labeled }} / {{ batch_total }} - Complete!</span>
+<!-- OOB swap to update features drawer -->
+<div id="features-drawer" hx-swap-oob="innerHTML">
+    <div class="features-drawer-header">
+        <div class="handle" onclick="closeFeatures()"></div>
+        <h4>Feature Details</h4>
+        <button class="features-close" onclick="closeFeatures()">&times;</button>
+    </div>
+    <p>Batch complete. No pair selected.</p>
+</div>
+{% endif %}

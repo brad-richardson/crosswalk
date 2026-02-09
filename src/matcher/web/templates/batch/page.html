@@ -1,17 +1,16 @@
 {% extends "base.html" %}
 
 {% block overlay %}
-<!-- Progress indicator (top-left, clickable to jump) -->
+<!-- Progress indicator (top-left) -->
 <div class="pair-progress map-overlay" id="pair-progress">
-    {% if total_pairs is defined and total_pairs > 0 %}
-    <span class="progress-label" onclick="showJumpInput()" title="Click to jump to a pair">{{ (labeled_count|default(0)) + pair_index + 1 }} / {{ total_candidates|default(0) }}</span>
-    <form class="jump-form hidden" id="jump-form" onsubmit="jumpToPair(event)">
-        <input type="number" id="jump-input" min="1" max="{{ total_pairs }}"
-               placeholder="1–{{ total_pairs }}" class="jump-input">
-        <button type="submit" class="jump-btn">Go</button>
-    </form>
+    {% if batch_total is defined and batch_total > 0 %}
+        {% if batch_labeled >= batch_total %}
+        Batch complete!
+        {% else %}
+        <span class="progress-label">{{ batch_labeled }} / {{ batch_total }}</span>
+        {% endif %}
     {% elif dataset %}
-    All pairs labeled!
+    Loading...
     {% endif %}
 </div>
 
@@ -88,30 +87,6 @@
         var backdrop = document.getElementById('features-backdrop');
         if (drawer) drawer.classList.remove('open');
         if (backdrop) backdrop.classList.add('hidden');
-    }
-
-    function showJumpInput() {
-        var form = document.getElementById('jump-form');
-        var label = document.querySelector('.progress-label');
-        if (form && label) {
-            form.classList.remove('hidden');
-            label.classList.add('hidden');
-            var input = document.getElementById('jump-input');
-            if (input) { input.focus(); input.select(); }
-        }
-    }
-
-    function jumpToPair(e) {
-        e.preventDefault();
-        var input = document.getElementById('jump-input');
-        if (!input) return;
-        var val = parseInt(input.value, 10);
-        if (isNaN(val) || val < 1) return;
-        var params = new URLSearchParams(window.location.search);
-        var dataset = params.get('dataset');
-        if (!dataset) return;
-        // Input is 1-based position in unlabeled list
-        window.location.href = '{{ url_prefix|default("/labeling") }}?dataset=' + encodeURIComponent(dataset) + '&index=' + (val - 1);
     }
 
     // Feature quality signals
@@ -245,14 +220,14 @@
                 toggleFeatures();
                 return;
             case 'z':
-                htmx.ajax('POST', '{{ url_prefix|default("/labeling") }}/undo', {
+                htmx.ajax('POST', '/batch/undo', {
                     values: { dataset: dataset },
                     target: '#pair-content'
                 });
                 return;
         }
         if (label) {
-            htmx.ajax('POST', '{{ url_prefix|default("/labeling") }}/label', {
+            htmx.ajax('POST', '/batch/label', {
                 values: { dataset: dataset, index: pairIndex, label: label },
                 target: '#pair-content'
             });
