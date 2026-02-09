@@ -64,11 +64,12 @@ def mock_services():
 @pytest.fixture
 def client(mock_services):
     """Create a test client with mocked services."""
-    from matcher.web.routes.labeling import _candidate_cache, _loading_errors, _loading_tasks
+    from matcher.web.routes.labeling import _candidate_cache
+    from matcher.web.services import loading_errors, loading_tasks
 
     _candidate_cache.clear()
-    _loading_tasks.clear()
-    _loading_errors.clear()
+    loading_tasks.clear()
+    loading_errors.clear()
 
     # Pre-populate cache so the labeling route hits the fast path (step 1)
     # instead of starting a background load
