@@ -734,6 +734,12 @@ def generate_batch(
         filter_to_review_band=False,
     )
 
+    if len(views) < n:
+        logger.warning(
+            f"Batch for {dataset_id} has only {len(views)} candidates (requested {n}) — "
+            f"not enough unlabeled candidates to fill the batch"
+        )
+
     logger.info(
         f"Generated batch of {len(views)} candidates for {dataset_id} "
         f"(likely_match={len(buckets['likely_match'])}, "

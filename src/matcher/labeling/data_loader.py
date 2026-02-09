@@ -1204,7 +1204,6 @@ def build_views_from_feature_df(
     import numpy as np
 
     probs_arr = np.array(probs)
-    records = feature_df.to_dict("records")
 
     if filter_to_review_band:
         review_lower = settings.optimizer_review_threshold
@@ -1218,18 +1217,19 @@ def build_views_from_feature_df(
             f"[3.5/5] Filtering to review band ({review_lower:.2f}-{review_upper:.2f}): {review_count:,}/{total:,} candidates"
         )
 
-        # Filter records and probs
-        filtered_records = [r for r, m in zip(records, review_mask) if m]
+        # Filter DataFrame and probs BEFORE materializing to dicts (speedup for large datasets)
+        filtered_df = feature_df[review_mask].reset_index(drop=True)
+        filtered_records = filtered_df.to_dict("records")
         filtered_probs = probs_arr[review_mask].tolist()
     else:
         logger.info(f"[3.5/5] Skipping review band filter — keeping all {total:,} candidates")
-        filtered_records = records
+        filtered_records = feature_df.to_dict("records")
         filtered_probs = probs_arr.tolist()
 
     # Update total for progress reporting
     total = len(filtered_records)
     logger.info(
-        f"[3.5/5] Will build views for {total:,} candidates (filtered from {len(records):,})"
+        f"[3.5/5] Will build views for {total:,} candidates (filtered from {len(feature_df):,})"
     )
 
     # Build fast dict lookups for geometry and attribute access (much faster than .loc)

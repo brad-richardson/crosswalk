@@ -338,7 +338,11 @@ async def label_batch_pair(
     if dataset not in list_datasets():
         return HTMLResponse(status_code=404, content="Unknown dataset")
 
-    all_candidates = _batch_cache.get(dataset, [])
+    # Guard: batch must be loaded before accepting labels
+    if dataset not in _batch_cache:
+        return HTMLResponse(status_code=409, content="Batch not loaded yet")
+
+    all_candidates = _batch_cache[dataset]
     unlabeled = get_unlabeled_candidates(dataset, all_candidates)
 
     # Record the label
