@@ -3,8 +3,8 @@
 import contextlib
 import json
 import logging
-import threading
 from pathlib import Path
+from threading import Thread
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -17,6 +17,9 @@ from ..services import (
     is_dataset_cached,
     list_datasets,
     load_candidates,
+    loading_errors,
+    loading_lock,
+    loading_tasks,
     record_label,
     undo_last_label,
 )
@@ -31,39 +34,34 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 # Module-level cache for loaded candidates per dataset
 _candidate_cache: dict[str, list] = {}
 
-# Background loading state (guarded by _load_lock)
-_loading_tasks: dict[str, threading.Thread] = {}
-_loading_errors: dict[str, str] = {}
-_load_lock = threading.Lock()
-
 
 def _start_background_load(dataset_id: str) -> None:
     """Start loading candidates in a background thread.
 
     If a load is already in progress for this dataset, does nothing.
     On success, stores result in _candidate_cache.
-    On error, stores error message in _loading_errors.
+    On error, stores error message in loading_errors.
     """
-    with _load_lock:
-        if dataset_id in _loading_tasks:
+    with loading_lock:
+        if dataset_id in loading_tasks:
             return  # Already running
 
         def _do_load():
             try:
                 result = load_candidates(dataset_id)
-                with _load_lock:
+                with loading_lock:
                     _candidate_cache[dataset_id] = result
             except Exception:
                 logger.exception("Background load failed for dataset %s", dataset_id)
-                with _load_lock:
-                    _loading_errors[dataset_id] = "Feature computation failed. Check server logs."
+                with loading_lock:
+                    loading_errors[dataset_id] = "Feature computation failed. Check server logs."
             finally:
-                with _load_lock:
-                    _loading_tasks.pop(dataset_id, None)
+                with loading_lock:
+                    loading_tasks.pop(dataset_id, None)
 
-        thread = threading.Thread(target=_do_load, daemon=True, name=f"load-{dataset_id}")
-        _loading_errors.pop(dataset_id, None)  # Clear any previous error
-        _loading_tasks[dataset_id] = thread
+        thread = Thread(target=_do_load, daemon=True, name=f"load-{dataset_id}")
+        loading_errors.pop(dataset_id, None)  # Clear any previous error
+        loading_tasks[dataset_id] = thread
         thread.start()
 
 
@@ -220,14 +218,14 @@ async def labeling(
     }
 
     # 2. Background load in progress → show loading spinner
-    if dataset in _loading_tasks:
+    if dataset in loading_tasks:
         if is_htmx:
             return templates.TemplateResponse(request, "labeling/loading.html", base_context)
         return templates.TemplateResponse(request, "labeling/page_loading.html", base_context)
 
     # 3. Previous load error → show error
-    if dataset in _loading_errors:
-        error = _loading_errors.pop(dataset)
+    if dataset in loading_errors:
+        error = loading_errors.pop(dataset)
         context = {**base_context, "error": error}
         if is_htmx:
             return templates.TemplateResponse(request, "labeling/not_cached.html", context)
@@ -252,7 +250,7 @@ async def compute_candidates(request: Request, dataset: str = Form(...)):
     datasets = list_datasets()
     if dataset not in datasets:
         return HTMLResponse(status_code=404, content="Unknown dataset")
-    if dataset not in _loading_tasks:
+    if dataset not in loading_tasks:
         _start_background_load(dataset)
     context = {"mode": "labeling", "datasets": datasets, "dataset": dataset}
     return templates.TemplateResponse(request, "labeling/loading.html", context)
@@ -270,8 +268,8 @@ async def loading_status(request: Request, dataset: str):
         return _render_pair(request, dataset, datasets)
 
     # Failed — show error with retry option
-    if dataset in _loading_errors:
-        error = _loading_errors.pop(dataset)
+    if dataset in loading_errors:
+        error = loading_errors.pop(dataset)
         context = {
             "mode": "labeling",
             "datasets": datasets,
@@ -391,7 +389,7 @@ async def refresh_candidates(
 ):
     """Clear cached candidates and redirect to reload the dataset."""
     # Don't clear if a background task is already running
-    if dataset not in _loading_tasks:
+    if dataset not in loading_tasks:
         _candidate_cache.pop(dataset, None)
     return RedirectResponse(
         url=f"/labeling?dataset={dataset}",

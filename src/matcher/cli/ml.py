@@ -1098,7 +1098,7 @@ def compute_features(
                 if target is None:
                     target = loader._load_gdf(target_path)
 
-                # Build views (runs ML scoring)
+                # Build views (runs ML scoring, filter to review band for labeling UI)
                 views = build_views_from_feature_df(
                     feature_df=feature_df,
                     reference=reference,
@@ -1109,6 +1109,7 @@ def compute_features(
                     target_name_column=target_name_column,
                     ref_class_column=ref_class_column,
                     target_class_column=target_class_column,
+                    filter_to_review_band=True,
                 )
 
                 if views:

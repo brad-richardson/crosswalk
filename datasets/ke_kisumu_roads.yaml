@@ -34,7 +34,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:21:48.059668+00:00'
+    fetched_at: '2026-02-08T23:31:30.248738+00:00'
     bbox:
     - 34.65
     - -0.25
@@ -50,4 +50,9 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-08T23:31:08.292638+00:00'
+  total_segments: 722
+  name_coverage_ratio: 0.0
+  class_coverage_ratio: 0.0
 notes: Regional subset of Kenya Roads Board data for efficient processing.

@@ -27,7 +27,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T14:26:20.951124+00:00'
+    fetched_at: '2026-02-08T23:35:38.372428+00:00'
     bbox:
     - -111.25
     - 45.55
@@ -43,4 +43,9 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-08T23:34:53.935173+00:00'
+  total_segments: 14054
+  name_coverage_ratio: 0.9998
+  class_coverage_ratio: 0.7998
 notes: Regional subset for efficient processing. Part of Montana Transportation Framework.

@@ -48,7 +48,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:26:03.081346+00:00'
+    fetched_at: '2026-02-08T23:34:46.701222+00:00'
     bbox:
     - -96.9
     - 33.1
@@ -86,3 +86,8 @@ classification:
     target_class: motorway_link
   - source_value: 9
     target_class: service
+quality_fingerprint:
+  computed_at: '2026-02-08T23:34:20.990215+00:00'
+  total_segments: 12818
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 1.0

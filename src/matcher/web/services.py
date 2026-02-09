@@ -7,20 +7,25 @@ label recording, configuration access, and integration QA.
 import csv
 import json
 import logging
+import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import geopandas as gpd
 
 from ..datasets.loader import DatasetLoader
-from ..filenames import integration_cache_dir
+from ..filenames import LABELING_CACHE_DIR, integration_cache_dir
 from ..integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from ..labeling.data_loader import (
     CandidatePairView,
+    build_views_from_feature_df,
     filter_candidates,
     generate_scored_candidates_with_cache,
+    get_cached_matcher,
     get_feature_cache_info,
     get_feature_cache_path,
+    load_feature_cache,
     load_geodataframe,
 )
 from ..labeling.label_store import LabelStore
@@ -31,6 +36,14 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parents[3]
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
 CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
+
+# Shared loading state — prevents duplicate background work across routes
+# (e.g., labeling and batch both trying to load the same dataset)
+import threading
+
+loading_lock = threading.Lock()
+loading_tasks: dict[str, threading.Thread] = {}
+loading_errors: dict[str, str] = {}
 
 
 def list_datasets() -> list[str]:
@@ -476,3 +489,326 @@ def get_dataset_detail(dataset_id: str) -> dict | None:
         "cache_version": cache_info.get("version"),
         "cache_candidate_count": cache_info.get("candidate_count"),
     }
+
+
+# --- Batch Label service functions ---
+
+# Cache for dataset label counts (expires after 30 seconds)
+_label_counts_cache: dict[str, int] | None = None
+_label_counts_cache_time: float = 0.0
+_LABEL_COUNTS_TTL = 30.0
+
+
+def get_dataset_label_counts() -> dict[str, int]:
+    """Get human label counts per dataset, cached for 30 seconds.
+
+    Returns:
+        Dict mapping dataset_id to number of human labels.
+    """
+    global _label_counts_cache, _label_counts_cache_time
+
+    now = time.monotonic()
+    if _label_counts_cache is not None and (now - _label_counts_cache_time) < _LABEL_COUNTS_TTL:
+        return _label_counts_cache
+
+    datasets = list_datasets()
+    counts = {}
+    for ds in datasets:
+        store = LabelStore(ds)
+        counts[ds] = len(store.df)
+
+    _label_counts_cache = counts
+    _label_counts_cache_time = now
+    return counts
+
+
+def _batch_manifest_path(dataset_id: str) -> Path:
+    """Get path to batch manifest JSON file."""
+    return LABELING_CACHE_DIR / f"{dataset_id}_batch.json"
+
+
+def has_batch(dataset_id: str) -> bool:
+    """Check if a batch manifest exists on disk."""
+    return _batch_manifest_path(dataset_id).exists()
+
+
+def save_batch_manifest(
+    dataset_id: str,
+    pairs: list[dict],
+    feature_version: str,
+) -> Path:
+    """Save batch manifest to disk.
+
+    Args:
+        dataset_id: Dataset identifier
+        pairs: List of dicts with ref_id, target_id, bucket keys
+        feature_version: Feature cache version string
+
+    Returns:
+        Path to saved manifest file
+    """
+    manifest = {
+        "dataset_id": dataset_id,
+        "feature_version": feature_version,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "n_total": len(pairs),
+        "pairs": pairs,
+    }
+
+    path = _batch_manifest_path(dataset_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2))
+    logger.info(f"Saved batch manifest with {len(pairs)} pairs to {path}")
+    return path
+
+
+def load_batch_manifest(dataset_id: str) -> dict | None:
+    """Load batch manifest from disk.
+
+    Returns:
+        Manifest dict or None if not found.
+    """
+    path = _batch_manifest_path(dataset_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        logger.exception("Failed to load batch manifest for %s", dataset_id)
+        return None
+
+
+def delete_batch_manifest(dataset_id: str) -> bool:
+    """Delete batch manifest from disk."""
+    path = _batch_manifest_path(dataset_id)
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def generate_batch(
+    dataset_id: str,
+    n: int = 200,
+    seed: int | None = None,
+) -> list[CandidatePairView]:
+    """Generate a stratified batch of candidates for labeling.
+
+    Samples from three confidence buckets:
+    - likely_match (>0.75): 25% of n
+    - borderline (0.50-0.75): 50% of n
+    - likely_no_match (<0.50): 25% of n
+
+    If a bucket has fewer candidates than requested, redistributes
+    remaining slots to other buckets.
+
+    Args:
+        dataset_id: Dataset identifier
+        n: Total number of candidates to sample (default 200)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of CandidatePairView objects for the batch
+    """
+    import numpy as np
+
+    from ..config import FEATURE_COLUMNS, FEATURE_VERSION
+
+    # Load feature cache
+    feature_df = load_feature_cache(dataset_id)
+    if feature_df is None:
+        raise ValueError(f"No feature cache found for {dataset_id}")
+
+    # Run ML prediction on all candidates
+    feature_cols = [col for col in feature_df.columns if col in FEATURE_COLUMNS]
+    features_list = feature_df[feature_cols].to_dict("records")
+
+    matcher = get_cached_matcher()
+    if matcher is None:
+        raise ValueError("No ML model available. Train a model first with 'matcher train'.")
+
+    probs = matcher.predict(features_list)
+    probs_arr = np.array(probs)
+
+    # Exclude already-labeled pairs
+    store = LabelStore(dataset_id)
+    labeled_pairs = store.get_labeled_pairs()
+    ref_ids = feature_df["ref_id"].values
+    target_ids = feature_df["target_id"].values
+
+    # Build mask for unlabeled pairs
+    unlabeled_mask = np.array(
+        [(str(r), str(t)) not in labeled_pairs for r, t in zip(ref_ids, target_ids)]
+    )
+
+    # Apply unlabeled filter
+    available_indices = np.where(unlabeled_mask)[0]
+    available_probs = probs_arr[available_indices]
+
+    logger.info(
+        f"Batch generation: {len(available_indices)} unlabeled candidates "
+        f"(excluded {unlabeled_mask.size - len(available_indices)} labeled)"
+    )
+
+    # Stratified sampling
+    rng = np.random.default_rng(seed)
+
+    buckets = {
+        "likely_match": np.where(available_probs > 0.75)[0],
+        "borderline": np.where((available_probs >= 0.50) & (available_probs <= 0.75))[0],
+        "likely_no_match": np.where(available_probs < 0.50)[0],
+    }
+
+    target_counts = {
+        "likely_match": n // 4,  # 25%
+        "borderline": n // 2,  # 50%
+        "likely_no_match": n // 4,  # 25%
+    }
+
+    sampled_indices = []
+    remaining = 0
+
+    # First pass: sample up to target from each bucket
+    for bucket_name in ["likely_match", "borderline", "likely_no_match"]:
+        bucket_indices = buckets[bucket_name]
+        target_count = target_counts[bucket_name]
+
+        if len(bucket_indices) <= target_count:
+            sampled_indices.extend(bucket_indices.tolist())
+            remaining += target_count - len(bucket_indices)
+        else:
+            chosen = rng.choice(bucket_indices, size=target_count, replace=False)
+            sampled_indices.extend(chosen.tolist())
+
+    # Second pass: redistribute remaining slots
+    if remaining > 0:
+        already_sampled = set(sampled_indices)
+        all_available = set(range(len(available_indices)))
+        unsampled = sorted(all_available - already_sampled)
+        if unsampled:
+            extra_count = min(remaining, len(unsampled))
+            extra = rng.choice(unsampled, size=extra_count, replace=False)
+            sampled_indices.extend(extra.tolist())
+
+    # Map back to feature_df indices
+    selected_feature_indices = available_indices[sampled_indices]
+
+    # Build batch manifest
+    batch_pairs = []
+    for _local_idx, feat_idx in zip(sampled_indices, selected_feature_indices):
+        prob = probs_arr[feat_idx]
+        if prob > 0.75:
+            bucket = "likely_match"
+        elif prob >= 0.50:
+            bucket = "borderline"
+        else:
+            bucket = "likely_no_match"
+
+        batch_pairs.append(
+            {
+                "ref_id": str(ref_ids[feat_idx]),
+                "target_id": str(target_ids[feat_idx]),
+                "bucket": bucket,
+            }
+        )
+
+    save_batch_manifest(dataset_id, batch_pairs, FEATURE_VERSION)
+
+    # Build views for sampled candidates
+    sampled_feature_df = feature_df.iloc[selected_feature_indices].reset_index(drop=True)
+
+    loader = DatasetLoader(DATA_DIR)
+    ref_path = loader.find_reference_path(dataset_id)
+    target_path = loader.find_target_path(dataset_id)
+
+    if ref_path is None or target_path is None:
+        return []
+
+    reference = load_geodataframe(ref_path)
+    target_gdf = load_geodataframe(target_path)
+
+    views = build_views_from_feature_df(
+        feature_df=sampled_feature_df,
+        reference=reference,
+        target=target_gdf,
+        filter_to_review_band=False,
+    )
+
+    if len(views) < n:
+        logger.warning(
+            f"Batch for {dataset_id} has only {len(views)} candidates (requested {n}) — "
+            f"not enough unlabeled candidates to fill the batch"
+        )
+
+    logger.info(
+        f"Generated batch of {len(views)} candidates for {dataset_id} "
+        f"(likely_match={len(buckets['likely_match'])}, "
+        f"borderline={len(buckets['borderline'])}, "
+        f"likely_no_match={len(buckets['likely_no_match'])})"
+    )
+
+    return views
+
+
+def load_batch(dataset_id: str) -> list[CandidatePairView]:
+    """Load a persisted batch from disk.
+
+    Reads the batch manifest, filters the feature cache to batch pair IDs,
+    and builds CandidatePairView objects.
+
+    Args:
+        dataset_id: Dataset identifier
+
+    Returns:
+        List of CandidatePairView objects for the batch
+    """
+    import pandas as pd
+
+    from ..config import FEATURE_VERSION
+
+    manifest = load_batch_manifest(dataset_id)
+    if manifest is None:
+        raise ValueError(f"No batch manifest found for {dataset_id}")
+
+    # Validate feature version
+    if manifest.get("feature_version") != FEATURE_VERSION:
+        logger.warning(
+            f"Batch feature version mismatch: {manifest.get('feature_version')} != {FEATURE_VERSION}"
+        )
+
+    # Get batch pair IDs
+    batch_pair_ids = {(p["ref_id"], p["target_id"]) for p in manifest["pairs"]}
+
+    # Load feature cache and filter to batch pairs
+    feature_df = load_feature_cache(dataset_id)
+    if feature_df is None:
+        raise ValueError(f"No feature cache found for {dataset_id}")
+
+    mask = pd.Series(
+        [
+            (str(r), str(t)) in batch_pair_ids
+            for r, t in zip(feature_df["ref_id"], feature_df["target_id"])
+        ]
+    )
+    batch_feature_df = feature_df[mask.values].reset_index(drop=True)
+
+    # Build views
+    loader = DatasetLoader(DATA_DIR)
+    ref_path = loader.find_reference_path(dataset_id)
+    target_path = loader.find_target_path(dataset_id)
+
+    if ref_path is None or target_path is None:
+        return []
+
+    reference = load_geodataframe(ref_path)
+    target_gdf = load_geodataframe(target_path)
+
+    views = build_views_from_feature_df(
+        feature_df=batch_feature_df,
+        reference=reference,
+        target=target_gdf,
+        filter_to_review_band=False,
+    )
+
+    logger.info(f"Loaded batch of {len(views)} candidates for {dataset_id}")
+    return views

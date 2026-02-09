@@ -27,7 +27,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T14:23:40.324035+00:00'
+    fetched_at: '2026-02-08T23:33:03.866812+00:00'
     bbox:
     - 103.6
     - 1.2
@@ -46,8 +46,8 @@ last_fetch:
 classification:
   source_classification:
     column: RD_CATG__1
-notes: 'LTA ships RD_CD (road code) column completely empty as of Aug 2025 quarterly
+notes: LTA ships RD_CD (road code) column completely empty as of Aug 2025 quarterly
   release. No stable unique ID column available - only RD_CD_DESC (road name, 3818
   unique across 15326 segments) and RD_CATG__1 (6 classification categories). Revisit
   if LTA restores RD_CD in a future release. LTA API works (GeospatialWholeIsland?ID=RoadSectionLine)
-  but data lacks usable IDs.'
+  but data lacks usable IDs.

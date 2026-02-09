@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .routes.batch import router as batch_router
 from .routes.browser import router as browser_router
 from .routes.dashboard import router as dashboard_router
 from .routes.labeling import router as labeling_router
@@ -44,9 +45,10 @@ class LabelerNameMiddleware(BaseHTTPMiddleware):
     """Inject the configured labeler name into every request's state."""
 
     async def dispatch(self, request, call_next):
-        from .services import get_labeler_name
+        from .services import get_dataset_label_counts, get_labeler_name
 
         request.state.labeler_name = get_labeler_name()
+        request.state.dataset_label_counts = get_dataset_label_counts()
         return await call_next(request)
 
 
@@ -90,6 +92,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Include routers
+    app.include_router(batch_router)
     app.include_router(browser_router)
     app.include_router(dashboard_router)
     app.include_router(labeling_router)

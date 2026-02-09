@@ -43,7 +43,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:19:32.424569+00:00'
+    fetched_at: '2026-02-08T23:28:41.652800+00:00'
     bbox:
     - -74.25
     - 4.45
@@ -78,7 +78,7 @@ classification:
   - source_value: 7
     target_class: unclassified
 quality_fingerprint:
-  computed_at: '2026-02-08T05:28:23.309110+00:00'
+  computed_at: '2026-02-08T23:34:46.402252+00:00'
   total_segments: 138516
   name_coverage_ratio: 1.0
   class_coverage_ratio: 0.9776

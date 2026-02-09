@@ -44,7 +44,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T14:25:24.515666+00:00'
+    fetched_at: '2026-02-08T23:34:44.947299+00:00'
     bbox:
     - -119.95
     - 36.65
@@ -78,3 +78,8 @@ classification:
     target_class: tertiary
   - source_value: 7
     target_class: residential
+quality_fingerprint:
+  computed_at: '2026-02-08T23:34:34.053534+00:00'
+  total_segments: 11899
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 1.0

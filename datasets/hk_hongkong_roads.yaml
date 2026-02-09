@@ -20,7 +20,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T14:20:52.493959+00:00'
+    fetched_at: '2026-02-08T23:30:29.590562+00:00'
     bbox:
     - 113.82
     - 22.15
@@ -36,4 +36,9 @@ last_fetch:
     geometry_types:
     - LineString
     output_path: data/raw
+quality_fingerprint:
+  computed_at: '2026-02-08T23:30:26.549038+00:00'
+  total_segments: 36107
+  name_coverage_ratio: 0.9549
+  class_coverage_ratio: 0.0
 notes: GML format is automatically parsed during fetch.
