@@ -1203,7 +1203,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.1" },
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
     { name = "geopandas", specifier = ">=1.0" },
-    { name = "h3", specifier = ">=3.7" },
+    { name = "h3", specifier = ">=4.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.27" },
     { name = "jellyfish", specifier = ">=1.0" },
