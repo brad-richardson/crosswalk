@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import typer
+from rich.markup import escape
 
 from .utils import console
 
@@ -223,9 +224,10 @@ def _fetch_reference_impl(
         console.print(f"[red]Error: Could not find dataset config for '{dataset_name}'[/red]")
         available = list_dataset_configs()
         if available:
-            console.print("[yellow]Available datasets: " + ", ".join(sorted(available)[:10]))
+            dataset_list = ", ".join(sorted(available)[:10])
             if len(available) > 10:
-                console.print(f"  ... and {len(available) - 10} more[/yellow]")
+                dataset_list += f"\n  ... and {len(available) - 10} more"
+            console.print(f"[yellow]Available datasets: {dataset_list}[/yellow]")
         raise typer.Exit(1)
 
     if config.fetch is None or config.fetch.bbox is None:
@@ -491,7 +493,7 @@ def _parallel_reference_fetch(
                 keep_pbf=keep_pbf,
             )
         except Exception as e:
-            console.print(f"[red]Error fetching {name}: {e}[/red]")
+            console.print(f"[red]Error fetching {name}: {escape(str(e))}[/red]")
             errors.append(name)
         return errors
 
@@ -520,7 +522,7 @@ def _parallel_reference_fetch(
         for future in as_completed(futures):
             name, error = future.result()
             if error is not None:
-                console.print(f"[red]Error fetching {name}: {error}[/red]")
+                console.print(f"[red]Error fetching {name}: {escape(str(error))}[/red]")
                 errors.append(name)
             else:
                 console.print(f"[green]Fetched reference data for {name}[/green]")
@@ -749,7 +751,7 @@ def fetch_all(
                 fetch_name, result = future.result()
                 if isinstance(result, Exception):
                     ds_errors.append((f"{ds_name}/{fetch_name}", result))
-                    console.print(f"[red]Error fetching {ds_name}/{fetch_name}: {result}[/red]")
+                    console.print(f"[red]Error fetching {ds_name}/{fetch_name}: {escape(str(result))}[/red]")
                 elif fetch_name == "target":
                     if result:
                         console.print(f"[green]{ds_name}: target saved to {result}[/green]")
@@ -1081,7 +1083,7 @@ def repair(
         console.print(f"\n[green]Repaired data saved to {output}[/green]")
 
     except Exception as e:
-        console.print(f"[red]Topology repair failed: {e}[/red]")
+        console.print(f"[red]Topology repair failed: {escape(str(e))}[/red]")
         raise typer.Exit(1) from None
 
 
@@ -1168,7 +1170,7 @@ def data_quality(
         if class_column is None:
             class_column = CLASS_COLUMN
     except FileNotFoundError as e:
-        console.print(f"[red]Data file not found: {e}[/red]")
+        console.print(f"[red]Data file not found: {escape(str(e))}[/red]")
         raise typer.Exit(1) from None
 
     # Compute metrics
@@ -1259,7 +1261,7 @@ def data_quality(
                 console.print(f"[red]Failed to save to dataset YAML: {dataset}[/red]")
 
     except Exception as e:
-        console.print(f"[red]Quality analysis failed: {e}[/red]")
+        console.print(f"[red]Quality analysis failed: {escape(str(e))}[/red]")
         raise typer.Exit(1) from None
 
 
