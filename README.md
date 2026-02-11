@@ -18,19 +18,37 @@ The bridge file enables:
 
 ## What Is a Match?
 
-A **match** means: this fraction of this GERS segment best represents this fraction of this local segment. They are the same physical road, even if the datasets differ in segmentation, naming, or classification.
+A match requires that the aligned overlapping portions represent the **same network role**, not just overlapping geometry. Two segments that intersect or overlap spatially are not necessarily a match — they must represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
-A **no match** means: either a better option exists for this local segment, or no corresponding Overture feature exists at all (the local segment is genuinely new).
+- **Match**: The aligned portions of the GERS segment and the local segment represent the same physical feature with the same network role.
+- **No Match**: Not the correct correspondence — either a different physical feature, or the correct corresponding feature is a different candidate.
+- **New** (conceptual): No plausible correspondence exists in Overture after considering nearby candidates and continuity. Still labeled `no_match` in practice, but conceptually distinct — "no match" means wrong pair, "new" means no pair exists.
+
+### Network Roles
+
+Matching is constrained by the segment's role in the network. See [docs/MATCHING_RULES.md](docs/MATCHING_RULES.md) for the full canonical ruleset.
+
+- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
+- **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
+- **TURN** — Direction-changing connectors (ramps, slip roads, curb ramps). Matches only with same role and intent.
+- **INTERNAL** — Intersection-scoped slices. May match other INTERNAL segments representing the same through-movement.
 
 ### Common Edge Cases
 
 | Scenario | Result | Why |
 |----------|--------|-----|
 | Different segmentation points | Match | Same road, just split differently between datasets |
-| Split carriageways vs single centerline | 1:N match | One Overture centerline corresponds to multiple local segments (e.g., divided highway) |
-| Road vs parallel sidewalk | No match | Different physical features, even if close together |
+| Split carriageways vs single centerline | 1:N Match | One Overture centerline corresponds to multiple local segments |
+| Road vs parallel sidewalk | No Match | Different physical features, even if close together |
 | Same road, different names | Match | Names are a signal, not a requirement |
-| Opposite carriageways of divided road | Match (each to its own GERS segment) | Each carriageway matches independently |
+| Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
+| Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
+| Overlap only at/inside intersection | No Match | Overlap alone is not sufficient for a match |
+| Colinear overlap <10m near node then diverge | No Match | Must continue ≥10m past node along shared direction |
+
+### Intersection Rule
+
+Never match based on overlap alone. For a match at an intersection, the target must continue **≥10m past the reference node** along the shared direction while staying aligned. Exception: if both segments are entirely inside the same intersection footprint and represent the same through-movement, they may match (rare).
 
 ### 1:N Matching
 
