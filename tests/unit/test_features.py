@@ -305,11 +305,9 @@ class TestCollinearGapRatio:
     @pytest.mark.parametrize(
         "coords_a,coords_b",
         [
-            # Identical lines (perfect overlap)
+            # Identical lines (perfect overlap → 1.0)
             ([(0, 0), (100, 0)], [(0, 0), (100, 0)]),
-            # Partial overlap (50%) - above 10% threshold
-            ([(0, 0), (100, 0)], [(50, 0), (150, 0)]),
-            # Perpendicular (not collinear, heading > 15°)
+            # Perpendicular (not collinear, heading > 15° → 1.0)
             ([(0, 0), (100, 0)], [(50, -50), (50, 50)]),
             # Parallel offset (good along-track overlap despite lateral offset)
             ([(0, 0), (100, 0)], [(0, 10), (100, 10)]),
@@ -318,7 +316,6 @@ class TestCollinearGapRatio:
         ],
         ids=[
             "identical_lines",
-            "partial_overlap_50pct",
             "perpendicular",
             "parallel_offset",
             "empty_line",
@@ -330,6 +327,13 @@ class TestCollinearGapRatio:
         line_b = LineString(coords_b) if coords_b else LineString()
         result = compute_collinear_gap_ratio(line_a, line_b)
         assert result == pytest.approx(1.0)
+
+    def test_partial_overlap_returns_fraction(self):
+        """50% overlap should return ~0.5 (raw overlap fraction)."""
+        line_a = LineString([(0, 0), (100, 0)])
+        line_b = LineString([(50, 0), (150, 0)])
+        result = compute_collinear_gap_ratio(line_a, line_b)
+        assert result == pytest.approx(0.5, abs=0.05)
 
     @pytest.mark.parametrize(
         "coords_a,coords_b",
@@ -368,13 +372,12 @@ class TestCollinearGapRatio:
         result = compute_collinear_gap_ratio(line_a, line_b)
         assert result > 0.9
 
-    def test_small_overlap_scaled_penalty(self):
-        """Small overlap should produce scaled penalty proportional to overlap."""
-        # 5% overlap at threshold of 10% -> ratio = 0.5
+    def test_small_overlap_returns_raw_fraction(self):
+        """Small overlap should return raw fraction (5m / 100m = 0.05)."""
         line_a = LineString([(0, 0), (100, 0)])
         line_b = LineString([(95, 0), (195, 0)])  # 5m overlap out of 100m
         result = compute_collinear_gap_ratio(line_a, line_b)
-        assert 0.4 <= result <= 0.6
+        assert result == pytest.approx(0.05, abs=0.02)
 
     def test_included_in_geometric_features(self):
         """collinear_gap_ratio should be included in compute_geometric_features output."""
@@ -530,7 +533,7 @@ class TestComputePairFeaturesWithAlignment:
         """compute_pair_features should include coverage features when alignment provided."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -550,6 +553,8 @@ class TestComputePairFeaturesWithAlignment:
             target_class="residential",
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Should include coverage features
@@ -565,7 +570,7 @@ class TestComputePairFeaturesWithAlignment:
     def test_compute_pair_features_without_alignment(self):
         """compute_pair_features should work without alignment (backward compatible)."""
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -578,6 +583,8 @@ class TestComputePairFeaturesWithAlignment:
             ref_class="residential",
             target_class="residential",
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Should still include coverage features (zeros without alignment)
@@ -588,7 +595,7 @@ class TestComputePairFeaturesWithAlignment:
         """With alignment, similarity features should be computed on sublines."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Reference is longer than target, target matches second half
         ref = LineString([(0, 0), (100, 0)])
@@ -605,6 +612,8 @@ class TestComputePairFeaturesWithAlignment:
             target_class=None,
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         features_unaligned = compute_pair_features(
@@ -616,6 +625,8 @@ class TestComputePairFeaturesWithAlignment:
             target_class=None,
             alignment=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Aligned features should have better (lower) hausdorff because
@@ -629,7 +640,7 @@ class TestComputePairFeaturesWithAlignment:
         """compute_pair_features should return all expected feature columns."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -649,6 +660,8 @@ class TestComputePairFeaturesWithAlignment:
             target_class="residential",
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # All feature columns should be present
@@ -663,7 +676,7 @@ class TestComputePairFeaturesWithAlignment:
         """
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Reference: 100m segment
         ref = LineString([(0, 0), (100, 0)])
@@ -681,6 +694,8 @@ class TestComputePairFeaturesWithAlignment:
             target_class=None,
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Lateral offset should be ~3m (the offset in the overlapping region)
@@ -703,7 +718,7 @@ class TestLengthRatioUsesFullGeometry:
         """When target is 3x longer than ref, length_ratio should be ~0.33."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])  # 100m
         target = LineString([(0, 0), (300, 0)])  # 300m
@@ -725,6 +740,8 @@ class TestLengthRatioUsesFullGeometry:
             target_class=None,
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # length_ratio = min/max = 100/300 ≈ 0.333
@@ -736,7 +753,7 @@ class TestLengthRatioUsesFullGeometry:
     def test_length_ratio_without_alignment(self):
         """Without alignment, length_ratio should still reflect original lengths."""
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (50, 0)])  # 50m
         target = LineString([(0, 0), (200, 0)])  # 200m
@@ -749,6 +766,8 @@ class TestLengthRatioUsesFullGeometry:
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # length_ratio = 50/200 = 0.25
@@ -766,6 +785,7 @@ class TestEndpointProximityInfCapping:
         """Inf values from endpoint computation should be capped to MAX_DISTANCE_METERS."""
         from matcher.config import MAX_DISTANCE_METERS
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -785,6 +805,8 @@ class TestEndpointProximityInfCapping:
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["min_endpoint_proximity_m"] == MAX_DISTANCE_METERS
@@ -793,6 +815,7 @@ class TestEndpointProximityInfCapping:
     def test_finite_endpoint_proximity_unchanged(self):
         """Finite endpoint values below MAX_DISTANCE_METERS should pass through unchanged."""
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 0), (100, 0)])
@@ -811,6 +834,8 @@ class TestEndpointProximityInfCapping:
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["min_endpoint_proximity_m"] == 5.0
@@ -861,15 +886,26 @@ class TestAngleHistogramSimilarity:
         result = compute_angle_histogram_similarity(curve1, curve2)
         assert result >= 0.9  # Should be very similar
 
-    def test_short_lines_return_neutral(self):
-        """Lines with < 3 points should return 0.5 (neutral — no signal)."""
+    def test_both_short_lines_return_one(self):
+        """Both lines with < 3 points (both straight) should return 1.0."""
         from matcher.features.geometric import compute_angle_histogram_similarity
 
         short1 = LineString([(0, 0), (10, 0)])
         short2 = LineString([(0, 0), (20, 10)])
 
         result = compute_angle_histogram_similarity(short1, short2)
-        assert result == pytest.approx(0.5)
+        assert result == pytest.approx(1.0)
+
+    def test_one_short_line_compared_to_straight_hist(self):
+        """One short line vs multi-point line uses straight histogram for short."""
+        from matcher.features.geometric import compute_angle_histogram_similarity
+
+        short = LineString([(0, 0), (10, 0)])
+        # Straight multi-point → same shape → high similarity
+        straight = LineString([(0, 0), (10, 0), (20, 0), (30, 0)])
+
+        result = compute_angle_histogram_similarity(short, straight)
+        assert result > 0.9  # Both effectively straight
 
     def test_empty_line_returns_one(self):
         """Empty lines should return 1.0."""
@@ -1458,7 +1494,7 @@ class TestAlignedLengthM:
         """aligned_length_m = ref_length * (end_frac - start_frac)."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (ref_length, 0)])
         target = LineString([(0, 2), (ref_length, 2)])
@@ -1477,6 +1513,8 @@ class TestAlignedLengthM:
                 dataset_end_frac=1.0,
             ),
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["aligned_length_m"] == pytest.approx(expected, abs=0.5)
@@ -1484,7 +1522,7 @@ class TestAlignedLengthM:
     def test_no_alignment_returns_zero(self):
         """Without alignment, aligned_length_m = 0.0 (consistent with coverage features)."""
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (150, 0)])
         target = LineString([(0, 5), (150, 5)])
@@ -1498,6 +1536,8 @@ class TestAlignedLengthM:
             target_class=None,
             alignment=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["aligned_length_m"] == 0.0
@@ -1506,7 +1546,7 @@ class TestAlignedLengthM:
         """Uses original ref geometry length, not subline (exact, no extraction error)."""
         from matcher.features.alignment import AlignmentResult
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Curved ref — subline extraction may lose/gain tiny amounts
         ref = LineString([(0, 0), (50, 10), (100, 0)])
@@ -1526,6 +1566,8 @@ class TestAlignedLengthM:
                 dataset_end_frac=1.0,
             ),
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["aligned_length_m"] == pytest.approx(ref.length * 0.5, abs=0.01)

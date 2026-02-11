@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .routes.audit import router as audit_router
 from .routes.batch import router as batch_router
 from .routes.browser import router as browser_router
 from .routes.dashboard import router as dashboard_router
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Include routers
+    app.include_router(audit_router)
     app.include_router(batch_router)
     app.include_router(browser_router)
     app.include_router(dashboard_router)

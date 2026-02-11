@@ -117,6 +117,7 @@ class TestAlignmentIntegration:
         """Coverage features should be computed when alignment is enabled."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
         target_geom = target_gdf.iloc[0].geometry
@@ -141,6 +142,8 @@ class TestAlignmentIntegration:
             target_class="primary",
             alignment=alignment,
             endpoint_features=mock_endpoint_features,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Verify coverage features are present and valid
@@ -185,6 +188,7 @@ class TestAlignmentIntegration:
         """Aligned features should differ from full geometry features for partial overlap."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         # Reference covers more area than target
         ref = LineString([(0, 0), (100, 0)])
@@ -208,6 +212,8 @@ class TestAlignmentIntegration:
             target_class=None,
             alignment=alignment,
             endpoint_features=mock_endpoint_features,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         features_unaligned = compute_pair_features(
@@ -219,6 +225,8 @@ class TestAlignmentIntegration:
             target_class=None,
             alignment=None,
             endpoint_features=mock_endpoint_features,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Aligned features should have better hausdorff (comparing matching portions)
@@ -239,6 +247,7 @@ class TestFeatureComputation:
         """Feature computation should produce all expected features."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
         target_geom = target_gdf.iloc[0].geometry
@@ -252,6 +261,8 @@ class TestFeatureComputation:
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Check for geometric features (buffer_iou replaced with buffer_iou_5m and buffer_iou_15m)
@@ -274,6 +285,7 @@ class TestFeatureComputation:
         """Feature values should be within expected ranges."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
         target_geom = target_gdf.iloc[0].geometry
@@ -287,6 +299,8 @@ class TestFeatureComputation:
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Hausdorff distance should be positive

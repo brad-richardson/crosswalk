@@ -228,7 +228,7 @@ def backfill_features(
     # Import heavy dependencies only when needed
     import geopandas as gpd
 
-    from ..config import DEFAULT_SNAP_TOLERANCE_M
+    from ..config import DEFAULT_SNAP_TOLERANCE_M, DEFAULT_TOPOLOGY_FEATURES
     from ..features.alignment import linestring_alignment
     from ..features.compute import (
         compute_graphlet_similarity,
@@ -237,7 +237,11 @@ def backfill_features(
     )
     from ..features.relational import build_sibling_search_context
     from ..features.semantic import _extract_name_string
-    from ..features.spatial_context import SpatialContextIndex, compute_aligned_endpoint_features
+    from ..features.spatial_context import (
+        SpatialContextIndex,
+        compute_aligned_endpoint_features,
+        compute_all_topology,
+    )
     from ..filenames import find_overture_segments, find_target_file
     from ..utils.geometry import filter_to_linestrings
 
@@ -353,6 +357,25 @@ def backfill_features(
         else:
             target_sibling_context = None
 
+        # Compute topology features for all segments
+        console.print("  Computing topology features...")
+        ref_topology_by_id = compute_all_topology(
+            ref_gdf_proj,
+            id_column="id",
+            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
+            connectors_column="connectors" if ref_has_connectors else None,
+        )
+        if target_gdf_proj is not None:
+            target_has_connectors_topo = "connectors" in target_gdf_proj.columns
+            target_topology_by_id = compute_all_topology(
+                target_gdf_proj,
+                id_column="id",
+                tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
+                connectors_column="connectors" if target_has_connectors_topo else None,
+            )
+        else:
+            target_topology_by_id = {}
+
         # Initialize feature store and data store for this dataset
         feature_store = FeatureStore(dataset, features_dir=features_dir)
 
@@ -385,6 +408,7 @@ def backfill_features(
             target_class = None
             ref_subclass = None
             target_subclass = None
+            pair_data = None
 
             # First, try to get geometries from stored data (preferred - stable)
             if has_stored_data:
@@ -491,6 +515,25 @@ def backfill_features(
             # Note: oneway_lr and speed_limit_kph_lr columns are fetched but not used as features
             # See docs/RESEARCH_GRAVEYARD.md - ablation showed these hurt model performance
 
+            # Look up topology features for this pair
+            # 3-tier fallback: stored topology > computed from raw data > NaN defaults
+            stored_ref_topo = None
+            stored_target_topo = None
+            if has_stored_data and pair_data is not None:
+                stored_ref_topo = pair_data.get("ref_topology")
+                stored_target_topo = pair_data.get("target_topology")
+
+            ref_topo = (
+                stored_ref_topo
+                or ref_topology_by_id.get(gers_id)
+                or DEFAULT_TOPOLOGY_FEATURES.copy()
+            )
+            target_topo = (
+                stored_target_topo
+                or target_topology_by_id.get(target_id)
+                or DEFAULT_TOPOLOGY_FEATURES.copy()
+            )
+
             # Compute all features
             features = compute_pair_features(
                 ref_geom,
@@ -502,6 +545,8 @@ def backfill_features(
                 ref_subclass,
                 target_subclass,
                 endpoint_features=endpoint_features,
+                ref_topology=ref_topo,
+                target_topology=target_topo,
                 alignment=alignment,
                 graphlet_features=graphlet_features,
                 ref_graphlet_data=ref_graphlet_data,
@@ -516,13 +561,24 @@ def backfill_features(
             if "_error" in features:
                 errored += 1
 
+            # Backfill topology into data store if not already stored
+            if has_stored_data and pair_data is not None and pair_data.get("ref_topology") is None:
+                data_store.update_topology(
+                    gers_id,
+                    target_id,
+                    ref_topology=ref_topo,
+                    target_topology=target_topo,
+                )
+
             # Add to feature store
             feature_store.add(gers_id=gers_id, target_id=target_id, features=features)
             computed += 1
 
-        # Save feature store
+        # Save feature store and data store (topology backfill)
         if computed > 0:
             feature_store.save()
+            if has_stored_data:
+                data_store.save()
             parts = [f"Computed {computed} features"]
             if used_stored > 0 or used_lookup > 0:
                 parts[0] += f" (stored={used_stored}, lookup={used_lookup})"

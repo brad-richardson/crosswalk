@@ -1,0 +1,65 @@
+{% if pair %}
+<!-- Pair header info -->
+<div class="audit-pair-header">
+    <div class="pair-names">
+        <div class="pair-row">
+            <span class="pair-label ref-label">REF</span>
+            <span class="pair-name">{{ pair.ref_name or "unnamed" }}</span>
+            <span class="pair-id" title="{{ pair.gers_id }}"
+                  data-short="{{ pair.gers_id[:16] }}&hellip;" data-full="{{ pair.gers_id }}">{{ pair.gers_id[:16] }}&hellip;</span>
+        </div>
+        <div class="pair-row">
+            <span class="pair-label target-label">TRGT</span>
+            <span class="pair-name">{{ pair.target_name or "unnamed" }}</span>
+            <span class="pair-id" title="{{ pair.target_id }}"
+                  data-short="{{ pair.target_id[:16] }}&hellip;" data-full="{{ pair.target_id }}">{{ pair.target_id[:16] }}&hellip;</span>
+        </div>
+    </div>
+    <div class="audit-pair-meta">
+        <span class="label-badge label-{{ pair.label|replace('_', '-') }}">{{ pair.label }}</span>
+        <span class="pair-class">{{ pair.ref_class or "?" }} / {{ pair.target_class or "?" }}</span>
+    </div>
+</div>
+
+<!-- Feature categories -->
+<div class="audit-features-list">
+    {% for cat, feats in feature_categories.items() %}
+    <div class="audit-category">
+        <div class="audit-category-header" onclick="toggleCategory(this)">
+            <span class="audit-category-arrow">&#9654;</span>
+            <span class="audit-category-name">{{ cat }}</span>
+            <span class="audit-category-count">{{ feats|length }}</span>
+        </div>
+        <div class="audit-category-body">
+            <table class="features-table">
+                <tbody>
+                    {% for f in feats %}
+                    <tr class="audit-feature-row" data-feature="{{ f }}">
+                        <td class="audit-feature-name"
+                            onclick="loadHistogram('{{ dataset }}', '{{ f }}', {{ pair.features.get(f, 'null') }})"
+                            title="Click for distribution">{{ f }}</td>
+                        <td class="feature-value">{{ "%.4f"|format(pair.features[f]) if pair.features.get(f) is not none else "—" }}</td>
+                        <td class="feature-signal" data-feature="{{ f }}" data-value="{{ pair.features.get(f, '') }}"></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Histogram container (populated by JS on feature click) -->
+<div class="audit-histogram-container" id="audit-histogram" style="display: none;">
+    <div class="audit-histogram-header">
+        <span id="histogram-title">Feature Distribution</span>
+        <button class="features-close" onclick="closeHistogram()">&times;</button>
+    </div>
+    <div id="histogram-svg"></div>
+</div>
+
+<!-- Geometry data for map -->
+<script id="pair-geometry" type="application/json">{{ geojson|safe }}</script>
+{% else %}
+<div class="audit-placeholder">Pair not found</div>
+{% endif %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<div class="audit-layout">
+    <!-- Left panel: pair list -->
+    <div class="audit-left-panel">
+        <div class="audit-controls">
+            <div class="audit-filter-pills">
+                <a href="/audit?dataset={{ dataset }}&label=all"
+                   class="filter-pill {% if label_filter == 'all' %}active{% endif %}">All</a>
+                <a href="/audit?dataset={{ dataset }}&label=match"
+                   class="filter-pill {% if label_filter == 'match' %}active{% endif %}">Match</a>
+                <a href="/audit?dataset={{ dataset }}&label=no_match"
+                   class="filter-pill {% if label_filter == 'no_match' %}active{% endif %}">No Match</a>
+            </div>
+            <div class="audit-sort">
+                <select id="sort-feature" onchange="auditSort(this.value)">
+                    <option value="">Sort by...</option>
+                    {% for cat, feats in feature_categories.items() %}
+                    <optgroup label="{{ cat }}">
+                        {% for f in feats %}
+                        <option value="{{ f }}" {% if sort_feature == f %}selected{% endif %}>{{ f }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="audit-count">{{ total_pairs }} pairs</div>
+        </div>
+
+        <div class="audit-pair-list" id="audit-pair-list">
+            {% if dataset %}
+            {% for pair in pairs %}
+            <div class="audit-pair-row {% if pair.label == 'match' %}row-match{% elif pair.label == 'no_match' %}row-no-match{% endif %}"
+                 data-index="{{ pair.index }}"
+                 hx-get="/audit/pair?dataset={{ dataset }}&index={{ pair.index }}"
+                 hx-target="#audit-detail"
+                 hx-swap="innerHTML"
+                 onclick="selectPairRow(this)">
+                <span class="label-badge label-{{ pair.label|replace('_', '-') }}">{{ pair.label[:1]|upper }}</span>
+                <span class="audit-pair-name">{{ pair.ref_name or pair.gers_id[:12] }}</span>
+                <span class="audit-pair-sep">/</span>
+                <span class="audit-pair-name">{{ pair.target_name or pair.target_id[:12] }}</span>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="audit-empty">Select a dataset from the menu</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right panel: feature inspector -->
+    <div class="audit-right-panel" id="audit-detail">
+        {% if dataset %}
+        <div class="audit-placeholder">Click a pair to inspect its features</div>
+        {% else %}
+        <div class="audit-placeholder">Select a dataset to begin</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/features.js"></script>
+<script src="/static/js/audit.js"></script>
+{% endblock %}

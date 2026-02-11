@@ -38,6 +38,17 @@ DATA_COLUMNS = [
     "target_level_lr",
     "ref_road_flags_lr",
     "target_road_flags_lr",
+    # Topology context (captured at labeling time from full network)
+    "ref_from_degree",
+    "ref_to_degree",
+    "ref_is_dead_end",
+    "ref_is_intersection",
+    "ref_degree_signature",  # JSON-serialized tuple
+    "target_from_degree",
+    "target_to_degree",
+    "target_is_dead_end",
+    "target_is_intersection",
+    "target_degree_signature",  # JSON-serialized tuple
 ]
 
 
@@ -59,6 +70,74 @@ def _deserialize_lr_data(raw: str | None) -> list | None:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return None
+
+
+def _serialize_degree_sig(sig: tuple | list | None) -> str | None:
+    """Serialize degree_signature tuple to JSON string."""
+    if sig is None:
+        return None
+    try:
+        return json.dumps(list(sig))
+    except (TypeError, ValueError):
+        return None
+
+
+def _deserialize_degree_sig(raw) -> tuple | None:
+    """Deserialize degree_signature from JSON string."""
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    try:
+        return tuple(json.loads(raw))
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _flatten_topology(prefix: str, topo: dict | None) -> dict:
+    """Flatten a topology dict into prefixed columns for storage."""
+    if topo is None:
+        return {}
+    return {
+        f"{prefix}_from_degree": topo.get("from_degree"),
+        f"{prefix}_to_degree": topo.get("to_degree"),
+        f"{prefix}_is_dead_end": topo.get("is_dead_end"),
+        f"{prefix}_is_intersection": topo.get("is_intersection"),
+        f"{prefix}_degree_signature": _serialize_degree_sig(topo.get("degree_signature")),
+    }
+
+
+def _reconstruct_topology(prefix: str, row) -> dict | None:
+    """Reconstruct a topology dict from prefixed columns in a row.
+
+    Returns None if all topology columns are missing (backward compat).
+    """
+    from_deg = row.get(f"{prefix}_from_degree")
+    to_deg = row.get(f"{prefix}_to_degree")
+    is_dead = row.get(f"{prefix}_is_dead_end")
+    is_inter = row.get(f"{prefix}_is_intersection")
+    deg_sig_raw = row.get(f"{prefix}_degree_signature")
+
+    # All missing → no topology stored
+    if all(v is None or (isinstance(v, float) and pd.isna(v)) for v in [from_deg, to_deg]):
+        return None
+
+    # Convert numeric types back (parquet may store as float)
+    def _to_num(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return float("nan")
+        return int(v) if float(v) == int(float(v)) else float(v)
+
+    def _to_bool_or_nan(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return float("nan")
+        return bool(v)
+
+    return {
+        "from_degree": _to_num(from_deg),
+        "to_degree": _to_num(to_deg),
+        "is_dead_end": _to_bool_or_nan(is_dead),
+        "is_intersection": _to_bool_or_nan(is_inter),
+        "degree_signature": _deserialize_degree_sig(deg_sig_raw) or (),
+    }
 
 
 @dataclass
@@ -167,6 +246,8 @@ class DataStore:
         target_oneway_lr: list | None = None,
         ref_speed_limit_kph_lr: list | None = None,
         target_speed_limit_kph_lr: list | None = None,
+        ref_topology: dict | None = None,
+        target_topology: dict | None = None,
     ) -> None:
         """Add or update a data record for a labeled pair.
 
@@ -195,6 +276,8 @@ class DataStore:
             target_oneway_lr: Target linear-referenced one-way direction data
             ref_speed_limit_kph_lr: Reference linear-referenced speed limit (kph)
             target_speed_limit_kph_lr: Target linear-referenced speed limit (kph)
+            ref_topology: Reference topology dict from compute_all_topology()
+            target_topology: Target topology dict from compute_all_topology()
         """
         new_row = {
             "gers_id": str(gers_id),
@@ -219,6 +302,8 @@ class DataStore:
             "target_oneway_lr": _serialize_lr_data(target_oneway_lr),
             "ref_speed_limit_kph_lr": _serialize_lr_data(ref_speed_limit_kph_lr),
             "target_speed_limit_kph_lr": _serialize_lr_data(target_speed_limit_kph_lr),
+            **_flatten_topology("ref", ref_topology),
+            **_flatten_topology("target", target_topology),
         }
 
         gdf = self.gdf
@@ -255,7 +340,7 @@ class DataStore:
             """Convert NaN/non-string values to None for string fields."""
             return val if isinstance(val, str) else None
 
-        return {
+        result = {
             "gers_id": row["gers_id"],
             "target_id": row["target_id"],
             "ref_geometry": row["ref_geometry"],
@@ -275,6 +360,12 @@ class DataStore:
             "ref_road_flags_lr": _deserialize_lr_data(row.get("ref_road_flags_lr")),
             "target_road_flags_lr": _deserialize_lr_data(row.get("target_road_flags_lr")),
         }
+
+        # Reconstruct topology dicts (None if columns missing — backward compat)
+        result["ref_topology"] = _reconstruct_topology("ref", row)
+        result["target_topology"] = _reconstruct_topology("target", row)
+
+        return result
 
     def has_pair(self, gers_id: str, target_id: str) -> bool:
         """Check if a data record exists for a labeled pair."""
@@ -359,6 +450,41 @@ class DataStore:
             self._gdf.at[idx, "ref_road_flags_lr"] = _serialize_lr_data(ref_road_flags_lr)
         if target_road_flags_lr is not None:
             self._gdf.at[idx, "target_road_flags_lr"] = _serialize_lr_data(target_road_flags_lr)
+
+        return True
+
+    def update_topology(
+        self,
+        gers_id: str,
+        target_id: str,
+        ref_topology: dict | None = None,
+        target_topology: dict | None = None,
+    ) -> bool:
+        """Update topology columns for an existing data record.
+
+        Used during backfill to persist computed topology for future use,
+        so that target data files don't need to be present on subsequent runs.
+
+        Returns:
+            True if record was found and updated, False if not found
+        """
+        gdf = self.gdf
+        mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
+
+        if not mask.any():
+            return False
+
+        idx = gdf[mask].index[-1]
+
+        if ref_topology is not None:
+            flat = _flatten_topology("ref", ref_topology)
+            for col, val in flat.items():
+                self._gdf.at[idx, col] = val
+
+        if target_topology is not None:
+            flat = _flatten_topology("target", target_topology)
+            for col, val in flat.items():
+                self._gdf.at[idx, col] = val
 
         return True
 

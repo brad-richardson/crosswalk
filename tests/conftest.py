@@ -278,3 +278,13 @@ MOCK_ENDPOINT_FEATURES = {
     "max_endpoint_proximity_m": 0.0,
     "shared_endpoint_count": 0,
 }
+
+# Mock topology features using degree 2 (typical mid-block) rather than
+# degree 1 (dead end default) to verify values are actually passed through.
+MOCK_TOPOLOGY_FEATURES = {
+    "from_degree": 2,
+    "to_degree": 2,
+    "is_dead_end": False,
+    "is_intersection": False,
+    "degree_signature": (2, 2),
+}

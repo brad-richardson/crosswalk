@@ -5,6 +5,7 @@ from shapely.geometry import LineString
 from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
 from matcher.labeling.label_store import LabelStore
 from matcher.matching.ml import FEATURE_COLUMNS
+from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
 
 class TestFeatureParity:
@@ -32,6 +33,8 @@ class TestFeatureParity:
             target_name="Main St",
             ref_class="residential",
             target_class="residential",
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         declared_features = set(ALL_FEATURE_COLUMNS)

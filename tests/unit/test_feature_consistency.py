@@ -12,16 +12,20 @@ The key invariants are:
 4. ml.py delegates to compute_pair_features() - no duplicate logic
 """
 
+import math
+
+import geopandas as gpd
 import pytest
 from shapely import LineString
 
 from matcher.config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
 from matcher.features.compute import (
     ALL_FEATURE_COLUMNS,
+    MissingContextError,
     _get_error_features,
     compute_pair_features,
 )
-from tests.conftest import MOCK_ENDPOINT_FEATURES
+from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
 
 @pytest.fixture
@@ -90,6 +94,28 @@ class TestErrorFeaturesConsistency:
         error_features = _get_error_features()
         assert error_features[feature] == 0.0
 
+    @pytest.mark.parametrize(
+        "feature",
+        [
+            "from_degree_ref",
+            "to_degree_ref",
+            "from_degree_target",
+            "to_degree_target",
+            "degree_match_score",
+            "degree_signature_similarity",
+            "is_dead_end_ref",
+            "is_dead_end_target",
+            "dead_end_match",
+            "is_intersection_ref",
+            "is_intersection_target",
+            "intersection_match",
+        ],
+    )
+    def test_topology_error_defaults_to_nan(self, feature):
+        """Topology features should default to NaN (XGBoost handles natively)."""
+        error_features = _get_error_features()
+        assert math.isnan(error_features[feature])
+
 
 class TestComputePairFeaturesConsistency:
     """Ensure compute_pair_features() returns exactly FEATURE_COLUMNS."""
@@ -102,7 +128,14 @@ class TestComputePairFeaturesConsistency:
         """
         ref_geom, target_geom = simple_pair_geoms
         features = compute_pair_features(
-            ref_geom, target_geom, "Main St", "Main St", "residential", "residential"
+            ref_geom,
+            target_geom,
+            "Main St",
+            "Main St",
+            "residential",
+            "residential",
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
         # Filter out internal metadata fields (prefixed with _)
         feature_keys = {k for k in features if not k.startswith("_")}
@@ -129,6 +162,8 @@ class TestComputePairFeaturesConsistency:
             "residential",
             graphlet_features=graphlet_features,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
         assert features["graphlet_similarity"] == expected_sim
         assert features["endpoint_degree_similarity"] == expected_deg
@@ -188,3 +223,118 @@ class TestGraphletFeatures:
         assert feature in FEATURE_COLUMNS
         error_features = _get_error_features()
         assert error_features[feature] == expected_default
+
+
+class TestCallSiteContextConsistency:
+    """Ensure all call sites provide required context to compute_pair_features.
+
+    These tests verify:
+    1. Missing topology raises MissingContextError (not silently defaults)
+    2. Aligned topology path still works without explicit topology
+    3. Real topology values pass through correctly
+    """
+
+    def test_missing_topology_raises(self):
+        """compute_pair_features must raise MissingContextError when topology omitted."""
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 5), (100, 5)])
+
+        with pytest.raises(MissingContextError, match="ref_topology is required"):
+            compute_pair_features(
+                ref_geom=ref,
+                target_geom=target,
+                ref_name="Main St",
+                target_name="Main St",
+                ref_class="residential",
+                target_class="residential",
+                endpoint_features=MOCK_ENDPOINT_FEATURES,
+                # ref_topology and target_topology deliberately omitted
+            )
+
+    def test_topology_not_required_when_aligned_path_active(self):
+        """Aligned topology path (graphlet_data + alignment + seg_ids) should work
+        without explicit topology parameters."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import precompute_graphlet_features
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["ref_1", "target_1"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(0, 5), (100, 5)]),
+                ],
+            },
+            crs="EPSG:32632",
+        )
+
+        graphlet_data = precompute_graphlet_features(gdf, id_column="id", tolerance_m=5.0)
+        alignment = AlignmentResult(
+            overture_start_frac=0.0,
+            overture_end_frac=1.0,
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,
+        )
+
+        # Should NOT raise - aligned path computes topology from graphlet data
+        features = compute_pair_features(
+            ref_geom=gdf.geometry.iloc[0],
+            target_geom=gdf.geometry.iloc[1],
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+            alignment=alignment,
+            ref_graphlet_data=graphlet_data,
+            target_graphlet_data=graphlet_data,
+            ref_seg_id="ref_1",
+            target_seg_id="target_1",
+        )
+
+        assert "from_degree_ref" in features
+        assert "to_degree_ref" in features
+
+    def test_topology_features_match_real_network(self):
+        """Topology from compute_all_topology should produce non-default features
+        that match actual network structure."""
+        from matcher.features.spatial_context import compute_all_topology
+
+        # Build T-intersection: main road + side street
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["main_w", "main_e", "side"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),  # Main road west
+                    LineString([(100, 0), (200, 0)]),  # Main road east
+                    LineString([(100, 0), (100, 100)]),  # Side street
+                ],
+            },
+            crs="EPSG:32632",
+        )
+
+        topology = compute_all_topology(gdf, id_column="id", tolerance_m=5.0)
+
+        # main_w: from_degree=1 (dead end), to_degree=3 (T-junction)
+        assert topology["main_w"]["to_degree"] == 3
+        assert topology["main_w"]["from_degree"] == 1
+
+        # Pass real topology to compute_pair_features
+        features = compute_pair_features(
+            ref_geom=gdf.geometry.iloc[0],
+            target_geom=gdf.geometry.iloc[1],
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=topology["main_w"],
+            target_topology=topology["main_e"],
+        )
+
+        # Verify non-default values came through
+        # (defaults would be from_degree=1, to_degree=1 for dead ends)
+        assert features["to_degree_ref"] == 3  # T-junction
+        assert features["from_degree_ref"] == 1  # Dead end
+        assert features["is_dead_end_ref"] == 1.0  # main_w from-end is dead end
+        assert features["is_intersection_ref"] == 1.0  # main_w to-end is intersection (degree >= 3)
