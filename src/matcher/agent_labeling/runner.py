@@ -237,19 +237,25 @@ def prepare_batch_prompt(
     prompt = """You are labeling transportation network segment matches in batch mode.
 Segments may be roads, sidewalks, bike lanes, trails, or other features in road/pedestrian/cycling networks.
 
-TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL FEATURE.
+TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL FEATURE with the SAME NETWORK ROLE. A match requires the same role in the network, not just overlapping geometry.
 
-A "match" means: this reference segment best represents this target segment. They cover the same physical movement space, even if the datasets differ in segmentation, naming, or classification.
+A "match" means: the aligned overlapping portions represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
-A "no_match" means: either a better option exists for this target segment, or these are genuinely different features.
+A "no_match" means: not the correct correspondence — either a different physical feature, or the correct corresponding feature is a different candidate.
 
 """
 
     # Section 2: Label definitions
     prompt += """LABELS:
-- match: Same physical feature with >=10% spatial overlap of either segment's length
-- no_match: Different features, or segments on the same road that do not spatially overlap
+- match: Same physical feature with same network role and >=10% spatial overlap
+- no_match: Different features, different network roles, or segments that do not spatially overlap
 - unsure: Ambiguous cases where reasonable people would disagree
+
+NETWORK ROLES (constrains what can match):
+- ALONG: Longitudinal movement (road mainlines, bike lanes, sidewalks). Matches only ALONG.
+- ACROSS: Crossing movement (crosswalks, rail crossings). Never matches ALONG or TURN.
+- TURN: Direction-changing connectors (ramps, slip roads, curb ramps). Matches only same role+intent.
+- INTERNAL: Intersection-scoped slices. May match other INTERNAL with same through-movement.
 
 """
 
@@ -280,6 +286,11 @@ ML FEATURE REFERENCE (rough thresholds for context):
 - heading_delta: <10 degrees suggests match, >45 degrees suggests no_match
 These are guidelines only - always defer to the image over raw numbers.
 
+INTERSECTION RULE:
+- Overlap only at/inside an intersection is NOT sufficient for a match.
+- For a match near an intersection node, the target must continue >=10m past the reference node along the shared direction while staying aligned.
+- Exception: both segments entirely inside the same intersection footprint representing the same through-movement may match (rare).
+
 NO_MATCH EXAMPLES:
 - Two lines running parallel but visually offset (separate infrastructure)
 - Northbound vs southbound lanes of divided highway
@@ -287,6 +298,9 @@ NO_MATCH EXAMPLES:
 - Main road vs adjacent service road/alley
 - Perpendicular/intersecting segments
 - Segments that share an intersection endpoint but continue in different directions
+- Road mainline vs crosswalk at intersection (ALONG vs ACROSS)
+- Road mainline vs turn lane/ramp (ALONG vs TURN)
+- Segments that overlap only inside an intersection then diverge
 
 MATCH EXAMPLES:
 - Lines that overlap on the same path (even with different class labels)
