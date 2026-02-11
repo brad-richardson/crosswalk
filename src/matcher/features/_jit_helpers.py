@@ -55,9 +55,8 @@ def collinear_gap_ratio_numba(
     coords_a: np.ndarray,
     coords_b: np.ndarray,
     heading_threshold: float,
-    min_overlap_fraction: float,
 ) -> float:
-    """Compute collinear gap ratio using JIT-compiled code.
+    """Compute collinear overlap fraction using JIT-compiled code.
 
     This is the complete JIT implementation that handles both the heading
     check and overlap computation. Expects pre-extracted coordinates.
@@ -66,10 +65,9 @@ def collinear_gap_ratio_numba(
         coords_a: Nx2 array of coordinates for line A
         coords_b: Mx2 array of coordinates for line B
         heading_threshold: Max heading difference to consider collinear (degrees)
-        min_overlap_fraction: Minimum overlap to not penalize (fraction 0-1)
 
     Returns:
-        Gap ratio from 0.0 (collinear with poor overlap) to 1.0 (no penalty).
+        Overlap fraction (0-1) for collinear pairs, 1.0 for non-collinear pairs.
     """
     # Compute headings
     dx_a = coords_a[-1, 0] - coords_a[0, 0]
@@ -120,10 +118,7 @@ def collinear_gap_ratio_numba(
 
     along_track_overlap = overlap_length / smaller_extent
 
-    if along_track_overlap >= min_overlap_fraction:
-        return 1.0
-
-    return along_track_overlap / min_overlap_fraction
+    return along_track_overlap
 
 
 @njit(cache=True)

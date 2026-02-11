@@ -106,6 +106,37 @@ def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[s
     }
 
 
+def _reconstruct_topology_from_features(features: dict[str, float], side: str) -> dict | None:
+    """Reconstruct a topology dict from ML feature values.
+
+    Args:
+        features: Feature dict containing from_degree_{side}, to_degree_{side}, etc.
+        side: "ref" or "target"
+
+    Returns:
+        Topology dict or None if features are missing/NaN.
+    """
+    from_deg = features.get(f"from_degree_{side}")
+    to_deg = features.get(f"to_degree_{side}")
+    if from_deg is None or to_deg is None:
+        return None
+    if pd.isna(from_deg) or pd.isna(to_deg):
+        return None
+
+    is_dead = features.get(f"is_dead_end_{side}")
+    is_inter = features.get(f"is_intersection_{side}")
+
+    return {
+        "from_degree": int(from_deg),
+        "to_degree": int(to_deg),
+        "is_dead_end": bool(is_dead) if is_dead is not None and not pd.isna(is_dead) else False,
+        "is_intersection": (
+            bool(is_inter) if is_inter is not None and not pd.isna(is_inter) else False
+        ),
+        "degree_signature": tuple(sorted([int(from_deg), int(to_deg)])),
+    }
+
+
 @dataclass
 class CandidatePairView:
     """View model for a single candidate pair in the labeling UI."""
@@ -133,6 +164,9 @@ class CandidatePairView:
     ref_end_frac: float = 1.0
     target_start_frac: float = 0.0
     target_end_frac: float = 1.0
+    # Topology context (captured from full network at scoring time)
+    ref_topology: dict | None = None
+    target_topology: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for cache storage."""
@@ -163,7 +197,30 @@ class CandidatePairView:
             "ref_end_frac": self.ref_end_frac,
             "target_start_frac": self.target_start_frac,
             "target_end_frac": self.target_end_frac,
+            # Topology context
+            "ref_topology_json": json.dumps(self._serialize_topology(self.ref_topology)),
+            "target_topology_json": json.dumps(self._serialize_topology(self.target_topology)),
         }
+
+    @staticmethod
+    def _serialize_topology(topo: dict | None) -> dict | None:
+        """Serialize topology dict for JSON storage (convert tuple to list)."""
+        if topo is None:
+            return None
+        result = dict(topo)
+        if "degree_signature" in result and isinstance(result["degree_signature"], tuple):
+            result["degree_signature"] = list(result["degree_signature"])
+        return result
+
+    @staticmethod
+    def _deserialize_topology(topo: dict | None) -> dict | None:
+        """Deserialize topology dict from JSON (convert list back to tuple)."""
+        if topo is None:
+            return None
+        result = dict(topo)
+        if "degree_signature" in result and isinstance(result["degree_signature"], list):
+            result["degree_signature"] = tuple(result["degree_signature"])
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CandidatePairView":
@@ -211,6 +268,15 @@ class CandidatePairView:
             ref_end_frac=data.get("ref_end_frac", 1.0),
             target_start_frac=data.get("target_start_frac", 0.0),
             target_end_frac=data.get("target_end_frac", 1.0),
+            # Topology context (may be None in older caches)
+            ref_topology=cls._deserialize_topology(
+                json.loads(data["ref_topology_json"]) if data.get("ref_topology_json") else None
+            ),
+            target_topology=cls._deserialize_topology(
+                json.loads(data["target_topology_json"])
+                if data.get("target_topology_json")
+                else None
+            ),
         )
 
 
@@ -1010,6 +1076,8 @@ def generate_scored_candidates(
                 ref_end_frac=ref_end_frac,
                 target_start_frac=target_start_frac,
                 target_end_frac=target_end_frac,
+                ref_topology=_reconstruct_topology_from_features(result.features, "ref"),
+                target_topology=_reconstruct_topology_from_features(result.features, "target"),
             )
         )
 
@@ -1375,6 +1443,8 @@ def build_views_from_feature_df(
                 ref_end_frac=ref_end_frac,
                 target_start_frac=target_start_frac,
                 target_end_frac=target_end_frac,
+                ref_topology=_reconstruct_topology_from_features(features, "ref"),
+                target_topology=_reconstruct_topology_from_features(features, "target"),
             )
         )
 

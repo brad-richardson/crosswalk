@@ -4,6 +4,7 @@ This module provides a unified interface for computing all features for candidat
 including geometric, semantic, relational, and topology features.
 """
 
+import math
 import os
 import threading
 import time
@@ -116,10 +117,15 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
 
 
 from ..config import (
-    DEFAULT_TOPOLOGY_FEATURES,
     FEATURE_COLUMNS,
     MAX_DISTANCE_METERS,
 )
+
+
+class MissingContextError(TypeError):
+    """Required context parameters missing - programmer error, not bad data."""
+
+
 from .alignment import AlignmentResult, compute_coverage_features, create_subline
 from .geometric import (
     GeometricFeatures,
@@ -350,36 +356,60 @@ def _compute_non_geometric_features(
             target_topology = target_aligned_topo
         else:
             if ref_topology is None:
-                ref_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+                raise MissingContextError(
+                    "ref_topology is required when aligned topology path is not active. "
+                    "Call compute_all_topology() and pass the result."
+                )
             if target_topology is None:
-                target_topology = DEFAULT_TOPOLOGY_FEATURES.copy()
+                raise MissingContextError(
+                    "target_topology is required when aligned topology path is not active. "
+                    "Call compute_all_topology() and pass the result."
+                )
 
-            from_degree_ref = ref_topology.get("from_degree", 1)
-            to_degree_ref = ref_topology.get("to_degree", 1)
-            from_degree_target = target_topology.get("from_degree", 1)
-            to_degree_target = target_topology.get("to_degree", 1)
+            from_degree_ref = ref_topology.get("from_degree", float("nan"))
+            to_degree_ref = ref_topology.get("to_degree", float("nan"))
+            from_degree_target = target_topology.get("from_degree", float("nan"))
+            to_degree_target = target_topology.get("to_degree", float("nan"))
 
-    # Degree match score
-    with timed_section("degree_match"):
-        degree_match = compute_degree_match_score(
-            from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
-        )
+    # NaN-propagation guard: if any degree value is NaN, all derived topology
+    # features must be NaN too. This avoids truthy/falsy issues with NaN in
+    # boolean comparisons (e.g. `if NaN` is truthy in Python).
+    _topo_nan = any(
+        isinstance(v, float) and math.isnan(v)
+        for v in [from_degree_ref, to_degree_ref, from_degree_target, to_degree_target]
+    )
 
-    # Degree signature similarity
-    with timed_section("degree_signature"):
-        ref_sig = ref_topology.get("degree_signature", (1,))
-        target_sig = target_topology.get("degree_signature", (1,))
-        sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
+    if _topo_nan:
+        degree_match = float("nan")
+        sig_similarity = float("nan")
+        is_dead_end_ref = float("nan")
+        is_dead_end_target = float("nan")
+        dead_end_match = float("nan")
+        is_intersection_ref = float("nan")
+        is_intersection_target = float("nan")
+        intersection_match = float("nan")
+    else:
+        # Degree match score
+        with timed_section("degree_match"):
+            degree_match = compute_degree_match_score(
+                from_degree_ref, to_degree_ref, from_degree_target, to_degree_target
+            )
 
-    # Topology flags
-    with timed_section("topology_flags"):
-        is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
-        is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
-        dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
+        # Degree signature similarity
+        with timed_section("degree_signature"):
+            ref_sig = ref_topology.get("degree_signature", (1,))
+            target_sig = target_topology.get("degree_signature", (1,))
+            sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
 
-        is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
-        is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
-        intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
+        # Topology flags
+        with timed_section("topology_flags"):
+            is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
+            is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
+            dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
+
+            is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
+            is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
+            intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
     # Coverage features
     with timed_section("coverage_features"):
@@ -703,8 +733,10 @@ def compute_pair_features(
         ref_subclass: Reference road subclass (optional)
         target_subclass: Target road subclass (optional)
         endpoint_features: Pre-computed endpoint proximity features (optional)
-        ref_topology: Pre-computed topology features for reference (optional)
-        target_topology: Pre-computed topology features for target (optional)
+        ref_topology: Pre-computed topology features for reference (required unless
+            aligned topology path is active via graphlet_data + alignment + seg_ids)
+        target_topology: Pre-computed topology features for target (required unless
+            aligned topology path is active via graphlet_data + alignment + seg_ids)
         alignment: Pre-computed alignment result for using aligned sublines (optional)
         graphlet_features: Pre-computed graphlet similarity features (optional)
         ref_graphlet_data: Graphlet data for reference (G, seg_to_connectors, node_features, use_connectors)
@@ -842,6 +874,8 @@ def compute_pair_features(
 
         return features
 
+    except MissingContextError:
+        raise  # Programmer error - must propagate
     except Exception as e:
         # Log at warning level with phase context for debugging
         logger.warning(
@@ -895,19 +929,19 @@ def _get_error_features(
         "lateral_offset_m": MAX_DISTANCE_METERS,
         "lateral_offset_iqr_m": MAX_DISTANCE_METERS,
         "lateral_offset_p95_m": MAX_DISTANCE_METERS,
-        # Topology features
-        "from_degree_ref": 0,
-        "to_degree_ref": 0,
-        "from_degree_target": 0,
-        "to_degree_target": 0,
-        "degree_match_score": 0.5,
-        "degree_signature_similarity": 0.5,
-        "is_dead_end_ref": 0.5,
-        "is_dead_end_target": 0.5,
-        "dead_end_match": 0.5,
-        "is_intersection_ref": 0.5,
-        "is_intersection_target": 0.5,
-        "intersection_match": 0.5,
+        # Topology features — NaN for unknown (XGBoost handles natively)
+        "from_degree_ref": float("nan"),
+        "to_degree_ref": float("nan"),
+        "from_degree_target": float("nan"),
+        "to_degree_target": float("nan"),
+        "degree_match_score": float("nan"),
+        "degree_signature_similarity": float("nan"),
+        "is_dead_end_ref": float("nan"),
+        "is_dead_end_target": float("nan"),
+        "dead_end_match": float("nan"),
+        "is_intersection_ref": float("nan"),
+        "is_intersection_target": float("nan"),
+        "intersection_match": float("nan"),
         # Coverage features
         "ref_coverage": 0.0,
         "target_coverage": 0.0,

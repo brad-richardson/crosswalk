@@ -16,14 +16,16 @@ MAX_DISTANCE_METERS = 10000.0
 METRIC_AVERAGE = "binary"
 METRIC_SCORING = "f1"  # sklearn scoring string for cross_val_score
 
-# Default topology features for empty/missing geometries
-# Represents an isolated dead-end segment (degree 1 at both endpoints)
+# Default topology features for genuinely unknown topology.
+# Uses NaN so XGBoost learns optimal split direction for missing values,
+# and NaN is clearly distinguishable from real data (unlike degree=1 which
+# looks identical to a real dead-end segment).
 DEFAULT_TOPOLOGY_FEATURES = {
-    "from_degree": 1,
-    "to_degree": 1,
-    "is_dead_end": True,
-    "is_intersection": False,
-    "degree_signature": (1,),
+    "from_degree": float("nan"),
+    "to_degree": float("nan"),
+    "is_dead_end": float("nan"),
+    "is_intersection": float("nan"),
+    "degree_signature": (),
 }
 
 # Tolerance for determining if alignment is "full" vs "partial"

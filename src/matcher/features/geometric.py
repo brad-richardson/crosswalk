@@ -763,19 +763,11 @@ def compute_collinear_gap_ratio(
     line_a: LineString,
     line_b: LineString,
     heading_threshold: float = 15.0,
-    min_overlap_fraction: float = 0.1,
     *,
     coords_a: np.ndarray | None = None,
     coords_b: np.ndarray | None = None,
 ) -> float:
-    """Detect collinear segments that barely touch (tip-to-tip penalty).
-
-    NOTE: Ablation study shows this feature has near-zero importance
-    (f1_delta=+0.000016 — removing it slightly *improves* the model). This is
-    because the feature returns 1.0 (no penalty) for the vast majority of pairs
-    (non-collinear, degenerate, zero-extent), and is only informative for the
-    rare case of collinear tip-to-tip segments. Candidate for removal in future
-    feature pruning.
+    """Compute along-track overlap fraction for collinear segments.
 
     This feature addresses the problem where consecutive road segments
     (same street, same direction, but end-to-end) score artificially high
@@ -783,32 +775,29 @@ def compute_collinear_gap_ratio(
 
     Algorithm:
     1. Check if segments are collinear (heading_delta < threshold)
-    2. If not collinear → return 1.0 (no penalty, let other features decide)
+    2. If not collinear → return 1.0 (let other features decide)
     3. Project both segments onto their common direction axis
-    4. Compute 1D overlap ratio along that axis
-    5. If good overlap (≥ min_overlap_fraction) → return 1.0 (no penalty)
-    6. If poor overlap or gap → return low value (0.0-1.0)
+    4. Return the raw overlap fraction (0-1) along that axis
 
     Args:
         line_a: First geometry (LineString, projected CRS)
         line_b: Second geometry (LineString, projected CRS)
         heading_threshold: Max heading difference to consider collinear (degrees)
-        min_overlap_fraction: Minimum overlap to not penalize (fraction 0-1)
         coords_a: Pre-extracted coordinates for line_a (optional, avoids redundant extraction)
         coords_b: Pre-extracted coordinates for line_b (optional, avoids redundant extraction)
 
     Returns:
-        1.0 = not collinear OR collinear with good overlap (no penalty)
-        0.0-1.0 = collinear with poor overlap (penalty scaled by overlap)
+        1.0 = not collinear or degenerate (no penalty)
+        0.0-1.0 = collinear overlap fraction (0.0 = no overlap, 1.0 = full overlap)
 
     Example:
         Segment A: (0,0) → (100,0)
         Segment B: (100,0) → (200,0)  # tip-to-tip
-        → Returns ~0.0 (strong penalty)
+        → Returns ~0.0 (no overlap)
 
         Segment A: (0,0) → (100,0)
         Segment B: (25,0) → (75,0)  # contained within
-        → Returns 1.0 (good overlap, no penalty)
+        → Returns 1.0 (full overlap)
     """
     # Handle degenerate cases
     if line_a.is_empty or line_b.is_empty:
@@ -822,7 +811,7 @@ def compute_collinear_gap_ratio(
     if coords_b is None:
         coords_b = np.array(line_b.coords)
 
-    return collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold, min_overlap_fraction)
+    return collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold)
 
 
 def compute_angle_histogram_similarity(
@@ -850,8 +839,9 @@ def compute_angle_histogram_similarity(
         n_bins: Number of histogram bins (default 8 = 22.5° per bin)
 
     Returns:
-        Similarity score (0-1) where 1 = identical angle distributions
-        Returns 0.5 (neutral) for degenerate cases (< 3 points in either line)
+        Similarity score (0-1) where 1 = identical angle distributions.
+        For 2-point (straight) lines: both straight → 1.0,
+        one straight → compared against a straight-line histogram.
     """
     if line_a.is_empty or line_b.is_empty:
         return 1.0
@@ -861,14 +851,25 @@ def compute_angle_histogram_similarity(
     if coords_b is None:
         coords_b = np.array(line_b.coords)
 
-    # Lines with < 3 points have no turn angles — return neutral value.
-    # Previously returned 1.0 ("identical shapes"), which falsely rewarded
-    # sparse geometry pairs. 0.5 is neutral: doesn't penalize or reward.
-    if len(coords_a) < 3 or len(coords_b) < 3:
-        return 0.5
+    a_has_turns = len(coords_a) >= 3
+    b_has_turns = len(coords_b) >= 3
 
-    hist_a = compute_angle_histogram_numba(coords_a, n_bins)
-    hist_b = compute_angle_histogram_numba(coords_b, n_bins)
+    if not a_has_turns and not b_has_turns:
+        return 1.0  # Both straight - identical shape profiles
+
+    # Straight-line histogram: all weight at bin 0 (zero-degree turns)
+    straight_hist = np.zeros(n_bins, dtype=np.float64)
+    straight_hist[0] = 1.0
+
+    if a_has_turns and b_has_turns:
+        hist_a = compute_angle_histogram_numba(coords_a, n_bins)
+        hist_b = compute_angle_histogram_numba(coords_b, n_bins)
+    elif a_has_turns:
+        hist_a = compute_angle_histogram_numba(coords_a, n_bins)
+        hist_b = straight_hist
+    else:
+        hist_a = straight_hist
+        hist_b = compute_angle_histogram_numba(coords_b, n_bins)
 
     return histogram_intersection_numba(hist_a, hist_b)
 

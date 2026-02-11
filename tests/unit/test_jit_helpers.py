@@ -93,14 +93,11 @@ class TestCollinearGapRatioNumba:
     """Tests for collinear_gap_ratio_numba JIT function."""
 
     def test_tip_to_tip_no_overlap(self):
-        """Tip-to-tip segments should have low overlap score."""
+        """Tip-to-tip segments should have zero overlap fraction."""
         coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
         coords_b = np.array([[100.0, 0.0], [200.0, 0.0]])
 
-        result = collinear_gap_ratio_numba(
-            coords_a, coords_b, heading_threshold=15.0, min_overlap_fraction=0.1
-        )
-        # Tip-to-tip with 0 overlap should return 0.0
+        result = collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold=15.0)
         assert result == pytest.approx(0.0, abs=0.01)
 
     def test_full_overlap(self):
@@ -108,30 +105,24 @@ class TestCollinearGapRatioNumba:
         coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
         coords_b = np.array([[25.0, 0.0], [75.0, 0.0]])
 
-        result = collinear_gap_ratio_numba(
-            coords_a, coords_b, heading_threshold=15.0, min_overlap_fraction=0.1
-        )
+        result = collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold=15.0)
         assert result == pytest.approx(1.0)
 
-    def test_partial_overlap_above_threshold(self):
-        """Partial overlap above threshold should return 1.0."""
+    def test_partial_overlap_returns_fraction(self):
+        """Partial overlap should return the raw overlap fraction."""
         coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
         coords_b = np.array([[80.0, 0.0], [180.0, 0.0]])
 
-        result = collinear_gap_ratio_numba(
-            coords_a, coords_b, heading_threshold=15.0, min_overlap_fraction=0.1
-        )
-        # 20m overlap on 100m segment = 20% overlap > 10% threshold
-        assert result == pytest.approx(1.0)
+        result = collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold=15.0)
+        # 20m overlap on 100m segment = 0.2
+        assert result == pytest.approx(0.2, abs=0.05)
 
     def test_opposite_heading_collinear(self):
         """Segments with opposite headings should still compute overlap correctly."""
         coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])
         coords_b = np.array([[50.0, 0.0], [25.0, 0.0]])  # Reversed direction
 
-        result = collinear_gap_ratio_numba(
-            coords_a, coords_b, heading_threshold=15.0, min_overlap_fraction=0.1
-        )
+        result = collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold=15.0)
         # Should detect overlap despite opposite heading
         assert result == pytest.approx(1.0)
 
@@ -140,9 +131,7 @@ class TestCollinearGapRatioNumba:
         coords_a = np.array([[0.0, 0.0], [100.0, 0.0]])  # Horizontal
         coords_b = np.array([[50.0, 0.0], [50.0, 100.0]])  # Vertical
 
-        result = collinear_gap_ratio_numba(
-            coords_a, coords_b, heading_threshold=15.0, min_overlap_fraction=0.1
-        )
+        result = collinear_gap_ratio_numba(coords_a, coords_b, heading_threshold=15.0)
         assert result == pytest.approx(1.0)
 
 

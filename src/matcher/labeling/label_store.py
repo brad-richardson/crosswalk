@@ -331,6 +331,8 @@ class LabelStore:
         target_class_raw: str | None = None,
         ref_subclass: str | None = None,
         target_subclass: str | None = None,
+        ref_topology: dict | None = None,
+        target_topology: dict | None = None,
     ) -> None:
         """Add a new label.
 
@@ -418,6 +420,8 @@ class LabelStore:
                 target_class=target_class_raw,
                 ref_subclass=ref_subclass,
                 target_subclass=target_subclass,
+                ref_topology=ref_topology,
+                target_topology=target_topology,
             )
             data_store.save()
 

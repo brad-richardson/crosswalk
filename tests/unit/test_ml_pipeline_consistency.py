@@ -8,6 +8,7 @@ These tests ensure feature computation is consistent across training and inferen
 These catch subtle training/inference skew that would degrade model performance.
 """
 
+import math
 import tempfile
 from pathlib import Path
 
@@ -48,6 +49,7 @@ class TestPrecomputedFeaturePassthrough:
             SpatialContextIndex,
             compute_endpoint_features,
         )
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         spatial_index = SpatialContextIndex()
         spatial_index.build_from_gdf(t_network, id_column="id")
@@ -63,6 +65,8 @@ class TestPrecomputedFeaturePassthrough:
             ref_class=None,
             target_class=None,
             endpoint_features=precomputed,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         # Pre-computed values should pass through (capped at MAX_DISTANCE_METERS)
@@ -114,7 +118,7 @@ class TestPrecomputedFeaturePassthrough:
     ):
         """Pre-computed graphlet features should be used unchanged."""
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(
             ref_geom=t_network.geometry.iloc[0],
@@ -125,6 +129,8 @@ class TestPrecomputedFeaturePassthrough:
             target_class=None,
             graphlet_features=graphlet_input,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         assert features["graphlet_similarity"] == expected_sim
@@ -297,6 +303,7 @@ class TestLabelStoreParity:
         from matcher.features.compute import compute_pair_features
         from matcher.labeling.feature_store import FeatureStore
         from matcher.labeling.label_store import LabelStore
+        from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(
             ref_geom=LineString([(0, 0), (100, 0)]),
@@ -305,6 +312,8 @@ class TestLabelStoreParity:
             target_name="Main St",
             ref_class="residential",
             target_class="residential",
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -326,6 +335,12 @@ class TestLabelStoreParity:
             assert stored_features is not None, "Features not found in FeatureStore"
 
             for feat in FEATURE_COLUMNS:
-                assert stored_features[feat] == pytest.approx(features[feat], rel=1e-5), (
-                    f"Mismatch: {feat}"
-                )
+                expected = features[feat]
+                actual = stored_features[feat]
+                # NaN == NaN should pass (both sides consistently NaN)
+                if isinstance(expected, float) and math.isnan(expected):
+                    assert isinstance(actual, float) and math.isnan(actual), (
+                        f"Mismatch: {feat} — expected NaN, got {actual}"
+                    )
+                else:
+                    assert actual == pytest.approx(expected, rel=1e-5), f"Mismatch: {feat}"
