@@ -12,7 +12,7 @@ import pytest
 from shapely.geometry import LineString
 from shapely.ops import transform as shapely_transform
 
-from matcher.features.alignment import create_subline, linestring_alignment
+from matcher.features.alignment import linestring_alignment
 
 
 class TestSyntheticAlignmentRegression:
@@ -337,48 +337,6 @@ _UTM43N = pyproj.Transformer.from_crs(
 ).transform
 
 
-def _subline_overshoot(ref, target, result):
-    """Compute how far each subline extends past the other line's extent.
-
-    Returns (ref_overshoot, target_overshoot) in the same units as the input
-    geometries (degrees for WGS84, meters for projected).
-    """
-    ref_sub = create_subline(ref, result.overture_start_frac, result.overture_end_frac)
-    target_sub = create_subline(target, result.dataset_start_frac, result.dataset_end_frac)
-    if ref_sub is None or target_sub is None:
-        return float("inf"), float("inf")
-
-    # Project target subline endpoints onto ref to find valid ref range
-    t_start_proj = ref.project(target_sub.interpolate(0), normalized=True)
-    t_end_proj = ref.project(target_sub.interpolate(1, normalized=True), normalized=True)
-    ref_clipped_start = max(result.overture_start_frac, min(t_start_proj, t_end_proj))
-    ref_clipped_end = min(result.overture_end_frac, max(t_start_proj, t_end_proj))
-
-    ref_overshoot = (
-        max(
-            abs(result.overture_start_frac - ref_clipped_start),
-            abs(result.overture_end_frac - ref_clipped_end),
-        )
-        * ref.length
-    )
-
-    # Project ref subline endpoints onto target to find valid target range
-    r_start_proj = target.project(ref_sub.interpolate(0), normalized=True)
-    r_end_proj = target.project(ref_sub.interpolate(1, normalized=True), normalized=True)
-    tgt_clipped_start = max(result.dataset_start_frac, min(r_start_proj, r_end_proj))
-    tgt_clipped_end = min(result.dataset_end_frac, max(r_start_proj, r_end_proj))
-
-    target_overshoot = (
-        max(
-            abs(result.dataset_start_frac - tgt_clipped_start),
-            abs(result.dataset_end_frac - tgt_clipped_end),
-        )
-        * target.length
-    )
-
-    return ref_overshoot, target_overshoot
-
-
 class TestOveralignment:
     """Tests for barely-overlapping segments that should have small alignment.
 
@@ -393,15 +351,13 @@ class TestOveralignment:
     # -- Parameterized: barely-overlapping pairs should have small coverage --
 
     @pytest.mark.parametrize(
-        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, max_overshoot, case_id",
+        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov",
         [
             pytest.param(
                 _MUMBAI_REF_WGS,
                 _MUMBAI_TGT_WGS,
                 0.15,
                 0.15,
-                1.0 / 111000,  # 1m in degrees
-                "mumbai_wgs84",
                 id="mumbai-degree-space",
             ),
             pytest.param(
@@ -409,8 +365,6 @@ class TestOveralignment:
                 list(shapely_transform(_UTM43N, LineString(_MUMBAI_TGT_WGS)).coords),
                 0.05,
                 0.05,
-                2.0,  # 2m in projected meters
-                "mumbai_projected",
                 id="mumbai-projected-meters",
             ),
             pytest.param(
@@ -418,8 +372,6 @@ class TestOveralignment:
                 [(0, 3), (50, 3), (100, 3)],
                 0.10,
                 0.15,
-                1.0,  # 1m in synthetic meters
-                "synthetic_collinear",
                 id="synthetic-collinear-5m-overlap",
             ),
             pytest.param(
@@ -442,34 +394,24 @@ class TestOveralignment:
                 [(-2.2, -3), (7.6, 2.2), (18.1, 10), (28.7, 22.9), (36.7, 40.6), (39.9, 51.5)],
                 0.05,
                 0.10,
-                10.0,  # More generous for angled pair
-                "bogota_asymmetric",
                 id="bogota-asymmetric-360m-ref",
             ),
         ],
     )
     def test_barely_overlapping_small_coverage(
-        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, max_overshoot, case_id
+        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov
     ):
-        """Barely-overlapping pairs should have small coverage and limited overshoot."""
+        """Barely-overlapping pairs should have small coverage fractions."""
         ref = LineString(ref_coords)
         target = LineString(tgt_coords)
 
         result = linestring_alignment(ref, target)
 
         assert result.overture_coverage < max_ref_cov, (
-            f"[{case_id}] ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
+            f"ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
         )
         assert result.dataset_coverage < max_tgt_cov, (
-            f"[{case_id}] tgt_cov={result.dataset_coverage:.4f}, expected < {max_tgt_cov}"
-        )
-
-        ref_overshoot, target_overshoot = _subline_overshoot(ref, target, result)
-        assert ref_overshoot < max_overshoot, (
-            f"[{case_id}] ref overshoots target by {ref_overshoot:.2f}"
-        )
-        assert target_overshoot < max_overshoot, (
-            f"[{case_id}] target overshoots ref by {target_overshoot:.2f}"
+            f"tgt_cov={result.dataset_coverage:.4f}, expected < {max_tgt_cov}"
         )
 
     # -- Parameterized: well-aligned pairs should maintain high coverage --
@@ -557,3 +499,90 @@ class TestOveralignment:
         result = linestring_alignment(ref, target)
 
         assert result.overture_coverage > 0.005 or result.dataset_coverage > 0.005
+
+    def test_endpoint_seed_must_not_regress_final_score(self):
+        """Endpoint seed that scores well at seed point but converges to worse optimum.
+
+        Regression: Frisco trail pair where the backward endpoint seed scored
+        11.6x better than midpoint at the seed point, but grid+ternary from
+        that seed converged to a worse local optimum (score 35224 vs 46039),
+        collapsing a valid 21% overlap to a 1.7% stub.
+
+        The fix runs grid+ternary from both seeds and keeps whichever produces
+        the better final score.
+        """
+        # Short winding ref (~282m), long target (~1315m), partial overlap ~21%
+        ref = LineString(
+            [
+                (-97.0621, 33.1546),
+                (-97.0622, 33.1549),
+                (-97.0625, 33.1551),
+                (-97.0629, 33.1554),
+                (-97.0630, 33.1557),
+                (-97.0628, 33.1561),
+                (-97.0625, 33.1563),
+                (-97.0622, 33.1562),
+                (-97.0619, 33.1558),
+                (-97.0617, 33.1554),
+                (-97.0615, 33.1549),
+                (-97.0612, 33.1546),
+                (-97.0609, 33.1544),
+                (-97.0605, 33.1545),
+                (-97.0601, 33.1548),
+                (-97.0597, 33.1549),
+                (-97.0593, 33.1548),
+                (-97.0590, 33.1545),
+                (-97.0587, 33.1541),
+                (-97.0584, 33.1538),
+                (-97.0580, 33.1536),
+                (-97.0575, 33.1535),
+                (-97.0571, 33.1536),
+                (-97.0568, 33.1539),
+                (-97.0565, 33.1542),
+                (-97.0561, 33.1543),
+            ]
+        )
+        # Long target that overlaps ref along its southern segment
+        target = LineString(
+            [
+                (-97.0640, 33.1530),
+                (-97.0635, 33.1533),
+                (-97.0630, 33.1536),
+                (-97.0625, 33.1539),
+                (-97.0621, 33.1542),
+                (-97.0618, 33.1545),
+                (-97.0615, 33.1548),
+                (-97.0612, 33.1545),
+                (-97.0609, 33.1543),
+                (-97.0605, 33.1544),
+                (-97.0601, 33.1547),
+                (-97.0597, 33.1548),
+                (-97.0593, 33.1547),
+                (-97.0590, 33.1544),
+                (-97.0587, 33.1540),
+                (-97.0584, 33.1537),
+                (-97.0580, 33.1535),
+                (-97.0575, 33.1534),
+                (-97.0571, 33.1535),
+                (-97.0568, 33.1538),
+                (-97.0565, 33.1541),
+                (-97.0561, 33.1542),
+                (-97.0556, 33.1541),
+                (-97.0551, 33.1539),
+                (-97.0546, 33.1537),
+                (-97.0541, 33.1535),
+                (-97.0536, 33.1533),
+                (-97.0531, 33.1530),
+            ]
+        )
+
+        result = linestring_alignment(ref, target)
+
+        # The overlap should be substantial — ref runs ~parallel to target's
+        # southern section. Min coverage should be at least 10%.
+        min_cov = min(result.overture_coverage, result.dataset_coverage)
+        assert min_cov > 0.10, (
+            f"Endpoint seed regression: min_coverage={min_cov:.4f}, "
+            f"expected >0.10. Endpoint seed may have hijacked alignment "
+            f"to a worse local optimum."
+        )

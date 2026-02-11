@@ -36,6 +36,12 @@ _GEOD = Geod(ellps="WGS84")
 # to avoid perturbing well-aligned pairs where the midpoint seed works fine.
 _ENDPOINT_SEED_THRESHOLD = 5.0
 
+# Buffer distance for seed scoring is a fraction of the shorter line's length,
+# divided by the grid resolution. Controls how "wide" the scoring kernel is
+# when evaluating candidate seed offsets.
+_SEED_BUFFER_FRACTION = 0.5
+_MIN_GRID_SAMPLES = 2
+
 
 def geodetic_length(line: LineString) -> float:
     """Compute geodetic length in meters on the WGS84 ellipsoid.
@@ -501,93 +507,100 @@ def linestring_alignment(
     proj_mid = reference.project(target_mid)
     proj_end = reference.project(Point(target.coords[-1]))
 
-    buffer_distance_for_seed = 0.5 * min(ref_length, target_length) / max(grid_samples, 2)
-
-    midpoint_seed = proj_mid - target_length / 2.0
-    midpoint_score = _get_score_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
-        target_coords,
-        target_distances,
-        target_length,
-        midpoint_seed,
-        buffer_distance_for_seed,
+    buffer_distance_for_seed = (
+        _SEED_BUFFER_FRACTION
+        * min(ref_length, target_length)
+        / max(grid_samples, _MIN_GRID_SAMPLES)
     )
 
-    best_forward_seed = midpoint_seed
-    best_forward_score = midpoint_score
-    for s in [proj_start, proj_end - target_length]:
-        score = _get_score_numba(
+    midpoint_seed = proj_mid - target_length / 2.0
+
+    def _best_offset_with_endpoint_seeds(
+        tgt_coords: np.ndarray,
+        tgt_distances: np.ndarray,
+        endpoint_seed_candidates: list[float],
+    ) -> tuple[float, float]:
+        """Run grid+ternary from midpoint seed and optionally an endpoint seed.
+
+        For barely-overlapping lines, endpoint seeds can score much better at the
+        seed point, but a high seed score doesn't guarantee the grid+ternary search
+        converges to a better final offset. So we run from both seeds and keep
+        whichever produces the better final score.
+        """
+        mp_score = _get_score_numba(
             ref_coords,
             ref_distances,
             ref_length,
-            target_coords,
-            target_distances,
+            tgt_coords,
+            tgt_distances,
             target_length,
-            s,
+            midpoint_seed,
             buffer_distance_for_seed,
         )
-        if score > midpoint_score * _ENDPOINT_SEED_THRESHOLD and score > best_forward_score:
-            best_forward_seed = s
-            best_forward_score = score
 
-    # Compare normally (forward)
-    forward_offset, forward_score = _find_best_alignment_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
+        # Check if any endpoint seed scores dramatically better than midpoint
+        best_ep_seed = None
+        best_ep_score = mp_score
+        for s in endpoint_seed_candidates:
+            score = _get_score_numba(
+                ref_coords,
+                ref_distances,
+                ref_length,
+                tgt_coords,
+                tgt_distances,
+                target_length,
+                s,
+                buffer_distance_for_seed,
+            )
+            if score > mp_score * _ENDPOINT_SEED_THRESHOLD and score > best_ep_score:
+                best_ep_seed = s
+                best_ep_score = score
+
+        # Always run from midpoint seed
+        best_offset, best_score = _find_best_alignment_numba(
+            ref_coords,
+            ref_distances,
+            ref_length,
+            tgt_coords,
+            tgt_distances,
+            target_length,
+            grid_samples,
+            refinement_steps,
+            midpoint_seed,
+        )
+
+        # If an endpoint seed qualified, also run from it and keep better result
+        if best_ep_seed is not None:
+            ep_offset, ep_score = _find_best_alignment_numba(
+                ref_coords,
+                ref_distances,
+                ref_length,
+                tgt_coords,
+                tgt_distances,
+                target_length,
+                grid_samples,
+                refinement_steps,
+                best_ep_seed,
+            )
+            if ep_score > best_score:
+                best_offset, best_score = ep_offset, ep_score
+
+        return best_offset, best_score
+
+    forward_offset, forward_score = _best_offset_with_endpoint_seeds(
         target_coords,
         target_distances,
-        target_length,
-        grid_samples,
-        refinement_steps,
-        best_forward_seed,
+        [proj_start, proj_end - target_length],
     )
 
     # Compare with the second linestring reversed
     target_coords_rev = target_coords[::-1].copy()
     target_distances_rev = target_length - target_distances[::-1]
 
-    # Reversed target: endpoints are swapped relative to forward case
-    midpoint_score_bwd = _get_score_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
+    backward_offset, backward_score = _best_offset_with_endpoint_seeds(
         target_coords_rev,
         target_distances_rev,
-        target_length,
-        midpoint_seed,
-        buffer_distance_for_seed,
-    )
-
-    best_backward_seed = midpoint_seed
-    best_backward_score = midpoint_score_bwd
-    for s in [proj_end, proj_start - target_length]:
-        score = _get_score_numba(
-            ref_coords,
-            ref_distances,
-            ref_length,
-            target_coords_rev,
-            target_distances_rev,
-            target_length,
-            s,
-            buffer_distance_for_seed,
-        )
-        if score > midpoint_score_bwd * _ENDPOINT_SEED_THRESHOLD and score > best_backward_score:
-            best_backward_seed = s
-            best_backward_score = score
-
-    backward_offset, backward_score = _find_best_alignment_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
-        target_coords_rev,
-        target_distances_rev,
-        target_length,
-        grid_samples,
-        refinement_steps,
-        best_backward_seed,
+        [proj_end, proj_start - target_length],
     )
 
     def unit_clamp(x: float) -> float:
