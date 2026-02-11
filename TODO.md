@@ -78,6 +78,19 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Feature Ideas
 
+### HIGH: Intersection Overlap / Gating Features (Tier 1)
+
+**Priority:** High
+**Problem:** The model has no features encoding the "overlap at intersection but doesn't continue" false positive pattern. Many incorrect matches overlap only at intersection nodes without continuing along the shared direction. See `MATCHING_RULES.md:98-99` for the >=10m continuation rule.
+
+Remaining Tier 1 features (after `aligned_length_m` which is implemented):
+
+1. **`post_node_continuation_m`** — How far the target continues past the alignment boundary along the ref's heading direction. This is the >=10m continuation rule encoded as a continuous feature. Purely geometric — uses alignment fractions and geometry only, no connectors needed (target datasets generally lack connectors). At each alignment boundary, extract the un-aligned remainder of the target and measure how far it extends in the ref's direction before diverging. Pairs that overlap only inside the intersection and then veer away will have near-zero values. This is the most direct encoding of the intersection gating rule.
+
+2. **`endpoint_heading_divergence`** — Heading difference at alignment boundaries. At the endpoints of the aligned subline, compute the heading delta between ref and target. A pair that overlaps only at an intersection and then diverges will show a large heading divergence at the boundary (>30-45deg), while a legitimate partial match will show near-zero divergence. Different from `heading_delta` which is the overall heading.
+
+3. **`alignment_at_intersection`** — Is the overlap concentrated at an intersection node? Binary/float: are both aligned-subline endpoints within tolerance of an intersection node (from precomputed topology)? If the aligned portion starts and ends within the intersection footprint, it's likely an intersection-internal overlap. Different from `is_intersection_ref/target` which just say "is this segment's endpoint an intersection".
+
 ### Dual Carriageway / Centerline Handling
 
 **Priority:** Medium

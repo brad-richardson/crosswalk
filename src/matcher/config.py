@@ -228,6 +228,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
     ],
     "Length": [
         "min_length_m",
+        "aligned_length_m",  # Absolute length of aligned overlap on ref side (meters)
     ],
     "Shape Complexity": [
         "shape_complexity_ref",

@@ -1435,3 +1435,104 @@ class TestCrossingAngleFeatures:
 
         # Should use only the valid neighbor
         assert result["crossing_angle_min"] > 75.0
+
+
+class TestAlignedLengthM:
+    """Tests for aligned_length_m feature.
+
+    aligned_length_m = ref_geom.length * (end_frac - start_frac).
+    Distinguishes short intersection-only overlaps from substantial partial matches.
+    """
+
+    @pytest.mark.parametrize(
+        "ref_length,start_frac,end_frac,expected",
+        [
+            (100, 0.0, 1.0, 100.0),  # Full alignment
+            (200, 0.25, 0.75, 100.0),  # 50% partial
+            (12, 0.1, 0.9, 9.6),  # Short intersection overlap
+            (1000, 0.0, 0.05, 50.0),  # Tiny overlap on long segment
+        ],
+        ids=["full", "partial_50pct", "short_intersection", "tiny_on_long"],
+    )
+    def test_aligned_length_computation(self, ref_length, start_frac, end_frac, expected):
+        """aligned_length_m = ref_length * (end_frac - start_frac)."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (ref_length, 0)])
+        target = LineString([(0, 2), (ref_length, 2)])
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=AlignmentResult(
+                overture_start_frac=start_frac,
+                overture_end_frac=end_frac,
+                dataset_start_frac=0.0,
+                dataset_end_frac=1.0,
+            ),
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+        )
+
+        assert features["aligned_length_m"] == pytest.approx(expected, abs=0.5)
+
+    def test_no_alignment_returns_zero(self):
+        """Without alignment, aligned_length_m = 0.0 (consistent with coverage features)."""
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (150, 0)])
+        target = LineString([(0, 5), (150, 5)])
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+        )
+
+        assert features["aligned_length_m"] == 0.0
+
+    def test_uses_ref_geom_length_not_subline(self):
+        """Uses original ref geometry length, not subline (exact, no extraction error)."""
+        from matcher.features.alignment import AlignmentResult
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        # Curved ref — subline extraction may lose/gain tiny amounts
+        ref = LineString([(0, 0), (50, 10), (100, 0)])
+        target = LineString([(25, 12), (75, 12)])
+
+        features = compute_pair_features(
+            ref_geom=ref,
+            target_geom=target,
+            ref_name=None,
+            target_name=None,
+            ref_class=None,
+            target_class=None,
+            alignment=AlignmentResult(
+                overture_start_frac=0.25,
+                overture_end_frac=0.75,
+                dataset_start_frac=0.0,
+                dataset_end_frac=1.0,
+            ),
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+        )
+
+        assert features["aligned_length_m"] == pytest.approx(ref.length * 0.5, abs=0.01)
+
+    def test_error_case_returns_zero(self):
+        """Error features should have aligned_length_m = 0.0."""
+        from matcher.features.compute import _get_error_features
+
+        error_feats = _get_error_features(error=ValueError("test"))
+        assert error_feats["aligned_length_m"] == 0.0

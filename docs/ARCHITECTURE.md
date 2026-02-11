@@ -7,7 +7,7 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 67 features across 15 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 72 features across 16 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Training**: `matcher train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
@@ -67,7 +67,7 @@ matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_t
 
 ## Feature Categories
 
-67 features across 15 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+72 features across 16 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
@@ -83,9 +83,10 @@ matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_t
 | Sinuosity | 3 | sinuosity_ref, sinuosity_target, sinuosity_delta |
 | Heading Consistency | 3 | heading_consistency_ref, heading_consistency_target, heading_consistency_delta |
 | Vertex Density | 3 | vertex_density_ref, vertex_density_target, vertex_density_ratio |
-| Length | 1 | min_length_m |
+| Length | 2 | min_length_m, aligned_length_m |
 | Shape Complexity | 3 | shape_complexity_ref, shape_complexity_target, shape_complexity_delta |
 | Parallel Sibling | 5 | has_parallel_sibling_ref, parallel_fraction_ref, offset_vs_half_corridor_ratio, offset_over_expected_halfwidth, likely_representation_mismatch |
+| Crossing Angle | 4 | crossing_angle_min_ref, transverse_neighbor_fraction_ref, crossing_angle_min_target, transverse_neighbor_fraction_target |
 
 ## Feature Computation Paths
 
@@ -94,7 +95,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (67 features)
+config.py::FEATURE_COLUMNS (72 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |

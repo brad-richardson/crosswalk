@@ -212,9 +212,10 @@ class TestExcludeSemanticFlag:
         vertex_density_count = sum(1 for f in geom_only_features if f.startswith("vertex_density"))
         assert vertex_density_count == 3, "Should have 3 vertex density features"
 
-        # Length features: min_length_m only (length_bin_* removed as redundant)
-        length_feature_count = sum(1 for f in geom_only_features if f == "min_length_m")
-        assert length_feature_count == 1, "Should have 1 length feature"
+        # Length features: min_length_m + aligned_length_m
+        length_features = ["min_length_m", "aligned_length_m"]
+        length_feature_count = sum(1 for f in geom_only_features if f in length_features)
+        assert length_feature_count == 2, "Should have 2 length features"
 
         shape_complexity_count = sum(
             1 for f in geom_only_features if f.startswith("shape_complexity")
@@ -224,8 +225,8 @@ class TestExcludeSemanticFlag:
         # Total geometry-only features:
         # 11 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
-        # 3 (vertex_density) + 1 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) = 60
-        assert len(geom_only_features) == 60, (
-            f"Expected 60 geometry-only features, got {len(geom_only_features)}"
+        # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
+        # 4 (crossing_angle) = 61
+        assert len(geom_only_features) == 61, (
+            f"Expected 61 geometry-only features, got {len(geom_only_features)}"
         )
