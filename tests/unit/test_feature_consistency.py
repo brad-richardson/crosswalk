@@ -81,10 +81,12 @@ class TestErrorFeaturesConsistency:
             "name_jaro_winkler",
             "name_token_sort",
             "class_similarity",
+            "min_length_m",
+            "aligned_length_m",
         ],
     )
     def test_similarity_error_defaults_to_zero(self, feature):
-        """Similarity features should default to 0.0."""
+        """Similarity and length features should default to 0.0."""
         error_features = _get_error_features()
         assert error_features[feature] == 0.0
 

@@ -758,6 +758,16 @@ def compute_pair_features(
                 geom_for_similarity_ref = ref_geom
                 geom_for_similarity_target = target_geom
 
+        # Aligned length: absolute overlap length in meters
+        # Coverage features express overlap as fractions, but absolute length matters:
+        # 5% coverage on 1km = 50m (plausible), 80% coverage on 12m = ~10m (intersection-only)
+        if alignment is not None:
+            aligned_length_m = ref_geom.length * (
+                alignment.overture_end_frac - alignment.overture_start_frac
+            )
+        else:
+            aligned_length_m = 0.0  # No alignment → 0.0, consistent with coverage features
+
         _current_phase = "coord_extraction"
         # Extract coords once for functions that accept optional coords parameter
         # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
@@ -817,6 +827,8 @@ def compute_pair_features(
             if max(ref_geom.length, target_geom.length) > 0
             else 0.0,
             "centroid_distance_m": geom_features.centroid_distance,
+            # Aligned length (computed in this function, not _compute_non_geometric_features)
+            "aligned_length_m": aligned_length_m,
             # Non-geometric and per-pair geometric features
             **non_geom,
         }
@@ -922,6 +934,7 @@ def _get_error_features(
         "vertex_density_ratio": 0.0,
         # Length features
         "min_length_m": 0.0,
+        "aligned_length_m": 0.0,
         # Shape complexity features - default to no turns
         "shape_complexity_ref": 0,
         "shape_complexity_target": 0,

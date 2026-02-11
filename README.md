@@ -68,7 +68,7 @@ flowchart TB
 
     subgraph Match["2. Matching Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
-        E --> F[Compute 67 Features<br/>Geometric, semantic, topological]
+        E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
         F --> G[Score with XGBoost<br/>Binary classifier]
         G --> H[Optimize 1:N Matches<br/>Hungarian algorithm]
         H --> I{Quality<br/>Acceptable?}
@@ -100,7 +100,7 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
-| **Features** | 67 features across 15 categories: geometric, semantic, topological, alignment, and more |
+| **Features** | 72 features across 16 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 
 ## Quick Start
@@ -186,7 +186,7 @@ See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instruct
 
 ### Step 2: Feature Computation & Matching
 
-The matcher computes 67 features for each candidate pair across 15 categories:
+The matcher computes 72 features for each candidate pair across 16 categories:
 
 | Category | Count | Examples |
 |----------|-------|----------|
@@ -202,9 +202,10 @@ The matcher computes 67 features for each candidate pair across 15 categories:
 | Sinuosity | 3 | Ref/target sinuosity, delta |
 | Heading Consistency | 3 | Ref/target consistency, delta |
 | Vertex Density | 3 | Ref/target density, ratio |
-| Length | 1 | Minimum length |
+| Length | 2 | Minimum length, aligned length |
 | Shape Complexity | 3 | Ref/target complexity (significant turns), delta |
 | Parallel Sibling | 5 | Parallel sibling detection, fraction, offset ratios, representation mismatch |
+| Crossing Angle | 4 | Min crossing angle (ref/target), transverse neighbor fraction (ref/target) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
 
