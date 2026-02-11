@@ -11,6 +11,7 @@ from shapely import LineString
 from matcher.features._jit_helpers import (
     angle_diff_numba,
     collinear_gap_ratio_numba,
+    compute_crossing_angle_stats_numba,
     compute_endpoint_proximity_numba,
     compute_heading_consistency_numba,
     compute_heading_numba,
@@ -796,3 +797,100 @@ class TestHistogramIntersectionNumba:
 
         result = histogram_intersection_numba(h1, h2)
         assert result == pytest.approx(1.0)
+
+
+class TestComputeCrossingAngleStatsNumba:
+    """Tests for compute_crossing_angle_stats_numba JIT function."""
+
+    def test_perpendicular_single_sample_single_neighbor(self):
+        """Single perpendicular pair should return ~90°."""
+        # Candidate heading: 90° (north)
+        candidate_headings = np.array([90.0])
+        # Neighbor heading: 0° (east) -> bidirectional delta = 90°
+        neighbor_headings = np.array([0.0])
+
+        min_a, mean_a, std_a, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 90.0
+        )
+
+        assert min_a == pytest.approx(90.0)
+        assert mean_a == pytest.approx(90.0)
+        assert std_a == pytest.approx(0.0)
+        assert trans_frac == pytest.approx(1.0)
+
+    def test_parallel_headings(self):
+        """Parallel headings should return ~0°."""
+        candidate_headings = np.array([0.0, 0.0, 0.0])
+        neighbor_headings = np.array([0.0])
+
+        min_a, mean_a, std_a, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 0.0
+        )
+
+        assert min_a == pytest.approx(0.0)
+        assert mean_a == pytest.approx(0.0)
+        assert trans_frac == pytest.approx(0.0)
+
+    def test_opposite_direction_is_parallel(self):
+        """Headings 0° and 180° should be treated as parallel (bidirectional)."""
+        candidate_headings = np.array([0.0])
+        neighbor_headings = np.array([180.0])
+
+        min_a, mean_a, std_a, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 0.0
+        )
+
+        assert min_a == pytest.approx(0.0)
+        assert mean_a == pytest.approx(0.0)
+
+    def test_varying_sample_headings(self):
+        """Headings that vary along segment should produce non-zero std."""
+        # Simulates a ramp that starts parallel (0°) and veers to 45°
+        candidate_headings = np.array([0.0, 5.0, 10.0, 20.0, 35.0, 45.0])
+        # Corridor running east-west
+        neighbor_headings = np.array([0.0])
+
+        min_a, mean_a, std_a, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 0.0
+        )
+
+        # Min should be 0° (first sample is parallel)
+        assert min_a == pytest.approx(0.0)
+        # Mean should be between 0 and 45
+        assert 10.0 < mean_a < 35.0
+        # Std should be elevated
+        assert std_a > 5.0
+
+    def test_multiple_neighbors_takes_min(self):
+        """Per-sample angle should be the min across all neighbors."""
+        # Candidate heading: 45° (northeast)
+        candidate_headings = np.array([45.0])
+        # Neighbor 1: 0° (east) -> 45° delta
+        # Neighbor 2: 90° (north) -> 45° delta
+        # Neighbor 3: 30° -> 15° delta (closest)
+        neighbor_headings = np.array([0.0, 90.0, 30.0])
+
+        min_a, mean_a, std_a, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 45.0
+        )
+
+        # Should pick the closest neighbor (30° -> 15° delta)
+        assert min_a == pytest.approx(15.0)
+
+    def test_transverse_fraction_threshold(self):
+        """Transverse fraction should respect threshold."""
+        candidate_headings = np.array([0.0])
+        # Two neighbors: one perpendicular (90°), one at 50° from candidate
+        neighbor_headings = np.array([90.0, 50.0])
+
+        # With threshold 60°: only the 90° neighbor is transverse
+        _, _, _, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 60.0, 0.0
+        )
+        assert trans_frac == pytest.approx(0.5)  # 1 of 2
+
+        # With threshold 40°: both are transverse
+        _, _, _, trans_frac = compute_crossing_angle_stats_numba(
+            candidate_headings, neighbor_headings, 40.0, 0.0
+        )
+        assert trans_frac == pytest.approx(1.0)  # 2 of 2

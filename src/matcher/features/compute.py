@@ -126,6 +126,7 @@ from .geometric import (
     _compute_hausdorff_stats,
     compute_angle_histogram_similarity,
     compute_collinear_gap_ratio,
+    compute_crossing_angle_features,
     compute_edge_distance_rmse,
     compute_geometric_features,
     compute_heading_consistency,
@@ -485,6 +486,24 @@ def _compute_non_geometric_features(
                 "clustering_coef_delta": 0.0,
             }
 
+    # Crossing angle features - detect segments transverse to nearby different-tier corridor
+    # Both sides use ref_sibling_context (Overture spatial index) since target datasets
+    # are often single-type (e.g., all footway) making target_sibling_context useless
+    # for cross-tier detection.
+    with timed_section("crossing_angle"):
+        crossing_ref = _compute_crossing_angle(
+            geom_sim_ref,
+            ref_class,
+            ref_seg_id,
+            ref_sibling_context,
+        )
+        crossing_target = _compute_crossing_angle(
+            geom_sim_target,
+            target_class,
+            None,  # target not in ref spatial index, no self-exclusion needed
+            ref_sibling_context,
+        )
+
     # Log timing summary periodically
     log_timing_summary_if_needed()
 
@@ -578,7 +597,73 @@ def _compute_non_geometric_features(
         # Shape/geometric features (new)
         "angle_histogram_similarity": angle_histogram_similarity,
         "edge_distance_rmse_m": edge_distance_rmse_m,
+        # Crossing angle features (4) - detect ACROSS-role segments (2 per side)
+        "crossing_angle_min_ref": crossing_ref["crossing_angle_min"],
+        "transverse_neighbor_fraction_ref": crossing_ref["transverse_neighbor_fraction"],
+        "crossing_angle_min_target": crossing_target["crossing_angle_min"],
+        "transverse_neighbor_fraction_target": crossing_target["transverse_neighbor_fraction"],
     }
+
+
+_DEFAULT_CROSSING_ANGLE_FEATURES = {
+    "crossing_angle_min": 45.0,
+    "crossing_angle_mean": 45.0,
+    "crossing_angle_std": 0.0,
+    "transverse_neighbor_fraction": 0.0,
+}
+
+_CROSSING_ANGLE_SEARCH_RADIUS_M = 30.0
+
+
+def _compute_crossing_angle(
+    geom,
+    road_class: str | None,
+    seg_id: str | None,
+    sibling_context: SiblingSearchContext | None,
+) -> dict[str, float]:
+    """Compute crossing angle features using the sibling search context.
+
+    Queries nearby segments from the spatial index, filters to different
+    traffic tiers, and delegates to compute_crossing_angle_features.
+
+    Args:
+        geom: Segment geometry (projected CRS, meters)
+        road_class: Road class of the segment
+        seg_id: Segment ID (to exclude self from results)
+        sibling_context: Spatial index + metadata for the dataset
+
+    Returns:
+        Dict with crossing_angle_min, crossing_angle_mean,
+        crossing_angle_std, transverse_neighbor_fraction
+    """
+    if sibling_context is None or geom is None or geom.is_empty:
+        return _DEFAULT_CROSSING_ANGLE_FEATURES.copy()
+
+    # Query spatial index for nearby segments
+    buffer_geom = geom.buffer(_CROSSING_ANGLE_SEARCH_RADIUS_M)
+    candidate_indices = sibling_context.spatial_index.query(buffer_geom)
+
+    nearby_geoms: list = []
+    nearby_classes: list[str | None] = []
+    for idx in candidate_indices:
+        sid, _, cls = sibling_context.segment_data[idx]
+        # Exclude self
+        if seg_id is not None and sid == seg_id:
+            continue
+        # Get geometry from spatial index
+        nearby_geom = sibling_context.spatial_index.geometries[idx]
+        nearby_geoms.append(nearby_geom)
+        nearby_classes.append(cls)
+
+    if not nearby_geoms:
+        return _DEFAULT_CROSSING_ANGLE_FEATURES.copy()
+
+    return compute_crossing_angle_features(
+        candidate=geom,
+        nearby_geometries=nearby_geoms,
+        nearby_classes=nearby_classes,
+        candidate_class=road_class,
+    )
 
 
 def compute_pair_features(
@@ -854,7 +939,11 @@ def _get_error_features(
         # Shape/geometric features - default to neutral values
         "angle_histogram_similarity": 0.5,  # Neutral: no signal in error case
         "edge_distance_rmse_m": MAX_DISTANCE_METERS,
-        # Road properties - default to neutral values
+        # Crossing angle features - neutral (45° = ambiguous)
+        "crossing_angle_min_ref": 45.0,
+        "transverse_neighbor_fraction_ref": 0.0,
+        "crossing_angle_min_target": 45.0,
+        "transverse_neighbor_fraction_target": 0.0,
     }
 
     # Add error metadata only if error is provided

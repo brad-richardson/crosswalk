@@ -530,3 +530,67 @@ def compute_local_parallel_alignment_numba(
     parallel_fraction = float(parallel_count) / n_comparisons
 
     return mean_alignment, parallel_fraction
+
+
+@njit(cache=True)
+def compute_crossing_angle_stats_numba(
+    candidate_headings: np.ndarray,
+    neighbor_headings: np.ndarray,
+    transverse_threshold: float,
+    candidate_gross_heading: float,
+) -> tuple[float, float, float, float]:
+    """Compute crossing angle statistics for a segment vs nearby corridor.
+
+    For each sample heading along the candidate, computes the minimum
+    bidirectional angle to any neighbor heading. Then reports statistics
+    over all samples.
+
+    Args:
+        candidate_headings: (N,) array of local headings sampled along candidate (0-360)
+        neighbor_headings: (M,) array of gross headings of different-tier neighbors (0-360)
+        transverse_threshold: Angle threshold for "transverse" classification (degrees)
+        candidate_gross_heading: Overall heading of candidate (0-360) for transverse fraction
+
+    Returns:
+        Tuple of (min_angle, mean_angle, std_angle, transverse_fraction)
+        where angles are in degrees (0-90).
+    """
+    n_samples = candidate_headings.shape[0]
+    n_neighbors = neighbor_headings.shape[0]
+
+    # Per-sample minimum angle to any neighbor
+    sample_min_angles = np.empty(n_samples, dtype=np.float64)
+    for i in range(n_samples):
+        min_angle = 90.0
+        for j in range(n_neighbors):
+            angle = angle_diff_numba(candidate_headings[i], neighbor_headings[j])
+            if angle < min_angle:
+                min_angle = angle
+        sample_min_angles[i] = min_angle
+
+    # Statistics over sample points
+    crossing_min = sample_min_angles.min()
+
+    crossing_mean = 0.0
+    for i in range(n_samples):
+        crossing_mean += sample_min_angles[i]
+    crossing_mean /= n_samples
+
+    # Std dev
+    crossing_var = 0.0
+    for i in range(n_samples):
+        diff = sample_min_angles[i] - crossing_mean
+        crossing_var += diff * diff
+    if n_samples > 1:
+        crossing_std = np.sqrt(crossing_var / n_samples)
+    else:
+        crossing_std = 0.0
+
+    # Transverse neighbor fraction using gross heading
+    transverse_count = 0
+    for j in range(n_neighbors):
+        if angle_diff_numba(candidate_gross_heading, neighbor_headings[j]) > transverse_threshold:
+            transverse_count += 1
+    transverse_fraction = float(transverse_count) / float(n_neighbors)
+
+    return crossing_min, crossing_mean, crossing_std, transverse_fraction
