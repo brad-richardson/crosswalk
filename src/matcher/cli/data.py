@@ -751,7 +751,9 @@ def fetch_all(
                 fetch_name, result = future.result()
                 if isinstance(result, Exception):
                     ds_errors.append((f"{ds_name}/{fetch_name}", result))
-                    console.print(f"[red]Error fetching {ds_name}/{fetch_name}: {escape(str(result))}[/red]")
+                    console.print(
+                        f"[red]Error fetching {ds_name}/{fetch_name}: {escape(str(result))}[/red]"
+                    )
                 elif fetch_name == "target":
                     if result:
                         console.print(f"[green]{ds_name}: target saved to {result}[/green]")
