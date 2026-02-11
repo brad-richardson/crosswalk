@@ -330,9 +330,17 @@ def _find_best_alignment_numba(
     dataset_length: float,
     grid_samples: int,
     refinement_steps: int,
+    seed_offset: float = np.nan,
 ) -> tuple[float, float]:
     """
     Numba-optimized grid search + ternary refinement for best alignment.
+
+    Args:
+        seed_offset: Optional projection-based seed offset. When provided,
+            evaluated alongside grid points to ensure the correct region is
+            always considered (fixes edge cases where the target sits near
+            the start/end of a much longer reference and grid points miss it).
+
     Returns: (best_offset, best_score)
     """
     if overture_length == 0 or dataset_length == 0:
@@ -349,6 +357,22 @@ def _find_best_alignment_numba(
 
     best_score = 0.0
     best_offset = 0.0
+
+    # Evaluate projection-based seed offset first (if provided)
+    if not np.isnan(seed_offset):
+        seed_score = _get_score_numba(
+            overture_coords,
+            overture_distances,
+            overture_length,
+            dataset_coords,
+            dataset_distances,
+            dataset_length,
+            seed_offset,
+            buffer_distance,
+        )
+        if seed_score > best_score:
+            best_score = seed_score
+            best_offset = seed_offset
 
     # Grid search
     for i in range(grid_samples):
@@ -462,6 +486,15 @@ def linestring_alignment(
     if ref_length == 0 or target_length == 0:
         return AlignmentResult(0.0, 1.0, 0.0, 1.0)
 
+    # Compute projection-based seed offset: project target midpoint onto
+    # reference to find approximate position, then convert to offset.
+    # This ensures the grid search always evaluates the correct region,
+    # even when the target is much shorter than the reference and grid
+    # points at the edges fall in dead zones.
+    target_mid = target.interpolate(0.5, normalized=True)
+    seed_pos = reference.project(target_mid)
+    seed_offset = seed_pos - target_length / 2.0
+
     # Compare normally (forward)
     forward_offset, forward_score = _find_best_alignment_numba(
         ref_coords,
@@ -472,6 +505,7 @@ def linestring_alignment(
         target_length,
         grid_samples,
         refinement_steps,
+        seed_offset,
     )
 
     # Compare with the second linestring reversed
@@ -487,6 +521,7 @@ def linestring_alignment(
         target_length,
         grid_samples,
         refinement_steps,
+        seed_offset,
     )
 
     def unit_clamp(x: float) -> float:
