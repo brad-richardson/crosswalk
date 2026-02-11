@@ -20,9 +20,9 @@ The bridge file enables:
 
 A match requires that the aligned overlapping portions represent the **same network role**, not just overlapping geometry. Two segments that intersect or overlap spatially are not necessarily a match — they must represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
-- **Match**: The aligned portions of the GERS segment and the local segment represent the same physical feature with the same network role.
+- **Match**: The aligned portions of the GERS segment and the local segment represent the same physical traveled way with the same network role.
 - **No Match**: Not the correct correspondence — either a different physical feature, or the correct corresponding feature is a different candidate.
-- **New** (conceptual): No plausible correspondence exists in Overture after considering nearby candidates and continuity. Still labeled `no_match` in practice, but conceptually distinct — "no match" means wrong pair, "new" means no pair exists.
+- **New** (conceptual): A property of a segment, not a pair — emerges when a local segment has `no_match` against every candidate. Still labeled `no_match` at the pair level; "new" is the segment-level conclusion.
 
 ### Network Roles
 
@@ -30,7 +30,7 @@ Matching is constrained by the segment's role in the network. See [docs/MATCHING
 
 - **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
 - **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
-- **TURN** — Direction-changing connectors (ramps, slip roads, curb ramps). Matches only with same role and intent.
+- **TURN** — Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns at intersections). Matches only with same role and intent.
 - **INTERNAL** — Intersection-scoped slices. May match other INTERNAL segments representing the same through-movement.
 
 ### Common Edge Cases
@@ -52,7 +52,7 @@ Never match based on overlap alone. For a match at an intersection, the target m
 
 ### 1:N Matching
 
-A single Overture segment can correctly correspond to multiple local segments. This happens with split highways where the local dataset has separate segments for each direction but Overture has a single centerline. The optimizer handles this via the Hungarian algorithm.
+A single Overture segment can correctly correspond to multiple local segments. This happens with split highways where the local dataset has separate segments for each direction but Overture has a single centerline.
 
 ## How It Works
 

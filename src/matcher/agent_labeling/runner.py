@@ -237,7 +237,7 @@ def prepare_batch_prompt(
     prompt = """You are labeling transportation network segment matches in batch mode.
 Segments may be roads, sidewalks, bike lanes, trails, or other features in road/pedestrian/cycling networks.
 
-TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL FEATURE with the SAME NETWORK ROLE. A match requires the same role in the network, not just overlapping geometry.
+TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL TRAVELED WAY with the SAME NETWORK ROLE. A match requires the same role in the network, not just overlapping geometry.
 
 A "match" means: the aligned overlapping portions represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
@@ -247,14 +247,14 @@ A "no_match" means: not the correct correspondence — either a different physic
 
     # Section 2: Label definitions
     prompt += """LABELS:
-- match: Same physical feature with same network role and >=10% spatial overlap
+- match: Same physical traveled way with same network role and >=10% spatial overlap
 - no_match: Different features, different network roles, or segments that do not spatially overlap
 - unsure: Ambiguous cases where reasonable people would disagree
 
 NETWORK ROLES (constrains what can match):
 - ALONG: Longitudinal movement (road mainlines, bike lanes, sidewalks). Matches only ALONG.
 - ACROSS: Crossing movement (crosswalks, rail crossings). Never matches ALONG or TURN.
-- TURN: Direction-changing connectors (ramps, slip roads, curb ramps). Matches only same role+intent.
+- TURN: Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns). Matches only same role+intent.
 - INTERNAL: Intersection-scoped slices. May match other INTERNAL with same through-movement.
 
 """

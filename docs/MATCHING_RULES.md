@@ -12,7 +12,7 @@ Two segments that overlap spatially are not necessarily a match. They must repre
 
 ### Match
 
-The aligned overlapping portions of the GERS segment and the local segment represent the same physical feature with the same network role. Segmentation points, names, and classification may differ.
+The aligned overlapping portions of the GERS segment and the local segment represent the same physical traveled way with the same network role. Segmentation points, names, and classification may differ.
 
 ### No Match
 
@@ -22,11 +22,11 @@ Not the correct correspondence. Either:
 
 ### New (Conceptual)
 
-No plausible correspondence exists in Overture after considering nearby candidates and continuity. A segment is "new" only when no candidate represents the same real-world feature. Still labeled `no_match` in practice — the distinction is conceptual and matters for downstream "add to Overture" logic, not for the ML classifier.
+"New" is a property of a **segment**, not a pair — it emerges from aggregation. If a local segment receives `no_match` against every candidate, then that segment is "new" (no plausible correspondence exists in Overture). Individual pairs are always labeled `match` or `no_match`; "new" is never a pair-level label. The distinction matters for downstream "add to Overture" logic, not for the ML classifier.
 
 ## Network Roles
 
-Every segment in a transportation network serves one of four roles. Match compatibility is constrained by role.
+Every segment in a transportation network serves one of four roles. Match compatibility is constrained by role. Roles are a conceptual tool for labeling and reasoning — they may be inferred implicitly from geometry, topology, and tags rather than stored explicitly.
 
 ### ALONG — Longitudinal / Corridor Movement
 
@@ -34,7 +34,7 @@ Movement along a facility. The most common role.
 
 Examples: road mainline, bike lane along a road, sidewalk along a street, rail track segment, canal segment.
 
-**Match rule:** Matches primarily with other ALONG segments representing the same facility. May rarely match INTERNAL segments that are clearly clipped ALONG (be conservative).
+**Match rule:** Matches primarily with other ALONG segments representing the same facility. May rarely match INTERNAL segments that are clearly clipped ALONG (be conservative). Parallel but laterally separated segments (e.g., opposite carriageways, frontage roads, parallel service roads) are not matches unless they represent the same traveled way.
 
 ### ACROSS — Crossing / Transverse Movement
 
@@ -44,13 +44,13 @@ Examples: crosswalk, bike crossing, rail crossing, road crossing over tracks, pe
 
 **Match rule:** Never matches with ALONG. Never matches with TURN. Only matches with other ACROSS segments at the same crossing.
 
-### TURN / CONNECTOR — Direction-Changing Movement
+### TURN / CONNECTOR — Hierarchy or Facility Transition
 
-Movement that connects two ALONG segments with intent to change direction.
+Movement that transitions between network levels or facility types — not a simple turn at an intersection (which is still ALONG).
 
-Examples: turn lanes, slip roads / ramps, bike turn pockets, sidewalk curb ramps, rail switches.
+Examples: highway off-ramps, slip roads, bike turn pockets at facility transitions, sidewalk curb ramps, rail switches. A regular left turn at a signalized intersection is still ALONG.
 
-**Match rule:** Matches only with same role and same intent (e.g., a left-turn pocket matches another left-turn pocket, not a through-lane).
+**Match rule:** Matches only with same role and same intent (e.g., an off-ramp matches another off-ramp, not a through-lane).
 
 ### INTERNAL — Intersection-Scoped Slices
 
@@ -112,3 +112,7 @@ The ML classifier operates as a "Layer 1" identity matcher:
 - Safe for replace/average geometry operations
 - Intersection overlap cases are **No Match** at this layer
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
+
+## Heuristic: The Replacement Test
+
+A helpful mental model: if replacing one aligned subline with the other would change the intent of the network (e.g., through movement becomes a turn, along becomes across), it is not a match.

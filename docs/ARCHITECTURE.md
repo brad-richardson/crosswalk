@@ -30,6 +30,8 @@ Applied by the ML scorer when classifying each candidate pair:
 
 ### Optimizer/Labeling Thresholds (1:N groups and labeling UI)
 
+1:N group optimization uses the Hungarian algorithm to resolve cases where a single Overture segment corresponds to multiple local segments (e.g., split carriageways).
+
 Applied during 1:N group optimization and to define the labeling UI review band:
 
 | Setting | Default | Purpose |
