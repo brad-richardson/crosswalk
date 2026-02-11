@@ -14,6 +14,33 @@ from .utils import console
 labels_app = typer.Typer(help="Label data management commands")
 
 
+def _auto_fetch_overture(dataset: str, data_dir: Path) -> Path | None:
+    """Auto-fetch Overture segments when missing, using dataset config bbox.
+
+    Delegates to the existing fetch reference implementation to avoid
+    duplicating the fetch logic.
+
+    Returns the path to the fetched file, or None if no config found.
+    """
+    from ..datasets.schema import get_dataset_config
+    from ..filenames import find_overture_segments
+    from .data import _fetch_reference_impl
+    from .utils import console
+
+    config = get_dataset_config(dataset)
+    if config is None or config.fetch is None or config.fetch.bbox is None:
+        return None
+
+    console.print(f"  [blue]Auto-fetching Overture data for {dataset}...[/blue]")
+    _fetch_reference_impl(
+        dataset_name=dataset,
+        output_dir=data_dir,
+        sources={"overture"},
+    )
+
+    return find_overture_segments(data_dir, dataset)
+
+
 @labels_app.command("backfill")
 def backfill_features(
     labels_dir: Path = typer.Option(
@@ -236,22 +263,18 @@ def backfill_features(
         target_path = find_target_file(data_dir, dataset)
 
         if overture_path is None:
-            if skip_missing:
-                console.print("  [yellow]Skipping: Overture data not found[/yellow]")
-                total_skipped += len(dataset_keys)
-                continue
-            else:
-                console.print("  [red]Error: Overture data not found[/red]")
+            # Auto-fetch Overture data using dataset config bbox
+            overture_path = _auto_fetch_overture(dataset, data_dir)
+            if overture_path is None:
+                console.print(
+                    f"  [red]Error: Overture data not found and auto-fetch failed "
+                    f"(no dataset config for '{dataset}')[/red]"
+                )
                 raise typer.Exit(1)
 
-        if target_path is None:
-            if skip_missing:
-                console.print("  [yellow]Skipping: Target data not found[/yellow]")
-                total_skipped += len(dataset_keys)
-                continue
-            else:
-                console.print("  [red]Error: Target data not found[/red]")
-                raise typer.Exit(1)
+        if target_path is None and not skip_missing:
+            console.print("  [red]Error: Target data not found[/red]")
+            raise typer.Exit(1)
 
         # Load and prepare data
         console.print(f"  Loading Overture from {overture_path.name}...")
@@ -260,24 +283,34 @@ def backfill_features(
         ref_gdf["id"] = ref_gdf["id"].astype(str)
         ref_lookup = ref_gdf.set_index("id")
 
-        console.print(f"  Loading target from {target_path.name}...")
-        target_gdf = gpd.read_parquet(target_path)
-        target_gdf = filter_to_linestrings(target_gdf, source_name="target")
-        target_gdf["id"] = target_gdf["id"].astype(str)
-        target_lookup = target_gdf.set_index("id")
-
-        # Project to UTM
+        # Project reference to UTM
         if ref_gdf.crs is not None and ref_gdf.crs.is_geographic:
             utm_crs = ref_gdf.estimate_utm_crs()
             ref_gdf_proj = ref_gdf.to_crs(utm_crs)
-            target_gdf_proj = target_gdf.to_crs(utm_crs)
         else:
+            utm_crs = ref_gdf.crs
             ref_gdf_proj = ref_gdf
-            target_gdf_proj = target_gdf
 
-        # Build spatial index
+        # Load target raw data if available (not required when stored geometries exist)
+        if target_path is not None:
+            console.print(f"  Loading target from {target_path.name}...")
+            target_gdf = gpd.read_parquet(target_path)
+            target_gdf = filter_to_linestrings(target_gdf, source_name="target")
+            target_gdf["id"] = target_gdf["id"].astype(str)
+            target_lookup = target_gdf.set_index("id")
+            target_gdf_proj = (
+                target_gdf.to_crs(utm_crs) if utm_crs != target_gdf.crs else target_gdf
+            )
+        else:
+            console.print("  [yellow]Target data not found - using stored geometries only[/yellow]")
+            target_gdf = None
+            target_gdf_proj = None
+            target_lookup = None
+
+        # Build spatial index (only if target data available)
         target_context = SpatialContextIndex()
-        target_context.build_from_gdf(target_gdf_proj, id_column="id")
+        if target_gdf_proj is not None:
+            target_context.build_from_gdf(target_gdf_proj, id_column="id")
 
         # Build graphlet data
         ref_has_connectors = "connectors" in ref_gdf.columns
@@ -287,11 +320,14 @@ def backfill_features(
             tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
             connectors_column="connectors" if ref_has_connectors else None,
         )
-        target_graphlet_data = precompute_graphlet_features(
-            target_gdf_proj,
-            id_column="id",
-            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
-        )
+        if target_gdf_proj is not None:
+            target_graphlet_data = precompute_graphlet_features(
+                target_gdf_proj,
+                id_column="id",
+                tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
+            )
+        else:
+            target_graphlet_data = None
 
         _, target_seg_to_connectors, _, _ = (
             target_graphlet_data if target_graphlet_data else (None, None, None, None)
@@ -307,12 +343,15 @@ def backfill_features(
             names=list(ref_gdf_proj.get("names", [None] * len(ref_gdf_proj))),
             classes=list(ref_gdf_proj.get("class", [None] * len(ref_gdf_proj))),
         )
-        target_sibling_context = build_sibling_search_context(
-            geometries=list(target_gdf_proj.geometry),
-            segment_ids=[str(sid) for sid in target_gdf_proj["id"]],
-            names=list(target_gdf_proj.get("names", [None] * len(target_gdf_proj))),
-            classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
-        )
+        if target_gdf_proj is not None:
+            target_sibling_context = build_sibling_search_context(
+                geometries=list(target_gdf_proj.geometry),
+                segment_ids=[str(sid) for sid in target_gdf_proj["id"]],
+                names=list(target_gdf_proj.get("names", [None] * len(target_gdf_proj))),
+                classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
+            )
+        else:
+            target_sibling_context = None
 
         # Initialize feature store and data store for this dataset
         feature_store = FeatureStore(dataset, features_dir=features_dir)
@@ -379,7 +418,11 @@ def backfill_features(
                     skipped += 1
                     continue
 
-                if gers_id not in ref_lookup.index or target_id not in target_lookup.index:
+                if (
+                    gers_id not in ref_lookup.index
+                    or target_lookup is None
+                    or target_id not in target_lookup.index
+                ):
                     skipped += 1
                     continue
 
@@ -423,7 +466,7 @@ def backfill_features(
             # Compute endpoint features
             target_filtered_idx = (
                 target_gdf_proj[target_gdf_proj["id"] == target_id].index[0]
-                if target_id in target_gdf_proj["id"].values
+                if target_gdf_proj is not None and target_id in target_gdf_proj["id"].values
                 else None
             )
             endpoint_features = compute_aligned_endpoint_features(

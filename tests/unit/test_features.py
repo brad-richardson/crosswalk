@@ -1118,3 +1118,320 @@ class TestClusteringCoefficientFeatures:
         assert result["clustering_coef_ref"] == 0.0
         assert result["clustering_coef_target"] == 0.0
         assert result["clustering_coef_delta"] == 0.0
+
+
+class TestCrossingAngleFeatures:
+    """Tests for crossing angle feature extraction.
+
+    These features detect ACROSS-role segments (crosswalks, bike crossings)
+    by measuring the angle between a candidate segment and nearby segments
+    of a different traffic tier.
+    """
+
+    def test_crosswalk_perpendicular_to_vehicle_road(self):
+        """A short N-S footway crossing an E-W vehicle road should have high angles."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Crosswalk: short north-south segment
+        crosswalk = LineString([(50, 0), (50, 15)])
+        # Nearby east-west vehicle road segments
+        nearby_geoms = [
+            LineString([(0, 0), (100, 0)]),
+            LineString([(0, 15), (100, 15)]),
+        ]
+        nearby_classes = ["residential", "residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=crosswalk,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Perpendicular: angles should be near 90°
+        assert result["crossing_angle_min"] > 75.0
+        assert result["crossing_angle_mean"] > 75.0
+        # Low std since consistently perpendicular
+        assert result["crossing_angle_std"] < 10.0
+        # All neighbors are transverse
+        assert result["transverse_neighbor_fraction"] == 1.0
+
+    def test_sidewalk_parallel_to_vehicle_road(self):
+        """A sidewalk running parallel to a road should have low angles."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Sidewalk: runs east-west, parallel to the road
+        sidewalk = LineString([(0, 5), (100, 5)])
+        # Nearby east-west vehicle road
+        nearby_geoms = [LineString([(0, 0), (100, 0)])]
+        nearby_classes = ["residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=sidewalk,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Parallel: angles should be near 0°
+        assert result["crossing_angle_min"] < 15.0
+        assert result["crossing_angle_mean"] < 15.0
+        # No neighbors are transverse
+        assert result["transverse_neighbor_fraction"] == 0.0
+
+    def test_same_tier_neighbors_are_ignored(self):
+        """Neighbors of the same traffic tier should not influence crossing angle."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Candidate is a vehicle road
+        candidate = LineString([(0, 0), (100, 0)])
+        # Nearby segments are also vehicle roads (same tier)
+        nearby_geoms = [
+            LineString([(50, -50), (50, 50)]),  # Perpendicular vehicle road
+        ]
+        nearby_classes = ["residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="secondary",
+        )
+
+        # Should return neutral values since all neighbors are same tier
+        assert result["crossing_angle_min"] == 45.0
+        assert result["crossing_angle_mean"] == 45.0
+        assert result["crossing_angle_std"] == 0.0
+        assert result["transverse_neighbor_fraction"] == 0.0
+
+    def test_slip_road_mostly_parallel_then_veers(self):
+        """A long ramp parallel to motorway then veering off should have LOW min angle.
+
+        This is the critical edge case: the ramp is mostly parallel to the
+        motorway (vehicle tier), so the minimum angle to corridor should be
+        near 0° even though the end veers off at ~45°.
+        """
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Slip road: runs parallel for ~200m, then veers off at 45° for ~50m
+        ramp = LineString(
+            [
+                (0, 10),
+                (50, 10),
+                (100, 10),
+                (150, 10),
+                (200, 10),
+                (230, 30),
+                (250, 50),  # Veer off at ~45°
+            ]
+        )
+        # Nearby motorway corridor running east-west
+        nearby_geoms = [
+            LineString([(0, 0), (300, 0)]),
+        ]
+        nearby_classes = ["motorway"]
+
+        result = compute_crossing_angle_features(
+            candidate=ramp,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",  # Different tier to trigger computation
+        )
+
+        # Min should be very low (parallel portion)
+        assert result["crossing_angle_min"] < 15.0
+        # Mean should be moderate (mix of parallel and angled)
+        assert result["crossing_angle_mean"] < 45.0
+        # Std should be elevated (heading varies along segment)
+        assert result["crossing_angle_std"] > 5.0
+
+    def test_diagonal_crosswalk(self):
+        """A diagonal crosswalk at ~45° to the road should have moderate angles."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Diagonal crosswalk crossing an E-W road
+        crosswalk = LineString([(40, 0), (60, 20)])
+        nearby_geoms = [LineString([(0, 10), (100, 10)])]
+        nearby_classes = ["residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=crosswalk,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Should be ~45° (diagonal crossing)
+        assert 30.0 < result["crossing_angle_min"] < 60.0
+        assert 30.0 < result["crossing_angle_mean"] < 60.0
+
+    def test_empty_candidate_returns_neutral(self):
+        """Empty or degenerate candidate should return neutral values."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        empty = LineString()
+        result = compute_crossing_angle_features(
+            candidate=empty,
+            nearby_geometries=[LineString([(0, 0), (100, 0)])],
+            nearby_classes=["residential"],
+            candidate_class="footway",
+        )
+
+        assert result["crossing_angle_min"] == 45.0
+        assert result["crossing_angle_mean"] == 45.0
+        assert result["crossing_angle_std"] == 0.0
+        assert result["transverse_neighbor_fraction"] == 0.0
+
+    def test_no_different_tier_neighbors_returns_neutral(self):
+        """When all neighbors are same tier, should return neutral."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        candidate = LineString([(0, 0), (50, 50)])
+        nearby_geoms = [LineString([(0, 10), (100, 10)])]
+        # Same tier as candidate
+        nearby_classes = ["path"]
+
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        assert result == {
+            "crossing_angle_min": 45.0,
+            "crossing_angle_mean": 45.0,
+            "crossing_angle_std": 0.0,
+            "transverse_neighbor_fraction": 0.0,
+        }
+
+    def test_no_neighbors_returns_neutral(self):
+        """When no nearby geometries exist, should return neutral."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        candidate = LineString([(0, 0), (50, 50)])
+
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=[],
+            nearby_classes=[],
+            candidate_class="footway",
+        )
+
+        assert result == {
+            "crossing_angle_min": 45.0,
+            "crossing_angle_mean": 45.0,
+            "crossing_angle_std": 0.0,
+            "transverse_neighbor_fraction": 0.0,
+        }
+
+    def test_unknown_class_returns_neutral(self):
+        """When candidate or neighbor class is unknown, return neutral."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        candidate = LineString([(0, 0), (50, 50)])
+        nearby_geoms = [LineString([(0, 10), (100, 10)])]
+
+        # Unknown candidate class
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=["residential"],
+            candidate_class=None,
+        )
+        assert result["crossing_angle_min"] == 45.0
+
+        # Unknown neighbor class
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=[None],
+            candidate_class="footway",
+        )
+        assert result["crossing_angle_min"] == 45.0
+
+    def test_multiple_corridors_different_angles(self):
+        """With corridors at different angles, min should reflect closest."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # North-south candidate
+        candidate = LineString([(50, 0), (50, 30)])
+        # One corridor E-W (perpendicular) and one corridor NE-SW (45°)
+        nearby_geoms = [
+            LineString([(0, 15), (100, 15)]),  # E-W (90° to candidate)
+            LineString([(0, 0), (100, 100)]),  # NE-SW (45° to candidate)
+        ]
+        nearby_classes = ["residential", "primary"]
+
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Min should reflect the 45° corridor (closer angle)
+        assert result["crossing_angle_min"] < 55.0
+        # Mean should be between 45° and 90°
+        assert 35.0 < result["crossing_angle_mean"] < 80.0
+
+    def test_cycleway_crossing_vehicle_road(self):
+        """Cycleway crossing a vehicle road should be detected."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # Bike crossing: north-south
+        bike_crossing = LineString([(50, 0), (50, 12)])
+        nearby_geoms = [LineString([(0, 6), (100, 6)])]
+        nearby_classes = ["tertiary"]
+
+        result = compute_crossing_angle_features(
+            candidate=bike_crossing,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="cycleway",
+        )
+
+        # Perpendicular crossing
+        assert result["crossing_angle_min"] > 75.0
+        assert result["transverse_neighbor_fraction"] == 1.0
+
+    def test_very_short_segment(self):
+        """Very short segments (< sample_interval) should still work."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        # 3m crosswalk (shorter than default 10m sample interval)
+        short_crosswalk = LineString([(50, 0), (50, 3)])
+        nearby_geoms = [LineString([(0, 1.5), (100, 1.5)])]
+        nearby_classes = ["residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=short_crosswalk,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Should still detect the perpendicular relationship
+        assert result["crossing_angle_min"] > 70.0
+        assert result["crossing_angle_mean"] > 70.0
+
+    def test_degenerate_zero_length_neighbor_ignored(self):
+        """Zero-length neighbor geometries should be filtered out."""
+        from matcher.features.geometric import compute_crossing_angle_features
+
+        candidate = LineString([(50, 0), (50, 20)])
+        nearby_geoms = [
+            LineString([(10, 10), (10, 10)]),  # Zero length (degenerate)
+            LineString([(0, 10), (100, 10)]),  # Valid E-W road
+        ]
+        nearby_classes = ["residential", "residential"]
+
+        result = compute_crossing_angle_features(
+            candidate=candidate,
+            nearby_geometries=nearby_geoms,
+            nearby_classes=nearby_classes,
+            candidate_class="footway",
+        )
+
+        # Should use only the valid neighbor
+        assert result["crossing_angle_min"] > 75.0

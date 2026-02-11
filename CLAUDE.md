@@ -51,6 +51,7 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
    - Add to `SEMANTIC_FEATURES` if it's a name/class feature
 
 2. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
+   - See **Performance Requirements** below for vectorization/numba rules
 
 3. **Wire it through compute.py**:
    - Add to `compute_pair_features()` return dict
@@ -74,10 +75,41 @@ At training time, `LabelStore.load_all()` joins labels with features automatical
 
 **Note:** `ml.py` imports `FEATURE_COLUMNS` from `config.py`, so no separate update needed there.
 
+### Performance Requirements for Feature Code
+
+**CRITICAL: Feature computation runs on every candidate pair (100K-1M+ pairs per dataset). All feature code must be optimized.**
+
+Follow this performance hierarchy when implementing features:
+
+1. **Vectorized Shapely** (preferred for geometry operations):
+   - Use `shapely.get_point()`, `shapely.get_x()`, `shapely.get_y()` on numpy arrays of geometries
+   - Use `shapely.line_interpolate_point(line, distances_array)` for point sampling
+   - Use `shapely.distance(points_array, line)` for batch distance computation
+   - Use `shapely.get_coordinates(points_array)` to extract coords from point arrays
+   - These operate at the C level with no Python per-element overhead
+
+2. **Vectorized numpy** (preferred for numeric computation):
+   - Use `np.arctan2`, `np.degrees`, broadcasting, `np.diff` etc. on arrays
+   - Avoid Python loops over numpy arrays — use broadcasting instead
+
+3. **Numba `@njit(cache=True)`** (for loops that can't be vectorized):
+   - Use for O(N*M) computations, coordinate-level iteration, complex branching
+   - Add JIT helpers to `src/matcher/features/_jit_helpers.py`
+   - Accept pre-extracted `np.ndarray` coords, not Shapely objects (numba can't handle them)
+   - Always add `cache=True` to avoid recompilation across runs
+   - Can call other `@njit` functions (e.g., `angle_diff_numba`, `compute_heading_numba`)
+
+4. **Never acceptable:**
+   - Python `for` loops over geometry arrays calling Shapely methods per-element
+   - Repeated `np.array(line.coords)` — extract coords once, pass as parameter
+   - `line.interpolate()` in a loop — use vectorized `line_interpolate_point(line, distances)`
+
+See `compute_crossing_angle_features()` in `geometric.py` for a reference implementation combining all three tiers: vectorized Shapely for sampling, vectorized numpy for heading computation, numba JIT for the O(N*M) angle matrix.
+
 ## Feature Computation Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture including:
-- 67 features across 15 categories (source of truth: `config.py::FEATURE_COLUMNS`)
+- 71 features across 16 categories (source of truth: `config.py::FEATURE_COLUMNS`)
 - Three computation paths (ML inference, labeling UI, training)
 - Pre-computation table (what's pre-computed and why)
 - Imputation consistency (training medians)

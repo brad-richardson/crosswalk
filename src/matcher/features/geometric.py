@@ -65,7 +65,9 @@ from shapely import distance as shapely_distance
 from ._jit_helpers import (
     collinear_gap_ratio_numba,
     compute_angle_histogram_numba,
+    compute_crossing_angle_stats_numba,
     compute_heading_consistency_numba,
+    compute_heading_numba,
     compute_shape_complexity_numba,
     histogram_intersection_numba,
 )
@@ -927,3 +929,154 @@ def compute_edge_distance_rmse(
     # RMSE aggregation (different from mean in hausdorff)
     all_dists = np.concatenate([dists_a_to_b, dists_b_to_a])
     return float(np.sqrt(np.mean(all_dists**2)))
+
+
+def _sample_local_headings(
+    line: LineString,
+    sample_interval: float = 10.0,
+    min_samples: int = 3,
+) -> np.ndarray:
+    """Sample local tangent headings at regular intervals along a line.
+
+    Uses vectorized Shapely line_interpolate_point for efficient sampling,
+    then vectorized numpy arctan2 for heading computation.
+
+    Args:
+        line: LineString geometry (projected CRS, meters)
+        sample_interval: Distance between sample points in meters
+        min_samples: Minimum number of sample points
+
+    Returns:
+        Array of headings in degrees (0-360), shape (N,).
+        Empty array if line is degenerate.
+    """
+    length = line.length
+    if length <= 0:
+        return np.array([], dtype=np.float64)
+
+    n_samples = max(min_samples, int(length / sample_interval) + 1)
+    # Use n_samples + 1 to get tangent vectors between consecutive points
+    n_interp = max(n_samples + 1, 3)
+    distances = np.linspace(0, length, n_interp)
+    # Vectorized Shapely interpolation — single C call for all points
+    pts = line_interpolate_point(line, distances)
+    coords = get_coordinates(pts)
+
+    # Vectorized heading computation via numpy
+    dx = np.diff(coords[:, 0])
+    dy = np.diff(coords[:, 1])
+    headings = (np.degrees(np.arctan2(dy, dx)) + 360) % 360
+    return headings
+
+
+def compute_crossing_angle_features(
+    candidate: LineString,
+    nearby_geometries: list[LineString],
+    nearby_classes: list[str | None],
+    candidate_class: str | None,
+    sample_interval: float = 10.0,
+    transverse_threshold: float = 60.0,
+) -> dict[str, float]:
+    """Compute crossing-angle features for a candidate segment vs nearby corridor.
+
+    Measures how transverse the candidate is relative to nearby segments of a
+    different traffic tier. Designed to detect ACROSS-role segments (crosswalks,
+    bike crossings) which cross a linear facility at a high angle.
+
+    Algorithm:
+    1. Filter nearby segments to those in a different traffic tier
+    2. For each different-tier neighbor, compute its gross heading (vectorized)
+    3. Sample local headings along the candidate using vectorized Shapely
+    4. Delegate to numba JIT for the O(samples x neighbors) angle computation
+    5. Report statistics: min, mean, std, transverse_neighbor_fraction
+
+    Performance:
+    - Shapely vectorized for point sampling (line_interpolate_point on arrays)
+    - Numpy vectorized for heading computation (arctan2 on arrays)
+    - Numba JIT for the O(N*M) angle matrix (compute_crossing_angle_stats_numba)
+    - Neighbor heading extraction uses vectorized Shapely get_point/get_x/get_y
+
+    Args:
+        candidate: The segment being evaluated (projected CRS, meters)
+        nearby_geometries: Geometries of nearby segments (from spatial query)
+        nearby_classes: Road classes of nearby segments (parallel to geometries)
+        candidate_class: Road class of the candidate segment
+        sample_interval: Distance between heading sample points (meters)
+        transverse_threshold: Angle threshold for "transverse" classification (degrees)
+
+    Returns:
+        Dict with keys:
+        - crossing_angle_min: Minimum angle to nearest different-tier segment (0-90)
+        - crossing_angle_mean: Mean of per-sample minimum angles (0-90)
+        - crossing_angle_std: Std dev of per-sample minimum angles (0-45ish)
+        - transverse_neighbor_fraction: Fraction of different-tier neighbors
+          whose gross heading is >transverse_threshold from candidate (0-1)
+    """
+    from .semantic import get_traffic_tier
+
+    neutral = {
+        "crossing_angle_min": 45.0,
+        "crossing_angle_mean": 45.0,
+        "crossing_angle_std": 0.0,
+        "transverse_neighbor_fraction": 0.0,
+    }
+
+    if candidate.is_empty or candidate.length <= 0:
+        return neutral
+
+    candidate_tier = get_traffic_tier(candidate_class)
+
+    # Filter to different-tier neighbors and extract headings
+    # Use vectorized Shapely for endpoint extraction where possible
+    diff_tier_geoms = []
+    for geom, cls in zip(nearby_geometries, nearby_classes):
+        if geom is None or geom.is_empty or geom.length <= 0:
+            continue
+        neighbor_tier = get_traffic_tier(cls)
+        if neighbor_tier is None or candidate_tier is None:
+            continue
+        if neighbor_tier == candidate_tier:
+            continue
+        if neighbor_tier == "neutral" or candidate_tier == "neutral":
+            continue
+        diff_tier_geoms.append(geom)
+
+    if not diff_tier_geoms:
+        return neutral
+
+    # Vectorized heading extraction for filtered neighbors
+    geom_array = np.array(diff_tier_geoms, dtype=object)
+    starts = shapely_mod.get_point(geom_array, 0)
+    ends = shapely_mod.get_point(geom_array, -1)
+    dx = shapely_mod.get_x(ends) - shapely_mod.get_x(starts)
+    dy = shapely_mod.get_y(ends) - shapely_mod.get_y(starts)
+    neighbor_headings = (np.degrees(np.arctan2(dy, dx)) + 360) % 360
+
+    # Sample local headings along the candidate (vectorized Shapely + numpy)
+    candidate_headings = _sample_local_headings(candidate, sample_interval)
+    if len(candidate_headings) == 0:
+        return neutral
+
+    # Candidate gross heading for transverse fraction
+    candidate_coords = np.array(candidate.coords)
+    candidate_gross_heading = float(
+        compute_heading_numba(
+            candidate_coords[-1, 0] - candidate_coords[0, 0],
+            candidate_coords[-1, 1] - candidate_coords[0, 1],
+        )
+    )
+
+    # Delegate to numba JIT for the O(N*M) angle computation
+    crossing_min, crossing_mean, crossing_std, transverse_frac = compute_crossing_angle_stats_numba(
+        candidate_headings,
+        neighbor_headings,
+        transverse_threshold,
+        candidate_gross_heading,
+    )
+
+    return {
+        "crossing_angle_min": float(crossing_min),
+        "crossing_angle_mean": float(crossing_mean),
+        "crossing_angle_std": float(crossing_std),
+        "transverse_neighbor_fraction": float(transverse_frac),
+    }
