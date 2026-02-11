@@ -18,7 +18,7 @@ import numpy as np
 from loguru import logger
 from numba import njit
 from pyproj import CRS, Geod, Transformer
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 from shapely.ops import substring, transform
 
 from ..config import (
@@ -30,6 +30,17 @@ from ..config import (
 
 # WGS84 ellipsoid for geodetic calculations (consistent with Overture)
 _GEOD = Geod(ellps="WGS84")
+
+# For barely-overlapping lines, endpoint seeds can dramatically outperform the
+# midpoint seed. Only switch when the improvement is at least this factor,
+# to avoid perturbing well-aligned pairs where the midpoint seed works fine.
+_ENDPOINT_SEED_THRESHOLD = 5.0
+
+# Buffer distance for seed scoring is a fraction of the shorter line's length,
+# divided by the grid resolution. Controls how "wide" the scoring kernel is
+# when evaluating candidate seed offsets.
+_SEED_BUFFER_FRACTION = 0.5
+_MIN_GRID_SAMPLES = 2
 
 
 def geodetic_length(line: LineString) -> float:
@@ -486,42 +497,110 @@ def linestring_alignment(
     if ref_length == 0 or target_length == 0:
         return AlignmentResult(0.0, 1.0, 0.0, 1.0)
 
-    # Compute projection-based seed offset: project target midpoint onto
-    # reference to find approximate position, then convert to offset.
-    # This ensures the grid search always evaluates the correct region,
-    # even when the target is much shorter than the reference and grid
-    # points at the edges fall in dead zones.
+    # Seed offset selection. The standard midpoint seed works well when lines
+    # overlap substantially, but for barely-overlapping lines (e.g. two collinear
+    # roads meeting at a junction), the midpoint projects far from the actual
+    # overlap zone, and the grid search + ternary refinement can't bridge the gap.
+    # We evaluate endpoint-based seeds and switch only when dramatically better.
     target_mid = target.interpolate(0.5, normalized=True)
-    seed_pos = reference.project(target_mid)
-    seed_offset = seed_pos - target_length / 2.0
+    proj_start = reference.project(Point(target.coords[0]))
+    proj_mid = reference.project(target_mid)
+    proj_end = reference.project(Point(target.coords[-1]))
 
-    # Compare normally (forward)
-    forward_offset, forward_score = _find_best_alignment_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
+    buffer_distance_for_seed = (
+        _SEED_BUFFER_FRACTION
+        * min(ref_length, target_length)
+        / max(grid_samples, _MIN_GRID_SAMPLES)
+    )
+
+    midpoint_seed = proj_mid - target_length / 2.0
+
+    def _best_offset_with_endpoint_seeds(
+        tgt_coords: np.ndarray,
+        tgt_distances: np.ndarray,
+        endpoint_seed_candidates: list[float],
+    ) -> tuple[float, float]:
+        """Run grid+ternary from midpoint seed and optionally an endpoint seed.
+
+        For barely-overlapping lines, endpoint seeds can score much better at the
+        seed point, but a high seed score doesn't guarantee the grid+ternary search
+        converges to a better final offset. So we run from both seeds and keep
+        whichever produces the better final score.
+        """
+        mp_score = _get_score_numba(
+            ref_coords,
+            ref_distances,
+            ref_length,
+            tgt_coords,
+            tgt_distances,
+            target_length,
+            midpoint_seed,
+            buffer_distance_for_seed,
+        )
+
+        # Check if any endpoint seed scores dramatically better than midpoint
+        best_ep_seed = None
+        best_ep_score = mp_score
+        for s in endpoint_seed_candidates:
+            score = _get_score_numba(
+                ref_coords,
+                ref_distances,
+                ref_length,
+                tgt_coords,
+                tgt_distances,
+                target_length,
+                s,
+                buffer_distance_for_seed,
+            )
+            if score > mp_score * _ENDPOINT_SEED_THRESHOLD and score > best_ep_score:
+                best_ep_seed = s
+                best_ep_score = score
+
+        # Always run from midpoint seed
+        best_offset, best_score = _find_best_alignment_numba(
+            ref_coords,
+            ref_distances,
+            ref_length,
+            tgt_coords,
+            tgt_distances,
+            target_length,
+            grid_samples,
+            refinement_steps,
+            midpoint_seed,
+        )
+
+        # If an endpoint seed qualified, also run from it and keep better result
+        if best_ep_seed is not None:
+            ep_offset, ep_score = _find_best_alignment_numba(
+                ref_coords,
+                ref_distances,
+                ref_length,
+                tgt_coords,
+                tgt_distances,
+                target_length,
+                grid_samples,
+                refinement_steps,
+                best_ep_seed,
+            )
+            if ep_score > best_score:
+                best_offset, best_score = ep_offset, ep_score
+
+        return best_offset, best_score
+
+    forward_offset, forward_score = _best_offset_with_endpoint_seeds(
         target_coords,
         target_distances,
-        target_length,
-        grid_samples,
-        refinement_steps,
-        seed_offset,
+        [proj_start, proj_end - target_length],
     )
 
     # Compare with the second linestring reversed
     target_coords_rev = target_coords[::-1].copy()
     target_distances_rev = target_length - target_distances[::-1]
 
-    backward_offset, backward_score = _find_best_alignment_numba(
-        ref_coords,
-        ref_distances,
-        ref_length,
+    backward_offset, backward_score = _best_offset_with_endpoint_seeds(
         target_coords_rev,
         target_distances_rev,
-        target_length,
-        grid_samples,
-        refinement_steps,
-        seed_offset,
+        [proj_end, proj_start - target_length],
     )
 
     def unit_clamp(x: float) -> float:
@@ -548,7 +627,7 @@ def linestring_alignment(
     target_start_frac = float(max(-offset, 0) / target_length)
     target_end_frac = float(min(-offset + ref_length, target_length) / target_length)
 
-    # Post-process: detect and truncate at divergence points
+    # Post-process: detect and truncate at divergence points.
     if detect_divergence and (ref_end_frac - ref_start_frac) > 0.1:
         new_ref_start, new_ref_end = _detect_divergence_endpoints(
             ref_coords,
