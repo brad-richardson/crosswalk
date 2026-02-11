@@ -5,9 +5,14 @@ across various scenarios. They use synthetic geometries to ensure tests are
 reproducible regardless of data file availability.
 """
 
-from shapely.geometry import LineString
+import math
 
-from matcher.features.alignment import linestring_alignment
+import pyproj
+import pytest
+from shapely.geometry import LineString
+from shapely.ops import transform as shapely_transform
+
+from matcher.features.alignment import create_subline, linestring_alignment
 
 
 class TestSyntheticAlignmentRegression:
@@ -67,8 +72,6 @@ class TestSyntheticAlignmentRegression:
 
     def test_curvy_road_maintains_coverage(self):
         """Curvy roads that follow the same path should maintain coverage."""
-        import math
-
         # Create a curvy road (sinusoidal)
         ref_coords = [(x, 5 * math.sin(x / 10)) for x in range(0, 101, 5)]
         target_coords = [(x, 5 * math.sin(x / 10) + 2) for x in range(0, 101, 5)]
@@ -142,8 +145,6 @@ class TestDivergenceDetectionRegression:
 
     def test_gradual_curve_tolerated(self):
         """Gradual curves (small angle) should not be truncated."""
-        import math
-
         # 10 degree angle over 100m = ~17m divergence
         angle_rad = math.radians(10)
         end_y = 100 * math.tan(angle_rad)
@@ -308,3 +309,251 @@ class TestShortSegmentOnLongReference:
             f"Subline center off by {error_m:.1f}m (expected frac={expected:.6f}, got={actual:.6f})"
         )
         assert result.dataset_coverage >= 0.9
+
+
+# -- Shared geometry fixtures for overalignment tests --
+
+# Mumbai pair: target end barely meets reference start (~5m overlap on 214m ref)
+_MUMBAI_REF_WGS = [
+    (72.8673478, 19.0670971),
+    (72.8673947, 19.0671258),
+    (72.8674923, 19.0671855),
+    (72.8680551, 19.0675296),
+    (72.8682888, 19.0675866),
+    (72.868365, 19.0675517),
+    (72.8684056, 19.0675331),
+    (72.8688529, 19.0668792),
+]
+_MUMBAI_TGT_WGS = [
+    (72.8662591430328, 19.0664357013479),
+    (72.8665335555516, 19.0666071109827),
+    (72.8668575929, 19.0667960206963),
+    (72.8671447645236, 19.0669840156765),
+    (72.867384158045, 19.0671211095619),
+]
+
+_UTM43N = pyproj.Transformer.from_crs(
+    "EPSG:4326", "+proj=utm +zone=43 +north +datum=WGS84", always_xy=True
+).transform
+
+
+def _subline_overshoot(ref, target, result):
+    """Compute how far each subline extends past the other line's extent.
+
+    Returns (ref_overshoot, target_overshoot) in the same units as the input
+    geometries (degrees for WGS84, meters for projected).
+    """
+    ref_sub = create_subline(ref, result.overture_start_frac, result.overture_end_frac)
+    target_sub = create_subline(target, result.dataset_start_frac, result.dataset_end_frac)
+    if ref_sub is None or target_sub is None:
+        return float("inf"), float("inf")
+
+    # Project target subline endpoints onto ref to find valid ref range
+    t_start_proj = ref.project(target_sub.interpolate(0), normalized=True)
+    t_end_proj = ref.project(target_sub.interpolate(1, normalized=True), normalized=True)
+    ref_clipped_start = max(result.overture_start_frac, min(t_start_proj, t_end_proj))
+    ref_clipped_end = min(result.overture_end_frac, max(t_start_proj, t_end_proj))
+
+    ref_overshoot = (
+        max(
+            abs(result.overture_start_frac - ref_clipped_start),
+            abs(result.overture_end_frac - ref_clipped_end),
+        )
+        * ref.length
+    )
+
+    # Project ref subline endpoints onto target to find valid target range
+    r_start_proj = target.project(ref_sub.interpolate(0), normalized=True)
+    r_end_proj = target.project(ref_sub.interpolate(1, normalized=True), normalized=True)
+    tgt_clipped_start = max(result.dataset_start_frac, min(r_start_proj, r_end_proj))
+    tgt_clipped_end = min(result.dataset_end_frac, max(r_start_proj, r_end_proj))
+
+    target_overshoot = (
+        max(
+            abs(result.dataset_start_frac - tgt_clipped_start),
+            abs(result.dataset_end_frac - tgt_clipped_end),
+        )
+        * target.length
+    )
+
+    return ref_overshoot, target_overshoot
+
+
+class TestOveralignment:
+    """Tests for barely-overlapping segments that should have small alignment.
+
+    When two lines barely overlap at one endpoint (e.g. collinear roads meeting
+    at a junction), the standard midpoint seed projects far from the actual
+    overlap zone, so the grid search converges to a suboptimal offset that
+    overshoots. The fix evaluates endpoint-based seeds and switches when they
+    score significantly better (5x threshold), giving the refinement a starting
+    point near the true overlap.
+    """
+
+    # -- Parameterized: barely-overlapping pairs should have small coverage --
+
+    @pytest.mark.parametrize(
+        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, max_overshoot, case_id",
+        [
+            pytest.param(
+                _MUMBAI_REF_WGS,
+                _MUMBAI_TGT_WGS,
+                0.15,
+                0.15,
+                1.0 / 111000,  # 1m in degrees
+                "mumbai_wgs84",
+                id="mumbai-degree-space",
+            ),
+            pytest.param(
+                list(shapely_transform(_UTM43N, LineString(_MUMBAI_REF_WGS)).coords),
+                list(shapely_transform(_UTM43N, LineString(_MUMBAI_TGT_WGS)).coords),
+                0.05,
+                0.05,
+                2.0,  # 2m in projected meters
+                "mumbai_projected",
+                id="mumbai-projected-meters",
+            ),
+            pytest.param(
+                [(95, 0), (200, 0), (300, 0)],
+                [(0, 3), (50, 3), (100, 3)],
+                0.10,
+                0.15,
+                1.0,  # 1m in synthetic meters
+                "synthetic_collinear",
+                id="synthetic-collinear-5m-overlap",
+            ),
+            pytest.param(
+                # Bogota pair bog_road_165093: 360m ref, 72m target at edge
+                [
+                    (0, 0),
+                    (-19, -3.2),
+                    (-39.3, -5.6),
+                    (-84.3, -7.1),
+                    (-93.5, -8),
+                    (-101, -8.8),
+                    (-112.2, -9.9),
+                    (-128.4, -12.8),
+                    (-144.9, -18.5),
+                    (-180.3, -31.4),
+                    (-199.5, -34.5),
+                    (-286.5, -17.4),
+                    (-353, -4.5),
+                ],
+                [(-2.2, -3), (7.6, 2.2), (18.1, 10), (28.7, 22.9), (36.7, 40.6), (39.9, 51.5)],
+                0.05,
+                0.10,
+                10.0,  # More generous for angled pair
+                "bogota_asymmetric",
+                id="bogota-asymmetric-360m-ref",
+            ),
+        ],
+    )
+    def test_barely_overlapping_small_coverage(
+        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, max_overshoot, case_id
+    ):
+        """Barely-overlapping pairs should have small coverage and limited overshoot."""
+        ref = LineString(ref_coords)
+        target = LineString(tgt_coords)
+
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage < max_ref_cov, (
+            f"[{case_id}] ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
+        )
+        assert result.dataset_coverage < max_tgt_cov, (
+            f"[{case_id}] tgt_cov={result.dataset_coverage:.4f}, expected < {max_tgt_cov}"
+        )
+
+        ref_overshoot, target_overshoot = _subline_overshoot(ref, target, result)
+        assert ref_overshoot < max_overshoot, (
+            f"[{case_id}] ref overshoots target by {ref_overshoot:.2f}"
+        )
+        assert target_overshoot < max_overshoot, (
+            f"[{case_id}] target overshoots ref by {target_overshoot:.2f}"
+        )
+
+    # -- Parameterized: well-aligned pairs should maintain high coverage --
+
+    @pytest.mark.parametrize(
+        "ref_coords, tgt_coords, min_cov",
+        [
+            pytest.param(
+                [(0, 0), (100, 0)],
+                [(0, 5), (100, 5)],
+                0.90,
+                id="parallel-5m-offset",
+            ),
+            pytest.param(
+                [(0, 0), (200, 0)],
+                [(0, 5), (200, 5)],
+                0.90,
+                id="parallel-long",
+            ),
+            pytest.param(
+                [(0, 0), (100, 0)],
+                [(100, 0), (0, 0)],
+                0.95,
+                id="reversed-direction",
+            ),
+        ],
+    )
+    def test_high_coverage_not_degraded(self, ref_coords, tgt_coords, min_cov):
+        """Well-aligned pairs must maintain high coverage (multi-seed stability)."""
+        ref = LineString(ref_coords)
+        target = LineString(tgt_coords)
+
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage >= min_cov
+        assert result.dataset_coverage >= min_cov
+
+    # -- Individual edge-case tests --
+
+    def test_synthetic_collinear_no_overlap(self):
+        """Two collinear parallel lines with a gap — should have near-zero coverage."""
+        ref = LineString([(120, 0), (200, 0), (300, 0)])
+        target = LineString([(0, 3), (50, 3), (100, 3)])
+
+        result = linestring_alignment(ref, target)
+        assert result.overture_coverage < 0.10
+
+    def test_angled_junction_not_clipped(self):
+        """Lines meeting at 45 degrees should produce a small but non-zero alignment."""
+        ref = LineString([(0, 0), (200, 0)])
+        target = LineString([(-70.7, -70.7), (0, 0)])
+
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage > 0.01
+        assert result.dataset_coverage > 0.01
+
+    def test_angled_junction_with_parallel_section(self):
+        """Road approaching at 45 degrees then running parallel should align the parallel part."""
+        ref = LineString([(0, 0), (200, 0)])
+        target = LineString([(-30, -30), (0, 3), (20, 3)])
+
+        result = linestring_alignment(ref, target)
+
+        ref_aligned_m = result.overture_coverage * ref.length
+        assert ref_aligned_m >= 15, f"Expected ~20m aligned, got {ref_aligned_m:.1f}m"
+
+    def test_small_overshoot_not_clipped(self):
+        """A 12m overlap should not be over-trimmed."""
+        ref = LineString([(88, 0), (200, 0)])
+        target = LineString([(0, 3), (100, 3)])
+
+        result = linestring_alignment(ref, target)
+
+        ref_aligned_m = result.overture_coverage * ref.length
+        assert ref_aligned_m >= 10, f"Expected ~12m aligned, got {ref_aligned_m:.1f}m"
+
+    def test_curved_barely_overlapping_not_collapsed(self):
+        """Curved roads that barely overlap should still produce an alignment."""
+        ref_pts = [(x, 5 * math.sin(x / 30)) for x in range(0, 201, 10)]
+        tgt_pts = [(x, -5 * math.sin((-x) / 20) + 2) for x in range(-100, 6, 10)]
+        ref = LineString(ref_pts)
+        target = LineString(tgt_pts)
+
+        result = linestring_alignment(ref, target)
+
+        assert result.overture_coverage > 0.005 or result.dataset_coverage > 0.005
