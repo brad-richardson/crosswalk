@@ -1,0 +1,28 @@
+name: fr_france_winter_hiking_traces
+display_name: France Winter Hiking Traces (IGN GeoPlateforme)
+type: trail
+description: National-scale winter hiking traces (ski and snowshoe) served via France GeoPlateforme WFS.
+source:
+  type: wfs
+  url: https://data.geopf.fr/wfs/wfs
+  portal_url: https://cartes.gouv.fr/rechercher-une-donnee
+  where_clause: TRACES.RANDO.HIVERNALE:traces_rando_hivernale
+fetch:
+  id_prefix: fr_winter_hike
+  id_column: cleabs
+  name_column: nom_de_la_trace
+  class_column: passage_delicat
+  class_mapping:
+    true: path
+    false: path
+  subclass_column: passage_delicat
+  subclass_mapping:
+    true: difficult
+    false: standard
+  bbox:
+  - -5.3
+  - 41.2
+  - 9.8
+  - 51.2
+  crs: EPSG:4326
+

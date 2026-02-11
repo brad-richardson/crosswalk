@@ -1,0 +1,29 @@
+name: ch_grand_geneva_cycle_schema
+display_name: Grand Geneva Cycle Schema
+type: bike
+description: Strategic cycling network for Greater Geneva (liaisons, mesh links, and greenways).
+source:
+  type: arcgis
+  url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/AGGLO_SCHEMA_CYCLABLE/FeatureServer/0
+  portal_url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/AGGLO_SCHEMA_CYCLABLE/FeatureServer
+fetch:
+  id_prefix: ch_geneva_bike
+  id_column: objectid
+  name_column: nom_iti_19
+  class_column: type
+  class_mapping:
+    Liaison: cycleway
+    Maillage: cycleway
+    Voie Verte: cycleway
+  subclass_column: type
+  subclass_mapping:
+    Liaison: connector
+    Maillage: local_network
+    Voie Verte: greenway
+  bbox:
+  - 5.55
+  - 45.65
+  - 6.55
+  - 46.55
+  crs: EPSG:4326
+

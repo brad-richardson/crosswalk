@@ -1,325 +1,185 @@
-# Adding New Datasets
+# Dataset Ingestion Guide
 
-This guide covers the process for adding a new road dataset to the matcher pipeline, including fetching data, discovering class mappings, and validating results.
+This guide describes the current workflow for adding **target datasets** (roads, sidewalks, bike, trails) that will be matched against **Overture** reference data.
 
-## Overview
+## Scope
 
-The matcher pipeline links local road datasets to Overture Maps GERS identifiers. Each dataset needs:
+- Target datasets should be authoritative or reputable third-party sources.
+- Avoid using OSM as a target source in this workflow (Overture is the default reference source).
+- Configs live in `datasets/*.yaml`.
 
-1. A **YAML configuration** in `datasets/` with source URL, bbox, and class mappings
-2. The **fetch CLI** (`matcher fetch`) reads the YAML and downloads data
+## Supported Source Types
 
-## Step 1: Find and Fetch the Data
+Set `source.type` in your dataset YAML:
 
-### Finding Public Road Data
+- `arcgis`: ArcGIS FeatureServer/MapServer endpoints
+- `download`: direct file download (`shp`, `gpkg`, `gml`, `geojson`, `gdb`)
+- `ogc_features`: OGC API Features item endpoint
+- `wfs`: WFS endpoint (set `source.where_clause` to `typeName`)
+- `os_downloads`: Ordnance Survey Data Hub products
+- `manual`: metadata-only entry for datasets that need manual acquisition
 
-Many states and counties publish road data through ArcGIS FeatureServers. Common sources:
-
-- **State DOTs**: Utah SGID, Caltrans, etc.
-- **County GIS portals**: Often have local street centerlines
-- **Open data portals**: data.gov, state-specific portals
-
-Look for datasets that include:
-- Street names (enables name-based match verification)
-- Classification codes (FHWA functional class, local codes, etc.)
-- Geometry as LineStrings
-
-### Creating a Dataset Configuration
-
-Create a YAML config in `datasets/<dataset_name>.yaml`:
+## Minimal YAML Template
 
 ```yaml
-name: us_example_streets
-display_name: Example City Streets
-type: road
-description: Street centerlines from Example City GIS portal
+name: xx_example_sidewalks
+display_name: Example Sidewalk Network
+type: sidewalk
+
+description: Pedestrian centerlines from Example provider.
 
 source:
   type: arcgis
-  url: https://example.com/arcgis/rest/services/Roads/FeatureServer/0
-  portal_url: https://example-city.gov/open-data/streets
+  url: https://example.org/arcgis/rest/services/Sidewalks/FeatureServer/0
+  portal_url: https://example.org/open-data
 
 fetch:
-  bbox: [-122.5, 37.7, -122.3, 37.9]  # [xmin, ymin, xmax, ymax]
-  name_column: STREETNAME
-  class_column: FCLASS
+  id_prefix: ex_sidewalk
+  id_column: OBJECTID
+  name_column: NAME
+  class_column: TYPE
   class_mapping:
-    1: motorway
-    2: trunk
-    3: primary
-    4: secondary
-    5: tertiary
-    6: residential
-    7: service
+    SIDEWALK: footway
+    CROSSWALK: footway
+  subclass_column: TYPE
+  subclass_mapping:
+    SIDEWALK: sidewalk
+    CROSSWALK: crosswalk
+  bbox: [xmin, ymin, xmax, ymax]
+  crs: EPSG:4326
 ```
 
-### Fetching the Data
+## Important Fields
 
-Use the fetch CLI:
+### `name`
+- Stable dataset ID used by CLI and filenames.
+
+### `type`
+- One of `road`, `sidewalk`, `bike`, `trail`.
+- Affects default class fallback behavior:
+  - `sidewalk` defaults to `footway` when no class column is provided.
+  - `bike` defaults to `cycleway` when no class column is provided.
+
+### `fetch.id_column` (required)
+- Must point to a stable upstream identifier.
+- Required to preserve label linkage across refreshes.
+
+### `fetch.bbox`
+- Used for target fetch filtering (where supported) and for reference fetch extent.
+- Format: `[xmin, ymin, xmax, ymax]` in WGS84 coordinates.
+
+### `fetch.source_crs`
+- Use when source data CRS metadata is missing/wrong.
+- The fetch pipeline reprojects to `EPSG:4326`.
+
+### `fetch.polygon_to_centerline`
+- Use when source geometries are polygons but target needs linear network extraction.
+
+### `source.where_clause` for WFS
+- For `source.type: wfs`, set `source.where_clause` to the WFS `typeName`.
+
+## End-to-End Workflow
+
+## 1) Add YAML config
+
+Create `datasets/<dataset_name>.yaml` using the template above.
+
+## 2) Verify config
 
 ```bash
-# Fetch all data (target + Overture reference) for a dataset
-matcher fetch all us_example_streets
+# verify one dataset
+matcher data fetch verify xx_example_sidewalks
 
-# Fetch target data only
-matcher fetch target us_example_streets
+# verify everything under a prefix
+matcher data fetch verify --prefix xx_
 
-# Fetch all datasets for a region
-matcher fetch target --prefix us_boston
-
-# List available datasets
-matcher fetch list
+# schema-only check (no URL checks)
+matcher data fetch verify xx_example_sidewalks --dry-run
 ```
 
-The CLI reads the YAML config and handles:
-- ArcGIS FeatureServer pagination
-- Coordinate system transformation
-- Overture-compatible schema conversion
-- Class mapping application
-
-### Common Issues
-
-- **MultiLineString geometries**: The fetch script automatically explodes to LineStrings
-- **CRS issues**: Specify `crs` in the YAML config if the source uses a non-WGS84 CRS
-
-## Step 2: Fetch Reference Data
-
-Fetch Overture reference data for your dataset:
+## 3) Fetch target data
 
 ```bash
-# Fetch Overture reference data (uses bbox from dataset config)
-matcher fetch reference us_example_streets
+matcher data fetch target xx_example_sidewalks
 
-# Or fetch both target and reference in one command
-matcher fetch all us_example_streets
+# force refresh
+matcher data fetch target xx_example_sidewalks --force
+
+# fetch a set
+matcher data fetch target --prefix xx_ --workers 4
 ```
 
-## Step 3: Run Initial Matching
-
-Run the matcher to find correspondences:
+## 4) Fetch reference data (Overture)
 
 ```bash
-matcher match data/raw/overture_segments.parquet data/raw/your_dataset.parquet \
-    -m xgboost -o data/output/your_dataset_bridge.parquet
+matcher data fetch reference xx_example_sidewalks -s overture
 ```
 
-This produces a bridge file linking your dataset IDs to Overture GERS IDs.
-
-## Step 4: Analyze Class Mappings
-
-### Using the Discovery Command
+Or fetch target + reference together:
 
 ```bash
-matcher discover-classes data/raw/your_dataset.parquet \
-    --reference data/raw/overture_segments.parquet \
-    --bridge data/output/your_dataset_bridge.parquet
+matcher data fetch all xx_example_sidewalks
 ```
 
-### Manual Analysis for Higher Accuracy
-
-For datasets with street names, name-verified matching provides more accurate class mappings:
-
-```python
-import pandas as pd
-import geopandas as gpd
-from rapidfuzz import fuzz
-
-# Load data
-bridge = pd.read_parquet("data/output/your_dataset_bridge.parquet")
-target = gpd.read_parquet("data/raw/your_dataset.parquet")
-overture = gpd.read_parquet("data/raw/overture_segments.parquet")
-
-# Merge in attributes
-merged = bridge.merge(
-    target[["id", "names", "source_tags"]],
-    left_on="target_id",
-    right_on="id",
-    suffixes=("", "_target")
-)
-merged = merged.merge(
-    overture[["id", "names", "class"]],
-    left_on="gers_id",
-    right_on="id",
-    suffixes=("_target", "_ref")
-)
-
-# Extract names
-def get_primary_name(names_dict):
-    if isinstance(names_dict, dict):
-        return names_dict.get("primary", "")
-    return ""
-
-merged["target_name"] = merged["names_target"].apply(get_primary_name)
-merged["ref_name"] = merged["names_ref"].apply(get_primary_name)
-
-# Filter to high-confidence matches with name verification
-merged["name_similarity"] = merged.apply(
-    lambda row: fuzz.token_sort_ratio(
-        row["target_name"] or "",
-        row["ref_name"] or ""
-    ) / 100.0 if row["target_name"] and row["ref_name"] else 0,
-    axis=1
-)
-
-# Use 70% name similarity threshold
-name_verified = merged[
-    (merged["confidence"] >= 0.5) &
-    (merged["name_similarity"] >= 0.7)
-]
-
-print(f"Total matches: {len(bridge)}")
-print(f"High-confidence: {len(merged[merged['confidence'] >= 0.5])}")
-print(f"Name-verified: {len(name_verified)}")
-
-# Extract source classification
-name_verified["source_class"] = name_verified["source_tags"].apply(
-    lambda x: x.get("CLASS_COLUMN") if isinstance(x, dict) else None
-)
-
-# Build confusion matrix
-confusion = pd.crosstab(
-    name_verified["source_class"],
-    name_verified["class"],  # Overture class
-    margins=True
-)
-print("\nConfusion matrix:")
-print(confusion)
-
-# Calculate accuracy per source class
-for src_class in name_verified["source_class"].unique():
-    subset = name_verified[name_verified["source_class"] == src_class]
-    top_match = subset["class"].value_counts().index[0]
-    accuracy = (subset["class"] == top_match).mean()
-    print(f"{src_class} -> {top_match}: {accuracy:.1%} ({len(subset)} samples)")
-```
-
-### Interpreting Results
-
-**High accuracy mappings (>80%)**:
-- Local/residential roads typically map cleanly to `residential`
-- Interstates/freeways map to `motorway`
-
-**Ambiguous mappings (40-60%)**:
-- Middle-tier roads (arterials, collectors) often split between `secondary` and `tertiary`
-- Use the plurality class, but note the variance in the YAML config
-
-**Overall accuracy targets**:
-- 75%+ is good for geometric-only matches
-- 80-85%+ is achievable with name-verified matches
-
-## Step 5: Create YAML Configuration
-
-Create `src/matcher/datasets/<dataset_name>.yaml`:
-
-```yaml
-name: your_dataset
-description: |
-  Description of the dataset source and coverage area.
-  Note any quirks or data quality observations.
-
-confidence: high  # or medium/low based on analysis
-default_class: residential
-
-source_classification:
-  column: CLASS_COLUMN
-  description: |
-    Description of the classification system used.
-  documentation_url: https://source-documentation-url
-  values:
-    1:
-      description: Interstate
-      count: 123
-    2:
-      description: Highway
-      count: 456
-    # etc.
-
-class_mapping_rules:
-  # Order by priority (highest first)
-  - source_value: "1"
-    target_class: motorway
-    priority: 100
-
-  - source_value: "2"
-    target_class: trunk
-    priority: 95
-
-  # Add all mappings...
-
-notes: |
-  Analysis notes:
-  - How many matches were analyzed
-  - Key accuracy observations
-  - Any special handling required
-```
-
-## Step 6: Verify the Configuration
-
-The YAML config you created in Step 1 serves as the dataset registry. Verify it's recognized:
+## 5) Run matching
 
 ```bash
-# List all configured datasets
-matcher fetch list
+matcher match \
+  data/raw/xx_example_sidewalks_overture_segments_*.parquet \
+  data/raw/xx_example_sidewalks_target_*.parquet \
+  -o data/output/xx_example_sidewalks_bridge.parquet
 ```
 
-## Step 7: Validate
+Tip: use `matcher data fetch list` and filenames in `data/raw/` to pick exact file paths.
 
-### List available configs
+## 6) Discover class mappings
 
 ```bash
-matcher fetch list
+matcher class discover \
+  data/raw/xx_example_sidewalks_target_*.parquet \
+  --reference data/raw/xx_example_sidewalks_overture_segments_*.parquet \
+  --bridge data/output/xx_example_sidewalks_bridge.parquet
 ```
 
-### Run discovery on new data
+This updates/merges classification sections in `datasets/<dataset>.yaml`.
+
+## 7) (Optional) Save quality fingerprint
 
 ```bash
-matcher discover-classes data/raw/new_data.parquet
+matcher data quality xx_example_sidewalks --save-yaml
 ```
 
-## Example: Utah Salt Lake County
+This writes `quality_fingerprint` into the dataset YAML for regression checks.
 
-### Key findings from Utah analysis:
+## Common Pitfalls
 
-1. **Data quality**: 99.4% of roads have street names (excellent)
-2. **Classification**: CARTOCODE system (1-17 values)
-3. **Match rate**: 71,603 match pairs from 63,005 source roads (some roads match multiple Overture segments)
-4. **Name-verified matches**: 49,438 (84.4% of high-confidence)
-5. **Accuracy**: 84.4% for name-verified matches
+### Missing `id_column`
+- Fetch fails by design.
+- Fix by using a stable upstream ID field.
 
-### Class mapping accuracy:
+### CRS mismatch
+- Set `fetch.source_crs` explicitly.
 
-| Source | Target | Accuracy | Samples |
-|--------|--------|----------|---------|
-| 11 (Local Street) | residential | 88.7% | 46,070 |
-| 5 (State Route) | primary | 73.7% | 1,413 |
-| 10 (Secondary Street) | tertiary | 71.9% | 2,878 |
-| 8 (Major Street) | secondary | 50.7% | 3,717 |
+### Unexpected geometry types
+- Non-line geometries are filtered out.
+- Use `polygon_to_centerline: true` when source data is polygon-based pathways.
 
-## Example: Fresno County
+### WFS typeName errors
+- Ensure `source.where_clause` exactly matches WFS `typeName`.
 
-### Key findings from Fresno analysis:
+### Huge datasets
+- Keep `bbox` focused unless intentionally running national-scale experiments.
+- For large downloads, enable:
+  - `source.cache_download: true`
+  - `source.cache_ttl_hours: <hours>`
 
-1. **Data quality**: Limited street names (route IDs only)
-2. **Classification**: FHWA Functional Class (F_System 1-7)
-3. **Match rate**: 91% geometric match rate
-4. **Accuracy**: 75.5% exact class match
+## Quick Checklist
 
-### Key observation:
-F_System 2 (Principal Arterial - Freeways) maps to Overture `motorway` rather than `trunk` in practice (95.1% agreement).
-
-## Troubleshooting
-
-### Low match rate (<50%)
-- Check CRS alignment between datasets
-- Verify geometry types (LineString vs MultiLineString)
-- Check if datasets cover the same area
-
-### Low class accuracy (<60%)
-- Try name-verified analysis if names are available
-- Source classification may not align with OSM/Overture conventions
-- Consider multi-value mappings in the YAML config
-
-### Missing data
-- Check FeatureServer pagination (batch size limits)
-- Verify query filters aren't too restrictive
-- Check for NULL/empty geometries
+- YAML added in `datasets/`
+- `source.type` and URL/typeName validated
+- Stable `fetch.id_column` set
+- `bbox` present and reasonable
+- `matcher data fetch verify` passes
+- `matcher data fetch target` succeeds
+- `matcher data fetch reference -s overture` succeeds
+- `matcher match` runs and produces bridge output

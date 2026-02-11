@@ -1,0 +1,27 @@
+name: ch_geneva_hiking_routes
+display_name: Geneva Pedestrian Hiking Routes
+type: trail
+description: Official pedestrian hiking itineraries published for Geneva, including local and cross-border routes.
+source:
+  type: arcgis
+  url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/FFP_ITINERAIRES_RANDO_PEDESTRE/FeatureServer/0
+  portal_url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/FFP_ITINERAIRES_RANDO_PEDESTRE/FeatureServer
+fetch:
+  id_prefix: ch_geneva_hike
+  id_column: objectid
+  name_column: nom_itineraire
+  class_column: type_itineraire
+  class_mapping:
+    Itinéraires transfrontaliers: path
+    La Suisse à pied: path
+  subclass_column: mobilite_reduite
+  subclass_mapping:
+    Oui: accessible
+    Non: standard
+  bbox:
+  - 5.9
+  - 46.0
+  - 6.45
+  - 46.45
+  crs: EPSG:4326
+

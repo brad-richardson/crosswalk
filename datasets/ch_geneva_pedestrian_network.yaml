@@ -1,0 +1,28 @@
+name: ch_geneva_pedestrian_network
+display_name: Geneva Pedestrian Network (SPD)
+type: sidewalk
+description: Inventory of municipal pedestrian links in Geneva, including existing and planned segments.
+source:
+  type: arcgis
+  url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer/0
+  portal_url: https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer
+fetch:
+  id_prefix: ch_geneva_ped
+  id_column: objectid
+  class_column: nature
+  class_mapping:
+    chemin: footway
+    route: footway
+  subclass_column: statut
+  subclass_mapping:
+    existant: sidewalk
+    à améliorer: sidewalk
+    à créer: sidewalk
+    chemins de randonnée: trail
+  bbox:
+  - 5.95
+  - 46.1
+  - 6.25
+  - 46.33
+  crs: EPSG:4326
+
