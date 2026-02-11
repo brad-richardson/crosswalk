@@ -28,7 +28,7 @@ A match requires that the aligned overlapping portions represent the **same netw
 
 Matching is constrained by the segment's role in the network. See [docs/MATCHING_RULES.md](docs/MATCHING_RULES.md) for the full canonical ruleset.
 
-- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches only with ALONG.
+- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
 - **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
 - **TURN** — Direction-changing connectors (ramps, slip roads, curb ramps). Matches only with same role and intent.
 - **INTERNAL** — Intersection-scoped slices. May match other INTERNAL segments representing the same through-movement.

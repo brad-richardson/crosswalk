@@ -34,7 +34,7 @@ Movement along a facility. The most common role.
 
 Examples: road mainline, bike lane along a road, sidewalk along a street, rail track segment, canal segment.
 
-**Match rule:** Matches only with other ALONG segments representing the same facility.
+**Match rule:** Matches primarily with other ALONG segments representing the same facility. May rarely match INTERNAL segments that are clearly clipped ALONG (be conservative).
 
 ### ACROSS — Crossing / Transverse Movement
 
