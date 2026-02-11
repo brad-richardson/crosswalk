@@ -180,3 +180,131 @@ class TestDivergenceDetectionRegression:
 
         # Without detection should show higher coverage
         assert without_detection.overture_coverage >= with_detection.overture_coverage
+
+
+class TestShortSegmentOnLongReference:
+    """Tests for alignment of short target segments on long references.
+
+    Real-world case: phila_sidewalk_899976 (11m) on Overture d4cc8e07 (817m).
+    The alignment must correctly identify WHERE the short target sits on the
+    long reference, not just that it overlaps somewhere.
+
+    The subline center should be within 1m of the target's actual projected
+    position on the reference.
+    """
+
+    @staticmethod
+    def _expected_center_frac(ref, target):
+        """Compute where the target's midpoint projects onto the reference."""
+        target_mid = target.interpolate(0.5, normalized=True)
+        return ref.project(target_mid, normalized=True)
+
+    @staticmethod
+    def _actual_center_frac(result):
+        """Compute the center of the aligned subline on the reference."""
+        return (result.overture_start_frac + result.overture_end_frac) / 2
+
+    def test_real_pair_phila_sidewalk_on_long_ref(self):
+        """Alignment should place subline where target actually sits.
+
+        Target endpoint is 0.94m from reference start. The aligned subline
+        center should be within 1m of the projected position (~4.7m along ref).
+        """
+        ref = LineString(
+            [
+                (-75.1356235, 40.0952469),
+                (-75.1356788, 40.0952247),
+                (-75.1372502, 40.0945944),
+                (-75.1376063, 40.0944512),
+                (-75.1376626, 40.0944041),
+                (-75.1376921, 40.0943446),
+                (-75.1375271, 40.0934991),
+                (-75.1375029, 40.0934643),
+                (-75.1373363, 40.0931817),
+                (-75.1373013, 40.0931319),
+                (-75.1372605, 40.0930737),
+                (-75.1371757, 40.0929502),
+                (-75.1370376, 40.0927564),
+                (-75.1370148, 40.0927618),
+                (-75.1363652, 40.0929186),
+                (-75.136224, 40.0929478),
+                (-75.135057, 40.0932222),
+                (-75.1344723, 40.0933597),
+                (-75.1339933, 40.0934766),
+                (-75.1337999, 40.0935373),
+            ]
+        )
+        target = LineString(
+            [
+                (-75.13572513699995, 40.09521999800006),
+                (-75.13563115199997, 40.095253005000075),
+            ]
+        )
+
+        result = linestring_alignment(ref, target)
+
+        expected = self._expected_center_frac(ref, target)
+        actual = self._actual_center_frac(result)
+        error_m = abs(actual - expected) * ref.length
+        assert error_m < 1.0 / 111000, (  # 1m tolerance in degrees
+            f"Subline center off by {error_m * 111000:.1f}m "
+            f"(expected frac={expected:.6f}, got={actual:.6f})"
+        )
+        assert result.dataset_coverage >= 0.9
+
+    def test_synthetic_short_segment_at_bend(self):
+        """Short target near start of a long L-shaped reference (projected meters)."""
+        ref = LineString(
+            [
+                (0, 0),
+                (100, 0),
+                (200, 0),
+                (300, 0),
+                (400, 0),
+                (400, -100),
+                (400, -200),
+                (400, -300),
+                (400, -400),
+            ]
+        )
+        target = LineString([(5, 3), (16, 3)])
+
+        result = linestring_alignment(ref, target)
+
+        expected = self._expected_center_frac(ref, target)
+        actual = self._actual_center_frac(result)
+        error_m = abs(actual - expected) * ref.length
+        assert error_m < 1.0, (
+            f"Subline center off by {error_m:.1f}m (expected frac={expected:.6f}, got={actual:.6f})"
+        )
+        assert result.dataset_coverage >= 0.9
+
+    def test_synthetic_short_segment_at_midpoint(self):
+        """Short target near midpoint of a long straight reference."""
+        ref = LineString([(0, 0), (800, 0)])
+        target = LineString([(400, 3), (411, 3)])
+
+        result = linestring_alignment(ref, target)
+
+        expected = self._expected_center_frac(ref, target)
+        actual = self._actual_center_frac(result)
+        error_m = abs(actual - expected) * ref.length
+        assert error_m < 1.0, (
+            f"Subline center off by {error_m:.1f}m (expected frac={expected:.6f}, got={actual:.6f})"
+        )
+        assert result.dataset_coverage >= 0.9
+
+    def test_synthetic_short_segment_at_end(self):
+        """Short target near end of a long straight reference."""
+        ref = LineString([(0, 0), (800, 0)])
+        target = LineString([(789, 3), (800, 3)])
+
+        result = linestring_alignment(ref, target)
+
+        expected = self._expected_center_frac(ref, target)
+        actual = self._actual_center_frac(result)
+        error_m = abs(actual - expected) * ref.length
+        assert error_m < 1.0, (
+            f"Subline center off by {error_m:.1f}m (expected frac={expected:.6f}, got={actual:.6f})"
+        )
+        assert result.dataset_coverage >= 0.9
