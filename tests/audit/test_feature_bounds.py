@@ -13,6 +13,14 @@ from .conftest import FEATURE_BOUNDS, compute_features_simple, make_projected_li
 class TestBoundsOnSyntheticPairs:
     """Verify feature bounds on controlled synthetic geometry pairs."""
 
+    # Features that are NaN by design when no alignment is provided.
+    # compute_features_simple() does not pass alignment, so these will be NaN.
+    # XGBoost handles NaN natively (same pattern as topology features).
+    NAN_WITHOUT_ALIGNMENT = {
+        "post_node_continuation_m",
+        "endpoint_heading_divergence",
+    }
+
     def test_bounds_on_identical_lines(self):
         """Perfect match pair: both lines are the same."""
         line = make_projected_line([(0, 0), (50, 0), (100, 0)])
@@ -21,6 +29,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue  # NaN is valid when no alignment provided
             assert not np.isnan(val), f"Feature {name} is NaN for identical lines"
             assert not np.isinf(val), f"Feature {name} is inf for identical lines"
 
@@ -45,6 +55,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for parallel lines"
             assert not np.isinf(val), f"Feature {name} is inf for parallel lines"
 
@@ -57,6 +69,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for far-apart lines"
             assert not np.isinf(val), f"Feature {name} is inf for far-apart lines"
 
@@ -81,6 +95,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for short line"
             assert not np.isinf(val), f"Feature {name} is inf for short line"
 
@@ -93,6 +109,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for 2-vertex line"
             assert not np.isinf(val), f"Feature {name} is inf for 2-vertex line"
 
@@ -105,6 +123,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for reversed line"
             assert not np.isinf(val), f"Feature {name} is inf for reversed line"
 
@@ -119,6 +139,8 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
+            if name in self.NAN_WITHOUT_ALIGNMENT:
+                continue
             assert not np.isnan(val), f"Feature {name} is NaN for zigzag line"
             assert not np.isinf(val), f"Feature {name} is inf for zigzag line"
 
@@ -126,7 +148,9 @@ class TestBoundsOnSyntheticPairs:
 class TestErrorFeatureBounds:
     """Verify _get_error_features() returns values within bounds."""
 
-    # Topology error defaults are NaN by design (XGBoost handles natively)
+    # Error defaults that are NaN by design (XGBoost handles natively)
+    # Topology features: unknown when target data unavailable
+    # Intersection overlap features: unknown without alignment/topology
     TOPOLOGY_FEATURES = {
         "from_degree_ref",
         "to_degree_ref",
@@ -140,6 +164,8 @@ class TestErrorFeatureBounds:
         "is_intersection_ref",
         "is_intersection_target",
         "intersection_match",
+        "post_node_continuation_m",
+        "endpoint_heading_divergence",
     }
 
     def test_error_features_within_bounds(self, error_features):

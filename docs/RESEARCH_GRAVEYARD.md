@@ -4,6 +4,40 @@ Features that were implemented, tested, and removed or parked due to insufficien
 
 ---
 
+## Alignment at Intersection (Removed 2026-02-12)
+
+### What It Was
+A binary feature indicating whether both alignment boundary endpoints fall at intersection nodes on the reference side:
+- `alignment_at_intersection` - 1.0 if both boundaries have degree > 2, else 0.0
+
+Part of the "Intersection Overlap" feature group (alongside `post_node_continuation_m` and `endpoint_heading_divergence` which were kept).
+
+### Implementation
+1. Used `compute_aligned_topology_at_position()` to get degree at `overture_start_frac` and `overture_end_frac`
+2. If both degrees > 2, returned 1.0; else 0.0
+3. Only used ref-side topology (Overture connectors)
+
+### Ablation Results
+| Feature | Importance Rank | Importance Score |
+|---------|-----------------|------------------|
+| `alignment_at_intersection` (pre-audit) | 75/75 (dead last) | 0.00% |
+| `alignment_at_intersection` (post-audit) | 59/75 | 0.70% |
+
+After correcting 46 mislabeled training pairs (identified via `post_node_continuation_m` audit), importance rose from zero to 0.70%, but still well below the upper 2/3 threshold (0.78%).
+
+### Why Removed
+- **Binary design limits discriminative power**: 0/1 value can't capture gradient of intersection overlap severity
+- **Confounded by roundabouts**: Roundabout segments legitimately have high-degree nodes at both boundaries, causing false positives in the audit (most flagged pairs were correct matches)
+- **Signal already captured**: The combination of low `post_node_continuation_m` + high `endpoint_heading_divergence` captures the same pattern continuously
+- **No F1 impact**: Dropping the feature changed CV F1 from 0.909 to 0.907 (within noise)
+
+### Lessons Learned
+1. Binary features struggle when the underlying pattern has a continuous distribution
+2. Topology-dependent features are sensitive to segmentation differences between datasets
+3. Feature importance can improve dramatically with label quality (0% → 0.7% after fixing 46 mislabels), but binary design puts a ceiling on it
+
+---
+
 ## Junction Angle Similarity (Removed 2026-02-03)
 
 **Commit:** `81c0d55`

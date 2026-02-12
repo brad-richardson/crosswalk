@@ -97,6 +97,16 @@ FEATURE_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "shape_complexity_ref": (0, None),
     "shape_complexity_target": (0, None),
     "shape_complexity_delta": (0, None),
+    # Aligned length (meters)
+    "aligned_length_m": (0, None),
+    # Crossing angle
+    "crossing_angle_min_ref": (0, 90),
+    "transverse_neighbor_fraction_ref": (0, 1),
+    "crossing_angle_min_target": (0, 90),
+    "transverse_neighbor_fraction_target": (0, 1),
+    # Intersection overlap
+    "post_node_continuation_m": (0, None),
+    "endpoint_heading_divergence": (0, 90),
     # Parallel sibling
     "has_parallel_sibling_ref": (0, 1),
     "parallel_fraction_ref": (0, 1),

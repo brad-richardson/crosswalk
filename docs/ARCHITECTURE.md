@@ -7,7 +7,7 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 72 features across 16 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 74 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Training**: `matcher train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
@@ -67,7 +67,7 @@ matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_t
 
 ## Feature Categories
 
-72 features across 16 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+74 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
@@ -87,6 +87,7 @@ matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_t
 | Shape Complexity | 3 | shape_complexity_ref, shape_complexity_target, shape_complexity_delta |
 | Parallel Sibling | 5 | has_parallel_sibling_ref, parallel_fraction_ref, offset_vs_half_corridor_ratio, offset_over_expected_halfwidth, likely_representation_mismatch |
 | Crossing Angle | 4 | crossing_angle_min_ref, transverse_neighbor_fraction_ref, crossing_angle_min_target, transverse_neighbor_fraction_target |
+| Intersection Overlap | 2 | post_node_continuation_m, endpoint_heading_divergence |
 
 ## Feature Computation Paths
 
@@ -95,7 +96,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (72 features)
+config.py::FEATURE_COLUMNS (74 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |

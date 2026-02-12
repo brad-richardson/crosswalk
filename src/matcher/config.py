@@ -132,7 +132,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-11"
+FEATURE_VERSION = "2026-02-12"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -249,6 +249,10 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "transverse_neighbor_fraction_ref",  # Fraction of nearby different-tier segments >60°, ref side (0-1)
         "crossing_angle_min_target",  # Min angle to nearby different-tier corridor, target side (0-90°)
         "transverse_neighbor_fraction_target",  # Fraction of nearby different-tier segments >60°, target side (0-1)
+    ],
+    "Intersection Overlap": [
+        "post_node_continuation_m",  # How far target continues past alignment boundary along ref heading (meters)
+        "endpoint_heading_divergence",  # Max heading difference at alignment boundaries (0-90°)
     ],
     # Road Properties features (oneway_match, speed_limit_similarity) moved to graveyard
     # - Data is still fetched (oneway_lr, speed_limit_kph_lr columns) for future use

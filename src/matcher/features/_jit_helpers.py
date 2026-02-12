@@ -528,6 +528,125 @@ def compute_local_parallel_alignment_numba(
 
 
 @njit(cache=True)
+def compute_heading_at_fraction_numba(
+    coords: np.ndarray,
+    segment_lengths: np.ndarray,
+    total_length: float,
+    fraction: float,
+    look_ahead_m: float = 10.0,
+) -> float:
+    """Compute heading at a fractional position along a line.
+
+    Finds two points bracketing the fraction (+/- look_ahead) and computes
+    the heading between them.
+
+    Args:
+        coords: Nx2 array of coordinates
+        segment_lengths: (N-1,) array of per-segment lengths
+        total_length: Total line length in meters
+        fraction: Position along line (0.0 to 1.0)
+        look_ahead_m: Distance to look ahead/behind for heading (meters)
+
+    Returns:
+        Heading in degrees (0-360).
+    """
+    n = coords.shape[0]
+    if n < 2 or total_length < 1e-10:
+        return 0.0
+
+    target_dist = fraction * total_length
+    before_dist = max(0.0, target_dist - look_ahead_m)
+    after_dist = min(total_length, target_dist + look_ahead_m)
+
+    # If look_ahead collapses to zero range, widen to segment endpoints
+    if after_dist - before_dist < 1e-10:
+        before_dist = 0.0
+        after_dist = total_length
+
+    # Interpolate point at before_dist
+    bx, by = coords[0, 0], coords[0, 1]
+    cum = 0.0
+    for i in range(n - 1):
+        seg_len = segment_lengths[i]
+        if cum + seg_len >= before_dist:
+            if seg_len > 1e-10:
+                t = (before_dist - cum) / seg_len
+            else:
+                t = 0.0
+            bx = coords[i, 0] + t * (coords[i + 1, 0] - coords[i, 0])
+            by = coords[i, 1] + t * (coords[i + 1, 1] - coords[i, 1])
+            break
+        cum += seg_len
+
+    # Interpolate point at after_dist
+    ax, ay = coords[-1, 0], coords[-1, 1]
+    cum = 0.0
+    for i in range(n - 1):
+        seg_len = segment_lengths[i]
+        if cum + seg_len >= after_dist:
+            if seg_len > 1e-10:
+                t = (after_dist - cum) / seg_len
+            else:
+                t = 0.0
+            ax = coords[i, 0] + t * (coords[i + 1, 0] - coords[i, 0])
+            ay = coords[i, 1] + t * (coords[i + 1, 1] - coords[i, 1])
+            break
+        cum += seg_len
+
+    return compute_heading_numba(ax - bx, ay - by)
+
+
+@njit(cache=True)
+def compute_continuation_along_heading_numba(
+    remainder_coords: np.ndarray,
+    heading_dx: float,
+    heading_dy: float,
+    dot_threshold: float = 0.5,
+) -> float:
+    """Walk remainder coords and accumulate distance along a heading direction.
+
+    Projects each segment of the remainder onto the reference heading direction,
+    accumulating along-heading distance until the direction diverges.
+
+    Args:
+        remainder_coords: Nx2 array of remainder coordinates
+        heading_dx: X component of reference heading unit vector
+        heading_dy: Y component of reference heading unit vector
+        dot_threshold: Minimum dot product to continue (0.5 = ~60 degrees)
+
+    Returns:
+        Continuation distance in meters along the heading direction.
+    """
+    n = remainder_coords.shape[0]
+    if n < 2:
+        return 0.0
+
+    total = 0.0
+    for i in range(n - 1):
+        dx = remainder_coords[i + 1, 0] - remainder_coords[i, 0]
+        dy = remainder_coords[i + 1, 1] - remainder_coords[i, 1]
+        seg_len = np.sqrt(dx * dx + dy * dy)
+        if seg_len < 1e-10:
+            continue
+
+        # Normalize segment direction
+        nx = dx / seg_len
+        ny = dy / seg_len
+
+        # Dot product with reference heading (both unit vectors)
+        dot = nx * heading_dx + ny * heading_dy
+
+        # Use absolute dot to handle reversed digitization
+        if abs(dot) < dot_threshold:
+            break
+
+        # Accumulate the along-heading projection
+        total += seg_len * abs(dot)
+
+    return total
+
+
+@njit(cache=True)
 def compute_crossing_angle_stats_numba(
     candidate_headings: np.ndarray,
     neighbor_headings: np.ndarray,

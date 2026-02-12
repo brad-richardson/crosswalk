@@ -100,7 +100,7 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
-| **Features** | 72 features across 16 categories: geometric, semantic, topological, alignment, and more |
+| **Features** | 74 features across 17 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 
 ## Quick Start

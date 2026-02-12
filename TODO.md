@@ -78,18 +78,38 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Feature Ideas
 
-### HIGH: Intersection Overlap / Gating Features (Tier 1)
+### HIGH: Target-Side Aligned Topology (Degree at Subline Endpoints)
 
 **Priority:** High
-**Problem:** The model has no features encoding the "overlap at intersection but doesn't continue" false positive pattern. Many incorrect matches overlap only at intersection nodes without continuing along the shared direction. See `MATCHING_RULES.md:98-99` for the >=10m continuation rule.
+**Problem:** Target topology uses full segment endpoints for degree computation, but target datasets often don't split segments at intersections (unlike Overture which has explicit connectors). A target road passing *through* an intersection gets degree 1 at its distant endpoints, even though the alignment boundary is at a high-degree intersection node. This makes target-side topology features unreliable for partial matches.
 
-Remaining Tier 1 features (after `aligned_length_m` which is implemented):
+**Solution:** At alignment boundary points, query the target spatial index for nearby target segment endpoints to compute degree at that position (analogous to `compute_aligned_topology_at_position()` which already does this for the ref side using Overture connectors).
 
-1. **`post_node_continuation_m`** — How far the target continues past the alignment boundary along the ref's heading direction. This is the >=10m continuation rule encoded as a continuous feature. Purely geometric — uses alignment fractions and geometry only, no connectors needed (target datasets generally lack connectors). At each alignment boundary, extract the un-aligned remainder of the target and measure how far it extends in the ref's direction before diverging. Pairs that overlap only inside the intersection and then veer away will have near-zero values. This is the most direct encoding of the intersection gating rule.
+**Impact:** Would improve `from_degree_target`, `to_degree_target`, `degree_match_score`, `degree_signature_similarity`, and related features for partial-match cases.
 
-2. **`endpoint_heading_divergence`** — Heading difference at alignment boundaries. At the endpoints of the aligned subline, compute the heading delta between ref and target. A pair that overlaps only at an intersection and then diverges will show a large heading divergence at the boundary (>30-45deg), while a legitimate partial match will show near-zero divergence. Different from `heading_delta` which is the overall heading.
+**Location:** `src/matcher/features/spatial_context.py:compute_all_topology()` (geometry-based fallback, lines 1177+)
 
-3. **`alignment_at_intersection`** — Is the overlap concentrated at an intersection node? Binary/float: are both aligned-subline endpoints within tolerance of an intersection node (from precomputed topology)? If the aligned portion starts and ends within the intersection footprint, it's likely an intersection-internal overlap. Different from `is_intersection_ref/target` which just say "is this segment's endpoint an intersection".
+**Reproduction pair** (target passes through two 4-way intersections but gets degree 1/1):
+- Dataset: `au_melbourne_roads`
+- GERS: `5001b7be-3b4f-41dc-b395-df221ba66741`
+- Target: `au_melbourne_8043_88be630a1b`
+
+<details>
+<summary>WKT geometries</summary>
+
+REF:
+```
+LINESTRING (144.7344467 -37.8673933, 144.7345845 -37.867333)
+```
+
+TGT:
+```
+LINESTRING (144.734621881638 -37.8674845946421, 144.73467978024 -37.8674574316707, 144.734604739062 -37.8673078641339, 144.734537848093 -37.8673383138165)
+```
+
+</details>
+
+Features: `from_degree_ref=4, to_degree_ref=4` (correct), `from_degree_target=1, to_degree_target=1` (incorrect — should reflect intersection degree at alignment boundary).
 
 ### Dual Carriageway / Centerline Handling
 
