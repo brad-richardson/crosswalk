@@ -390,9 +390,7 @@ class LabelStore:
 
         # Remove any existing label for this pair (re-labeling replaces, not duplicates)
         if self._df is not None and len(self._df) > 0:
-            mask = (self._df["gers_id"] == str(gers_id)) & (
-                self._df["target_id"] == str(target_id)
-            )
+            mask = (self._df["gers_id"] == str(gers_id)) & (self._df["target_id"] == str(target_id))
             if mask.any():
                 self._df = self._df[~mask]
 
