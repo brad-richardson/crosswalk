@@ -814,3 +814,182 @@ def load_batch(dataset_id: str) -> list[CandidatePairView]:
 
     logger.info(f"Loaded batch of {len(views)} candidates for {dataset_id}")
     return views
+
+
+def generate_batch_from_pairs(
+    dataset_id: str,
+    pair_ids: list[tuple[str, str]],
+) -> list[CandidatePairView]:
+    """Generate a batch from a specific list of pair IDs.
+
+    Used for label auditing — accepts a pre-selected list of suspect pairs
+    (e.g., match-labeled pairs with low post_node_continuation_m) and creates
+    a batch for review in the labeling UI.
+
+    Falls back to label store data (FeatureStore + DataStore) when no feature
+    cache exists. This works for already-labeled pairs without requiring
+    the expensive full-dataset feature computation.
+
+    Args:
+        dataset_id: Dataset identifier
+        pair_ids: List of (ref_id, target_id) tuples to include
+
+    Returns:
+        List of CandidatePairView objects for the specified pairs
+    """
+    import pandas as pd
+
+    from ..config import FEATURE_VERSION
+
+    feature_df = load_feature_cache(dataset_id)
+    if feature_df is None:
+        # Fall back to label store for already-labeled pairs
+        logger.info(f"No feature cache for {dataset_id}, falling back to label store data")
+        return _generate_batch_from_label_store(dataset_id, pair_ids)
+
+    # Filter to requested pairs
+    pair_set = {(str(r), str(t)) for r, t in pair_ids}
+    mask = pd.Series(
+        [
+            (str(r), str(t)) in pair_set
+            for r, t in zip(feature_df["ref_id"], feature_df["target_id"])
+        ]
+    )
+    batch_feature_df = feature_df[mask.values].reset_index(drop=True)
+
+    if len(batch_feature_df) == 0:
+        logger.warning(f"No matching pairs found in feature cache for {dataset_id}")
+        return []
+
+    # Save manifest for persistence
+    batch_pairs = [
+        {"ref_id": str(r), "target_id": str(t), "bucket": "audit"}
+        for r, t in zip(batch_feature_df["ref_id"], batch_feature_df["target_id"])
+    ]
+    save_batch_manifest(dataset_id, batch_pairs, FEATURE_VERSION)
+
+    # Build views
+    loader = DatasetLoader(DATA_DIR)
+    ref_path = loader.find_reference_path(dataset_id)
+    target_path = loader.find_target_path(dataset_id)
+
+    if ref_path is None or target_path is None:
+        return []
+
+    reference = load_geodataframe(ref_path)
+    target_gdf = load_geodataframe(target_path)
+
+    views = build_views_from_feature_df(
+        feature_df=batch_feature_df,
+        reference=reference,
+        target=target_gdf,
+        filter_to_review_band=False,
+    )
+
+    logger.info(
+        f"Generated audit batch of {len(views)} candidates for {dataset_id} "
+        f"from {len(pair_ids)} requested pairs"
+    )
+    return views
+
+
+def _generate_batch_from_label_store(
+    dataset_id: str,
+    pair_ids: list[tuple[str, str]],
+) -> list[CandidatePairView]:
+    """Generate batch views from label store data (FeatureStore + DataStore).
+
+    Used as fallback when no feature cache exists. Works for already-labeled
+    pairs only, since it reads pre-computed features and geometries from the
+    label store's normalized architecture.
+
+    Args:
+        dataset_id: Dataset identifier
+        pair_ids: List of (ref_id, target_id) tuples to include
+
+    Returns:
+        List of CandidatePairView objects for the specified pairs
+    """
+    from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
+    from ..labeling.data_loader import (
+        _compute_score_breakdown_from_features,
+        get_cached_matcher,
+    )
+    from ..labeling.data_store import DataStore
+    from ..labeling.feature_store import FeatureStore
+
+    feature_store = FeatureStore(dataset_id)
+    data_store = DataStore(dataset_id)
+
+    # Collect features and geometry data for requested pairs
+    features_for_prediction = []
+    pair_data = []
+
+    for ref_id, target_id in pair_ids:
+        features = feature_store.get(str(ref_id), str(target_id))
+        data = data_store.get_pair(str(ref_id), str(target_id))
+
+        if features is None:
+            logger.debug(f"No features in label store for {ref_id}/{target_id}")
+            continue
+        if data is None:
+            logger.debug(f"No geometry data in label store for {ref_id}/{target_id}")
+            continue
+
+        feature_dict = {col: features.get(col, float("nan")) for col in FEATURE_COLUMNS}
+        features_for_prediction.append(feature_dict)
+        pair_data.append((str(ref_id), str(target_id), feature_dict, data))
+
+    if not pair_data:
+        logger.warning(f"No pairs found in label store for {dataset_id}")
+        return []
+
+    # Batch ML prediction
+    matcher = get_cached_matcher()
+    if matcher and features_for_prediction:
+        probs = matcher.predict(features_for_prediction)
+    else:
+        probs = [0.5] * len(features_for_prediction)
+
+    # Build CandidatePairView objects
+    views = []
+    for i, (ref_id, target_id, feature_dict, data) in enumerate(pair_data):
+        prob = probs[i]
+
+        if prob >= settings.optimizer_match_threshold:
+            decision = "match"
+        elif prob >= settings.optimizer_review_threshold:
+            decision = "review"
+        else:
+            decision = "no_match"
+
+        score_breakdown = _compute_score_breakdown_from_features(feature_dict)
+
+        views.append(
+            CandidatePairView(
+                ref_id=ref_id,
+                target_id=target_id,
+                ref_geometry=data["ref_geometry"],
+                target_geometry=data["target_geometry"],
+                ref_name=data.get("ref_name"),
+                target_name=data.get("target_name"),
+                ref_class=data.get("ref_class"),
+                target_class=data.get("target_class"),
+                decision=decision,
+                confidence=prob,
+                score_breakdown=score_breakdown,
+                features=feature_dict,
+                ref_topology=data.get("ref_topology"),
+                target_topology=data.get("target_topology"),
+            )
+        )
+
+    # Save batch manifest for persistence
+    batch_pairs = [{"ref_id": v.ref_id, "target_id": v.target_id, "bucket": "audit"} for v in views]
+    save_batch_manifest(dataset_id, batch_pairs, FEATURE_VERSION)
+
+    logger.info(
+        f"Generated audit batch of {len(views)} from label store for {dataset_id} "
+        f"({len(pair_ids)} requested, {len(pair_ids) - len(views)} missing)"
+    )
+    return views

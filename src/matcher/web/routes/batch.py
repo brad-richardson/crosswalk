@@ -13,6 +13,7 @@ from shapely.geometry import mapping
 from ..services import (
     delete_batch_manifest,
     generate_batch,
+    generate_batch_from_pairs,
     get_unlabeled_candidates,
     has_batch,
     is_dataset_cached,
@@ -35,6 +36,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 
 # Module-level cache for loaded batch candidates per dataset
 _batch_cache: dict[str, list] = {}
+
+# Datasets in audit mode (show already-labeled pairs for re-evaluation)
+_audit_datasets: set[str] = set()
 
 
 def _pair_to_geojson(pair) -> str:
@@ -125,7 +129,12 @@ def _render_pair(request, dataset, datasets, index=0):
     is_htmx = request.headers.get("HX-Request") == "true"
 
     all_candidates = _batch_cache[dataset]
-    unlabeled = get_unlabeled_candidates(dataset, all_candidates)
+
+    # Audit mode: show ALL pairs (including already-labeled) for re-evaluation
+    if dataset in _audit_datasets:
+        unlabeled = all_candidates
+    else:
+        unlabeled = get_unlabeled_candidates(dataset, all_candidates)
     batch_labeled, batch_total = _get_batch_progress(dataset, all_candidates)
 
     # All labeled in batch
@@ -343,20 +352,31 @@ async def label_batch_pair(
         return HTMLResponse(status_code=409, content="Batch not loaded yet")
 
     all_candidates = _batch_cache[dataset]
-    unlabeled = get_unlabeled_candidates(dataset, all_candidates)
+    is_audit = dataset in _audit_datasets
+
+    # In audit mode, use all candidates (already-labeled pairs shown for re-evaluation)
+    working_list = all_candidates if is_audit else get_unlabeled_candidates(dataset, all_candidates)
 
     # Record the label
-    if unlabeled and 0 <= index < len(unlabeled):
-        pair = unlabeled[index]
+    if working_list and 0 <= index < len(working_list):
+        pair = working_list[index]
         record_label(dataset, pair, label)
 
-    # Re-filter after labeling
-    unlabeled = get_unlabeled_candidates(dataset, all_candidates)
+    # Advance to next pair
+    if is_audit:
+        # Audit mode: advance by index through all candidates
+        working_list = all_candidates
+        next_index = index + 1
+    else:
+        # Normal mode: re-filter to unlabeled only
+        working_list = get_unlabeled_candidates(dataset, all_candidates)
+        next_index = min(index, max(0, len(working_list) - 1))
+
     batch_labeled, batch_total = _get_batch_progress(dataset, all_candidates)
     datasets = list_datasets()
 
-    # All labeled -> show complete
-    if not unlabeled:
+    # All done -> show complete
+    if next_index >= len(working_list):
         context = {
             "mode": "batch",
             "datasets": datasets,
@@ -366,12 +386,10 @@ async def label_batch_pair(
         }
         return templates.TemplateResponse(request, "batch/complete.html", context)
 
-    next_index = min(index, max(0, len(unlabeled) - 1))
-
     next_pair = None
     geojson = "{}"
-    if unlabeled and 0 <= next_index < len(unlabeled):
-        next_pair = unlabeled[next_index]
+    if working_list and 0 <= next_index < len(working_list):
+        next_pair = working_list[next_index]
         geojson = _pair_to_geojson(next_pair)
 
     context = {
@@ -381,7 +399,7 @@ async def label_batch_pair(
         "pair": next_pair,
         "geojson": geojson,
         "pair_index": next_index,
-        "total_pairs": len(unlabeled),
+        "total_pairs": len(working_list),
         "labeled_count": batch_labeled,
         "total_candidates": batch_total,
         "batch_labeled": batch_labeled,
@@ -440,8 +458,9 @@ async def regenerate_batch(request: Request, dataset: str = Form(...)):
     if dataset not in datasets:
         return HTMLResponse(status_code=404, content="Unknown dataset")
 
-    # Clear existing batch
+    # Clear existing batch and audit mode
     _batch_cache.pop(dataset, None)
+    _audit_datasets.discard(dataset)
     delete_batch_manifest(dataset)
 
     # Start new generation
@@ -450,3 +469,40 @@ async def regenerate_batch(request: Request, dataset: str = Form(...)):
 
     context = {"mode": "batch", "datasets": datasets, "dataset": dataset}
     return templates.TemplateResponse(request, "batch/loading.html", context)
+
+
+@router.post("/batch/audit")
+async def generate_audit_batch(request: Request):
+    """Generate a batch from a pre-selected list of pair IDs for label auditing.
+
+    Accepts JSON body: {"dataset": "...", "pairs": [["ref_id", "target_id"], ...]}
+    """
+    body = await request.json()
+    dataset = body.get("dataset")
+    pairs_raw = body.get("pairs", [])
+
+    if not dataset:
+        return HTMLResponse(status_code=400, content="Missing 'dataset' field")
+
+    datasets = list_datasets()
+    if dataset not in datasets:
+        return HTMLResponse(status_code=404, content=f"Unknown dataset: {dataset}")
+
+    pair_ids = [(str(r), str(t)) for r, t in pairs_raw]
+    if not pair_ids:
+        return HTMLResponse(status_code=400, content="No pairs provided")
+
+    try:
+        views = generate_batch_from_pairs(dataset, pair_ids)
+    except ValueError as e:
+        return HTMLResponse(status_code=400, content=str(e))
+
+    # Cache the batch and mark as audit (show already-labeled pairs)
+    _batch_cache[dataset] = views
+    _audit_datasets.add(dataset)
+
+    return HTMLResponse(
+        content=f"Generated audit batch with {len(views)} pairs for {dataset}. "
+        f"Navigate to /labeling/batch?dataset={dataset} to review.",
+        status_code=200,
+    )

@@ -696,6 +696,140 @@ def _compute_crossing_angle(
     )
 
 
+def _compute_intersection_overlap_features(
+    ref_geom,
+    target_geom,
+    alignment: AlignmentResult | None,
+) -> dict[str, float]:
+    """Compute intersection overlap features for a candidate pair.
+
+    These features encode the "overlap at intersection but doesn't continue"
+    false positive pattern. They measure:
+    1. How far the target continues past alignment boundary along ref heading
+    2. Max heading divergence at alignment boundaries
+
+    Args:
+        ref_geom: Reference geometry (LineString, projected CRS)
+        target_geom: Target geometry (LineString, projected CRS)
+        alignment: Alignment result (None → defaults)
+
+    Returns:
+        Dict with post_node_continuation_m, endpoint_heading_divergence
+    """
+    from ._jit_helpers import (
+        angle_diff_numba,
+        compute_continuation_along_heading_numba,
+        compute_heading_at_fraction_numba,
+    )
+
+    nan = float("nan")
+
+    if alignment is None:
+        return {
+            "post_node_continuation_m": nan,
+            "endpoint_heading_divergence": 45.0,
+        }
+
+    ref_start = alignment.overture_start_frac
+    ref_end = alignment.overture_end_frac
+    target_start = alignment.dataset_start_frac
+    target_end = alignment.dataset_end_frac
+
+    # Pre-compute coordinate arrays and cumulative distances
+    ref_coords = np.array(ref_geom.coords)
+    target_coords = np.array(target_geom.coords)
+    ref_length = ref_geom.length
+    target_length = target_geom.length
+
+    def _seg_distances(coords):
+        """Compute per-segment distances from coordinate array."""
+        diffs = np.diff(coords, axis=0)
+        return np.sqrt(diffs[:, 0] ** 2 + diffs[:, 1] ** 2)
+
+    ref_dists = _seg_distances(ref_coords)
+    target_dists = _seg_distances(target_coords)
+
+    # Tolerance for "fully aligned" check
+    FRAC_TOL = 0.01
+
+    # ── 1. Post-node continuation ──────────────────────────────────
+    # At each boundary where target has un-aligned remainder, measure
+    # how far the remainder continues along the ref heading direction.
+    continuation_values = []
+
+    # Check start boundary (target_start > FRAC_TOL means remainder at start)
+    has_start_remainder = target_start > FRAC_TOL
+    has_end_remainder = target_end < (1.0 - FRAC_TOL)
+
+    if not has_start_remainder and not has_end_remainder:
+        # Target fully aligned — no remainder to measure
+        post_node_continuation_m = nan
+    else:
+        if has_start_remainder:
+            # Ref heading at the start boundary
+            ref_heading_start = compute_heading_at_fraction_numba(
+                ref_coords, ref_dists, ref_length, ref_start
+            )
+            rad = np.radians(ref_heading_start)
+            hdx, hdy = np.cos(rad), np.sin(rad)
+
+            # Target remainder: from 0 to target_start (reversed — walk away from boundary)
+            remainder_sub = create_subline(target_geom, 0.0, target_start)
+            if remainder_sub is not None and remainder_sub.length > 0.5:
+                rem_coords = np.array(remainder_sub.coords)
+                # Reverse so we walk FROM boundary outward
+                rem_coords = rem_coords[::-1].copy()
+                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy)
+                continuation_values.append(cont)
+
+        if has_end_remainder:
+            # Ref heading at the end boundary
+            ref_heading_end = compute_heading_at_fraction_numba(
+                ref_coords, ref_dists, ref_length, ref_end
+            )
+            rad = np.radians(ref_heading_end)
+            hdx, hdy = np.cos(rad), np.sin(rad)
+
+            # Target remainder: from target_end to 1.0
+            remainder_sub = create_subline(target_geom, target_end, 1.0)
+            if remainder_sub is not None and remainder_sub.length > 0.5:
+                rem_coords = np.array(remainder_sub.coords)
+                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy)
+                continuation_values.append(cont)
+
+        if continuation_values:
+            post_node_continuation_m = min(continuation_values)
+        else:
+            post_node_continuation_m = nan
+
+    # ── 2. Endpoint heading divergence ─────────────────────────────
+    # Max heading difference between ref and target at alignment boundaries
+    divergence_values = []
+
+    ref_heading_at_start = compute_heading_at_fraction_numba(
+        ref_coords, ref_dists, ref_length, ref_start
+    )
+    target_heading_at_start = compute_heading_at_fraction_numba(
+        target_coords, target_dists, target_length, target_start
+    )
+    divergence_values.append(angle_diff_numba(ref_heading_at_start, target_heading_at_start))
+
+    ref_heading_at_end = compute_heading_at_fraction_numba(
+        ref_coords, ref_dists, ref_length, ref_end
+    )
+    target_heading_at_end = compute_heading_at_fraction_numba(
+        target_coords, target_dists, target_length, target_end
+    )
+    divergence_values.append(angle_diff_numba(ref_heading_at_end, target_heading_at_end))
+
+    endpoint_heading_divergence = max(divergence_values)
+
+    return {
+        "post_node_continuation_m": post_node_continuation_m,
+        "endpoint_heading_divergence": endpoint_heading_divergence,
+    }
+
+
 def compute_pair_features(
     ref_geom,
     target_geom,
@@ -800,6 +934,15 @@ def compute_pair_features(
         else:
             aligned_length_m = 0.0  # No alignment → 0.0, consistent with coverage features
 
+        # Intersection overlap features (continuation, divergence)
+        _current_phase = "intersection_overlap"
+        with timed_section("intersection_overlap"):
+            intersection_overlap_feats = _compute_intersection_overlap_features(
+                ref_geom=ref_geom,
+                target_geom=target_geom,
+                alignment=alignment,
+            )
+
         _current_phase = "coord_extraction"
         # Extract coords once for functions that accept optional coords parameter
         # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
@@ -863,6 +1006,8 @@ def compute_pair_features(
             "aligned_length_m": aligned_length_m,
             # Non-geometric and per-pair geometric features
             **non_geom,
+            # Intersection overlap features
+            **intersection_overlap_feats,
         }
 
         # Embed per-pair timing data in the feature dict for main-process aggregation
@@ -991,6 +1136,9 @@ def _get_error_features(
         "transverse_neighbor_fraction_ref": 0.0,
         "crossing_angle_min_target": 45.0,
         "transverse_neighbor_fraction_target": 0.0,
+        # Intersection overlap features - unknown/neutral defaults
+        "post_node_continuation_m": float("nan"),  # Unknown continuation
+        "endpoint_heading_divergence": 45.0,  # Neutral (matches crossing angle pattern)
     }
 
     # Add error metadata only if error is provided

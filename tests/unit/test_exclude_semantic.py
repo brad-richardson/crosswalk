@@ -226,7 +226,7 @@ class TestExcludeSemanticFlag:
         # 11 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
         # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) = 61
-        assert len(geom_only_features) == 61, (
-            f"Expected 61 geometry-only features, got {len(geom_only_features)}"
+        # 4 (crossing_angle) + 2 (intersection_overlap) = 63
+        assert len(geom_only_features) == 63, (
+            f"Expected 63 geometry-only features, got {len(geom_only_features)}"
         )
