@@ -7,18 +7,23 @@ label recording, configuration access, and integration QA.
 import csv
 import json
 import logging
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
+import pandas as pd
 
+from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..datasets.loader import DatasetLoader
 from ..filenames import LABELING_CACHE_DIR, integration_cache_dir
 from ..integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from ..labeling.data_loader import (
     CandidatePairView,
+    _compute_score_breakdown_from_features,
     build_views_from_feature_df,
     filter_candidates,
     generate_scored_candidates_with_cache,
@@ -28,6 +33,8 @@ from ..labeling.data_loader import (
     load_feature_cache,
     load_geodataframe,
 )
+from ..labeling.data_store import DataStore
+from ..labeling.feature_store import FeatureStore
 from ..labeling.label_store import LabelStore
 
 logger = logging.getLogger(__name__)
@@ -39,8 +46,6 @@ CONFIG_FILE = Path.home() / ".matcher_labeler_config.json"
 
 # Shared loading state — prevents duplicate background work across routes
 # (e.g., labeling and batch both trying to load the same dataset)
-import threading
-
 loading_lock = threading.Lock()
 loading_tasks: dict[str, threading.Thread] = {}
 loading_errors: dict[str, str] = {}
@@ -612,10 +617,6 @@ def generate_batch(
     Returns:
         List of CandidatePairView objects for the batch
     """
-    import numpy as np
-
-    from ..config import FEATURE_COLUMNS, FEATURE_VERSION
-
     # Load feature cache
     feature_df = load_feature_cache(dataset_id)
     if feature_df is None:
@@ -764,10 +765,6 @@ def load_batch(dataset_id: str) -> list[CandidatePairView]:
     Returns:
         List of CandidatePairView objects for the batch
     """
-    import pandas as pd
-
-    from ..config import FEATURE_VERSION
-
     manifest = load_batch_manifest(dataset_id)
     if manifest is None:
         raise ValueError(f"No batch manifest found for {dataset_id}")
@@ -837,10 +834,6 @@ def generate_batch_from_pairs(
     Returns:
         List of CandidatePairView objects for the specified pairs
     """
-    import pandas as pd
-
-    from ..config import FEATURE_VERSION
-
     feature_df = load_feature_cache(dataset_id)
     if feature_df is None:
         # Fall back to label store for already-labeled pairs
@@ -910,14 +903,6 @@ def _generate_batch_from_label_store(
     Returns:
         List of CandidatePairView objects for the specified pairs
     """
-    from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
-    from ..labeling.data_loader import (
-        _compute_score_breakdown_from_features,
-        get_cached_matcher,
-    )
-    from ..labeling.data_store import DataStore
-    from ..labeling.feature_store import FeatureStore
-
     feature_store = FeatureStore(dataset_id)
     data_store = DataStore(dataset_id)
 
