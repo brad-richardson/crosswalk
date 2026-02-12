@@ -92,13 +92,13 @@ def test_intersection_overlap_scenarios(name, ref, target, alignment, cont_range
 
 
 def test_no_alignment_returns_defaults():
-    """None alignment → NaN continuation, 45° divergence."""
+    """None alignment → NaN for both features."""
     ref = LineString([(0, 0), (100, 0)])
     target = LineString([(200, 200), (300, 300)])
     result = _make_result(ref, target, None)
 
     assert math.isnan(result["post_node_continuation_m"])
-    assert result["endpoint_heading_divergence"] == 45.0
+    assert math.isnan(result["endpoint_heading_divergence"])
 
 
 def test_full_target_coverage_nan_continuation():

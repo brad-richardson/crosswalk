@@ -727,7 +727,7 @@ def _compute_intersection_overlap_features(
     if alignment is None:
         return {
             "post_node_continuation_m": nan,
-            "endpoint_heading_divergence": 45.0,
+            "endpoint_heading_divergence": nan,
         }
 
     ref_start = alignment.overture_start_frac
@@ -1138,7 +1138,7 @@ def _get_error_features(
         "transverse_neighbor_fraction_target": 0.0,
         # Intersection overlap features - unknown/neutral defaults
         "post_node_continuation_m": float("nan"),  # Unknown continuation
-        "endpoint_heading_divergence": 45.0,  # Neutral (matches crossing angle pattern)
+        "endpoint_heading_divergence": float("nan"),  # Unknown heading
     }
 
     # Add error metadata only if error is provided

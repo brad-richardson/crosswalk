@@ -18,6 +18,7 @@ class TestBoundsOnSyntheticPairs:
     # XGBoost handles NaN natively (same pattern as topology features).
     NAN_WITHOUT_ALIGNMENT = {
         "post_node_continuation_m",
+        "endpoint_heading_divergence",
     }
 
     def test_bounds_on_identical_lines(self):
@@ -164,6 +165,7 @@ class TestErrorFeatureBounds:
         "is_intersection_target",
         "intersection_match",
         "post_node_continuation_m",
+        "endpoint_heading_divergence",
     }
 
     def test_error_features_within_bounds(self, error_features):
