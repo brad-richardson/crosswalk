@@ -358,9 +358,7 @@ def _cross_validate(
 
     # Remove duplicates
     n_before = len(all_labels)
-    all_labels = all_labels.drop_duplicates(
-        subset=["gers_id", "target_id", "dataset"], keep="first"
-    )
+    all_labels = all_labels.drop_duplicates(subset=["gers_id", "target_id", "dataset"], keep="last")
     n_dropped = n_before - len(all_labels)
     if n_dropped > 0:
         console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping first)[/yellow]")

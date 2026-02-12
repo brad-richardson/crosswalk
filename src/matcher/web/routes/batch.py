@@ -372,7 +372,12 @@ async def label_batch_pair(
         working_list = get_unlabeled_candidates(dataset, all_candidates)
         next_index = min(index, max(0, len(working_list) - 1))
 
-    batch_labeled, batch_total = _get_batch_progress(dataset, all_candidates)
+    if is_audit:
+        # Audit mode: track progress by index position
+        batch_total = len(all_candidates)
+        batch_labeled = next_index
+    else:
+        batch_labeled, batch_total = _get_batch_progress(dataset, all_candidates)
     datasets = list_datasets()
 
     # All done -> show complete

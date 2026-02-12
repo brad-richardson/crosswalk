@@ -735,19 +735,19 @@ def _compute_intersection_overlap_features(
     target_start = alignment.dataset_start_frac
     target_end = alignment.dataset_end_frac
 
-    # Pre-compute coordinate arrays and cumulative distances
+    # Pre-compute coordinate arrays and per-segment lengths
     ref_coords = np.array(ref_geom.coords)
     target_coords = np.array(target_geom.coords)
     ref_length = ref_geom.length
     target_length = target_geom.length
 
-    def _seg_distances(coords):
-        """Compute per-segment distances from coordinate array."""
+    def _seg_lengths(coords):
+        """Compute per-segment lengths from coordinate array."""
         diffs = np.diff(coords, axis=0)
         return np.sqrt(diffs[:, 0] ** 2 + diffs[:, 1] ** 2)
 
-    ref_dists = _seg_distances(ref_coords)
-    target_dists = _seg_distances(target_coords)
+    ref_seg_lens = _seg_lengths(ref_coords)
+    target_seg_lens = _seg_lengths(target_coords)
 
     # Tolerance for "fully aligned" check
     FRAC_TOL = 0.01
@@ -768,7 +768,7 @@ def _compute_intersection_overlap_features(
         if has_start_remainder:
             # Ref heading at the start boundary
             ref_heading_start = compute_heading_at_fraction_numba(
-                ref_coords, ref_dists, ref_length, ref_start
+                ref_coords, ref_seg_lens, ref_length, ref_start
             )
             rad = np.radians(ref_heading_start)
             hdx, hdy = np.cos(rad), np.sin(rad)
@@ -785,7 +785,7 @@ def _compute_intersection_overlap_features(
         if has_end_remainder:
             # Ref heading at the end boundary
             ref_heading_end = compute_heading_at_fraction_numba(
-                ref_coords, ref_dists, ref_length, ref_end
+                ref_coords, ref_seg_lens, ref_length, ref_end
             )
             rad = np.radians(ref_heading_end)
             hdx, hdy = np.cos(rad), np.sin(rad)
@@ -807,18 +807,18 @@ def _compute_intersection_overlap_features(
     divergence_values = []
 
     ref_heading_at_start = compute_heading_at_fraction_numba(
-        ref_coords, ref_dists, ref_length, ref_start
+        ref_coords, ref_seg_lens, ref_length, ref_start
     )
     target_heading_at_start = compute_heading_at_fraction_numba(
-        target_coords, target_dists, target_length, target_start
+        target_coords, target_seg_lens, target_length, target_start
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_start, target_heading_at_start))
 
     ref_heading_at_end = compute_heading_at_fraction_numba(
-        ref_coords, ref_dists, ref_length, ref_end
+        ref_coords, ref_seg_lens, ref_length, ref_end
     )
     target_heading_at_end = compute_heading_at_fraction_numba(
-        target_coords, target_dists, target_length, target_end
+        target_coords, target_seg_lens, target_length, target_end
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_end, target_heading_at_end))
 

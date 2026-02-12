@@ -530,7 +530,7 @@ def compute_local_parallel_alignment_numba(
 @njit(cache=True)
 def compute_heading_at_fraction_numba(
     coords: np.ndarray,
-    distances: np.ndarray,
+    segment_lengths: np.ndarray,
     total_length: float,
     fraction: float,
     look_ahead_m: float = 10.0,
@@ -542,7 +542,7 @@ def compute_heading_at_fraction_numba(
 
     Args:
         coords: Nx2 array of coordinates
-        distances: (N-1,) array of cumulative segment distances (starting from 0)
+        segment_lengths: (N-1,) array of per-segment lengths
         total_length: Total line length in meters
         fraction: Position along line (0.0 to 1.0)
         look_ahead_m: Distance to look ahead/behind for heading (meters)
@@ -567,7 +567,7 @@ def compute_heading_at_fraction_numba(
     bx, by = coords[0, 0], coords[0, 1]
     cum = 0.0
     for i in range(n - 1):
-        seg_len = distances[i]
+        seg_len = segment_lengths[i]
         if cum + seg_len >= before_dist:
             if seg_len > 1e-10:
                 t = (before_dist - cum) / seg_len
@@ -582,7 +582,7 @@ def compute_heading_at_fraction_numba(
     ax, ay = coords[-1, 0], coords[-1, 1]
     cum = 0.0
     for i in range(n - 1):
-        seg_len = distances[i]
+        seg_len = segment_lengths[i]
         if cum + seg_len >= after_dist:
             if seg_len > 1e-10:
                 t = (after_dist - cum) / seg_len

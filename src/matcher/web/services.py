@@ -840,15 +840,9 @@ def generate_batch_from_pairs(
         logger.info(f"No feature cache for {dataset_id}, falling back to label store data")
         return _generate_batch_from_label_store(dataset_id, pair_ids)
 
-    # Filter to requested pairs
-    pair_set = {(str(r), str(t)) for r, t in pair_ids}
-    mask = pd.Series(
-        [
-            (str(r), str(t)) in pair_set
-            for r, t in zip(feature_df["ref_id"], feature_df["target_id"])
-        ]
-    )
-    batch_feature_df = feature_df[mask.values].reset_index(drop=True)
+    # Filter to requested pairs via merge (vectorized)
+    pair_df = pd.DataFrame(pair_ids, columns=["ref_id", "target_id"]).astype(str)
+    batch_feature_df = feature_df.merge(pair_df, on=["ref_id", "target_id"]).reset_index(drop=True)
 
     if len(batch_feature_df) == 0:
         logger.warning(f"No matching pairs found in feature cache for {dataset_id}")
