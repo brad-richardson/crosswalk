@@ -678,16 +678,3 @@ class TestRealLabeledExamples:
         assert low <= confidence <= high, (
             f"Borderline confidence {confidence:.3f} outside expected range [{low}, {high}]"
         )
-
-    @pytest.mark.skip(
-        reason="Model weights geometry over names; name effects are complex "
-        "and depend on other features. See feature importances from benchmark."
-    )
-    def test_name_similarity_influences_score(self, trained_matcher):
-        """Demonstrate that name similarity has some effect on the model.
-
-        Note: The model weights geometry (buffer_iou) more heavily than names,
-        so name changes have complex effects depending on other features.
-        This test is skipped because the model's learned behavior is valid.
-        """
-        pass

@@ -1,6 +1,15 @@
 """Training regression test - verify model quality hasn't degraded."""
 
+import os
+
+import pytest
+
 from matcher.matching.ml import train_model
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") != "true",
+    reason="Training regression test only runs on CI",
+)
 
 # Minimum acceptable thresholds
 MIN_TEST_ACCURACY = 0.88

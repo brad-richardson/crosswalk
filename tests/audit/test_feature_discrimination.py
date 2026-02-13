@@ -122,9 +122,6 @@ class TestDegenerateValueDetection:
         close = (abs(series - default_val) < tol).sum()
         return close / len(series)
 
-    @pytest.mark.xfail(
-        reason="graphlet features require full graph context not available in backfill"
-    )
     def test_graphlet_features_not_all_default(self, labeled_features):
         """graphlet_similarity should not be all 0.5 (the error default)."""
         if "graphlet_similarity" not in labeled_features.columns:
@@ -137,9 +134,6 @@ class TestDegenerateValueDetection:
             f"(suggests feature rarely fires)"
         )
 
-    @pytest.mark.xfail(
-        reason="clustering features require full graph context not available in backfill"
-    )
     def test_clustering_coef_not_all_zero(self, labeled_features):
         """clustering_coef_ref should not be all 0.0."""
         if "clustering_coef_ref" not in labeled_features.columns:
@@ -178,9 +172,6 @@ class TestDegenerateValueDetection:
         pct = self._pct_at_default(series, 0.5)
         assert pct < 0.80, f"angle_histogram_similarity: {pct:.1%} of values are at default 0.5"
 
-    @pytest.mark.xfail(
-        reason="endpoint degree features require full graph context not available in backfill"
-    )
     def test_endpoint_degree_similarity_not_all_default(self, labeled_features):
         """endpoint_degree_similarity should not be all 0.5."""
         if "endpoint_degree_similarity" not in labeled_features.columns:

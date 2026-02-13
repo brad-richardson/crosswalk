@@ -7,34 +7,36 @@ For ML pipeline architecture and feature details, see [docs/ARCHITECTURE.md](doc
 
 ## Quick Reference
 
+**Use `uv` as the package manager and command runner for this project.**
+
 ```bash
 # Install with all dependencies
-pip install -e ".[dev,ml,web]"
+uv pip install -e ".[dev,ml,web]"
 
 # Train ML model (required after fresh clone)
-matcher train
+uv run matcher train
 
 # Run tests
-pytest tests/
+uv run pytest tests/
 
 # Format and lint
-ruff format src/ tests/ && ruff check src/ tests/
+uv run ruff format src/ tests/ && uv run ruff check src/ tests/
 
 # CLI help
-matcher --help
+uv run matcher --help
 ```
 
 ## Web UI
 
 ```bash
 # Install web dependencies
-pip install -e ".[dev,web]"
+uv pip install -e ".[dev,web]"
 
 # Launch web UI
-matcher ui
+uv run matcher ui
 
 # Development mode with auto-reload
-matcher ui --reload
+uv run matcher ui --reload
 ```
 
 The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Three modes: Labeling (`/labeling`), Integration QA (`/qa`), Label Review (`/review`).
@@ -125,12 +127,12 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
 
@@ -153,13 +155,13 @@ For any code changes, follow this workflow:
 
 ```bash
 # Run formatting and linting
-ruff format src/ tests/ && ruff check src/ tests/
+uv run ruff format src/ tests/ && uv run ruff check src/ tests/
 
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run training regression tests (if ML changes)
-pytest tests/regression/test_training.py -v
+uv run pytest tests/regression/test_training.py -v
 ```
 
 ### 2. Self-Review Changes

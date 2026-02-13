@@ -172,32 +172,6 @@ class TestFeatureComputationPerformance:
         # Should be faster without buffer creation overhead
         assert per_pair_us < 300, f"Buffer IoU (pre-computed) too slow: {per_pair_us:.1f} µs/call"
 
-    @pytest.mark.skip(reason="Flaky on CI due to timing variability")
-    def test_iou_calculation_optimization(self, synthetic_lines):
-        """Verify IoU optimization: union = A + B - intersection."""
-        # Take a sample pair
-        line_a = synthetic_lines[0]
-        line_b = synthetic_lines[1]
-
-        buf_a = line_a.buffer(5.0)
-        buf_b = line_b.buffer(5.0)
-
-        # Original method: explicit union
-        intersection_area = buf_a.intersection(buf_b).area
-        union_area_original = buf_a.union(buf_b).area
-        iou_original = intersection_area / union_area_original if union_area_original > 0 else 0.0
-
-        # Optimized method: union = A + B - intersection
-        union_area_optimized = buf_a.area + buf_b.area - intersection_area
-        iou_optimized = (
-            intersection_area / union_area_optimized if union_area_optimized > 0 else 0.0
-        )
-
-        # Results should be identical (or very close due to floating point)
-        assert abs(iou_original - iou_optimized) < 1e-10, (
-            f"IoU mismatch: original={iou_original}, optimized={iou_optimized}"
-        )
-
         # Benchmark both approaches with meaningful iterations
         n_iterations = 5000
 

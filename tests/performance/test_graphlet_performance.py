@@ -21,7 +21,6 @@ from matcher.features.compute import (
     precompute_graphlet_features,
 )
 from matcher.features.spatial_context import (
-    build_inferred_graph,
     compute_road_graphlet_features,
 )
 from matcher.topology.sparse_graph import build_graph_from_edges
@@ -133,30 +132,6 @@ class TestGraphletSimilarityPerformance:
 
 class TestScalingBehavior:
     """Tests to verify algorithms scale well (O(n) to O(n log n))."""
-
-    @pytest.mark.slow
-    @pytest.mark.skip(reason="Flaky on CI due to timing variance")
-    def test_graph_building_scales_linearly(self, grid_network_factory):
-        """Verify graph building scales approximately linearly."""
-        sizes = [100, 500, 1000, 2000]
-        times = []
-
-        for n in sizes:
-            gdf = grid_network_factory(n_segments=n)
-            gdf["id"] = gdf["id"].astype(str)
-
-            start = time.perf_counter()
-            build_inferred_graph(gdf, id_column="id", tolerance_m=5.0)
-            times.append(time.perf_counter() - start)
-
-        # Verify sub-quadratic scaling: 2x data should cause < 4x slowdown
-        for i in range(1, len(sizes)):
-            size_ratio = sizes[i] / sizes[i - 1]
-            time_ratio = times[i] / times[i - 1] if times[i - 1] > 0 else 1
-            assert time_ratio < size_ratio * 2.5, (
-                f"Graph building doesn't scale well: {sizes[i - 1]} -> {sizes[i]} "
-                f"caused {time_ratio:.1f}x slowdown"
-            )
 
     @pytest.mark.slow
     def test_feature_computation_scales_linearly(self):
