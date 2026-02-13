@@ -137,35 +137,32 @@ class TestPrecomputedFeaturePassthrough:
         assert features["endpoint_degree_similarity"] == expected_deg
 
 
-class TestImputationConsistency:
-    """Verify imputation uses stored training medians consistently."""
+class TestMissingValueHandling:
+    """Verify NaN is preserved for XGBoost and inf is capped."""
 
     @pytest.fixture
-    def matcher_with_medians(self):
-        """Matcher with programmatically generated median values."""
+    def matcher_instance(self):
+        """Matcher instance for testing."""
         from matcher.matching.ml import MLMatcher
 
         matcher = MLMatcher()
         matcher.feature_names = FEATURE_COLUMNS.copy()
-        # Generate predictable medians: feature index * 0.1
-        matcher.feature_medians = {feat: i * 0.1 for i, feat in enumerate(FEATURE_COLUMNS)}
         return matcher
 
-    def test_nan_values_replaced_with_medians(self, matcher_with_medians):
-        """NaN values should be replaced with stored medians."""
+    def test_nan_values_preserved(self, matcher_instance):
+        """NaN values should be preserved for XGBoost's native handling."""
         X = np.array([[np.nan] * len(FEATURE_COLUMNS)], dtype=np.float32)
-        X_imputed = matcher_with_medians._impute_missing(X)
+        X_out = matcher_instance._cap_infinities(X)
 
-        for i, feat in enumerate(FEATURE_COLUMNS):
-            expected = matcher_with_medians.feature_medians[feat]
-            assert X_imputed[0, i] == pytest.approx(expected, rel=1e-5)
+        for i in range(len(FEATURE_COLUMNS)):
+            assert np.isnan(X_out[0, i]), f"NaN should be preserved for {FEATURE_COLUMNS[i]}"
 
-    def test_valid_values_preserved(self, matcher_with_medians):
-        """Valid values should not be modified by imputation."""
+    def test_valid_values_preserved(self, matcher_instance):
+        """Valid values should not be modified."""
         original = np.arange(len(FEATURE_COLUMNS), dtype=np.float32).reshape(1, -1)
-        X_imputed = matcher_with_medians._impute_missing(original.copy())
+        X_out = matcher_instance._cap_infinities(original.copy())
 
-        np.testing.assert_array_almost_equal(X_imputed, original)
+        np.testing.assert_array_almost_equal(X_out, original)
 
     @pytest.mark.parametrize(
         "input_value,expected",
@@ -175,36 +172,25 @@ class TestImputationConsistency:
         ],
         ids=["positive_inf", "negative_inf"],
     )
-    def test_infinite_values_capped(self, matcher_with_medians, input_value, expected):
+    def test_infinite_values_capped(self, matcher_instance, input_value, expected):
         """Infinite values should be capped at MAX_DISTANCE_METERS."""
         X = np.full((1, len(FEATURE_COLUMNS)), input_value, dtype=np.float32)
-        X_imputed = matcher_with_medians._impute_missing(X)
+        X_out = matcher_instance._cap_infinities(X)
 
-        assert X_imputed[0, 0] == expected
+        assert X_out[0, 0] == expected
 
-    def test_missing_median_falls_back_to_zero(self, matcher_with_medians):
-        """Features not in stored medians should fall back to 0.0."""
-        del matcher_with_medians.feature_medians["hausdorff_distance_m"]
-        X = np.array([[np.nan] * len(FEATURE_COLUMNS)], dtype=np.float32)
-
-        X_imputed = matcher_with_medians._impute_missing(X)
-
-        idx = FEATURE_COLUMNS.index("hausdorff_distance_m")
-        assert X_imputed[0, idx] == 0.0
-
-    def test_features_to_array_applies_medians(self, matcher_with_medians):
-        """_features_to_array() should apply medians for missing dict keys."""
+    def test_features_to_array_preserves_nan(self, matcher_instance):
+        """_features_to_array() should preserve NaN for missing dict keys."""
         feature_dict = {"hausdorff_distance_m": 99.0}  # Only one feature present
-        X = matcher_with_medians._features_to_array([feature_dict])
+        X = matcher_instance._features_to_array([feature_dict])
 
         # Present value preserved
         idx = FEATURE_COLUMNS.index("hausdorff_distance_m")
         assert X[0, idx] == 99.0
 
-        # Missing values get medians
+        # Missing values are NaN (XGBoost handles natively)
         other_idx = FEATURE_COLUMNS.index("buffer_iou_5m")
-        expected = matcher_with_medians.feature_medians["buffer_iou_5m"]
-        assert X[0, other_idx] == pytest.approx(expected, rel=1e-5)
+        assert np.isnan(X[0, other_idx])
 
 
 class TestAlignmentAwareGraphletComputation:

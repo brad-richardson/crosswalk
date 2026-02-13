@@ -1016,10 +1016,10 @@ def compute_crossing_angle_features(
     from .semantic import get_traffic_tier
 
     neutral = {
-        "crossing_angle_min": 45.0,
-        "crossing_angle_mean": 45.0,
-        "crossing_angle_std": 0.0,
-        "transverse_neighbor_fraction": 0.0,
+        "crossing_angle_min": float("nan"),
+        "crossing_angle_mean": float("nan"),
+        "crossing_angle_std": float("nan"),
+        "transverse_neighbor_fraction": float("nan"),
     }
 
     if candidate.is_empty or candidate.length <= 0:

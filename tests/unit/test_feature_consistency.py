@@ -18,7 +18,7 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
+from matcher.config import FEATURE_COLUMNS
 from matcher.features.compute import (
     ALL_FEATURE_COLUMNS,
     MissingContextError,
@@ -56,65 +56,13 @@ class TestErrorFeaturesConsistency:
         error_features = _get_error_features()
         assert set(error_features.keys()) == set(FEATURE_COLUMNS)
 
-    @pytest.mark.parametrize(
-        "feature",
-        [
-            "hausdorff_distance_m",
-            "mean_hausdorff_distance_m",
-            "hausdorff_p95_m",
-            "centroid_distance_m",
-            "min_endpoint_proximity_m",
-            "max_endpoint_proximity_m",
-            "lateral_offset_m",
-            "lateral_offset_iqr_m",
-            "lateral_offset_p95_m",
-        ],
-    )
-    def test_distance_error_defaults_to_max(self, feature):
-        """Distance features should default to MAX_DISTANCE_METERS."""
+    @pytest.mark.parametrize("feature", FEATURE_COLUMNS)
+    def test_all_error_defaults_are_nan(self, feature):
+        """All error features should default to NaN (XGBoost handles natively)."""
         error_features = _get_error_features()
-        assert error_features[feature] == MAX_DISTANCE_METERS
-
-    @pytest.mark.parametrize(
-        "feature",
-        [
-            "buffer_iou_5m",
-            "buffer_iou_15m",
-            "length_ratio",
-            "name_levenshtein",
-            "name_jaro_winkler",
-            "name_token_sort",
-            "class_similarity",
-            "min_length_m",
-            "aligned_length_m",
-        ],
-    )
-    def test_similarity_error_defaults_to_zero(self, feature):
-        """Similarity and length features should default to 0.0."""
-        error_features = _get_error_features()
-        assert error_features[feature] == 0.0
-
-    @pytest.mark.parametrize(
-        "feature",
-        [
-            "from_degree_ref",
-            "to_degree_ref",
-            "from_degree_target",
-            "to_degree_target",
-            "degree_match_score",
-            "degree_signature_similarity",
-            "is_dead_end_ref",
-            "is_dead_end_target",
-            "dead_end_match",
-            "is_intersection_ref",
-            "is_intersection_target",
-            "intersection_match",
-        ],
-    )
-    def test_topology_error_defaults_to_nan(self, feature):
-        """Topology features should default to NaN (XGBoost handles natively)."""
-        error_features = _get_error_features()
-        assert math.isnan(error_features[feature])
+        assert math.isnan(error_features[feature]), (
+            f"Error default for {feature} should be NaN, got {error_features[feature]}"
+        )
 
 
 class TestComputePairFeaturesConsistency:
@@ -141,17 +89,8 @@ class TestComputePairFeaturesConsistency:
         feature_keys = {k for k in features if not k.startswith("_")}
         assert feature_keys == set(FEATURE_COLUMNS)
 
-    @pytest.mark.parametrize(
-        "graphlet_features,expected_sim,expected_deg",
-        [
-            ({"graphlet_similarity": 0.8, "endpoint_degree_similarity": 0.9}, 0.8, 0.9),
-            (None, 0.5, 0.5),  # Defaults when no graphlet data
-        ],
-    )
-    def test_graphlet_features_handling(
-        self, simple_pair_geoms, graphlet_features, expected_sim, expected_deg
-    ):
-        """Graphlet features should use provided values or defaults."""
+    def test_graphlet_features_with_values(self, simple_pair_geoms):
+        """Graphlet features should use provided values."""
         ref_geom, target_geom = simple_pair_geoms
         features = compute_pair_features(
             ref_geom,
@@ -160,13 +99,31 @@ class TestComputePairFeaturesConsistency:
             "Main St",
             "residential",
             "residential",
-            graphlet_features=graphlet_features,
+            graphlet_features={"graphlet_similarity": 0.8, "endpoint_degree_similarity": 0.9},
             endpoint_features=MOCK_ENDPOINT_FEATURES,
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
             target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
-        assert features["graphlet_similarity"] == expected_sim
-        assert features["endpoint_degree_similarity"] == expected_deg
+        assert features["graphlet_similarity"] == 0.8
+        assert features["endpoint_degree_similarity"] == 0.9
+
+    def test_graphlet_features_default_to_nan(self, simple_pair_geoms):
+        """Graphlet features should default to NaN when no graphlet data."""
+        ref_geom, target_geom = simple_pair_geoms
+        features = compute_pair_features(
+            ref_geom,
+            target_geom,
+            "Main St",
+            "Main St",
+            "residential",
+            "residential",
+            graphlet_features=None,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+        )
+        assert math.isnan(features["graphlet_similarity"])
+        assert math.isnan(features["endpoint_degree_similarity"])
 
 
 class TestFeatureNaming:
@@ -212,17 +169,17 @@ class TestGraphletFeatures:
     """Ensure graphlet features are properly integrated."""
 
     @pytest.mark.parametrize(
-        "feature,expected_default",
+        "feature",
         [
-            ("graphlet_similarity", 0.5),
-            ("endpoint_degree_similarity", 0.5),
+            "graphlet_similarity",
+            "endpoint_degree_similarity",
         ],
     )
-    def test_graphlet_features_in_config_and_error(self, feature, expected_default):
-        """Graphlet features should be in FEATURE_COLUMNS and _get_error_features()."""
+    def test_graphlet_features_in_config_and_error(self, feature):
+        """Graphlet features should be in FEATURE_COLUMNS and error defaults should be NaN."""
         assert feature in FEATURE_COLUMNS
         error_features = _get_error_features()
-        assert error_features[feature] == expected_default
+        assert math.isnan(error_features[feature])
 
 
 class TestCallSiteContextConsistency:

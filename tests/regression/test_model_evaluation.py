@@ -72,7 +72,7 @@ class TestModelEvaluation:
 
         # Extract features and labels (same as training evaluation)
         X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
-        X_test = matcher._impute_missing(X_test)
+        X_test = matcher._cap_infinities(X_test)
 
         # Predict on test set - use model.predict for class labels (0/1)
         y_pred = matcher.model.predict(X_test)

@@ -163,7 +163,7 @@ def _eval_existing_model(
 
     # Evaluate
     X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
-    X_test = matcher._impute_missing(X_test)
+    X_test = matcher._cap_infinities(X_test)
     y_pred = matcher.model.predict(X_test)
 
     # Overall metrics
@@ -197,7 +197,7 @@ def _eval_existing_model(
         for ds in sorted(test_df["dataset"].unique()):
             ds_test = test_df[test_df["dataset"] == ds]
             X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
-            X_ds = matcher._impute_missing(X_ds)
+            X_ds = matcher._cap_infinities(X_ds)
             y_ds_pred = matcher.model.predict(X_ds)
 
             ds_acc = accuracy_score(y_ds, y_ds_pred)
@@ -401,14 +401,9 @@ def _cross_validate(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
-        # Compute imputation medians from training fold only, then impute both
-        matcher.feature_medians = {}
-        for i, feat_name in enumerate(matcher.feature_names):
-            col_vals = X_train[:, i]
-            median_val = np.nanmedian(col_vals)
-            matcher.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
-        X_train = matcher._impute_missing(X_train)
-        X_test = matcher._impute_missing(X_test)
+        # Cap infinities (XGBoost handles NaN natively)
+        X_train = matcher._cap_infinities(X_train)
+        X_test = matcher._cap_infinities(X_test)
 
         # Train model for this fold
         from xgboost import XGBClassifier
@@ -694,7 +689,7 @@ def analyze_errors(
     # Extract features and get predictions
     console.print("[blue]Computing predictions...[/blue]")
     X, y_true = matcher._extract_features_and_labels(all_labels, binary=True)
-    X = matcher._impute_missing(X)
+    X = matcher._cap_infinities(X)
 
     y_pred = matcher.model.predict(X)
     y_prob = matcher.model.predict_proba(X)
