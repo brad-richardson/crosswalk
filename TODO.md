@@ -76,6 +76,22 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ---
 
+## Ablation Study
+
+### Add Permutation Importance to Ablation Script
+
+**Problem:** Single-feature ablation systematically underestimates feature importance with tree ensembles due to redundancy masking — XGBoost routes around any one missing feature via correlated alternatives. Feb 2026 ablation classified 64/74 features as "noise", but bulk-removing them causes -2.9% F1. Permutation importance (shuffling feature values) avoids this by breaking correlations without removing the feature entirely.
+
+**Solution:** Add `--permutation` mode (or include alongside existing modes) that:
+1. Trains a single model on the train split
+2. For each feature, shuffles its test-set values N times (e.g., 5 repeats) and measures F1 drop
+3. Reports mean/std importance per feature
+4. Cross-references with ablation classification to flag false negatives (features ablation called "noise" but permutation shows are actively used)
+
+**Validation:** Feb 2026 permutation analysis found 14 false negatives, including `buffer_iou_15m` (2nd most important feature by permutation, classified as noise by ablation).
+
+---
+
 ## Feature Ideas
 
 ### HIGH: Target-Side Aligned Topology (Degree at Subline Endpoints)
