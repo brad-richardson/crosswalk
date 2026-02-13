@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -26,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -34,7 +38,7 @@ jobs:
       - name: Create virtual environment
         run: uv venv
       - name: Install dependencies
-        run: uv pip install -e ".[dev,ml,web]" --python .venv/bin/python
+        run: uv pip install -e "[dev,ml,web]" --python .venv/bin/python
       - name: Train model
         run: uv run matcher train
       - name: Run tests
