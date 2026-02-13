@@ -351,13 +351,14 @@ class TestOveralignment:
     # -- Parameterized: barely-overlapping pairs should have small coverage --
 
     @pytest.mark.parametrize(
-        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov",
+        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, min_overlap_m",
         [
             pytest.param(
                 _MUMBAI_REF_WGS,
                 _MUMBAI_TGT_WGS,
                 0.15,
                 0.15,
+                0.00003,  # ~3m in degree-space
                 id="mumbai-degree-space",
             ),
             pytest.param(
@@ -365,6 +366,7 @@ class TestOveralignment:
                 list(shapely_transform(_UTM43N, LineString(_MUMBAI_TGT_WGS)).coords),
                 0.05,
                 0.05,
+                3.0,
                 id="mumbai-projected-meters",
             ),
             pytest.param(
@@ -372,6 +374,7 @@ class TestOveralignment:
                 [(0, 3), (50, 3), (100, 3)],
                 0.10,
                 0.15,
+                3.0,
                 id="synthetic-collinear-5m-overlap",
             ),
             pytest.param(
@@ -394,18 +397,19 @@ class TestOveralignment:
                 [(-2.2, -3), (7.6, 2.2), (18.1, 10), (28.7, 22.9), (36.7, 40.6), (39.9, 51.5)],
                 0.05,
                 0.10,
+                3.0,
                 id="bogota-asymmetric-360m-ref",
             ),
         ],
     )
     def test_barely_overlapping_small_coverage(
-        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov
+        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, min_overlap_m
     ):
         """Barely-overlapping pairs should have small coverage fractions."""
         ref = LineString(ref_coords)
         target = LineString(tgt_coords)
 
-        result = linestring_alignment(ref, target)
+        result = linestring_alignment(ref, target, min_overlap_m=min_overlap_m)
 
         assert result.overture_coverage < max_ref_cov, (
             f"ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
