@@ -185,18 +185,18 @@ STREET_ABBREVIATIONS = {
 }
 
 
-# Default result when names are missing - use neutral scores (0.5)
-# to avoid penalizing valid geometric matches when one dataset lacks
-# name data. The 'names_missing' flag allows the ML model to handle
-# this case specifically if needed.
+# Default result when names are missing - use NaN for similarity scores
+# so the ML model (XGBoost) can learn to handle missing names natively.
+# has_name_ref/has_name_target encode name presence as binary indicators.
+_nan = float("nan")
 _MISSING_NAMES_RESULT = {
-    "levenshtein_ratio": 0.5,
-    "jaro_winkler": 0.5,
-    "token_sort_ratio": 0.5,
-    "token_set_ratio": 0.5,
-    "partial_ratio": 0.5,
-    "soundex_match": 0.5,
-    "metaphone_similarity": 0.5,
+    "levenshtein_ratio": _nan,
+    "jaro_winkler": _nan,
+    "token_sort_ratio": _nan,
+    "token_set_ratio": _nan,
+    "partial_ratio": _nan,
+    "soundex_match": _nan,
+    "metaphone_similarity": _nan,
     "names_match": False,
     "names_missing": True,
     "has_name_ref": 0.0,
@@ -414,26 +414,26 @@ def compute_class_similarity(
         Similarity score (0-1)
     """
     if not class_a or not isinstance(class_a, str) or not class_b or not isinstance(class_b, str):
-        return 0.5  # Unknown, neutral
+        return float("nan")  # Missing data — unknown similarity
 
     class_a = class_a.lower().strip()
     class_b = class_b.lower().strip()
 
-    # Treat "unknown" as neutral - don't penalize or reward
+    # Treat "unknown" class string as missing data
     if class_a == "unknown" or class_b == "unknown":
-        return 0.5
+        return float("nan")
 
     # Get traffic tiers for both classes
     tier_a = get_traffic_tier(class_a)
     tier_b = get_traffic_tier(class_b)
 
-    # Neutral tier (bridleway) or unknown tier -> return 0.5
+    # Neutral tier (bridleway) or unknown tier -> no signal
     if tier_a == "neutral" or tier_b == "neutral" or tier_a is None or tier_b is None:
-        return 0.5
+        return float("nan")
 
     # Cross-tier: lookup penalty from matrix
     if tier_a != tier_b:
-        return TIER_PENALTIES.get((tier_a, tier_b), 0.5)
+        return TIER_PENALTIES.get((tier_a, tier_b), float("nan"))
 
     # Same tier: use rank-based similarity
 
@@ -604,7 +604,7 @@ def compute_route_prefix_match(name_a, name_b) -> float:
     Returns:
         1.0 if both have the same route prefix type
         0.0 if both have different route prefix types
-        0.5 if either/both is not a recognized route (neutral)
+        NaN if either/both is not a recognized route (missing signal)
     """
     # Extract name strings from dict if needed
     name_a = _extract_name_string(name_a)
@@ -614,13 +614,13 @@ def compute_route_prefix_match(name_a, name_b) -> float:
     prefix_a, _ = canonicalize_route_name(name_a)
     prefix_b, _ = canonicalize_route_name(name_b)
 
-    # Neither is a route - neutral (no signal)
+    # Neither is a route - no signal
     if prefix_a is None and prefix_b is None:
-        return 0.5
+        return float("nan")
 
-    # Only one is a route - neutral (don't penalize)
+    # Only one is a route - no signal
     if prefix_a is None or prefix_b is None:
-        return 0.5
+        return float("nan")
 
     # Both are routes - compare types
     if prefix_a == prefix_b:
@@ -641,9 +641,9 @@ def compute_name_numeric_match(name_a, name_b) -> float:
 
     Returns:
         1.0 if both have matching route numbers
-        0.5 if neither has a number (neutral - no signal either way)
+        NaN if neither has a number (no signal)
         0.0 if route numbers mismatch
-        0.5 if only one has a number (neutral - don't penalize)
+        NaN if only one has a number (no signal)
     """
     # Extract name strings from dict if needed
     name_a = _extract_name_string(name_a)
@@ -653,13 +653,13 @@ def compute_name_numeric_match(name_a, name_b) -> float:
     num_a = extract_numeric_suffix(name_a)
     num_b = extract_numeric_suffix(name_b)
 
-    # Neither has a number - neutral (no signal either way)
+    # Neither has a number - no signal
     if num_a is None and num_b is None:
-        return 0.5
+        return float("nan")
 
-    # Only one has a number - neutral (don't penalize)
+    # Only one has a number - no signal
     if num_a is None or num_b is None:
-        return 0.5
+        return float("nan")
 
     # Both have numbers - check if they match
     if num_a == num_b:

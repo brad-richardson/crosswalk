@@ -1,5 +1,7 @@
 """Tests for relational feature extraction."""
 
+import math
+
 import geopandas as gpd
 import numpy as np
 import pytest
@@ -317,11 +319,11 @@ class TestTopologyFeatures:
         assert sim < 1.0
 
     def test_degree_signature_similarity_empty(self):
-        """Empty signatures should return 0."""
+        """Empty signatures should return NaN (missing data)."""
         from matcher.features.spatial_context import compute_degree_signature_similarity
 
-        assert compute_degree_signature_similarity((), (1, 2)) == 0.0
-        assert compute_degree_signature_similarity((1, 2), ()) == 0.0
+        assert math.isnan(compute_degree_signature_similarity((), (1, 2)))
+        assert math.isnan(compute_degree_signature_similarity((1, 2), ()))
 
 
 class TestPerpendicularOffsetBatch:

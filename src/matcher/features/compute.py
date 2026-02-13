@@ -511,9 +511,9 @@ def _compute_non_geometric_features(
             )
         else:
             clustering_feats = {
-                "clustering_coef_ref": 0.0,
-                "clustering_coef_target": 0.0,
-                "clustering_coef_delta": 0.0,
+                "clustering_coef_ref": float("nan"),
+                "clustering_coef_target": float("nan"),
+                "clustering_coef_delta": float("nan"),
             }
 
     # Crossing angle features - detect segments transverse to nearby different-tier corridor
@@ -555,14 +555,14 @@ def _compute_non_geometric_features(
         "class_similarity": class_sim,
         # Endpoint proximity
         "min_endpoint_proximity_m": min(
-            endpoint_features.get("min_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            endpoint_features.get("min_endpoint_proximity_m", float("nan")),
             MAX_DISTANCE_METERS,
         ),
         "max_endpoint_proximity_m": min(
-            endpoint_features.get("max_endpoint_proximity_m", MAX_DISTANCE_METERS),
+            endpoint_features.get("max_endpoint_proximity_m", float("nan")),
             MAX_DISTANCE_METERS,
         ),
-        "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", 0),
+        "shared_endpoint_count": endpoint_features.get("shared_endpoint_count", float("nan")),
         # Lateral offset
         "lateral_offset_m": min(lateral_offset, MAX_DISTANCE_METERS),
         "lateral_offset_iqr_m": min(lateral_iqr, MAX_DISTANCE_METERS),
@@ -587,10 +587,14 @@ def _compute_non_geometric_features(
         "coverage_ratio": coverage_feats["coverage_ratio"],
         # Graphlet features
         "graphlet_similarity": (
-            graphlet_features.get("graphlet_similarity", 0.5) if graphlet_features else 0.5
+            graphlet_features.get("graphlet_similarity", float("nan"))
+            if graphlet_features
+            else float("nan")
         ),
         "endpoint_degree_similarity": (
-            graphlet_features.get("endpoint_degree_similarity", 0.5) if graphlet_features else 0.5
+            graphlet_features.get("endpoint_degree_similarity", float("nan"))
+            if graphlet_features
+            else float("nan")
         ),
         # Clustering coefficient features
         "clustering_coef_ref": clustering_feats["clustering_coef_ref"],
@@ -636,10 +640,10 @@ def _compute_non_geometric_features(
 
 
 _DEFAULT_CROSSING_ANGLE_FEATURES = {
-    "crossing_angle_min": 45.0,
-    "crossing_angle_mean": 45.0,
-    "crossing_angle_std": 0.0,
-    "transverse_neighbor_fraction": 0.0,
+    "crossing_angle_min": float("nan"),
+    "crossing_angle_mean": float("nan"),
+    "crossing_angle_std": float("nan"),
+    "transverse_neighbor_fraction": float("nan"),
 }
 
 _CROSSING_ANGLE_SEARCH_RADIUS_M = 30.0
@@ -1040,106 +1044,13 @@ def _get_error_features(
         error: Optional exception that caused the error
         phase: Optional phase where the error occurred (e.g., "compute_pair_features")
 
-    Returns a dict with all features from FEATURE_COLUMNS, using neutral/default
-    values that won't artificially inflate or deflate match scores. Also includes
-    error metadata fields (_error, _error_type, _error_phase) when error is provided.
+    Returns a dict with all features from FEATURE_COLUMNS set to NaN.
+    XGBoost handles NaN natively (learns optimal split routing for missing values).
+    Also includes error metadata fields (_error, _error_type, _error_phase) when
+    error is provided.
     """
-    features = {
-        # Geometric features
-        "hausdorff_distance_m": MAX_DISTANCE_METERS,
-        "mean_hausdorff_distance_m": MAX_DISTANCE_METERS,
-        "hausdorff_p95_m": MAX_DISTANCE_METERS,
-        "buffer_iou_5m": 0.0,
-        "buffer_iou_15m": 0.0,
-        "heading_delta": 180.0,
-        "length_ratio": 0.0,
-        "centroid_distance_m": MAX_DISTANCE_METERS,
-        "collinear_gap_ratio": 1.0,  # No penalty in error case (conservative)
-        # Semantic features - name
-        "name_levenshtein": 0.0,
-        "name_jaro_winkler": 0.0,
-        "name_token_sort": 0.0,
-        "name_soundex": 0.5,  # Neutral for missing names
-        "name_metaphone": 0.5,  # Neutral for missing names
-        "has_name_ref": 0.0,
-        "has_name_target": 0.0,
-        "name_is_generic": 0.0,
-        # Semantic features - class
-        "class_similarity": 0.0,
-        # Endpoint proximity
-        "min_endpoint_proximity_m": MAX_DISTANCE_METERS,
-        "max_endpoint_proximity_m": MAX_DISTANCE_METERS,
-        "shared_endpoint_count": 0,
-        # Lateral offset
-        "lateral_offset_m": MAX_DISTANCE_METERS,
-        "lateral_offset_iqr_m": MAX_DISTANCE_METERS,
-        "lateral_offset_p95_m": MAX_DISTANCE_METERS,
-        # Topology features — NaN for unknown (XGBoost handles natively)
-        "from_degree_ref": float("nan"),
-        "to_degree_ref": float("nan"),
-        "from_degree_target": float("nan"),
-        "to_degree_target": float("nan"),
-        "degree_match_score": float("nan"),
-        "degree_signature_similarity": float("nan"),
-        "is_dead_end_ref": float("nan"),
-        "is_dead_end_target": float("nan"),
-        "dead_end_match": float("nan"),
-        "is_intersection_ref": float("nan"),
-        "is_intersection_target": float("nan"),
-        "intersection_match": float("nan"),
-        # Coverage features
-        "ref_coverage": 0.0,
-        "target_coverage": 0.0,
-        "min_coverage": 0.0,
-        "coverage_ratio": 0.0,
-        # Graphlet features - neutral values for error case
-        "graphlet_similarity": 0.5,
-        "endpoint_degree_similarity": 0.5,
-        # Clustering coefficient features - default to 0 (no clustering)
-        "clustering_coef_ref": 0.0,
-        "clustering_coef_target": 0.0,
-        "clustering_coef_delta": 0.0,
-        # Sinuosity features - default to straight line (1.0)
-        "sinuosity_ref": 1.0,
-        "sinuosity_target": 1.0,
-        "sinuosity_delta": 0.0,
-        # Heading consistency features - default to perfectly straight (1.0)
-        "heading_consistency_ref": 1.0,
-        "heading_consistency_target": 1.0,
-        "heading_consistency_delta": 0.0,
-        # Vertex density features - default to 0 (unknown)
-        "vertex_density_ref": 0.0,
-        "vertex_density_target": 0.0,
-        "vertex_density_ratio": 0.0,
-        # Length features
-        "min_length_m": 0.0,
-        "aligned_length_m": 0.0,
-        # Shape complexity features - default to no turns
-        "shape_complexity_ref": 0,
-        "shape_complexity_target": 0,
-        "shape_complexity_delta": 0,
-        # Numeric route matching - 0.0 (no signal when neither has number)
-        "name_numeric_match": 0.0,
-        # Route prefix matching - 0.5 neutral (don't penalize non-routes)
-        "route_prefix_match": 0.5,
-        # Parallel sibling features - default to no sibling detected
-        "has_parallel_sibling_ref": 0.0,
-        "parallel_fraction_ref": 0.0,
-        "offset_vs_half_corridor_ratio": 0.0,  # Changed from 1.0 - 0.0 means "no corridor"
-        "offset_over_expected_halfwidth": 0.0,
-        "likely_representation_mismatch": 0.0,
-        # Shape/geometric features - default to neutral values
-        "angle_histogram_similarity": 0.5,  # Neutral: no signal in error case
-        "edge_distance_rmse_m": MAX_DISTANCE_METERS,
-        # Crossing angle features - neutral (45° = ambiguous)
-        "crossing_angle_min_ref": 45.0,
-        "transverse_neighbor_fraction_ref": 0.0,
-        "crossing_angle_min_target": 45.0,
-        "transverse_neighbor_fraction_target": 0.0,
-        # Intersection overlap features - unknown/neutral defaults
-        "post_node_continuation_m": float("nan"),  # Unknown continuation
-        "endpoint_heading_divergence": float("nan"),  # Unknown heading
-    }
+    _nan = float("nan")
+    features = {col: _nan for col in ALL_FEATURE_COLUMNS}
 
     # Add error metadata only if error is provided
     if error is not None:
@@ -1319,7 +1230,7 @@ def compute_graphlet_similarity(
         Dict with 'graphlet_similarity' and 'endpoint_degree_similarity' keys
     """
     if ref_graphlet_data is None or target_graphlet_data is None:
-        return {"graphlet_similarity": 0.5, "endpoint_degree_similarity": 0.5}
+        return {"graphlet_similarity": float("nan"), "endpoint_degree_similarity": float("nan")}
 
     try:
         # Unpack graphlet data - always connector format now
@@ -1352,4 +1263,4 @@ def compute_graphlet_similarity(
         logger.debug(
             f"Graphlet similarity failed for ref={ref_seg_id}, target={target_seg_id}: {exc}"
         )
-        return {"graphlet_similarity": 0.5, "endpoint_degree_similarity": 0.5}
+        return {"graphlet_similarity": float("nan"), "endpoint_degree_similarity": float("nan")}

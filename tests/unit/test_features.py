@@ -1,5 +1,7 @@
 """Tests for feature extraction."""
 
+import math
+
 import numpy as np
 import pytest
 from shapely import LineString
@@ -146,19 +148,19 @@ class TestSemanticFeatures:
         assert result["token_sort_ratio"] > 0.9
 
     def test_name_similarity_none(self):
-        """Missing names should return neutral score (0.5) and flag as missing."""
+        """Missing names should return NaN scores and flag as missing."""
         result = compute_name_similarity(None, "Main Street")
 
-        # Neutral scores avoid penalizing valid geometric matches
-        assert result["levenshtein_ratio"] == 0.5
-        assert result["token_sort_ratio"] == 0.5
+        # NaN signals missing data — XGBoost handles natively
+        assert math.isnan(result["levenshtein_ratio"])
+        assert math.isnan(result["token_sort_ratio"])
         assert result["names_missing"] is True
 
     def test_name_similarity_both_none(self):
-        """Both names missing should return neutral score (0.5)."""
+        """Both names missing should return NaN scores."""
         result = compute_name_similarity(None, None)
 
-        assert result["levenshtein_ratio"] == 0.5
+        assert math.isnan(result["levenshtein_ratio"])
         assert result["names_missing"] is True
 
     @pytest.mark.parametrize(
@@ -255,16 +257,16 @@ class TestPhoneticFeatures:
         assert result["metaphone_similarity"] > 0.9
 
     def test_phonetic_missing_one_name(self):
-        """Missing one name should return neutral phonetic scores."""
+        """Missing one name should return NaN phonetic scores."""
         result = compute_name_similarity(None, "Main Street")
-        assert result["soundex_match"] == 0.5
-        assert result["metaphone_similarity"] == 0.5
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
 
     def test_phonetic_missing_both_names(self):
-        """Missing both names should return neutral phonetic scores."""
+        """Missing both names should return NaN phonetic scores."""
         result = compute_name_similarity(None, None)
-        assert result["soundex_match"] == 0.5
-        assert result["metaphone_similarity"] == 0.5
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
 
     def test_phonetic_with_abbreviations(self):
         """Phonetic matching should work with abbreviations after normalization."""
@@ -485,14 +487,14 @@ class TestTrafficTierClassSimilarity:
             ("residential", "service", 0.8),
             ("primary", "secondary", 0.8),
             ("motorway", "trunk", 0.8),
-            # Neutral tier: bridleway -> 0.5
-            ("bridleway", "residential", 0.5),
-            ("bridleway", "footway", 0.5),
-            ("bridleway", "cycleway", 0.5),
-            # Unknown -> neutral 0.5
-            ("residential", "unknown", 0.5),
-            (None, "footway", 0.5),
-            ("", "residential", 0.5),
+            # Neutral tier: bridleway -> NaN (unknown signal)
+            ("bridleway", "residential", float("nan")),
+            ("bridleway", "footway", float("nan")),
+            ("bridleway", "cycleway", float("nan")),
+            # Unknown -> NaN (unknown signal)
+            ("residential", "unknown", float("nan")),
+            (None, "footway", float("nan")),
+            ("", "residential", float("nan")),
         ],
         ids=[
             "vehicle_pedestrian_residential_footway",
@@ -523,7 +525,10 @@ class TestTrafficTierClassSimilarity:
     def test_traffic_tier_class_similarity(self, class_a, class_b, expected):
         """Class similarity should use traffic tier penalties for cross-tier comparisons."""
         result = compute_class_similarity(class_a, class_b)
-        assert result == pytest.approx(expected, abs=0.05)
+        if isinstance(expected, float) and math.isnan(expected):
+            assert math.isnan(result), f"Expected NaN for ({class_a}, {class_b}), got {result}"
+        else:
+            assert result == pytest.approx(expected, abs=0.05)
 
 
 class TestComputePairFeaturesWithAlignment:
@@ -1066,18 +1071,18 @@ class TestRoutePrefixMatch:
         assert result == pytest.approx(0.0)
 
     def test_non_routes(self):
-        """Non-routes should return neutral 0.5."""
+        """Non-routes should return NaN (missing signal)."""
         from matcher.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("Main Street", "Oak Avenue")
-        assert result == pytest.approx(0.5)
+        assert math.isnan(result)
 
     def test_one_route_one_non_route(self):
-        """One route, one non-route should return neutral 0.5."""
+        """One route, one non-route should return NaN (missing signal)."""
         from matcher.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("I-5", "Main Street")
-        assert result == pytest.approx(0.5)
+        assert math.isnan(result)
 
     def test_canonicalize_route_name(self):
         """Test route name canonicalization."""
@@ -1150,10 +1155,10 @@ class TestClusteringCoefficientFeatures:
             target_seg_to_connectors,
         )
 
-        # Should return defaults
-        assert result["clustering_coef_ref"] == 0.0
-        assert result["clustering_coef_target"] == 0.0
-        assert result["clustering_coef_delta"] == 0.0
+        # Should return NaN defaults (no clustering data available)
+        assert math.isnan(result["clustering_coef_ref"])
+        assert math.isnan(result["clustering_coef_target"])
+        assert math.isnan(result["clustering_coef_delta"])
 
 
 class TestCrossingAngleFeatures:
@@ -1234,11 +1239,11 @@ class TestCrossingAngleFeatures:
             candidate_class="secondary",
         )
 
-        # Should return neutral values since all neighbors are same tier
-        assert result["crossing_angle_min"] == 45.0
-        assert result["crossing_angle_mean"] == 45.0
-        assert result["crossing_angle_std"] == 0.0
-        assert result["transverse_neighbor_fraction"] == 0.0
+        # Should return NaN since all neighbors are same tier
+        assert math.isnan(result["crossing_angle_min"])
+        assert math.isnan(result["crossing_angle_mean"])
+        assert math.isnan(result["crossing_angle_std"])
+        assert math.isnan(result["transverse_neighbor_fraction"])
 
     def test_slip_road_mostly_parallel_then_veers(self):
         """A long ramp parallel to motorway then veering off should have LOW min angle.
@@ -1313,13 +1318,13 @@ class TestCrossingAngleFeatures:
             candidate_class="footway",
         )
 
-        assert result["crossing_angle_min"] == 45.0
-        assert result["crossing_angle_mean"] == 45.0
-        assert result["crossing_angle_std"] == 0.0
-        assert result["transverse_neighbor_fraction"] == 0.0
+        assert math.isnan(result["crossing_angle_min"])
+        assert math.isnan(result["crossing_angle_mean"])
+        assert math.isnan(result["crossing_angle_std"])
+        assert math.isnan(result["transverse_neighbor_fraction"])
 
     def test_no_different_tier_neighbors_returns_neutral(self):
-        """When all neighbors are same tier, should return neutral."""
+        """When all neighbors are same tier, should return NaN."""
         from matcher.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(0, 0), (50, 50)])
@@ -1334,15 +1339,11 @@ class TestCrossingAngleFeatures:
             candidate_class="footway",
         )
 
-        assert result == {
-            "crossing_angle_min": 45.0,
-            "crossing_angle_mean": 45.0,
-            "crossing_angle_std": 0.0,
-            "transverse_neighbor_fraction": 0.0,
-        }
+        for key in result:
+            assert math.isnan(result[key]), f"Expected NaN for {key}, got {result[key]}"
 
     def test_no_neighbors_returns_neutral(self):
-        """When no nearby geometries exist, should return neutral."""
+        """When no nearby geometries exist, should return NaN."""
         from matcher.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(0, 0), (50, 50)])
@@ -1354,12 +1355,8 @@ class TestCrossingAngleFeatures:
             candidate_class="footway",
         )
 
-        assert result == {
-            "crossing_angle_min": 45.0,
-            "crossing_angle_mean": 45.0,
-            "crossing_angle_std": 0.0,
-            "transverse_neighbor_fraction": 0.0,
-        }
+        for key in result:
+            assert math.isnan(result[key]), f"Expected NaN for {key}, got {result[key]}"
 
     def test_unknown_class_returns_neutral(self):
         """When candidate or neighbor class is unknown, return neutral."""
@@ -1375,7 +1372,7 @@ class TestCrossingAngleFeatures:
             nearby_classes=["residential"],
             candidate_class=None,
         )
-        assert result["crossing_angle_min"] == 45.0
+        assert math.isnan(result["crossing_angle_min"])
 
         # Unknown neighbor class
         result = compute_crossing_angle_features(
@@ -1384,7 +1381,7 @@ class TestCrossingAngleFeatures:
             nearby_classes=[None],
             candidate_class="footway",
         )
-        assert result["crossing_angle_min"] == 45.0
+        assert math.isnan(result["crossing_angle_min"])
 
     def test_multiple_corridors_different_angles(self):
         """With corridors at different angles, min should reflect closest."""
@@ -1572,9 +1569,9 @@ class TestAlignedLengthM:
 
         assert features["aligned_length_m"] == pytest.approx(ref.length * 0.5, abs=0.01)
 
-    def test_error_case_returns_zero(self):
-        """Error features should have aligned_length_m = 0.0."""
+    def test_error_case_returns_nan(self):
+        """Error features should have aligned_length_m = NaN."""
         from matcher.features.compute import _get_error_features
 
         error_feats = _get_error_features(error=ValueError("test"))
-        assert error_feats["aligned_length_m"] == 0.0
+        assert math.isnan(error_feats["aligned_length_m"])

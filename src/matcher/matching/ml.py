@@ -718,7 +718,6 @@ class MLMatcher:
         self.model = None
         self.model_path = model_path
         self.feature_names = FEATURE_COLUMNS.copy()
-        self.feature_medians = {}  # For imputing missing values during inference
         self.label_encoder = {"match": 1, "no_match": 0}
         self.label_decoder = {1: "match", 0: "no_match"}
         self.is_binary = True  # Track if model is binary or multiclass
@@ -741,7 +740,6 @@ class MLMatcher:
         data = joblib.load(path)
         self.model = data["model"]
         self.feature_names = data.get("feature_names", FEATURE_COLUMNS.copy())
-        self.feature_medians = data.get("feature_medians", {})
         self.label_encoder = data.get("label_encoder", self.label_encoder)
         self.label_decoder = data.get("label_decoder", self.label_decoder)
         self.is_binary = data.get("is_binary", True)
@@ -774,7 +772,6 @@ class MLMatcher:
         data = {
             "model": self.model,
             "feature_names": self.feature_names,
-            "feature_medians": self.feature_medians,
             "label_encoder": self.label_encoder,
             "label_decoder": self.label_decoder,
             "is_binary": self.is_binary,
@@ -1047,16 +1044,9 @@ class MLMatcher:
                 f"Run backfill to add missing features, or retrain with updated labels."
             )
 
-        # Compute imputation values from TRAINING data only
-        self.feature_medians = {}
-        for i, feat_name in enumerate(self.feature_names):
-            col_vals = X_train[:, i]
-            median_val = np.nanmedian(col_vals)
-            self.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
-
-        # Apply imputation to both train and test using training medians
-        X_train = self._impute_missing(X_train)
-        X_test = self._impute_missing(X_test)
+        # Cap infinite values (XGBoost handles NaN natively but not inf)
+        X_train = self._cap_infinities(X_train)
+        X_test = self._cap_infinities(X_test)
 
         # Handle class imbalance
         if binary:
@@ -1133,9 +1123,8 @@ class MLMatcher:
         if len(X_test) > 0:
             y_pred = self.model.predict(X_test)
 
-            # Cross-validation score with segment-aware folding and per-fold imputation
-            # to prevent data leakage (imputation medians computed from each fold's
-            # training data only, matching the approach in `matcher ml eval`).
+            # Cross-validation score with segment-aware folding.
+            # XGBoost handles NaN natively — no imputation needed.
             n_groups = groups.nunique()
             if n_groups >= 2:
                 n_splits = min(5, n_groups)
@@ -1144,20 +1133,6 @@ class MLMatcher:
                 for cv_train_idx, cv_test_idx in gkf.split(X, y, groups):
                     X_cv_train, X_cv_test = X[cv_train_idx], X[cv_test_idx]
                     y_cv_train, y_cv_test = y[cv_train_idx], y[cv_test_idx]
-
-                    # Compute imputation medians from CV training fold only
-                    cv_medians = {}
-                    for i, feat_name in enumerate(self.feature_names):
-                        col_vals = X_cv_train[:, i]
-                        median_val = np.nanmedian(col_vals)
-                        cv_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
-
-                    # Impute using fold-specific medians
-                    saved_medians = self.feature_medians
-                    self.feature_medians = cv_medians
-                    X_cv_train = self._impute_missing(X_cv_train)
-                    X_cv_test = self._impute_missing(X_cv_test)
-                    self.feature_medians = saved_medians
 
                     # Train and score this fold
                     cv_model = xgb.XGBClassifier(**params)
@@ -1374,26 +1349,21 @@ class MLMatcher:
 
         return df
 
-    def _impute_missing(self, X: np.ndarray) -> np.ndarray:
-        """Impute missing and infinite values using stored medians.
+    def _cap_infinities(self, X: np.ndarray) -> np.ndarray:
+        """Cap infinite values at MAX_DISTANCE_METERS.
+
+        XGBoost handles NaN natively but not inf.
 
         Args:
-            X: Feature matrix with potential NaNs or infinite values
+            X: Feature matrix with potential infinite values
 
         Returns:
-            Feature matrix with NaNs replaced by medians and infinities capped
+            Feature matrix with infinities capped
         """
         X = X.copy()
-        for i, feat_name in enumerate(self.feature_names):
-            # Handle NaN values
-            nan_mask = np.isnan(X[:, i])
-            if nan_mask.any():
-                fill_value = self.feature_medians.get(feat_name, 0.0)
-                X[nan_mask, i] = fill_value
-            # Handle infinite values (cap at MAX_DISTANCE_METERS)
-            inf_mask = np.isinf(X[:, i])
-            if inf_mask.any():
-                X[inf_mask, i] = MAX_DISTANCE_METERS
+        inf_mask = np.isinf(X)
+        if inf_mask.any():
+            X[inf_mask] = MAX_DISTANCE_METERS
         return X
 
     def predict(self, features: list[dict[str, float]]) -> np.ndarray:
@@ -1439,10 +1409,10 @@ class MLMatcher:
         return [self.label_decoder.get(int(y), "unknown") for y in y_pred]
 
     def _features_to_array(self, features: list[dict[str, float]]) -> np.ndarray:
-        """Convert feature dicts to numpy array, using stored medians for missing values.
+        """Convert feature dicts to numpy array.
 
-        Also handles infinite values by replacing them with MAX_DISTANCE_METERS,
-        which prevents XGBoost from producing NaN predictions.
+        NaN values are preserved for XGBoost's native missing-value handling.
+        Infinite values are capped at MAX_DISTANCE_METERS.
         """
         # pd.DataFrame(list-of-dicts) uses C-optimized path — orders of magnitude
         # faster than per-element Python dict lookups
@@ -1450,9 +1420,7 @@ class MLMatcher:
         # Reorder columns to match model's expected feature order; adds NaN
         # for any feature columns missing entirely from all dicts
         df = df.reindex(columns=self.feature_names)
-        # Impute NaN (missing dict keys or explicit NaN values) with training medians
-        df = df.fillna(self.feature_medians).fillna(0.0)
-        # Replace infinities with cap value
+        # Replace infinities with cap value; preserve NaN for XGBoost
         arr = df.to_numpy(dtype=np.float32)
         inf_mask = np.isinf(arr)
         if inf_mask.any():
@@ -2222,8 +2190,8 @@ def evaluate_by_dataset(
         # Extract features
         X, y = matcher._extract_features_and_labels(df, binary=binary)
 
-        # Impute missing values
-        X = matcher._impute_missing(X)
+        # Cap infinities (XGBoost handles NaN natively)
+        X = matcher._cap_infinities(X)
 
         # Predict
         y_pred = matcher.model.predict(X)

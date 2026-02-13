@@ -1403,7 +1403,7 @@ def compute_degree_signature_similarity(
     from collections import Counter
 
     if not sig_a or not sig_b:
-        return 0.0
+        return float("nan")
 
     counter_a = Counter(sig_a)
     counter_b = Counter(sig_b)
@@ -1776,7 +1776,7 @@ def compute_road_graphlet_features(
                 G.degree(node),
                 triangles.get(node, 0),
                 squares_arr[i],
-                clustering.get(node, 0.0),
+                clustering.get(node, float("nan")),
                 two_hop_arr[i],
                 1.0 if node in articulation_points else 0.0,
             ]
@@ -2592,28 +2592,29 @@ def compute_clustering_coefficient_features(
         - clustering_coef_target: Average clustering coefficient at target endpoints
         - clustering_coef_delta: Absolute difference between ref and target clustering
     """
+    _nan = float("nan")
     default_result = {
-        "clustering_coef_ref": 0.0,
-        "clustering_coef_target": 0.0,
-        "clustering_coef_delta": 0.0,
+        "clustering_coef_ref": _nan,
+        "clustering_coef_target": _nan,
+        "clustering_coef_delta": _nan,
     }
 
     # Check if we have full feature vectors (clustering is index 3)
     sample_feat = next(iter(ref_features.values()), None) if ref_features else None
     if sample_feat is None or not isinstance(sample_feat, np.ndarray) or len(sample_feat) < 4:
-        # Degrees-only mode or insufficient features - return defaults
+        # Degrees-only mode or insufficient features - return NaN
         return default_result
 
     def get_clustering(features: dict, connectors: list, frac: float) -> float:
         """Get clustering coefficient at position along segment."""
         if not connectors:
-            return 0.0
+            return _nan
         node_id = find_nearest_connector(connectors, frac)
         if node_id is None:
-            return 0.0
+            return _nan
         feat = features.get(node_id)
         if feat is None or not isinstance(feat, np.ndarray) or len(feat) < 4:
-            return 0.0
+            return _nan
         return float(feat[3])  # Index 3 is clustering coefficient
 
     # Get connectors for both segments

@@ -13,12 +13,37 @@ from .conftest import FEATURE_BOUNDS, compute_features_simple, make_projected_li
 class TestBoundsOnSyntheticPairs:
     """Verify feature bounds on controlled synthetic geometry pairs."""
 
-    # Features that are NaN by design when no alignment is provided.
-    # compute_features_simple() does not pass alignment, so these will be NaN.
-    # XGBoost handles NaN natively (same pattern as topology features).
-    NAN_WITHOUT_ALIGNMENT = {
+    # Features that are NaN by design when optional context is missing.
+    # compute_features_simple() does not pass alignment, graphlet data, or
+    # sibling context, so these will be NaN.
+    # XGBoost handles NaN natively.
+    NAN_WITHOUT_CONTEXT = {
         "post_node_continuation_m",
         "endpoint_heading_divergence",
+        # No graphlet data in simple test
+        "graphlet_similarity",
+        "endpoint_degree_similarity",
+        # No graphlet/alignment data — clustering unavailable
+        "clustering_coef_ref",
+        "clustering_coef_target",
+        "clustering_coef_delta",
+        # No sibling context — crossing angle defaults to NaN
+        "crossing_angle_min_ref",
+        "transverse_neighbor_fraction_ref",
+        "crossing_angle_min_target",
+        "transverse_neighbor_fraction_target",
+        # "Test Road" has no numeric suffix or route prefix
+        "name_numeric_match",
+        "route_prefix_match",
+    }
+
+    # Additional features that are NaN when names are None
+    NAN_WITHOUT_NAMES = {
+        "name_levenshtein",
+        "name_jaro_winkler",
+        "name_token_sort",
+        "name_soundex",
+        "name_metaphone",
     }
 
     def test_bounds_on_identical_lines(self):
@@ -29,7 +54,7 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue  # NaN is valid when no alignment provided
             assert not np.isnan(val), f"Feature {name} is NaN for identical lines"
             assert not np.isinf(val), f"Feature {name} is inf for identical lines"
@@ -55,7 +80,7 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for parallel lines"
             assert not np.isinf(val), f"Feature {name} is inf for parallel lines"
@@ -66,10 +91,11 @@ class TestBoundsOnSyntheticPairs:
         target = make_projected_line([(500, 500), (500, 600)])
         features = compute_features_simple(ref, target, ref_name=None, target_name=None)
 
+        nan_expected = self.NAN_WITHOUT_CONTEXT | self.NAN_WITHOUT_NAMES
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in nan_expected:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for far-apart lines"
             assert not np.isinf(val), f"Feature {name} is inf for far-apart lines"
@@ -95,7 +121,7 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for short line"
             assert not np.isinf(val), f"Feature {name} is inf for short line"
@@ -109,7 +135,7 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for 2-vertex line"
             assert not np.isinf(val), f"Feature {name} is inf for 2-vertex line"
@@ -123,7 +149,7 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for reversed line"
             assert not np.isinf(val), f"Feature {name} is inf for reversed line"
@@ -139,19 +165,41 @@ class TestBoundsOnSyntheticPairs:
         for name in FEATURE_COLUMNS:
             val = features.get(name)
             assert val is not None, f"Feature {name} is None"
-            if name in self.NAN_WITHOUT_ALIGNMENT:
+            if name in self.NAN_WITHOUT_CONTEXT:
                 continue
             assert not np.isnan(val), f"Feature {name} is NaN for zigzag line"
             assert not np.isinf(val), f"Feature {name} is inf for zigzag line"
 
 
 class TestErrorFeatureBounds:
-    """Verify _get_error_features() returns values within bounds."""
+    """Verify _get_error_features() returns NaN for all features."""
 
-    # Error defaults that are NaN by design (XGBoost handles natively)
-    # Topology features: unknown when target data unavailable
-    # Intersection overlap features: unknown without alignment/topology
-    TOPOLOGY_FEATURES = {
+    def test_error_features_all_nan(self, error_features):
+        """All error feature defaults should be NaN (XGBoost handles natively)."""
+        for name in FEATURE_COLUMNS:
+            val = error_features.get(name)
+            assert val is not None, f"Error feature {name} missing"
+            assert np.isnan(val), f"Error feature {name} should be NaN, got {val}"
+
+    def test_error_features_cover_all_columns(self, error_features):
+        """Error features must define every declared feature."""
+        for name in FEATURE_COLUMNS:
+            assert name in error_features, f"Error features missing {name}"
+
+
+class TestBoundsOnRealData:
+    """Verify no NaN/inf in real labeled data."""
+
+    # Features that may legitimately be NaN in labeled data:
+    # - Topology: NaN when target data is unavailable
+    # - Graphlet/clustering: NaN when graphlet data not precomputed
+    # - Crossing angle: NaN when no sibling context or no different-tier neighbors
+    # - Intersection overlap: NaN without alignment/topology
+    # - Name similarity: NaN when names are missing
+    # - Class similarity: NaN when class is missing/unknown
+    # - Route/numeric: NaN when not a route or no numeric component
+    NAN_ALLOWED_FEATURES = {
+        # Topology
         "from_degree_ref",
         "to_degree_ref",
         "from_degree_target",
@@ -164,40 +212,39 @@ class TestErrorFeatureBounds:
         "is_intersection_ref",
         "is_intersection_target",
         "intersection_match",
+        # Intersection overlap
         "post_node_continuation_m",
         "endpoint_heading_divergence",
+        # Graphlet / clustering
+        "graphlet_similarity",
+        "endpoint_degree_similarity",
+        "clustering_coef_ref",
+        "clustering_coef_target",
+        "clustering_coef_delta",
+        # Crossing angle
+        "crossing_angle_min_ref",
+        "transverse_neighbor_fraction_ref",
+        "crossing_angle_min_target",
+        "transverse_neighbor_fraction_target",
+        # Name similarity (NaN when names missing)
+        "name_levenshtein",
+        "name_jaro_winkler",
+        "name_token_sort",
+        "name_soundex",
+        "name_metaphone",
+        "name_numeric_match",
+        "route_prefix_match",
+        # Class similarity (NaN when class missing/unknown)
+        "class_similarity",
     }
 
-    def test_error_features_within_bounds(self, error_features):
-        for name in FEATURE_COLUMNS:
-            val = error_features.get(name)
-            assert val is not None, f"Error feature {name} missing"
-            if name in self.TOPOLOGY_FEATURES:
-                assert np.isnan(val), f"Topology error feature {name} should be NaN"
-            else:
-                assert not np.isnan(val), f"Error feature {name} is NaN"
-                assert not np.isinf(val), f"Error feature {name} is inf"
-
-    def test_error_features_cover_all_columns(self, error_features):
-        """Error features must define every declared feature."""
-        for name in FEATURE_COLUMNS:
-            assert name in error_features, f"Error features missing {name}"
-
-
-class TestBoundsOnRealData:
-    """Verify no NaN/inf in real labeled data."""
-
-    # Topology features may be NaN when target data is unavailable
-    # (e.g., us_boston_streets_osm has no fetchable target). XGBoost handles NaN natively.
-    TOPOLOGY_FEATURES = TestErrorFeatureBounds.TOPOLOGY_FEATURES
-
     def test_no_nan_in_real_data(self, labeled_features):
-        """Assert no NaN per feature column in real labeled data (except topology)."""
+        """Assert no NaN per feature column in real labeled data (except allowed)."""
         for col in FEATURE_COLUMNS:
             if col not in labeled_features.columns:
                 continue
-            if col in self.TOPOLOGY_FEATURES:
-                continue  # Topology NaN is expected when target data unavailable
+            if col in self.NAN_ALLOWED_FEATURES:
+                continue  # NaN is expected when optional context unavailable
             nan_count = labeled_features[col].isna().sum()
             total = len(labeled_features)
             assert nan_count == 0, (
