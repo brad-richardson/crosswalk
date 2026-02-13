@@ -415,13 +415,13 @@ class TestNameFlagTests:
         assert feats["route_prefix_match"] == 0.0
 
     def test_name_numeric_match_non_numeric(self):
-        """Non-numeric names should return 0.5 (neutral)."""
+        """Non-numeric names should return NaN (no numeric signal)."""
         ref = make_projected_line([(0, 0), (100, 0)])
         target = make_projected_line([(0, 2), (100, 2)])
         feats = compute_features_simple(
             ref, target, ref_name="Main Street", target_name="Main Street"
         )
-        assert feats["name_numeric_match"] == 0.5
+        assert math.isnan(feats["name_numeric_match"])
 
 
 class TestClassSimilaritySweep:

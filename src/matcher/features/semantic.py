@@ -604,7 +604,7 @@ def compute_route_prefix_match(name_a, name_b) -> float:
     Returns:
         1.0 if both have the same route prefix type
         0.0 if both have different route prefix types
-        0.5 if either/both is not a recognized route (neutral)
+        NaN if either/both is not a recognized route (missing signal)
     """
     # Extract name strings from dict if needed
     name_a = _extract_name_string(name_a)

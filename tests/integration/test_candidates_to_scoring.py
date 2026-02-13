@@ -285,7 +285,7 @@ class TestFeatureComputation:
         """Feature values should be within expected ranges."""
         from matcher.features.alignment import linestring_alignment
         from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_TOPOLOGY_FEATURES
+        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
         target_geom = target_gdf.iloc[0].geometry
@@ -299,6 +299,7 @@ class TestFeatureComputation:
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
             target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )

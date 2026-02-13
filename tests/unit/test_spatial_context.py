@@ -1,5 +1,7 @@
 """Tests for spatial context indexing and topology computation."""
 
+import math
+
 import geopandas as gpd
 import numpy as np
 import pytest
@@ -516,11 +518,11 @@ class TestComputeDegreeSignatureSimilarity:
             # Repeated elements
             ((1, 1, 2), (1, 2, 2), 2 / 4),  # intersection=2 (one 1, one 2), union=4
             # Empty signature a
-            ((), (1, 2), 0.0),
+            ((), (1, 2), float("nan")),
             # Empty signature b
-            ((1, 2), (), 0.0),
+            ((1, 2), (), float("nan")),
             # Both empty
-            ((), (), 0.0),
+            ((), (), float("nan")),
             # Single element match
             ((2,), (2,), 1.0),
             # Single element mismatch
@@ -542,7 +544,10 @@ class TestComputeDegreeSignatureSimilarity:
     def test_degree_signature_similarity(self, sig_a, sig_b, expected):
         """Test degree signature similarity with various inputs."""
         score = compute_degree_signature_similarity(sig_a, sig_b)
-        assert score == pytest.approx(expected, abs=0.01)
+        if isinstance(expected, float) and math.isnan(expected):
+            assert math.isnan(score), f"Expected NaN for ({sig_a}, {sig_b}), got {score}"
+        else:
+            assert score == pytest.approx(expected, abs=0.01)
 
     def test_symmetry(self):
         """Similarity should be symmetric."""
@@ -554,7 +559,7 @@ class TestComputeDegreeSignatureSimilarity:
         assert score1 == pytest.approx(score2)
 
     def test_score_in_valid_range(self):
-        """Score should always be in [0, 1]."""
+        """Score should always be in [0, 1] or NaN (for empty signatures)."""
         import random
 
         random.seed(42)
@@ -565,7 +570,10 @@ class TestComputeDegreeSignatureSimilarity:
             sig_b = tuple(random.randint(1, 5) for _ in range(len_b))
 
             score = compute_degree_signature_similarity(sig_a, sig_b)
-            assert 0.0 <= score <= 1.0
+            if len_a == 0 or len_b == 0:
+                assert math.isnan(score), f"Expected NaN for empty sig, got {score}"
+            else:
+                assert 0.0 <= score <= 1.0
 
 
 class TestEndpointClusteringPerformance:

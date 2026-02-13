@@ -1045,7 +1045,7 @@ def _get_error_features(
         phase: Optional phase where the error occurred (e.g., "compute_pair_features")
 
     Returns a dict with all features from FEATURE_COLUMNS set to NaN.
-    XGBoost handles NaN natively; the ML pipeline imputes NaN → training median.
+    XGBoost handles NaN natively (learns optimal split routing for missing values).
     Also includes error metadata fields (_error, _error_type, _error_phase) when
     error is provided.
     """
