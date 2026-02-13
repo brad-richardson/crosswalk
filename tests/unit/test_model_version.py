@@ -28,7 +28,6 @@ def _save_model_dict(path, extra=None):
     data = {
         "model": _make_simple_model(),
         "feature_names": FEATURE_COLUMNS.copy(),
-        "feature_medians": {},
         "label_encoder": {"match": 1, "no_match": 0, "associated": 2},
         "label_decoder": {1: "match", 0: "no_match", 2: "associated"},
         "is_binary": True,

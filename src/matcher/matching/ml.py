@@ -718,7 +718,6 @@ class MLMatcher:
         self.model = None
         self.model_path = model_path
         self.feature_names = FEATURE_COLUMNS.copy()
-        self.feature_medians = {}  # Legacy: kept for backward compat with saved models
         self.label_encoder = {"match": 1, "no_match": 0}
         self.label_decoder = {1: "match", 0: "no_match"}
         self.is_binary = True  # Track if model is binary or multiclass
@@ -741,7 +740,6 @@ class MLMatcher:
         data = joblib.load(path)
         self.model = data["model"]
         self.feature_names = data.get("feature_names", FEATURE_COLUMNS.copy())
-        self.feature_medians = data.get("feature_medians", {})  # Legacy, unused
         self.label_encoder = data.get("label_encoder", self.label_encoder)
         self.label_decoder = data.get("label_decoder", self.label_decoder)
         self.is_binary = data.get("is_binary", True)
@@ -774,7 +772,6 @@ class MLMatcher:
         data = {
             "model": self.model,
             "feature_names": self.feature_names,
-            "feature_medians": self.feature_medians,
             "label_encoder": self.label_encoder,
             "label_decoder": self.label_decoder,
             "is_binary": self.is_binary,
