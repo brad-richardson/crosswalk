@@ -20,7 +20,7 @@ Model Architecture:
 """
 
 import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -33,7 +33,6 @@ from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 
 from ..config import (
-    DEFAULT_TOPOLOGY_FEATURES,
     FEATURE_COLUMNS,
     FEATURE_VERSION,
     MAX_DISTANCE_METERS,
@@ -41,7 +40,6 @@ from ..config import (
     SEMANTIC_FEATURES,
     default_worker_count,
 )
-from ..features.semantic import _extract_name_string
 from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 from .types import MatchDecision, MatchResult
@@ -105,35 +103,15 @@ def _extract_lr_attributes_for_pair(
         ref_start, ref_end = 0.0, 1.0
         target_start, target_end = 0.0, 1.0
 
-    # Extract reference attributes
-    ref_names_lr = worker_data.get("ref_names_lr")
-    if ref_names_lr is not None:
-        lr_data = ref_names_lr[ref_idx]
-        if lr_data is not None:
-            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-            ref_attrs = extract_aligned_attributes({"name": lr_attr}, ref_start, ref_end)
-            ref_name = ref_attrs.get("name")
-        else:
-            # Non-LR fallback: extract string from Overture's nested name format
-            ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
-    else:
-        # Non-LR fallback: extract string from Overture's nested name format
-        ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
+    # Extract reference name from LR data
+    # All datasets are expected to have names_lr populated (Overture has native LR,
+    # target datasets get trivial LR via _add_trivial_lr_columns)
+    ref_name = _extract_lr_name(worker_data.get("ref_names_lr"), ref_idx, ref_start, ref_end)
 
-    # Extract target attributes (typically trivial LR, but support full LR)
-    target_names_lr = worker_data.get("target_names_lr")
-    if target_names_lr is not None:
-        lr_data = target_names_lr[target_idx]
-        if lr_data is not None:
-            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-            target_attrs = extract_aligned_attributes({"name": lr_attr}, target_start, target_end)
-            target_name = target_attrs.get("name")
-        else:
-            # Non-LR fallback: extract string from Overture's nested name format
-            target_name = _extract_name_string(worker_data["target_names"][target_idx])
-    else:
-        # Non-LR fallback: extract string from Overture's nested name format
-        target_name = _extract_name_string(worker_data["target_names"][target_idx])
+    # Extract target name from LR data
+    target_name = _extract_lr_name(
+        worker_data.get("target_names_lr"), target_idx, target_start, target_end
+    )
 
     # Classes and subclasses - use flat values for now (LR support can be added)
     ref_class = worker_data["ref_classes"][ref_idx]
@@ -192,6 +170,36 @@ def _extract_lr_value(lr_column, idx: int, start_frac: float, end_frac: float):
         lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
         attrs = extract_aligned_attributes({"value": lr_attr}, start_frac, end_frac)
         return attrs.get("value")
+    except Exception:
+        return None
+
+
+def _extract_lr_name(lr_column, idx: int, start_frac: float, end_frac: float) -> str | None:
+    """Extract name from an LR column for a given index and alignment range.
+
+    Specialized version of _extract_lr_value for names, using "name" as the
+    attribute key (matching the LR schema convention).
+
+    Args:
+        lr_column: Array of LR data (or None)
+        idx: Row index
+        start_frac: Start of alignment (0-1)
+        end_frac: End of alignment (0-1)
+
+    Returns:
+        The majority name for the aligned range, or None if not available
+    """
+    if lr_column is None:
+        return None
+
+    lr_data = lr_column[idx]
+    if lr_data is None:
+        return None
+
+    try:
+        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+        attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
+        return attrs.get("name")
     except Exception:
         return None
 
@@ -1497,63 +1505,6 @@ class MLMatcher:
         # Timing instrumentation for pipeline profiling (visible at DEBUG log level)
         timings = {}
 
-        # Pre-extract data into NumPy arrays for memory efficiency
-        t0 = time.perf_counter()
-        ref_geoms = reference.geometry.to_numpy()
-        target_geoms = target.geometry.to_numpy()
-        ref_names = (
-            reference[ref_name_column].to_numpy()
-            if ref_name_column in reference.columns
-            else np.full(len(reference), None, dtype=object)
-        )
-        target_names = (
-            target[target_name_column].to_numpy()
-            if target_name_column in target.columns
-            else np.full(len(target), None, dtype=object)
-        )
-        ref_classes = (
-            reference[ref_class_column].to_numpy()
-            if ref_class_column in reference.columns
-            else np.full(len(reference), None, dtype=object)
-        )
-        target_classes = (
-            target[target_class_column].to_numpy()
-            if target_class_column in target.columns
-            else np.full(len(target), None, dtype=object)
-        )
-        ref_subclasses = (
-            reference[ref_subclass_column].to_numpy()
-            if ref_subclass_column in reference.columns
-            else np.full(len(reference), None, dtype=object)
-        )
-        target_subclasses = (
-            target[target_subclass_column].to_numpy()
-            if target_subclass_column in target.columns
-            else np.full(len(target), None, dtype=object)
-        )
-
-        # Extract linear-referenced attribute columns if available
-        # These allow alignment-aware attribute extraction (majority covering value)
-        ref_names_lr = reference["names_lr"].to_numpy() if "names_lr" in reference.columns else None
-        target_names_lr = target["names_lr"].to_numpy() if "names_lr" in target.columns else None
-        ref_oneway_lr = (
-            reference["oneway_lr"].to_numpy() if "oneway_lr" in reference.columns else None
-        )
-        target_oneway_lr = target["oneway_lr"].to_numpy() if "oneway_lr" in target.columns else None
-        ref_speed_limit_kph_lr = (
-            reference["speed_limit_kph_lr"].to_numpy()
-            if "speed_limit_kph_lr" in reference.columns
-            else None
-        )
-        target_speed_limit_kph_lr = (
-            target["speed_limit_kph_lr"].to_numpy()
-            if "speed_limit_kph_lr" in target.columns
-            else None
-        )
-
-        timings["data_extraction"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] data_extraction: {timings['data_extraction']:.2f}s")
-
         # Filter candidates by physical overlap (actual geometric intersection, no translation)
         # This removes collinear segments that barely touch at tips, which dominate labeling
         # time but are almost never real matches. 5m threshold gives 5.9:1 no_match:match ratio.
@@ -1564,8 +1515,12 @@ class MLMatcher:
         # Batch computation using vectorized shapely for performance
         import shapely as shapely_mod
 
-        ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
-        target_geom_arr = np.array([target_geoms[c.target_idx] for c in candidates], dtype=object)
+        ref_geoms_arr = reference.geometry.to_numpy()
+        target_geoms_arr = target.geometry.to_numpy()
+        ref_geom_arr = np.array([ref_geoms_arr[c.ref_idx] for c in candidates], dtype=object)
+        target_geom_arr = np.array(
+            [target_geoms_arr[c.target_idx] for c in candidates], dtype=object
+        )
 
         # Buffer targets and intersect with refs (vectorized)
         target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
@@ -1591,245 +1546,41 @@ class MLMatcher:
             logger.info("All candidates filtered by physical overlap threshold")
             return []
 
-        # Pre-compute endpoint, topology, and graphlet features for both reference and target
-        # These capture network connectivity without requiring explicit topology
-        from ..config import settings
-        from ..features.alignment import compute_alignment_batch
-        from ..features.compute import precompute_graphlet_features
-        from ..features.spatial_context import (
-            SpatialContextIndex,
-            compute_all_topology,
-        )
+        # Prepare worker data using shared pipeline setup
+        # Pass pre-extracted geometry arrays to avoid redundant GeoSeries->ndarray conversion
+        from ..features.pipeline import prepare_worker_data
 
-        # Get unique indices from candidates to avoid recomputation
         t0 = time.perf_counter()
-        unique_target_indices = set(cand.target_idx for cand in candidates)
-        unique_ref_indices = set(cand.ref_idx for cand in candidates)
-
-        # Filter target to only segments that appear in candidates
-        # This dramatically speeds up spatial index building (e.g., 11k -> ~1k segments)
-        sorted_target_indices = sorted(unique_target_indices)
-        target_candidates_only = target.iloc[sorted_target_indices].reset_index(drop=True)
-        logger.info(
-            f"Filtered target to {len(target_candidates_only)} candidate segments "
-            f"(from {len(target)} total)"
+        pipeline_result = prepare_worker_data(
+            candidates=candidates,
+            reference=reference,
+            target=target,
+            ref_id_column=ref_id_column,
+            target_id_column=target_id_column,
+            ref_name_column=ref_name_column,
+            target_name_column=target_name_column,
+            ref_class_column=ref_class_column,
+            target_class_column=target_class_column,
+            ref_subclass_column=ref_subclass_column,
+            target_subclass_column=target_subclass_column,
+            n_jobs=n_jobs,
+            ref_geoms=ref_geoms_arr,
+            target_geoms=target_geoms_arr,
         )
+        worker_data = pipeline_result.worker_data
+        alignments = pipeline_result.alignments
+        timings["prepare_worker_data"] = time.perf_counter() - t0
 
-        # Create mapping from original index to filtered index
-        # SpatialContextIndex uses 0-indexed positions within the GDF passed to build_from_gdf()
-        original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
-
-        timings["segment_filtering"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] segment_filtering: {timings['segment_filtering']:.2f}s")
-        logger.debug(f"[TIMING] candidate_count: {len(candidates)}")
-
-        # Build spatial index for endpoint proximity features (filtered target only)
-        logger.info("Building spatial index for endpoint features...")
-        t0 = time.perf_counter()
-        target_index = SpatialContextIndex()
-        target_index.build_from_gdf(target_candidates_only, id_column=target_id_column)
-        timings["spatial_index_build"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] spatial_index_build: {timings['spatial_index_build']:.2f}s")
-
-        # Pre-compute topology features using efficient Union-Find batch computation
-        # Get unique segment IDs for only the candidates we need
-        target_ids = target[target_id_column].to_numpy()
-        ref_ids = reference[ref_id_column].to_numpy()
-        unique_target_ids = {str(target_ids[idx]) for idx in unique_target_indices}
-        unique_ref_ids = {str(ref_ids[idx]) for idx in unique_ref_indices}
-
-        logger.info(
-            f"Computing topology features for {len(unique_target_ids)} target "
-            f"and {len(unique_ref_ids)} reference segments (batch)..."
-        )
-
-        # Check for explicit connector data (Overture/OSM style)
-        # When available, use explicit topology instead of geometry inference
-        ref_has_connectors = "connectors" in reference.columns
-        target_has_connectors = "connectors" in target.columns
-
-        # Compute topology for target and reference
-        # Uses explicit connectors when available, falls back to geometry inference
-        t0 = time.perf_counter()
-        target_topology_by_id = compute_all_topology(
-            target,
-            id_column=target_id_column,
-            tolerance_m=5.0,
-            ids_to_compute=unique_target_ids,
-            connectors_column="connectors" if target_has_connectors else None,
-        )
-        ref_topology_by_id = compute_all_topology(
-            reference,
-            id_column=ref_id_column,
-            tolerance_m=5.0,
-            ids_to_compute=unique_ref_ids,
-            connectors_column="connectors" if ref_has_connectors else None,
-        )
-
-        # Map topology from segment IDs to DataFrame indices
-        target_topology_features = {}
-        for target_idx in unique_target_indices:
-            seg_id = str(target_ids[target_idx])
-            target_topology_features[target_idx] = target_topology_by_id.get(
-                seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-            )
-
-        ref_topology_features = {}
-        for ref_idx in unique_ref_indices:
-            seg_id = str(ref_ids[ref_idx])
-            ref_topology_features[ref_idx] = ref_topology_by_id.get(
-                seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-            )
-        timings["topology_computation"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] topology_computation: {timings['topology_computation']:.2f}s")
-
-        # Pre-compute graphlet features for network topology similarity
-        # For Overture reference data, use explicit connector positions for alignment-aware comparison
-        # Filter to only candidate segments to reduce graph building overhead
-        sorted_ref_indices = sorted(unique_ref_indices)
-        ref_candidates_only = reference.iloc[sorted_ref_indices].reset_index(drop=True)
-        target_candidates_only_proj = target.iloc[sorted_target_indices].reset_index(drop=True)
-
-        logger.info(
-            f"Computing graphlet features for {len(ref_candidates_only)} reference "
-            f"and {len(target_candidates_only_proj)} target segments..."
-        )
-
-        # Resolve worker count once, used for all parallel blocks
+        # Resolve worker count for parallel feature computation
         if n_jobs == -1:
             n_workers = default_worker_count()
         else:
             n_workers = max(1, n_jobs)
 
-        # Launch alignment and sibling context builds in background threads while
-        # graphlets compute on main thread. compute_alignment_batch spawns its own
-        # ProcessPoolExecutor internally; sibling builds do C-level STRtree construction
-        # (releases GIL) plus lightweight name normalization — no contention.
-        # IMPORTANT: Use ALL reference/target segments for sibling contexts, not just
-        # candidates — a parallel sibling might not have any candidate matches.
-        from ..features.relational import build_sibling_search_context
-
-        with ThreadPoolExecutor(max_workers=n_workers) as bg_executor:
-            logger.info("Computing linestring alignments (background)...")
-            t0_align = time.perf_counter()
-            alignment_future = bg_executor.submit(
-                compute_alignment_batch, candidates, ref_geoms, target_geoms, n_jobs=n_jobs
-            )
-
-            # Submit sibling context builds — extract list args eagerly for thread safety
-            t0_sib_ref = time.perf_counter()
-            ref_sibling_future = bg_executor.submit(
-                build_sibling_search_context,
-                geometries=list(reference.geometry),
-                segment_ids=[str(sid) for sid in reference[ref_id_column]],
-                names=list(reference.get(ref_name_column, [None] * len(reference))),
-                classes=list(reference.get(ref_class_column, [None] * len(reference))),
-            )
-            t0_sib_target = time.perf_counter()
-            target_sibling_future = bg_executor.submit(
-                build_sibling_search_context,
-                geometries=list(target.geometry),
-                segment_ids=[str(sid) for sid in target[target_id_column]],
-                names=list(target.get(target_name_column, [None] * len(target))),
-                classes=list(target.get(target_class_column, [None] * len(target))),
-            )
-
-            # ref_has_connectors already defined earlier for topology computation
-            t0 = time.perf_counter()
-            ref_graphlet_data = precompute_graphlet_features(
-                ref_candidates_only,
-                id_column=ref_id_column,
-                tolerance_m=5.0,
-                connectors_column="connectors" if ref_has_connectors else None,
-            )
-            timings["graphlet_ref"] = time.perf_counter() - t0
-            logger.debug(f"[TIMING] graphlet_ref: {timings['graphlet_ref']:.2f}s")
-
-            # Target data typically doesn't have explicit connectors, use endpoint-based inference
-            t0 = time.perf_counter()
-            target_graphlet_data = precompute_graphlet_features(
-                target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
-            )
-            timings["graphlet_target"] = time.perf_counter() - t0
-            logger.debug(f"[TIMING] graphlet_target: {timings['graphlet_target']:.2f}s")
-
-            # Wait for alignment result (should already be done — alignment ~21s < graphlets ~35s)
-            alignments = alignment_future.result()
-            timings["alignment_batch"] = time.perf_counter() - t0_align
-            logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
-
-            # Collect sibling context results
-            ref_sibling_context = ref_sibling_future.result()
-            timings["sibling_context_ref"] = time.perf_counter() - t0_sib_ref
-            logger.debug(f"[TIMING] sibling_context_ref: {timings['sibling_context_ref']:.2f}s")
-
-            target_sibling_context = target_sibling_future.result()
-            timings["sibling_context_target"] = time.perf_counter() - t0_sib_target
-            logger.debug(
-                f"[TIMING] sibling_context_target: {timings['sibling_context_target']:.2f}s"
-            )
-
-        # Recompute endpoint features using alignment fractions
-        # This uses aligned subline endpoints instead of full segment endpoints,
-        # which is critical for partial overlaps
-        # Extract connector data for snapping fractions to real network junctions
-        _, target_seg_to_connectors_ep, _, _ = (
-            target_graphlet_data if target_graphlet_data else (None, None, None, None)
-        )
-        aligned_endpoint_features = {}
-        if alignments:
-            from ..features.spatial_context import compute_aligned_endpoint_features_batch
-
-            logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
-            t0 = time.perf_counter()
-            aligned_endpoint_features = compute_aligned_endpoint_features_batch(
-                alignments=alignments,
-                target_geoms=target_geoms,
-                target_ids=target_ids,
-                target_index=target_index,
-                original_to_filtered=original_to_filtered,
-                seg_to_connectors=target_seg_to_connectors_ep,
-            )
-            timings["aligned_endpoint_features"] = time.perf_counter() - t0
-            logger.info(
-                f"[TIMING] aligned_endpoint_features: {timings['aligned_endpoint_features']:.2f}s"
-            )
-            logger.info(
-                f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
-            )
-
         n_candidates = len(candidates)
         logger.info(
             f"Computing features for {n_candidates} candidates using {n_workers} processes..."
         )
-
-        # Prepare worker data (passed via initializer to avoid repeated pickling)
-        worker_data = {
-            "ref_geoms": ref_geoms,
-            "target_geoms": target_geoms,
-            "ref_names": ref_names,
-            "target_names": target_names,
-            "ref_classes": ref_classes,
-            "target_classes": target_classes,
-            "ref_subclasses": ref_subclasses,
-            "target_subclasses": target_subclasses,
-            "ref_names_lr": ref_names_lr,
-            "target_names_lr": target_names_lr,
-            "ref_oneway_lr": ref_oneway_lr,
-            "target_oneway_lr": target_oneway_lr,
-            "ref_speed_limit_kph_lr": ref_speed_limit_kph_lr,
-            "target_speed_limit_kph_lr": target_speed_limit_kph_lr,
-            "ref_ids": ref_ids,
-            "target_ids": target_ids,
-            "aligned_endpoint_features": aligned_endpoint_features,
-            "ref_topology": ref_topology_features,
-            "target_topology": target_topology_features,
-            "ref_graphlet_data": ref_graphlet_data,
-            "target_graphlet_data": target_graphlet_data,
-            "ref_sibling_context": ref_sibling_context,
-            "target_sibling_context": target_sibling_context,
-            "alignments": alignments,
-        }
 
         # Prepare work items as simple tuples, sorted by ref_idx for cache locality
         # Grouping by ref_idx improves buffer cache hit rate since reference
