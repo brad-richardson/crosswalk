@@ -1,6 +1,6 @@
 """Tests for helper functions in data_loader.py.
 
-Tests _resolve_lr_name(), _extract_pair_attributes(), and _build_aligned_geometries().
+Tests resolve_lr_name(), extract_pair_attributes(), and _build_aligned_geometries().
 """
 
 import pandas as pd
@@ -10,8 +10,8 @@ from shapely.geometry import LineString
 
 from matcher.labeling.data_loader import (
     _build_aligned_geometries,
-    _extract_pair_attributes,
-    _resolve_lr_name,
+    extract_pair_attributes,
+    resolve_lr_name,
 )
 
 # Reusable LR data: "First Avenue" 0-50%, "Second Street" 50-100%
@@ -22,7 +22,7 @@ SPLIT_LR = [
 
 
 class TestResolveLrName:
-    """Tests for _resolve_lr_name()."""
+    """Tests for resolve_lr_name()."""
 
     @pytest.mark.parametrize(
         "lr_data, start, end, expected",
@@ -46,7 +46,7 @@ class TestResolveLrName:
         ],
     )
     def test_name_resolution(self, lr_data, start, end, expected):
-        assert _resolve_lr_name(lr_data, start, end) == expected
+        assert resolve_lr_name(lr_data, start, end) == expected
 
     @pytest.mark.parametrize(
         "lr_data, expected",
@@ -59,11 +59,11 @@ class TestResolveLrName:
     )
     def test_returns_none_on_bad_lr_data(self, lr_data, expected):
         """Should return None when LR data is unusable."""
-        assert _resolve_lr_name(lr_data, 0.0, 1.0) == expected
+        assert resolve_lr_name(lr_data, 0.0, 1.0) == expected
 
 
 class TestExtractPairAttributes:
-    """Tests for _extract_pair_attributes()."""
+    """Tests for extract_pair_attributes()."""
 
     def _call(
         self,
@@ -82,7 +82,7 @@ class TestExtractPairAttributes:
         target_end=1.0,
     ):
         """Thin wrapper to reduce boilerplate in tests."""
-        return _extract_pair_attributes(
+        return extract_pair_attributes(
             ref_data=ref_data,
             target_data=target_data,
             ref_class_column="class",

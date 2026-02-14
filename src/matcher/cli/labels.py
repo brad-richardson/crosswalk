@@ -227,6 +227,7 @@ def backfill_features(
 
     # Import heavy dependencies only when needed
     import geopandas as gpd
+    import numpy as np
 
     from ..config import DEFAULT_SNAP_TOLERANCE_M, DEFAULT_TOPOLOGY_FEATURES
     from ..features.alignment import linestring_alignment
@@ -236,18 +237,14 @@ def backfill_features(
         precompute_graphlet_features,
     )
     from ..features.relational import build_sibling_search_context
-    from ..features.semantic import _extract_name_string
     from ..features.spatial_context import (
         SpatialContextIndex,
         compute_aligned_endpoint_features,
         compute_all_topology,
     )
     from ..filenames import find_overture_segments, find_target_file
+    from ..labeling.data_loader import extract_pair_attributes
     from ..utils.geometry import filter_to_linestrings
-
-    def _str_or_none(val):
-        """Convert NaN/non-string values to None for string fields."""
-        return val if isinstance(val, str) else None
 
     # Process by dataset - get unique datasets from keys to process
     datasets = sorted(set(d for _, _, d in keys_to_process))
@@ -392,6 +389,14 @@ def backfill_features(
         else:
             console.print("  [yellow]No stored geometries - using raw data lookup[/yellow]")
 
+        # Pre-compute dataset-level column flags (once per dataset)
+        has_ref_names_lr_col = "names_lr" in ref_lookup.columns
+        has_target_names_lr_col = target_lookup is not None and "names_lr" in target_lookup.columns
+        has_ref_class_col = "class" in ref_lookup.columns
+        has_target_class_col = target_lookup is not None and "class" in target_lookup.columns
+        has_ref_subclass_col = "subclass" in ref_lookup.columns
+        has_target_subclass_col = target_lookup is not None and "subclass" in target_lookup.columns
+
         computed = 0
         skipped = 0
         errored = 0
@@ -402,13 +407,8 @@ def backfill_features(
         for gers_id, target_id in dataset_keys:
             ref_geom = None
             target_geom = None
-            ref_name = None
-            target_name = None
-            ref_class = None
-            target_class = None
-            ref_subclass = None
-            target_subclass = None
             pair_data = None
+            used_stored_for_pair = False
 
             # First, try to get geometries from stored data (preferred - stable)
             if has_stored_data:
@@ -425,13 +425,7 @@ def backfill_features(
                         target_geom = (
                             gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
                         )
-                        # Get attributes from stored data
-                        ref_name = _str_or_none(pair_data.get("ref_name"))
-                        target_name = _str_or_none(pair_data.get("target_name"))
-                        ref_class = _str_or_none(pair_data.get("ref_class"))
-                        target_class = _str_or_none(pair_data.get("target_class"))
-                        ref_subclass = _str_or_none(pair_data.get("ref_subclass"))
-                        target_subclass = _str_or_none(pair_data.get("target_subclass"))
+                        used_stored_for_pair = True
                         used_stored += 1
 
             # Fall back to raw data lookup if stored data not available
@@ -456,28 +450,6 @@ def backfill_features(
 
                 ref_geom = ref_gdf_proj.geometry.loc[ref_idx]
                 target_geom = target_gdf_proj.geometry.loc[target_idx]
-
-                # Get attributes from raw data
-                ref_row = ref_lookup.loc[gers_id]
-                target_row = target_lookup.loc[target_id]
-                ref_name = (
-                    _extract_name_string(ref_row["names"]) if "names" in ref_row.index else None
-                )
-                target_name = (
-                    _extract_name_string(target_row["names"])
-                    if "names" in target_row.index
-                    else None
-                )
-                ref_class = _str_or_none(ref_row["class"]) if "class" in ref_row.index else None
-                target_class = (
-                    _str_or_none(target_row["class"]) if "class" in target_row.index else None
-                )
-                ref_subclass = (
-                    _str_or_none(ref_row["subclass"]) if "subclass" in ref_row.index else None
-                )
-                target_subclass = (
-                    _str_or_none(target_row["subclass"]) if "subclass" in target_row.index else None
-                )
                 used_lookup += 1
 
             if ref_geom is None or ref_geom.is_empty or target_geom is None or target_geom.is_empty:
@@ -486,6 +458,74 @@ def backfill_features(
 
             # Compute alignment
             alignment = linestring_alignment(ref_geom, target_geom)
+
+            # Extract attributes using shared LR-aware resolution
+            # (after alignment so fractions are available for name resolution)
+            if used_stored_for_pair:
+                # Build data dict from stored data; fall back to raw Overture
+                # LR data if stored data predates LR column addition
+                ref_names_lr = pair_data.get("ref_names_lr")
+                if ref_names_lr is None and gers_id in ref_lookup.index and has_ref_names_lr_col:
+                    val = ref_lookup.loc[gers_id]["names_lr"]
+                    if isinstance(val, (list, np.ndarray)):
+                        ref_names_lr = val
+
+                target_names_lr = pair_data.get("target_names_lr")
+                if (
+                    target_names_lr is None
+                    and target_lookup is not None
+                    and target_id in target_lookup.index
+                    and has_target_names_lr_col
+                ):
+                    val = target_lookup.loc[target_id]["names_lr"]
+                    if isinstance(val, (list, np.ndarray)):
+                        target_names_lr = val
+
+                ref_data_dict = {
+                    "names_lr": ref_names_lr,
+                    "class": pair_data.get("ref_class"),
+                    "subclass": pair_data.get("ref_subclass"),
+                }
+                target_data_dict = {
+                    "names_lr": target_names_lr,
+                    "class": pair_data.get("target_class"),
+                    "subclass": pair_data.get("target_subclass"),
+                }
+                pair_has_ref_lr = ref_names_lr is not None
+                pair_has_target_lr = target_names_lr is not None
+                pair_has_ref_class = ref_data_dict.get("class") is not None
+                pair_has_target_class = target_data_dict.get("class") is not None
+                pair_has_ref_subclass = ref_data_dict.get("subclass") is not None
+                pair_has_target_subclass = target_data_dict.get("subclass") is not None
+            else:
+                # Raw data path: use row data directly (Series works with .get())
+                ref_data_dict = ref_lookup.loc[gers_id]
+                target_data_dict = target_lookup.loc[target_id]
+                pair_has_ref_lr = has_ref_names_lr_col
+                pair_has_target_lr = has_target_names_lr_col
+                pair_has_ref_class = has_ref_class_col
+                pair_has_target_class = has_target_class_col
+                pair_has_ref_subclass = has_ref_subclass_col
+                pair_has_target_subclass = has_target_subclass_col
+
+            ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
+                extract_pair_attributes(
+                    ref_data=ref_data_dict,
+                    target_data=target_data_dict,
+                    ref_class_column="class",
+                    target_class_column="class",
+                    ref_start_frac=alignment.overture_start_frac,
+                    ref_end_frac=alignment.overture_end_frac,
+                    target_start_frac=alignment.dataset_start_frac,
+                    target_end_frac=alignment.dataset_end_frac,
+                    has_ref_names_lr=pair_has_ref_lr,
+                    has_target_names_lr=pair_has_target_lr,
+                    has_ref_class=pair_has_ref_class,
+                    has_target_class=pair_has_target_class,
+                    has_ref_subclass=pair_has_ref_subclass,
+                    has_target_subclass=pair_has_target_subclass,
+                )
+            )
 
             # Compute endpoint features
             target_filtered_idx = (

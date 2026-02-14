@@ -38,6 +38,10 @@ DATA_COLUMNS = [
     "target_level_lr",
     "ref_road_flags_lr",
     "target_road_flags_lr",
+    "ref_oneway_lr",
+    "target_oneway_lr",
+    "ref_speed_limit_kph_lr",
+    "target_speed_limit_kph_lr",
     # Topology context (captured at labeling time from full network)
     "ref_from_degree",
     "ref_to_degree",
@@ -52,12 +56,35 @@ DATA_COLUMNS = [
 ]
 
 
+def _convert_numpy(obj):
+    """Recursively convert numpy types to native Python for JSON serialization."""
+    import numpy as np
+
+    if isinstance(obj, np.ndarray):
+        return [_convert_numpy(x) for x in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, dict):
+        return {k: _convert_numpy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_convert_numpy(x) for x in obj]
+    return obj
+
+
 def _serialize_lr_data(lr_data: list | None) -> str | None:
-    """Serialize linear-referenced data to JSON string."""
+    """Serialize linear-referenced data to JSON string.
+
+    Handles numpy arrays from Overture parquet reads by converting to
+    native Python types before JSON serialization.
+    """
     if lr_data is None:
         return None
     try:
-        return json.dumps(lr_data)
+        return json.dumps(_convert_numpy(lr_data))
     except (TypeError, ValueError):
         return None
 
@@ -403,6 +430,10 @@ class DataStore:
         target_level_lr: list | None = None,
         ref_road_flags_lr: list | None = None,
         target_road_flags_lr: list | None = None,
+        ref_oneway_lr: list | None = None,
+        target_oneway_lr: list | None = None,
+        ref_speed_limit_kph_lr: list | None = None,
+        target_speed_limit_kph_lr: list | None = None,
     ) -> bool:
         """Update LR attributes for an existing data record.
 
@@ -420,6 +451,10 @@ class DataStore:
             target_level_lr: Target linear-referenced level data
             ref_road_flags_lr: Reference linear-referenced road flags data
             target_road_flags_lr: Target linear-referenced road flags data
+            ref_oneway_lr: Reference linear-referenced one-way direction data
+            target_oneway_lr: Target linear-referenced one-way direction data
+            ref_speed_limit_kph_lr: Reference linear-referenced speed limit (kph)
+            target_speed_limit_kph_lr: Target linear-referenced speed limit (kph)
 
         Returns:
             True if record was found and updated, False if not found
@@ -450,6 +485,16 @@ class DataStore:
             self._gdf.at[idx, "ref_road_flags_lr"] = _serialize_lr_data(ref_road_flags_lr)
         if target_road_flags_lr is not None:
             self._gdf.at[idx, "target_road_flags_lr"] = _serialize_lr_data(target_road_flags_lr)
+        if ref_oneway_lr is not None:
+            self._gdf.at[idx, "ref_oneway_lr"] = _serialize_lr_data(ref_oneway_lr)
+        if target_oneway_lr is not None:
+            self._gdf.at[idx, "target_oneway_lr"] = _serialize_lr_data(target_oneway_lr)
+        if ref_speed_limit_kph_lr is not None:
+            self._gdf.at[idx, "ref_speed_limit_kph_lr"] = _serialize_lr_data(ref_speed_limit_kph_lr)
+        if target_speed_limit_kph_lr is not None:
+            self._gdf.at[idx, "target_speed_limit_kph_lr"] = _serialize_lr_data(
+                target_speed_limit_kph_lr
+            )
 
         return True
 
