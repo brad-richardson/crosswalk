@@ -1,0 +1,66 @@
+name: jp_tokyo_roads
+display_name: Japan MLIT Roads (Tokyo/Kanto)
+type: road
+description: Combined expressway (N06) and emergency transport road (N10) data from
+  Japan MLIT National Land Numerical Information. Japanese road names in Kanji. N06
+  covers nationwide expressways clipped to Kanto, N10 covers Tokyo prefecture emergency
+  transport network.
+source:
+  type: manual
+  portal_url: https://nlftp.mlit.go.jp/ksj/
+fetch:
+  id_prefix: jp_tokyo
+  id_column: orig_id
+  name_column: road_name
+  class_column: road_class
+  bbox:
+  - 138.93
+  - 35.2
+  - 140.54
+  - 36.3
+  crs: EPSG:4326
+last_fetch:
+  target:
+    fetched_at: '2026-02-14T00:00:00+00:00'
+    bbox:
+    - 138.93
+    - 35.2
+    - 140.54
+    - 36.3
+    bbox_buffered:
+    - 138.93
+    - 35.2
+    - 140.54
+    - 36.3
+    bbox_buffer_m: 0.0
+    feature_count: 1160
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-14T04:11:59.667391+00:00'
+    bbox:
+    - 138.93
+    - 35.2
+    - 140.54
+    - 36.3
+    bbox_buffered:
+    - 138.9189312472436
+    - 35.19101688825009
+    - 140.5510687527564
+    - 36.30898311174991
+    bbox_buffer_m: 1000.0
+    feature_count: 2459454
+    geometry_types:
+    - LineString
+    output_path: data/raw
+notes: 'Processed from MLIT NLFTP downloads using scripts/setup_new_datasets.py.
+
+  Sources: N06-24 (expressway sections) + N10-24_13 (Tokyo emergency transport roads).
+
+  N06 filtered to Kanto bbox. All segments have Japanese road names.
+
+  Road classification: motorway (N06 expressways), trunk/secondary/unclassified (N10
+  by road category).
+
+  '

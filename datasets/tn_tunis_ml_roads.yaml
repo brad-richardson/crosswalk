@@ -1,0 +1,63 @@
+name: tn_tunis_ml_roads
+display_name: Tunis ML-Extracted Roads (Microsoft)
+type: road
+description: ML-extracted road detections from Microsoft/Bing Maps aerial imagery
+  for the greater Tunis area. No road names or classification - geometry only. Used
+  to test model generalization on ML-extracted road networks with no semantic attributes.
+source:
+  type: manual
+  portal_url: https://github.com/microsoft/RoadDetections
+fetch:
+  id_prefix: tn_tunis_ml
+  id_column: orig_id
+  bbox:
+  - 9.8
+  - 36.5
+  - 10.5
+  - 37.1
+  crs: EPSG:4326
+last_fetch:
+  target:
+    fetched_at: '2026-02-14T00:00:00+00:00'
+    bbox:
+    - 9.8
+    - 36.5
+    - 10.5
+    - 37.1
+    bbox_buffered:
+    - 9.8
+    - 36.5
+    - 10.5
+    - 37.1
+    bbox_buffer_m: 0.0
+    feature_count: 113487
+    geometry_types:
+    - LineString
+    output_path: data/raw
+  reference:
+    fetched_at: '2026-02-14T04:10:36.580061+00:00'
+    bbox:
+    - 9.8
+    - 36.5
+    - 10.5
+    - 37.1
+    bbox_buffered:
+    - 9.788781366540858
+    - 36.49101688825009
+    - 10.511218633459142
+    - 37.108983111749914
+    bbox_buffer_m: 1000.0
+    feature_count: 145127
+    geometry_types:
+    - LineString
+    output_path: data/raw
+notes: 'Processed from Microsoft Road Detections Northern_Africa.zip using scripts/setup_new_datasets.py.
+
+  Extracted Tunisia (TUN) records, clipped to greater Tunis metro area.
+
+  No road names, no road classification - pure ML-extracted geometry from aerial imagery.
+
+  May contain artifacts: airport runways, rail lines misclassified as roads, short
+  false-positive segments.
+
+  '
