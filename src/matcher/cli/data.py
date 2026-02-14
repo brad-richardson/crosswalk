@@ -273,6 +273,9 @@ def _fetch_reference_impl(
     elif "osm" in sources and bbox_buffer == 0:
         console.print("[blue]Buffer explicitly disabled (--bbox-buffer=0)[/blue]")
 
+    overture_fetched = False
+    osm_fetched = False
+
     if "overture" in sources:
         overture_seg_path = output_dir / overture_segments_filename(dataset_name)
         overture_conn_path = output_dir / overture_connectors_filename(dataset_name)
@@ -300,6 +303,7 @@ def _fetch_reference_impl(
                 buffer_m=overture_buffer,
             )
             console.print(f"[green]Saved Overture connectors to {connectors_path}[/green]")
+            overture_fetched = True
 
     if "osm" in sources:
         osm_seg_path = output_dir / osm_segments_filename(dataset_name)
@@ -328,12 +332,13 @@ def _fetch_reference_impl(
             )
             console.print(f"[green]Saved OSM segments (ways) to {segments_path}[/green]")
             console.print(f"[green]Saved OSM connectors (nodes) to {connectors_path}[/green]")
+            osm_fetched = True
 
     # Update last_fetch in dataset config (per source type)
     from ..datasets.schema import update_last_fetch
     from ..fetch.metadata import load_metadata
 
-    if "overture" in sources:
+    if overture_fetched:
         overture_seg_file = overture_segments_filename(dataset_name)
         meta = load_metadata(output_dir / overture_seg_file)
         update_last_fetch(
@@ -348,7 +353,7 @@ def _fetch_reference_impl(
         )
         console.print(f"[blue]Updated last_fetch.reference for {dataset_name}[/blue]")
 
-    if "osm" in sources:
+    if osm_fetched:
         osm_seg_file = osm_segments_filename(dataset_name)
         meta = load_metadata(output_dir / osm_seg_file)
         update_last_fetch(
