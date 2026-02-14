@@ -4,9 +4,10 @@ Single source of truth for all filename patterns used in the matcher pipeline.
 This module ensures consistent naming across fetch, pipeline, and labeling code.
 """
 
+import hashlib
 from pathlib import Path
 
-from matcher.config import DATA_VERSION, FEATURE_VERSION
+from matcher.config import DATA_VERSION, FEATURE_VERSION, settings
 
 # ============================================================================
 # DIRECTORY PATHS
@@ -187,12 +188,28 @@ def find_target_file(data_dir: Path, dataset_name: str) -> Path | None:
 # ============================================================================
 
 
+def _model_fingerprint() -> str:
+    """Compute a short fingerprint of the current ML model file.
+
+    Uses file size + mtime to detect when the model has been retrained.
+    Returns a stable 8-char hex string. If the model file doesn't exist,
+    returns "nomodel" so the cache path is still valid.
+    """
+    model_path = settings.model_path
+    if not model_path.exists():
+        return "nomodel"
+    stat = model_path.stat()
+    key = f"{stat.st_size}:{stat.st_mtime_ns}"
+    return hashlib.md5(key.encode()).hexdigest()[:8]
+
+
 def scored_cache_path(dataset_id: str) -> Path:
     """Get path to versioned scored candidates cache file.
 
     The scored cache contains candidates with ML predictions (decision, confidence)
-    and all computed features. It is versioned by FEATURE_VERSION so that feature
-    changes invalidate the cache automatically.
+    and all computed features. It is versioned by both FEATURE_VERSION and a model
+    fingerprint, so that retraining the model automatically invalidates stale
+    predictions while the feature cache (which has no model dependency) stays valid.
 
     Args:
         dataset_id: Dataset identifier (e.g., "us_boston_streets")
@@ -201,9 +218,10 @@ def scored_cache_path(dataset_id: str) -> Path:
         Path to cache file (may not exist)
 
     Example:
-        us_boston_streets -> data/cache/labeling/us_boston_streets_candidates_v2026-02-01.parquet
+        us_boston_streets -> data/cache/labeling/us_boston_streets_candidates_v2026-02-01_m3a4b5c6d.parquet
     """
-    return LABELING_CACHE_DIR / f"{dataset_id}_candidates_v{FEATURE_VERSION}.parquet"
+    fingerprint = _model_fingerprint()
+    return LABELING_CACHE_DIR / f"{dataset_id}_candidates_v{FEATURE_VERSION}_m{fingerprint}.parquet"
 
 
 def feature_cache_path(dataset_id: str) -> Path:
