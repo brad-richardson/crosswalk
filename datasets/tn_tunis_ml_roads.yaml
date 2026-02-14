@@ -1,0 +1,31 @@
+name: tn_tunis_ml_roads
+display_name: Tunis ML-Extracted Roads (Microsoft)
+type: road
+description: ML-extracted road detections from Microsoft/Bing Maps aerial imagery
+  for the greater Tunis area. No road names or classification - geometry only. Used
+  to test model generalization on ML-extracted road networks with no semantic attributes.
+source:
+  type: download
+  url: https://usaminedroads.z19.web.core.windows.net/drops/2025.04.28/Northern_Africa.zip
+  portal_url: https://github.com/microsoft/RoadDetections
+  file_format: ms_roads_tsv
+  where_clause: TUN
+  cache_download: true
+fetch:
+  id_prefix: tn_tunis_ml
+  id_column: _geom_hash
+  bbox:
+  - 9.8
+  - 36.5
+  - 10.5
+  - 37.1
+  crs: EPSG:4326
+quality_fingerprint:
+  computed_at: '2026-02-14T05:12:22.172439+00:00'
+  total_segments: 113566
+  name_coverage_ratio: 0.0
+  class_coverage_ratio: 0.0
+notes: 'Microsoft Road Detections from Northern_Africa.zip. TSV format with country_code
+  prefix, filtered to TUN (Tunisia) records. Geometry hash used as ID since ML-extracted
+  data has no properties. May contain artifacts: airport runways, rail lines misclassified
+  as roads, short false-positive segments.'
