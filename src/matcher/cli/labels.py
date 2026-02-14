@@ -227,23 +227,12 @@ def backfill_features(
 
     # Import heavy dependencies only when needed
     import geopandas as gpd
-    import numpy as np
+    import pandas as pd
 
-    from ..config import DEFAULT_SNAP_TOLERANCE_M, DEFAULT_TOPOLOGY_FEATURES
-    from ..features.alignment import linestring_alignment
-    from ..features.compute import (
-        compute_graphlet_similarity,
-        compute_pair_features,
-        precompute_graphlet_features,
-    )
-    from ..features.relational import build_sibling_search_context
-    from ..features.spatial_context import (
-        SpatialContextIndex,
-        compute_aligned_endpoint_features,
-        compute_all_topology,
-    )
+    from ..blocking.spatial_index import CandidatePair
+    from ..features.pipeline import prepare_worker_data
     from ..filenames import find_overture_segments, find_target_file
-    from ..labeling.data_loader import extract_pair_attributes
+    from ..matching.ml import _compute_feature_chunk, _init_worker
     from ..utils.geometry import filter_to_linestrings
 
     # Process by dataset - get unique datasets from keys to process
@@ -308,71 +297,6 @@ def backfill_features(
             target_gdf_proj = None
             target_lookup = None
 
-        # Build spatial index (only if target data available)
-        target_context = SpatialContextIndex()
-        if target_gdf_proj is not None:
-            target_context.build_from_gdf(target_gdf_proj, id_column="id")
-
-        # Build graphlet data
-        ref_has_connectors = "connectors" in ref_gdf.columns
-        ref_graphlet_data = precompute_graphlet_features(
-            ref_gdf_proj,
-            id_column="id",
-            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
-            connectors_column="connectors" if ref_has_connectors else None,
-        )
-        if target_gdf_proj is not None:
-            target_graphlet_data = precompute_graphlet_features(
-                target_gdf_proj,
-                id_column="id",
-                tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
-            )
-        else:
-            target_graphlet_data = None
-
-        _, target_seg_to_connectors, _, _ = (
-            target_graphlet_data if target_graphlet_data else (None, None, None, None)
-        )
-
-        # Build sibling search contexts for per-pair parallel sibling detection
-        # These hold the spatial index and segment metadata needed to search for
-        # parallel siblings on aligned sublines (not precomputed on full geometries)
-        console.print("  Building sibling search contexts...")
-        ref_sibling_context = build_sibling_search_context(
-            geometries=list(ref_gdf_proj.geometry),
-            segment_ids=[str(sid) for sid in ref_gdf_proj["id"]],
-            names=list(ref_gdf_proj.get("names", [None] * len(ref_gdf_proj))),
-            classes=list(ref_gdf_proj.get("class", [None] * len(ref_gdf_proj))),
-        )
-        if target_gdf_proj is not None:
-            target_sibling_context = build_sibling_search_context(
-                geometries=list(target_gdf_proj.geometry),
-                segment_ids=[str(sid) for sid in target_gdf_proj["id"]],
-                names=list(target_gdf_proj.get("names", [None] * len(target_gdf_proj))),
-                classes=list(target_gdf_proj.get("class", [None] * len(target_gdf_proj))),
-            )
-        else:
-            target_sibling_context = None
-
-        # Compute topology features for all segments
-        console.print("  Computing topology features...")
-        ref_topology_by_id = compute_all_topology(
-            ref_gdf_proj,
-            id_column="id",
-            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
-            connectors_column="connectors" if ref_has_connectors else None,
-        )
-        if target_gdf_proj is not None:
-            target_has_connectors_topo = "connectors" in target_gdf_proj.columns
-            target_topology_by_id = compute_all_topology(
-                target_gdf_proj,
-                id_column="id",
-                tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
-                connectors_column="connectors" if target_has_connectors_topo else None,
-            )
-        else:
-            target_topology_by_id = {}
-
         # Initialize feature store and data store for this dataset
         feature_store = FeatureStore(dataset, features_dir=features_dir)
 
@@ -389,14 +313,6 @@ def backfill_features(
         else:
             console.print("  [yellow]No stored geometries - using raw data lookup[/yellow]")
 
-        # Pre-compute dataset-level column flags (once per dataset)
-        has_ref_names_lr_col = "names_lr" in ref_lookup.columns
-        has_target_names_lr_col = target_lookup is not None and "names_lr" in target_lookup.columns
-        has_ref_class_col = "class" in ref_lookup.columns
-        has_target_class_col = target_lookup is not None and "class" in target_lookup.columns
-        has_ref_subclass_col = "subclass" in ref_lookup.columns
-        has_target_subclass_col = target_lookup is not None and "subclass" in target_lookup.columns
-
         computed = 0
         skipped = 0
         errored = 0
@@ -404,38 +320,29 @@ def backfill_features(
         used_lookup = 0
         no_stored_rejected = 0
 
+        # --- Phase 1: Resolve geometries for all labeled pairs ---
+        # Collect stored target geometries for building the augmented target GDF
+        resolved_pairs = []  # list of (gers_id, target_id, pair_data)
+        stored_target_overrides = {}  # target_id -> WGS84 geometry
+        stored_target_attrs = {}  # target_id -> attribute dict (for segments not in raw data)
+
         for gers_id, target_id in dataset_keys:
-            ref_geom = None
-            target_geom = None
             pair_data = None
             used_stored_for_pair = False
 
-            # First, try to get geometries from stored data (preferred - stable)
             if has_stored_data:
                 pair_data = data_store.get_pair(gers_id, target_id)
                 if pair_data is not None:
-                    # Get geometries from stored data (in WGS84)
                     stored_ref = pair_data.get("ref_geometry")
                     stored_target = pair_data.get("target_geometry")
                     if stored_ref is not None and stored_target is not None:
-                        # Project to UTM
-                        ref_geom = (
-                            gpd.GeoSeries([stored_ref], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
-                        )
-                        target_geom = (
-                            gpd.GeoSeries([stored_target], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
-                        )
                         used_stored_for_pair = True
-                        used_stored += 1
 
-            # Fall back to raw data lookup if stored data not available
-            if ref_geom is None or target_geom is None:
-                # If require_stored_data is set, reject fallback lookups
+            if not used_stored_for_pair:
                 if require_stored_data:
                     no_stored_rejected += 1
                     skipped += 1
                     continue
-
                 if (
                     gers_id not in ref_lookup.index
                     or target_lookup is None
@@ -443,175 +350,166 @@ def backfill_features(
                 ):
                     skipped += 1
                     continue
-
-                # Get geometries from raw data files
-                ref_idx = ref_gdf[ref_gdf["id"] == gers_id].index[0]
-                target_idx = target_gdf[target_gdf["id"] == target_id].index[0]
-
-                ref_geom = ref_gdf_proj.geometry.loc[ref_idx]
-                target_geom = target_gdf_proj.geometry.loc[target_idx]
                 used_lookup += 1
+            else:
+                used_stored += 1
+                stored_target_overrides[target_id] = pair_data["target_geometry"]
+                if target_lookup is None or target_id not in target_lookup.index:
+                    stored_target_attrs[target_id] = {
+                        "names": pair_data.get("target_name"),
+                        "names_lr": pair_data.get("target_names_lr"),
+                        "class": pair_data.get("target_class"),
+                        "subclass": pair_data.get("target_subclass"),
+                    }
 
+            resolved_pairs.append((gers_id, target_id, pair_data))
+
+        if not resolved_pairs:
+            reason = "IDs not in data"
+            if no_stored_rejected > 0:
+                reason += f", {no_stored_rejected} rejected (no stored data)"
+            console.print(f"  [yellow]Skipped all {skipped} pairs ({reason})[/yellow]")
+            total_skipped += skipped
+            continue
+
+        # --- Phase 2: Build augmented target GeoDataFrame ---
+        # Start with full raw target (for sibling contexts, spatial index, topology),
+        # then override/append stored geometries for labeled pairs
+        if target_gdf_proj is not None:
+            augmented_target = target_gdf_proj.copy()
+        else:
+            augmented_target = gpd.GeoDataFrame(
+                {"id": pd.Series(dtype=str)},
+                geometry=gpd.GeoSeries([], crs=utm_crs),
+            )
+
+        target_id_set = (
+            set(augmented_target["id"].astype(str)) if len(augmented_target) > 0 else set()
+        )
+
+        # Override geometry for stored-data targets already in raw data
+        override_ids = [tid for tid in stored_target_overrides if tid in target_id_set]
+        if override_ids:
+            override_geoms = gpd.GeoSeries(
+                [stored_target_overrides[tid] for tid in override_ids],
+                crs="EPSG:4326",
+            ).to_crs(utm_crs)
+            for tid, geom in zip(override_ids, override_geoms):
+                mask = augmented_target["id"].astype(str) == tid
+                augmented_target.loc[mask, "geometry"] = geom
+
+        # Append new rows for stored-data targets not in raw data
+        append_ids = [tid for tid in stored_target_attrs if tid not in target_id_set]
+        if append_ids:
+            append_geoms = gpd.GeoSeries(
+                [stored_target_overrides[tid] for tid in append_ids],
+                crs="EPSG:4326",
+            ).to_crs(utm_crs)
+            append_rows = []
+            for tid, geom in zip(append_ids, append_geoms):
+                row = {"id": tid, "geometry": geom}
+                row.update(stored_target_attrs[tid])
+                append_rows.append(row)
+            new_gdf = gpd.GeoDataFrame(append_rows, geometry="geometry", crs=utm_crs)
+            augmented_target = pd.concat([augmented_target, new_gdf], ignore_index=True)
+
+        # --- Phase 3: Create CandidatePair objects ---
+        ref_id_to_idx = {str(rid): idx for idx, rid in enumerate(ref_gdf_proj["id"])}
+        target_id_to_idx = {str(tid): idx for idx, tid in enumerate(augmented_target["id"])}
+
+        candidates = []
+        candidate_metadata = []  # parallel list tracking (gers_id, target_id, pair_data)
+
+        for gers_id, target_id, pair_data in resolved_pairs:
+            ref_idx = ref_id_to_idx.get(str(gers_id))
+            target_idx = target_id_to_idx.get(str(target_id))
+
+            if ref_idx is None or target_idx is None:
+                skipped += 1
+                continue
+
+            ref_geom = ref_gdf_proj.geometry.iloc[ref_idx]
+            target_geom = augmented_target.geometry.iloc[target_idx]
             if ref_geom is None or ref_geom.is_empty or target_geom is None or target_geom.is_empty:
                 skipped += 1
                 continue
 
-            # Compute alignment
-            alignment = linestring_alignment(ref_geom, target_geom)
-
-            # Extract attributes using shared LR-aware resolution
-            # (after alignment so fractions are available for name resolution)
-            if used_stored_for_pair:
-                # Build data dict from stored data; fall back to raw Overture
-                # LR data if stored data predates LR column addition
-                ref_names_lr = pair_data.get("ref_names_lr")
-                if ref_names_lr is None and gers_id in ref_lookup.index and has_ref_names_lr_col:
-                    val = ref_lookup.loc[gers_id]["names_lr"]
-                    if isinstance(val, (list, np.ndarray)):
-                        ref_names_lr = val
-
-                target_names_lr = pair_data.get("target_names_lr")
-                if (
-                    target_names_lr is None
-                    and target_lookup is not None
-                    and target_id in target_lookup.index
-                    and has_target_names_lr_col
-                ):
-                    val = target_lookup.loc[target_id]["names_lr"]
-                    if isinstance(val, (list, np.ndarray)):
-                        target_names_lr = val
-
-                ref_data_dict = {
-                    "names_lr": ref_names_lr,
-                    "class": pair_data.get("ref_class"),
-                    "subclass": pair_data.get("ref_subclass"),
-                }
-                target_data_dict = {
-                    "names_lr": target_names_lr,
-                    "class": pair_data.get("target_class"),
-                    "subclass": pair_data.get("target_subclass"),
-                }
-                pair_has_ref_lr = ref_names_lr is not None
-                pair_has_target_lr = target_names_lr is not None
-                pair_has_ref_class = ref_data_dict.get("class") is not None
-                pair_has_target_class = target_data_dict.get("class") is not None
-                pair_has_ref_subclass = ref_data_dict.get("subclass") is not None
-                pair_has_target_subclass = target_data_dict.get("subclass") is not None
-            else:
-                # Raw data path: use row data directly (Series works with .get())
-                ref_data_dict = ref_lookup.loc[gers_id]
-                target_data_dict = target_lookup.loc[target_id]
-                pair_has_ref_lr = has_ref_names_lr_col
-                pair_has_target_lr = has_target_names_lr_col
-                pair_has_ref_class = has_ref_class_col
-                pair_has_target_class = has_target_class_col
-                pair_has_ref_subclass = has_ref_subclass_col
-                pair_has_target_subclass = has_target_subclass_col
-
-            ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
-                extract_pair_attributes(
-                    ref_data=ref_data_dict,
-                    target_data=target_data_dict,
-                    ref_class_column="class",
-                    target_class_column="class",
-                    ref_start_frac=alignment.overture_start_frac,
-                    ref_end_frac=alignment.overture_end_frac,
-                    target_start_frac=alignment.dataset_start_frac,
-                    target_end_frac=alignment.dataset_end_frac,
-                    has_ref_names_lr=pair_has_ref_lr,
-                    has_target_names_lr=pair_has_target_lr,
-                    has_ref_class=pair_has_ref_class,
-                    has_target_class=pair_has_target_class,
-                    has_ref_subclass=pair_has_ref_subclass,
-                    has_target_subclass=pair_has_target_subclass,
+            candidates.append(
+                CandidatePair(
+                    ref_id=gers_id,
+                    ref_idx=ref_idx,
+                    target_id=target_id,
+                    target_idx=target_idx,
+                    distance_estimate=0.0,
+                    heading_diff=0.0,
+                    length_ratio=1.0,
                 )
             )
+            candidate_metadata.append((gers_id, target_id, pair_data))
 
-            # Compute endpoint features
-            target_filtered_idx = (
-                target_gdf_proj[target_gdf_proj["id"] == target_id].index[0]
-                if target_gdf_proj is not None and target_id in target_gdf_proj["id"].values
-                else None
-            )
-            endpoint_features = compute_aligned_endpoint_features(
-                target_geom,
-                target_context,
-                start_frac=alignment.dataset_start_frac,
-                end_frac=alignment.dataset_end_frac,
-                exclude_segment_idx=target_filtered_idx,
-                seg_id=target_id,
-                seg_to_connectors=target_seg_to_connectors,
-            )
+        if not candidates:
+            reason = "no valid geometries"
+            if no_stored_rejected > 0:
+                reason += f", {no_stored_rejected} rejected (no stored data)"
+            console.print(f"  [yellow]Skipped all pairs ({reason})[/yellow]")
+            total_skipped += skipped
+            continue
 
-            # Compute graphlet similarity
-            graphlet_features = compute_graphlet_similarity(
-                gers_id,
-                target_id,
-                ref_graphlet_data,
-                target_graphlet_data,
-                alignment,
-            )
+        # --- Phase 4: Prepare worker data through shared pipeline ---
+        # One call replaces manual spatial index, graphlet, sibling context,
+        # topology, alignment, and endpoint feature computation
+        console.print("  Running shared feature pipeline...")
+        pipeline_result = prepare_worker_data(
+            candidates=candidates,
+            reference=ref_gdf_proj,
+            target=augmented_target,
+            n_jobs=1,  # small dataset, no need for parallel alignment
+        )
+        worker_data = pipeline_result.worker_data
 
-            # Note: oneway_lr and speed_limit_kph_lr columns are fetched but not used as features
-            # See docs/RESEARCH_GRAVEYARD.md - ablation showed these hurt model performance
-
-            # Look up topology features for this pair
-            # 3-tier fallback: stored topology > computed from raw data > NaN defaults
-            stored_ref_topo = None
-            stored_target_topo = None
-            if has_stored_data and pair_data is not None:
+        # --- Phase 5: Override topology with stored values ---
+        # 3-tier fallback: stored topology > computed by pipeline > NaN defaults
+        for cand, (_gid, _tid, pair_data) in zip(candidates, candidate_metadata):
+            if pair_data is not None:
                 stored_ref_topo = pair_data.get("ref_topology")
                 stored_target_topo = pair_data.get("target_topology")
+                if stored_ref_topo:
+                    worker_data["ref_topology"][cand.ref_idx] = stored_ref_topo
+                if stored_target_topo:
+                    worker_data["target_topology"][cand.target_idx] = stored_target_topo
 
-            ref_topo = (
-                stored_ref_topo
-                or ref_topology_by_id.get(gers_id)
-                or DEFAULT_TOPOLOGY_FEATURES.copy()
-            )
-            target_topo = (
-                stored_target_topo
-                or target_topology_by_id.get(target_id)
-                or DEFAULT_TOPOLOGY_FEATURES.copy()
-            )
+        # --- Phase 6: Compute features through shared code path ---
+        # Uses the exact same _compute_feature_chunk() that inference uses,
+        # including batch geometric computation and LR attribute extraction
+        console.print("  Computing features...")
+        _init_worker(worker_data)
+        work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+        results, _errors = _compute_feature_chunk(work_items)
 
-            # Compute all features
-            features = compute_pair_features(
-                ref_geom,
-                target_geom,
-                ref_name,
-                target_name,
-                ref_class,
-                target_class,
-                ref_subclass,
-                target_subclass,
-                endpoint_features=endpoint_features,
-                ref_topology=ref_topo,
-                target_topology=target_topo,
-                alignment=alignment,
-                graphlet_features=graphlet_features,
-                ref_graphlet_data=ref_graphlet_data,
-                target_graphlet_data=target_graphlet_data,
-                ref_seg_id=gers_id,
-                target_seg_id=target_id,
-                ref_sibling_context=ref_sibling_context,
-                target_sibling_context=target_sibling_context,
-            )
+        # --- Phase 7: Process results and persist ---
+        for i, (result, (gers_id, target_id, pair_data)) in enumerate(
+            zip(results, candidate_metadata)
+        ):
+            if result is None:
+                skipped += 1
+                continue
 
-            # Track error features
-            if "_error" in features:
+            if result.get("_error"):
                 errored += 1
 
             # Backfill topology into data store if not already stored
             if has_stored_data and pair_data is not None and pair_data.get("ref_topology") is None:
-                data_store.update_topology(
-                    gers_id,
-                    target_id,
-                    ref_topology=ref_topo,
-                    target_topology=target_topo,
-                )
+                ref_topo = worker_data["ref_topology"].get(candidates[i].ref_idx)
+                target_topo = worker_data["target_topology"].get(candidates[i].target_idx)
+                if ref_topo is not None and target_topo is not None:
+                    data_store.update_topology(
+                        gers_id,
+                        target_id,
+                        ref_topology=ref_topo,
+                        target_topology=target_topo,
+                    )
 
-            # Add to feature store
-            feature_store.add(gers_id=gers_id, target_id=target_id, features=features)
+            feature_store.add(gers_id=gers_id, target_id=target_id, features=result)
             computed += 1
 
         # Save feature store and data store (topology backfill)
