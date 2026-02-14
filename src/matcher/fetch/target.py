@@ -346,7 +346,7 @@ def fetch_ogc_features(
     logger.info(f"Fetching OGC API Features: {url}")
 
     all_features = []
-    offset = 0
+    start_index = 0
 
     # Build base params
     params: dict[str, Any] = {"f": "json", "limit": limit_per_page}
@@ -354,7 +354,7 @@ def fetch_ogc_features(
         params["bbox"] = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
 
     while True:
-        params["offset"] = offset
+        params["startIndex"] = start_index
 
         resp = requests.get(url, params=params, timeout=120)
         resp.raise_for_status()
@@ -374,7 +374,7 @@ def fetch_ogc_features(
         if len(all_features) >= number_matched or len(features) < limit_per_page:
             break
 
-        offset += len(features)
+        start_index += len(features)
 
     if not all_features:
         logger.warning(f"No features returned from {url}")

@@ -1,14 +1,16 @@
 name: fi_helsinki_roads
-display_name: Digiroad Finland (Helsinki)
+display_name: Digiroad Finland (Helsinki + Southern Uusimaa)
 type: road
-description: Road network from Finnish national Digiroad database (Helsinki area)
+description: Road network from Finnish national Digiroad database. Covers Helsinki
+  metro area plus rural southern Uusimaa north to Hyvinkää/Riihimäki for sparse rural
+  road coverage.
 source:
   type: ogc_features
   url: https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1/collections/dr_tielinkki_toim_lk/items
   portal_url: https://vayla.fi/en/transport-network/data/digiroad
 fetch:
   id_prefix: hel_road
-  id_column: OBJECTID
+  id_column: link_id
   name_column: tienimi_su
   class_column: toiminn_lk
   class_mapping:
@@ -22,10 +24,10 @@ fetch:
     8: service
     9: service
   bbox:
-  - 24.8
-  - 60.1
-  - 25.2
-  - 60.3
+  - 24.4
+  - 60.0
+  - 25.6
+  - 60.8
   crs: EPSG:4326
 last_fetch:
   target:
@@ -65,3 +67,8 @@ last_fetch:
 classification:
   source_classification:
     column: toiminn_lk
+quality_fingerprint:
+  computed_at: '2026-02-14T13:15:55.862057+00:00'
+  total_segments: 5000
+  name_coverage_ratio: 0.4982
+  class_coverage_ratio: 1.0
