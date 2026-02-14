@@ -1722,16 +1722,16 @@ class MLMatcher:
                 build_sibling_search_context,
                 geometries=list(reference.geometry),
                 segment_ids=[str(sid) for sid in reference[ref_id_column]],
-                names=list(reference.get("names", [None] * len(reference))),
-                classes=list(reference.get("class", [None] * len(reference))),
+                names=list(reference.get(ref_name_column, [None] * len(reference))),
+                classes=list(reference.get(ref_class_column, [None] * len(reference))),
             )
             t0_sib_target = time.perf_counter()
             target_sibling_future = bg_executor.submit(
                 build_sibling_search_context,
                 geometries=list(target.geometry),
                 segment_ids=[str(sid) for sid in target[target_id_column]],
-                names=list(target.get("names", [None] * len(target))),
-                classes=list(target.get("class", [None] * len(target))),
+                names=list(target.get(target_name_column, [None] * len(target))),
+                classes=list(target.get(target_class_column, [None] * len(target))),
             )
 
             # ref_has_connectors already defined earlier for topology computation
