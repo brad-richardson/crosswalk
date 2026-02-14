@@ -1,0 +1,36 @@
+name: jp_tokyo_roads
+display_name: Japan MLIT Tokyo Emergency Transport Roads
+type: road
+description: Emergency transport road network (N10) for Tokyo prefecture from Japan
+  MLIT National Land Numerical Information. Includes motorways, trunk roads, and secondary
+  roads. Japanese road names in Kanji.
+source:
+  type: download
+  url: https://nlftp.mlit.go.jp/ksj/gml/data/N10/N10-24/N10-24_13_GML.zip
+  portal_url: https://nlftp.mlit.go.jp/ksj/
+  file_format: geojson
+  cache_download: true
+fetch:
+  id_prefix: jp_tokyo
+  id_column: _geom_hash
+  name_column: N01_004
+  class_column: N01_002
+  class_mapping:
+    1: motorway
+    2: trunk
+    3: secondary
+    9: unknown
+  bbox:
+  - 138.9
+  - 35.5
+  - 139.95
+  - 35.9
+  crs: EPSG:4326
+quality_fingerprint:
+  computed_at: '2026-02-14T12:52:32.841908+00:00'
+  total_segments: 977
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.9908
+notes: N10 Emergency Transport Roads from MLIT NLFTP, prefecture code 13 (Tokyo).
+  Uses _geom_hash for stable IDs since source has no unique ID column. Road class
+  mapped from N01_002 codes. CRS is JGD2011 (auto-reprojected to WGS84).
