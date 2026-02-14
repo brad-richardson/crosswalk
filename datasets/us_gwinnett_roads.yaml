@@ -20,7 +20,7 @@ fetch:
     collectordistributor: tertiary
     highway: primary
     freeway: motorway
-    ramp: motorway_link
+    ramp: motorway  # TODO: add is_link flag for ramp segments
     private: service
     school: service
   bbox:

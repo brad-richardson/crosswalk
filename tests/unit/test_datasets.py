@@ -362,6 +362,75 @@ class TestListDatasetConfigs:
         assert "boston_streets" in configs
 
 
+def _load_all_dataset_yamls():
+    """Load raw YAML data for all dataset configs."""
+    import yaml
+
+    datasets_dir = Path(__file__).parent.parent.parent / "datasets"
+    return {p.stem: yaml.safe_load(p.read_text()) for p in sorted(datasets_dir.glob("*.yaml"))}
+
+
+# Overture Maps transportation segment schema enums
+# https://github.com/OvertureMaps/schema/blob/dev/packages/overture-schema-transportation-theme/src/overture/schema/transportation/enums.py
+VALID_CLASSES = {
+    "motorway", "primary", "secondary", "tertiary", "residential",
+    "living_street", "trunk", "unclassified", "service", "pedestrian",
+    "footway", "steps", "path", "track", "cycleway", "bridleway", "unknown",
+}  # fmt: skip
+
+VALID_SUBCLASSES = {
+    "link", "sidewalk", "crosswalk", "parking_aisle",
+    "driveway", "alley", "cycle_crossing",
+}  # fmt: skip
+
+
+class TestOvertureSchemaMappings:
+    """Validate that all dataset class/subclass mappings use valid Overture values."""
+
+    ALL_YAMLS = _load_all_dataset_yamls()
+
+    # Datasets with class_mapping in fetch config
+    CLASS_MAPPED = [
+        (name, data)
+        for name, data in ALL_YAMLS.items()
+        if data.get("fetch", {}).get("class_mapping")
+    ]
+
+    # Datasets with subclass_mapping in fetch config
+    SUBCLASS_MAPPED = [
+        (name, data)
+        for name, data in ALL_YAMLS.items()
+        if data.get("fetch", {}).get("subclass_mapping")
+    ]
+
+    # Datasets with class_mapping_rules in classification config
+    RULES_MAPPED = [
+        (name, data)
+        for name, data in ALL_YAMLS.items()
+        if data.get("classification", {}).get("class_mapping_rules")
+    ]
+
+    @pytest.mark.parametrize("name,data", CLASS_MAPPED, ids=[n for n, _ in CLASS_MAPPED])
+    def test_class_mapping_values(self, name, data):
+        """class_mapping targets must be valid Overture RoadClass values."""
+        for src, tgt in data["fetch"]["class_mapping"].items():
+            assert tgt in VALID_CLASSES, f"{name}: '{src}' maps to invalid class '{tgt}'"
+
+    @pytest.mark.parametrize("name,data", SUBCLASS_MAPPED, ids=[n for n, _ in SUBCLASS_MAPPED])
+    def test_subclass_mapping_values(self, name, data):
+        """subclass_mapping targets must be valid Overture Subclass values."""
+        for src, tgt in data["fetch"]["subclass_mapping"].items():
+            assert tgt in VALID_SUBCLASSES, f"{name}: '{src}' maps to invalid subclass '{tgt}'"
+
+    @pytest.mark.parametrize("name,data", RULES_MAPPED, ids=[n for n, _ in RULES_MAPPED])
+    def test_class_mapping_rules_values(self, name, data):
+        """class_mapping_rules target_class must be valid Overture RoadClass values."""
+        for rule in data["classification"]["class_mapping_rules"]:
+            tgt = rule.get("target_class")
+            if tgt:
+                assert tgt in VALID_CLASSES, f"{name}: rule target_class '{tgt}' is invalid"
+
+
 class TestDiscovery:
     """Tests for dataset discovery functions."""
 

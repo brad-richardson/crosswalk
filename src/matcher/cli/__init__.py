@@ -1,5 +1,9 @@
 """CLI package for the road network conflation pipeline."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import typer
 
 from .agent import agent_app

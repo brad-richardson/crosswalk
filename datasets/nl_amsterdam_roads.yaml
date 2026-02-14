@@ -9,7 +9,7 @@ source:
   cache_download: true
 fetch:
   id_prefix: ams_road
-  id_column: FID
+  id_column: wvk_id
   name_column: stt_naam
   class_column: wegbehsrt
   class_mapping:
@@ -43,7 +43,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T23:32:57.494079+00:00'
+    fetched_at: '2026-02-14T14:36:33.062844+00:00'
     bbox:
     - 4.75
     - 52.3
@@ -62,3 +62,8 @@ last_fetch:
 classification:
   source_classification:
     column: wegbehsrt
+quality_fingerprint:
+  computed_at: '2026-02-14T15:14:43.364324+00:00'
+  total_segments: 48663
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 1.0

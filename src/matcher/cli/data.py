@@ -24,6 +24,19 @@ fetch_app = typer.Typer(
 data_app.add_typer(fetch_app, name="fetch")
 
 
+def _print_fetch_results_summary(results: dict[str, Path | None]) -> None:
+    """Print a summary of fetch results, listing any failures."""
+    failed = sorted(name for name, path in results.items() if path is None)
+    success = len(results) - len(failed)
+    if failed:
+        console.print(f"\n[green]Fetched {success}/{len(results)} datasets[/green]")
+        console.print(f"[yellow]Failed ({len(failed)}):[/yellow]")
+        for name in failed:
+            console.print(f"  [red]✗[/red] {name}")
+    else:
+        console.print(f"\n[green]All {len(results)} datasets fetched successfully![/green]")
+
+
 @fetch_app.command("target")
 def fetch_target(
     dataset_name: str = typer.Argument(
@@ -91,8 +104,7 @@ def fetch_target(
         results = target_module.fetch_all_datasets(
             output_dir, page_size, force, workers, skip_quality_check
         )
-        success = sum(1 for p in results.values() if p is not None)
-        console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
+        _print_fetch_results_summary(results)
 
     elif prefix:
         console.print(
@@ -104,8 +116,7 @@ def fetch_target(
         if not results:
             console.print(f"[red]No datasets found matching prefix: {prefix}[/red]")
             raise typer.Exit(1)
-        success = sum(1 for p in results.values() if p is not None)
-        console.print(f"[green]Fetched {success}/{len(results)} datasets[/green]")
+        _print_fetch_results_summary(results)
 
     elif dataset_name:
         console.print(f"[blue]Fetching dataset: {dataset_name}[/blue]")
@@ -788,10 +799,16 @@ def fetch_all(
                 errors.extend(ds_errors)
 
     if errors:
-        console.print(f"[yellow]Completed with {len(errors)} error(s)[/yellow]")
+        console.print(f"\n[yellow]Completed with {len(errors)} error(s):[/yellow]")
+        for name, err in sorted(errors, key=lambda x: x[0]):
+            err_str = str(err)
+            # Truncate long error messages but keep the useful part
+            if len(err_str) > 120:
+                err_str = err_str[:120] + "..."
+            console.print(f"  [red]✗[/red] {name}: {escape(err_str)}")
         raise typer.Exit(1)
     else:
-        console.print("[green]All data fetched successfully![/green]")
+        console.print("\n[green]All data fetched successfully![/green]")
 
 
 @fetch_app.command("list")

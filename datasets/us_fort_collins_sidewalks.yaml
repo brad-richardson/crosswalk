@@ -21,7 +21,7 @@ fetch:
     2: sidewalk
     3: sidewalk
     4: sidewalk
-    5: crossing
+    5: crosswalk
   bbox:
   - -105.15
   - 40.45
