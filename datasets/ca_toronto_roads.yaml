@@ -13,13 +13,13 @@ fetch:
   class_column: FEATURE_CODE_DESC
   class_mapping:
     Expressway: motorway
-    Expressway Ramp: motorway
+    Expressway Ramp: motorway  # TODO: add is_link flag for ramp segments
     Major Arterial: primary
-    Major Arterial Ramp: primary
+    Major Arterial Ramp: primary  # TODO: add is_link flag for ramp segments
     Minor Arterial: secondary
-    Minor Arterial Ramp: secondary
+    Minor Arterial Ramp: secondary  # TODO: add is_link flag for ramp segments
     Collector: tertiary
-    Collector Ramp: tertiary
+    Collector Ramp: tertiary  # TODO: add is_link flag for ramp segments
     Local: residential
     Laneway: service
     Other: unclassified
