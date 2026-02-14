@@ -20,8 +20,26 @@ fetch:
   - 10.5
   - 37.1
   crs: EPSG:4326
+last_fetch:
+  reference:
+    fetched_at: '2026-02-14T15:42:29.897391+00:00'
+    bbox:
+    - 9.8
+    - 36.5
+    - 10.5
+    - 37.1
+    bbox_buffered:
+    - 9.788781366540858
+    - 36.49101688825009
+    - 10.511218633459142
+    - 37.108983111749914
+    bbox_buffer_m: 1000.0
+    feature_count: 145127
+    geometry_types:
+    - LineString
+    output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-14T05:12:22.172439+00:00'
+  computed_at: '2026-02-14T15:05:02.146955+00:00'
   total_segments: 113566
   name_coverage_ratio: 0.0
   class_coverage_ratio: 0.0

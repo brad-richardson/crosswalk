@@ -53,7 +53,7 @@ last_fetch:
     - LineString
     output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-08T16:27:08.439681+00:00'
+  computed_at: '2026-02-14T15:49:49.634576+00:00'
   total_segments: 109960
   name_coverage_ratio: 0.0
   class_coverage_ratio: 0.0

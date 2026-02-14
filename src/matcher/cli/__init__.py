@@ -1,6 +1,10 @@
 """CLI package for the road network conflation pipeline."""
 
-import typer
+from dotenv import load_dotenv
+
+load_dotenv()
+
+import typer  # noqa: E402
 
 from .agent import agent_app
 from .classify import class_app
