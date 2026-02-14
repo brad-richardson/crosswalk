@@ -1,0 +1,6 @@
+{% macro app_card(title, description, href) %}
+<a href="{{ href }}" class="app-card">
+    <div class="app-card-title">{{ title }}</div>
+    <div class="app-card-desc">{{ description }}</div>
+</a>
+{% endmacro %}

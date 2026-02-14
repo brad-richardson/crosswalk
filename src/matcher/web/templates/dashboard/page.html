@@ -1,7 +1,18 @@
 {% extends "dashboard_base.html" %}
+{% from "components/app_card.html" import app_card %}
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+<!-- App cards -->
+<div class="app-card-grid">
+    {{ app_card("Label Creation", "Label individual candidate pairs with map view", "/labeling") }}
+    {{ app_card("Batch Label", "Label stratified batches of candidates", "/batch") }}
+    {{ app_card("Label Review", "Review and edit existing labels", "/review") }}
+    {{ app_card("Integration QA", "Review integration results and edges", "/qa") }}
+    {{ app_card("Browse", "Browse raw dataset features on map", "/browser") }}
+    {{ app_card("Audit", "Inspect features and distributions for labeled pairs", "/audit") }}
+</div>
+
 <!-- Overall metrics -->
 {% if overall %}
 <div class="metrics-row">
@@ -76,31 +87,55 @@
     <thead>
         <tr>
             <th data-sortable="dataset_id" data-sort-type="string">Dataset</th>
+            <th data-sortable="data" data-sort-type="string">Data</th>
+            <th data-sortable="features" data-sort-type="string">Features</th>
+            <th data-sortable="candidates" data-sort-type="string">Candidates</th>
             <th data-sortable="label_count" data-sort-type="number">Labels</th>
-            <th data-sortable="match" data-sort-type="number">Match</th>
-            <th data-sortable="no_match" data-sort-type="number">No Match</th>
-            <th data-sortable="unsure" data-sort-type="number">Unsure</th>
             <th data-sortable="f1" data-sort-type="number">F1</th>
             <th data-sortable="accuracy" data-sort-type="number">Accuracy</th>
-            <th data-sortable="cache" data-sort-type="string">Cache</th>
             <th>Actions</th>
         </tr>
     </thead>
     <tbody>
         {% for ds in datasets %}
-        <tr data-labels="{{ ds.label_count }}" data-f1="{{ ds.f1 if ds.f1 is not none else '' }}">
-            <td><a href="/dashboard/{{ ds.dataset_id }}">{{ ds.dataset_id }}</a></td>
+        <tr data-labels="{{ ds.label_count }}" data-f1="{{ ds.f1 if ds.f1 is not none else '' }}" data-has-data="{{ 'yes' if ds.has_data else 'no' }}">
+            <td>{% if ds.has_data %}<a href="/dashboard/{{ ds.dataset_id }}">{{ ds.dataset_id }}</a>{% else %}<span class="text-muted">{{ ds.dataset_id }}</span>{% endif %}</td>
+            <td>
+                {% if ds.has_data %}
+                    <span class="status-badge status-ready" title="Reference and target data available">Ready</span>
+                {% elif ds.has_reference and not ds.has_target %}
+                    <span class="status-badge status-partial" title="Reference only, target not fetched">Ref only</span>
+                {% elif ds.has_target and not ds.has_reference %}
+                    <span class="status-badge status-partial" title="Target only, reference not fetched">Target only</span>
+                {% else %}
+                    <span class="status-badge status-none" title="No data fetched">Not fetched</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if ds.cache_exists %}
+                    <span class="status-badge status-ready" title="Age: {{ ds.cache_age_hours|round(1) if ds.cache_age_hours else '?' }}h">{{ 'Fresh' if ds.cache_is_fresh else 'Stale' }}</span>
+                {% else %}
+                    <span class="status-badge status-none">&mdash;</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if ds.candidates_cached %}
+                    <span class="status-badge status-ready">Cached</span>
+                {% else %}
+                    <span class="status-badge status-none">&mdash;</span>
+                {% endif %}
+            </td>
             <td>{{ ds.label_count }}</td>
-            <td>{{ ds.label_dist.match }}</td>
-            <td>{{ ds.label_dist.no_match }}</td>
-            <td>{{ ds.label_dist.unsure }}</td>
             <td>{% if ds.f1 is not none %}{{ "%.2f"|format(ds.f1) }}{% else %}&mdash;{% endif %}</td>
             <td>{% if ds.accuracy is not none %}{{ "%.2f"|format(ds.accuracy) }}{% else %}&mdash;{% endif %}</td>
-            <td>{% if ds.cache_exists %}<span title="Age: {{ ds.cache_age_hours|round(1) if ds.cache_age_hours else '?' }}h">{{ 'Fresh' if ds.cache_is_fresh else 'Stale' }}</span>{% else %}None{% endif %}</td>
             <td class="action-links">
-                <a href="/labeling?dataset={{ ds.dataset_id }}">Label</a>
-                <a href="/review?dataset={{ ds.dataset_id }}">Review</a>
-                <a href="/qa?dataset={{ ds.dataset_id }}">QA</a>
+                {% if ds.has_data %}
+                    <a href="/labeling?dataset={{ ds.dataset_id }}">Label</a>
+                    <a href="/review?dataset={{ ds.dataset_id }}">Review</a>
+                    <a href="/qa?dataset={{ ds.dataset_id }}">QA</a>
+                {% else %}
+                    <span class="text-muted">Fetch data first</span>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

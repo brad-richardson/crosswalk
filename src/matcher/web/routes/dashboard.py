@@ -241,24 +241,46 @@ async def task_clear_cache(
     if cache_type not in VALID_CACHE_TYPES:
         return HTMLResponse(status_code=400, content="Invalid cache type")
 
+    from ...filenames import INTEGRATION_CACHE_DIR, LABELING_CACHE_DIR
+
     task_id = str(uuid.uuid4())[:8]
     cleared = []
     errors = []
 
-    from ..services import PROJECT_ROOT as PROJ
+    def _clear_files(label: str, directory: Path, pattern: str) -> None:
+        """Remove files matching a glob pattern from a directory."""
+        if not directory.exists():
+            return
+        files = list(directory.glob(pattern))
+        if not files:
+            return
+        try:
+            for f in files:
+                f.unlink()
+            cleared.append(f"{label} ({len(files)} files)")
+        except OSError as e:
+            logger.exception("Failed to clear %s cache", label)
+            errors.append(f"{label}: {e}")
 
-    cache_dirs = {"features": "features", "candidates": "candidates", "integration": "integration"}
-    for name, dirname in cache_dirs.items():
-        if cache_type not in (name, "all"):
-            continue
-        cache_dir = PROJ / "cache" / dirname
-        if cache_dir.exists():
-            try:
-                shutil.rmtree(cache_dir)
-                cleared.append(name)
-            except OSError as e:
-                logger.exception("Failed to clear %s cache", name)
-                errors.append(f"{name}: {e}")
+    def _clear_dir(label: str, directory: Path) -> None:
+        """Remove an entire directory tree."""
+        if not directory.exists():
+            return
+        try:
+            shutil.rmtree(directory)
+            cleared.append(label)
+        except OSError as e:
+            logger.exception("Failed to clear %s cache", label)
+            errors.append(f"{label}: {e}")
+
+    if cache_type in ("features", "all"):
+        _clear_files("features", LABELING_CACHE_DIR, "*_features_*.parquet")
+
+    if cache_type in ("candidates", "all"):
+        _clear_files("candidates", LABELING_CACHE_DIR, "*_candidates*.parquet")
+
+    if cache_type in ("integration", "all"):
+        _clear_dir("integration", INTEGRATION_CACHE_DIR)
 
     status = "failed" if errors else "completed"
     parts = []
