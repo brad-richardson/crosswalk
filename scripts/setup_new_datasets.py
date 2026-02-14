@@ -19,10 +19,9 @@ from pathlib import Path
 
 import geopandas as gpd
 import h3
-import numpy as np
 import pandas as pd
 import shapely
-from shapely.geometry import LineString, shape
+from shapely.geometry import shape
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STAGING = PROJECT_ROOT / "data" / "raw" / "staging"
@@ -79,17 +78,11 @@ def to_overture_schema(
     suffixes = [compute_spatial_suffix(g) for g in gdf.geometry]
 
     # Build IDs
-    ids = [
-        f"{id_prefix}_{uid}_{sfx}"
-        for uid, sfx in zip(gdf[id_col].astype(str), suffixes)
-    ]
+    ids = [f"{id_prefix}_{uid}_{sfx}" for uid, sfx in zip(gdf[id_col].astype(str), suffixes)]
 
     # Names
     if name_col and name_col in gdf.columns:
-        names = [
-            {"primary": str(v)} if pd.notna(v) and v else None
-            for v in gdf[name_col]
-        ]
+        names = [{"primary": str(v)} if pd.notna(v) and v else None for v in gdf[name_col]]
     else:
         names = [None] * len(gdf)
 
@@ -104,10 +97,7 @@ def to_overture_schema(
         classes = [default_class] * len(gdf)
 
     # Sources
-    sources = [
-        [{"dataset": source_name, "record_id": str(rid)}]
-        for rid in gdf[id_col]
-    ]
+    sources = [[{"dataset": source_name, "record_id": str(rid)}] for rid in gdf[id_col]]
 
     # Build result
     data = {
@@ -127,9 +117,7 @@ def to_overture_schema(
     result = gpd.GeoDataFrame(data, geometry=gdf.geometry.values, crs="EPSG:4326")
 
     # Add linear-referenced columns
-    result["names_lr"] = [
-        make_trivial_lr(n["primary"] if n else None) for n in names
-    ]
+    result["names_lr"] = [make_trivial_lr(n["primary"] if n else None) for n in names]
     result["subclass_lr"] = [make_trivial_lr(None)] * len(result)
     result["level_lr"] = [make_trivial_lr(0)] * len(result)
     result["road_flags_lr"] = [make_trivial_lr([])] * len(result)
@@ -177,10 +165,12 @@ def setup_japan():
     print(f"  N06 in Kanto: {len(n06_kanto)}")
 
     # Normalize columns
-    n06_kanto = n06_kanto.rename(columns={
-        "N06_007": "road_name",
-        "N06_003": "road_type_code",
-    })
+    n06_kanto = n06_kanto.rename(
+        columns={
+            "N06_007": "road_name",
+            "N06_003": "road_type_code",
+        }
+    )
     n06_kanto["source_dataset"] = "N06_expressways"
     n06_kanto["road_class"] = "motorway"  # All N06 are expressways
     n06_kanto["orig_id"] = [f"N06_{i}" for i in range(len(n06_kanto))]
@@ -203,10 +193,12 @@ def setup_japan():
         3: "secondary",
         9: "unknown",
     }
-    n10 = n10.rename(columns={
-        "N01_004": "road_name",
-        "N01_002": "road_class_code",
-    })
+    n10 = n10.rename(
+        columns={
+            "N01_004": "road_name",
+            "N01_002": "road_class_code",
+        }
+    )
     n10["source_dataset"] = "N10_emergency"
     n10["road_class"] = n10["road_class_code"].map(n10_class_mapping).fillna("unclassified")
     n10["orig_id"] = [f"N10_{i}" for i in range(len(n10))]
@@ -266,7 +258,7 @@ def setup_tunisia():
     if not zip_path.exists():
         zip_path = STAGING / "Northern_Africa.zip"
     if not zip_path.exists():
-        print(f"ERROR: Northern_Africa.zip not found")
+        print("ERROR: Northern_Africa.zip not found")
         sys.exit(1)
 
     print(f"Reading Tunisia records from {zip_path}...")
@@ -313,11 +305,13 @@ def setup_tunisia():
                             continue
 
                         props = feature.get("properties", {})
-                        features.append({
-                            "geometry": geom,
-                            "width_m": props.get("WidthMeters"),
-                        })
-                    except (json.JSONDecodeError, Exception) as e:
+                        features.append(
+                            {
+                                "geometry": geom,
+                                "width_m": props.get("WidthMeters"),
+                            }
+                        )
+                    except (json.JSONDecodeError, Exception):
                         continue
 
     print(f"  Total TUN records: {total_tun}")
