@@ -26,7 +26,7 @@ from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attrib
 logger = logging.getLogger(__name__)
 
 
-def _resolve_lr_name(
+def resolve_lr_name(
     names_lr_data,
     start_frac: float,
     end_frac: float,
@@ -59,7 +59,7 @@ def _resolve_lr_name(
         return None
 
 
-def _extract_pair_attributes(
+def extract_pair_attributes(
     ref_data,
     target_data,
     ref_class_column: str,
@@ -92,12 +92,12 @@ def _extract_pair_attributes(
         Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
     """
     ref_name = (
-        _resolve_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
+        resolve_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
         if has_ref_names_lr
         else None
     )
     target_name = (
-        _resolve_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
+        resolve_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
         if has_target_names_lr
         else None
     )
@@ -985,7 +985,7 @@ def generate_scored_candidates(
 
         # Extract names, classes, subclasses using LR-aware resolution
         ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
-            _extract_pair_attributes(
+            extract_pair_attributes(
                 ref_data=ref_row,
                 target_data=target_row,
                 ref_class_column=ref_class_column,
@@ -1339,7 +1339,7 @@ def build_views_from_feature_df(
 
         # Extract names, classes, subclasses using LR-aware resolution
         ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
-            _extract_pair_attributes(
+            extract_pair_attributes(
                 ref_data=ref_data,
                 target_data=target_data,
                 ref_class_column=ref_class_column,

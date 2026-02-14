@@ -13,13 +13,13 @@ fetch:
   class_column: FEATURE_CODE_DESC
   class_mapping:
     Expressway: motorway
-    Expressway Ramp: motorway  # TODO: add is_link flag for ramp segments
+    Expressway Ramp: motorway
     Major Arterial: primary
-    Major Arterial Ramp: primary  # TODO: add is_link flag for ramp segments
+    Major Arterial Ramp: primary
     Minor Arterial: secondary
-    Minor Arterial Ramp: secondary  # TODO: add is_link flag for ramp segments
+    Minor Arterial Ramp: secondary
     Collector: tertiary
-    Collector Ramp: tertiary  # TODO: add is_link flag for ramp segments
+    Collector Ramp: tertiary
     Local: residential
     Laneway: service
     Other: unclassified
@@ -65,7 +65,7 @@ last_fetch:
     - LineString
     output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-08T05:23:52.575920+00:00'
-  total_segments: 62411
+  computed_at: '2026-02-14T20:11:57.919711+00:00'
+  total_segments: 62383
   name_coverage_ratio: 1.0
   class_coverage_ratio: 0.9549

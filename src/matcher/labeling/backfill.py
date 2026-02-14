@@ -119,6 +119,8 @@ def backfill_lr_data(
         ref_subclass_lr = None
         ref_level_lr = None
         ref_road_flags_lr = None
+        ref_oneway_lr = None
+        ref_speed_limit_kph_lr = None
 
         if gers_id in ref_by_id.index:
             ref_row = ref_by_id.loc[gers_id]
@@ -126,6 +128,8 @@ def backfill_lr_data(
             ref_subclass_lr = ref_row.get("subclass_lr")
             ref_level_lr = ref_row.get("level_lr")
             ref_road_flags_lr = ref_row.get("road_flags_lr")
+            ref_oneway_lr = ref_row.get("oneway_lr")
+            ref_speed_limit_kph_lr = ref_row.get("speed_limit_kph_lr")
         else:
             not_found += 1
             continue
@@ -135,6 +139,8 @@ def backfill_lr_data(
         target_subclass_lr = None
         target_level_lr = None
         target_road_flags_lr = None
+        target_oneway_lr = None
+        target_speed_limit_kph_lr = None
 
         if target_by_id is not None and target_id in target_by_id.index:
             target_row = target_by_id.loc[target_id]
@@ -142,6 +148,8 @@ def backfill_lr_data(
             target_subclass_lr = target_row.get("subclass_lr")
             target_level_lr = target_row.get("level_lr")
             target_road_flags_lr = target_row.get("road_flags_lr")
+            target_oneway_lr = target_row.get("oneway_lr")
+            target_speed_limit_kph_lr = target_row.get("speed_limit_kph_lr")
 
         # Update the data store entry
         if not dry_run:
@@ -156,6 +164,10 @@ def backfill_lr_data(
                 target_level_lr=target_level_lr,
                 ref_road_flags_lr=ref_road_flags_lr,
                 target_road_flags_lr=target_road_flags_lr,
+                ref_oneway_lr=ref_oneway_lr,
+                target_oneway_lr=target_oneway_lr,
+                ref_speed_limit_kph_lr=ref_speed_limit_kph_lr,
+                target_speed_limit_kph_lr=target_speed_limit_kph_lr,
             )
             if success:
                 updated += 1
