@@ -1049,6 +1049,74 @@ body {
     background: #ffebee;
 }
 
+/* === Status Badges === */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.status-ready {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-partial {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.status-none {
+    color: #999;
+}
+
+.text-muted {
+    color: #999;
+}
+
+/* === App Card Grid === */
+.app-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.app-card {
+    display: block;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    text-decoration: none;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.app-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-color: #1976d2;
+}
+
+.app-card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.app-card:hover .app-card-title {
+    color: #1976d2;
+}
+
+.app-card-desc {
+    font-size: 0.8rem;
+    color: #666;
+    line-height: 1.4;
+}
+
 .chart-container {
     background: white;
     border: 1px solid #e0e0e0;

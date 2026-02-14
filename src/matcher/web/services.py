@@ -19,7 +19,13 @@ import pandas as pd
 
 from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..datasets.loader import DatasetLoader
-from ..filenames import LABELING_CACHE_DIR, integration_cache_dir
+from ..datasets.schema import list_dataset_configs
+from ..filenames import (
+    LABELING_CACHE_DIR,
+    find_overture_segments,
+    find_target_file,
+    integration_cache_dir,
+)
 from ..integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from ..labeling.data_loader import (
     CandidatePairView,
@@ -27,6 +33,7 @@ from ..labeling.data_loader import (
     build_views_from_feature_df,
     filter_candidates,
     generate_scored_candidates_with_cache,
+    get_cache_info,
     get_cached_matcher,
     get_feature_cache_info,
     get_feature_cache_path,
@@ -392,8 +399,16 @@ def get_overall_metrics() -> dict | None:
 
 
 def get_dataset_metrics() -> list[dict]:
-    """Per-dataset metrics combining labels + CV results + cache status."""
-    datasets = list_datasets()
+    """Per-dataset metrics combining labels + CV results + cache status.
+
+    Includes ALL configured datasets (from YAML configs), not just those
+    with fetched data. Each entry indicates whether raw data, feature cache,
+    and candidate cache are available.
+    """
+    available = set(list_datasets())
+    all_configs = set(list_dataset_configs())
+    all_dataset_ids = sorted(available | all_configs)
+
     rows = _read_cv_results()
 
     # Build lookup: dataset -> latest CV row
@@ -404,7 +419,14 @@ def get_dataset_metrics() -> list[dict]:
             cv_latest[ds] = r
 
     result = []
-    for ds in datasets:
+    for ds in all_dataset_ids:
+        has_data = ds in available
+
+        # Check for reference and target files individually
+        has_reference = find_overture_segments(DATA_DIR, ds) is not None
+        has_target = find_target_file(DATA_DIR, ds) is not None
+
+        # Labels (only check if data exists, since LabelStore may still have labels)
         store = LabelStore(ds)
         df = store.df
         label_count = len(df)
@@ -419,19 +441,24 @@ def get_dataset_metrics() -> list[dict]:
         accuracy = float(cv["accuracy_mean"]) if cv else None
         n_samples = int(cv["n_samples"]) if cv else None
 
-        cache_info = get_feature_cache_info(ds)
+        feature_info = get_feature_cache_info(ds)
+        candidate_info = get_cache_info(ds)
 
         result.append(
             {
                 "dataset_id": ds,
+                "has_data": has_data,
+                "has_reference": has_reference,
+                "has_target": has_target,
                 "label_count": label_count,
                 "label_dist": label_dist,
                 "f1": f1,
                 "accuracy": accuracy,
                 "n_samples": n_samples,
-                "cache_exists": cache_info["exists"],
-                "cache_age_hours": cache_info.get("age_hours"),
-                "cache_is_fresh": cache_info.get("is_fresh"),
+                "cache_exists": feature_info["exists"],
+                "cache_age_hours": feature_info.get("age_hours"),
+                "cache_is_fresh": feature_info.get("is_fresh"),
+                "candidates_cached": candidate_info["exists"],
             }
         )
 
