@@ -42,7 +42,7 @@ from ..labeling.data_loader import (
 )
 from ..labeling.data_store import DataStore
 from ..labeling.feature_store import FeatureStore
-from ..labeling.label_store import LabelStore
+from ..labeling.label_store import LabelStore, get_data_version
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,13 @@ def record_label(
     labeler = get_labeler_name()
     session_id = get_session_id()
 
+    # Compute data versions from source files
+    loader = DatasetLoader(DATA_DIR)
+    ref_path = loader.find_reference_path(dataset_id)
+    target_path = loader.find_target_path(dataset_id)
+    ref_data_version = get_data_version(ref_path) if ref_path else None
+    target_data_version = get_data_version(target_path) if target_path else None
+
     store.add(
         gers_id=pair.ref_id,
         target_id=pair.target_id,
@@ -176,6 +183,8 @@ def record_label(
         ref_end_pct=pair.ref_end_frac,
         target_start_pct=pair.target_start_frac,
         target_end_pct=pair.target_end_frac,
+        ref_data_version=ref_data_version,
+        target_data_version=target_data_version,
         ref_geometry=pair.ref_geometry,
         target_geometry=pair.target_geometry,
         ref_name_raw=pair.ref_name,

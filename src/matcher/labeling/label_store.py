@@ -127,10 +127,10 @@ SUBSEGMENT_DEFAULTS = {
 }
 
 # Default values for version columns (None = pre-versioning label)
+# Note: feature_version belongs in FeatureStore, not human labels
 VERSION_DEFAULTS = {
     "ref_data_version": None,
     "target_data_version": None,
-    "feature_version": None,
 }
 
 
@@ -386,6 +386,8 @@ class LabelStore:
             "target_start_pct": target_start_pct,
             "target_end_pct": target_end_pct,
             "is_subsegment": is_subseg,
+            "ref_data_version": ref_data_version,
+            "target_data_version": target_data_version,
         }
 
         # Remove any existing label for this pair (re-labeling replaces, not duplicates)
@@ -581,6 +583,11 @@ class LabelStore:
         if len(features) == 0:
             logger.warning(f"No features found in {features_dir}")
             return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + FEATURE_COLUMNS + ["dataset"])
+
+        # Drop feature_version from human labels if present — it belongs in
+        # FeatureStore and having it on both sides creates _x/_y suffixes
+        if "feature_version" in human_labels.columns:
+            human_labels = human_labels.drop(columns=["feature_version"])
 
         # Join labels with features
         result = human_labels.merge(
