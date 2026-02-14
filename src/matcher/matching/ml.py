@@ -40,7 +40,6 @@ from ..config import (
     SEMANTIC_FEATURES,
     default_worker_count,
 )
-from ..features.semantic import _extract_name_string
 from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 from .types import MatchDecision, MatchResult
@@ -104,35 +103,15 @@ def _extract_lr_attributes_for_pair(
         ref_start, ref_end = 0.0, 1.0
         target_start, target_end = 0.0, 1.0
 
-    # Extract reference attributes
-    ref_names_lr = worker_data.get("ref_names_lr")
-    if ref_names_lr is not None:
-        lr_data = ref_names_lr[ref_idx]
-        if lr_data is not None:
-            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-            ref_attrs = extract_aligned_attributes({"name": lr_attr}, ref_start, ref_end)
-            ref_name = ref_attrs.get("name")
-        else:
-            # Non-LR fallback: extract string from Overture's nested name format
-            ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
-    else:
-        # Non-LR fallback: extract string from Overture's nested name format
-        ref_name = _extract_name_string(worker_data["ref_names"][ref_idx])
+    # Extract reference name from LR data
+    # All datasets are expected to have names_lr populated (Overture has native LR,
+    # target datasets get trivial LR via _add_trivial_lr_columns)
+    ref_name = _extract_lr_name(worker_data.get("ref_names_lr"), ref_idx, ref_start, ref_end)
 
-    # Extract target attributes (typically trivial LR, but support full LR)
-    target_names_lr = worker_data.get("target_names_lr")
-    if target_names_lr is not None:
-        lr_data = target_names_lr[target_idx]
-        if lr_data is not None:
-            lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-            target_attrs = extract_aligned_attributes({"name": lr_attr}, target_start, target_end)
-            target_name = target_attrs.get("name")
-        else:
-            # Non-LR fallback: extract string from Overture's nested name format
-            target_name = _extract_name_string(worker_data["target_names"][target_idx])
-    else:
-        # Non-LR fallback: extract string from Overture's nested name format
-        target_name = _extract_name_string(worker_data["target_names"][target_idx])
+    # Extract target name from LR data
+    target_name = _extract_lr_name(
+        worker_data.get("target_names_lr"), target_idx, target_start, target_end
+    )
 
     # Classes and subclasses - use flat values for now (LR support can be added)
     ref_class = worker_data["ref_classes"][ref_idx]
@@ -191,6 +170,36 @@ def _extract_lr_value(lr_column, idx: int, start_frac: float, end_frac: float):
         lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
         attrs = extract_aligned_attributes({"value": lr_attr}, start_frac, end_frac)
         return attrs.get("value")
+    except Exception:
+        return None
+
+
+def _extract_lr_name(lr_column, idx: int, start_frac: float, end_frac: float) -> str | None:
+    """Extract name from an LR column for a given index and alignment range.
+
+    Specialized version of _extract_lr_value for names, using "name" as the
+    attribute key (matching the LR schema convention).
+
+    Args:
+        lr_column: Array of LR data (or None)
+        idx: Row index
+        start_frac: Start of alignment (0-1)
+        end_frac: End of alignment (0-1)
+
+    Returns:
+        The majority name for the aligned range, or None if not available
+    """
+    if lr_column is None:
+        return None
+
+    lr_data = lr_column[idx]
+    if lr_data is None:
+        return None
+
+    try:
+        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+        attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
+        return attrs.get("name")
     except Exception:
         return None
 
@@ -1538,6 +1547,7 @@ class MLMatcher:
             return []
 
         # Prepare worker data using shared pipeline setup
+        # Pass pre-extracted geometry arrays to avoid redundant GeoSeries->ndarray conversion
         from ..features.pipeline import prepare_worker_data
 
         t0 = time.perf_counter()
@@ -1554,6 +1564,8 @@ class MLMatcher:
             ref_subclass_column=ref_subclass_column,
             target_subclass_column=target_subclass_column,
             n_jobs=n_jobs,
+            ref_geoms=ref_geoms_arr,
+            target_geoms=target_geoms_arr,
         )
         worker_data = pipeline_result.worker_data
         alignments = pipeline_result.alignments

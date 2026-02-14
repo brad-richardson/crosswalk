@@ -18,7 +18,6 @@ from shapely.ops import transform
 from ..blocking import generate_candidates
 from ..config import FEATURE_COLUMNS, FEATURE_VERSION, default_worker_count, settings
 from ..features.alignment import create_subline
-from ..features.semantic import _extract_name_string
 from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
 from ..utils import ensure_projected_crs, filter_to_linestrings
@@ -29,68 +28,63 @@ logger = logging.getLogger(__name__)
 
 def _resolve_lr_name(
     names_lr_data,
-    name_raw,
     start_frac: float,
     end_frac: float,
 ) -> str | None:
-    """Resolve display name using linear-referenced data when available.
+    """Resolve display name from linear-referenced data for an aligned portion.
 
     For segments with varying names along their length (e.g., a segment that is
     "First Avenue" from 0-40% and "Second Street" from 40-100%), this returns the
     name covering the majority of the aligned portion, rather than always returning
     the segment's primary name.
 
+    All datasets are expected to have names_lr populated (Overture segments have
+    native LR data, target datasets get trivial LR via _add_trivial_lr_columns).
+
     Args:
         names_lr_data: Linear-referenced names data (list of dicts), or None
-        name_raw: Raw name value (string or dict with 'primary' key) as fallback
         start_frac: Start fraction of aligned portion (0.0-1.0)
         end_frac: End fraction of aligned portion (0.0-1.0)
 
     Returns:
         Resolved name string, or None if no name available
     """
-    if names_lr_data is not None:
-        try:
-            lr_attr = LinearReferencedAttribute.from_dict_list(names_lr_data)
-            attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
-            name = attrs.get("name")
-            if name is not None:
-                return name
-        except (TypeError, KeyError, ValueError):
-            pass
-    # Fallback to primary/flat name extraction
-    return _extract_name_string(name_raw)
+    if names_lr_data is None:
+        return None
+    try:
+        lr_attr = LinearReferencedAttribute.from_dict_list(names_lr_data)
+        attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
+        return attrs.get("name")
+    except (TypeError, KeyError, ValueError):
+        return None
 
 
 def _extract_pair_attributes(
     ref_data,
     target_data,
-    ref_name_column: str,
-    target_name_column: str,
     ref_class_column: str,
     target_class_column: str,
     ref_start_frac: float,
     ref_end_frac: float,
     target_start_frac: float,
     target_end_frac: float,
-    has_ref_name: bool,
-    has_target_name: bool,
-    has_ref_class: bool,
-    has_target_class: bool,
-    has_ref_subclass: bool,
-    has_target_subclass: bool,
     has_ref_names_lr: bool,
     has_target_names_lr: bool,
+    has_ref_class: bool,
+    has_target_class: bool,
+    has_ref_subclass: bool = False,
+    has_target_subclass: bool = False,
 ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
     """Extract names, classes, and subclasses for a candidate pair.
 
-    Uses LR-aware name resolution when linear-referenced name data is available,
-    falling back to the primary name otherwise.
+    Names are always resolved from linear-referenced (LR) data. All datasets
+    are expected to have names_lr populated (Overture has native LR, target
+    datasets get trivial LR via _add_trivial_lr_columns).
 
     Args:
         ref_data: Reference segment data (dict-like with .get())
         target_data: Target segment data (dict-like with .get())
-        *_column: Column names for name/class/subclass
+        *_column: Column names for class
         *_frac: Alignment fractions for LR resolution
         has_*: Flags indicating whether columns exist
 
@@ -98,23 +92,13 @@ def _extract_pair_attributes(
         Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
     """
     ref_name = (
-        _resolve_lr_name(
-            ref_data.get("names_lr") if has_ref_names_lr else None,
-            ref_data.get(ref_name_column) if has_ref_name else None,
-            ref_start_frac,
-            ref_end_frac,
-        )
-        if has_ref_name or has_ref_names_lr
+        _resolve_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
+        if has_ref_names_lr
         else None
     )
     target_name = (
-        _resolve_lr_name(
-            target_data.get("names_lr") if has_target_names_lr else None,
-            target_data.get(target_name_column) if has_target_name else None,
-            target_start_frac,
-            target_end_frac,
-        )
-        if has_target_name or has_target_names_lr
+        _resolve_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
+        if has_target_names_lr
         else None
     )
     ref_class = ref_data.get(ref_class_column) if has_ref_class else None
@@ -971,8 +955,6 @@ def generate_scored_candidates(
     ref_proj_lookup = reference_proj.set_index(ref_id_column)
     target_proj_lookup = target_proj.set_index(target_id_column)
 
-    has_ref_name = ref_name_column in reference.columns
-    has_target_name = target_name_column in target.columns
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
     has_ref_subclass = "subclass" in reference.columns
@@ -1006,22 +988,18 @@ def generate_scored_candidates(
             _extract_pair_attributes(
                 ref_data=ref_row,
                 target_data=target_row,
-                ref_name_column=ref_name_column,
-                target_name_column=target_name_column,
                 ref_class_column=ref_class_column,
                 target_class_column=target_class_column,
                 ref_start_frac=ref_start_frac,
                 ref_end_frac=ref_end_frac,
                 target_start_frac=target_start_frac,
                 target_end_frac=target_end_frac,
-                has_ref_name=has_ref_name,
-                has_target_name=has_target_name,
+                has_ref_names_lr=has_ref_names_lr,
+                has_target_names_lr=has_target_names_lr,
                 has_ref_class=has_ref_class,
                 has_target_class=has_target_class,
                 has_ref_subclass=has_ref_subclass,
                 has_target_subclass=has_target_subclass,
-                has_ref_names_lr=has_ref_names_lr,
-                has_target_names_lr=has_target_names_lr,
             )
         )
 
@@ -1320,8 +1298,6 @@ def build_views_from_feature_df(
 
     logger.info(f"[4/5] Built lookups in {time.perf_counter() - t_lookup:.1f}s")
 
-    has_ref_name = ref_name_column in reference.columns
-    has_target_name = target_name_column in target.columns
     has_ref_class = ref_class_column in reference.columns
     has_target_class = target_class_column in target.columns
     has_ref_subclass = "subclass" in reference.columns
@@ -1366,22 +1342,18 @@ def build_views_from_feature_df(
             _extract_pair_attributes(
                 ref_data=ref_data,
                 target_data=target_data,
-                ref_name_column=ref_name_column,
-                target_name_column=target_name_column,
                 ref_class_column=ref_class_column,
                 target_class_column=target_class_column,
                 ref_start_frac=ref_start_frac,
                 ref_end_frac=ref_end_frac,
                 target_start_frac=target_start_frac,
                 target_end_frac=target_end_frac,
-                has_ref_name=has_ref_name,
-                has_target_name=has_target_name,
+                has_ref_names_lr=has_ref_names_lr,
+                has_target_names_lr=has_target_names_lr,
                 has_ref_class=has_ref_class,
                 has_target_class=has_target_class,
                 has_ref_subclass=has_ref_subclass,
                 has_target_subclass=has_target_subclass,
-                has_ref_names_lr=has_ref_names_lr,
-                has_target_names_lr=has_target_names_lr,
             )
         )
 

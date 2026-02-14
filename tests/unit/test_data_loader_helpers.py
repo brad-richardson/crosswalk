@@ -25,45 +25,41 @@ class TestResolveLrName:
     """Tests for _resolve_lr_name()."""
 
     @pytest.mark.parametrize(
-        "lr_data, name_raw, start, end, expected",
+        "lr_data, start, end, expected",
         [
-            # Fallback cases: no LR data
-            (None, {"primary": "Main Street"}, 0.0, 1.0, "Main Street"),
-            (None, "Main Street", 0.0, 1.0, "Main Street"),
-            (None, None, 0.0, 1.0, None),
+            # No LR data → None
+            (None, 0.0, 1.0, None),
             # LR resolution: aligned portion selects correct name
-            (SPLIT_LR, {"primary": "Second Street"}, 0.0, 0.4, "First Avenue"),
-            (SPLIT_LR, {"primary": "Second Street"}, 0.6, 1.0, "Second Street"),
+            (SPLIT_LR, 0.0, 0.4, "First Avenue"),
+            (SPLIT_LR, 0.6, 1.0, "Second Street"),
             # Majority wins when spanning boundary (0.5-0.8 > 0.3-0.5)
-            (SPLIT_LR, {"primary": "Second Street"}, 0.3, 0.8, "Second Street"),
+            (SPLIT_LR, 0.3, 0.8, "Second Street"),
             # Uniform LR
-            ([{"between": [0.0, 1.0], "value": "Main Street"}], None, 0.0, 1.0, "Main Street"),
+            ([{"between": [0.0, 1.0], "value": "Main Street"}], 0.0, 1.0, "Main Street"),
         ],
         ids=[
-            "no_lr_dict_name",
-            "no_lr_string_name",
-            "no_lr_no_name",
+            "no_lr_data",
             "lr_first_half",
             "lr_second_half",
             "lr_majority_wins",
             "lr_uniform",
         ],
     )
-    def test_name_resolution(self, lr_data, name_raw, start, end, expected):
-        assert _resolve_lr_name(lr_data, name_raw, start, end) == expected
+    def test_name_resolution(self, lr_data, start, end, expected):
+        assert _resolve_lr_name(lr_data, start, end) == expected
 
     @pytest.mark.parametrize(
-        "lr_data, name_raw, expected",
+        "lr_data, expected",
         [
-            ([{"invalid": "data"}], {"primary": "Fallback"}, "Fallback"),
-            ([], {"primary": "Fallback"}, "Fallback"),
-            ([{"between": [0.0, 1.0], "value": None}], {"primary": "Fallback"}, "Fallback"),
+            ([{"invalid": "data"}], None),
+            ([], None),
+            ([{"between": [0.0, 1.0], "value": None}], None),
         ],
         ids=["malformed", "empty_list", "none_value"],
     )
-    def test_fallback_on_bad_lr_data(self, lr_data, name_raw, expected):
-        """Should fall back to raw name when LR data is unusable."""
-        assert _resolve_lr_name(lr_data, name_raw, 0.0, 1.0) == expected
+    def test_returns_none_on_bad_lr_data(self, lr_data, expected):
+        """Should return None when LR data is unusable."""
+        assert _resolve_lr_name(lr_data, 0.0, 1.0) == expected
 
 
 class TestExtractPairAttributes:
@@ -74,8 +70,6 @@ class TestExtractPairAttributes:
         ref_data,
         target_data,
         *,
-        has_ref_name=True,
-        has_target_name=True,
         has_ref_class=True,
         has_target_class=True,
         has_ref_subclass=False,
@@ -91,74 +85,88 @@ class TestExtractPairAttributes:
         return _extract_pair_attributes(
             ref_data=ref_data,
             target_data=target_data,
-            ref_name_column="names",
-            target_name_column="names",
             ref_class_column="class",
             target_class_column="class",
             ref_start_frac=ref_start,
             ref_end_frac=ref_end,
             target_start_frac=target_start,
             target_end_frac=target_end,
-            has_ref_name=has_ref_name,
-            has_target_name=has_target_name,
+            has_ref_names_lr=has_ref_names_lr,
+            has_target_names_lr=has_target_names_lr,
             has_ref_class=has_ref_class,
             has_target_class=has_target_class,
             has_ref_subclass=has_ref_subclass,
             has_target_subclass=has_target_subclass,
-            has_ref_names_lr=has_ref_names_lr,
-            has_target_names_lr=has_target_names_lr,
         )
 
     def test_extracts_all_attributes(self):
         """All six attributes extracted when all columns present."""
         ref = {
-            "names": {"primary": "Main Street"},
             "class": "primary",
             "subclass": "highway",
             "names_lr": [{"between": [0.0, 1.0], "value": "Main Street"}],
         }
-        target = {"names": {"primary": "Main St"}, "class": "residential", "subclass": "local"}
+        target = {
+            "class": "residential",
+            "subclass": "local",
+            "names_lr": [{"between": [0.0, 1.0], "value": "Main St"}],
+        }
         result = self._call(
-            ref, target, has_ref_subclass=True, has_target_subclass=True, has_ref_names_lr=True
+            ref,
+            target,
+            has_ref_subclass=True,
+            has_target_subclass=True,
+            has_ref_names_lr=True,
+            has_target_names_lr=True,
         )
         assert result == ("Main Street", "Main St", "primary", "residential", "highway", "local")
 
     @pytest.mark.parametrize(
-        "has_ref_name, has_target_name, has_ref_class, has_target_class",
+        "has_ref_names_lr, has_target_names_lr, has_ref_class, has_target_class",
         [
             (False, False, True, True),
             (True, True, False, False),
         ],
-        ids=["missing_names", "missing_classes"],
+        ids=["missing_names_lr", "missing_classes"],
     )
     def test_missing_columns_return_none(
-        self, has_ref_name, has_target_name, has_ref_class, has_target_class
+        self, has_ref_names_lr, has_target_names_lr, has_ref_class, has_target_class
     ):
         """Missing columns should produce None for those attributes."""
-        ref = {"names": {"primary": "A"}, "class": "primary"}
-        target = {"names": {"primary": "B"}, "class": "secondary"}
+        ref = {
+            "class": "primary",
+            "names_lr": [{"between": [0.0, 1.0], "value": "A"}],
+        }
+        target = {
+            "class": "secondary",
+            "names_lr": [{"between": [0.0, 1.0], "value": "B"}],
+        }
         result = self._call(
             ref,
             target,
-            has_ref_name=has_ref_name,
-            has_target_name=has_target_name,
+            has_ref_names_lr=has_ref_names_lr,
+            has_target_names_lr=has_target_names_lr,
             has_ref_class=has_ref_class,
             has_target_class=has_target_class,
         )
         ref_name, target_name, ref_class, target_class, _, _ = result
-        if not has_ref_name:
+        if not has_ref_names_lr:
             assert ref_name is None and target_name is None
         if not has_ref_class:
             assert ref_class is None and target_class is None
 
     def test_lr_overrides_primary_name_for_partial_alignment(self):
         """LR name for the aligned portion should override the primary name (original bug)."""
-        ref = {"names": {"primary": "Second Street"}, "names_lr": SPLIT_LR, "class": "primary"}
-        target = {"names": {"primary": "FIRST AVENUE"}, "class": "residential"}
+        ref = {"names_lr": SPLIT_LR, "class": "primary"}
+        target = {
+            "names_lr": [{"between": [0.0, 1.0], "value": "FIRST AVENUE"}],
+            "class": "residential",
+        }
         ref_name, target_name, *_ = self._call(
             ref,
             target,
             has_ref_names_lr=True,
+            has_target_names_lr=True,
             ref_start=0.0,
             ref_end=0.4,
         )
@@ -167,9 +175,21 @@ class TestExtractPairAttributes:
 
     def test_works_with_pandas_series(self):
         """Should accept both dicts and pandas Series (from .iloc[0])."""
-        ref = pd.Series({"names": {"primary": "Oak Ave"}, "class": "secondary"})
-        target = pd.Series({"names": {"primary": "Oak Avenue"}, "class": "tertiary"})
-        ref_name, target_name, ref_class, target_class, _, _ = self._call(ref, target)
+        ref = pd.Series(
+            {
+                "class": "secondary",
+                "names_lr": [{"between": [0.0, 1.0], "value": "Oak Ave"}],
+            }
+        )
+        target = pd.Series(
+            {
+                "class": "tertiary",
+                "names_lr": [{"between": [0.0, 1.0], "value": "Oak Avenue"}],
+            }
+        )
+        ref_name, target_name, ref_class, target_class, _, _ = self._call(
+            ref, target, has_ref_names_lr=True, has_target_names_lr=True
+        )
         assert (ref_name, target_name) == ("Oak Ave", "Oak Avenue")
         assert (ref_class, target_class) == ("secondary", "tertiary")
 

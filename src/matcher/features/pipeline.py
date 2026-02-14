@@ -62,6 +62,8 @@ def prepare_worker_data(
     ref_subclass_column: str = "subclass",
     target_subclass_column: str = "subclass",
     n_jobs: int = -1,
+    ref_geoms: np.ndarray | None = None,
+    target_geoms: np.ndarray | None = None,
 ) -> WorkerDataResult:
     """Prepare worker_data dict for parallel feature computation.
 
@@ -84,6 +86,9 @@ def prepare_worker_data(
         ref_subclass_column: Column name for reference subclass
         target_subclass_column: Column name for target subclass
         n_jobs: Number of parallel jobs for alignment (-1 for all cores)
+        ref_geoms: Pre-extracted reference geometry array (avoids re-conversion
+            if caller already materialized it, e.g., for overlap filtering)
+        target_geoms: Pre-extracted target geometry array (same optimization)
 
     Returns:
         WorkerDataResult with worker_data dict and side-products
@@ -92,8 +97,10 @@ def prepare_worker_data(
 
     # --- Step 1: Extract numpy arrays from GeoDataFrames ---
     t0 = time.perf_counter()
-    ref_geoms = reference.geometry.to_numpy()
-    target_geoms = target.geometry.to_numpy()
+    if ref_geoms is None:
+        ref_geoms = reference.geometry.to_numpy()
+    if target_geoms is None:
+        target_geoms = target.geometry.to_numpy()
 
     ref_names = _extract_column_array(reference, ref_name_column, len(reference))
     target_names = _extract_column_array(target, target_name_column, len(target))
@@ -181,17 +188,16 @@ def prepare_worker_data(
         )
     logger.debug(f"[TIMING] topology_computation: {time.perf_counter() - t0:.2f}s")
 
-    # --- Step 5: Compute graphlet features ---
+    # --- Step 5: Filter reference to candidate-only segments ---
     sorted_ref_indices = sorted(unique_ref_indices)
     ref_candidates_only = reference.iloc[sorted_ref_indices].reset_index(drop=True)
-    target_candidates_only_proj = target.iloc[sorted_target_indices].reset_index(drop=True)
-
-    logger.info(
-        f"Computing graphlet features for {len(ref_candidates_only)} reference "
-        f"and {len(target_candidates_only_proj)} target segments..."
-    )
 
     # --- Step 6: Compute graphlet features ---
+    logger.info(
+        f"Computing graphlet features for {len(ref_candidates_only)} reference "
+        f"and {len(target_candidates_only)} target segments..."
+    )
+
     t0 = time.perf_counter()
     ref_graphlet_data = precompute_graphlet_features(
         ref_candidates_only,
@@ -203,7 +209,7 @@ def prepare_worker_data(
 
     t0 = time.perf_counter()
     target_graphlet_data = precompute_graphlet_features(
-        target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
+        target_candidates_only, id_column=target_id_column, tolerance_m=5.0
     )
     logger.debug(f"[TIMING] graphlet_target: {time.perf_counter() - t0:.2f}s")
 
