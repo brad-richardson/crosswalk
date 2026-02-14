@@ -647,6 +647,111 @@ def _load_ms_roads_tsv(
     return gpd.GeoDataFrame(features, geometry="geometry", crs="EPSG:4326")
 
 
+# Extension patterns for each file format (used for ZIP extraction)
+_FORMAT_EXTENSIONS: dict[str, list[str]] = {
+    "shp": ["*.shp"],
+    "gpkg": ["*.gpkg"],
+    "gml": ["*.gml"],
+    "geojson": ["*.geojson", "*.json"],
+    "ms_roads_tsv": ["*.tsv"],
+}
+
+
+def _find_data_file_in_zip(
+    extract_path: Path,
+    file_format: str,
+    file_pattern: str | None = None,
+) -> Path:
+    """Find the data file within an extracted ZIP archive.
+
+    Args:
+        extract_path: Root directory of extracted ZIP contents
+        file_format: Expected format (shp, gpkg, gml, geojson, gdb, ms_roads_tsv)
+        file_pattern: Optional glob pattern to select a specific file (matched
+            against path relative to extract_path, e.g. "UTF-8/*.geojson")
+
+    Returns:
+        Path to the data file to load
+    """
+    import fnmatch
+
+    # GDB is a directory, not a file
+    if file_format == "gdb":
+        found_dirs = [d for d in extract_path.rglob("*.gdb") if d.is_dir()]
+        if not found_dirs:
+            raise ValueError("No .gdb folder found in zip")
+        return found_dirs[0]
+
+    # Look up extensions for this format
+    extensions = _FORMAT_EXTENSIONS.get(file_format)
+    if extensions is None:
+        raise ValueError(f"Unsupported file format: {file_format}")
+
+    found_files: list[Path] = []
+    for ext in extensions:
+        found_files.extend(extract_path.rglob(ext))
+
+    # ms_roads_tsv fallback: try extensionless files
+    if not found_files and file_format == "ms_roads_tsv":
+        found_files = [f for f in extract_path.rglob("*") if f.is_file() and not f.suffix]
+
+    if not found_files:
+        raise ValueError(f"No {file_format} file found in zip")
+
+    # Filter by file_pattern if specified (match against relative path)
+    if file_pattern and len(found_files) > 1:
+        filtered = [
+            f
+            for f in found_files
+            if fnmatch.fnmatch(str(f.relative_to(extract_path)), file_pattern)
+        ]
+        if filtered:
+            found_files = filtered
+
+    return found_files[0]
+
+
+# Preferred layer names for multi-layer formats (gdb)
+_GDB_PREFERRED_LAYERS = [
+    "CENTERLINE",
+    "centerline",
+    "road_link",
+    "RoadLink",
+    "roads",
+    "road",
+]
+
+
+def _load_geodata_file(
+    data_file: Path,
+    file_format: str,
+    encoding: str | None = None,
+) -> gpd.GeoDataFrame:
+    """Load a geodata file using geopandas with format-specific options.
+
+    Handles GML driver selection and GDB layer auto-selection.
+    """
+    read_kwargs: dict[str, Any] = {}
+    if encoding:
+        read_kwargs["encoding"] = encoding
+        logger.info(f"Using encoding: {encoding}")
+    if file_format == "gml":
+        read_kwargs["driver"] = "GML"
+    elif file_format == "gdb":
+        import pyogrio
+
+        layers = pyogrio.list_layers(data_file)
+        layer_names = [layer_info[0] for layer_info in layers]
+        logger.debug(f"Available layers: {layer_names}")
+        for preferred in _GDB_PREFERRED_LAYERS:
+            if preferred in layer_names:
+                read_kwargs["layer"] = preferred
+                logger.info(f"Selected layer: {preferred}")
+                break
+
+    return gpd.read_file(data_file, **read_kwargs)
+
+
 def fetch_download(
     url: str,
     output_path: Path,
@@ -766,59 +871,8 @@ def fetch_download(
                     zf.extractall(extract_dir)
                 extract_path = Path(extract_dir)
 
-                # Find the data file
-                if file_format == "shp":
-                    found_files = list(extract_path.rglob("*.shp"))
-                    if not found_files:
-                        raise ValueError("No .shp file found in zip")
-                elif file_format == "gpkg":
-                    found_files = list(extract_path.rglob("*.gpkg"))
-                    if not found_files:
-                        raise ValueError("No .gpkg file found in zip")
-                elif file_format == "gml":
-                    found_files = list(extract_path.rglob("*.gml"))
-                    if not found_files:
-                        raise ValueError("No .gml file found in zip")
-                elif file_format == "geojson":
-                    found_files = list(extract_path.rglob("*.geojson")) + list(
-                        extract_path.rglob("*.json")
-                    )
-                    if not found_files:
-                        raise ValueError("No .geojson file found in zip")
-                elif file_format == "gdb":
-                    found_dirs = [d for d in extract_path.rglob("*.gdb") if d.is_dir()]
-                    if not found_dirs:
-                        raise ValueError("No .gdb folder found in zip")
-                    data_file = found_dirs[0]
-                    found_files = None  # handled above
-                elif file_format == "ms_roads_tsv":
-                    found_files = list(extract_path.rglob("*.tsv"))
-                    if not found_files:
-                        # Sometimes TSV files don't have extension
-                        found_files = [
-                            f for f in extract_path.rglob("*") if f.is_file() and not f.suffix
-                        ]
-                    if not found_files:
-                        raise ValueError("No .tsv file found in zip")
-                else:
-                    raise ValueError(f"Unsupported file format: {file_format}")
-
-                # Filter by file_pattern if specified (for formats with multiple files)
-                if found_files is not None:
-                    if file_pattern and len(found_files) > 1:
-                        import fnmatch
-
-                        # Match against relative path to handle subdirs (e.g., UTF-8/)
-                        filtered = [
-                            f
-                            for f in found_files
-                            if fnmatch.fnmatch(str(f.relative_to(extract_path)), file_pattern)
-                        ]
-                        if filtered:
-                            found_files = filtered
-                    data_file = found_files[0]
-
-                logger.info(f"Loading from: {data_file}")
+                # Find the data file within the extracted ZIP
+                data_file = _find_data_file_in_zip(extract_path, file_format, file_pattern)
             finally:
                 # Clean up extract directory after we're done (handled after geopandas load)
                 pass
@@ -830,37 +884,7 @@ def fetch_download(
             gdf = _load_ms_roads_tsv(data_file, country_filter=where_clause)
             logger.info(f"Loaded {len(gdf)} features from MS Roads TSV")
         else:
-            # Load with geopandas
-            read_kwargs: dict[str, Any] = {}
-            if encoding:
-                read_kwargs["encoding"] = encoding
-                logger.info(f"Using encoding: {encoding}")
-            if file_format == "gml":
-                read_kwargs["driver"] = "GML"
-
-            # For multi-layer formats (gdb, gpkg), select the road centerline layer
-            if file_format == "gdb":
-                import pyogrio
-
-                layers = pyogrio.list_layers(data_file)
-                layer_names = [layer_info[0] for layer_info in layers]
-                logger.debug(f"Available layers: {layer_names}")
-
-                # Prefer centerline/road layers
-                for preferred in [
-                    "CENTERLINE",
-                    "centerline",
-                    "road_link",
-                    "RoadLink",
-                    "roads",
-                    "road",
-                ]:
-                    if preferred in layer_names:
-                        read_kwargs["layer"] = preferred
-                        logger.info(f"Selected layer: {preferred}")
-                        break
-
-            gdf = gpd.read_file(data_file, **read_kwargs)
+            gdf = _load_geodata_file(data_file, file_format, encoding)
             logger.info(f"Loaded {len(gdf)} features")
 
         # Set source CRS if provided (overrides file metadata)
