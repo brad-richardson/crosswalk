@@ -42,12 +42,13 @@ def _make_candidates(ref_ids, target_ids, ref_idxs=None, target_idxs=None):
     if target_idxs is None:
         target_idxs = list(range(len(target_ids)))
     return [
+        # Blocking stats are unused by the pipeline; placeholders required by dataclass
         CandidatePair(
             ref_id=rid,
             ref_idx=ridx,
             target_id=tid,
             target_idx=tidx,
-            distance_estimate=5.0,
+            distance_estimate=0.0,
             heading_diff=0.0,
             length_ratio=1.0,
         )

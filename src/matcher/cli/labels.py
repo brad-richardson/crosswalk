@@ -435,6 +435,7 @@ def backfill_features(
                 skipped += 1
                 continue
 
+            # Blocking stats are unused by the pipeline; placeholders required by dataclass
             candidates.append(
                 CandidatePair(
                     ref_id=gers_id,
@@ -476,12 +477,10 @@ def backfill_features(
         ref_has_connectors = "connectors" in ref_gdf_proj.columns
         worker_data["ref_graphlet_data"] = precompute_graphlet_features(
             ref_gdf_proj,
-            id_column="id",
-            tolerance_m=5.0,
             connectors_column="connectors" if ref_has_connectors else None,
         )
         worker_data["target_graphlet_data"] = precompute_graphlet_features(
-            augmented_target, id_column="id", tolerance_m=5.0
+            augmented_target,
         )
 
         # --- Phase 5: Override topology with stored values ---
