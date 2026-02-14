@@ -38,6 +38,10 @@ DATA_COLUMNS = [
     "target_level_lr",
     "ref_road_flags_lr",
     "target_road_flags_lr",
+    "ref_oneway_lr",
+    "target_oneway_lr",
+    "ref_speed_limit_kph_lr",
+    "target_speed_limit_kph_lr",
     # Topology context (captured at labeling time from full network)
     "ref_from_degree",
     "ref_to_degree",
@@ -62,6 +66,8 @@ def _convert_numpy(obj):
         return int(obj)
     if isinstance(obj, (np.floating,)):
         return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
     if isinstance(obj, dict):
         return {k: _convert_numpy(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
