@@ -18,7 +18,7 @@ fetch:
     '4': primary
     '5': primary
     '6': secondary
-    '7': motorway_link
+    '7': motorway  # TODO: add is_link flag for ramp segments
     '8': secondary
     '9': tertiary
     '10': tertiary
@@ -89,7 +89,7 @@ classification:
   - source_value: '6'
     target_class: secondary
   - source_value: '7'
-    target_class: motorway_link
+    target_class: motorway  # TODO: add is_link flag for ramp segments
   - source_value: '8'
     target_class: secondary
   - source_value: '9'

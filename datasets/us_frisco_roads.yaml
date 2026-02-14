@@ -18,7 +18,7 @@ fetch:
     5: tertiary
     6: tertiary
     7: residential
-    8: motorway_link
+    8: motorway  # TODO: add is_link flag for ramp segments
     9: service
   bbox:
   - -96.9
@@ -83,7 +83,7 @@ classification:
   - source_value: 7
     target_class: residential
   - source_value: 8
-    target_class: motorway_link
+    target_class: motorway  # TODO: add is_link flag for ramp segments
   - source_value: 9
     target_class: service
 quality_fingerprint:

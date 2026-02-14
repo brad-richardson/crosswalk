@@ -16,7 +16,7 @@ fetch:
     Secondary: secondary
     Local: residential
     Alley: service
-    Ramp: motorway_link
+    Ramp: motorway  # TODO: add is_link flag for ramp segments
     Vehicular Trail: track
     Other: unclassified
   bbox:

@@ -18,7 +18,7 @@ fetch:
     Local: residential
     LOCAL: residential
     Driveway: service
-    Ramp: motorway_link
+    Ramp: motorway  # TODO: add is_link flag for ramp segments
     Alley: service
     Parks: path
   bbox:

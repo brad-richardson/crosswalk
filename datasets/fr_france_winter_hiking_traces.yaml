@@ -16,10 +16,6 @@ fetch:
   class_mapping:
     1: path
     0: path
-  subclass_column: passage_delicat
-  subclass_mapping:
-    1: difficult
-    0: standard
   bbox:
   - -5.3
   - 41.2

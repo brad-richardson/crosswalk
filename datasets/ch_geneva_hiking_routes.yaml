@@ -15,10 +15,6 @@ fetch:
   class_mapping:
     Itinéraires transfrontaliers: path
     La Suisse à pied: path
-  subclass_column: mobilite_reduite
-  subclass_mapping:
-    Oui: accessible
-    Non: standard
   bbox:
   - 5.9
   - 46.0

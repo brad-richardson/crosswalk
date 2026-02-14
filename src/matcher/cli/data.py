@@ -24,7 +24,7 @@ fetch_app = typer.Typer(
 data_app.add_typer(fetch_app, name="fetch")
 
 
-def _print_fetch_results_summary(results: dict[str, "Path | None"]) -> None:
+def _print_fetch_results_summary(results: dict[str, Path | None]) -> None:
     """Print a summary of fetch results, listing any failures."""
     failed = sorted(name for name, path in results.items() if path is None)
     success = len(results) - len(failed)

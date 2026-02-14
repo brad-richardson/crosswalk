@@ -16,11 +16,6 @@ fetch:
     Liaison: cycleway
     Maillage: cycleway
     Voie Verte: cycleway
-  subclass_column: type
-  subclass_mapping:
-    Liaison: connector
-    Maillage: local_network
-    Voie Verte: greenway
   bbox:
   - 5.55
   - 45.65
