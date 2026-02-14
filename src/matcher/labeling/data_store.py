@@ -484,9 +484,7 @@ class DataStore:
         if target_oneway_lr is not None:
             self._gdf.at[idx, "target_oneway_lr"] = _serialize_lr_data(target_oneway_lr)
         if ref_speed_limit_kph_lr is not None:
-            self._gdf.at[idx, "ref_speed_limit_kph_lr"] = _serialize_lr_data(
-                ref_speed_limit_kph_lr
-            )
+            self._gdf.at[idx, "ref_speed_limit_kph_lr"] = _serialize_lr_data(ref_speed_limit_kph_lr)
         if target_speed_limit_kph_lr is not None:
             self._gdf.at[idx, "target_speed_limit_kph_lr"] = _serialize_lr_data(
                 target_speed_limit_kph_lr
