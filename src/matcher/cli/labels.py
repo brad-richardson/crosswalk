@@ -230,6 +230,7 @@ def backfill_features(
     import pandas as pd
 
     from ..blocking.spatial_index import CandidatePair
+    from ..features.compute import precompute_graphlet_features
     from ..features.pipeline import prepare_worker_data
     from ..filenames import find_overture_segments, find_target_file
     from ..matching.ml import _compute_feature_chunk, _init_worker
@@ -466,6 +467,22 @@ def backfill_features(
             n_jobs=1,  # small dataset, no need for parallel alignment
         )
         worker_data = pipeline_result.worker_data
+
+        # --- Phase 4b: Override graphlet data with full-network computation ---
+        # The shared pipeline computes graphlets on candidate-only subsets (efficient
+        # for inference with ~10K candidates). For backfill with ~100-200 labeled pairs,
+        # the candidate-only graph is too sparse for meaningful clustering coefficients.
+        # Recompute on full GDFs so clustering_coef reflects the actual network topology.
+        ref_has_connectors = "connectors" in ref_gdf_proj.columns
+        worker_data["ref_graphlet_data"] = precompute_graphlet_features(
+            ref_gdf_proj,
+            id_column="id",
+            tolerance_m=5.0,
+            connectors_column="connectors" if ref_has_connectors else None,
+        )
+        worker_data["target_graphlet_data"] = precompute_graphlet_features(
+            augmented_target, id_column="id", tolerance_m=5.0
+        )
 
         # --- Phase 5: Override topology with stored values ---
         # 3-tier fallback: stored topology > computed by pipeline > NaN defaults
