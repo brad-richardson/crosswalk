@@ -1695,14 +1695,43 @@ class MLMatcher:
             f"and {len(target_candidates_only_proj)} target segments..."
         )
 
-        # Launch alignment in background thread while graphlets compute on main thread.
-        # compute_alignment_batch spawns its own ProcessPoolExecutor internally,
-        # so the thread just orchestrates child processes — no GIL contention.
-        with ThreadPoolExecutor(max_workers=1) as bg_executor:
+        # Resolve worker count once, used for all parallel blocks
+        if n_jobs == -1:
+            n_workers = default_worker_count()
+        else:
+            n_workers = max(1, n_jobs)
+
+        # Launch alignment and sibling context builds in background threads while
+        # graphlets compute on main thread. compute_alignment_batch spawns its own
+        # ProcessPoolExecutor internally; sibling builds do C-level STRtree construction
+        # (releases GIL) plus lightweight name normalization — no contention.
+        # IMPORTANT: Use ALL reference/target segments for sibling contexts, not just
+        # candidates — a parallel sibling might not have any candidate matches.
+        from ..features.relational import build_sibling_search_context
+
+        with ThreadPoolExecutor(max_workers=n_workers) as bg_executor:
             logger.info("Computing linestring alignments (background)...")
             t0_align = time.perf_counter()
             alignment_future = bg_executor.submit(
                 compute_alignment_batch, candidates, ref_geoms, target_geoms, n_jobs=n_jobs
+            )
+
+            # Submit sibling context builds — extract list args eagerly for thread safety
+            t0_sib_ref = time.perf_counter()
+            ref_sibling_future = bg_executor.submit(
+                build_sibling_search_context,
+                geometries=list(reference.geometry),
+                segment_ids=[str(sid) for sid in reference[ref_id_column]],
+                names=list(reference.get(ref_name_column, [None] * len(reference))),
+                classes=list(reference.get(ref_class_column, [None] * len(reference))),
+            )
+            t0_sib_target = time.perf_counter()
+            target_sibling_future = bg_executor.submit(
+                build_sibling_search_context,
+                geometries=list(target.geometry),
+                segment_ids=[str(sid) for sid in target[target_id_column]],
+                names=list(target.get(target_name_column, [None] * len(target))),
+                classes=list(target.get(target_class_column, [None] * len(target))),
             )
 
             # ref_has_connectors already defined earlier for topology computation
@@ -1729,35 +1758,16 @@ class MLMatcher:
             timings["alignment_batch"] = time.perf_counter() - t0_align
             logger.debug(f"[TIMING] alignment_batch: {timings['alignment_batch']:.2f}s")
 
-        # Build sibling search contexts for per-pair parallel sibling detection
-        # These hold the spatial index and segment metadata needed to search for
-        # parallel siblings on aligned sublines (not precomputed on full geometries)
-        # IMPORTANT: Use ALL reference segments, not just candidates - a parallel sibling
-        # might not have any candidate matches in the target dataset
-        from ..features.relational import build_sibling_search_context
+            # Collect sibling context results
+            ref_sibling_context = ref_sibling_future.result()
+            timings["sibling_context_ref"] = time.perf_counter() - t0_sib_ref
+            logger.debug(f"[TIMING] sibling_context_ref: {timings['sibling_context_ref']:.2f}s")
 
-        logger.info("Building sibling search contexts for split carriageway detection...")
-        t0 = time.perf_counter()
-        ref_sibling_context = build_sibling_search_context(
-            geometries=list(reference.geometry),
-            segment_ids=[str(sid) for sid in reference[ref_id_column]],
-            names=list(reference.get("names", [None] * len(reference))),
-            classes=list(reference.get("class", [None] * len(reference))),
-        )
-        timings["sibling_context_ref"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] sibling_context_ref: {timings['sibling_context_ref']:.2f}s")
-
-        # Use ALL target segments for sibling context (same reasoning as reference)
-        t0 = time.perf_counter()
-        target_sibling_context = build_sibling_search_context(
-            geometries=list(target.geometry),
-            segment_ids=[str(sid) for sid in target[target_id_column]],
-            names=list(target.get("names", [None] * len(target))),
-            classes=list(target.get("class", [None] * len(target))),
-        )
-        timings["sibling_context_target"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] sibling_context_target: {timings['sibling_context_target']:.2f}s")
-        logger.info("Sibling search contexts built (per-pair detection on sublines)")
+            target_sibling_context = target_sibling_future.result()
+            timings["sibling_context_target"] = time.perf_counter() - t0_sib_target
+            logger.debug(
+                f"[TIMING] sibling_context_target: {timings['sibling_context_target']:.2f}s"
+            )
 
         # Recompute endpoint features using alignment fractions
         # This uses aligned subline endpoints instead of full segment endpoints,
@@ -1787,12 +1797,6 @@ class MLMatcher:
             logger.info(
                 f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
             )
-
-        # Determine number of workers (reserve ~10% of cores)
-        if n_jobs == -1:
-            n_workers = default_worker_count()
-        else:
-            n_workers = n_jobs
 
         n_candidates = len(candidates)
         logger.info(

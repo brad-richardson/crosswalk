@@ -34,11 +34,13 @@ Key Features:
 """
 
 import re
+import time
 from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
 import shapely
+from loguru import logger
 from shapely import LineString, STRtree, line_interpolate_point
 from shapely import distance as shapely_distance
 
@@ -107,9 +109,20 @@ def build_sibling_search_context(
     """
     from .semantic import _extract_name_string
 
+    n_segments = len(geometries)
+    logger.info(f"Building sibling search context for {n_segments} segments...")
+    t0 = time.perf_counter()
+
     spatial_index = STRtree(geometries)
+    t_tree = time.perf_counter() - t0
+    logger.debug(f"[TIMING] STRtree construction: {t_tree:.2f}s ({n_segments} geometries)")
+
     # Normalize names to plain strings using existing extraction logic
+    t1 = time.perf_counter()
     normalized_names = [_extract_name_string(n) for n in names]
+    t_names = time.perf_counter() - t1
+    logger.debug(f"[TIMING] Name normalization: {t_names:.2f}s ({n_segments} names)")
+
     segment_data = list(zip(segment_ids, normalized_names, classes))
     return SiblingSearchContext(spatial_index=spatial_index, segment_data=segment_data)
 
