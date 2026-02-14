@@ -1012,13 +1012,13 @@ def compute_features(
 
     loader = DatasetLoader()
 
-    def compute_for_dataset(dataset_id: str) -> bool:
-        """Compute features for a single dataset. Returns True if successful."""
+    def compute_for_dataset(dataset_id: str) -> tuple[bool, str]:
+        """Compute features for a single dataset. Returns (success, error_msg)."""
         ref_path = loader.find_reference_path(dataset_id)
         target_path = loader.find_target_path(dataset_id)
         if ref_path is None or target_path is None:
             console.print(f"[yellow]Skipping {dataset_id}: missing data files[/yellow]")
-            return False
+            return False, "missing data files"
 
         # Check cache
         cache_info = get_feature_cache_info(dataset_id, ref_path, target_path)
@@ -1030,7 +1030,7 @@ def compute_features(
                 f"({cache_info['candidate_count']:,} candidates, "
                 f"version {cache_info['version']})[/blue]"
             )
-            return True
+            return True, ""
 
         # Use standardized Overture-format column names for parquet files
         # (the fetch step transforms source columns to these during data ingestion)
@@ -1073,7 +1073,7 @@ def compute_features(
 
                 if len(feature_df) == 0:
                     console.print(f"[yellow]  No candidates generated for {dataset_id}[/yellow]")
-                    return False
+                    return False, "no candidates generated"
 
                 # Save feature cache
                 cache_path = save_feature_cache(dataset_id, feature_df)
@@ -1114,11 +1114,11 @@ def compute_features(
                 else:
                     console.print(f"[yellow]  No candidates to cache for {dataset_id}[/yellow]")
 
-            return True
+            return True, ""
 
         except Exception as e:
             console.print(f"[red]  Error computing features for {dataset_id}: {e}[/red]")
-            return False
+            return False, str(e)
 
     # Determine which datasets to process
     datasets_to_process: list[str] = []
@@ -1157,21 +1157,20 @@ def compute_features(
     # Process datasets sequentially
     success_count = 0
     skip_count = 0
-    fail_count = 0
+    errors: list[tuple[str, str]] = []
 
     for dataset_id in datasets_to_process:
         # Check cache BEFORE computation to distinguish skip vs compute
         cache_info_before = get_feature_cache_info(dataset_id)
         had_cache = cache_info_before.get("exists", False)
 
-        result = compute_for_dataset(dataset_id)
-        if not result:
-            fail_count += 1
+        success, err_msg = compute_for_dataset(dataset_id)
+
+        if not success:
+            errors.append((dataset_id, err_msg))
         elif had_cache and not force:
-            # Had cache and didn't force recompute = skipped
             skip_count += 1
         else:
-            # Newly computed (or force recomputed)
             success_count += 1
 
     # Summary
@@ -1179,5 +1178,11 @@ def compute_features(
     console.print("[bold]Summary:[/bold]")
     console.print(f"  Computed: {success_count}")
     console.print(f"  Skipped (cached): {skip_count}")
-    if fail_count > 0:
-        console.print(f"  [red]Failed: {fail_count}[/red]")
+    if errors:
+        from rich.markup import escape
+
+        console.print(f"  [red]Failed: {len(errors)}[/red]")
+        for name, err in sorted(errors):
+            err_str = err if len(err) <= 120 else err[:120] + "..."
+            console.print(f"    [red]✗[/red] {name}: {escape(err_str)}")
+        raise typer.Exit(1)

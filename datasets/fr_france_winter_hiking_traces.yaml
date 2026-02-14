@@ -17,11 +17,29 @@ fetch:
     1: path
     0: path
   bbox:
-  - -5.3
-  - 41.2
-  - 9.8
-  - 51.2
+  - 5.2
+  - 43.8
+  - 7.8
+  - 46.6
   crs: EPSG:4326
+last_fetch:
+  reference:
+    fetched_at: '2026-02-14T16:45:06.199265+00:00'
+    bbox:
+    - 5.2
+    - 43.8
+    - 7.8
+    - 46.6
+    bbox_buffered:
+    - 5.187251382883646
+    - 43.791016888250084
+    - 7.812748617116354
+    - 46.608983111749914
+    bbox_buffer_m: 1000.0
+    feature_count: 1487166
+    geometry_types:
+    - LineString
+    output_path: data/raw
 quality_fingerprint:
   computed_at: '2026-02-14T14:33:59.404337+00:00'
   total_segments: 14322
