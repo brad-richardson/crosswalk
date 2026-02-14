@@ -5,59 +5,27 @@ description: ML-extracted road detections from Microsoft/Bing Maps aerial imager
   for the greater Tunis area. No road names or classification - geometry only. Used
   to test model generalization on ML-extracted road networks with no semantic attributes.
 source:
-  type: manual
+  type: download
+  url: https://usaminedroads.z19.web.core.windows.net/drops/2025.04.28/Northern_Africa.zip
   portal_url: https://github.com/microsoft/RoadDetections
+  file_format: ms_roads_tsv
+  where_clause: TUN
+  cache_download: true
 fetch:
   id_prefix: tn_tunis_ml
-  id_column: orig_id
+  id_column: _geom_hash
   bbox:
   - 9.8
   - 36.5
   - 10.5
   - 37.1
   crs: EPSG:4326
-last_fetch:
-  target:
-    fetched_at: '2026-02-14T00:00:00+00:00'
-    bbox:
-    - 9.8
-    - 36.5
-    - 10.5
-    - 37.1
-    bbox_buffered:
-    - 9.8
-    - 36.5
-    - 10.5
-    - 37.1
-    bbox_buffer_m: 0.0
-    feature_count: 113487
-    geometry_types:
-    - LineString
-    output_path: data/raw
-  reference:
-    fetched_at: '2026-02-14T04:10:36.580061+00:00'
-    bbox:
-    - 9.8
-    - 36.5
-    - 10.5
-    - 37.1
-    bbox_buffered:
-    - 9.788781366540858
-    - 36.49101688825009
-    - 10.511218633459142
-    - 37.108983111749914
-    bbox_buffer_m: 1000.0
-    feature_count: 145127
-    geometry_types:
-    - LineString
-    output_path: data/raw
-notes: 'Processed from Microsoft Road Detections Northern_Africa.zip using scripts/setup_new_datasets.py.
-
-  Extracted Tunisia (TUN) records, clipped to greater Tunis metro area.
-
-  No road names, no road classification - pure ML-extracted geometry from aerial imagery.
-
-  May contain artifacts: airport runways, rail lines misclassified as roads, short
-  false-positive segments.
-
-  '
+quality_fingerprint:
+  computed_at: '2026-02-14T05:12:22.172439+00:00'
+  total_segments: 113566
+  name_coverage_ratio: 0.0
+  class_coverage_ratio: 0.0
+notes: 'Microsoft Road Detections from Northern_Africa.zip. TSV format with country_code
+  prefix, filtered to TUN (Tunisia) records. Geometry hash used as ID since ML-extracted
+  data has no properties. May contain artifacts: airport runways, rail lines misclassified
+  as roads, short false-positive segments.'

@@ -1,0 +1,32 @@
+name: jp_kanto_expressways
+display_name: Japan MLIT Kanto Expressways
+type: road
+description: Expressway sections (N06) from Japan MLIT National Land Numerical Information,
+  filtered to the Kanto region. Japanese road names in Kanji. N06_004 route code used
+  as ID (86% unique, H3 spatial suffix handles remainder).
+source:
+  type: download
+  url: https://nlftp.mlit.go.jp/ksj/gml/data/N06/N06-24/N06-24_GML.zip
+  portal_url: https://nlftp.mlit.go.jp/ksj/
+  file_format: geojson
+  file_pattern: UTF-8/*HighwaySection*
+  cache_download: true
+fetch:
+  id_prefix: jp_kanto_exp
+  id_column: N06_004
+  name_column: N06_007
+  bbox:
+  - 138.93
+  - 35.2
+  - 140.54
+  - 36.3
+  crs: EPSG:4326
+quality_fingerprint:
+  computed_at: '2026-02-14T05:13:40.346072+00:00'
+  total_segments: 174
+  name_coverage_ratio: 1.0
+  class_coverage_ratio: 0.0
+notes: N06 expressway section data from MLIT NLFTP. ZIP contains 4 GeoJSON files (HighwaySection
+  + Joint, in Shift-JIS and UTF-8). file_pattern selects the UTF-8 HighwaySection
+  file. CRS is JGD2011 (practically identical to WGS84, auto-reprojected). All segments
+  are expressways (motorway class).

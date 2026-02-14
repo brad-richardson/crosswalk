@@ -29,6 +29,7 @@ class SourceConfig(BaseModel):
     api_key_env_var: str | None = None  # Environment variable for API key
     api_key_header: str | None = None  # HTTP header name for API key
     product_id: str | None = None  # OS Data Hub product ID (e.g., "OpenRoads")
+    file_pattern: str | None = None  # Glob pattern to select file within ZIP
     cache_download: bool = False  # Cache large downloads to ~/.cache/matcher/downloads
     cache_ttl_hours: int = 168  # Cache TTL in hours (default: 7 days)
 

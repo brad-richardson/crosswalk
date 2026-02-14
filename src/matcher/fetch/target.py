@@ -593,6 +593,60 @@ def _get_cached_download(url: str, cache_ttl_hours: int = 168) -> Path | None:
         return None
 
 
+def _load_ms_roads_tsv(
+    path: Path,
+    country_filter: str | None = None,
+) -> gpd.GeoDataFrame:
+    """Load Microsoft Road Detections TSV file.
+
+    Format: country_code<TAB>GeoJSON_Feature per line.
+
+    Args:
+        path: Path to the TSV file
+        country_filter: If set, only include rows matching this country code prefix
+
+    Returns:
+        GeoDataFrame in EPSG:4326
+    """
+    import json
+
+    from shapely.geometry import shape
+
+    features = []
+    total = 0
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t", 1)
+            if len(parts) != 2:
+                continue
+            country_code, geojson_str = parts
+
+            if country_filter and country_code != country_filter:
+                continue
+
+            total += 1
+            try:
+                feature = json.loads(geojson_str)
+                geom = shape(feature["geometry"])
+                props = feature.get("properties", {})
+                row = {"geometry": geom}
+                row.update(props)
+                features.append(row)
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+    logger.info(f"Parsed {len(features)} features from TSV (filtered from {total} matching rows)")
+
+    if not features:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    return gpd.GeoDataFrame(features, geometry="geometry", crs="EPSG:4326")
+
+
 def fetch_download(
     url: str,
     output_path: Path,
@@ -606,13 +660,15 @@ def fetch_download(
     cache_download: bool = False,
     cache_ttl_hours: int = 168,
     dataset_type: str | None = None,
+    file_pattern: str | None = None,
+    where_clause: str | None = None,
 ) -> Path:
-    """Download and process geospatial file (Shapefile, GeoPackage, GML).
+    """Download and process geospatial file (Shapefile, GeoPackage, GML, TSV).
 
     Args:
         url: URL to download from
         output_path: Path for output GeoParquet file
-        file_format: Format of downloaded file (shp, gpkg, gml, geojson)
+        file_format: Format of downloaded file (shp, gpkg, gml, geojson, ms_roads_tsv)
         fetch_config: FetchConfig with column mappings and transform settings
         source_name: Name for the data source
         bbox: Optional bounding box (xmin, ymin, xmax, ymax) to filter
@@ -622,6 +678,8 @@ def fetch_download(
         cache_download: If True, cache the downloaded file for future use
         cache_ttl_hours: Hours before cache expires (default: 168 = 7 days)
         dataset_type: Dataset type for default class assignment
+        file_pattern: Glob pattern to select specific file within ZIP archive
+        where_clause: Filter clause (e.g., country code for ms_roads_tsv format)
 
     Returns:
         Path to the output GeoParquet file
@@ -713,31 +771,52 @@ def fetch_download(
                     found_files = list(extract_path.rglob("*.shp"))
                     if not found_files:
                         raise ValueError("No .shp file found in zip")
-                    data_file = found_files[0]
                 elif file_format == "gpkg":
                     found_files = list(extract_path.rglob("*.gpkg"))
                     if not found_files:
                         raise ValueError("No .gpkg file found in zip")
-                    data_file = found_files[0]
                 elif file_format == "gml":
                     found_files = list(extract_path.rglob("*.gml"))
                     if not found_files:
                         raise ValueError("No .gml file found in zip")
-                    data_file = found_files[0]
                 elif file_format == "geojson":
                     found_files = list(extract_path.rglob("*.geojson")) + list(
                         extract_path.rglob("*.json")
                     )
                     if not found_files:
                         raise ValueError("No .geojson file found in zip")
-                    data_file = found_files[0]
                 elif file_format == "gdb":
                     found_dirs = [d for d in extract_path.rglob("*.gdb") if d.is_dir()]
                     if not found_dirs:
                         raise ValueError("No .gdb folder found in zip")
                     data_file = found_dirs[0]
+                    found_files = None  # handled above
+                elif file_format == "ms_roads_tsv":
+                    found_files = list(extract_path.rglob("*.tsv"))
+                    if not found_files:
+                        # Sometimes TSV files don't have extension
+                        found_files = [
+                            f for f in extract_path.rglob("*") if f.is_file() and not f.suffix
+                        ]
+                    if not found_files:
+                        raise ValueError("No .tsv file found in zip")
                 else:
                     raise ValueError(f"Unsupported file format: {file_format}")
+
+                # Filter by file_pattern if specified (for formats with multiple files)
+                if found_files is not None:
+                    if file_pattern and len(found_files) > 1:
+                        import fnmatch
+
+                        # Match against relative path to handle subdirs (e.g., UTF-8/)
+                        filtered = [
+                            f
+                            for f in found_files
+                            if fnmatch.fnmatch(str(f.relative_to(extract_path)), file_pattern)
+                        ]
+                        if filtered:
+                            found_files = filtered
+                    data_file = found_files[0]
 
                 logger.info(f"Loading from: {data_file}")
             finally:
@@ -746,38 +825,43 @@ def fetch_download(
 
         logger.info(f"Loading from: {data_file}")
 
-        # Load with geopandas
-        read_kwargs: dict[str, Any] = {}
-        if encoding:
-            read_kwargs["encoding"] = encoding
-            logger.info(f"Using encoding: {encoding}")
-        if file_format == "gml":
-            read_kwargs["driver"] = "GML"
+        # Load data based on format
+        if file_format == "ms_roads_tsv":
+            gdf = _load_ms_roads_tsv(data_file, country_filter=where_clause)
+            logger.info(f"Loaded {len(gdf)} features from MS Roads TSV")
+        else:
+            # Load with geopandas
+            read_kwargs: dict[str, Any] = {}
+            if encoding:
+                read_kwargs["encoding"] = encoding
+                logger.info(f"Using encoding: {encoding}")
+            if file_format == "gml":
+                read_kwargs["driver"] = "GML"
 
-        # For multi-layer formats (gdb, gpkg), select the road centerline layer
-        if file_format == "gdb":
-            import pyogrio
+            # For multi-layer formats (gdb, gpkg), select the road centerline layer
+            if file_format == "gdb":
+                import pyogrio
 
-            layers = pyogrio.list_layers(data_file)
-            layer_names = [layer_info[0] for layer_info in layers]
-            logger.debug(f"Available layers: {layer_names}")
+                layers = pyogrio.list_layers(data_file)
+                layer_names = [layer_info[0] for layer_info in layers]
+                logger.debug(f"Available layers: {layer_names}")
 
-            # Prefer centerline/road layers
-            for preferred in [
-                "CENTERLINE",
-                "centerline",
-                "road_link",
-                "RoadLink",
-                "roads",
-                "road",
-            ]:
-                if preferred in layer_names:
-                    read_kwargs["layer"] = preferred
-                    logger.info(f"Selected layer: {preferred}")
-                    break
+                # Prefer centerline/road layers
+                for preferred in [
+                    "CENTERLINE",
+                    "centerline",
+                    "road_link",
+                    "RoadLink",
+                    "roads",
+                    "road",
+                ]:
+                    if preferred in layer_names:
+                        read_kwargs["layer"] = preferred
+                        logger.info(f"Selected layer: {preferred}")
+                        break
 
-        gdf = gpd.read_file(data_file, **read_kwargs)
-        logger.info(f"Loaded {len(gdf)} features")
+            gdf = gpd.read_file(data_file, **read_kwargs)
+            logger.info(f"Loaded {len(gdf)} features")
 
         # Set source CRS if provided (overrides file metadata)
         if source_crs:
@@ -799,6 +883,17 @@ def fetch_download(
         if len(gdf) == 0:
             logger.warning("No features after filtering")
             return output_path
+
+        # Compute geometry hash IDs if configured
+        if fetch_config.id_column == "_geom_hash" and "_geom_hash" not in gdf.columns:
+            import hashlib
+
+            gdf["_geom_hash"] = gdf.geometry.apply(
+                lambda g: hashlib.md5(shapely.to_wkt(g, rounding_precision=7).encode()).hexdigest()[
+                    :12
+                ]
+            )
+            logger.info(f"Computed geometry hash IDs for {len(gdf)} features")
 
         # Transform to Overture schema
         gdf = _transform_download_data(
@@ -1162,6 +1257,10 @@ def fetch_dataset(
                 cache_download = config.source.cache_download if config.source else False
                 cache_ttl_hours = config.source.cache_ttl_hours if config.source else 168
 
+                # Extract file_pattern and where_clause from source config
+                src_file_pattern = config.source.file_pattern if config.source else None
+                src_where_clause = config.source.where_clause if config.source else None
+
                 result_path = fetch_download(
                     url=url,
                     output_path=output_path,
@@ -1175,6 +1274,8 @@ def fetch_dataset(
                     cache_download=cache_download,
                     cache_ttl_hours=cache_ttl_hours,
                     dataset_type=config.type,
+                    file_pattern=src_file_pattern,
+                    where_clause=src_where_clause,
                 )
 
         elif source_type == "ogc_features":
