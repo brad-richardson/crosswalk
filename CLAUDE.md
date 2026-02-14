@@ -118,6 +118,26 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture inclu
 - Decision thresholds (ML scoring vs optimizer settings)
 - Test coverage matrix for consistency
 
+### Backfill Architecture
+
+**The backfill command MUST remain a thin wrapper around the shared pipeline.**
+
+Backfill (`matcher labels backfill`) recomputes features for existing labeled pairs. It routes
+through the same `prepare_worker_data()` → `_compute_feature_chunk()` code path that inference
+uses. The only backfill-specific code handles:
+
+1. **Geometry resolution**: Looking up stored geometries from the data store and building an
+   augmented target GeoDataFrame that includes both raw data and stored-data segments
+2. **Topology override**: Preferring stored topology over computed (3-tier fallback:
+   stored > computed > NaN defaults)
+3. **Persistence**: Saving results to FeatureStore/DataStore
+
+If you add new features, new worker_data keys, or change the pipeline setup, backfill picks
+it up automatically through the shared path. Do NOT add custom feature computation logic to
+the backfill command — it defeats the purpose and causes train/test skew.
+
+See `tests/unit/test_backfill_parity.py` for the test that enforces this invariant.
+
 ## Change Tracking
 
 ### Before/After Comparison for PRs

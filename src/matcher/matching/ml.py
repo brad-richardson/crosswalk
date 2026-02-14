@@ -237,6 +237,7 @@ def _compute_feature_chunk(chunk):
     from ..errors import ErrorAggregator, ErrorPhase, ErrorSeverity
     from ..features.alignment import create_subline
     from ..features.compute import (
+        _compute_intersection_overlap_features,
         _compute_non_geometric_features,
         _get_error_features,
         compute_graphlet_similarity,
@@ -470,6 +471,22 @@ def _compute_feature_chunk(chunk):
                 target_sibling_context=_worker_data.get("target_sibling_context"),
             )
 
+            # Aligned length: absolute overlap length in meters
+            alignment = pd_item["alignment"]
+            if alignment is not None:
+                aligned_length_m = _worker_data["ref_geoms"][pd_item["ref_idx"]].length * (
+                    alignment.overture_end_frac - alignment.overture_start_frac
+                )
+            else:
+                aligned_length_m = 0.0
+
+            # Intersection overlap features (continuation, divergence)
+            intersection_overlap_feats = _compute_intersection_overlap_features(
+                ref_geom=_worker_data["ref_geoms"][pd_item["ref_idx"]],
+                target_geom=_worker_data["target_geoms"][pd_item["target_idx"]],
+                alignment=alignment,
+            )
+
             # Assemble full feature dict
             features = {
                 # Batchable geometric features
@@ -479,8 +496,11 @@ def _compute_feature_chunk(chunk):
                 "heading_delta": float(batch_result.heading_deltas[i]),
                 "length_ratio": float(batch_result.length_ratios[i]),
                 "centroid_distance_m": float(batch_result.centroid_distances[i]),
+                "aligned_length_m": aligned_length_m,
                 # Non-geometric and per-pair geometric features
                 **non_geom,
+                # Intersection overlap features
+                **intersection_overlap_feats,
                 "_error": None,
             }
             results[chunk_idx] = features
