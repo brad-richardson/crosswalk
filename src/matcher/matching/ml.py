@@ -1699,7 +1699,7 @@ class MLMatcher:
         if n_jobs == -1:
             n_workers = default_worker_count()
         else:
-            n_workers = n_jobs
+            n_workers = max(1, n_jobs)
 
         # Launch alignment and sibling context builds in background threads while
         # graphlets compute on main thread. compute_alignment_batch spawns its own
