@@ -20,7 +20,6 @@ Model Architecture:
 """
 
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -41,7 +40,7 @@ from ..config import (
     default_worker_count,
 )
 from ..utils.crs import validate_projected_crs
-from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
+from ..utils.linear_ref import extract_lr_name, extract_lr_value
 from .types import MatchDecision, MatchResult
 
 
@@ -106,10 +105,12 @@ def _extract_lr_attributes_for_pair(
     # Extract reference name from LR data
     # All datasets are expected to have names_lr populated (Overture has native LR,
     # target datasets get trivial LR via _add_trivial_lr_columns)
-    ref_name = _extract_lr_name(worker_data.get("ref_names_lr"), ref_idx, ref_start, ref_end)
+    ref_name = _extract_lr_name_from_column(
+        worker_data.get("ref_names_lr"), ref_idx, ref_start, ref_end
+    )
 
     # Extract target name from LR data
-    target_name = _extract_lr_name(
+    target_name = _extract_lr_name_from_column(
         worker_data.get("target_names_lr"), target_idx, target_start, target_end
     )
 
@@ -120,16 +121,18 @@ def _extract_lr_attributes_for_pair(
     target_subclass = worker_data["target_subclasses"][target_idx]
 
     # Extract one-way direction from LR data
-    ref_oneway = _extract_lr_value(worker_data.get("ref_oneway_lr"), ref_idx, ref_start, ref_end)
-    target_oneway = _extract_lr_value(
+    ref_oneway = _extract_lr_value_from_column(
+        worker_data.get("ref_oneway_lr"), ref_idx, ref_start, ref_end
+    )
+    target_oneway = _extract_lr_value_from_column(
         worker_data.get("target_oneway_lr"), target_idx, target_start, target_end
     )
 
     # Extract speed limit from LR data
-    ref_speed_limit_kph = _extract_lr_value(
+    ref_speed_limit_kph = _extract_lr_value_from_column(
         worker_data.get("ref_speed_limit_kph_lr"), ref_idx, ref_start, ref_end
     )
-    target_speed_limit_kph = _extract_lr_value(
+    target_speed_limit_kph = _extract_lr_value_from_column(
         worker_data.get("target_speed_limit_kph_lr"), target_idx, target_start, target_end
     )
 
@@ -147,61 +150,22 @@ def _extract_lr_attributes_for_pair(
     )
 
 
-def _extract_lr_value(lr_column, idx: int, start_frac: float, end_frac: float):
-    """Extract a single value from an LR column for a given index and alignment range.
-
-    Args:
-        lr_column: Array of LR data (or None)
-        idx: Row index
-        start_frac: Start of alignment (0-1)
-        end_frac: End of alignment (0-1)
-
-    Returns:
-        The majority value for the aligned range, or None if not available
-    """
+def _extract_lr_value_from_column(lr_column, idx: int, start_frac: float, end_frac: float):
+    """Extract a single value from an LR column array for a given index and alignment range."""
     if lr_column is None:
         return None
-
     lr_data = lr_column[idx]
-    if lr_data is None:
-        return None
-
-    try:
-        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-        attrs = extract_aligned_attributes({"value": lr_attr}, start_frac, end_frac)
-        return attrs.get("value")
-    except Exception:
-        return None
+    return extract_lr_value(lr_data, start_frac, end_frac)
 
 
-def _extract_lr_name(lr_column, idx: int, start_frac: float, end_frac: float) -> str | None:
-    """Extract name from an LR column for a given index and alignment range.
-
-    Specialized version of _extract_lr_value for names, using "name" as the
-    attribute key (matching the LR schema convention).
-
-    Args:
-        lr_column: Array of LR data (or None)
-        idx: Row index
-        start_frac: Start of alignment (0-1)
-        end_frac: End of alignment (0-1)
-
-    Returns:
-        The majority name for the aligned range, or None if not available
-    """
+def _extract_lr_name_from_column(
+    lr_column, idx: int, start_frac: float, end_frac: float
+) -> str | None:
+    """Extract name from an LR column array for a given index and alignment range."""
     if lr_column is None:
         return None
-
     lr_data = lr_column[idx]
-    if lr_data is None:
-        return None
-
-    try:
-        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
-        attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
-        return attrs.get("name")
-    except Exception:
-        return None
+    return extract_lr_name(lr_data, start_frac, end_frac)
 
 
 def _compute_single_feature(args):
@@ -1591,64 +1555,19 @@ class MLMatcher:
         alignments = pipeline_result.alignments
         timings["prepare_worker_data"] = time.perf_counter() - t0
 
-        # Resolve worker count for parallel feature computation
-        if n_jobs == -1:
-            n_workers = default_worker_count()
-        else:
-            n_workers = max(1, n_jobs)
+        # Parallel feature computation using shared dispatch
+        from ..features.pipeline import compute_features_parallel
 
-        n_candidates = len(candidates)
-        logger.info(
-            f"Computing features for {n_candidates} candidates using {n_workers} processes..."
-        )
-
-        # Prepare work items as simple tuples, sorted by ref_idx for cache locality
-        # Grouping by ref_idx improves buffer cache hit rate since reference
-        # geometries appear in multiple candidate pairs
-        work_items_with_idx = [
-            (cand.ref_idx, cand.target_idx, i) for i, cand in enumerate(candidates)
-        ]
-        work_items_with_idx.sort(key=lambda x: (x[0], x[1]))  # Sort by ref_idx, then target_idx
-
-        # Extract sorted work items and keep track of original indices for result ordering
-        work_items = [(item[0], item[1]) for item in work_items_with_idx]
-        original_indices = [item[2] for item in work_items_with_idx]
-
-        # Split work into chunks for batch buffer IoU computation
-        # Each chunk is processed by one worker, which defers buffer IoU to a
-        # vectorized batch phase at the end of the chunk (avoids per-pair
-        # Python overhead for shapely intersection/area calls).
-        chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
-        chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
-        features_list = []
-
-        # Error aggregation across workers
-        from ..errors import ErrorAggregator
-
-        total_errors = ErrorAggregator()
-
-        logger.info(
-            f"Starting parallel feature computation "
-            f"(chunk_size={chunk_size}, {len(chunks)} chunks)..."
-        )
         t0 = time.perf_counter()
-
-        with ProcessPoolExecutor(
-            max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
-        ) as executor:
-            # Submit chunks in batches for progress reporting
-            for i in range(0, len(chunks), n_workers):
-                batch_chunks = chunks[i : i + n_workers]
-                for chunk_results, chunk_errors in executor.map(
-                    _compute_feature_chunk, batch_chunks
-                ):
-                    features_list.extend(chunk_results)
-                    total_errors.merge_serialized(chunk_errors)
-                processed = len(features_list)
-                pct = processed / len(work_items) * 100
-                logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct:.0f}%)")
-
-        wall_clock = time.perf_counter() - t0
+        parallel_result = compute_features_parallel(
+            candidates=candidates,
+            worker_data=worker_data,
+            n_jobs=n_jobs,
+            sort_for_locality=True,
+        )
+        features_list = parallel_result.features_list
+        total_errors = parallel_result.error_aggregator
+        wall_clock = parallel_result.wall_clock_seconds
         timings["parallel_feature_computation"] = wall_clock
         logger.info(f"[TIMING] parallel_feature_computation: {wall_clock:.2f}s")
 
@@ -1686,8 +1605,9 @@ class MLMatcher:
                 logger.info(f"[PROFILING] {'-' * 35} {'-' * 9} {'-' * 7} {'-' * 9}")
                 logger.info(f"[PROFILING] {'SUM OF SECTIONS (cpu-time)':<35} {cpu_total:>9.2f}")
                 logger.info(f"[PROFILING] {'WALL CLOCK':<35} {wall_clock:>9.2f}")
+                n_workers_used = default_worker_count() if n_jobs == -1 else max(1, n_jobs)
                 logger.info(
-                    f"[PROFILING] Pairs: {n_timed:,} | Workers: {n_workers} "
+                    f"[PROFILING] Pairs: {n_timed:,} | Workers: {n_workers_used} "
                     f"| Throughput: {throughput:,.0f} pairs/s"
                 )
 
@@ -1698,13 +1618,6 @@ class MLMatcher:
                 timing_keys = [k for k in feat_dict if k.startswith("_t_")]
                 for k in timing_keys:
                     del feat_dict[k]
-
-        # Reorder results back to original candidate order
-        # (we sorted by spatial locality for cache efficiency)
-        features_list_reordered = [None] * len(features_list)
-        for sorted_idx, orig_idx in enumerate(original_indices):
-            features_list_reordered[orig_idx] = features_list[sorted_idx]
-        features_list = features_list_reordered
 
         # Filter out rejected pairs (None results) and track valid candidates
         # Pairs are rejected when they don't have aligned endpoint features

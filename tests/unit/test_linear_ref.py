@@ -8,6 +8,8 @@ from matcher.utils.linear_ref import (
     coverage_for_value,
     create_trivial_lr,
     extract_aligned_attributes,
+    extract_lr_name,
+    extract_lr_value,
     extract_majority,
     normalize_ranges,
 )
@@ -382,3 +384,64 @@ class TestCreateTrivialLr:
         lr = create_trivial_lr("test")
         result = lr.to_dict_list()
         assert result == [{"between": [0.0, 1.0], "value": "test"}]
+
+
+# Reusable LR data for extract_lr_value/extract_lr_name tests
+SPLIT_LR = [
+    {"between": [0.0, 0.5], "value": "First Avenue"},
+    {"between": [0.5, 1.0], "value": "Second Street"},
+]
+
+
+class TestExtractLrValue:
+    """Tests for extract_lr_value() shared helper."""
+
+    def test_none_data_returns_none(self):
+        assert extract_lr_value(None, 0.0, 1.0) is None
+
+    def test_valid_uniform_data(self):
+        lr_data = [{"between": [0.0, 1.0], "value": 42}]
+        assert extract_lr_value(lr_data, 0.0, 1.0) == 42
+
+    def test_partial_alignment_majority(self):
+        lr_data = [
+            {"between": [0.0, 0.4], "value": "slow"},
+            {"between": [0.4, 1.0], "value": "fast"},
+        ]
+        # Aligned to 0.3-0.9: slow covers 0.1, fast covers 0.5 → fast wins
+        assert extract_lr_value(lr_data, 0.3, 0.9) == "fast"
+
+    def test_custom_key(self):
+        lr_data = [{"between": [0.0, 1.0], "value": "some_value"}]
+        assert extract_lr_value(lr_data, 0.0, 1.0, key="custom") == "some_value"
+
+    def test_malformed_data_returns_none(self):
+        assert extract_lr_value([{"invalid": "data"}], 0.0, 1.0) is None
+
+    def test_empty_list_returns_none(self):
+        assert extract_lr_value([], 0.0, 1.0) is None
+
+
+class TestExtractLrName:
+    """Tests for extract_lr_name() shared helper."""
+
+    def test_none_data_returns_none(self):
+        assert extract_lr_name(None, 0.0, 1.0) is None
+
+    def test_uniform_name(self):
+        lr_data = [{"between": [0.0, 1.0], "value": "Main Street"}]
+        assert extract_lr_name(lr_data, 0.0, 1.0) == "Main Street"
+
+    def test_split_name_first_half(self):
+        assert extract_lr_name(SPLIT_LR, 0.0, 0.4) == "First Avenue"
+
+    def test_split_name_second_half(self):
+        assert extract_lr_name(SPLIT_LR, 0.6, 1.0) == "Second Street"
+
+    def test_split_name_majority_wins(self):
+        # 0.3-0.8: First Avenue covers 0.2, Second Street covers 0.3 → Second wins
+        assert extract_lr_name(SPLIT_LR, 0.3, 0.8) == "Second Street"
+
+    def test_none_value_returns_none(self):
+        lr_data = [{"between": [0.0, 1.0], "value": None}]
+        assert extract_lr_name(lr_data, 0.0, 1.0) is None

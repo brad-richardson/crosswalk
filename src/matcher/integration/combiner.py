@@ -11,18 +11,8 @@ from shapely.strtree import STRtree
 
 from ..config import ALIGNMENT_FULL_TOLERANCE, settings
 from ..features.alignment import create_subline
+from ..features.geometric import compute_buffer_iou as _compute_buffer_iou
 from .provenance import DroppedSegment, EdgeSource, TargetInput
-
-
-def _compute_buffer_iou(line_a, line_b, radius: float) -> float:
-    """Compute Intersection over Union of buffered geometries."""
-    buf_a = line_a.buffer(radius)
-    buf_b = line_b.buffer(radius)
-
-    intersection_area = buf_a.intersection(buf_b).area
-    union_area = buf_a.union(buf_b).area
-
-    return intersection_area / union_area if union_area > 0 else 0.0
 
 
 def combine_networks(

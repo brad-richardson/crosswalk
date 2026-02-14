@@ -143,6 +143,28 @@ def get_buffer_cache_info():
     return _cached_buffer.cache_info()
 
 
+def compute_buffer_iou(line_a, line_b, radius: float) -> float:
+    """Compute Intersection over Union of buffered geometries, using cache.
+
+    This is the shared implementation used by both feature computation and
+    integration filters/combiner. Uses get_cached_buffer() for efficiency
+    when the same geometry appears in multiple candidate pairs.
+
+    Args:
+        line_a: First geometry (LineString)
+        line_b: Second geometry (LineString)
+        radius: Buffer radius in meters
+
+    Returns:
+        IoU value (0.0 to 1.0)
+    """
+    buf_a = get_cached_buffer(line_a, radius)
+    buf_b = get_cached_buffer(line_b, radius)
+    intersection_area = buf_a.intersection(buf_b).area
+    union_area = buf_a.union(buf_b).area
+    return intersection_area / union_area if union_area > 0 else 0.0
+
+
 class GeometricFeatures(NamedTuple):
     """Geometric features for a candidate pair.
 

@@ -8,18 +8,8 @@ import geopandas as gpd
 from loguru import logger
 
 from ..config import settings
+from ..features.geometric import compute_buffer_iou as _compute_buffer_iou
 from ..spatial import SpatialIndex
-
-
-def _compute_buffer_iou(line_a, line_b, radius: float) -> float:
-    """Compute Intersection over Union of buffered geometries."""
-    buf_a = line_a.buffer(radius)
-    buf_b = line_b.buffer(radius)
-
-    intersection_area = buf_a.intersection(buf_b).area
-    union_area = buf_a.union(buf_b).area
-
-    return intersection_area / union_area if union_area > 0 else 0.0
 
 
 def filter_short_segments(
