@@ -22,8 +22,145 @@ from ..features.semantic import _extract_name_string
 from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
 from ..utils import ensure_projected_crs, filter_to_linestrings
+from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_lr_name(
+    names_lr_data,
+    name_raw,
+    start_frac: float,
+    end_frac: float,
+) -> str | None:
+    """Resolve display name using linear-referenced data when available.
+
+    For segments with varying names along their length (e.g., a segment that is
+    "First Avenue" from 0-40% and "Second Street" from 40-100%), this returns the
+    name covering the majority of the aligned portion, rather than always returning
+    the segment's primary name.
+
+    Args:
+        names_lr_data: Linear-referenced names data (list of dicts), or None
+        name_raw: Raw name value (string or dict with 'primary' key) as fallback
+        start_frac: Start fraction of aligned portion (0.0-1.0)
+        end_frac: End fraction of aligned portion (0.0-1.0)
+
+    Returns:
+        Resolved name string, or None if no name available
+    """
+    if names_lr_data is not None:
+        try:
+            lr_attr = LinearReferencedAttribute.from_dict_list(names_lr_data)
+            attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
+            name = attrs.get("name")
+            if name is not None:
+                return name
+        except (TypeError, KeyError, ValueError):
+            pass
+    # Fallback to primary/flat name extraction
+    return _extract_name_string(name_raw)
+
+
+def _extract_pair_attributes(
+    ref_data,
+    target_data,
+    ref_name_column: str,
+    target_name_column: str,
+    ref_class_column: str,
+    target_class_column: str,
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+    has_ref_name: bool,
+    has_target_name: bool,
+    has_ref_class: bool,
+    has_target_class: bool,
+    has_ref_subclass: bool,
+    has_target_subclass: bool,
+    has_ref_names_lr: bool,
+    has_target_names_lr: bool,
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    """Extract names, classes, and subclasses for a candidate pair.
+
+    Uses LR-aware name resolution when linear-referenced name data is available,
+    falling back to the primary name otherwise.
+
+    Args:
+        ref_data: Reference segment data (dict-like with .get())
+        target_data: Target segment data (dict-like with .get())
+        *_column: Column names for name/class/subclass
+        *_frac: Alignment fractions for LR resolution
+        has_*: Flags indicating whether columns exist
+
+    Returns:
+        Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
+    """
+    ref_name = (
+        _resolve_lr_name(
+            ref_data.get("names_lr") if has_ref_names_lr else None,
+            ref_data.get(ref_name_column) if has_ref_name else None,
+            ref_start_frac,
+            ref_end_frac,
+        )
+        if has_ref_name or has_ref_names_lr
+        else None
+    )
+    target_name = (
+        _resolve_lr_name(
+            target_data.get("names_lr") if has_target_names_lr else None,
+            target_data.get(target_name_column) if has_target_name else None,
+            target_start_frac,
+            target_end_frac,
+        )
+        if has_target_name or has_target_names_lr
+        else None
+    )
+    ref_class = ref_data.get(ref_class_column) if has_ref_class else None
+    target_class = target_data.get(target_class_column) if has_target_class else None
+    ref_subclass = ref_data.get("subclass") if has_ref_subclass else None
+    target_subclass = target_data.get("subclass") if has_target_subclass else None
+    return ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass
+
+
+def _build_aligned_geometries(
+    ref_proj_geom,
+    target_proj_geom,
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+    proj_to_wgs84,
+):
+    """Create aligned subline geometries and transform back to WGS84.
+
+    Args:
+        ref_proj_geom: Reference geometry in projected CRS
+        target_proj_geom: Target geometry in projected CRS
+        *_frac: Alignment fractions
+        proj_to_wgs84: Transformer for CRS conversion (or None)
+
+    Returns:
+        Tuple of (ref_aligned, target_aligned) in WGS84
+    """
+    ref_aligned_proj = create_subline(ref_proj_geom, ref_start_frac, ref_end_frac)
+    target_aligned_proj = create_subline(target_proj_geom, target_start_frac, target_end_frac)
+
+    if proj_to_wgs84:
+        ref_aligned = (
+            transform(proj_to_wgs84, ref_aligned_proj) if ref_aligned_proj is not None else None
+        )
+        target_aligned = (
+            transform(proj_to_wgs84, target_aligned_proj)
+            if target_aligned_proj is not None
+            else None
+        )
+    else:
+        ref_aligned = ref_aligned_proj
+        target_aligned = target_aligned_proj
+
+    return ref_aligned, target_aligned
 
 
 _cached_matcher: MLMatcher | None = None
@@ -596,19 +733,9 @@ def compute_features_only(
         - ref_start_frac, ref_end_frac, target_start_frac, target_end_frac (alignment)
         - All features from FEATURE_COLUMNS
     """
-    import numpy as np
-
-    from ..config import DEFAULT_TOPOLOGY_FEATURES
-    from ..features.alignment import compute_alignment_batch
-    from ..features.compute import precompute_graphlet_features
-    from ..features.spatial_context import (
-        SpatialContextIndex,
-        compute_aligned_endpoint_features_batch,
-        compute_all_topology,
-    )
+    from ..features.pipeline import prepare_worker_data
     from ..matching.ml import _compute_feature_chunk, _init_worker
 
-    # Filter to LineStrings only
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")
         return pd.DataFrame()
@@ -634,147 +761,21 @@ def compute_features_only(
     if not candidates:
         return pd.DataFrame()
 
-    # Pre-extract data into NumPy arrays
-    ref_geoms = reference_proj.geometry.to_numpy()
-    target_geoms = target_proj.geometry.to_numpy()
-    ref_names = (
-        reference[ref_name_column].to_numpy()
-        if ref_name_column in reference.columns
-        else np.full(len(reference), None, dtype=object)
+    # Prepare worker data using shared pipeline setup
+    pipeline_result = prepare_worker_data(
+        candidates=candidates,
+        reference=reference_proj,
+        target=target_proj,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+        n_jobs=n_jobs,
     )
-    target_names = (
-        target[target_name_column].to_numpy()
-        if target_name_column in target.columns
-        else np.full(len(target), None, dtype=object)
-    )
-    ref_classes = (
-        reference[ref_class_column].to_numpy()
-        if ref_class_column in reference.columns
-        else np.full(len(reference), None, dtype=object)
-    )
-    target_classes = (
-        target[target_class_column].to_numpy()
-        if target_class_column in target.columns
-        else np.full(len(target), None, dtype=object)
-    )
-    ref_subclasses = reference.get("subclass", pd.Series([None] * len(reference))).to_numpy()
-    target_subclasses = target.get("subclass", pd.Series([None] * len(target))).to_numpy()
-
-    # Get unique indices from candidates
-    unique_target_indices = set(cand.target_idx for cand in candidates)
-    unique_ref_indices = set(cand.ref_idx for cand in candidates)
-
-    # Pre-compute endpoint features
-    # IMPORTANT: Use target_proj (projected CRS) not target (WGS84) to match the
-    # CRS of target_geoms which are used as query points. Otherwise the spatial
-    # index expects WGS84 inputs but receives UTM coordinates → no matches.
-    sorted_target_indices = sorted(unique_target_indices)
-    target_candidates_only = target_proj.iloc[sorted_target_indices].reset_index(drop=True)
-    original_to_filtered = {orig: filt for filt, orig in enumerate(sorted_target_indices)}
-
-    logger.info("Building spatial index for endpoint features...")
-    target_index = SpatialContextIndex()
-    target_index.build_from_gdf(target_candidates_only, id_column="id")
-
-    # Pre-compute topology features
-    target_ids = target["id"].to_numpy()
-    ref_ids = reference["id"].to_numpy()
-    unique_target_ids = {str(target_ids[idx]) for idx in unique_target_indices}
-    unique_ref_ids = {str(ref_ids[idx]) for idx in unique_ref_indices}
-
-    logger.info(
-        f"Computing topology features for {len(unique_target_ids)} target and {len(unique_ref_ids)} reference segments..."
-    )
-
-    ref_has_connectors = "connectors" in reference.columns
-    target_has_connectors = "connectors" in target.columns
-
-    target_topology_by_id = compute_all_topology(
-        target,
-        id_column="id",
-        tolerance_m=5.0,
-        ids_to_compute=unique_target_ids,
-        connectors_column="connectors" if target_has_connectors else None,
-    )
-    ref_topology_by_id = compute_all_topology(
-        reference,
-        id_column="id",
-        tolerance_m=5.0,
-        ids_to_compute=unique_ref_ids,
-        connectors_column="connectors" if ref_has_connectors else None,
-    )
-
-    target_topology_features = {}
-    for target_idx in unique_target_indices:
-        seg_id = str(target_ids[target_idx])
-        target_topology_features[target_idx] = target_topology_by_id.get(
-            seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-        )
-
-    ref_topology_features = {}
-    for ref_idx in unique_ref_indices:
-        seg_id = str(ref_ids[ref_idx])
-        ref_topology_features[ref_idx] = ref_topology_by_id.get(
-            seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
-        )
-
-    # Pre-compute graphlet features
-    sorted_ref_indices = sorted(unique_ref_indices)
-    ref_candidates_only = reference_proj.iloc[sorted_ref_indices].reset_index(drop=True)
-    target_candidates_only_proj = target_proj.iloc[sorted_target_indices].reset_index(drop=True)
-
-    logger.info(
-        f"Computing graphlet features for {len(ref_candidates_only)} reference and {len(target_candidates_only_proj)} target segments..."
-    )
-    ref_graphlet_data = precompute_graphlet_features(
-        ref_candidates_only,
-        id_column="id",
-        tolerance_m=5.0,
-        connectors_column="connectors" if ref_has_connectors else None,
-    )
-    target_graphlet_data = precompute_graphlet_features(
-        target_candidates_only_proj, id_column="id", tolerance_m=5.0
-    )
-
-    # Pre-compute linestring alignments
-    logger.info("Computing linestring alignments...")
-    alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
-
-    # Compute endpoint features using alignment fractions
-    # This uses aligned subline endpoints instead of full segment endpoints
-    # Extract connector data for snapping fractions to real network junctions
-    _, target_seg_to_connectors_ep, _, _ = (
-        target_graphlet_data if target_graphlet_data else (None, None, None, None)
-    )
-    aligned_endpoint_features = {}
-    if alignments:
-        logger.info(f"Computing aligned endpoint features for {len(alignments)} pairs...")
-        aligned_endpoint_features = compute_aligned_endpoint_features_batch(
-            alignments=alignments,
-            target_geoms=target_geoms,
-            target_ids=target_ids,
-            target_index=target_index,
-            original_to_filtered=original_to_filtered,
-            seg_to_connectors=target_seg_to_connectors_ep,
-        )
-
-    # Build sibling search contexts for parallel sibling detection
-    # Use ALL segments, not just candidates - a parallel sibling might not have candidate matches
-    from ..features.relational import build_sibling_search_context
-
-    logger.info("Building sibling search contexts...")
-    ref_sibling_context = build_sibling_search_context(
-        geometries=list(reference_proj.geometry),
-        segment_ids=[str(sid) for sid in reference_proj[ref_id_column]],
-        names=list(reference_proj.get(ref_name_column, [None] * len(reference_proj))),
-        classes=list(reference_proj.get(ref_class_column, [None] * len(reference_proj))),
-    )
-    target_sibling_context = build_sibling_search_context(
-        geometries=list(target_proj.geometry),
-        segment_ids=[str(sid) for sid in target_proj[target_id_column]],
-        names=list(target_proj.get(target_name_column, [None] * len(target_proj))),
-        classes=list(target_proj.get(target_class_column, [None] * len(target_proj))),
-    )
+    worker_data = pipeline_result.worker_data
+    alignments = pipeline_result.alignments
 
     # Determine number of workers
     if n_jobs == -1:
@@ -784,28 +785,6 @@ def compute_features_only(
 
     n_candidates = len(candidates)
     logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
-
-    # Prepare worker data
-    worker_data = {
-        "ref_geoms": ref_geoms,
-        "target_geoms": target_geoms,
-        "ref_names": ref_names,
-        "target_names": target_names,
-        "ref_classes": ref_classes,
-        "target_classes": target_classes,
-        "ref_subclasses": ref_subclasses,
-        "target_subclasses": target_subclasses,
-        "ref_ids": ref_ids,
-        "target_ids": target_ids,
-        "aligned_endpoint_features": aligned_endpoint_features,
-        "ref_topology": ref_topology_features,
-        "target_topology": target_topology_features,
-        "ref_graphlet_data": ref_graphlet_data,
-        "target_graphlet_data": target_graphlet_data,
-        "alignments": alignments,
-        "ref_sibling_context": ref_sibling_context,
-        "target_sibling_context": target_sibling_context,
-    }
 
     work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
     chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
@@ -998,6 +977,8 @@ def generate_scored_candidates(
     has_target_class = target_class_column in target.columns
     has_ref_subclass = "subclass" in reference.columns
     has_target_subclass = "subclass" in target.columns
+    has_ref_names_lr = "names_lr" in reference.columns
+    has_target_names_lr = "names_lr" in target.columns
 
     def get_row(lookup, id_val):
         """Get single row from lookup, handling duplicate IDs."""
@@ -1014,38 +995,49 @@ def generate_scored_candidates(
         ref_row = get_row(ref_lookup, result.ref_id)
         target_row = get_row(target_lookup, result.target_id)
 
-        # Extract names and classes
-        ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
-        target_name = (
-            _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
-        )
-        ref_class = ref_row.get(ref_class_column) if has_ref_class else None
-        target_class = target_row.get(target_class_column) if has_target_class else None
-        ref_subclass = ref_row.get("subclass") if has_ref_subclass else None
-        target_subclass = target_row.get("subclass") if has_target_subclass else None
-
         # Get alignment fractions from MatchResult
         ref_start_frac = result.gers_start_frac if result.gers_start_frac is not None else 0.0
         ref_end_frac = result.gers_end_frac if result.gers_end_frac is not None else 1.0
         target_start_frac = result.local_start_frac if result.local_start_frac is not None else 0.0
         target_end_frac = result.local_end_frac if result.local_end_frac is not None else 1.0
 
+        # Extract names, classes, subclasses using LR-aware resolution
+        ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
+            _extract_pair_attributes(
+                ref_data=ref_row,
+                target_data=target_row,
+                ref_name_column=ref_name_column,
+                target_name_column=target_name_column,
+                ref_class_column=ref_class_column,
+                target_class_column=target_class_column,
+                ref_start_frac=ref_start_frac,
+                ref_end_frac=ref_end_frac,
+                target_start_frac=target_start_frac,
+                target_end_frac=target_end_frac,
+                has_ref_name=has_ref_name,
+                has_target_name=has_target_name,
+                has_ref_class=has_ref_class,
+                has_target_class=has_target_class,
+                has_ref_subclass=has_ref_subclass,
+                has_target_subclass=has_target_subclass,
+                has_ref_names_lr=has_ref_names_lr,
+                has_target_names_lr=has_target_names_lr,
+            )
+        )
+
         # Create aligned geometries for map display
         ref_proj_row = get_row(ref_proj_lookup, result.ref_id)
         target_proj_row = get_row(target_proj_lookup, result.target_id)
 
-        ref_aligned_proj = create_subline(ref_proj_row.geometry, ref_start_frac, ref_end_frac)
-        target_aligned_proj = create_subline(
-            target_proj_row.geometry, target_start_frac, target_end_frac
+        ref_aligned, target_aligned = _build_aligned_geometries(
+            ref_proj_geom=ref_proj_row.geometry,
+            target_proj_geom=target_proj_row.geometry,
+            ref_start_frac=ref_start_frac,
+            ref_end_frac=ref_end_frac,
+            target_start_frac=target_start_frac,
+            target_end_frac=target_end_frac,
+            proj_to_wgs84=proj_to_wgs84,
         )
-
-        # Transform aligned geometries back to WGS84
-        if proj_to_wgs84:
-            ref_aligned = transform(proj_to_wgs84, ref_aligned_proj)
-            target_aligned = transform(proj_to_wgs84, target_aligned_proj)
-        else:
-            ref_aligned = ref_aligned_proj
-            target_aligned = target_aligned_proj
 
         # Convert decision enum to string
         decision = result.decision.value  # MatchDecision enum -> string
@@ -1334,6 +1326,8 @@ def build_views_from_feature_df(
     has_target_class = target_class_column in target.columns
     has_ref_subclass = "subclass" in reference.columns
     has_target_subclass = "subclass" in target.columns
+    has_ref_names_lr = "names_lr" in reference.columns
+    has_target_names_lr = "names_lr" in target.columns
 
     views = []
     skipped_count = 0
@@ -1361,48 +1355,50 @@ def build_views_from_feature_df(
             skipped_count += 1
             continue
 
-        # Extract names and classes
-        ref_name = _extract_name_string(ref_data.get(ref_name_column)) if has_ref_name else None
-        target_name = (
-            _extract_name_string(target_data.get(target_name_column)) if has_target_name else None
-        )
-        ref_class = ref_data.get(ref_class_column) if has_ref_class else None
-        target_class = target_data.get(target_class_column) if has_target_class else None
-        ref_subclass = ref_data.get("subclass") if has_ref_subclass else None
-        target_subclass = target_data.get("subclass") if has_target_subclass else None
-
         # Get alignment fractions from cached data
         ref_start_frac = row.get("ref_start_frac", 0.0)
         ref_end_frac = row.get("ref_end_frac", 1.0)
         target_start_frac = row.get("target_start_frac", 0.0)
         target_end_frac = row.get("target_end_frac", 1.0)
 
+        # Extract names, classes, subclasses using LR-aware resolution
+        ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass = (
+            _extract_pair_attributes(
+                ref_data=ref_data,
+                target_data=target_data,
+                ref_name_column=ref_name_column,
+                target_name_column=target_name_column,
+                ref_class_column=ref_class_column,
+                target_class_column=target_class_column,
+                ref_start_frac=ref_start_frac,
+                ref_end_frac=ref_end_frac,
+                target_start_frac=target_start_frac,
+                target_end_frac=target_end_frac,
+                has_ref_name=has_ref_name,
+                has_target_name=has_target_name,
+                has_ref_class=has_ref_class,
+                has_target_class=has_target_class,
+                has_ref_subclass=has_ref_subclass,
+                has_target_subclass=has_target_subclass,
+                has_ref_names_lr=has_ref_names_lr,
+                has_target_names_lr=has_target_names_lr,
+            )
+        )
+
         # Create aligned geometries
         ref_proj_data = ref_proj_records.get(ref_id)
         target_proj_data = target_proj_records.get(target_id)
 
         if ref_proj_data is not None and target_proj_data is not None:
-            ref_aligned_proj = create_subline(
-                ref_proj_data["geometry"], ref_start_frac, ref_end_frac
+            ref_aligned, target_aligned = _build_aligned_geometries(
+                ref_proj_geom=ref_proj_data["geometry"],
+                target_proj_geom=target_proj_data["geometry"],
+                ref_start_frac=ref_start_frac,
+                ref_end_frac=ref_end_frac,
+                target_start_frac=target_start_frac,
+                target_end_frac=target_end_frac,
+                proj_to_wgs84=proj_to_wgs84,
             )
-            target_aligned_proj = create_subline(
-                target_proj_data["geometry"], target_start_frac, target_end_frac
-            )
-
-            if proj_to_wgs84:
-                ref_aligned = (
-                    transform(proj_to_wgs84, ref_aligned_proj)
-                    if ref_aligned_proj is not None
-                    else None
-                )
-                target_aligned = (
-                    transform(proj_to_wgs84, target_aligned_proj)
-                    if target_aligned_proj is not None
-                    else None
-                )
-            else:
-                ref_aligned = ref_aligned_proj
-                target_aligned = target_aligned_proj
         else:
             ref_aligned = None
             target_aligned = None
