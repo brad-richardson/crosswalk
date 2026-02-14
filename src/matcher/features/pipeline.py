@@ -8,7 +8,6 @@ when new worker_data keys were added to one path but not the other.
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NamedTuple
 
 import geopandas as gpd
@@ -63,7 +62,6 @@ def prepare_worker_data(
     ref_subclass_column: str = "subclass",
     target_subclass_column: str = "subclass",
     n_jobs: int = -1,
-    run_alignment_in_background: bool = False,
 ) -> WorkerDataResult:
     """Prepare worker_data dict for parallel feature computation.
 
@@ -86,9 +84,6 @@ def prepare_worker_data(
         ref_subclass_column: Column name for reference subclass
         target_subclass_column: Column name for target subclass
         n_jobs: Number of parallel jobs for alignment (-1 for all cores)
-        run_alignment_in_background: If True, run alignment in a background
-            thread overlapping with graphlet computation (used by score_candidates
-            for better throughput on large datasets)
 
     Returns:
         WorkerDataResult with worker_data dict and side-products
@@ -196,117 +191,51 @@ def prepare_worker_data(
         f"and {len(target_candidates_only_proj)} target segments..."
     )
 
-    # --- Step 6: Compute alignments, graphlets, and sibling contexts ---
-    # Resolve worker count once, used for all parallel blocks
-    from ..config import default_worker_count
+    # --- Step 6: Compute graphlet features ---
+    t0 = time.perf_counter()
+    ref_graphlet_data = precompute_graphlet_features(
+        ref_candidates_only,
+        id_column=ref_id_column,
+        tolerance_m=5.0,
+        connectors_column="connectors" if ref_has_connectors else None,
+    )
+    logger.debug(f"[TIMING] graphlet_ref: {time.perf_counter() - t0:.2f}s")
 
-    if n_jobs == -1:
-        n_workers = default_worker_count()
-    else:
-        n_workers = max(1, n_jobs)
+    t0 = time.perf_counter()
+    target_graphlet_data = precompute_graphlet_features(
+        target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
+    )
+    logger.debug(f"[TIMING] graphlet_target: {time.perf_counter() - t0:.2f}s")
 
-    # Launch alignment and sibling context builds in background threads while
-    # graphlets compute on main thread. compute_alignment_batch spawns its own
-    # ProcessPoolExecutor internally; sibling builds do C-level STRtree construction
-    # (releases GIL) plus lightweight name normalization — no contention.
-    # IMPORTANT: Use ALL reference/target segments for sibling contexts, not just
-    # candidates — a parallel sibling might not have any candidate matches.
-    if run_alignment_in_background:
-        with ThreadPoolExecutor(max_workers=n_workers) as bg_executor:
-            logger.info("Computing linestring alignments (background)...")
-            t0_align = time.perf_counter()
-            alignment_future = bg_executor.submit(
-                compute_alignment_batch, candidates, ref_geoms, target_geoms, n_jobs=n_jobs
-            )
+    # --- Step 7: Compute linestring alignments ---
+    logger.info("Computing linestring alignments...")
+    t0 = time.perf_counter()
+    alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
+    logger.debug(f"[TIMING] alignment_batch: {time.perf_counter() - t0:.2f}s")
 
-            # Submit sibling context builds — extract list args eagerly for thread safety
-            t0_sib_ref = time.perf_counter()
-            ref_sibling_future = bg_executor.submit(
-                build_sibling_search_context,
-                geometries=list(reference.geometry),
-                segment_ids=[str(sid) for sid in reference[ref_id_column]],
-                names=list(reference.get(ref_name_column, [None] * len(reference))),
-                classes=list(reference.get(ref_class_column, [None] * len(reference))),
-            )
-            t0_sib_target = time.perf_counter()
-            target_sibling_future = bg_executor.submit(
-                build_sibling_search_context,
-                geometries=list(target.geometry),
-                segment_ids=[str(sid) for sid in target[target_id_column]],
-                names=list(target.get(target_name_column, [None] * len(target))),
-                classes=list(target.get(target_class_column, [None] * len(target))),
-            )
+    # --- Step 8: Build sibling search contexts ---
+    # IMPORTANT: Use ALL segments, not just candidates — a parallel sibling
+    # might not have any candidate matches in the target dataset
+    logger.info("Building sibling search contexts...")
+    t0 = time.perf_counter()
+    ref_sibling_context = build_sibling_search_context(
+        geometries=list(reference.geometry),
+        segment_ids=[str(sid) for sid in reference[ref_id_column]],
+        names=list(reference.get(ref_name_column, [None] * len(reference))),
+        classes=list(reference.get(ref_class_column, [None] * len(reference))),
+    )
+    logger.debug(f"[TIMING] sibling_context_ref: {time.perf_counter() - t0:.2f}s")
 
-            t0 = time.perf_counter()
-            ref_graphlet_data = precompute_graphlet_features(
-                ref_candidates_only,
-                id_column=ref_id_column,
-                tolerance_m=5.0,
-                connectors_column="connectors" if ref_has_connectors else None,
-            )
-            logger.debug(f"[TIMING] graphlet_ref: {time.perf_counter() - t0:.2f}s")
+    t0 = time.perf_counter()
+    target_sibling_context = build_sibling_search_context(
+        geometries=list(target.geometry),
+        segment_ids=[str(sid) for sid in target[target_id_column]],
+        names=list(target.get(target_name_column, [None] * len(target))),
+        classes=list(target.get(target_class_column, [None] * len(target))),
+    )
+    logger.debug(f"[TIMING] sibling_context_target: {time.perf_counter() - t0:.2f}s")
 
-            t0 = time.perf_counter()
-            target_graphlet_data = precompute_graphlet_features(
-                target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
-            )
-            logger.debug(f"[TIMING] graphlet_target: {time.perf_counter() - t0:.2f}s")
-
-            alignments = alignment_future.result()
-            logger.debug(f"[TIMING] alignment_batch: {time.perf_counter() - t0_align:.2f}s")
-
-            ref_sibling_context = ref_sibling_future.result()
-            logger.debug(f"[TIMING] sibling_context_ref: {time.perf_counter() - t0_sib_ref:.2f}s")
-
-            target_sibling_context = target_sibling_future.result()
-            logger.debug(
-                f"[TIMING] sibling_context_target: {time.perf_counter() - t0_sib_target:.2f}s"
-            )
-    else:
-        # Serial: graphlets, alignment, then sibling contexts
-        t0 = time.perf_counter()
-        ref_graphlet_data = precompute_graphlet_features(
-            ref_candidates_only,
-            id_column=ref_id_column,
-            tolerance_m=5.0,
-            connectors_column="connectors" if ref_has_connectors else None,
-        )
-        logger.debug(f"[TIMING] graphlet_ref: {time.perf_counter() - t0:.2f}s")
-
-        t0 = time.perf_counter()
-        target_graphlet_data = precompute_graphlet_features(
-            target_candidates_only_proj, id_column=target_id_column, tolerance_m=5.0
-        )
-        logger.debug(f"[TIMING] graphlet_target: {time.perf_counter() - t0:.2f}s")
-
-        logger.info("Computing linestring alignments...")
-        t0 = time.perf_counter()
-        alignments = compute_alignment_batch(candidates, ref_geoms, target_geoms, n_jobs=n_jobs)
-        logger.debug(f"[TIMING] alignment_batch: {time.perf_counter() - t0:.2f}s")
-
-        # Build sibling search contexts sequentially
-        # IMPORTANT: Use ALL segments, not just candidates — a parallel sibling
-        # might not have any candidate matches in the target dataset
-        logger.info("Building sibling search contexts...")
-        t0 = time.perf_counter()
-        ref_sibling_context = build_sibling_search_context(
-            geometries=list(reference.geometry),
-            segment_ids=[str(sid) for sid in reference[ref_id_column]],
-            names=list(reference.get(ref_name_column, [None] * len(reference))),
-            classes=list(reference.get(ref_class_column, [None] * len(reference))),
-        )
-        logger.debug(f"[TIMING] sibling_context_ref: {time.perf_counter() - t0:.2f}s")
-
-        t0 = time.perf_counter()
-        target_sibling_context = build_sibling_search_context(
-            geometries=list(target.geometry),
-            segment_ids=[str(sid) for sid in target[target_id_column]],
-            names=list(target.get(target_name_column, [None] * len(target))),
-            classes=list(target.get(target_class_column, [None] * len(target))),
-        )
-        logger.debug(f"[TIMING] sibling_context_target: {time.perf_counter() - t0:.2f}s")
-
-    # --- Step 8: Compute aligned endpoint features ---
+    # --- Step 9: Compute aligned endpoint features ---
     _, target_seg_to_connectors_ep, _, _ = (
         target_graphlet_data if target_graphlet_data else (None, None, None, None)
     )
@@ -327,7 +256,7 @@ def prepare_worker_data(
             f"Computed aligned endpoint features for {len(aligned_endpoint_features)} pairs"
         )
 
-    # --- Step 9: Assemble worker_data ---
+    # --- Step 10: Assemble worker_data ---
     worker_data = {
         "ref_geoms": ref_geoms,
         "target_geoms": target_geoms,

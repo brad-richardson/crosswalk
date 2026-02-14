@@ -1554,7 +1554,6 @@ class MLMatcher:
             ref_subclass_column=ref_subclass_column,
             target_subclass_column=target_subclass_column,
             n_jobs=n_jobs,
-            run_alignment_in_background=True,
         )
         worker_data = pipeline_result.worker_data
         alignments = pipeline_result.alignments

@@ -781,7 +781,7 @@ def compute_features_only(
     if n_jobs == -1:
         n_workers = default_worker_count()
     else:
-        n_workers = n_jobs
+        n_workers = max(1, n_jobs)
 
     n_candidates = len(candidates)
     logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
