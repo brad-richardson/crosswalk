@@ -26,7 +26,7 @@ from ..features.spatial_context import (
     SpatialContextIndex,
     compute_aligned_endpoint_features_batch,
     compute_all_topology,
-    sample_topology_along_segment,
+    sample_topology_batch,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,22 +202,19 @@ def prepare_worker_data(
     # Sample topology degrees at 50m intervals along each target candidate,
     # using the full-network spatial index. This produces synthetic connectors
     # in the same format as Overture connectors, enabling alignment-aware
-    # topology for target segments.
+    # topology for target segments. Uses batch query for single STRtree call.
     t0 = time.perf_counter()
-    target_topo_connectors: dict[str, list[tuple[float, int]]] = {}
-    target_topo_node_features: dict[int, int] = {}
 
     # Project target geometries if needed (spatial index is in projected CRS)
     work_target = target
     if target.crs is not None and target.crs.is_geographic:
         work_target = target.to_crs(target.estimate_utm_crs())
 
-    for target_idx in unique_target_indices:
-        seg_id = str(target_ids[target_idx])
-        geom = work_target.geometry.iloc[target_idx]
-        connectors, node_feats = sample_topology_along_segment(geom, target_topo_spatial_index)
-        target_topo_connectors[seg_id] = connectors
-        target_topo_node_features.update(node_feats)
+    batch_geoms = [work_target.geometry.iloc[idx] for idx in unique_target_indices]
+    batch_ids = [str(target_ids[idx]) for idx in unique_target_indices]
+    target_topo_connectors, target_topo_node_features = sample_topology_batch(
+        batch_geoms, batch_ids, target_topo_spatial_index
+    )
 
     logger.info(f"Sampled topology connectors for {len(target_topo_connectors)} target segments")
     logger.debug(f"[TIMING] target_topo_connectors: {time.perf_counter() - t0:.2f}s")

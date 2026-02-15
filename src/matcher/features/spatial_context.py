@@ -1463,87 +1463,115 @@ def sample_topology_along_segment(
     sample_interval_m: float = 50.0,
     tolerance_m: float = 10.0,
 ) -> tuple[list[tuple[float, int]], dict[int, int]]:
-    """Sample topology degrees along a segment at regular intervals.
+    """Sample topology degrees along a single segment. Thin wrapper around sample_topology_batch()."""
+    seg_to_conn, node_features = sample_topology_batch(
+        [geom], ["_single"], topology_index, sample_interval_m, tolerance_m
+    )
+    return seg_to_conn.get("_single", []), node_features
 
-    Given a target segment geometry and a TopologySpatialIndex (built from the
-    full target network), samples positions at regular intervals and queries
-    the nearest topology cluster at each to determine degree.
 
-    Returns synthetic connectors in the same (frac, node_id) format that
-    Overture connectors use, plus a node_features dict mapping virtual node IDs
-    to degrees. This makes the output directly compatible with
-    compute_aligned_topology_features().
+def sample_topology_batch(
+    geoms: list,
+    seg_ids: list[str],
+    topology_index: TopologySpatialIndex,
+    sample_interval_m: float = 50.0,
+    tolerance_m: float = 10.0,
+) -> tuple[dict[str, list[tuple[float, int]]], dict[int, int]]:
+    """Batch-sample topology degrees for multiple segments in one spatial query.
+
+    More efficient than calling sample_topology_along_segment() per-segment
+    because all sample points are batched into a single STRtree.query_nearest().
 
     Args:
-        geom: LineString geometry (in projected CRS, same as topology_index)
-        topology_index: Spatial index of topology clusters from compute_all_topology()
-        sample_interval_m: Distance between sample points in meters (default 50m)
-        tolerance_m: Maximum distance to match a cluster centroid (default 10m)
+        geoms: List of LineString geometries (projected CRS)
+        seg_ids: Corresponding segment IDs
+        topology_index: Spatial index from compute_all_topology()
+        sample_interval_m: Distance between sample points in meters
+        tolerance_m: Max distance to match a cluster centroid
 
     Returns:
-        Tuple of (connectors, node_features) where:
-        - connectors: List of (frac, virtual_node_id) tuples, sorted by frac.
-            Always includes endpoints (frac=0.0, frac=1.0) plus interior samples.
-        - node_features: Dict mapping virtual_node_id -> degree (int)
+        Tuple of (seg_to_connectors, node_features) where:
+        - seg_to_connectors: {seg_id: [(frac, node_id), ...]}
+        - node_features: {node_id: degree}
     """
     import shapely
 
-    if geom is None or geom.is_empty:
-        return [], {}
+    if not geoms:
+        return {}, {}
 
-    length = geom.length
-    if length <= 0:
-        return [], {}
+    # Phase 1: generate all sample fractions and points per segment
+    all_fracs = []  # flat array of fractions
+    all_points = []  # flat array of shapely points
+    seg_offsets = []  # (seg_idx, start, end) into flat arrays
 
-    # Generate sample fractions: endpoints + interior at sample_interval_m
-    fracs = [0.0]
-    if length > sample_interval_m:
-        n_interior = int(length / sample_interval_m)
-        for i in range(1, n_interior + 1):
-            frac = (i * sample_interval_m) / length
-            if frac < 1.0:
-                fracs.append(frac)
-    fracs.append(1.0)
+    offset = 0
+    for seg_idx, geom in enumerate(geoms):
+        if geom is None or geom.is_empty or geom.length <= 0:
+            seg_offsets.append((seg_idx, offset, offset))
+            continue
 
-    # Interpolate points along the geometry at each fraction
-    distances = np.array(fracs) * length
-    sample_points = shapely.line_interpolate_point(geom, distances)
+        length = geom.length
+        if length > sample_interval_m:
+            n_interior = int(length / sample_interval_m)
+            interior = np.arange(1, n_interior + 1) * sample_interval_m / length
+            interior = interior[interior < 1.0]
+            fracs = np.concatenate(([0.0], interior, [1.0]))
+        else:
+            fracs = np.array([0.0, 1.0])
 
-    # Query the spatial index for nearest cluster at each sample point
-    connectors = []
-    node_features = {}
+        points = shapely.line_interpolate_point(geom, fracs * length)
+        all_fracs.append(fracs)
+        all_points.append(points)
+        seg_offsets.append((seg_idx, offset, offset + len(fracs)))
+        offset += len(fracs)
 
-    # Use query_nearest for batch lookup
+    if offset == 0:
+        return {seg_id: [] for seg_id in seg_ids}, {}
+
+    # Phase 2: single batch spatial query
+    all_points_arr = np.concatenate(all_points)
+    all_fracs_arr = np.concatenate(all_fracs)
+
     nearest_indices, nearest_dists = topology_index.tree.query_nearest(
-        sample_points, max_distance=tolerance_m, return_distance=True
+        all_points_arr, max_distance=tolerance_m, return_distance=True
     )
 
-    # nearest_indices shape: (2, N_matches) where [0] = input idx, [1] = tree idx
-    # Build a map from input index to (tree_idx, distance)
-    matches = {}
-    for k in range(nearest_indices.shape[1]):
-        input_idx = nearest_indices[0, k]
-        tree_idx = nearest_indices[1, k]
-        dist = nearest_dists[k]
-        # Keep only the closest match per input point
-        if input_idx not in matches or dist < matches[input_idx][1]:
-            matches[input_idx] = (tree_idx, dist)
+    # Deduplicate: keep closest match per input point
+    best_tree_idx = np.full(offset, -1, dtype=np.intp)
+    best_dist = np.full(offset, np.inf)
 
-    for i, frac in enumerate(fracs):
-        if i in matches:
-            tree_idx, _dist = matches[i]
-            degree = int(topology_index.degrees[tree_idx])
-            # Use tree_idx as virtual node ID (unique per cluster)
-            virtual_node_id = int(tree_idx)
-            connectors.append((frac, virtual_node_id))
-            node_features[virtual_node_id] = degree
-        else:
-            # No cluster nearby — degree 1 (dead end)
-            virtual_node_id = -(i + 1)  # Negative IDs for unmatched samples
-            connectors.append((frac, virtual_node_id))
-            node_features[virtual_node_id] = 1
+    if nearest_indices.shape[1] > 0:
+        input_idxs = nearest_indices[0]
+        tree_idxs = nearest_indices[1]
+        for k in range(len(input_idxs)):
+            inp = input_idxs[k]
+            if nearest_dists[k] < best_dist[inp]:
+                best_dist[inp] = nearest_dists[k]
+                best_tree_idx[inp] = tree_idxs[k]
 
-    return connectors, node_features
+    # Phase 3: split results back per segment
+    seg_to_connectors: dict[str, list[tuple[float, int]]] = {}
+    node_features: dict[int, int] = {}
+
+    for seg_idx, start, end in seg_offsets:
+        sid = seg_ids[seg_idx]
+        if start == end:
+            seg_to_connectors[sid] = []
+            continue
+
+        connectors = []
+        for i in range(start, end):
+            tid = int(best_tree_idx[i])
+            if tid >= 0:
+                connectors.append((float(all_fracs_arr[i]), tid))
+                node_features[tid] = int(topology_index.degrees[tid])
+            else:
+                vid = -(i + 1)
+                connectors.append((float(all_fracs_arr[i]), vid))
+                node_features[vid] = 1
+        seg_to_connectors[sid] = connectors
+
+    return seg_to_connectors, node_features
 
 
 def compute_degree_signature_similarity(

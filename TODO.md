@@ -94,14 +94,6 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Feature Ideas
 
-### ~~HIGH: Target-Side Aligned Topology~~ ✅ Done (PR #192)
-
-Implemented via synthetic topology connectors sampled from the full-network spatial index. Target topology is now alignment-aware using the same `compute_aligned_topology_features()` path as ref topology.
-
-### ~~Medium: Audit Topology Fallback Path~~ ✅ Done (PR #192)
-
-Eliminated the fallback. Topology now uses a unified code path: `compute_aligned_topology_features()` for both sides with connector data (Overture explicit for ref, synthetic sampled for target). Full-segment topology fallback is retained only for labeling UI edge cases where no connector data is available.
-
 ### Medium: Pre-compute Context to Eliminate Dataset Requirements for Backfill
 
 **Priority:** Medium
