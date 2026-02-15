@@ -256,9 +256,22 @@ def _detect_divergence_endpoints(
         frac = i / (num_samples - 1)
         t = comparison_start + comparison_length * frac
 
+        # Check if projected target parameter is out of bounds.
+        # When t - offset falls outside [0, target_length], _interpolate_along_line
+        # silently clamps to the target endpoint, making out-of-bounds samples
+        # appear aligned when the ref actually loops far away and back.
+        target_param = t - offset
+        if target_param < 0.0 or target_param > target_length:
+            sample_distances[i] = distance_threshold + 1.0
+            sample_fracs[i] = t / ref_length if ref_length > 0 else 0.0
+            sample_dot2[i] = 0.0
+            pa_x, pa_y = _interpolate_along_line(ref_coords, ref_distances, t)
+            pb_x, pb_y = pa_x, pa_y
+            continue
+
         # Interpolate points
         a_x, a_y = _interpolate_along_line(ref_coords, ref_distances, t)
-        b_x, b_y = _interpolate_along_line(target_coords, target_distances, t - offset)
+        b_x, b_y = _interpolate_along_line(target_coords, target_distances, target_param)
 
         # Store sample fraction on reference
         sample_fracs[i] = t / ref_length if ref_length > 0 else 0.0

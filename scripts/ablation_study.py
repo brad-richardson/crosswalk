@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from matcher.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
 from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
 from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import MLMatcher, segment_aware_split
+from matcher.matching.ml import DEFAULT_XGB_PARAMS, MLMatcher, segment_aware_split
 
 
 def _make_ablation_categories() -> dict[str, list[str]]:
@@ -119,6 +119,77 @@ def classify_feature(f1_delta: float) -> str:
         return "important"
 
 
+def _get_xgb_params(seed: int, scale_pos_weight: float) -> dict:
+    """Return XGBoost hyperparameters from the shared default in ml.py."""
+    try:
+        import xgboost  # noqa: F401
+    except ImportError as err:
+        raise ImportError("XGBoost is required. Install with: pip install xgboost") from err
+
+    return {
+        **DEFAULT_XGB_PARAMS,
+        "objective": "binary:logistic",
+        "eval_metric": "logloss",
+        "random_state": seed,
+        "n_jobs": -1,
+        "scale_pos_weight": scale_pos_weight,
+    }
+
+
+def _prepare_data(
+    labels_dir: Path,
+    seed: int,
+    feature_names: list[str] | None = None,
+):
+    """Load labels, extract features, and split into train/test.
+
+    Returns:
+        Tuple of (X_train, X_test, y_train, y_test, X_all, y_all, groups, feature_names)
+    """
+    df = LabelStore.load_all(labels_dir)
+    valid_labels = {"match", "no_match"}
+    df = df[df["label"].isin(valid_labels)].copy()
+
+    if len(df) == 0:
+        raise ValueError("No valid labels found")
+
+    if feature_names is None:
+        feature_names = FEATURE_COLUMNS.copy()
+
+    matcher = MLMatcher()
+    matcher.feature_names = feature_names
+
+    X, y = matcher._extract_features_and_labels(df, binary=True)
+
+    train_idx, test_idx, groups = segment_aware_split(
+        df, test_size=0.3, random_state=seed, return_groups=True
+    )
+
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+
+    # Cap infinite values (XGBoost handles NaN natively but not inf)
+    X_train = np.where(np.isinf(X_train), np.nan, X_train)
+    X_test = np.where(np.isinf(X_test), np.nan, X_test)
+    X_all = np.where(np.isinf(X), np.nan, X)
+
+    return X_train, X_test, y_train, y_test, X_all, y, groups, feature_names
+
+
+def _train_model(X_train, y_train, X_test, y_test, seed: int):
+    """Train an XGBoost model and return it with params."""
+    import xgboost as xgb
+
+    n_neg = (y_train == 0).sum()
+    n_pos = (y_train == 1).sum()
+    scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
+
+    params = _get_xgb_params(seed, scale_pos_weight)
+    model = xgb.XGBClassifier(**params)
+    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+    return model, params
+
+
 def train_and_evaluate(
     labels_dir: Path,
     exclude_features: list[str] | None = None,
@@ -136,80 +207,18 @@ def train_and_evaluate(
     Returns:
         Dict with metrics: accuracy, f1, cv_f1_mean, cv_f1_std, n_features_used
     """
-    # Load labels
-    df = LabelStore.load_all(labels_dir)
+    import xgboost as xgb
 
-    # Filter to valid labels
-    valid_labels = {"match", "no_match"}
-    df = df[df["label"].isin(valid_labels)].copy()
-
-    if len(df) == 0:
-        raise ValueError("No valid labels found")
-
-    # Determine feature columns to use
     if exclude_features:
         feature_names = [f for f in FEATURE_COLUMNS if f not in exclude_features]
     else:
-        feature_names = FEATURE_COLUMNS.copy()
+        feature_names = None
 
-    # Create matcher with specific features
-    matcher = MLMatcher()
-    matcher.feature_names = feature_names
-
-    # Extract features
-    X, y = matcher._extract_features_and_labels(df, binary=True)
-
-    # Segment-aware split
-    train_idx, test_idx, groups = segment_aware_split(
-        df, test_size=0.3, random_state=seed, return_groups=True
+    X_train, X_test, y_train, y_test, X_all, y_all, groups, feature_names = _prepare_data(
+        labels_dir, seed, feature_names
     )
 
-    X_train, X_test = X[train_idx], X[test_idx]
-    y_train, y_test = y[train_idx], y[test_idx]
-
-    # Compute imputation medians from training data
-    matcher.feature_medians = {}
-    for i, feat_name in enumerate(matcher.feature_names):
-        col_vals = X_train[:, i]
-        median_val = np.nanmedian(col_vals)
-        matcher.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
-
-    # Impute missing values
-    X_train = matcher._impute_missing(X_train)
-    X_test = matcher._impute_missing(X_test)
-
-    # Handle class imbalance
-    n_neg = (y_train == 0).sum()
-    n_pos = (y_train == 1).sum()
-    scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-
-    # Train XGBoost with consistent parameters
-    try:
-        import xgboost as xgb
-    except ImportError as err:
-        raise ImportError("XGBoost is required. Install with: pip install xgboost") from err
-
-    params = {
-        "n_estimators": 912,
-        "max_depth": 7,
-        "learning_rate": 0.010636101749852585,
-        "min_child_weight": 5,
-        "subsample": 0.8761081830856152,
-        "colsample_bytree": 0.9616639656253169,
-        "gamma": 0.30396926808636227,
-        "reg_alpha": 1.724985773632091,
-        "reg_lambda": 2.7011840568401686,
-        "max_bin": 147,
-        "tree_method": "hist",
-        "objective": "binary:logistic",
-        "eval_metric": "logloss",
-        "random_state": seed,
-        "n_jobs": -1,
-        "scale_pos_weight": scale_pos_weight,
-    }
-
-    model = xgb.XGBClassifier(**params)
-    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+    model, params = _train_model(X_train, y_train, X_test, y_test, seed)
 
     # Evaluate on test set
     y_pred = model.predict(X_test)
@@ -217,15 +226,14 @@ def train_and_evaluate(
     f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
 
     # Cross-validation with segment-aware folding
-    X_imputed = matcher._impute_missing(X.copy())
     n_groups = groups.nunique()
 
     if n_groups >= n_cv_folds:
         gkf = GroupKFold(n_splits=n_cv_folds)
         cv_scores = []
-        for train_cv_idx, val_cv_idx in gkf.split(X_imputed, y, groups=groups):
-            X_cv_train, X_cv_val = X_imputed[train_cv_idx], X_imputed[val_cv_idx]
-            y_cv_train, y_cv_val = y[train_cv_idx], y[val_cv_idx]
+        for train_cv_idx, val_cv_idx in gkf.split(X_all, y_all, groups=groups):
+            X_cv_train, X_cv_val = X_all[train_cv_idx], X_all[val_cv_idx]
+            y_cv_train, y_cv_val = y_all[train_cv_idx], y_all[val_cv_idx]
 
             cv_model = xgb.XGBClassifier(**params)
             cv_model.fit(X_cv_train, y_cv_train, verbose=False)
@@ -246,6 +254,133 @@ def train_and_evaluate(
         "cv_f1_std": cv_f1_std,
         "n_features_used": len(feature_names),
     }
+
+
+def run_permutation_importance(
+    labels_dir: Path,
+    output_dir: Path,
+    seed: int = 999,
+    n_repeats: int = 10,
+) -> list[dict]:
+    """Run permutation importance analysis.
+
+    Trains one baseline model, then uses sklearn's permutation_importance
+    to measure per-feature importance by shuffling feature values on the test
+    set. This avoids the redundancy masking problem of single-feature ablation.
+
+    Args:
+        labels_dir: Path to labels directory
+        output_dir: Output directory for results
+        seed: Random seed for reproducibility
+        n_repeats: Number of permutation repeats per feature
+
+    Returns:
+        List of per-feature importance dicts
+    """
+    from sklearn.inspection import permutation_importance
+
+    logger.info("Running permutation importance analysis...")
+
+    X_train, X_test, y_train, y_test, _, _, _, feature_names = _prepare_data(labels_dir, seed)
+    model, _ = _train_model(X_train, y_train, X_test, y_test, seed)
+
+    # Baseline test F1
+    y_pred = model.predict(X_test)
+    baseline_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    logger.info(f"Baseline test F1: {baseline_f1:.4f}")
+
+    # Permutation importance
+    logger.info(f"Computing permutation importance ({n_repeats} repeats)...")
+    perm_result = permutation_importance(
+        model,
+        X_test,
+        y_test,
+        n_repeats=n_repeats,
+        random_state=seed,
+        scoring="f1",
+        n_jobs=-1,
+    )
+
+    # Load existing ablation results for cross-referencing (if available)
+    ablation_classifications = {}
+    ablation_csv = output_dir / "ablation_results.csv"
+    if ablation_csv.exists():
+        logger.info(f"Loading ablation results from {ablation_csv} for cross-reference")
+        import csv as csv_module
+
+        with open(ablation_csv) as f:
+            reader = csv_module.DictReader(f)
+            for row in reader:
+                if row["experiment_type"] == "single_feature":
+                    ablation_classifications[row["excluded_features"]] = row["classification"]
+
+    # Build results
+    results = []
+    for i, feat_name in enumerate(feature_names):
+        result = {
+            "feature": feat_name,
+            "importance_mean": float(perm_result.importances_mean[i]),
+            "importance_std": float(perm_result.importances_std[i]),
+            "ablation_classification": ablation_classifications.get(feat_name, ""),
+        }
+        results.append(result)
+
+    # Sort by importance (most important first)
+    results.sort(key=lambda x: -x["importance_mean"])
+
+    # Save CSV
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "permutation_importance.csv"
+    fieldnames = ["feature", "importance_mean", "importance_std", "ablation_classification"]
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in results:
+            writer.writerow(result)
+
+    logger.info(f"Saved permutation importance to {csv_path}")
+
+    # Print summary
+    print("\n" + "=" * 70)
+    print("PERMUTATION IMPORTANCE RESULTS")
+    print("=" * 70)
+    print(f"\nBaseline test F1: {baseline_f1:.4f}")
+    print(f"Features: {len(feature_names)}, Repeats: {n_repeats}\n")
+
+    print(f"{'Feature':<45} {'Importance':>12} {'Std':>8} {'Ablation':>12}")
+    print("-" * 80)
+    for r in results[:20]:
+        print(
+            f"{r['feature']:<45} {r['importance_mean']:>12.4f} "
+            f"{r['importance_std']:>8.4f} {r['ablation_classification']:>12}"
+        )
+    if len(results) > 20:
+        print(f"  ... and {len(results) - 20} more features")
+
+    # Flag potential false negatives: features classified as "noise" by ablation
+    # but showing meaningful permutation importance
+    if ablation_classifications:
+        false_negatives = [
+            r
+            for r in results
+            if r["ablation_classification"] in ("noise", "redundant")
+            and r["importance_mean"] > 0.005
+        ]
+        if false_negatives:
+            print(f"\nPotential false negatives ({len(false_negatives)} features):")
+            print(
+                "  (Classified as noise/redundant by ablation but meaningful permutation importance)"
+            )
+            for r in false_negatives:
+                print(
+                    f"  - {r['feature']}: importance={r['importance_mean']:.4f}, "
+                    f"ablation={r['ablation_classification']}"
+                )
+
+    print("\n" + "=" * 70)
+
+    return results
 
 
 def run_ablation_study(
@@ -609,9 +744,9 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["full", "single", "category"],
+        choices=["full", "single", "category", "permutation"],
         default="full",
-        help="Ablation mode: full (all), single (features only), category (categories only)",
+        help="Ablation mode: full (all), single (features only), category (categories only), permutation (permutation importance)",
     )
     parser.add_argument(
         "--seed",
@@ -634,37 +769,47 @@ def main():
     logger.info(f"  Total features: {len(FEATURE_COLUMNS)}")
     logger.info(f"  Total categories: {len(FEATURE_CATEGORIES)}")
 
-    # Run ablation study
-    results, summary = run_ablation_study(
-        labels_dir=args.labels,
-        output_dir=args.output,
-        mode=args.mode,
-        seed=args.seed,
-    )
-
-    # Save results
-    save_results(results, summary, args.output)
-
-    # Print summary
-    print_summary(summary)
-
-    # Verify expected row count
-    expected_rows = 1  # baseline
-    if args.mode in ("full", "single"):
-        expected_rows += len(FEATURE_COLUMNS)
-    if args.mode in ("full", "category"):
-        expected_rows += len(FEATURE_CATEGORIES)
-
-    actual_rows = len(results)
-    if actual_rows != expected_rows:
-        logger.warning(
-            f"Expected {expected_rows} rows but got {actual_rows} "
-            f"(mode={args.mode}, features={len(FEATURE_COLUMNS)}, categories={len(FEATURE_CATEGORIES)})"
+    if args.mode == "permutation":
+        # Permutation importance mode
+        run_permutation_importance(
+            labels_dir=args.labels,
+            output_dir=args.output,
+            seed=args.seed,
         )
+        logger.info("Permutation importance analysis complete!")
     else:
-        logger.info(f"Generated {actual_rows} results (expected: {expected_rows})")
+        # Ablation study modes (full, single, category)
+        results, summary = run_ablation_study(
+            labels_dir=args.labels,
+            output_dir=args.output,
+            mode=args.mode,
+            seed=args.seed,
+        )
 
-    logger.info("Ablation study complete!")
+        # Save results
+        save_results(results, summary, args.output)
+
+        # Print summary
+        print_summary(summary)
+
+        # Verify expected row count
+        expected_rows = 1  # baseline
+        if args.mode in ("full", "single"):
+            expected_rows += len(FEATURE_COLUMNS)
+        if args.mode in ("full", "category"):
+            expected_rows += len(FEATURE_CATEGORIES)
+
+        actual_rows = len(results)
+        if actual_rows != expected_rows:
+            logger.warning(
+                f"Expected {expected_rows} rows but got {actual_rows} "
+                f"(mode={args.mode}, features={len(FEATURE_COLUMNS)}, "
+                f"categories={len(FEATURE_CATEGORIES)})"
+            )
+        else:
+            logger.info(f"Generated {actual_rows} results (expected: {expected_rows})")
+
+        logger.info("Ablation study complete!")
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ def run_tuning(
         median_val = np.nanmedian(col_vals)
         matcher.feature_medians[feat_name] = median_val if not np.isnan(median_val) else 0.0
 
-    X = matcher._impute_missing(X)
+    X = np.where(np.isinf(X), np.nan, X)
 
     # Create segment groups for CV
     logger.info("Creating segment groups...")

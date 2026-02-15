@@ -43,6 +43,22 @@ from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import extract_lr_name, extract_lr_value
 from .types import MatchDecision, MatchResult
 
+# Default XGBoost hyperparameters (F1-optimized via Optuna tuning).
+# Updated by scripts/tune_model.py; used by MLMatcher.train() and scripts/ablation_study.py.
+DEFAULT_XGB_PARAMS: dict[str, Any] = {
+    "n_estimators": 834,
+    "max_depth": 9,
+    "learning_rate": 0.022511981234250394,
+    "min_child_weight": 9,
+    "subsample": 0.7392909078558574,
+    "colsample_bytree": 0.9537926227035262,
+    "gamma": 0.38078555476202813,
+    "reg_alpha": 0.19508694558590667,
+    "reg_lambda": 4.990926294038142,
+    "max_bin": 248,
+    "tree_method": "hist",
+}
+
 
 class LRAttributes(NamedTuple):
     """Attributes extracted from linear-referenced data for a candidate pair."""
@@ -1051,19 +1067,8 @@ class MLMatcher:
         else:
             scale_pos_weight = None
 
-        # Default XGBoost parameters (F1-optimized via Optuna tuning, 71 features)
         default_params = {
-            "n_estimators": 996,
-            "max_depth": 6,
-            "learning_rate": 0.05469387376360464,
-            "min_child_weight": 5,
-            "subsample": 0.6843716035463862,
-            "colsample_bytree": 0.6286292596625314,
-            "gamma": 0.751881396823991,
-            "reg_alpha": 0.5711023885124519,
-            "reg_lambda": 4.181726868044611,
-            "max_bin": 409,
-            "tree_method": "hist",
+            **DEFAULT_XGB_PARAMS,
             "objective": "binary:logistic" if binary else "multi:softprob",
             "eval_metric": "logloss" if binary else "mlogloss",
             "random_state": 42,
