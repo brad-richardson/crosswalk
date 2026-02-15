@@ -940,3 +940,23 @@ class TestDivergenceDetection:
         assert result.overture_coverage > 0.8, (
             f"Gradual divergence should not truncate heavily, got {result.overture_coverage}"
         )
+
+    def test_winding_road_out_of_bounds_detected(self):
+        """Reference that loops far away and back should be detected as diverged.
+
+        When the ref loops away and t - offset falls outside [0, target_length],
+        _interpolate_along_line used to silently clamp to the target endpoint,
+        making the out-of-bounds samples appear aligned. After the fix, these
+        samples are marked as diverged, producing reduced coverage.
+        """
+        # Target: short straight line
+        target = LineString([(0, 0), (50, 0)])
+        # Reference: starts at target, loops far away (200m up), then comes back
+        ref = LineString([(0, 0), (25, 0), (25, 200), (75, 200), (75, 0), (50, 0)])
+        result = linestring_alignment(ref, target)
+
+        # The looping portion should be detected as divergent, reducing coverage.
+        # Without the fix, the clamped interpolation makes the loop appear aligned.
+        assert result.overture_coverage < 0.8, (
+            f"Winding road loop should truncate coverage, got {result.overture_coverage}"
+        )

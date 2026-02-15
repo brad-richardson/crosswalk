@@ -1390,6 +1390,7 @@ class TestAlignedTopologyFeatures:
         assert aligned_features["to_degree"] != full_features["to_degree"]
 
 
+
 class TestEndpointFeaturesCRSConsistency:
     """Tests for CRS consistency in endpoint feature computation.
 
