@@ -1,9 +1,12 @@
 """Top-level CLI commands."""
 
 import csv
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -1109,6 +1112,9 @@ def register_commands(app: typer.Typer) -> None:
                         skipped += 1
                         continue
                     used_lookup += 1
+                    logger.debug(
+                        "Backfill fallback lookup: gers_id=%s target_id=%s", gers_id, target_id
+                    )
                 else:
                     used_stored += 1
                     stored_target_overrides[target_id] = pair_data["target_geometry"]

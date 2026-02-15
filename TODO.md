@@ -16,17 +16,6 @@ Actionable backlog for the road network matcher.
 - **Location**: `src/matcher/pipeline/runner.py`
 - **Solution**: Migrate to Spark/Sedona/GraphFrames (see [docs/RESEARCH_IDEAS.md](docs/RESEARCH_IDEAS.md#spark-migration-research-jan-2026))
 
-### HIGH: Robust Feature Backfill Validation
-
-**Problem**: Backfill now uses stored geometries from `labels/data/` (stable), but fallback to raw data lookup can still produce wrong features if data has been re-fetched with different filtering or extent.
-
-**Needed**:
-1. Candidate validation after resolving geometries (centroids within buffer distance)
-2. Fallback rejection when stored geometry isn't available
-3. Audit trail logging when backfill uses fallback lookup
-
-**Location**: `src/matcher/cli/labels.py:backfill_features()`
-
 ### Medium: Divergence Detection Fails on Winding Roads (PR #81 follow-up)
 
 **Problem**: `_detect_divergence_endpoints` doesn't truncate the ref subline when the reference loops far away from the target and back. The 1D offset model extends the ref subline through the loop because:

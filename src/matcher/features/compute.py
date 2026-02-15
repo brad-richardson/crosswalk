@@ -981,7 +981,7 @@ def compute_pair_features(
         # Determine geometries for similarity features
         # If alignment is provided, extract aligned portions for computing similarity features
         # (hausdorff, buffer_iou, etc.) on comparable portions only.
-        # Topology/endpoint features still use full geometries.
+        # Topology/endpoint features use alignment-aware calculations via connectors.
         #
         # Optimization: Skip aligned portion extraction when coverage is >99.5%.
         # When alignment covers nearly the full geometry, extracting a portion
