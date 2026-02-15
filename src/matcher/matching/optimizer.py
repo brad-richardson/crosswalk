@@ -22,7 +22,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
 from shapely import LineString
 
-from ..config import settings
+from ..config import DEFAULT_SNAP_TOLERANCE_M, settings
 from .types import MatchDecision, MatchResult
 
 
@@ -381,7 +381,7 @@ def resolve_one_to_many(
     results: list[MatchResult],
     target: gpd.GeoDataFrame,
     min_confidence: float = 0.5,
-    contiguity_tolerance: float = 5.0,
+    contiguity_tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
     target_id_column: str = "local_id",
 ) -> tuple[list[MatchResult], list[MultiMatchResult]]:
     """Resolve 1:N matches where one reference matches multiple targets.
@@ -552,7 +552,7 @@ def optimize_with_one_to_many(
     results: list[MatchResult],
     target: gpd.GeoDataFrame,
     min_confidence: float = 0.5,
-    contiguity_tolerance: float = 5.0,
+    contiguity_tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
     target_id_column: str = "local_id",
 ) -> list[MatchResult]:
     """Optimize matches with support for 1:N relationships.

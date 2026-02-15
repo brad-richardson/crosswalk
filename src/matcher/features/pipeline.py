@@ -19,7 +19,7 @@ from typing import Any, NamedTuple
 import geopandas as gpd
 import numpy as np
 
-from ..config import DEFAULT_TOPOLOGY_FEATURES, default_worker_count
+from ..config import DEFAULT_SNAP_TOLERANCE_M, DEFAULT_TOPOLOGY_FEATURES, default_worker_count
 from ..features.alignment import compute_alignment_batch
 from ..features.compute import precompute_graphlet_features
 from ..features.relational import build_sibling_search_context
@@ -171,7 +171,7 @@ def prepare_worker_data(
             compute_all_topology,
             target,
             id_column=target_id_column,
-            tolerance_m=5.0,
+            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
             ids_to_compute=unique_target_ids,
             return_spatial_index=True,
         )
@@ -179,7 +179,7 @@ def prepare_worker_data(
             compute_all_topology,
             reference,
             id_column=ref_id_column,
-            tolerance_m=5.0,
+            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
             ids_to_compute=unique_ref_ids,
             connectors_column="connectors" if ref_has_connectors else None,
         )
@@ -242,14 +242,14 @@ def prepare_worker_data(
             precompute_graphlet_features,
             ref_candidates_only,
             id_column=ref_id_column,
-            tolerance_m=5.0,
+            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
             connectors_column="connectors" if ref_has_connectors else None,
         )
         target_graphlet_future = graphlet_pool.submit(
             precompute_graphlet_features,
             target_candidates_only,
             id_column=target_id_column,
-            tolerance_m=5.0,
+            tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
         )
         ref_graphlet_data = ref_graphlet_future.result()
         target_graphlet_data = target_graphlet_future.result()

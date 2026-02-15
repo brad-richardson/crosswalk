@@ -117,6 +117,7 @@ def log_timing_summary_if_needed(interval: int = 5000) -> None:
 
 
 from ..config import (
+    DEFAULT_SNAP_TOLERANCE_M,
     FEATURE_COLUMNS,
     MAX_DISTANCE_METERS,
 )
@@ -1221,7 +1222,7 @@ def precompute_parallel_siblings(
 def precompute_graphlet_features(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     connectors_column: str | None = None,
 ) -> tuple:
     """Pre-compute graphlet data for efficient per-pair lookups.
