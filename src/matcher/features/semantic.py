@@ -191,9 +191,7 @@ STREET_ABBREVIATIONS = {
 # has_name_ref/has_name_target encode name presence as binary indicators.
 # Road type words to exclude from Soundex — derived from the expanded forms
 # already maintained in STREET_ABBREVIATIONS (street, avenue, boulevard, etc.).
-_ROAD_TYPE_WORDS = frozenset(
-    w for phrase in STREET_ABBREVIATIONS.values() for w in phrase.split()
-)
+_ROAD_TYPE_WORDS = frozenset(w for phrase in STREET_ABBREVIATIONS.values() for w in phrase.split())
 
 
 def _soundex_key_word(name: str) -> str:
