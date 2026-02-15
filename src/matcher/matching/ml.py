@@ -194,6 +194,7 @@ def _compute_feature_chunk(chunk):
         _compute_intersection_overlap_features,
         _compute_non_geometric_features,
         _get_error_features,
+        assemble_feature_dict,
         compute_graphlet_similarity,
         get_timing_stats,
         is_profiling_enabled,
@@ -447,22 +448,24 @@ def _compute_feature_chunk(chunk):
                 alignment=alignment,
             )
 
-            # Assemble full feature dict
-            features = {
-                # Batchable geometric features
-                "hausdorff_distance_m": float(batch_result.hausdorff_distances[i]),
-                "buffer_iou_5m": float(batch_result.buffer_iou_5m[i]),
-                "buffer_iou_15m": float(batch_result.buffer_iou_15m[i]),
-                "heading_delta": float(batch_result.heading_deltas[i]),
-                "length_ratio": float(batch_result.length_ratios[i]),
-                "centroid_distance_m": float(batch_result.centroid_distances[i]),
-                "aligned_length_m": aligned_length_m,
-                # Non-geometric and per-pair geometric features
-                **non_geom,
-                # Intersection overlap features
-                **intersection_overlap_feats,
-                "_error": None,
-            }
+            # Use original geometries for length_ratio (not sublines)
+            ref_len = _worker_data["ref_geoms"][pd_item["ref_idx"]].length
+            target_len = _worker_data["target_geoms"][pd_item["target_idx"]].length
+            length_ratio = (
+                min(ref_len, target_len) / max(ref_len, target_len)
+                if max(ref_len, target_len) > 0
+                else 0.0
+            )
+
+            # Assemble via shared function (single source of truth for clamping)
+            features = assemble_feature_dict(
+                geom_features=geom_features,
+                length_ratio=length_ratio,
+                aligned_length_m=aligned_length_m,
+                non_geom=non_geom,
+                intersection_overlap_feats=intersection_overlap_feats,
+            )
+            features["_error"] = None
             results[chunk_idx] = features
 
         except Exception as e:
