@@ -410,3 +410,4 @@ class TestOldCommandsRemoved:
         """Old 'matcher ml features' should not work (now data cache)."""
         result = runner.invoke(app, ["ml", "features", "--help"])
         assert result.exit_code != 0
+        assert "No such command" in result.output

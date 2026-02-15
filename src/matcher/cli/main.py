@@ -664,8 +664,9 @@ def register_commands(app: typer.Typer) -> None:
         features_dir = labels_dir / "features"
         if not human_dir.exists() or not features_dir.exists():
             console.print(f"[red]Normalized label format not found in {labels_dir}[/red]")
-            console.print("[yellow]Expected: labels/human/ and labels/features/[/yellow]")
-            console.print("[yellow]Expected normalized label format (labels/human/ + labels/features/).[/yellow]")
+            console.print(
+                "[yellow]Expected normalized label format (labels/human/ + labels/features/).[/yellow]"
+            )
             raise typer.Exit(1)
 
         console.print(f"[blue]Loading labels from {labels_dir}...[/blue]")
