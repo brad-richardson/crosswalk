@@ -1,6 +1,7 @@
 """Tests for helper functions in data_loader.py.
 
-Tests resolve_lr_name(), extract_pair_attributes(), and _build_aligned_geometries().
+Tests extract_pair_attributes() and _build_aligned_geometries().
+LR name extraction tests live in test_linear_ref.py (TestExtractLrName).
 """
 
 import pandas as pd
@@ -11,7 +12,6 @@ from shapely.geometry import LineString
 from matcher.labeling.data_loader import (
     _build_aligned_geometries,
     extract_pair_attributes,
-    resolve_lr_name,
 )
 
 # Reusable LR data: "First Avenue" 0-50%, "Second Street" 50-100%
@@ -19,47 +19,6 @@ SPLIT_LR = [
     {"between": [0.0, 0.5], "value": "First Avenue"},
     {"between": [0.5, 1.0], "value": "Second Street"},
 ]
-
-
-class TestResolveLrName:
-    """Tests for resolve_lr_name()."""
-
-    @pytest.mark.parametrize(
-        "lr_data, start, end, expected",
-        [
-            # No LR data → None
-            (None, 0.0, 1.0, None),
-            # LR resolution: aligned portion selects correct name
-            (SPLIT_LR, 0.0, 0.4, "First Avenue"),
-            (SPLIT_LR, 0.6, 1.0, "Second Street"),
-            # Majority wins when spanning boundary (0.5-0.8 > 0.3-0.5)
-            (SPLIT_LR, 0.3, 0.8, "Second Street"),
-            # Uniform LR
-            ([{"between": [0.0, 1.0], "value": "Main Street"}], 0.0, 1.0, "Main Street"),
-        ],
-        ids=[
-            "no_lr_data",
-            "lr_first_half",
-            "lr_second_half",
-            "lr_majority_wins",
-            "lr_uniform",
-        ],
-    )
-    def test_name_resolution(self, lr_data, start, end, expected):
-        assert resolve_lr_name(lr_data, start, end) == expected
-
-    @pytest.mark.parametrize(
-        "lr_data, expected",
-        [
-            ([{"invalid": "data"}], None),
-            ([], None),
-            ([{"between": [0.0, 1.0], "value": None}], None),
-        ],
-        ids=["malformed", "empty_list", "none_value"],
-    )
-    def test_returns_none_on_bad_lr_data(self, lr_data, expected):
-        """Should return None when LR data is unusable."""
-        assert resolve_lr_name(lr_data, 0.0, 1.0) == expected
 
 
 class TestExtractPairAttributes:

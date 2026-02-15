@@ -21,29 +21,9 @@ from ..features.alignment import create_subline
 from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
 from ..utils import ensure_projected_crs, filter_to_linestrings
-from ..utils.linear_ref import extract_lr_name as _extract_lr_name
+from ..utils.linear_ref import extract_lr_name
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_lr_name(
-    names_lr_data,
-    start_frac: float,
-    end_frac: float,
-) -> str | None:
-    """Resolve display name from linear-referenced data for an aligned portion.
-
-    Delegates to the shared extract_lr_name() in utils.linear_ref.
-
-    Args:
-        names_lr_data: Linear-referenced names data (list of dicts), or None
-        start_frac: Start fraction of aligned portion (0.0-1.0)
-        end_frac: End fraction of aligned portion (0.0-1.0)
-
-    Returns:
-        Resolved name string, or None if no name available
-    """
-    return _extract_lr_name(names_lr_data, start_frac, end_frac)
 
 
 def extract_pair_attributes(
@@ -79,12 +59,12 @@ def extract_pair_attributes(
         Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
     """
     ref_name = (
-        resolve_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
+        extract_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
         if has_ref_names_lr
         else None
     )
     target_name = (
-        resolve_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
+        extract_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
         if has_target_names_lr
         else None
     )
