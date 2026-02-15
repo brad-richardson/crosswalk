@@ -387,12 +387,12 @@ def _compute_non_geometric_features(
         else:
             if ref_topology_full is None:
                 raise MissingContextError(
-                    "ref_topology_full is required when aligned topology path is not active. "
+                    "ref_topology is required when aligned topology path is not active. "
                     "Call compute_all_topology() and pass the result."
                 )
             if target_topology_full is None:
                 raise MissingContextError(
-                    "target_topology_full is required when aligned topology path is not active. "
+                    "target_topology is required when aligned topology path is not active. "
                     "Call compute_all_topology() and pass the result."
                 )
 

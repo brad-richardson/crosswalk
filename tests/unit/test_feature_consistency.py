@@ -190,7 +190,7 @@ class TestCallSiteContextConsistency:
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 5), (100, 5)])
 
-        with pytest.raises(MissingContextError, match="ref_topology_full is required"):
+        with pytest.raises(MissingContextError, match="ref_topology is required"):
             compute_pair_features(
                 ref_geom_full=ref,
                 target_geom_full=target,

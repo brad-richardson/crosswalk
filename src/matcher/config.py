@@ -153,7 +153,7 @@ FEATURE_VERSION = "2026-02-15"
 #       heading_consistency_*, vertex_density_*, has_parallel_sibling_ref,
 #       parallel_fraction_ref, crossing_angle_*, transverse_neighbor_fraction_*
 #   Full geometry: length_ratio, aligned_length_m (full length * coverage fraction)
-#   Pre-computed on full: topology, graphlet, endpoint, coverage, crossing angle
+#   Pre-computed on full: topology, graphlet, endpoint, coverage
 #   Context-dependent (aligned if graphlet_data available, else full): from_degree_*,
 #       to_degree_*, degree_match_score, degree_signature_similarity, is_dead_end_*,
 #       dead_end_match, is_intersection_*, intersection_match
