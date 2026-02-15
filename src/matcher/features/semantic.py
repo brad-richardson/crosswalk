@@ -1,6 +1,7 @@
 """Semantic feature extraction (names, classifications)."""
 
 import re
+import unicodedata
 
 import jellyfish
 from rapidfuzz import fuzz
@@ -188,6 +189,25 @@ STREET_ABBREVIATIONS = {
 # Default result when names are missing - use NaN for similarity scores
 # so the ML model (XGBoost) can learn to handle missing names natively.
 # has_name_ref/has_name_target encode name presence as binary indicators.
+# Road type words to exclude from Soundex — derived from the expanded forms
+# already maintained in STREET_ABBREVIATIONS (street, avenue, boulevard, etc.).
+_ROAD_TYPE_WORDS = frozenset(w for phrase in STREET_ABBREVIATIONS.values() for w in phrase.split())
+
+
+def _soundex_key_word(name: str) -> str:
+    """Pick the longest content word for Soundex comparison.
+
+    Filters out road type words (street, avenue, north, etc.) from the expanded
+    abbreviations, then returns the longest remaining word. Falls back to the
+    longest word overall if all words are road types.
+    """
+    words = name.split()
+    if not words:
+        return ""
+    content = [w for w in words if w not in _ROAD_TYPE_WORDS]
+    return max(content or words, key=len)
+
+
 _nan = float("nan")
 _MISSING_NAMES_RESULT = {
     "levenshtein_ratio": _nan,
@@ -220,6 +240,51 @@ def _is_generic_name(name: str | None) -> bool:
     if not name:
         return False
     return bool(_GENERIC_NAME_REGEX.match(name.strip()))
+
+
+def _get_char_script(ch: str) -> str | None:
+    """Get the Unicode script category for an alphabetic character.
+
+    Uses the first word of unicodedata.name(), which identifies the script:
+    LATIN, CJK, ARABIC, CYRILLIC, HANGUL, HIRAGANA, KATAKANA, DEVANAGARI, THAI, etc.
+    """
+    if not ch.isalpha():
+        return None
+    name = unicodedata.name(ch, "")
+    return name.split()[0] if name else None
+
+
+def _get_text_scripts(text: str) -> set[str]:
+    """Get the set of Unicode script categories used in text.
+
+    Returns script names like {"LATIN"}, {"CJK", "HIRAGANA"}, {"ARABIC"}, etc.
+    Non-alphabetic characters (digits, punctuation, spaces) are ignored.
+    """
+    return {s for ch in text if (s := _get_char_script(ch)) is not None}
+
+
+def _has_non_latin_alpha(text: str) -> bool:
+    """Check if text contains non-Latin alphabetic characters."""
+    return bool(_get_text_scripts(text) - {"LATIN"})
+
+
+def _names_are_cross_script(name_a: str, name_b: str) -> bool:
+    """Check if two names use different writing systems.
+
+    Extracts Unicode script categories (LATIN, CJK, ARABIC, CYRILLIC, etc.)
+    from each name and checks for overlap. No shared scripts means
+    character-level similarity metrics will be unreliable.
+
+    Handles mixed-script text correctly: "北京 Beijing Road" shares LATIN
+    with "Queen's Road Central", so they are NOT considered cross-script.
+    """
+    scripts_a = _get_text_scripts(name_a)
+    scripts_b = _get_text_scripts(name_b)
+
+    if not scripts_a or not scripts_b:
+        return False
+
+    return not scripts_a & scripts_b
 
 
 def _extract_name_string(name) -> str | None:
@@ -318,19 +383,30 @@ def compute_name_similarity(
     partial_ratio = fuzz.partial_ratio(norm_a, norm_b) / 100.0
 
     # Phonetic matching - catches typos and transcription errors
-    # Use first word for Soundex (usually the main street name)
-    first_word_a = norm_a.split()[0] if norm_a else ""
-    first_word_b = norm_b.split()[0] if norm_b else ""
-    soundex_a = jellyfish.soundex(first_word_a) if first_word_a else ""
-    soundex_b = jellyfish.soundex(first_word_b) if first_word_b else ""
-    soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
+    # Soundex and Metaphone are English phonetic algorithms: they produce meaningless
+    # codes for non-Latin characters (CJK, Arabic, Cyrillic, etc.), creating noisy
+    # false signals. Return NaN when either name contains non-Latin characters
+    # so XGBoost learns to ignore phonetics for these pairs.
+    either_non_latin = _has_non_latin_alpha(norm_a) or _has_non_latin_alpha(norm_b)
 
-    # Metaphone on full name for better typo tolerance
-    metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
-    metaphone_b = jellyfish.metaphone(norm_b) if norm_b else ""
-    metaphone_similarity = (
-        fuzz.ratio(metaphone_a, metaphone_b) / 100.0 if metaphone_a and metaphone_b else 0.5
-    )
+    if either_non_latin:
+        soundex_match = _nan
+        metaphone_similarity = _nan
+    else:
+        # Soundex on the key content word (longest word after filtering road type
+        # words like street/avenue/north derived from STREET_ABBREVIATIONS).
+        key_a = _soundex_key_word(norm_a)
+        key_b = _soundex_key_word(norm_b)
+        soundex_a = jellyfish.soundex(key_a) if key_a else ""
+        soundex_b = jellyfish.soundex(key_b) if key_b else ""
+        soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
+
+        # Metaphone on full name for better typo tolerance
+        metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
+        metaphone_b = jellyfish.metaphone(norm_b) if norm_b else ""
+        metaphone_similarity = (
+            fuzz.ratio(metaphone_a, metaphone_b) / 100.0 if metaphone_a and metaphone_b else 0.5
+        )
 
     # Names match if any metric is very high
     names_match = levenshtein_ratio > 0.9 or token_sort_ratio > 0.9 or token_set_ratio > 0.95
@@ -351,16 +427,141 @@ def compute_name_similarity(
     }
 
 
+def _extract_all_name_variants(names_dict) -> list[str]:
+    """Extract all name variants from an Overture names dict.
+
+    Overture Names schema (https://docs.overturemaps.org/schema/reference/transportation/segment/):
+    - primary: The default/main name (string)
+    - common: Dict of language code -> name (e.g., {"en": "Lake Geneva", "fr": "Le Léman"})
+    - rules: Array of NameRule dicts, each with:
+        - value: The name string
+        - variant: Type (common, official, alternate, short)
+        - language: Language code or None
+        - between: [start, end] geometric scope (0-1 fractions along segment)
+        - side: Which side of the road (left/right)
+
+    Note: This function extracts ALL name variants regardless of their ``between``
+    range or ``side`` scope. The caller (resolve_best_name_variant) uses this for
+    cross-language fallback matching — the LR resolution in parse_names_lr already
+    handles range-specific name selection for the primary comparison.
+
+    Returns a deduplicated (case-insensitive) list of all available name strings.
+    """
+    if not names_dict or not isinstance(names_dict, dict):
+        return []
+
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value):
+        if isinstance(value, str) and value:
+            lower = value.lower()
+            if lower not in seen:
+                variants.append(value)
+                seen.add(lower)
+
+    # 1. Primary name
+    _add(names_dict.get("primary"))
+
+    # 2. Common names (dict of language code -> name)
+    common = names_dict.get("common")
+    if isinstance(common, dict):
+        for lang_name in common.values():
+            _add(lang_name)
+
+    # 3. Rules (array of NameRule dicts with value, variant, language, between, side)
+    rules = names_dict.get("rules")
+    if rules is None:
+        return variants
+
+    # Handle numpy arrays
+    if hasattr(rules, "tolist"):
+        rules = rules.tolist()
+
+    if not isinstance(rules, list):
+        return variants
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        _add(rule.get("value"))
+
+    return variants
+
+
+def resolve_best_name_variant(
+    ref_names_raw,
+    ref_name: str | None,
+    target_name: str | None,
+) -> str | None:
+    """Find the best-matching reference name variant for the target name.
+
+    When Overture has multilingual names (e.g., Chinese primary + English alt),
+    the LR-resolved ref_name may be in a different script from the target name,
+    yielding ~0 similarity. This function tries ALL available name variants from
+    the Overture names dict and returns the highest-scoring one against the target.
+
+    Args:
+        ref_names_raw: Raw Overture names dict with primary + rules, or None
+        ref_name: Currently resolved reference name (may be None)
+        target_name: Target segment name string (may be None)
+
+    Returns:
+        The best-matching name variant string, or ref_name if no variants available.
+    """
+    if not target_name or not ref_names_raw:
+        return ref_name
+
+    # Extract target string from dict if needed
+    target_str = _extract_name_string(target_name)
+    if not target_str:
+        return ref_name
+
+    # Extract all available name variants from the reference
+    variants = _extract_all_name_variants(ref_names_raw)
+    if not variants:
+        return ref_name
+
+    # Single variant: return it directly (may upgrade a None ref_name)
+    if len(variants) == 1:
+        return variants[0]
+
+    norm_target = _normalize_street_name(target_str)
+    if not norm_target:
+        return ref_name
+
+    best_score = -1.0
+    best_variant = ref_name
+    for variant in variants:
+        norm_variant = _normalize_street_name(variant)
+        if not norm_variant:
+            continue
+        score = fuzz.ratio(norm_variant, norm_target) / 100.0
+        if score > best_score:
+            best_score = score
+            best_variant = variant
+            if score == 1.0:
+                break  # Perfect match, no need to continue
+
+    return best_variant
+
+
 def _normalize_street_name(name: str) -> str:
     """Normalize street name for comparison.
 
+    - Unicode NFKC normalization (full-width → half-width, compatibility chars)
     - Convert to lowercase
-    - Expand abbreviations
+    - Expand abbreviations (Latin text only)
     - Remove extra whitespace
     - Remove common punctuation
     """
     if not name or not isinstance(name, str):
         return ""
+
+    # Unicode NFKC normalization: normalizes full-width chars (Ｔｏｋｙｏ → Tokyo),
+    # compatibility characters, and composed forms. Critical for CJK data where
+    # full-width Latin and half-width katakana are common.
+    name = unicodedata.normalize("NFKC", name)
 
     # Lowercase
     name = name.lower().strip()
@@ -371,7 +572,7 @@ def _normalize_street_name(name: str) -> str:
     # Add spaces around name for abbreviation matching
     name = f" {name} "
 
-    # Expand abbreviations
+    # Expand abbreviations (only effective for Latin text, harmless for CJK)
     for abbr, full in STREET_ABBREVIATIONS.items():
         name = name.replace(abbr, full)
 
