@@ -127,6 +127,21 @@ LINESTRING (144.734621881638 -37.8674845946421, 144.73467978024 -37.867457431670
 
 Features: `from_degree_ref=4, to_degree_ref=4` (correct), `from_degree_target=1, to_degree_target=1` (incorrect — should reflect intersection degree at alignment boundary).
 
+### Audit Full-Geometry vs Subline Usage Across Pipeline
+
+**Priority:** Medium
+**Problem:** Some features use original (full) geometries while others use alignment-clipped sublines, and the rationale isn't always clear. Inconsistencies have already caused bugs (e.g. `length_ratio` divergence between compute.py and ml.py, fixed in PR #189).
+
+**Audit scope:**
+- `length_ratio` — currently uses full-geometry lengths. Subline ratio is always ~1.0 (useless). But full-geometry ratio penalizes segmentation differences that are normal. Coverage features (`ref_coverage`, `target_coverage`, `coverage_ratio`) may already subsume this — consider dropping `length_ratio` entirely.
+- `hausdorff_distance_m` — uses sublines (via `geom_sim_ref/target`). Correct for measuring shape similarity of the matched portion.
+- `centroid_distance_m` — uses sublines. Should this use full geometries instead? Centroid of a subline vs centroid of the full segment could give different signals.
+- Lateral offset features — uses sublines. Correct (measures offset of matched portion).
+- `heading_delta` — uses sublines. Correct for partial matches where only part of the segment aligns.
+- Document the rationale for each choice and whether any features should switch.
+
+**Location:** `src/matcher/features/compute.py` (subline extraction logic ~line 950), `src/matcher/matching/ml.py` (batch path)
+
 ### Dual Carriageway / Centerline Handling
 
 **Priority:** Medium
