@@ -229,15 +229,20 @@ def generate_agent_test_batch(
 
     from ..agent_labeling.context_generator import write_candidate_package
     from ..agent_labeling.sampler import SampledCandidate
+    from ..features.semantic import resolve_best_name_variant
 
-    def _get_primary_name(row) -> str | None:
-        """Extract primary name string from a GeoDataFrame row."""
-        if not hasattr(row, "get"):
-            return None
-        names = row.get("names")
-        if isinstance(names, dict):
-            return names.get("primary")
-        return names
+    def _resolve_names(ref_row, target_row) -> tuple[str | None, str | None]:
+        """Resolve best name pair using bilateral variant resolution."""
+        ref_names = ref_row.get("names") if hasattr(ref_row, "get") else None
+        target_names = target_row.get("names") if hasattr(target_row, "get") else None
+        ref_primary = ref_names.get("primary") if isinstance(ref_names, dict) else None
+        target_primary = target_names.get("primary") if isinstance(target_names, dict) else None
+        return resolve_best_name_variant(
+            ref_names if isinstance(ref_names, dict) else None,
+            ref_primary,
+            target_primary,
+            target_names if isinstance(target_names, dict) else None,
+        )
 
     # Load human labels
     if not labels_dir.exists():
@@ -367,13 +372,14 @@ def generate_agent_test_batch(
         ]
         features = {col: row.get(col, 0.0) for col in feature_cols if col in row.index}
 
+        resolved_ref_name, resolved_target_name = _resolve_names(ref_row, target_row)
         candidate = SampledCandidate(
             ref_id=str(ref_id),
             target_id=str(target_id),
             ref_geometry=ref_row.geometry,
             target_geometry=target_row.geometry,
-            ref_name=_get_primary_name(ref_row),
-            target_name=_get_primary_name(target_row),
+            ref_name=resolved_ref_name,
+            target_name=resolved_target_name,
             ref_class=ref_row.get("class") if hasattr(ref_row, "get") else None,
             target_class=target_row.get("class") if hasattr(target_row, "get") else None,
             ml_confidence=row.get("original_confidence", 0.5),
@@ -504,6 +510,7 @@ def generate_basemap_sweep(
     from ..agent_labeling.context_generator import write_candidate_sweep_package
     from ..agent_labeling.sampler import SampledCandidate
     from ..config import FEATURE_COLUMNS
+    from ..features.semantic import resolve_best_name_variant
     from ..filenames import find_overture_segments
     from ..labeling.feature_store import FeatureStore
 
@@ -675,36 +682,43 @@ def generate_basemap_sweep(
                     val = row[col]
                     features[col] = None if pd.isna(val) else val
 
-            # Parse names/classes from geometry attributes if available
+            # Parse names/classes from stored data
             import json
 
+            ref_names_raw = None
+            target_names_raw = None
             ref_name = None
             target_name = None
             ref_class = None
             target_class = None
-            if "ref_attributes" in geom_row.index:
-                try:
-                    attrs = json.loads(geom_row["ref_attributes"])
-                    ref_name = attrs.get("name")
-                    ref_class = attrs.get("class")
-                except Exception:
-                    pass  # Malformed JSON attributes - continue with None values
-            if "target_attributes" in geom_row.index:
-                try:
-                    attrs = json.loads(geom_row["target_attributes"])
-                    target_name = attrs.get("name")
-                    target_class = attrs.get("class")
-                except Exception:
-                    pass  # Malformed JSON attributes - continue with None values
 
-            # Fallback: read names/classes from direct columns
-            if ref_name is None and "ref_name" in geom_row.index:
+            # Prefer full names structs for bilateral resolution
+            if "ref_names" in geom_row.index and pd.notna(geom_row.get("ref_names")):
+                val = geom_row["ref_names"]
+                ref_names_raw = json.loads(val) if isinstance(val, str) else val
+            if "target_names" in geom_row.index and pd.notna(geom_row.get("target_names")):
+                val = geom_row["target_names"]
+                target_names_raw = json.loads(val) if isinstance(val, str) else val
+
+            # Extract flat names from structs or legacy columns
+            if isinstance(ref_names_raw, dict):
+                ref_name = ref_names_raw.get("primary")
+            elif "ref_name" in geom_row.index:
                 ref_name = geom_row["ref_name"]
-            if target_name is None and "target_name" in geom_row.index:
+            if isinstance(target_names_raw, dict):
+                target_name = target_names_raw.get("primary")
+            elif "target_name" in geom_row.index:
                 target_name = geom_row["target_name"]
-            if ref_class is None and "ref_class" in geom_row.index:
+
+            # Resolve best name variant pair
+            ref_name, target_name = resolve_best_name_variant(
+                ref_names_raw, ref_name, target_name, target_names_raw
+            )
+
+            # Class from direct columns
+            if "ref_class" in geom_row.index:
                 ref_class = geom_row["ref_class"]
-            if target_class is None and "target_class" in geom_row.index:
+            if "target_class" in geom_row.index:
                 target_class = geom_row["target_class"]
 
             # Read alignment fractions from labels CSV (NaN → defaults)

@@ -287,41 +287,17 @@ def _names_are_cross_script(name_a: str, name_b: str) -> bool:
     return not scripts_a & scripts_b
 
 
-def _extract_name_string(name) -> str | None:
-    """Validate that a name value is a plain string (or None).
-
-    After bilateral variant resolution, all inputs to similarity functions
-    must already be resolved to strings. A dict arriving here means a code
-    path skipped variant resolution — fail loudly so we fix it.
-
-    Args:
-        name: String or None
-
-    Returns:
-        The name string or None
-
-    Raises:
-        TypeError: If name is a dict or other non-string type
-    """
-    if name is None:
-        return None
-    if isinstance(name, str):
-        return name
-    raise TypeError(
-        f"Expected str or None after variant resolution, got {type(name).__name__}: "
-        f"{repr(name)[:200]}"
-    )
-
-
 def compute_name_similarity(
-    name_a,
-    name_b,
+    name_a: str | None,
+    name_b: str | None,
 ) -> dict[str, float]:
     """Compute multiple string similarity metrics.
 
+    Inputs must be pre-resolved strings (via resolve_best_name_variant).
+
     Args:
-        name_a: First street name (string or dict with 'primary' key) - reference
-        name_b: Second street name (string or dict with 'primary' key) - target
+        name_a: Reference street name (string or None)
+        name_b: Target street name (string or None)
 
     Returns:
         Dictionary with:
@@ -336,9 +312,6 @@ def compute_name_similarity(
             - has_name_target: 1.0 if target has non-empty name
             - name_is_generic: 1.0 if either name matches generic pattern
     """
-    # Extract string from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Compute name presence flags
     has_name_ref = 1.0 if name_a else 0.0
@@ -460,7 +433,7 @@ def _extract_all_name_variants(names_dict) -> list[str]:
     if isinstance(common, dict):
         for lang_name in common.values():
             _add(lang_name)
-    elif hasattr(common, "__iter__") and common is not None:
+    elif hasattr(common, "__iter__") and not isinstance(common, str):
         # Overture format: numpy array of [lang_code, name] pairs
         for item in common:
             if hasattr(item, "__len__") and len(item) == 2:
@@ -540,14 +513,13 @@ def resolve_best_name_variant(
 
     # Only ref has variants — resolve against flat target name
     if ref_variants and not target_variants:
-        target_str = _extract_name_string(target_name)
-        if not target_str:
+        if not target_name:
             return ref_name, target_name
 
         if len(ref_variants) == 1:
             return ref_variants[0], target_name
 
-        norm_target = _normalize_street_name(target_str)
+        norm_target = _normalize_street_name(target_name)
         if not norm_target:
             return ref_name, target_name
 
@@ -567,14 +539,13 @@ def resolve_best_name_variant(
         return best_ref, target_name
 
     # Only target has variants — resolve against flat ref name
-    ref_str = _extract_name_string(ref_name)
-    if not ref_str:
+    if not ref_name:
         return ref_name, target_name
 
     if len(target_variants) == 1:
         return ref_name, target_variants[0]
 
-    norm_ref = _normalize_street_name(ref_str)
+    norm_ref = _normalize_street_name(ref_name)
     if not norm_ref:
         return ref_name, target_name
 
@@ -839,25 +810,21 @@ def canonicalize_route_name(name: str | None) -> tuple[str | None, int | None]:
     return None, None
 
 
-def compute_route_prefix_match(name_a, name_b) -> float:
+def compute_route_prefix_match(name_a: str | None, name_b: str | None) -> float:
     """Compute route prefix type matching score.
 
     Compares the route prefix types (Interstate, US Route, State Route, etc.)
-    between two road names. This helps distinguish between different route
-    systems that may have the same number (e.g., I-5 vs US-5 vs SR-5).
+    between two road names. Inputs must be pre-resolved strings.
 
     Args:
-        name_a: First name (string or dict with 'primary' key)
-        name_b: Second name (string or dict with 'primary' key)
+        name_a: Reference name (string or None)
+        name_b: Target name (string or None)
 
     Returns:
         1.0 if both have the same route prefix type
         0.0 if both have different route prefix types
         NaN if either/both is not a recognized route (missing signal)
     """
-    # Extract name strings from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Get route prefix types
     prefix_a, _ = canonicalize_route_name(name_a)
@@ -878,15 +845,16 @@ def compute_route_prefix_match(name_a, name_b) -> float:
         return 0.0
 
 
-def compute_name_numeric_match(name_a, name_b) -> float:
+def compute_name_numeric_match(name_a: str | None, name_b: str | None) -> float:
     """Compute numeric route matching score for numbered routes (I-90, US-101, etc.).
 
     This feature helps match numbered routes that may have different formatting
     (e.g., "Interstate 90" vs "I-90", "US Route 101" vs "US-101").
+    Inputs must be pre-resolved strings.
 
     Args:
-        name_a: First name (string or dict with 'primary' key)
-        name_b: Second name (string or dict with 'primary' key)
+        name_a: Reference name (string or None)
+        name_b: Target name (string or None)
 
     Returns:
         1.0 if both have matching route numbers
@@ -894,9 +862,6 @@ def compute_name_numeric_match(name_a, name_b) -> float:
         0.0 if route numbers mismatch
         NaN if only one has a number (no signal)
     """
-    # Extract name strings from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Extract numeric suffixes
     num_a = extract_numeric_suffix(name_a)

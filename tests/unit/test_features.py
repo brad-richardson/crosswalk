@@ -480,7 +480,7 @@ class TestNonLatinNameHandling:
             "three_lang_picks_korean",
             "three_lang_picks_english",
             "dedup_picks_best",
-            "dict_target",
+            "cjk_ref_english_target",
             "malformed_rules_skipped",
         ],
     )
@@ -488,6 +488,121 @@ class TestNonLatinNameHandling:
         """Should select the closest-matching ref variant."""
         result_ref, _result_target = resolve_best_name_variant(ref_names_raw, ref_name, target_name)
         assert result_ref == expected_ref
+
+
+class TestBilateralResolution:
+    """Tests for bilateral resolution — both ref and target have names structs."""
+
+    def test_both_sides_find_matching_language(self):
+        """When both sides have English + Chinese, picks the matching English pair."""
+        ref_names = {
+            "primary": "海榮路 Hoi Wing Road",
+            "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
+        }
+        target_names = {
+            "primary": "Hoi Wing Road 海榮路",
+            "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            ref_names, "海榮路 Hoi Wing Road", "Hoi Wing Road 海榮路", target_names
+        )
+        # Should find exact English match on both sides
+        assert ref_result == "Hoi Wing Road"
+        assert target_result == "Hoi Wing Road"
+
+    def test_both_sides_find_matching_cjk(self):
+        """When both sides have CJK names, picks matching CJK pair."""
+        ref_names = {
+            "primary": "北京路",
+            "rules": [{"value": "Beijing Road", "language": "en"}],
+        }
+        target_names = {
+            "primary": "北京路",
+            "common": [["en", "Beijing Rd"], ["zh", "北京路"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            ref_names, "北京路", "Beijing Rd", target_names
+        )
+        # Exact CJK match should beat partial English match
+        assert ref_result == "北京路"
+        assert target_result == "北京路"
+
+    def test_cross_script_bilateral_picks_english(self):
+        """Ref has CJK primary + English rule, target has English primary + Chinese alias."""
+        ref_names = {
+            "primary": "皇后大道中",
+            "rules": [{"value": "Queen's Road Central", "language": "en"}],
+        }
+        target_names = {
+            "primary": "Queen's Road Central",
+            "common": [["en", "Queen's Road Central"], ["zh", "皇后大道中"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            ref_names, "皇后大道中", "Queen's Road Central", target_names
+        )
+        # Should find exact English or CJK match
+        assert ref_result in ("Queen's Road Central", "皇后大道中")
+        assert target_result == ref_result  # Should be the same string
+
+    def test_no_good_match_returns_best_available(self):
+        """When languages don't overlap, still returns best fuzzy pair."""
+        ref_names = {
+            "primary": "Hauptstraße",
+            "rules": [{"value": "Hauptstrasse", "language": "de"}],
+        }
+        target_names = {
+            "primary": "Main Street",
+            "common": [["en", "Main Street"], ["fr", "Rue Principale"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            ref_names, "Hauptstraße", "Main Street", target_names
+        )
+        # No matching language, returns best fuzzy pair
+        assert ref_result is not None
+        assert target_result is not None
+
+    def test_target_only_variants_resolves_best(self):
+        """Only target has names struct, ref has flat name."""
+        target_names = {
+            "primary": "海榮路 Hoi Wing Road",
+            "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            None, "Hoi Wing Road", "海榮路 Hoi Wing Road", target_names
+        )
+        # Should pick English target variant to match ref
+        assert ref_result == "Hoi Wing Road"
+        assert target_result == "Hoi Wing Road"
+
+    def test_numpy_array_common_bilateral(self):
+        """Bilateral resolution works with numpy array format for common names."""
+        import numpy as np
+
+        ref_names = {
+            "primary": "海榮路 Hoi Wing Road",
+            "common": np.array(
+                [
+                    np.array(["en", "Hoi Wing Road"], dtype=object),
+                    np.array(["zh", "海榮路"], dtype=object),
+                ],
+                dtype=object,
+            ),
+        }
+        target_names = {
+            "primary": "Hoi Wing Road",
+            "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
+        }
+        ref_result, target_result = resolve_best_name_variant(
+            ref_names, "海榮路 Hoi Wing Road", "Hoi Wing Road", target_names
+        )
+        assert ref_result == "Hoi Wing Road"
+        assert target_result == "Hoi Wing Road"
+
+    def test_both_none_names_raw_returns_flat(self):
+        """When both names_raw are None, returns flat names unchanged."""
+        ref_result, target_result = resolve_best_name_variant(None, "Main St", "Main Street", None)
+        assert ref_result == "Main St"
+        assert target_result == "Main Street"
 
 
 class TestExtractAllNameVariants:

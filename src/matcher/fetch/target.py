@@ -53,6 +53,8 @@ from .normalize import (
 DEFAULT_DATA_DIR = Path("data/raw")
 
 
+# Null markers found in source datasets. HK Transport Department uses
+# U+2013 (EN DASH) + U+FF19 (full-width 9) as their null sentinel "–９９".
 _SENTINEL_VALUES = {"-99", "", "\u2013\uff19\uff19"}
 
 
@@ -67,7 +69,6 @@ def _is_valid_name(value) -> bool:
 
 
 def _build_multilingual_names(
-    gdf: gpd.GeoDataFrame,
     name_columns: dict[str, str],
     source_tags: list[dict],
 ) -> list[dict | None]:
@@ -115,8 +116,10 @@ def _build_multilingual_names(
             results.append(None)
             continue
 
-        # Use first common value as primary
+        # Use first common value as primary, falling back to first rule value
         primary = next(iter(common.values()), None)
+        if primary is None and rules:
+            primary = rules[0]["value"]
 
         names_struct = {"primary": primary}
         if common:
@@ -257,7 +260,7 @@ def _transform_download_data(
     name_columns_config = fetch_config.name_columns
     if name_columns_config:
         # Build multilingual names struct from configured column mapping
-        data["names"] = _build_multilingual_names(gdf, name_columns_config, source_tags_data)
+        data["names"] = _build_multilingual_names(name_columns_config, source_tags_data)
     elif name_column and name_column in gdf.columns:
         data["names"] = (
             gdf[name_column]

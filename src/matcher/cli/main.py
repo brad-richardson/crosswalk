@@ -1113,8 +1113,14 @@ def register_commands(app: typer.Typer) -> None:
                     used_stored += 1
                     stored_target_overrides[target_id] = pair_data["target_geometry"]
                     if target_lookup is None or target_id not in target_lookup.index:
+                        # Prefer full names struct; wrap legacy flat string
+                        target_names = pair_data.get("target_names")
+                        if target_names is None:
+                            flat = pair_data.get("target_name")
+                            if flat:
+                                target_names = {"primary": flat}
                         stored_target_attrs[target_id] = {
-                            "names": pair_data.get("target_names") or pair_data.get("target_name"),
+                            "names": target_names,
                             "names_lr": pair_data.get("target_names_lr"),
                             "class": pair_data.get("target_class"),
                             "subclass": pair_data.get("target_subclass"),

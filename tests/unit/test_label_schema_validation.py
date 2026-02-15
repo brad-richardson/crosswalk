@@ -120,6 +120,46 @@ class TestDataStoreSchema:
         """load_all adds dataset column from partition path."""
         assert "dataset" in data_gdf.columns, "Missing dataset column from partitioning"
 
+    def test_names_fields_valid_schema(self, data_gdf):
+        """ref_names and target_names are either null or valid names structs.
+
+        Valid names struct: dict with 'primary' key (str), optional 'common' and 'rules'.
+        """
+        import json
+
+        for col in ("ref_names", "target_names"):
+            if col not in data_gdf.columns:
+                continue
+            for idx, val in data_gdf[col].items():
+                if val is None:
+                    continue
+                # Deserialize if stored as JSON string
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except json.JSONDecodeError:
+                        pytest.fail(f"{col} row {idx}: invalid JSON string: {val!r}")
+                assert isinstance(val, dict), (
+                    f"{col} row {idx}: expected dict or None, got {type(val).__name__}"
+                )
+                assert "primary" in val, f"{col} row {idx}: missing 'primary' key in names struct"
+                primary = val["primary"]
+                assert primary is None or isinstance(primary, str), (
+                    f"{col} row {idx}: 'primary' must be str or None, got {type(primary).__name__}"
+                )
+                # common must be dict or list-of-pairs if present
+                if "common" in val and val["common"] is not None:
+                    common = val["common"]
+                    assert isinstance(common, (dict, list)), (
+                        f"{col} row {idx}: 'common' must be dict or list, got {type(common).__name__}"
+                    )
+                # rules must be list if present
+                if "rules" in val and val["rules"] is not None:
+                    rules = val["rules"]
+                    assert isinstance(rules, list), (
+                        f"{col} row {idx}: 'rules' must be list, got {type(rules).__name__}"
+                    )
+
 
 class TestHumanLabelSchema:
     """Validate human label CSV has correct schema."""
