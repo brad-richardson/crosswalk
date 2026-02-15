@@ -173,7 +173,7 @@ def _compute_single_feature(args):
 def _compute_feature_chunk(chunk):
     """Process a chunk of pairs with 3-pass batch architecture.
 
-    Pass 1: Collect geometry pairs, extract sublines, gather per-pair data
+    Pass 1: Collect geometry pairs, extract aligned portions, gather per-pair data
     Pass 2: Batch geometric computation via compute_geometric_features_batch()
     Pass 3: Per-pair non-batchable features + assembly
 
@@ -243,7 +243,7 @@ def _compute_feature_chunk(chunk):
                     alignment,
                 )
 
-            # Subline extraction (same logic as compute_pair_features)
+            # Aligned portion extraction (same logic as compute_pair_features)
             with timed_section("subline_extraction"):
                 if alignment is not None:
                     ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
@@ -451,7 +451,7 @@ def _compute_feature_chunk(chunk):
                 alignment=alignment,
             )
 
-            # Use full geometries for length_ratio (not sublines)
+            # Use full geometries for length_ratio (not aligned portions)
             target_length_full = _worker_data["target_geoms_full"][pd_item["target_idx"]].length
             length_ratio = (
                 min(ref_length_full, target_length_full) / max(ref_length_full, target_length_full)
@@ -1633,7 +1633,7 @@ class MLMatcher:
         valid_candidates = [p[0] for p in valid_pairs]
         valid_features = [p[1] for p in valid_pairs]
 
-        # Check for degenerate geometry errors (aligned sublines becoming points/empty)
+        # Check for degenerate geometry errors (aligned portions becoming points/empty)
         # These pairs get error default features but may indicate data quality issues
         error_features_list = [f for f in valid_features if f.get("_error")]
         if error_features_list or total_errors.has_errors():
@@ -1665,7 +1665,7 @@ class MLMatcher:
                 raise ValueError(
                     f"Feature computation error rate {error_rate:.1%} exceeds 20% threshold. "
                     f"{len(error_features_list)} of {len(valid_features)} pairs had errors "
-                    "(likely degenerate aligned sublines). "
+                    "(likely degenerate aligned portions). "
                     "This may indicate poor alignment coverage or bad geometry data."
                 )
 

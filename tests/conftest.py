@@ -262,7 +262,7 @@ def mock_endpoint_features():
     """Mock endpoint features for tests that don't focus on endpoint proximity.
 
     Since compute_pair_features() now requires endpoint_features to be provided
-    (computed on aligned subline endpoints), tests that aren't specifically testing
+    (computed on aligned portion endpoints), tests that aren't specifically testing
     endpoint features can use this fixture.
     """
     return {

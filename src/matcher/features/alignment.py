@@ -4,7 +4,7 @@ Ported from overture_udfs with Numba JIT compilation for performance.
 
 Key functions:
 - linestring_alignment: Find where two lines overlap, returns fractional positions
-- create_subline: Extract a portion of a linestring given start/end fractions
+- create_subline: Extract an aligned portion of a linestring given start/end fractions
 - walk_distance: Integrated Euclidean distance between two aligned lines
 - walk_parallelness: How parallel two aligned lines are (squared dot product)
 - compute_alignment_batch: Parallel batch processing for multiple pairs

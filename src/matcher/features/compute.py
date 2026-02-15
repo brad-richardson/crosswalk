@@ -205,9 +205,9 @@ def _compute_non_geometric_features(
     - Min length
 
     Args:
-        ref_geom_aligned: Reference geometry for similarity (aligned subline,
+        ref_geom_aligned: Reference geometry for similarity (aligned portion,
             or full geometry when coverage >= 99.5%)
-        target_geom_aligned: Target geometry for similarity (aligned subline,
+        target_geom_aligned: Target geometry for similarity (aligned portion,
             or full geometry when coverage >= 99.5%)
         coords_aligned_ref: Pre-extracted coordinates for ref_geom_aligned
         coords_aligned_target: Pre-extracted coordinates for target_geom_aligned
@@ -342,7 +342,7 @@ def _compute_non_geometric_features(
     with timed_section("endpoint_features_lookup"):
         if endpoint_features is None:
             raise ValueError(
-                "endpoint_features is required - must be computed on aligned subline endpoints"
+                "endpoint_features is required - must be computed on aligned portion endpoints"
             )
 
     # Topology features
@@ -448,12 +448,12 @@ def _compute_non_geometric_features(
         coverage_feats = compute_coverage_features(alignment)
 
     # Parallel sibling features (detect split vs centerline representation)
-    # Computed per-pair on the aligned sublines for accuracy with partial alignments
+    # Computed per-pair on aligned portions for accuracy with partial alignments
     with timed_section("sibling_features"):
-        # Compute sibling detection on sublines (not precomputed full geometries)
+        # Compute sibling detection on aligned portions (not precomputed full geometries)
         if ref_sibling_context_full is not None and ref_seg_id is not None:
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = find_parallel_sibling(
-                segment=ref_geom_aligned,  # Use subline, not full geometry
+                segment=ref_geom_aligned,  # Use aligned portion, not full geometry
                 segment_id=ref_seg_id,
                 segment_name=effective_ref_name,
                 segment_class=ref_class,
@@ -471,7 +471,7 @@ def _compute_non_geometric_features(
 
         if target_sibling_context_full is not None and target_seg_id is not None:
             has_sibling_target, sibling_dist_target, _ = find_parallel_sibling(
-                segment=target_geom_aligned,  # Use subline, not full geometry
+                segment=target_geom_aligned,  # Use aligned portion, not full geometry
                 segment_id=target_seg_id,
                 segment_name=effective_target_name,
                 segment_class=target_class,
@@ -934,7 +934,7 @@ def compute_pair_features(
             aligned topology path is active via graphlet_data + alignment + seg_ids)
         target_topology: Pre-computed topology features for target (required unless
             aligned topology path is active via graphlet_data + alignment + seg_ids)
-        alignment: Pre-computed alignment result for using aligned sublines (optional)
+        alignment: Pre-computed alignment result for extracting aligned portions (optional)
         graphlet_features: Pre-computed graphlet similarity features (optional)
         ref_graphlet_data: Graphlet data for reference (G, seg_to_connectors, node_features, use_connectors)
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
@@ -957,12 +957,12 @@ def compute_pair_features(
     _current_phase = "init"
     try:
         # Determine geometries for similarity features
-        # If alignment is provided, extract sublines for computing similarity features
+        # If alignment is provided, extract aligned portions for computing similarity features
         # (hausdorff, buffer_iou, etc.) on comparable portions only.
         # Topology/endpoint features still use full geometries.
         #
-        # Optimization: Skip subline extraction when coverage is >99.5%.
-        # When alignment covers nearly the full geometry, extracting a subline
+        # Optimization: Skip aligned portion extraction when coverage is >99.5%.
+        # When alignment covers nearly the full geometry, extracting a portion
         # just creates a nearly-identical geometry with unnecessary overhead.
         # Note: This threshold must be very high (>99%) to avoid conflicting
         # with divergence detection (PR #81) which trims alignment at 95-99%
@@ -977,7 +977,7 @@ def compute_pair_features(
                 ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
                 target_coverage = alignment.dataset_end_frac - alignment.dataset_start_frac
 
-                # Only extract subline if coverage is below threshold
+                # Only extract aligned portion if coverage is below threshold
                 if ref_coverage >= HIGH_COVERAGE_THRESHOLD:
                     ref_geom_aligned = ref_geom_full  # Use original (cacheable)
                 else:
@@ -1025,7 +1025,7 @@ def compute_pair_features(
             coords_aligned_target = np.array(target_geom_aligned.coords)
 
         _current_phase = "geometric_features"
-        # Compute geometric features on aligned sublines (or full geom if no alignment)
+        # Compute geometric features on aligned portions (or full geom if no alignment)
         with timed_section("geometric_features"):
             geom_features = compute_geometric_features(
                 ref_geom_aligned,
@@ -1060,8 +1060,8 @@ def compute_pair_features(
         )
 
         _current_phase = "merge_features"
-        # Use full geometries for length_ratio, NOT sublines.
-        # Subline alignment clips both geometries to matching portions,
+        # Use full geometries for length_ratio, NOT aligned portions.
+        # Alignment clips both geometries to matching portions,
         # making their lengths nearly identical (ratio ~1.0 always).
         # The full-geometry ratio captures actual segmentation differences.
         target_length_full = target_geom_full.length
@@ -1279,7 +1279,7 @@ def compute_graphlet_similarity(
     """Compute graphlet similarity features for a segment pair.
 
     Uses alignment-aware comparison that finds the nearest connectors to the
-    aligned subline endpoints. For Overture data, uses explicit connectors.
+    aligned portion endpoints. For Overture data, uses explicit connectors.
     For spaghetti geometry, uses inferred connectors from spatial proximity
     (including mid-segment crossings).
 

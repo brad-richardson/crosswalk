@@ -147,7 +147,7 @@ FEATURE_VERSION = "2026-02-15"
 # Distance/length features use _m suffix to indicate meters
 #
 # GEOMETRY PROVENANCE (which geometry each feature is computed from):
-#   Aligned (subline): hausdorff_*, buffer_iou_*, heading_delta, centroid_distance_m,
+#   Aligned portion: hausdorff_*, buffer_iou_*, heading_delta, centroid_distance_m,
 #       lateral_offset_*, sinuosity_*, min_length_m, edge_distance_rmse_m,
 #       collinear_gap_ratio, angle_histogram_similarity, shape_complexity_*,
 #       heading_consistency_*, vertex_density_*, has_parallel_sibling_ref,
