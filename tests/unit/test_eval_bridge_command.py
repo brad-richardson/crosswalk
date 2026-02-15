@@ -1,4 +1,4 @@
-"""Tests for the match-eval CLI command with ground truth evaluation."""
+"""Tests for the analyze bridge CLI command with ground truth evaluation."""
 
 import tempfile
 from pathlib import Path
@@ -11,7 +11,7 @@ from matcher.cli import app
 
 
 class TestMatchEvalCommand:
-    """Tests for matcher match-eval command."""
+    """Tests for matcher analyze bridge command."""
 
     @pytest.fixture
     def runner(self):
@@ -51,8 +51,8 @@ class TestMatchEvalCommand:
             Path(f.name).unlink()
 
     def test_match_eval_without_ground_truth(self, runner, bridge_file):
-        """match-eval command shows basic stats without ground truth."""
-        result = runner.invoke(app, ["match-eval", str(bridge_file)])
+        """analyze bridge command shows basic stats without ground truth."""
+        result = runner.invoke(app, ["analyze", "bridge", str(bridge_file)])
 
         assert result.exit_code == 0
         assert "Total matches: 5" in result.output
@@ -60,9 +60,9 @@ class TestMatchEvalCommand:
         assert "Confidence distribution:" in result.output
 
     def test_match_eval_with_ground_truth(self, runner, bridge_file, ground_truth_file):
-        """match-eval command computes precision/recall/F1 with ground truth."""
+        """analyze bridge command computes precision/recall/F1 with ground truth."""
         result = runner.invoke(
-            app, ["match-eval", str(bridge_file), "--ground-truth", str(ground_truth_file)]
+            app, ["analyze", "bridge", str(bridge_file), "--ground-truth", str(ground_truth_file)]
         )
 
         assert result.exit_code == 0
@@ -82,16 +82,16 @@ class TestMatchEvalCommand:
         assert "F1 Score: 0.667" in result.output
 
     def test_match_eval_nonexistent_ground_truth(self, runner, bridge_file):
-        """match-eval command errors on nonexistent ground truth file."""
+        """analyze bridge command errors on nonexistent ground truth file."""
         result = runner.invoke(
-            app, ["match-eval", str(bridge_file), "--ground-truth", "/nonexistent/file.csv"]
+            app, ["analyze", "bridge", str(bridge_file), "--ground-truth", "/nonexistent/file.csv"]
         )
 
         assert result.exit_code == 1
         assert "not found" in result.output
 
     def test_match_eval_parquet_ground_truth(self, runner, bridge_file):
-        """match-eval command can read parquet ground truth files."""
+        """analyze bridge command can read parquet ground truth files."""
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
             df = pd.DataFrame(
                 {
@@ -105,7 +105,7 @@ class TestMatchEvalCommand:
 
         try:
             result = runner.invoke(
-                app, ["match-eval", str(bridge_file), "--ground-truth", str(gt_path)]
+                app, ["analyze", "bridge", str(bridge_file), "--ground-truth", str(gt_path)]
             )
 
             assert result.exit_code == 0
@@ -196,7 +196,7 @@ class TestMatchEvalCommand:
 
         try:
             result = runner.invoke(
-                app, ["match-eval", str(bridge_path), "--ground-truth", str(gt_path)]
+                app, ["analyze", "bridge", str(bridge_path), "--ground-truth", str(gt_path)]
             )
 
             assert result.exit_code == 0

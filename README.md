@@ -227,7 +227,7 @@ Label pairs as `match`, `no_match`, or `unsure`, then retrain:
 
 ```bash
 matcher train
-matcher ml eval  # Cross-validation evaluation (default: 5-fold)
+matcher eval  # Cross-validation evaluation (default: 5-fold)
 ```
 
 ### Step 4: Integration
@@ -235,15 +235,9 @@ matcher ml eval  # Cross-validation evaluation (default: 5-fold)
 Merge unmatched segments into the reference network:
 
 ```bash
-matcher integrate run data/raw/overture_segments.parquet \
+matcher analyze integrate data/raw/overture_segments.parquet \
     -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \
     -o data/integrated
-```
-
-Review integration results with the QA app:
-
-```bash
-matcher integrate qa -o data/integrated
 ```
 
 ### Dataset Classification
@@ -268,9 +262,9 @@ matcher class discover data/raw/new_dataset.parquet \
 |---------|-------------|
 | `matcher match` | Run the matching pipeline |
 | `matcher train` | Train ML model on labeled data |
+| `matcher eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
+| `matcher backfill` | Recompute features for labeled pairs |
 | `matcher ui` | Launch web UI (labeling, label review, integration QA) |
-| `matcher match-eval` | Evaluate bridge file (matching output) quality |
-| `matcher screen` | Screen segments for valid network additions |
 | `matcher version` | Show version information |
 
 ### Command Groups
@@ -285,13 +279,13 @@ matcher class discover data/raw/new_dataset.parquet \
 | | `data repair` | Repair topology issues |
 | | `data quality` | Dataset quality fingerprint |
 | | `data validate` | Validate data file versions |
-| **ml** | `ml eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
-| | `ml errors` | Analyze prediction errors and diagnose model issues |
-| | `ml features` | Compute and cache features for dataset(s) |
-| **labels** | `labels backfill` | Recompute features for labeled pairs |
-| | `labels stats` | Show label statistics across datasets |
-| **integrate** | `integrate run` | Integrate unmatched segments |
-| | `integrate qa` | Launch integration QA app |
+| | `data cache` | Compute and cache features for dataset(s) |
+| **analyze** | `analyze bridge` | Evaluate bridge file (matching output) quality |
+| | `analyze screen` | Screen segments for valid network additions |
+| | `analyze errors` | Analyze prediction errors and diagnose model issues |
+| | `analyze labels` | Show label statistics across datasets |
+| | `analyze integrate` | Integrate unmatched segments |
+| | `analyze validate` | Run validation experiments (Overture provenance) |
 | **class** | `class discover` | Discover class mappings |
 | | `class analyze` | Analyze class confusion |
 | | `class detect-non-roads` | Detect non-road features |
@@ -301,7 +295,6 @@ matcher class discover data/raw/new_dataset.parquet \
 | | `agent run` | Run agent on batch |
 | | `agent import` | Import agent labels from CSV |
 | | `agent consensus` | Analyze agent consensus |
-| **validate** | `validate matching` | Run validation experiments (Overture provenance) |
 
 Run `matcher --help` or `matcher <command> --help` for detailed options.
 

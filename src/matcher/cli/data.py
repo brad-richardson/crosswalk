@@ -1343,3 +1343,246 @@ def validate_data(
         raise typer.Exit(1)
     else:
         console.print("\n[green]All versioned files valid.[/green]")
+
+
+@data_app.command("cache")
+def compute_features(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID to compute features for (e.g., us_boston_streets)",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Compute features for all datasets with fetched data",
+    ),
+    prefix: str = typer.Option(
+        None,
+        "--prefix",
+        "-p",
+        help="Compute features for datasets matching this prefix",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Recompute even if cached (ignores existing feature cache)",
+    ),
+    workers: int = typer.Option(
+        -1,
+        "--workers",
+        "-w",
+        help="Number of parallel workers for feature computation (-1 for auto)",
+    ),
+    generate_candidates: bool = typer.Option(
+        False,
+        "--generate-candidates",
+        "-c",
+        help="Also generate scored candidates cache for labeling UI (runs ML scoring)",
+    ),
+):
+    """Compute and cache features for dataset(s) without ML scoring.
+
+    This pre-computes the expensive feature computation step (~90% of processing time)
+    and caches the results. When the labeling UI loads, it can use the cached features
+    and only run ML prediction (fast).
+
+    Features are versioned - when feature computation logic changes, bump FEATURE_VERSION
+    in config.py and old caches will be ignored.
+
+    Use --generate-candidates to also run ML scoring and cache the final candidates,
+    making the labeling UI load instantly.
+
+    Examples:
+        matcher data cache us_boston_streets           # Single dataset
+        matcher data cache --prefix us_                # All US datasets
+        matcher data cache --all                       # All datasets with data
+        matcher data cache --all --force               # Recompute all
+        matcher data cache us_boston_streets -w 4      # Limit workers
+        matcher data cache --all --generate-candidates # Full precache for UI
+    """
+    from ..datasets.loader import DatasetLoader
+    from ..labeling.data_loader import (
+        build_views_from_feature_df,
+        compute_features_only,
+        get_feature_cache_info,
+        load_feature_cache,
+        save_candidates_to_cache,
+        save_feature_cache,
+    )
+
+    loader = DatasetLoader()
+
+    def compute_for_dataset(dataset_id: str) -> tuple[bool, str]:
+        """Compute features for a single dataset. Returns (success, error_msg)."""
+        ref_path = loader.find_reference_path(dataset_id)
+        target_path = loader.find_target_path(dataset_id)
+        if ref_path is None or target_path is None:
+            console.print(f"[yellow]Skipping {dataset_id}: missing data files[/yellow]")
+            return False, "missing data files"
+
+        # Check cache
+        cache_info = get_feature_cache_info(dataset_id, ref_path, target_path)
+        feature_cache_exists = cache_info["exists"]
+
+        if feature_cache_exists and not force and not generate_candidates:
+            console.print(
+                f"[blue]Skipping {dataset_id}: feature cache exists "
+                f"({cache_info['candidate_count']:,} candidates, "
+                f"version {cache_info['version']})[/blue]"
+            )
+            return True, ""
+
+        # Use standardized Overture-format column names for parquet files
+        # (the fetch step transforms source columns to these during data ingestion)
+        from ..config import CLASS_COLUMN, NAMES_COLUMN
+
+        ref_name_column = NAMES_COLUMN
+        target_name_column = NAMES_COLUMN
+        ref_class_column = CLASS_COLUMN
+        target_class_column = CLASS_COLUMN
+
+        try:
+            feature_df = None
+            reference = None
+            target = None
+
+            # Load or compute features
+            if feature_cache_exists and not force:
+                console.print(f"[blue]Loading cached features for {dataset_id}...[/blue]")
+                feature_df = load_feature_cache(dataset_id)
+            else:
+                console.print(f"[blue]Computing features for {dataset_id}...[/blue]")
+
+                # Load data
+                reference = loader._load_gdf(ref_path)
+                target = loader._load_gdf(target_path)
+
+                console.print(f"  Reference: {len(reference):,} segments")
+                console.print(f"  Target: {len(target):,} segments")
+
+                # Compute features
+                feature_df = compute_features_only(
+                    reference=reference,
+                    target=target,
+                    ref_name_column=ref_name_column,
+                    target_name_column=target_name_column,
+                    ref_class_column=ref_class_column,
+                    target_class_column=target_class_column,
+                    n_jobs=workers,
+                )
+
+                if len(feature_df) == 0:
+                    console.print(f"[yellow]  No candidates generated for {dataset_id}[/yellow]")
+                    return False, "no candidates generated"
+
+                # Save feature cache
+                cache_path = save_feature_cache(dataset_id, feature_df)
+                console.print(
+                    f"[green]  Saved {len(feature_df):,} features to {cache_path.name}[/green]"
+                )
+
+            # Generate candidates cache if requested
+            if generate_candidates and feature_df is not None:
+                console.print(f"[blue]  Generating scored candidates for {dataset_id}...[/blue]")
+
+                # Load geodataframes if not already loaded (when using cached features)
+                if reference is None:
+                    reference = loader._load_gdf(ref_path)
+                if target is None:
+                    target = loader._load_gdf(target_path)
+
+                # Build views (runs ML scoring, filter to review band for labeling UI)
+                views = build_views_from_feature_df(
+                    feature_df=feature_df,
+                    reference=reference,
+                    target=target,
+                    ref_id_column="id",
+                    target_id_column="id",
+                    ref_name_column=ref_name_column,
+                    target_name_column=target_name_column,
+                    ref_class_column=ref_class_column,
+                    target_class_column=target_class_column,
+                    filter_to_review_band=True,
+                )
+
+                if views:
+                    candidates_path = save_candidates_to_cache(dataset_id, views)
+                    console.print(
+                        f"[green]  Saved {len(views):,} candidates to "
+                        f"{candidates_path.name}[/green]"
+                    )
+                else:
+                    console.print(f"[yellow]  No candidates to cache for {dataset_id}[/yellow]")
+
+            return True, ""
+
+        except Exception as e:
+            console.print(f"[red]  Error computing features for {dataset_id}: {e}[/red]")
+            return False, str(e)
+
+    # Determine which datasets to process
+    datasets_to_process: list[str] = []
+
+    if all_datasets:
+        # Find all datasets with both target and reference data
+        datasets_to_process = loader.list_available()
+
+        if not datasets_to_process:
+            console.print("[yellow]No datasets found with fetched data[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(f"[blue]Found {len(datasets_to_process)} datasets with data[/blue]")
+
+    elif prefix:
+        # Find datasets matching prefix
+        for dataset_id in loader.list_available():
+            if dataset_id.startswith(prefix):
+                datasets_to_process.append(dataset_id)
+
+        if not datasets_to_process:
+            console.print(f"[yellow]No datasets found with prefix '{prefix}'[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(
+            f"[blue]Found {len(datasets_to_process)} datasets matching prefix '{prefix}'[/blue]"
+        )
+
+    elif dataset:
+        datasets_to_process = [dataset]
+
+    else:
+        console.print("[red]Error: Provide a dataset name, --prefix, or --all[/red]")
+        raise typer.Exit(1)
+
+    # Process datasets sequentially
+    success_count = 0
+    skip_count = 0
+    errors: list[tuple[str, str]] = []
+
+    for dataset_id in datasets_to_process:
+        # Check cache BEFORE computation to distinguish skip vs compute
+        cache_info_before = get_feature_cache_info(dataset_id)
+        had_cache = cache_info_before.get("exists", False)
+
+        success, err_msg = compute_for_dataset(dataset_id)
+
+        if not success:
+            errors.append((dataset_id, err_msg))
+        elif had_cache and not force:
+            skip_count += 1
+        else:
+            success_count += 1
+
+    # Summary
+    console.print()
+    console.print("[bold]Summary:[/bold]")
+    console.print(f"  Computed: {success_count}")
+    console.print(f"  Skipped (cached): {skip_count}")
+    if errors:
+        console.print(f"  [red]Failed: {len(errors)}[/red]")
+        for name, err in sorted(errors):
+            err_str = err if len(err) <= 120 else err[:120] + "..."
+            console.print(f"    [red]✗[/red] {name}: {escape(err_str)}")
+        raise typer.Exit(1)

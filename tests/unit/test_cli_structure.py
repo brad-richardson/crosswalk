@@ -34,24 +34,23 @@ class TestTopLevelCommands:
         assert result.exit_code == 0
         assert "Train" in result.output
 
+    def test_eval_help(self):
+        """Test eval command is at top level."""
+        result = runner.invoke(app, ["eval", "--help"])
+        assert result.exit_code == 0
+        assert "Evaluate" in result.output
+
+    def test_backfill_help(self):
+        """Test backfill command is at top level."""
+        result = runner.invoke(app, ["backfill", "--help"])
+        assert result.exit_code == 0
+        assert "Recompute" in result.output or "features" in result.output.lower()
+
     def test_ui_help(self):
         """Test ui command is at top level."""
         result = runner.invoke(app, ["ui", "--help"])
         assert result.exit_code == 0
         assert "ui" in result.output.lower() or "labeling" in result.output.lower()
-
-    def test_match_eval_help(self):
-        """Test match-eval command is at top level."""
-        result = runner.invoke(app, ["match-eval", "--help"])
-        assert result.exit_code == 0
-        output = strip_ansi(result.output)
-        assert "bridge" in output.lower() or "quality" in output.lower()
-
-    def test_screen_help(self):
-        """Test screen command is at top level."""
-        result = runner.invoke(app, ["screen", "--help"])
-        assert result.exit_code == 0
-        assert "screen" in result.output.lower()
 
     def test_version(self):
         """Test version command."""
@@ -73,6 +72,7 @@ class TestDataCommandGroup:
         assert "quality" in output.lower()
         assert "validate" in output.lower()
         assert "fetch" in output.lower()
+        assert "cache" in output.lower()
 
     def test_data_fetch_help(self):
         """Test data fetch subgroup shows commands."""
@@ -111,49 +111,64 @@ class TestDataCommandGroup:
         assert result.exit_code == 0
         assert "validate" in result.output.lower()
 
+    def test_data_cache_help(self):
+        """Test data cache command."""
+        result = runner.invoke(app, ["data", "cache", "--help"])
+        assert result.exit_code == 0
+        assert "features" in result.output.lower() or "cache" in result.output.lower()
 
-class TestMLCommandGroup:
-    """Test the ml command group structure."""
 
-    def test_ml_help(self):
-        """Test ml group shows subcommands."""
-        result = runner.invoke(app, ["ml", "--help"])
+class TestAnalyzeCommandGroup:
+    """Test the analyze command group structure."""
+
+    def test_analyze_help(self):
+        """Test analyze group shows subcommands."""
+        result = runner.invoke(app, ["analyze", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
-        assert "eval" in output.lower()
-        assert "features" in output.lower()
-        # Note: 'backfill' was removed - use 'matcher labels backfill' instead
+        assert "bridge" in output.lower()
+        assert "screen" in output.lower()
+        assert "errors" in output.lower()
+        assert "labels" in output.lower()
+        assert "integrate" in output.lower()
+        assert "validate" in output.lower()
 
-    def test_ml_eval_help(self):
-        """Test ml eval command."""
-        result = runner.invoke(app, ["ml", "eval", "--help"])
-        assert result.exit_code == 0
-        assert "Evaluate" in result.output
-
-    def test_ml_features_help(self):
-        """Test ml features command."""
-        result = runner.invoke(app, ["ml", "features", "--help"])
-        assert result.exit_code == 0
-        assert "features" in result.output.lower()
-
-    # ml backfill command was removed - use 'matcher labels backfill' instead
-
-
-class TestIntegrateCommandGroup:
-    """Test the integrate command group structure."""
-
-    def test_integrate_help(self):
-        """Test integrate group shows subcommands."""
-        result = runner.invoke(app, ["integrate", "--help"])
+    def test_analyze_bridge_help(self):
+        """Test analyze bridge command."""
+        result = runner.invoke(app, ["analyze", "bridge", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
-        assert "run" in output.lower()
+        assert "bridge" in output.lower() or "quality" in output.lower()
 
-    def test_integrate_run_help(self):
-        """Test integrate run command."""
-        result = runner.invoke(app, ["integrate", "run", "--help"])
+    def test_analyze_screen_help(self):
+        """Test analyze screen command."""
+        result = runner.invoke(app, ["analyze", "screen", "--help"])
+        assert result.exit_code == 0
+        assert "screen" in result.output.lower()
+
+    def test_analyze_errors_help(self):
+        """Test analyze errors command."""
+        result = runner.invoke(app, ["analyze", "errors", "--help"])
+        assert result.exit_code == 0
+        assert "error" in result.output.lower()
+
+    def test_analyze_labels_help(self):
+        """Test analyze labels command."""
+        result = runner.invoke(app, ["analyze", "labels", "--help"])
+        assert result.exit_code == 0
+        assert "label" in result.output.lower() or "statistic" in result.output.lower()
+
+    def test_analyze_integrate_help(self):
+        """Test analyze integrate command."""
+        result = runner.invoke(app, ["analyze", "integrate", "--help"])
         assert result.exit_code == 0
         assert "Integrate" in result.output
+
+    def test_analyze_validate_help(self):
+        """Test analyze validate command."""
+        result = runner.invoke(app, ["analyze", "validate", "--help"])
+        assert result.exit_code == 0
+        assert "validation" in result.output.lower() or "experiment" in result.output.lower()
 
 
 class TestClassCommandGroup:
@@ -278,23 +293,6 @@ class TestAgentCommandGroup:
         assert "Evaluate" in result.output or "sweep" in result.output.lower()
 
 
-class TestValidateCommandGroup:
-    """Test the validate command group structure."""
-
-    def test_validate_help(self):
-        """Test validate group shows subcommands."""
-        result = runner.invoke(app, ["validate", "--help"])
-        assert result.exit_code == 0
-        output = strip_ansi(result.output)
-        assert "matching" in output.lower()
-
-    def test_validate_matching_help(self):
-        """Test validate matching command."""
-        result = runner.invoke(app, ["validate", "matching", "--help"])
-        assert result.exit_code == 0
-        assert "validation" in result.output.lower() or "experiment" in result.output.lower()
-
-
 class TestMainAppStructure:
     """Test the main app structure and help output."""
 
@@ -307,18 +305,16 @@ class TestMainAppStructure:
         # Top-level commands
         assert "match" in output.lower()
         assert "train" in output.lower()
+        assert "eval" in output.lower()
+        assert "backfill" in output.lower()
         assert "ui" in output.lower()
-        assert "match-eval" in output.lower()
-        assert "screen" in output.lower()
         assert "version" in output.lower()
 
         # Command groups
         assert "data" in output.lower()
-        assert "ml" in output.lower()
-        assert "integrate" in output.lower()
+        assert "analyze" in output.lower()
         assert "class" in output.lower()
         assert "agent" in output.lower()
-        assert "validate" in output.lower()
 
     def test_no_args_shows_help(self):
         """Test that running without args shows help."""
@@ -345,7 +341,7 @@ class TestOldCommandsRemoved:
         assert "No such command" in result.output
 
     def test_old_eval_bridge_not_at_top_level(self):
-        """Old 'matcher eval-bridge' should not work (now match-eval)."""
+        """Old 'matcher eval-bridge' should not work."""
         result = runner.invoke(app, ["eval-bridge", "--help"])
         assert result.exit_code != 0
         assert "No such command" in result.output
@@ -374,7 +370,43 @@ class TestOldCommandsRemoved:
         assert result.exit_code != 0
         assert "No such command" in result.output
 
-    def test_old_integrate_qa_not_available(self):
-        """Old 'matcher integrate qa' should not work (now matcher ui)."""
-        result = runner.invoke(app, ["integrate", "qa", "--help"])
+    def test_old_match_eval_not_at_top_level(self):
+        """Old 'matcher match-eval' should not work (now analyze bridge)."""
+        result = runner.invoke(app, ["match-eval", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_screen_not_at_top_level(self):
+        """Old 'matcher screen' should not work (now analyze screen)."""
+        result = runner.invoke(app, ["screen", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_ml_eval_not_available(self):
+        """Old 'matcher ml eval' should not work (now matcher eval)."""
+        result = runner.invoke(app, ["ml", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_labels_backfill_not_available(self):
+        """Old 'matcher labels backfill' should not work (now matcher backfill)."""
+        result = runner.invoke(app, ["labels", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_integrate_run_not_available(self):
+        """Old 'matcher integrate run' should not work (now analyze integrate)."""
+        result = runner.invoke(app, ["integrate", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_validate_matching_not_available(self):
+        """Old 'matcher validate matching' should not work (now analyze validate)."""
+        result = runner.invoke(app, ["validate", "--help"])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
+    def test_old_ml_features_not_available(self):
+        """Old 'matcher ml features' should not work (now data cache)."""
+        result = runner.invoke(app, ["ml", "features", "--help"])
         assert result.exit_code != 0
