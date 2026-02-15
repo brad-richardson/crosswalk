@@ -4,16 +4,21 @@ Provides prepare_worker_data() which encapsulates the common setup logic
 needed by both score_candidates() (live scoring) and compute_features_only()
 (feature caching). This eliminates duplication that previously caused bugs
 when new worker_data keys were added to one path but not the other.
+
+Also provides compute_features_parallel() which encapsulates the common
+ProcessPoolExecutor dispatch pattern shared by score_candidates() and
+compute_features_only().
 """
 
 import logging
 import time
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, NamedTuple
 
 import geopandas as gpd
 import numpy as np
 
-from ..config import DEFAULT_TOPOLOGY_FEATURES
+from ..config import DEFAULT_TOPOLOGY_FEATURES, default_worker_count
 from ..features.alignment import compute_alignment_batch
 from ..features.compute import precompute_graphlet_features
 from ..features.relational import build_sibling_search_context
@@ -297,4 +302,101 @@ def prepare_worker_data(
         alignments=alignments,
         unique_ref_indices=unique_ref_indices,
         unique_target_indices=unique_target_indices,
+    )
+
+
+class ParallelFeatureResult(NamedTuple):
+    """Result of parallel feature computation."""
+
+    features_list: list[dict | None]
+    """Per-candidate feature dicts (None for rejected pairs), in candidate order."""
+    wall_clock_seconds: float
+    """Wall clock time for the parallel phase."""
+    error_aggregator: Any
+    """ErrorAggregator with cross-worker error stats."""
+
+
+def compute_features_parallel(
+    candidates: list,
+    worker_data: dict,
+    n_jobs: int = -1,
+    sort_for_locality: bool = False,
+) -> ParallelFeatureResult:
+    """Run parallel feature computation on candidate pairs.
+
+    Shared by MLMatcher.score_candidates() and data_loader.compute_features_only().
+
+    Encapsulates: chunk splitting, ProcessPoolExecutor setup, _init_worker,
+    _compute_feature_chunk mapping, progress logging, error aggregation,
+    and result collection.
+
+    Args:
+        candidates: List of CandidatePair objects
+        worker_data: Dict from prepare_worker_data()
+        n_jobs: Number of parallel jobs (-1 for all cores)
+        sort_for_locality: If True, sort work items by ref_idx for buffer cache
+            locality (used by score_candidates). Results are reordered back to
+            original candidate order.
+
+    Returns:
+        ParallelFeatureResult with features_list in original candidate order,
+        wall clock time, and error aggregator.
+    """
+    from ..errors import ErrorAggregator
+    from ..matching.ml import _compute_feature_chunk, _init_worker
+
+    if n_jobs == -1:
+        n_workers = default_worker_count()
+    else:
+        n_workers = max(1, n_jobs)
+
+    n_candidates = len(candidates)
+    logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
+
+    work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
+
+    # Optional spatial locality sorting for better buffer cache hit rates
+    original_indices = None
+    if sort_for_locality:
+        work_items_with_idx = [
+            (cand.ref_idx, cand.target_idx, i) for i, cand in enumerate(candidates)
+        ]
+        work_items_with_idx.sort(key=lambda x: (x[0], x[1]))
+        work_items = [(item[0], item[1]) for item in work_items_with_idx]
+        original_indices = [item[2] for item in work_items_with_idx]
+
+    chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
+    chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
+    features_list: list[dict | None] = []
+
+    total_errors = ErrorAggregator()
+
+    logger.info(
+        f"Starting parallel feature computation (chunk_size={chunk_size}, {len(chunks)} chunks)..."
+    )
+    t0 = time.perf_counter()
+
+    with ProcessPoolExecutor(
+        max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
+    ) as executor:
+        for chunk_results, chunk_errors in executor.map(_compute_feature_chunk, chunks):
+            features_list.extend(chunk_results)
+            total_errors.merge_serialized(chunk_errors)
+            processed = len(features_list)
+            pct = int(processed / len(work_items) * 100)
+            logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct}%)")
+
+    wall_clock = time.perf_counter() - t0
+
+    # Reorder back to original candidate order if we sorted for locality
+    if original_indices is not None:
+        features_list_reordered: list[dict | None] = [None] * len(features_list)
+        for sorted_idx, orig_idx in enumerate(original_indices):
+            features_list_reordered[orig_idx] = features_list[sorted_idx]
+        features_list = features_list_reordered
+
+    return ParallelFeatureResult(
+        features_list=features_list,
+        wall_clock_seconds=wall_clock,
+        error_aggregator=total_errors,
     )

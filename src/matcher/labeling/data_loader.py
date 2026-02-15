@@ -16,47 +16,14 @@ from shapely.geometry import LineString
 from shapely.ops import transform
 
 from ..blocking import generate_candidates
-from ..config import FEATURE_COLUMNS, FEATURE_VERSION, default_worker_count, settings
+from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..features.alignment import create_subline
 from ..filenames import feature_cache_path, scored_cache_path
 from ..matching.ml import MLMatcher
 from ..utils import ensure_projected_crs, filter_to_linestrings
-from ..utils.linear_ref import LinearReferencedAttribute, extract_aligned_attributes
+from ..utils.linear_ref import extract_lr_name
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_lr_name(
-    names_lr_data,
-    start_frac: float,
-    end_frac: float,
-) -> str | None:
-    """Resolve display name from linear-referenced data for an aligned portion.
-
-    For segments with varying names along their length (e.g., a segment that is
-    "First Avenue" from 0-40% and "Second Street" from 40-100%), this returns the
-    name covering the majority of the aligned portion, rather than always returning
-    the segment's primary name.
-
-    All datasets are expected to have names_lr populated (Overture segments have
-    native LR data, target datasets get trivial LR via _add_trivial_lr_columns).
-
-    Args:
-        names_lr_data: Linear-referenced names data (list of dicts), or None
-        start_frac: Start fraction of aligned portion (0.0-1.0)
-        end_frac: End fraction of aligned portion (0.0-1.0)
-
-    Returns:
-        Resolved name string, or None if no name available
-    """
-    if names_lr_data is None:
-        return None
-    try:
-        lr_attr = LinearReferencedAttribute.from_dict_list(names_lr_data)
-        attrs = extract_aligned_attributes({"name": lr_attr}, start_frac, end_frac)
-        return attrs.get("name")
-    except (TypeError, KeyError, ValueError):
-        return None
 
 
 def extract_pair_attributes(
@@ -92,12 +59,12 @@ def extract_pair_attributes(
         Tuple of (ref_name, target_name, ref_class, target_class, ref_subclass, target_subclass)
     """
     ref_name = (
-        resolve_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
+        extract_lr_name(ref_data.get("names_lr"), ref_start_frac, ref_end_frac)
         if has_ref_names_lr
         else None
     )
     target_name = (
-        resolve_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
+        extract_lr_name(target_data.get("names_lr"), target_start_frac, target_end_frac)
         if has_target_names_lr
         else None
     )
@@ -413,28 +380,23 @@ def get_cache_path(dataset_id: str) -> Path:
     return scored_cache_path(dataset_id)
 
 
-def get_cache_info(
-    dataset_id: str,
+def _get_parquet_cache_info(
+    cache_path: Path,
     reference_path: Path | None = None,
     target_path: Path | None = None,
+    extra_fields: dict | None = None,
 ) -> dict[str, Any]:
-    """Get information about the candidate cache for a dataset.
+    """Shared cache info logic for scored and feature caches.
 
     Args:
-        dataset_id: Unique identifier for the dataset
+        cache_path: Path to the parquet cache file
         reference_path: Path to reference data file (for freshness check)
         target_path: Path to target data file (for freshness check)
+        extra_fields: Additional fields to include in the returned dict
 
     Returns:
-        Dictionary with cache info:
-        - exists: Whether cache file exists
-        - path: Path to cache file
-        - created: Cache creation timestamp (or None)
-        - age_hours: Hours since cache creation (or None)
-        - is_fresh: Whether cache is newer than source files (or None)
-        - candidate_count: Number of candidates in cache (or None)
+        Dictionary with cache info (exists, path, created, age_hours, is_fresh, candidate_count)
     """
-    cache_path = get_cache_path(dataset_id)
     info: dict[str, Any] = {
         "exists": cache_path.exists(),
         "path": cache_path,
@@ -443,6 +405,8 @@ def get_cache_info(
         "is_fresh": None,
         "candidate_count": None,
     }
+    if extra_fields:
+        info.update(extra_fields)
 
     if not cache_path.exists():
         return info
@@ -470,10 +434,33 @@ def get_cache_info(
         metadata = pq.read_metadata(cache_path)
         info["candidate_count"] = metadata.num_rows
     except Exception as e:
-        # Failed to read metadata; leave candidate_count as None
         logger.debug(f"Failed to read cache metadata from {cache_path}: {e}")
 
     return info
+
+
+def get_cache_info(
+    dataset_id: str,
+    reference_path: Path | None = None,
+    target_path: Path | None = None,
+) -> dict[str, Any]:
+    """Get information about the candidate cache for a dataset.
+
+    Args:
+        dataset_id: Unique identifier for the dataset
+        reference_path: Path to reference data file (for freshness check)
+        target_path: Path to target data file (for freshness check)
+
+    Returns:
+        Dictionary with cache info:
+        - exists: Whether cache file exists
+        - path: Path to cache file
+        - created: Cache creation timestamp (or None)
+        - age_hours: Hours since cache creation (or None)
+        - is_fresh: Whether cache is newer than source files (or None)
+        - candidate_count: Number of candidates in cache (or None)
+    """
+    return _get_parquet_cache_info(get_cache_path(dataset_id), reference_path, target_path)
 
 
 def load_cached_candidates(dataset_id: str) -> list[CandidatePairView] | None:
@@ -588,48 +575,14 @@ def get_feature_cache_info(
         target_path: Path to target data file (for freshness check)
 
     Returns:
-        Dictionary with cache info (same structure as get_cache_info)
+        Dictionary with cache info (same structure as get_cache_info, plus version)
     """
-    cache_path = get_feature_cache_path(dataset_id)
-    info: dict[str, Any] = {
-        "exists": cache_path.exists(),
-        "path": cache_path,
-        "version": FEATURE_VERSION,
-        "created": None,
-        "age_hours": None,
-        "is_fresh": None,
-        "candidate_count": None,
-    }
-
-    if not cache_path.exists():
-        return info
-
-    # Get cache modification time
-    cache_mtime = cache_path.stat().st_mtime
-    cache_datetime = datetime.fromtimestamp(cache_mtime)
-    info["created"] = cache_datetime
-    info["age_hours"] = (datetime.now() - cache_datetime).total_seconds() / 3600
-
-    # Check freshness against source files
-    if reference_path and target_path:
-        source_mtimes = []
-        if reference_path.exists():
-            source_mtimes.append(reference_path.stat().st_mtime)
-        if target_path.exists():
-            source_mtimes.append(target_path.stat().st_mtime)
-        if source_mtimes:
-            info["is_fresh"] = cache_mtime > max(source_mtimes)
-
-    # Get candidate count from metadata without loading full file
-    try:
-        import pyarrow.parquet as pq
-
-        metadata = pq.read_metadata(cache_path)
-        info["candidate_count"] = metadata.num_rows
-    except Exception as e:
-        logger.debug(f"Failed to read feature cache metadata from {cache_path}: {e}")
-
-    return info
+    return _get_parquet_cache_info(
+        get_feature_cache_path(dataset_id),
+        reference_path,
+        target_path,
+        extra_fields={"version": FEATURE_VERSION},
+    )
 
 
 def load_feature_cache(dataset_id: str) -> pd.DataFrame | None:
@@ -717,8 +670,7 @@ def compute_features_only(
         - ref_start_frac, ref_end_frac, target_start_frac, target_end_frac (alignment)
         - All features from FEATURE_COLUMNS
     """
-    from ..features.pipeline import prepare_worker_data
-    from ..matching.ml import _compute_feature_chunk, _init_worker
+    from ..features.pipeline import compute_features_parallel, prepare_worker_data
 
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")
@@ -761,38 +713,13 @@ def compute_features_only(
     worker_data = pipeline_result.worker_data
     alignments = pipeline_result.alignments
 
-    # Determine number of workers
-    if n_jobs == -1:
-        n_workers = default_worker_count()
-    else:
-        n_workers = max(1, n_jobs)
-
-    n_candidates = len(candidates)
-    logger.info(f"Computing features for {n_candidates} candidates using {n_workers} processes...")
-
-    work_items = [(cand.ref_idx, cand.target_idx) for cand in candidates]
-    chunk_size = max(100, min(1000, n_candidates // (n_workers * 10)))
-    features_list = []
-
-    logger.info(f"Starting parallel feature computation (chunk_size={chunk_size})...")
-
-    from concurrent.futures import ProcessPoolExecutor
-
-    # Split work into chunks for batch geometric computation
-    chunks = [work_items[i : i + chunk_size] for i in range(0, len(work_items), chunk_size)]
-
-    # Log progress every 5% to avoid noise
-    last_logged_pct = 0
-    with ProcessPoolExecutor(
-        max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
-    ) as executor:
-        for chunk_results, _chunk_errors in executor.map(_compute_feature_chunk, chunks):
-            features_list.extend(chunk_results)
-            processed = len(features_list)
-            pct = int(processed / len(work_items) * 100)
-            if pct >= last_logged_pct + 5:
-                logger.info(f"Feature computation: {processed:,}/{len(work_items):,} ({pct}%)")
-                last_logged_pct = pct
+    # Parallel feature computation using shared dispatch
+    parallel_result = compute_features_parallel(
+        candidates=candidates,
+        worker_data=worker_data,
+        n_jobs=n_jobs,
+    )
+    features_list = parallel_result.features_list
 
     # Filter out rejected pairs (None results) - pairs without aligned endpoint features
     valid_pairs = [
@@ -889,17 +816,34 @@ def generate_scored_candidates(
     Returns:
         List of CandidatePairView objects sorted by decision priority, then confidence
     """
+    from ..pipeline.runner import score_candidates_from_geodataframes
+
     # Data should already be filtered to LineStrings at load time
     if len(reference) == 0 or len(target) == 0:
         logger.warning("No geometries in reference or target")
         return []
 
-    # Project to metric CRS for accurate distances
-    projection_result = ensure_projected_crs(reference, target)
+    # Score candidates using shared projection → blocking → scoring pipeline
+    t0 = time.perf_counter()
+    match_results, projection_result = score_candidates_from_geodataframes(
+        reference=reference,
+        target=target,
+        buffer_distance_m=buffer_distance_m,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+        auto_select=True,
+    )
+    logger.info(f"ML scoring completed in {time.perf_counter() - t0:.1f}s")
+
+    if not match_results:
+        return []
+
     reference_proj = projection_result.reference
     target_proj = projection_result.target
-    if projection_result.was_reprojected:
-        logger.info(f"Projected to {projection_result.projected_crs} for meter-based computations")
 
     # Create transformer for converting aligned geometries back to WGS84
     proj_to_wgs84 = None
@@ -907,44 +851,6 @@ def generate_scored_candidates(
         proj_to_wgs84 = Transformer.from_crs(
             projection_result.projected_crs, projection_result.original_crs, always_xy=True
         ).transform
-
-    # Generate candidates (blocking step - already fast)
-    t0 = time.perf_counter()
-    candidates = generate_candidates(
-        reference=reference_proj,
-        target=target_proj,
-        buffer_distance_m=buffer_distance_m,
-        ref_id_column=ref_id_column,
-        target_id_column=target_id_column,
-    )
-    logger.info(f"Generated {len(candidates)} candidates in {time.perf_counter() - t0:.1f}s")
-
-    if not candidates:
-        return []
-
-    # Use MLMatcher for optimized scoring (parallel feature computation + batch prediction)
-    t0 = time.perf_counter()
-
-    # Check if model exists
-    model_path = settings.model_path
-    if not model_path.exists():
-        raise FileNotFoundError(
-            f"ML model not found at {model_path}. Run 'matcher train' to train the model."
-        )
-
-    matcher = MLMatcher(auto_select=True)
-
-    # Score all candidates using ML pipeline (parallelized)
-    match_results = matcher.score_candidates(
-        candidates=candidates,
-        reference=reference_proj,
-        target=target_proj,
-        ref_name_column=ref_name_column,
-        target_name_column=target_name_column,
-        ref_class_column=ref_class_column,
-        target_class_column=target_class_column,
-    )
-    logger.info(f"ML scoring completed in {time.perf_counter() - t0:.1f}s")
 
     # Convert MatchResult objects to CandidatePairView objects
     t0 = time.perf_counter()

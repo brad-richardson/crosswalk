@@ -14,6 +14,7 @@ from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
+from ..utils.crs import ProjectionResult
 from ..utils.geometry import filter_to_linestrings
 
 
@@ -21,6 +22,99 @@ class PipelineError(Exception):
     """Error during pipeline execution."""
 
     pass
+
+
+def score_candidates_from_geodataframes(
+    reference: gpd.GeoDataFrame,
+    target: gpd.GeoDataFrame,
+    buffer_distance_m: float | None = None,
+    ref_id_column: str = "id",
+    target_id_column: str = "id",
+    ref_name_column: str = NAMES_COLUMN,
+    target_name_column: str = NAMES_COLUMN,
+    ref_class_column: str = CLASS_COLUMN,
+    target_class_column: str = CLASS_COLUMN,
+    n_jobs: int = -1,
+    model_path: str | None = None,
+    auto_select: bool = False,
+) -> tuple[list, ProjectionResult]:
+    """Project, block, and score candidates from GeoDataFrames.
+
+    Shared by run_pipeline() and labeling UI's generate_scored_candidates().
+    Handles projection to metric CRS, candidate generation (blocking), and
+    ML scoring.
+
+    Args:
+        reference: Reference GeoDataFrame (Overture)
+        target: Target GeoDataFrame (local data)
+        buffer_distance_m: Candidate search radius in meters (None = settings default)
+        ref_id_column: ID column in reference
+        target_id_column: ID column in target
+        ref_name_column: Name column in reference
+        target_name_column: Name column in target
+        ref_class_column: Class column in reference
+        target_class_column: Class column in target
+        n_jobs: Number of parallel jobs (-1 for all cores)
+        model_path: Explicit model path (if None, uses settings.model_path)
+        auto_select: If True, auto-select model based on target dataset
+
+    Returns:
+        Tuple of (match_results, projection_result) where:
+        - match_results: List of MatchResult objects
+        - projection_result: ProjectionResult with CRS info
+    """
+    from ..matching.ml import MLMatcher
+
+    # Project to metric CRS for accurate distances
+    projection_result = ensure_projected_crs(reference, target)
+    reference_proj = projection_result.reference
+    target_proj = projection_result.target
+    if projection_result.was_reprojected:
+        logger.info(f"Projected to {projection_result.projected_crs} for meter-based computations")
+
+    # Generate candidates (blocking step)
+    candidates = generate_candidates(
+        reference=reference_proj,
+        target=target_proj,
+        buffer_distance_m=buffer_distance_m,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+    )
+    logger.info(f"Generated {len(candidates)} candidates")
+
+    if not candidates:
+        return [], projection_result
+
+    # Score candidates using ML
+    if model_path:
+        matcher = MLMatcher(model_path=model_path)
+    elif auto_select:
+        matcher = MLMatcher(auto_select=True)
+    else:
+        from ..config import settings as _settings
+
+        _model_path = _settings.model_path
+        if not _model_path.exists():
+            raise FileNotFoundError(
+                f"ML model not found at {_model_path}. "
+                "Run 'matcher train' to train the model on labeled data."
+            )
+        matcher = MLMatcher(model_path=str(_model_path))
+
+    results = matcher.score_candidates(
+        candidates,
+        reference_proj,
+        target_proj,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        n_jobs=n_jobs,
+    )
+
+    return results, projection_result
 
 
 def validate_data_version(file_path: Path, file_type: str = "data") -> None:
@@ -84,8 +178,6 @@ def run_pipeline(
     output_path: Path,
     method: str = "xgboost",
     buffer_distance_m: float = 75.0,
-    max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
-    max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
     min_confidence: float = 0.1,  # Lower = more aggressive matching
     progress_callback: Callable[[int], None] | None = None,
     ref_id_column: str = "id",
@@ -104,7 +196,7 @@ def run_pipeline(
         reference_path: Path to reference GeoParquet (Overture)
         target_path: Path to target GeoParquet (local data)
         output_path: Path for output bridge file
-        method: Matching method ("rule" or "xgboost")
+        method: Matching method (only "xgboost" supported)
         buffer_distance_m: Candidate search radius in meters
         progress_callback: Optional callback for progress updates
         ref_id_column: ID column in reference
@@ -171,34 +263,36 @@ def run_pipeline(
     if progress_callback:
         progress_callback(10)
 
-    # Project to metric CRS early for consistent distance computations
-    # This ensures all downstream operations (blocking, features, scoring) use meters
-    projection_result = ensure_projected_crs(reference, target)
-    reference = projection_result.reference
-    target = projection_result.target
-    if projection_result.was_reprojected:
-        logger.info(
-            f"  Projected to {projection_result.projected_crs} for meter-based computations"
+    # Steps 2-3: Generate candidates and score using shared function
+    logger.info("Steps 2-3: Generating candidates and scoring...")
+
+    if method == "rule":
+        raise ValueError(
+            "Rule-based matching has been removed. Use method='xgboost' instead. "
+            "Train a model first with 'matcher train'."
         )
+    elif method != "xgboost":
+        raise ValueError(f"Unknown method: {method}")
 
-    if progress_callback:
-        progress_callback(20)
-
-    # Step 2: Generate candidates
-    logger.info("Step 2: Generating candidates...")
-    candidates = generate_candidates(
+    results, projection_result = score_candidates_from_geodataframes(
         reference=reference,
         target=target,
         buffer_distance_m=buffer_distance_m,
-        max_heading_diff=max_heading_diff,
-        max_length_ratio=max_length_ratio,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+        n_jobs=n_jobs,
     )
+    # Update reference/target to projected versions for downstream use
+    reference = projection_result.reference
+    target = projection_result.target
 
-    logger.info(f"  Generated {len(candidates)} candidates")
+    logger.info(f"  Generated and scored {len(results)} candidates")
 
-    if not candidates:
+    if not results:
         logger.warning("No candidates found! Check data alignment and buffer distance.")
 
         # Still write empty output files for consistency
@@ -226,44 +320,6 @@ def run_pipeline(
             bridge_file=output_path,
             unmatched_file=unmatched_path,
         )
-
-    if progress_callback:
-        progress_callback(40)
-
-    # Step 3: Score candidates
-    logger.info("Step 3: Scoring candidates...")
-
-    if method == "rule":
-        raise ValueError(
-            "Rule-based matching has been removed. Use method='xgboost' instead. "
-            "Train a model first with 'matcher train'."
-        )
-    elif method == "xgboost":
-        from ..config import settings
-        from ..matching.ml import MLMatcher
-
-        # Load trained model from configured location
-        model_path = settings.model_path
-        if not model_path.exists():
-            raise FileNotFoundError(
-                f"ML model not found at {model_path}. "
-                "Run 'matcher train' to train the model on labeled data from data/labels/."
-            )
-        matcher = MLMatcher(model_path=str(model_path))
-        results = matcher.score_candidates(
-            candidates,
-            reference,
-            target,
-            ref_name_column=ref_name_column,
-            target_name_column=target_name_column,
-            ref_class_column=ref_class_column,
-            target_class_column=target_class_column,
-            ref_id_column=ref_id_column,
-            target_id_column=target_id_column,
-            n_jobs=n_jobs,
-        )
-    else:
-        raise ValueError(f"Unknown method: {method}")
 
     if progress_callback:
         progress_callback(70)
@@ -338,7 +394,7 @@ def run_pipeline(
     return PipelineResult(
         n_reference=len(reference),
         n_target=len(target),
-        n_candidates=len(candidates),
+        n_candidates=len(results),
         n_matched=n_matched,
         n_review=n_review,
         n_unmatched=n_unmatched,

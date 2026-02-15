@@ -192,8 +192,6 @@ def generate_candidates(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
     buffer_distance_m: float = None,
-    max_heading_diff: float = None,  # Kept for API compatibility, not used for filtering
-    max_length_ratio: float = None,  # Kept for API compatibility, not used for filtering
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> CandidateBatch:
@@ -205,9 +203,7 @@ def generate_candidates(
     Args:
         reference: Reference edges (Overture) GeoDataFrame
         target: Target edges (local data) GeoDataFrame
-        buffer_distance_m: Search radius in meters
-        max_heading_diff: Deprecated - not used for filtering (ML model handles scoring)
-        max_length_ratio: Deprecated - not used for filtering (ML model handles scoring)
+        buffer_distance_m: Search radius in meters (None = settings default)
         ref_id_column: Column name for reference IDs
         target_id_column: Column name for target IDs
 
@@ -358,15 +354,13 @@ def generate_candidates_iter(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
     buffer_distance_m: float = None,
-    max_heading_diff: float = None,  # Kept for API compatibility, not used
-    max_length_ratio: float = None,  # Kept for API compatibility, not used
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> Iterator[CandidatePair]:
     """Iterator version of generate_candidates for memory efficiency.
 
     Yields candidate pairs one at a time instead of building full list.
-    Like generate_candidates, only uses spatial proximity for filtering.
+    Only uses spatial proximity for filtering.
     """
     buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
 

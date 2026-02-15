@@ -349,6 +349,57 @@ def extract_aligned_attributes(
     return result
 
 
+def extract_lr_value(
+    lr_data,
+    start_frac: float,
+    end_frac: float,
+    key: str = "value",
+) -> Any | None:
+    """Extract a single value from LR data for a given alignment range.
+
+    Consolidates the common pattern: null check -> from_dict_list -> extract_aligned_attributes.
+    Used by both ML scoring (ml.py) and labeling UI (data_loader.py).
+
+    Args:
+        lr_data: Linear-referenced data (list of dicts with 'between'/'value' keys), or None
+        start_frac: Start of alignment range (0.0-1.0)
+        end_frac: End of alignment range (0.0-1.0)
+        key: Attribute key to use in extract_aligned_attributes (default "value")
+
+    Returns:
+        The majority value for the aligned range, or None if not available
+    """
+    if lr_data is None:
+        return None
+
+    try:
+        lr_attr = LinearReferencedAttribute.from_dict_list(lr_data)
+        attrs = extract_aligned_attributes({key: lr_attr}, start_frac, end_frac)
+        return attrs.get(key)
+    except Exception:
+        return None
+
+
+def extract_lr_name(
+    lr_data,
+    start_frac: float,
+    end_frac: float,
+) -> str | None:
+    """Extract name from LR data for a given alignment range.
+
+    Convenience wrapper around extract_lr_value with key="name".
+
+    Args:
+        lr_data: Linear-referenced names data (list of dicts), or None
+        start_frac: Start fraction of aligned portion (0.0-1.0)
+        end_frac: End fraction of aligned portion (0.0-1.0)
+
+    Returns:
+        Resolved name string, or None if not available
+    """
+    return extract_lr_value(lr_data, start_frac, end_frac, key="name")
+
+
 def create_trivial_lr(value: Any) -> LinearReferencedAttribute:
     """Create a trivial linear-referenced attribute with a single uniform value.
 
