@@ -151,6 +151,7 @@ from .semantic import (
     compute_name_numeric_match,
     compute_name_similarity,
     compute_route_prefix_match,
+    resolve_best_name_variant,
 )
 from .spatial_context import (
     build_connector_graph,
@@ -188,6 +189,7 @@ def _compute_non_geometric_features(
     precomputed_lateral_offset: tuple[float, float, float] | None = None,
     ref_sibling_context: SiblingSearchContext | None = None,
     target_sibling_context: SiblingSearchContext | None = None,
+    ref_names_raw=None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -242,8 +244,14 @@ def _compute_non_geometric_features(
         )
 
     # Semantic features
+    # When the raw Overture names dict is available and has multiple language variants,
+    # find the best-matching variant for the target name. This handles cross-script
+    # comparisons (e.g., Chinese primary name + English alt vs English target).
+    with timed_section("name_variant_resolution"):
+        effective_ref_name = resolve_best_name_variant(ref_names_raw, ref_name, target_name)
+
     with timed_section("name_similarity"):
-        name_sim = compute_name_similarity(ref_name, target_name)
+        name_sim = compute_name_similarity(effective_ref_name, target_name)
 
     with timed_section("class_similarity"):
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
@@ -304,11 +312,11 @@ def _compute_non_geometric_features(
 
     # Name numeric match
     with timed_section("name_numeric_match"):
-        name_numeric_match = compute_name_numeric_match(ref_name, target_name)
+        name_numeric_match = compute_name_numeric_match(effective_ref_name, target_name)
 
     # Route prefix match
     with timed_section("route_prefix_match"):
-        route_prefix_match = compute_route_prefix_match(ref_name, target_name)
+        route_prefix_match = compute_route_prefix_match(effective_ref_name, target_name)
 
     # Endpoint features
     with timed_section("endpoint_features_lookup"):
@@ -854,6 +862,7 @@ def compute_pair_features(
     target_seg_id: str | None = None,
     ref_sibling_context: SiblingSearchContext | None = None,
     target_sibling_context: SiblingSearchContext | None = None,
+    ref_names_raw=None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -881,6 +890,8 @@ def compute_pair_features(
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
         ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
+        ref_names_raw: Raw Overture names dict with primary + rules for cross-variant
+            matching (optional, enables name_best_alt_levenshtein feature)
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -987,6 +998,7 @@ def compute_pair_features(
             geom_features=geom_features,
             ref_sibling_context=ref_sibling_context,
             target_sibling_context=target_sibling_context,
+            ref_names_raw=ref_names_raw,
         )
 
         _current_phase = "merge_features"

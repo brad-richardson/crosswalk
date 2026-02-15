@@ -308,6 +308,9 @@ def _compute_feature_chunk(chunk):
                     "target_graphlet_data": target_graphlet_data,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
+                    "ref_names_raw": (
+                        _worker_data["ref_names"][ref_idx] if "ref_names" in _worker_data else None
+                    ),
                 }
             )
             valid_indices.append(chunk_idx)
@@ -433,6 +436,7 @@ def _compute_feature_chunk(chunk):
                 ),
                 ref_sibling_context=_worker_data.get("ref_sibling_context"),
                 target_sibling_context=_worker_data.get("target_sibling_context"),
+                ref_names_raw=pd_item.get("ref_names_raw"),
             )
 
             # Aligned length: absolute overlap length in meters

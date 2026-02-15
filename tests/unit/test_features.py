@@ -14,11 +14,14 @@ from matcher.features.geometric import (
     compute_segment_heading,
 )
 from matcher.features.semantic import (
+    _has_cjk_chars,
+    _names_are_cross_script,
     compute_class_similarity,
     compute_name_similarity,
     get_class_info,
     get_traffic_tier,
     names_likely_same_road,
+    resolve_best_name_variant,
 )
 
 
@@ -198,6 +201,109 @@ class TestSemanticFeatures:
         assert names_likely_same_road("Main Street", "Main St")
         assert names_likely_same_road("Interstate 5", "I-5")
         assert not names_likely_same_road("Main Street", "Oak Avenue")
+
+
+class TestCJKNameHandling:
+    """Tests for CJK (Chinese/Japanese/Korean) name handling."""
+
+    def test_has_cjk_chars_chinese(self):
+        """Chinese characters should be detected."""
+        assert _has_cjk_chars("皇后大道中")
+        assert _has_cjk_chars("北京路")
+
+    def test_has_cjk_chars_japanese(self):
+        """Japanese characters should be detected."""
+        assert _has_cjk_chars("東京駅")  # Kanji
+        assert _has_cjk_chars("とうきょう")  # Hiragana
+        assert _has_cjk_chars("トウキョウ")  # Katakana
+
+    def test_has_cjk_chars_korean(self):
+        """Korean characters should be detected."""
+        assert _has_cjk_chars("서울로")  # Hangul
+
+    def test_has_cjk_chars_latin(self):
+        """Latin text should not be detected as CJK."""
+        assert not _has_cjk_chars("Main Street")
+        assert not _has_cjk_chars("Queen's Road Central")
+
+    def test_has_cjk_chars_mixed(self):
+        """Mixed CJK+Latin text should be detected as CJK."""
+        assert _has_cjk_chars("北京 Beijing Road")
+
+    def test_cross_script_detection(self):
+        """Cross-script pairs should be detected."""
+        assert _names_are_cross_script("皇后大道中", "Queen's Road Central")
+        assert _names_are_cross_script("東京駅", "Tokyo Station")
+        assert not _names_are_cross_script("Main Street", "Oak Avenue")
+        assert not _names_are_cross_script("北京路", "上海路")
+
+    def test_cjk_phonetic_features_return_nan(self):
+        """Soundex and Metaphone should return NaN for CJK names."""
+        result = compute_name_similarity("皇后大道中", "北京路")
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
+
+    def test_cjk_phonetic_nan_cross_script(self):
+        """Phonetics should return NaN when one name is CJK and other is Latin."""
+        result = compute_name_similarity("皇后大道中", "Queen's Road Central")
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
+
+    def test_latin_phonetics_still_work(self):
+        """Latin-only names should still get proper phonetic scores."""
+        result = compute_name_similarity("Main Street", "Maine Street")
+        assert not math.isnan(result["soundex_match"])
+        assert not math.isnan(result["metaphone_similarity"])
+
+    def test_cjk_same_name_high_levenshtein(self):
+        """Identical CJK names should get high Levenshtein scores."""
+        result = compute_name_similarity("皇后大道中", "皇后大道中")
+        assert result["levenshtein_ratio"] == pytest.approx(1.0)
+        assert result["jaro_winkler"] == pytest.approx(1.0)
+
+    def test_unicode_normalization_fullwidth(self):
+        """Full-width Latin chars should match half-width after NFKC normalization."""
+        # Ｍａｉｎ (full-width) vs Main (half-width)
+        result = compute_name_similarity("Ｍａｉｎ Ｓｔｒｅｅｔ", "Main Street")
+        assert result["levenshtein_ratio"] > 0.9
+
+    def test_resolve_best_variant_selects_english(self):
+        """When Overture has Chinese primary + English alt, should pick English."""
+        ref_names_raw = {
+            "primary": "皇后大道中",
+            "rules": [
+                {"value": "皇后大道中", "language": "zh", "variant": "common"},
+                {"value": "Queen's Road Central", "language": "en", "variant": "common"},
+            ],
+        }
+        best = resolve_best_name_variant(ref_names_raw, "皇后大道中", "Queen's Road Central")
+        assert best == "Queen's Road Central"
+
+    def test_resolve_best_variant_keeps_original_when_no_alt(self):
+        """When only one variant exists, should keep the original name."""
+        ref_names_raw = {"primary": "皇后大道中", "rules": []}
+        best = resolve_best_name_variant(ref_names_raw, "皇后大道中", "Queen's Road Central")
+        assert best == "皇后大道中"
+
+    def test_resolve_best_variant_none_raw(self):
+        """When ref_names_raw is None, should return ref_name unchanged."""
+        best = resolve_best_name_variant(None, "Main Street", "Main St")
+        assert best == "Main Street"
+
+    def test_resolve_best_variant_picks_closer_match(self):
+        """When variants have different similarity, should pick the best one."""
+        ref_names_raw = {
+            "primary": "Rue de Rivoli",
+            "rules": [
+                {"value": "Rue de Rivoli", "language": "fr", "variant": "common"},
+                {"value": "Rivoli Street", "language": "en", "variant": "common"},
+            ],
+        }
+        best = resolve_best_name_variant(
+            ref_names_raw, "Rue de Rivoli", "Rivoli Street"
+        )
+        # Should prefer the English variant since it matches the target better
+        assert best == "Rivoli Street"
 
 
 class TestClassInfo:
