@@ -487,7 +487,7 @@ def _compute_feature_chunk(chunk):
 
             # Ref crossing angle cache
             precomputed_crossing_ref = None
-            if ref_is_full:
+            if ref_is_full and ref_seg_id is not None:
                 cache_key = (ref_seg_id, "crossing")
                 if cache_key in crossing_cache:
                     precomputed_crossing_ref = crossing_cache[cache_key]
@@ -504,7 +504,7 @@ def _compute_feature_chunk(chunk):
             # Note: target uses ref_sibling_ctx (Overture spatial index) for
             # cross-tier detection, with no self-exclusion (seg_id=None)
             precomputed_crossing_target = None
-            if target_is_full:
+            if target_is_full and target_seg_id is not None:
                 cache_key = (target_seg_id, "crossing")
                 if cache_key in crossing_cache:
                     precomputed_crossing_target = crossing_cache[cache_key]
