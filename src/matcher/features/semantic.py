@@ -245,12 +245,8 @@ def _get_text_scripts(text: str) -> set[str]:
 
 
 def _has_non_latin_alpha(text: str) -> bool:
-    """Check if text contains non-Latin alphabetic characters.
-
-    Uses unicodedata.name() to detect script, so it handles any writing system
-    (CJK, Arabic, Cyrillic, Devanagari, Thai, etc.) without hardcoded ranges.
-    """
-    return any(ch.isalpha() and "LATIN" not in unicodedata.name(ch, "") for ch in text)
+    """Check if text contains non-Latin alphabetic characters."""
+    return bool(_get_text_scripts(text) - {"LATIN"})
 
 
 def _names_are_cross_script(name_a: str, name_b: str) -> bool:
