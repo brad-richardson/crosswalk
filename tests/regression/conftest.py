@@ -43,9 +43,6 @@ def perfect_match_features():
         "buffer_iou_15m": 0.9999,
         "overlap_ratio": 0.99,
         "heading_delta": 0.1,
-        "length_ratio": 0.999,
-        "projection_distance_m": 0.1,
-        "centroid_distance_m": 0.05,
         "collinear_gap_ratio": 0.01,
         # Semantic features (exact name match)
         "name_levenshtein": 1.0,
@@ -122,9 +119,6 @@ def terrible_match_features():
         "buffer_iou_15m": 0.0,  # No overlap at 15m buffer either
         "overlap_ratio": 0.1,
         "heading_delta": 80.0,  # Nearly perpendicular
-        "length_ratio": 0.2,
-        "projection_distance_m": 150.0,
-        "centroid_distance_m": 100.0,  # 100 meters apart
         "collinear_gap_ratio": 0.9,
         # Semantic features (completely different names)
         "name_levenshtein": 0.0,
@@ -201,9 +195,6 @@ def borderline_match_features():
         "buffer_iou_15m": 0.95,  # Better overlap at 15m buffer
         "overlap_ratio": 0.7,
         "heading_delta": 3.7,
-        "length_ratio": 0.74,
-        "projection_distance_m": 10.0,
-        "centroid_distance_m": 8.0,
         "collinear_gap_ratio": 0.3,
         # Partial name match (similar but not identical)
         "name_levenshtein": 0.64,

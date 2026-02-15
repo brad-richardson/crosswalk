@@ -177,7 +177,6 @@ class TestCandidatePairConstructionPerformance:
         target_idxs = list(range(n_pairs))
         distances = np.random.uniform(0, 50, n_pairs)
         heading_diffs = np.random.uniform(0, 90, n_pairs)
-        length_ratios = np.random.uniform(0.1, 1.0, n_pairs)
 
         start = time.perf_counter()
         candidates = [
@@ -188,7 +187,6 @@ class TestCandidatePairConstructionPerformance:
                 target_idx=target_idxs[i],
                 distance_estimate=distances[i],
                 heading_diff=heading_diffs[i],
-                length_ratio=length_ratios[i],
             )
             for i in range(n_pairs)
         ]
@@ -327,16 +325,13 @@ class TestCandidateGenerationProfiling:
 
         n_candidates = len(joined)
 
-        # Step 6: Heading/length ratio computation
+        # Step 6: Heading computation
         start = time.perf_counter()
         heading_diff = _angle_diff_vectorized(
             joined["_target_heading"].values,
             joined["_ref_heading"].values,
         )
-        min_len = np.minimum(joined["_target_length"].values, joined["_ref_length"].values)
-        max_len = np.maximum(joined["_target_length"].values, joined["_ref_length"].values)
-        length_ratio = max_len / np.maximum(min_len, 0.1)
-        timings["heading_length"] = time.perf_counter() - start
+        timings["heading"] = time.perf_counter() - start
 
         # Step 7: Centroid distances
         start = time.perf_counter()
@@ -357,7 +352,6 @@ class TestCandidateGenerationProfiling:
                     target_idx=int(row["_target_idx"]),
                     distance_estimate=distances[i],
                     heading_diff=heading_diff[i],
-                    length_ratio=1.0 / length_ratio[i],
                 )
             )
         timings["iterrows_construction"] = time.perf_counter() - start
@@ -368,7 +362,6 @@ class TestCandidateGenerationProfiling:
         ref_idxs = joined["_ref_idx"].values.astype(int)
         target_ids = joined["_target_id"].values
         target_idxs = joined["_target_idx"].values.astype(int)
-        inv_length_ratios = 1.0 / length_ratio
 
         candidates_list_comp = [
             CandidatePair(
@@ -378,7 +371,6 @@ class TestCandidateGenerationProfiling:
                 target_idx=target_idxs[i],
                 distance_estimate=distances[i],
                 heading_diff=heading_diff[i],
-                length_ratio=inv_length_ratios[i],
             )
             for i in range(len(joined))
         ]

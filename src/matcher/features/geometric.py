@@ -40,18 +40,9 @@ Metric Selection Rationale:
 - **overlap_ratio**: What fraction of line A falls within line B's buffer? Answers
   "how much of this segment has a corresponding segment in the other dataset?"
 
-- **projection_distance**: Average perpendicular distance between curves. Computed
-  bidirectionally (A→B and B→A) for symmetry. More stable than Hausdorff for
-  typical road matching scenarios.
-
 - **heading_delta**: Overall direction difference. Handles bidirectional roads
   (0° and 180° both score well). Helps distinguish parallel roads from the same road.
 
-- **length_ratio**: Ratio of lengths (shorter/longer). Helps identify segmentation
-  mismatches vs. true non-matches.
-
-- **centroid_distance**: Simple proximity check. Fast to compute, useful for
-  initial filtering.
 """
 
 from functools import lru_cache
@@ -204,20 +195,6 @@ class GeometricFeatures(NamedTuple):
     Accounts for bidirectional roads (0° and 180° both indicate alignment).
     Helps distinguish parallel roads from the same road."""
 
-    length_ratio: float
-    """Ratio of lengths: min(len_a, len_b) / max(len_a, len_b) (0-1).
-    Value of 1 means same length. Low values suggest segmentation mismatch
-    or different roads entirely."""
-
-    projection_distance: float
-    """Bidirectional average perpendicular distance (meters).
-    Averages distances from A's vertices to B and B's vertices to A.
-    More stable than Hausdorff for typical road matching."""
-
-    centroid_distance: float
-    """Distance between segment centroids (meters).
-    Simple proximity check, useful for initial filtering."""
-
     overlap_ratio: float
     """Fraction of line_a that falls within line_b's buffer (0-1).
     Answers: 'how much of this segment has a corresponding segment?'
@@ -275,9 +252,6 @@ def compute_geometric_features(
         buffer_iou_5m=float(batch.buffer_iou_5m[0]),
         buffer_iou_15m=float(batch.buffer_iou_15m[0]),
         heading_delta=float(batch.heading_deltas[0]),
-        length_ratio=float(batch.length_ratios[0]),
-        projection_distance=mean_h,
-        centroid_distance=float(batch.centroid_distances[0]),
         overlap_ratio=float(batch.overlap_ratios[0]),
         collinear_gap_ratio=collinear,
     )
@@ -346,8 +320,6 @@ class BatchGeometricResult(NamedTuple):
     buffer_iou_15m: np.ndarray  # (N,) float64
     buffer_iou_5m: np.ndarray  # (N,) float64
     heading_deltas: np.ndarray  # (N,) float64
-    length_ratios: np.ndarray  # (N,) float64
-    centroid_distances: np.ndarray  # (N,) float64
     overlap_ratios: np.ndarray  # (N,) float64
     lengths_a: np.ndarray  # (N,) float64 - needed downstream
     lengths_b: np.ndarray  # (N,) float64 - needed downstream
@@ -378,28 +350,18 @@ def compute_geometric_features_batch(
     # 1. Hausdorff distance - single vectorized call
     hausdorff_dists = shapely_mod.hausdorff_distance(lines_a, lines_b)
 
-    # 2. Lengths - vectorized
+    # 2. Lengths - vectorized (needed for overlap_ratio denominator)
     lengths_a = shapely_mod.length(lines_a)
     lengths_b = shapely_mod.length(lines_b)
 
-    # 3. Length ratios via numpy
-    max_lengths = np.maximum(lengths_a, lengths_b)
-    min_lengths = np.minimum(lengths_a, lengths_b)
-    length_ratios = np.where(max_lengths > 0, min_lengths / max_lengths, 0.0)
-
-    # 4. Centroid distance - vectorized centroids + distance
-    centroids_a = shapely_mod.centroid(lines_a)
-    centroids_b = shapely_mod.centroid(lines_b)
-    centroid_dists = shapely_mod.distance(centroids_a, centroids_b)
-
-    # 5. Build 15m buffer arrays — vectorized
+    # 3. Build 15m buffer arrays — vectorized
     bufs_a_15m = shapely_mod.buffer(lines_a, 15.0, quad_segs=16)
     bufs_b_15m = shapely_mod.buffer(lines_b, 15.0, quad_segs=16)
 
-    # 6. Buffer IoU 15m - vectorized
+    # 4. Buffer IoU 15m - vectorized
     iou_15m = compute_buffer_iou_batch(bufs_a_15m, bufs_b_15m)
 
-    # 7. Buffer IoU 5m with short-circuit: only process pairs where iou_15m > 0.3
+    # 5. Buffer IoU 5m with short-circuit: only process pairs where iou_15m > 0.3
     iou_5m = np.zeros(N, dtype=np.float64)
     qualifying_mask = iou_15m > 0.3
     if qualifying_mask.any():
@@ -407,12 +369,12 @@ def compute_geometric_features_batch(
         bufs_b_5m_q = shapely_mod.buffer(lines_b[qualifying_mask], 5.0, quad_segs=16)
         iou_5m[qualifying_mask] = compute_buffer_iou_batch(bufs_a_5m_q, bufs_b_5m_q)
 
-    # 8. Overlap ratio: length(intersection(lines_a, bufs_b_15m)) / lengths_a
+    # 6. Overlap ratio: length(intersection(lines_a, bufs_b_15m)) / lengths_a
     intersections = shapely_mod.intersection(lines_a, bufs_b_15m)
     intersection_lengths = shapely_mod.length(intersections)
     overlap_ratios = np.where(lengths_a > 0, intersection_lengths / lengths_a, 0.0)
 
-    # 9. Heading delta - vectorized via get_point + get_x/get_y + numpy arctan2
+    # 7. Heading delta - vectorized via get_point + get_x/get_y + numpy arctan2
     heading_deltas = _compute_heading_deltas_batch(lines_a, lines_b)
 
     return BatchGeometricResult(
@@ -420,8 +382,6 @@ def compute_geometric_features_batch(
         buffer_iou_15m=iou_15m,
         buffer_iou_5m=iou_5m,
         heading_deltas=heading_deltas,
-        length_ratios=length_ratios,
-        centroid_distances=centroid_dists,
         overlap_ratios=overlap_ratios,
         lengths_a=lengths_a,
         lengths_b=lengths_b,

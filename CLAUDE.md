@@ -111,7 +111,7 @@ See `compute_crossing_angle_features()` in `geometric.py` for a reference implem
 ## Feature Computation Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture including:
-- 74 features across 17 categories (source of truth: `config.py::FEATURE_COLUMNS`)
+- 72 features across 17 categories (source of truth: `config.py::FEATURE_COLUMNS`)
 - Three computation paths (ML inference, labeling UI, training)
 - Pre-computation table (what's pre-computed and why)
 - Imputation consistency (training medians)

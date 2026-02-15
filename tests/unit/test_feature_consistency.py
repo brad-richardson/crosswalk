@@ -129,7 +129,6 @@ class TestFeatureNaming:
             "hausdorff_distance_m",
             "mean_hausdorff_distance_m",
             "hausdorff_p95_m",
-            "centroid_distance_m",
             "min_endpoint_proximity_m",
             "max_endpoint_proximity_m",
             "lateral_offset_m",
@@ -146,8 +145,6 @@ class TestFeatureNaming:
         [
             "hausdorff_distance",
             "buffer_iou",
-            "projection_distance",
-            "centroid_distance",
             "start_endpoint_proximity",
             "end_endpoint_proximity",
             "lateral_offset",

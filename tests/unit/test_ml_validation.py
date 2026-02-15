@@ -34,7 +34,6 @@ def log_capture():
 
 def _make_pair(
     dataset: str = "test_dataset",
-    centroid_distance_m: float = 20.0,
     hausdorff_distance_m: float = 15.0,
     buffer_overlap_iou: float = 0.5,
     label: str = "match",
@@ -46,7 +45,6 @@ def _make_pair(
         "target_id": "test_target_1",
         "dataset": dataset,
         "label": label,
-        "centroid_distance_m": centroid_distance_m,
         "hausdorff_distance_m": hausdorff_distance_m,
         "buffer_overlap_iou": buffer_overlap_iou,
     }
@@ -67,15 +65,9 @@ class TestValidateTrainingPairs:
 
     def test_normal_pair_passes(self, matcher):
         """A pair with plausible features is kept."""
-        df = _make_df([_make_pair(centroid_distance_m=20.0, hausdorff_distance_m=15.0)])
+        df = _make_df([_make_pair(hausdorff_distance_m=15.0)])
         result = matcher._validate_training_pairs(df)
         assert len(result) == 1
-
-    def test_distant_centroid_rejected(self, matcher):
-        """A pair with centroid_distance_m > 500m is dropped."""
-        df = _make_df([_make_pair(centroid_distance_m=5000.0)])
-        result = matcher._validate_training_pairs(df)
-        assert len(result) == 0
 
     def test_high_hausdorff_rejected(self, matcher):
         """A pair with hausdorff_distance_m > 1000m is dropped."""
@@ -92,12 +84,6 @@ class TestValidateTrainingPairs:
         result = matcher._validate_training_pairs(df)
         assert len(result) == 0
 
-    def test_nan_centroid_passes(self, matcher):
-        """A pair with NaN centroid_distance_m is kept (let imputation handle it)."""
-        df = _make_df([_make_pair(centroid_distance_m=np.nan)])
-        result = matcher._validate_training_pairs(df)
-        assert len(result) == 1
-
     def test_nan_hausdorff_passes(self, matcher):
         """A pair with NaN hausdorff_distance_m is kept."""
         df = _make_df([_make_pair(hausdorff_distance_m=np.nan)])
@@ -107,11 +93,11 @@ class TestValidateTrainingPairs:
     def test_mixed_dataset_logging(self, matcher, log_capture):
         """Verify per-dataset logging counts for mixed valid/invalid pairs."""
         pairs = [
-            _make_pair(dataset="good_dataset", centroid_distance_m=10.0),
-            _make_pair(dataset="good_dataset", centroid_distance_m=20.0),
-            _make_pair(dataset="bad_dataset", centroid_distance_m=5000.0),
-            _make_pair(dataset="bad_dataset", centroid_distance_m=6000.0),
-            _make_pair(dataset="bad_dataset", centroid_distance_m=15.0),
+            _make_pair(dataset="good_dataset", hausdorff_distance_m=10.0),
+            _make_pair(dataset="good_dataset", hausdorff_distance_m=20.0),
+            _make_pair(dataset="bad_dataset", hausdorff_distance_m=5000.0),
+            _make_pair(dataset="bad_dataset", hausdorff_distance_m=6000.0),
+            _make_pair(dataset="bad_dataset", hausdorff_distance_m=15.0),
         ]
         df = _make_df(pairs)
         result = matcher._validate_training_pairs(df)
@@ -124,9 +110,9 @@ class TestValidateTrainingPairs:
     def test_warning_threshold_triggered(self, matcher, log_capture):
         """>20% drop rate for a dataset triggers a warning."""
         pairs = [
-            _make_pair(dataset="problematic", centroid_distance_m=5000.0),
-            _make_pair(dataset="problematic", centroid_distance_m=6000.0),
-            _make_pair(dataset="problematic", centroid_distance_m=15.0),
+            _make_pair(dataset="problematic", hausdorff_distance_m=5000.0),
+            _make_pair(dataset="problematic", hausdorff_distance_m=6000.0),
+            _make_pair(dataset="problematic", hausdorff_distance_m=15.0),
         ]
         df = _make_df(pairs)
         matcher._validate_training_pairs(df)
@@ -136,25 +122,23 @@ class TestValidateTrainingPairs:
 
     def test_custom_thresholds(self, matcher):
         """Custom thresholds override defaults."""
-        df = _make_df([_make_pair(centroid_distance_m=200.0, hausdorff_distance_m=600.0)])
-        # With defaults (500m/1000m), this passes
+        df = _make_df([_make_pair(hausdorff_distance_m=600.0)])
+        # With defaults (1000m), this passes
         result = matcher._validate_training_pairs(df)
         assert len(result) == 1
         # With stricter thresholds, it fails
-        result = matcher._validate_training_pairs(
-            df, max_centroid_distance_m=100.0, max_hausdorff_m=500.0
-        )
+        result = matcher._validate_training_pairs(df, max_hausdorff_m=500.0)
         assert len(result) == 0
 
     def test_boundary_values(self, matcher):
         """Values exactly at thresholds are kept."""
-        df = _make_df([_make_pair(centroid_distance_m=500.0, hausdorff_distance_m=1000.0)])
+        df = _make_df([_make_pair(hausdorff_distance_m=1000.0)])
         result = matcher._validate_training_pairs(df)
         assert len(result) == 1
 
     def test_multiple_reasons_single_drop(self, matcher):
         """A pair failing multiple checks is only counted once."""
-        df = _make_df([_make_pair(centroid_distance_m=5000.0, hausdorff_distance_m=15000.0)])
+        df = _make_df([_make_pair(hausdorff_distance_m=15000.0)])
         result = matcher._validate_training_pairs(df)
         assert len(result) == 0
 
@@ -172,8 +156,8 @@ class TestValidateTrainingPairs:
         """When all pairs are valid, logs success message."""
         df = _make_df(
             [
-                _make_pair(centroid_distance_m=10.0, hausdorff_distance_m=5.0),
-                _make_pair(centroid_distance_m=30.0, hausdorff_distance_m=20.0),
+                _make_pair(hausdorff_distance_m=5.0),
+                _make_pair(hausdorff_distance_m=20.0),
             ]
         )
         result = matcher._validate_training_pairs(df)

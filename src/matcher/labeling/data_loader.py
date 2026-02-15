@@ -172,21 +172,12 @@ def _compute_score_breakdown_from_features(features: dict[str, float]) -> dict[s
             return 0.0
         return max(0.0, 1.0 - delta / 90.0)  # 90 degrees = score 0
 
-    # Normalize length ratio (1.0 = perfect, further from 1 = worse)
-    def norm_length_ratio(ratio: float) -> float:
-        if ratio is None or ratio <= 0:
-            return 0.0
-        if ratio > 1:
-            ratio = 1.0 / ratio  # Normalize so ratio is always <= 1
-        return ratio
-
     return {
         "hausdorff_norm": norm_distance(features.get("hausdorff_distance_m", 50)),
         "mean_hausdorff_norm": norm_distance(features.get("mean_hausdorff_distance_m", 50)),
         "buffer_iou": features.get("buffer_iou_5m", 0.0),
         "overlap_ratio": features.get("min_coverage", 0.0),
         "heading_norm": norm_heading(features.get("heading_delta", 90)),
-        "length_ratio": norm_length_ratio(features.get("length_ratio", 0)),
         # projection_norm uses mean_hausdorff (they were equivalent features)
         "projection_norm": norm_distance(features.get("mean_hausdorff_distance_m", 50)),
         "name_similarity": features.get("name_jaro_winkler", 0.0),

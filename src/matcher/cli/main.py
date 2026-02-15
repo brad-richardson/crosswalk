@@ -1207,7 +1207,6 @@ def register_commands(app: typer.Typer) -> None:
                         target_idx=target_idx,
                         distance_estimate=0.0,
                         heading_diff=0.0,
-                        length_ratio=1.0,
                     )
                 )
                 candidate_metadata.append((gers_id, target_id, pair_data))

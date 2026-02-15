@@ -218,10 +218,6 @@ class TestAlongTrackShiftSweep:
         values = _feature_series(shift_pairs, "collinear_gap_ratio")
         _assert_monotonic_decreasing(values, "collinear_gap_ratio", tolerance=0.01)
 
-    def test_centroid_distance_increases_with_shift(self, shift_pairs):
-        values = _feature_series(shift_pairs, "centroid_distance_m")
-        _assert_monotonic_increasing(values, "centroid_distance_m", tolerance=1.0)
-
 
 class TestShapeComplexitySweep:
     """Straight line vs progressively zigzag."""
@@ -274,7 +270,7 @@ class TestShapeComplexitySweep:
         _assert_first_better_than_last(values, "shape_complexity_delta", higher_is_better=False)
 
 
-class TestLengthRatioSweep:
+class TestMinLengthSweep:
     """Reference 100m, target progressively shorter."""
 
     @pytest.fixture
@@ -282,19 +278,6 @@ class TestLengthRatioSweep:
         lengths = [100, 80, 60, 40, 20]
         ref = make_projected_line([(0, 0), (100, 0)])
         return [(ref, make_projected_line([(0, 2), (length, 2)])) for length in lengths]
-
-    def test_length_ratio_decreases(self, length_pairs):
-        values = _feature_series(length_pairs, "length_ratio")
-        _assert_monotonic_decreasing(values, "length_ratio", tolerance=0.01)
-
-    def test_min_coverage_decreases(self, length_pairs):
-        """Shorter target means less overlap.
-
-        Note: Without alignment data, coverage features default to 0.0.
-        This test checks length_ratio instead, which doesn't require alignment.
-        """
-        values = _feature_series(length_pairs, "length_ratio")
-        _assert_first_better_than_last(values, "length_ratio", higher_is_better=True)
 
     def test_min_length_decreases(self, length_pairs):
         values = _feature_series(length_pairs, "min_length_m")
@@ -619,7 +602,6 @@ class TestBugHuntingTests:
 
         # Similarity features should be at or near maximum
         assert feats["buffer_iou_5m"] > 0.99, f"buffer_iou_5m={feats['buffer_iou_5m']}"
-        assert feats["length_ratio"] > 0.99, f"length_ratio={feats['length_ratio']}"
         assert feats["heading_delta"] < 1.0, f"heading_delta={feats['heading_delta']}"
 
         # Distance features should be at or near zero

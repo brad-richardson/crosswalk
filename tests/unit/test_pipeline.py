@@ -51,7 +51,6 @@ def _make_candidates(ref_ids, target_ids, ref_idxs=None, target_idxs=None):
             target_idx=tidx,
             distance_estimate=5.0,
             heading_diff=0.0,
-            length_ratio=1.0,
         )
         for rid, ridx, tid, tidx in zip(ref_ids, ref_idxs, target_ids, target_idxs)
     ]

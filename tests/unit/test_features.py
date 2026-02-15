@@ -41,7 +41,6 @@ class TestGeometricFeatures:
         assert features.buffer_iou_5m == pytest.approx(1.0, abs=0.01)
         assert features.buffer_iou_15m == pytest.approx(1.0, abs=0.01)
         assert features.heading_delta == pytest.approx(0.0)
-        assert features.length_ratio == pytest.approx(1.0)
 
     def test_parallel_lines(self):
         """Parallel lines should have 0 heading delta."""
@@ -52,7 +51,6 @@ class TestGeometricFeatures:
 
         assert features.heading_delta == pytest.approx(0.0)
         assert features.hausdorff_distance == pytest.approx(10.0)
-        assert features.length_ratio == pytest.approx(1.0)
 
     def test_perpendicular_lines(self):
         """Perpendicular lines should have 90 degree heading delta."""
@@ -72,15 +70,6 @@ class TestGeometricFeatures:
 
         # Should be 0 because roads can be traversed in either direction
         assert features.heading_delta == pytest.approx(0.0, abs=1.0)
-
-    def test_different_length_lines(self):
-        """Lines of different lengths should have correct length ratio."""
-        line_a = LineString([(0, 0), (100, 0)])  # Length 100
-        line_b = LineString([(0, 0), (50, 0)])  # Length 50
-
-        features = compute_geometric_features(line_a, line_b)
-
-        assert features.length_ratio == pytest.approx(0.5)
 
     def test_buffer_iou_no_overlap(self):
         """Non-overlapping lines should have low buffer IoU."""
@@ -1335,70 +1324,6 @@ class TestComputePairFeaturesWithAlignment:
             f"Lateral offset {features['lateral_offset_m']:.1f}m is too high. "
             "Should be ~3m for aligned sublines, not inflated by non-overlapping portion."
         )
-
-
-class TestLengthRatioUsesFullGeometry:
-    """Regression tests: length_ratio must use original geometries, not sublines.
-
-    Subline alignment clips both geometries to the matching portion, which makes
-    their lengths nearly identical (ratio ~1.0). The length_ratio feature should
-    reflect the actual segmentation difference between the full original geometries.
-    """
-
-    def test_length_ratio_reflects_original_lengths_with_alignment(self):
-        """When target is 3x longer than ref, length_ratio should be ~0.33."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
-
-        ref = LineString([(0, 0), (100, 0)])  # 100m
-        target = LineString([(0, 0), (300, 0)])  # 300m
-
-        # Alignment says ref covers the first 1/3 of target
-        alignment = AlignmentResult(
-            overture_start_frac=0.0,
-            overture_end_frac=1.0,
-            dataset_start_frac=0.0,
-            dataset_end_frac=0.333,
-        )
-
-        features = compute_pair_features(
-            ref_geom_full=ref,
-            target_geom_full=target,
-            ref_class=None,
-            target_class=None,
-            alignment=alignment,
-            endpoint_features=MOCK_ENDPOINT_FEATURES,
-            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
-            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
-        )
-
-        # length_ratio = min/max = 100/300 ≈ 0.333
-        assert features["length_ratio"] == pytest.approx(1 / 3, abs=0.01), (
-            f"length_ratio={features['length_ratio']:.3f}, expected ~0.333. "
-            "Should use original geometry lengths, not subline lengths."
-        )
-
-    def test_length_ratio_without_alignment(self):
-        """Without alignment, length_ratio should still reflect original lengths."""
-        from matcher.features.compute import compute_pair_features
-        from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
-
-        ref = LineString([(0, 0), (50, 0)])  # 50m
-        target = LineString([(0, 0), (200, 0)])  # 200m
-
-        features = compute_pair_features(
-            ref_geom_full=ref,
-            target_geom_full=target,
-            ref_class=None,
-            target_class=None,
-            endpoint_features=MOCK_ENDPOINT_FEATURES,
-            ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
-            target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
-        )
-
-        # length_ratio = 50/200 = 0.25
-        assert features["length_ratio"] == pytest.approx(0.25, abs=0.01)
 
 
 class TestEndpointProximityInfCapping:

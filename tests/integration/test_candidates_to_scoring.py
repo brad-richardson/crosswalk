@@ -263,7 +263,6 @@ class TestFeatureComputation:
             "buffer_iou_5m",
             "buffer_iou_15m",
             "heading_delta",
-            "length_ratio",
         ]
         for feat in expected_geometric:
             assert feat in features, f"Missing geometric feature: {feat}"
@@ -305,9 +304,6 @@ class TestFeatureComputation:
 
         # Heading delta should be between 0 and 180
         assert 0 <= features["heading_delta"] <= 180
-
-        # Length ratio should be between 0 and 1 (normalized)
-        assert 0 <= features["length_ratio"] <= 1
 
         # Name similarity should be between 0 and 1
         assert 0 <= features["name_levenshtein"] <= 1

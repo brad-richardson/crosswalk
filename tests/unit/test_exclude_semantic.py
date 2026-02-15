@@ -44,7 +44,6 @@ class TestExcludeSemanticFlag:
         assert "hausdorff_distance_m" in filtered
         assert "buffer_iou_5m" in filtered
         assert "buffer_iou_15m" in filtered
-        assert "length_ratio" in filtered
 
         # Topology features should still be present
         assert "from_degree_ref" in filtered
@@ -65,8 +64,6 @@ class TestExcludeSemanticFlag:
                     "buffer_iou_5m",
                     "buffer_iou_15m",
                     "heading_delta",
-                    "length_ratio",
-                    "centroid_distance_m",
                     "collinear_gap_ratio",
                 ],
             ),
@@ -129,7 +126,7 @@ class TestExcludeSemanticFlag:
         """Geometry-only model should include all non-semantic features."""
         geom_only_features = [f for f in FEATURE_COLUMNS if f not in SEMANTIC_FEATURES]
 
-        # Count by category (11 geometric features)
+        # Count by category (9 geometric features)
         geometric_count = sum(
             1
             for f in geom_only_features
@@ -141,14 +138,12 @@ class TestExcludeSemanticFlag:
                 "buffer_iou_5m",
                 "buffer_iou_15m",
                 "heading_delta",
-                "length_ratio",
-                "centroid_distance_m",
                 "collinear_gap_ratio",
                 "angle_histogram_similarity",
                 "edge_distance_rmse_m",
             ]
         )
-        assert geometric_count == 11, "Should have 11 geometric features"
+        assert geometric_count == 9, "Should have 9 geometric features"
 
         endpoint_count = sum(
             1
@@ -223,10 +218,10 @@ class TestExcludeSemanticFlag:
         assert shape_complexity_count == 3, "Should have 3 shape complexity features"
 
         # Total geometry-only features:
-        # 11 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
+        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 12 (topology) + 4 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
         # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) + 2 (intersection_overlap) = 63
-        assert len(geom_only_features) == 63, (
-            f"Expected 63 geometry-only features, got {len(geom_only_features)}"
+        # 4 (crossing_angle) + 2 (intersection_overlap) = 61
+        assert len(geom_only_features) == 61, (
+            f"Expected 61 geometry-only features, got {len(geom_only_features)}"
         )

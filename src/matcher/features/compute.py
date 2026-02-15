@@ -868,16 +868,15 @@ def _compute_intersection_overlap_features(
 
 def assemble_feature_dict(
     geom_features: GeometricFeatures,
-    length_ratio: float,
     aligned_length_m: float,
     non_geom: dict[str, float],
     intersection_overlap_feats: dict[str, float],
 ) -> dict[str, float]:
     """Single source of truth for merging geometric + non-geometric features.
 
-    Applies MAX_DISTANCE_METERS clamping to all distance features from the
-    batchable geometric path (hausdorff, centroid). Distance features in
-    non_geom are already clamped by _compute_non_geometric_features.
+    Applies MAX_DISTANCE_METERS clamping to distance features from the
+    batchable geometric path (hausdorff). Distance features in non_geom
+    are already clamped by _compute_non_geometric_features.
 
     Both compute_pair_features() and _compute_feature_chunk() (ml.py) call
     this to avoid divergent feature assembly logic.
@@ -887,8 +886,6 @@ def assemble_feature_dict(
         "buffer_iou_5m": geom_features.buffer_iou_5m,
         "buffer_iou_15m": geom_features.buffer_iou_15m,
         "heading_delta": geom_features.heading_delta,
-        "length_ratio": length_ratio,
-        "centroid_distance_m": min(geom_features.centroid_distance, MAX_DISTANCE_METERS),
         "aligned_length_m": aligned_length_m,
         **non_geom,
         **intersection_overlap_feats,
@@ -1060,20 +1057,8 @@ def compute_pair_features(
         )
 
         _current_phase = "merge_features"
-        # Use full geometries for length_ratio, NOT aligned portions.
-        # Alignment clips both geometries to matching portions,
-        # making their lengths nearly identical (ratio ~1.0 always).
-        # The full-geometry ratio captures actual segmentation differences.
-        target_length_full = target_geom_full.length
-        length_ratio = (
-            min(ref_length_full, target_length_full) / max(ref_length_full, target_length_full)
-            if max(ref_length_full, target_length_full) > 0
-            else 0.0
-        )
-
         features = assemble_feature_dict(
             geom_features=geom_features,
-            length_ratio=length_ratio,
             aligned_length_m=aligned_length_m,
             non_geom=non_geom,
             intersection_overlap_feats=intersection_overlap_feats,

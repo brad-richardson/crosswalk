@@ -100,7 +100,7 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
-| **Features** | 74 features across 17 categories: geometric, semantic, topological, alignment, and more |
+| **Features** | 72 features across 17 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 
 ## Quick Start
@@ -190,7 +190,7 @@ The matcher computes 72 features for each candidate pair across 16 categories:
 
 | Category | Count | Examples |
 |----------|-------|----------|
-| Geometric | 11 | Hausdorff distance (mean, p95), buffer IoU (5m/15m), heading delta, length ratio, angle histogram, edge distance RMSE |
+| Geometric | 9 | Hausdorff distance (mean, p95), buffer IoU (5m/15m), heading delta, angle histogram, edge distance RMSE |
 | Name Similarity | 10 | Levenshtein, Jaro-Winkler, token sort, Soundex, Metaphone, presence flags, numeric match, route prefix |
 | Class | 1 | Road class similarity |
 | Endpoint/Connectivity | 3 | Min/max endpoint proximity, shared endpoint count |

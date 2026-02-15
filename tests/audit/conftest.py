@@ -21,12 +21,10 @@ FEATURE_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "hausdorff_distance_m": (0, MAX_DISTANCE_METERS),
     "mean_hausdorff_distance_m": (0, MAX_DISTANCE_METERS),
     "hausdorff_p95_m": (0, MAX_DISTANCE_METERS),
-    "centroid_distance_m": (0, MAX_DISTANCE_METERS),
     "edge_distance_rmse_m": (0, MAX_DISTANCE_METERS),
     # Geometric - ratios (0-1)
     "buffer_iou_5m": (0, 1),
     "buffer_iou_15m": (0, 1),
-    "length_ratio": (0, 1),
     "collinear_gap_ratio": (0, 1),
     "angle_histogram_similarity": (0, 1),
     # Geometric - degrees
