@@ -136,8 +136,6 @@ class TestAlignmentIntegration:
         features = compute_pair_features(
             ref_geom=ref_geom,
             target_geom=target_geom,
-            ref_name="Main Street",
-            target_name="Main St",
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
@@ -206,8 +204,6 @@ class TestAlignmentIntegration:
         features_aligned = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -219,8 +215,6 @@ class TestAlignmentIntegration:
         features_unaligned = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -256,8 +250,6 @@ class TestFeatureComputation:
         features = compute_pair_features(
             ref_geom=ref_geom,
             target_geom=target_geom,
-            ref_name="Main Street",
-            target_name="Main St",
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
@@ -294,14 +286,14 @@ class TestFeatureComputation:
         features = compute_pair_features(
             ref_geom=ref_geom,
             target_geom=target_geom,
-            ref_name="Main Street",
-            target_name="Main St",
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
             target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+            ref_names_raw={"primary": "Main Street"},
+            target_names_raw={"primary": "Main St"},
         )
 
         # Hausdorff distance should be positive

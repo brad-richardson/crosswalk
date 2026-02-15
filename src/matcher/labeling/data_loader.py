@@ -255,6 +255,9 @@ class CandidatePairView:
     # Topology context (captured from full network at scoring time)
     ref_topology: dict | None = None
     target_topology: dict | None = None
+    # Full names structs (all variants, all languages)
+    ref_names_raw: dict | None = None
+    target_names_raw: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for cache storage."""
@@ -288,6 +291,11 @@ class CandidatePairView:
             # Topology context
             "ref_topology_json": json.dumps(self._serialize_topology(self.ref_topology)),
             "target_topology_json": json.dumps(self._serialize_topology(self.target_topology)),
+            # Full names structs
+            "ref_names_raw_json": json.dumps(self.ref_names_raw) if self.ref_names_raw else None,
+            "target_names_raw_json": json.dumps(self.target_names_raw)
+            if self.target_names_raw
+            else None,
         }
 
     @staticmethod
@@ -365,6 +373,13 @@ class CandidatePairView:
                 if data.get("target_topology_json")
                 else None
             ),
+            # Full names structs (may be None in older caches)
+            ref_names_raw=json.loads(data["ref_names_raw_json"])
+            if data.get("ref_names_raw_json")
+            else None,
+            target_names_raw=json.loads(data["target_names_raw_json"])
+            if data.get("target_names_raw_json")
+            else None,
         )
 
 
@@ -954,6 +969,8 @@ def generate_scored_candidates(
                 target_end_frac=target_end_frac,
                 ref_topology=_reconstruct_topology_from_features(result.features, "ref"),
                 target_topology=_reconstruct_topology_from_features(result.features, "target"),
+                ref_names_raw=ref_row.get("names") if hasattr(ref_row, "get") else None,
+                target_names_raw=target_row.get("names") if hasattr(target_row, "get") else None,
             )
         )
 
@@ -1319,6 +1336,8 @@ def build_views_from_feature_df(
                 target_end_frac=target_end_frac,
                 ref_topology=_reconstruct_topology_from_features(features, "ref"),
                 target_topology=_reconstruct_topology_from_features(features, "target"),
+                ref_names_raw=ref_data.get("names"),
+                target_names_raw=target_data.get("names"),
             )
         )
 

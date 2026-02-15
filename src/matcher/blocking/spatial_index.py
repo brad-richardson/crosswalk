@@ -465,8 +465,14 @@ def filter_candidates_by_name(
     filtered = []
 
     for cand in candidates:
-        ref_name = reference.iloc[cand.ref_idx].get(ref_name_column)
-        target_name = target.iloc[cand.target_idx].get(target_name_column)
+        ref_name_raw = reference.iloc[cand.ref_idx].get(ref_name_column)
+        target_name_raw = target.iloc[cand.target_idx].get(target_name_column)
+
+        # Extract primary string from names struct if needed
+        ref_name = ref_name_raw.get("primary") if isinstance(ref_name_raw, dict) else ref_name_raw
+        target_name = (
+            target_name_raw.get("primary") if isinstance(target_name_raw, dict) else target_name_raw
+        )
 
         # If both have names, check similarity
         if ref_name and target_name:

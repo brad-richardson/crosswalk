@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
+from matcher.features.semantic import display_name
 from matcher.labeling.data_store import DataStore
 
 
@@ -22,8 +23,8 @@ def sample_pair_data():
         "target_id": "target-001",
         "ref_geometry": LineString([(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]),
         "target_geometry": LineString([(0.1, 0.1), (1.1, 1.1), (2.1, 0.1)]),
-        "ref_name": "Main Street",
-        "target_name": "Main St",
+        "ref_names": {"primary": "Main Street"},
+        "target_names": {"primary": "Main St"},
         "ref_class": "residential",
         "target_class": "residential",
         "ref_subclass": "urban",
@@ -41,8 +42,8 @@ class TestDataStoreAddAndRetrieve:
         assert result is not None
         assert result["gers_id"] == "ref-001"
         assert result["target_id"] == "target-001"
-        assert result["ref_name"] == "Main Street"
-        assert result["target_name"] == "Main St"
+        assert result["ref_names"]["primary"] == "Main Street"
+        assert result["target_names"]["primary"] == "Main St"
         assert result["ref_class"] == "residential"
         assert result["target_class"] == "residential"
         assert result["ref_subclass"] == "urban"
@@ -71,11 +72,11 @@ class TestDataStoreAddAndRetrieve:
         store.add(**sample_pair_data)
 
         # Add again with different name
-        updated = {**sample_pair_data, "ref_name": "Updated Street"}
+        updated = {**sample_pair_data, "ref_names": {"primary": "Updated Street"}}
         store.add(**updated)
 
         result = store.get_pair("ref-001", "target-001")
-        assert result["ref_name"] == "Updated Street"
+        assert result["ref_names"]["primary"] == "Updated Street"
 
         # Should only have one entry
         mask = (store.gdf["gers_id"] == "ref-001") & (store.gdf["target_id"] == "target-001")
@@ -93,8 +94,8 @@ class TestDataStoreAddAndRetrieve:
 
         result = store.get_pair("ref-001", "target-001")
         assert result is not None
-        assert result["ref_name"] is None
-        assert result["target_name"] is None
+        assert result["ref_names"] is None
+        assert result["target_names"] is None
         assert result["ref_class"] is None
 
     def test_linear_referenced_names(self, tmp_data_dir, sample_pair_data):
@@ -123,7 +124,7 @@ class TestDataStorePersistence:
         store2 = DataStore("test_dataset", data_dir=tmp_data_dir)
         result = store2.get_pair("ref-001", "target-001")
         assert result is not None
-        assert result["ref_name"] == "Main Street"
+        assert result["ref_names"]["primary"] == "Main Street"
         assert isinstance(result["ref_geometry"], LineString)
         assert isinstance(result["target_geometry"], LineString)
 
@@ -252,11 +253,50 @@ class TestDataStoreLoadAll:
         assert "dataset" in all_data.columns
 
         # Check attribute columns
-        assert "ref_name" in all_data.columns
-        assert "target_name" in all_data.columns
+        assert "ref_names" in all_data.columns
+        assert "target_names" in all_data.columns
         assert "ref_class" in all_data.columns
         assert "target_class" in all_data.columns
 
         # Check geometry columns
         assert "ref_geometry" in all_data.columns
         assert "target_geometry" in all_data.columns
+
+
+class TestDisplayName:
+    """Tests for display_name() helper."""
+
+    def test_english_common_preferred(self):
+        """English common name is preferred over primary."""
+        names = {
+            "primary": "海榮路 Hoi Wing Road",
+            "common": {"en": "Hoi Wing Road", "zh": "海榮路"},
+        }
+        assert display_name(names) == "Hoi Wing Road"
+
+    def test_primary_fallback(self):
+        """Falls back to primary when no common English name."""
+        names = {"primary": "Main Street"}
+        assert display_name(names) == "Main Street"
+
+    def test_none_input(self):
+        """Returns None for None input."""
+        assert display_name(None) is None
+
+    def test_non_dict_input(self):
+        """Returns string for non-dict input."""
+        assert display_name("Some Street") == "Some Street"
+
+    def test_empty_dict(self):
+        """Returns None for empty dict (no primary)."""
+        assert display_name({}) is None
+
+    def test_common_without_english(self):
+        """Falls back to primary when common has no English."""
+        names = {"primary": "海榮路", "common": {"zh": "海榮路"}}
+        assert display_name(names) == "海榮路"
+
+    def test_falsy_non_dict(self):
+        """Returns None for falsy non-dict input."""
+        assert display_name("") is None
+        assert display_name(0) is None

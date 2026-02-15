@@ -6,7 +6,21 @@ from pathlib import Path
 import pandas as pd
 import typer
 
+from ..features.semantic import display_name
 from .utils import console
+
+
+def _display_name_from_raw(raw) -> str | None:
+    """Derive display name from a raw names column value (JSON string or dict)."""
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    return display_name(raw)
+
 
 # Create class group
 class_app = typer.Typer(
@@ -371,7 +385,7 @@ def _train_predictor_from_labels(
         data_df = pd.read_parquet(data_path)
 
         # Merge to get classes and geometry for matches
-        cols_to_merge = ["gers_id", "target_id", "ref_class", "target_class", "target_name"]
+        cols_to_merge = ["gers_id", "target_id", "ref_class", "target_class", "target_names"]
         if "target_geometry_wkb" in data_df.columns:
             cols_to_merge.append("target_geometry_wkb")
 
@@ -412,7 +426,7 @@ def _train_predictor_from_labels(
         )
         train_gdf = gpd.GeoDataFrame(
             {
-                "names": combined["target_name"].fillna(""),
+                "names": combined["target_names"].apply(_display_name_from_raw).fillna(""),
                 "class": combined["target_class"].fillna("unknown"),
             },
             geometry=geometries,
@@ -424,7 +438,7 @@ def _train_predictor_from_labels(
         # No geometry available, create simple DataFrame
         train_gdf = gpd.GeoDataFrame(
             {
-                "names": combined["target_name"].fillna(""),
+                "names": combined["target_names"].apply(_display_name_from_raw).fillna(""),
                 "class": combined["target_class"].fillna("unknown"),
             }
         )

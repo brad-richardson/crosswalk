@@ -29,8 +29,6 @@ class TestFeatureParity:
         features = compute_pair_features(
             ref_geom=ref_geom,
             target_geom=target_geom,
-            ref_name="Main Street",
-            target_name="Main St",
             ref_class="residential",
             target_class="residential",
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
@@ -105,12 +103,12 @@ class TestGeometryPersistence:
             features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
             ref_geometry=ref_geom,
             target_geometry=target_geom,
-            ref_name_raw="Main St",
-            target_name_raw="Main Street",
             ref_class_raw="residential",
             target_class_raw="residential",
             ref_subclass="urban",
             target_subclass="urban",
+            ref_names={"primary": "Main St"},
+            target_names={"primary": "Main Street"},
         )
 
         # Label should be saved to labels/human/
@@ -131,7 +129,7 @@ class TestGeometryPersistence:
         data_store = DataStore(dataset_id, data_dir=labels_dir / "data")
         result = data_store.get_pair("ref-001", "target-001")
         assert result is not None
-        assert result["ref_name"] == "Main St"
+        assert result["ref_names"]["primary"] == "Main St"
         assert isinstance(result["ref_geometry"], LineString)
 
         # Verify features were persisted correctly
@@ -231,8 +229,8 @@ class TestLabelUpdateDelete:
             features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
             ref_geometry=ref_geom,
             target_geometry=target_geom,
-            ref_name_raw="Main St",
-            target_name_raw="Main Street",
+            ref_names={"primary": "Main St"},
+            target_names={"primary": "Main Street"},
         )
 
         # Verify all stores have data

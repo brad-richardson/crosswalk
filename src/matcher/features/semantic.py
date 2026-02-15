@@ -31,6 +31,22 @@ GENERIC_NAME_PATTERNS = [
 # Pre-compile patterns for efficiency
 _GENERIC_NAME_REGEX = re.compile("|".join(GENERIC_NAME_PATTERNS), re.IGNORECASE)
 
+
+def display_name(names_struct) -> str | None:
+    """Extract best display name from a names struct.
+
+    Prefers English from common names when available, falls back to primary.
+    """
+    if names_struct is None:
+        return None
+    if not isinstance(names_struct, dict):
+        return str(names_struct) if names_struct else None
+    common = names_struct.get("common")
+    if isinstance(common, dict) and "en" in common:
+        return common["en"]
+    return names_struct.get("primary")
+
+
 # Road class mapping to hierarchy levels
 # Expanded to include link roads, bike/pedestrian infrastructure
 # Lower numbers = higher hierarchy (motorways at top)
@@ -287,49 +303,17 @@ def _names_are_cross_script(name_a: str, name_b: str) -> bool:
     return not scripts_a & scripts_b
 
 
-def _extract_name_string(name) -> str | None:
-    """Extract string from name, handling dict format.
-
-    Overture/OSM data often stores names as dicts like:
-    - {'primary': 'Main Street'}
-    - {'primary': 'Main St', 'common': None, 'rules': [...]}
-
-    Args:
-        name: String or dict containing name
-
-    Returns:
-        Extracted name string or None
-    """
-    if name is None:
-        return None
-    if isinstance(name, str):
-        return name
-    if isinstance(name, dict):
-        # Try common keys in order of preference
-        for key in ["primary", "common", "name", "value"]:
-            if key in name and name[key]:
-                val = name[key]
-                # Handle nested extraction
-                if isinstance(val, str):
-                    return val
-                if isinstance(val, dict):
-                    return _extract_name_string(val)
-        # Last resort - return first non-None string value
-        for v in name.values():
-            if isinstance(v, str) and v:
-                return v
-    return None
-
-
 def compute_name_similarity(
-    name_a,
-    name_b,
+    name_a: str | None,
+    name_b: str | None,
 ) -> dict[str, float]:
     """Compute multiple string similarity metrics.
 
+    Inputs must be pre-resolved strings (via resolve_best_name_variant).
+
     Args:
-        name_a: First street name (string or dict with 'primary' key) - reference
-        name_b: Second street name (string or dict with 'primary' key) - target
+        name_a: Reference street name (string or None)
+        name_b: Target street name (string or None)
 
     Returns:
         Dictionary with:
@@ -344,9 +328,6 @@ def compute_name_similarity(
             - has_name_target: 1.0 if target has non-empty name
             - name_is_generic: 1.0 if either name matches generic pattern
     """
-    # Extract string from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Compute name presence flags
     has_name_ref = 1.0 if name_a else 0.0
@@ -463,11 +444,16 @@ def _extract_all_name_variants(names_dict) -> list[str]:
     # 1. Primary name
     _add(names_dict.get("primary"))
 
-    # 2. Common names (dict of language code -> name)
+    # 2. Common names — dict format or Overture numpy array-of-arrays
     common = names_dict.get("common")
     if isinstance(common, dict):
         for lang_name in common.values():
             _add(lang_name)
+    elif hasattr(common, "__iter__") and not isinstance(common, str):
+        # Overture format: numpy array of [lang_code, name] pairs
+        for item in common:
+            if hasattr(item, "__len__") and len(item) == 2:
+                _add(item[1])  # item[0] is lang code, item[1] is name
 
     # 3. Rules (array of NameRule dicts with value, variant, language, between, side)
     rules = names_dict.get("rules")
@@ -491,59 +477,110 @@ def _extract_all_name_variants(names_dict) -> list[str]:
 
 def resolve_best_name_variant(
     ref_names_raw,
-    ref_name: str | None,
-    target_name: str | None,
-) -> str | None:
-    """Find the best-matching reference name variant for the target name.
+    target_names_raw=None,
+) -> tuple[str | None, str | None]:
+    """Find the best-matching name variant pair across ref and target.
 
-    When Overture has multilingual names (e.g., Chinese primary + English alt),
-    the LR-resolved ref_name may be in a different script from the target name,
-    yielding ~0 similarity. This function tries ALL available name variants from
-    the Overture names dict and returns the highest-scoring one against the target.
+    Bilateral resolution: when both sides have multilingual names, finds the
+    (ref_variant, target_variant) pair with highest similarity. When only one
+    side has variants, resolves against the other side's primary name.
+
+    Primary names are derived from the structs — no flat name params needed.
 
     Args:
         ref_names_raw: Raw Overture names dict with primary + rules, or None
-        ref_name: Currently resolved reference name (may be None)
-        target_name: Target segment name string (may be None)
+        target_names_raw: Raw target names dict (Overture format), or None
 
     Returns:
-        The best-matching name variant string, or ref_name if no variants available.
+        Tuple of (best_ref_name, best_target_name) — the best-matching pair.
     """
-    if not target_name or not ref_names_raw:
-        return ref_name
+    ref_variants = _extract_all_name_variants(ref_names_raw) if ref_names_raw else []
+    target_variants = _extract_all_name_variants(target_names_raw) if target_names_raw else []
 
-    # Extract target string from dict if needed
-    target_str = _extract_name_string(target_name)
-    if not target_str:
-        return ref_name
+    # Derive primary names from structs
+    ref_name = ref_names_raw.get("primary") if isinstance(ref_names_raw, dict) else None
+    target_name = target_names_raw.get("primary") if isinstance(target_names_raw, dict) else None
 
-    # Extract all available name variants from the reference
-    variants = _extract_all_name_variants(ref_names_raw)
-    if not variants:
-        return ref_name
+    # Neither side has variants — return primary names
+    if not ref_variants and not target_variants:
+        return ref_name, target_name
 
-    # Single variant: return it directly (may upgrade a None ref_name)
-    if len(variants) == 1:
-        return variants[0]
+    # Both sides have variants — find best (ref, target) pair
+    if ref_variants and target_variants:
+        best_score = -1.0
+        best_ref = ref_name
+        best_target = target_name
 
-    norm_target = _normalize_street_name(target_str)
-    if not norm_target:
-        return ref_name
+        for rv in ref_variants:
+            norm_rv = _normalize_street_name(rv)
+            if not norm_rv:
+                continue
+            for tv in target_variants:
+                norm_tv = _normalize_street_name(tv)
+                if not norm_tv:
+                    continue
+                score = fuzz.ratio(norm_rv, norm_tv) / 100.0
+                if score > best_score:
+                    best_score = score
+                    best_ref = rv
+                    best_target = tv
+                    if score == 1.0:
+                        return best_ref, best_target
+
+        return best_ref, best_target
+
+    # Only ref has variants — resolve against target primary
+    if ref_variants and not target_variants:
+        if not target_name:
+            return ref_name, target_name
+
+        if len(ref_variants) == 1:
+            return ref_variants[0], target_name
+
+        norm_target = _normalize_street_name(target_name)
+        if not norm_target:
+            return ref_name, target_name
+
+        best_score = -1.0
+        best_ref = ref_name
+        for rv in ref_variants:
+            norm_rv = _normalize_street_name(rv)
+            if not norm_rv:
+                continue
+            score = fuzz.ratio(norm_rv, norm_target) / 100.0
+            if score > best_score:
+                best_score = score
+                best_ref = rv
+                if score == 1.0:
+                    break
+
+        return best_ref, target_name
+
+    # Only target has variants — resolve against ref primary
+    if not ref_name:
+        return ref_name, target_name
+
+    if len(target_variants) == 1:
+        return ref_name, target_variants[0]
+
+    norm_ref = _normalize_street_name(ref_name)
+    if not norm_ref:
+        return ref_name, target_name
 
     best_score = -1.0
-    best_variant = ref_name
-    for variant in variants:
-        norm_variant = _normalize_street_name(variant)
-        if not norm_variant:
+    best_target = target_name
+    for tv in target_variants:
+        norm_tv = _normalize_street_name(tv)
+        if not norm_tv:
             continue
-        score = fuzz.ratio(norm_variant, norm_target) / 100.0
+        score = fuzz.ratio(norm_ref, norm_tv) / 100.0
         if score > best_score:
             best_score = score
-            best_variant = variant
+            best_target = tv
             if score == 1.0:
-                break  # Perfect match, no need to continue
+                break
 
-    return best_variant
+    return ref_name, best_target
 
 
 def _normalize_street_name(name: str) -> str:
@@ -791,25 +828,21 @@ def canonicalize_route_name(name: str | None) -> tuple[str | None, int | None]:
     return None, None
 
 
-def compute_route_prefix_match(name_a, name_b) -> float:
+def compute_route_prefix_match(name_a: str | None, name_b: str | None) -> float:
     """Compute route prefix type matching score.
 
     Compares the route prefix types (Interstate, US Route, State Route, etc.)
-    between two road names. This helps distinguish between different route
-    systems that may have the same number (e.g., I-5 vs US-5 vs SR-5).
+    between two road names. Inputs must be pre-resolved strings.
 
     Args:
-        name_a: First name (string or dict with 'primary' key)
-        name_b: Second name (string or dict with 'primary' key)
+        name_a: Reference name (string or None)
+        name_b: Target name (string or None)
 
     Returns:
         1.0 if both have the same route prefix type
         0.0 if both have different route prefix types
         NaN if either/both is not a recognized route (missing signal)
     """
-    # Extract name strings from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Get route prefix types
     prefix_a, _ = canonicalize_route_name(name_a)
@@ -830,15 +863,16 @@ def compute_route_prefix_match(name_a, name_b) -> float:
         return 0.0
 
 
-def compute_name_numeric_match(name_a, name_b) -> float:
+def compute_name_numeric_match(name_a: str | None, name_b: str | None) -> float:
     """Compute numeric route matching score for numbered routes (I-90, US-101, etc.).
 
     This feature helps match numbered routes that may have different formatting
     (e.g., "Interstate 90" vs "I-90", "US Route 101" vs "US-101").
+    Inputs must be pre-resolved strings.
 
     Args:
-        name_a: First name (string or dict with 'primary' key)
-        name_b: Second name (string or dict with 'primary' key)
+        name_a: Reference name (string or None)
+        name_b: Target name (string or None)
 
     Returns:
         1.0 if both have matching route numbers
@@ -846,9 +880,6 @@ def compute_name_numeric_match(name_a, name_b) -> float:
         0.0 if route numbers mismatch
         NaN if only one has a number (no signal)
     """
-    # Extract name strings from dict if needed
-    name_a = _extract_name_string(name_a)
-    name_b = _extract_name_string(name_b)
 
     # Extract numeric suffixes
     num_a = extract_numeric_suffix(name_a)
