@@ -890,8 +890,9 @@ def compute_pair_features(
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
         ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
-        ref_names_raw: Raw Overture names dict with primary + rules for cross-variant
-            matching (optional, enables name_best_alt_levenshtein feature)
+        ref_names_raw: Raw Overture names dict with primary + common + rules.
+            When provided, the best-matching name variant is selected before
+            computing name similarity, improving scores for multilingual segments.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
