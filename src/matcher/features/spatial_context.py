@@ -1248,10 +1248,16 @@ def compute_all_topology(
         If return_spatial_index is True:
             Tuple of (topology_dict, TopologySpatialIndex)
     """
-    # Try explicit connector-based topology first (if available)
-    # Note: return_spatial_index is not supported with explicit connectors —
+    # Explicit connectors and spatial index are mutually exclusive —
     # the spatial index is built from geometry-inferred clustering, not connectors.
-    if connectors_column is not None and not return_spatial_index:
+    if connectors_column is not None and return_spatial_index:
+        raise ValueError(
+            "return_spatial_index=True is not supported with connectors_column. "
+            "The spatial index requires geometry-inferred clustering."
+        )
+
+    # Try explicit connector-based topology first (if available)
+    if connectors_column is not None:
         explicit_result = compute_all_topology_explicit(gdf, id_column, connectors_column)
         if explicit_result is not None:
             # Filter to requested IDs if specified

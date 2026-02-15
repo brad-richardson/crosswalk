@@ -148,6 +148,9 @@ def _deserialize_topo_sampled(raw) -> list[tuple[float, int]] | None:
         return None
 
 
+_reconstruct_node_counter = 0
+
+
 def reconstruct_topo_connectors_from_sampled(
     sampled: list[tuple[float, int]],
 ) -> tuple[list[tuple[float, int]], dict[int, int]]:
@@ -157,6 +160,9 @@ def reconstruct_topo_connectors_from_sampled(
     (frac, virtual_node_id) connectors + {node_id: degree} node_features
     for use with compute_aligned_topology_features().
 
+    Node IDs use a global monotonic counter to avoid collisions when multiple
+    segments' node_features are merged into a single dict during backfill.
+
     Args:
         sampled: List of (frac, degree) tuples from DataStore
 
@@ -164,10 +170,12 @@ def reconstruct_topo_connectors_from_sampled(
         Tuple of (connectors, node_features) compatible with
         compute_aligned_topology_features()
     """
+    global _reconstruct_node_counter
     connectors = []
     node_features = {}
-    for i, (frac, degree) in enumerate(sampled):
-        node_id = i  # Sequential IDs — unique within this segment
+    for _i, (frac, degree) in enumerate(sampled):
+        node_id = _reconstruct_node_counter
+        _reconstruct_node_counter += 1
         connectors.append((frac, node_id))
         node_features[node_id] = degree
     return connectors, node_features

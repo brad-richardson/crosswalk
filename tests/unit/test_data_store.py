@@ -112,6 +112,60 @@ class TestDataStoreAddAndRetrieve:
         assert result["ref_names_lr"] == lr_data
         assert result["target_names_lr"] == lr_data
 
+    def test_topo_sampled_round_trip(self, tmp_data_dir, sample_pair_data):
+        """target_topo_sampled survives add/save/load/get_pair cycle."""
+        from matcher.labeling.data_store import reconstruct_topo_connectors_from_sampled
+
+        store = DataStore("test_dataset", data_dir=tmp_data_dir)
+        sampled = [(0.0, 3), (0.25, 1), (0.5, 4), (1.0, 2)]
+        store.add(**sample_pair_data, target_topo_sampled=sampled)
+        store.save()
+
+        # Reload from disk
+        store2 = DataStore("test_dataset", data_dir=tmp_data_dir)
+        result = store2.get_pair("ref-001", "target-001")
+        assert result is not None
+        assert result["target_topo_sampled"] == sampled
+
+        # Reconstruction produces valid connectors
+        connectors, node_features = reconstruct_topo_connectors_from_sampled(
+            result["target_topo_sampled"]
+        )
+        assert len(connectors) == 4
+        assert all(isinstance(nid, int) for _, nid in connectors)
+        fracs = [f for f, _ in connectors]
+        assert fracs == [0.0, 0.25, 0.5, 1.0]
+        # Each connector's node_id should map to correct degree
+        for (_frac, node_id), (_orig_frac, orig_degree) in zip(connectors, sampled):
+            assert node_features[node_id] == orig_degree
+
+    def test_topo_sampled_none_by_default(self, tmp_data_dir, sample_pair_data):
+        """target_topo_sampled is None when not provided."""
+        store = DataStore("test_dataset", data_dir=tmp_data_dir)
+        store.add(**sample_pair_data)
+        store.save()
+
+        store2 = DataStore("test_dataset", data_dir=tmp_data_dir)
+        result = store2.get_pair("ref-001", "target-001")
+        assert result["target_topo_sampled"] is None
+
+    def test_reconstructed_node_ids_globally_unique(self, tmp_data_dir):
+        """Node IDs from separate reconstruct calls don't collide."""
+        from matcher.labeling.data_store import reconstruct_topo_connectors_from_sampled
+
+        sampled_a = [(0.0, 3), (1.0, 2)]
+        sampled_b = [(0.0, 1), (1.0, 4)]
+
+        _, feats_a = reconstruct_topo_connectors_from_sampled(sampled_a)
+        _, feats_b = reconstruct_topo_connectors_from_sampled(sampled_b)
+
+        # Node IDs should not overlap
+        assert set(feats_a.keys()).isdisjoint(set(feats_b.keys()))
+
+        # Merged dict should preserve both sets of degrees
+        merged = {**feats_a, **feats_b}
+        assert len(merged) == 4
+
 
 class TestDataStorePersistence:
     def test_save_and_reload(self, tmp_data_dir, sample_pair_data):
