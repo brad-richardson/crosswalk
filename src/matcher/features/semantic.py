@@ -223,60 +223,38 @@ def _is_generic_name(name: str | None) -> bool:
     return bool(_GENERIC_NAME_REGEX.match(name.strip()))
 
 
-def _has_cjk_chars(text: str) -> bool:
-    """Check if text contains CJK (Chinese/Japanese/Korean) characters.
+def _has_non_latin_alpha(text: str) -> bool:
+    """Check if text contains non-Latin alphabetic characters.
 
-    Checks Unicode blocks for CJK Unified Ideographs, Hangul, Katakana, Hiragana,
-    and CJK compatibility characters.
+    Uses unicodedata.name() to detect script, so it handles any writing system
+    (CJK, Arabic, Cyrillic, Devanagari, Thai, etc.) without hardcoded ranges.
     """
-    for ch in text:
-        cp = ord(ch)
-        if (
-            0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs
-            or 0x3400 <= cp <= 0x4DBF  # CJK Extension A
-            or 0xF900 <= cp <= 0xFAFF  # CJK Compatibility Ideographs
-            or 0x3040 <= cp <= 0x309F  # Hiragana
-            or 0x30A0 <= cp <= 0x30FF  # Katakana
-            or 0xAC00 <= cp <= 0xD7AF  # Hangul Syllables
-            or 0x1100 <= cp <= 0x11FF  # Hangul Jamo
-        ):
-            return True
-    return False
+    return any(ch.isalpha() and "LATIN" not in unicodedata.name(ch, "") for ch in text)
 
 
 def _has_latin_chars(text: str) -> bool:
     """Check if text contains Latin alphabet characters."""
-    for ch in text:
-        if ch.isalpha() and unicodedata.category(ch).startswith("L"):
-            # Check if it's in a Latin block
-            try:
-                name = unicodedata.name(ch, "")
-                if "LATIN" in name:
-                    return True
-            except ValueError:
-                continue
-    return False
+    return any(ch.isalpha() and "LATIN" in unicodedata.name(ch, "") for ch in text)
 
 
 def _names_are_cross_script(name_a: str, name_b: str) -> bool:
-    """Check if two names are in different scripts (e.g., CJK vs Latin).
+    """Check if two names are in different scripts (e.g., CJK vs Latin, Arabic vs Latin).
 
-    Returns True when one name is CJK and the other is Latin, indicating
-    that character-level similarity metrics will be unreliable.
+    Returns True when one name has non-Latin characters and the other is Latin,
+    indicating that character-level similarity metrics will be unreliable.
     """
-    a_cjk = _has_cjk_chars(name_a)
-    b_cjk = _has_cjk_chars(name_b)
+    a_non_latin = _has_non_latin_alpha(name_a)
+    b_non_latin = _has_non_latin_alpha(name_b)
 
-    # If both have CJK or neither has CJK, scripts are compatible
-    if a_cjk == b_cjk:
+    # If both are non-Latin or neither is non-Latin, scripts are compatible
+    if a_non_latin == b_non_latin:
         return False
 
-    # One has CJK, the other doesn't — check if the non-CJK one has Latin
+    # One is non-Latin, the other might be Latin
     a_latin = _has_latin_chars(name_a)
     b_latin = _has_latin_chars(name_b)
 
-    # Cross-script: one is CJK and the other is Latin
-    return (a_cjk and b_latin) or (b_cjk and a_latin)
+    return (a_non_latin and b_latin) or (b_non_latin and a_latin)
 
 
 def _extract_name_string(name) -> str | None:
@@ -376,11 +354,12 @@ def compute_name_similarity(
 
     # Phonetic matching - catches typos and transcription errors
     # Soundex and Metaphone are English phonetic algorithms: they produce meaningless
-    # codes for CJK characters, creating noisy false matches/mismatches. Return NaN
-    # when either name contains CJK so XGBoost learns to ignore phonetics for these pairs.
-    either_has_cjk = _has_cjk_chars(norm_a) or _has_cjk_chars(norm_b)
+    # codes for non-Latin characters (CJK, Arabic, Cyrillic, etc.), creating noisy
+    # false signals. Return NaN when either name contains non-Latin characters
+    # so XGBoost learns to ignore phonetics for these pairs.
+    either_non_latin = _has_non_latin_alpha(norm_a) or _has_non_latin_alpha(norm_b)
 
-    if either_has_cjk:
+    if either_non_latin:
         soundex_match = _nan
         metaphone_similarity = _nan
     else:
@@ -420,11 +399,22 @@ def compute_name_similarity(
 def _extract_all_name_variants(names_dict) -> list[str]:
     """Extract all name variants from an Overture names dict.
 
-    Overture names structure:
+    Overture Names schema (https://docs.overturemaps.org/schema/reference/transportation/segment/):
     - primary: The default/main name (string)
-    - rules: Array of name rules, each with value, variant, language
+    - common: Dict of language code -> name (e.g., {"en": "Lake Geneva", "fr": "Le Léman"})
+    - rules: Array of NameRule dicts, each with:
+        - value: The name string
+        - variant: Type (common, official, alternate, short)
+        - language: Language code or None
+        - between: [start, end] geometric scope (0-1 fractions along segment)
+        - side: Which side of the road (left/right)
 
-    Returns a deduplicated list of all available name strings.
+    Note: This function extracts ALL name variants regardless of their ``between``
+    range or ``side`` scope. The caller (resolve_best_name_variant) uses this for
+    cross-language fallback matching — the LR resolution in parse_names_lr already
+    handles range-specific name selection for the primary comparison.
+
+    Returns a deduplicated (case-insensitive) list of all available name strings.
     """
     if not names_dict or not isinstance(names_dict, dict):
         return []
@@ -432,15 +422,23 @@ def _extract_all_name_variants(names_dict) -> list[str]:
     variants: list[str] = []
     seen: set[str] = set()
 
-    # Add primary name
-    primary = names_dict.get("primary")
-    if isinstance(primary, str) and primary:
-        lower = primary.lower()
-        if lower not in seen:
-            variants.append(primary)
-            seen.add(lower)
+    def _add(value):
+        if isinstance(value, str) and value:
+            lower = value.lower()
+            if lower not in seen:
+                variants.append(value)
+                seen.add(lower)
 
-    # Add all rule values
+    # 1. Primary name
+    _add(names_dict.get("primary"))
+
+    # 2. Common names (dict of language code -> name)
+    common = names_dict.get("common")
+    if isinstance(common, dict):
+        for lang_name in common.values():
+            _add(lang_name)
+
+    # 3. Rules (array of NameRule dicts with value, variant, language, between, side)
     rules = names_dict.get("rules")
     if rules is None:
         return variants
@@ -455,12 +453,7 @@ def _extract_all_name_variants(names_dict) -> list[str]:
     for rule in rules:
         if not isinstance(rule, dict):
             continue
-        value = rule.get("value")
-        if isinstance(value, str) and value:
-            lower = value.lower()
-            if lower not in seen:
-                variants.append(value)
-                seen.add(lower)
+        _add(rule.get("value"))
 
     return variants
 

@@ -132,7 +132,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-15"
+FEATURE_VERSION = "2026-02-12"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline

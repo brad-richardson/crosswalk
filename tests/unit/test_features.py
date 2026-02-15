@@ -14,7 +14,7 @@ from matcher.features.geometric import (
     compute_segment_heading,
 )
 from matcher.features.semantic import (
-    _has_cjk_chars,
+    _has_non_latin_alpha,
     _names_are_cross_script,
     compute_class_similarity,
     compute_name_similarity,
@@ -203,49 +203,84 @@ class TestSemanticFeatures:
         assert not names_likely_same_road("Main Street", "Oak Avenue")
 
 
-class TestCJKNameHandling:
-    """Tests for CJK (Chinese/Japanese/Korean) name handling."""
+class TestNonLatinNameHandling:
+    """Tests for non-Latin script handling (CJK, Arabic, Cyrillic, etc.)."""
 
-    def test_has_cjk_chars_chinese(self):
-        """Chinese characters should be detected."""
-        assert _has_cjk_chars("皇后大道中")
-        assert _has_cjk_chars("北京路")
+    # -- Script detection --
 
-    def test_has_cjk_chars_japanese(self):
-        """Japanese characters should be detected."""
-        assert _has_cjk_chars("東京駅")  # Kanji
-        assert _has_cjk_chars("とうきょう")  # Hiragana
-        assert _has_cjk_chars("トウキョウ")  # Katakana
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "皇后大道中",  # Chinese
+            "北京路",
+            "東京駅",  # Japanese Kanji
+            "とうきょう",  # Hiragana
+            "トウキョウ",  # Katakana
+            "서울로",  # Korean Hangul
+            "شارع الملك",  # Arabic
+            "Невский проспект",  # Cyrillic
+            "राजपथ",  # Devanagari
+            "ถนนสุขุมวิท",  # Thai
+        ],
+        ids=[
+            "chinese",
+            "chinese_road",
+            "japanese_kanji",
+            "hiragana",
+            "katakana",
+            "korean",
+            "arabic",
+            "cyrillic",
+            "devanagari",
+            "thai",
+        ],
+    )
+    def test_non_latin_detected(self, text):
+        """Non-Latin scripts should be detected."""
+        assert _has_non_latin_alpha(text)
 
-    def test_has_cjk_chars_korean(self):
-        """Korean characters should be detected."""
-        assert _has_cjk_chars("서울로")  # Hangul
+    def test_latin_not_detected_as_non_latin(self):
+        """Pure Latin text should not be detected as non-Latin."""
+        assert not _has_non_latin_alpha("Main Street")
+        assert not _has_non_latin_alpha("Queen's Road Central")
+        assert not _has_non_latin_alpha("123 Route 66")  # digits/numbers only
 
-    def test_has_cjk_chars_latin(self):
-        """Latin text should not be detected as CJK."""
-        assert not _has_cjk_chars("Main Street")
-        assert not _has_cjk_chars("Queen's Road Central")
-
-    def test_has_cjk_chars_mixed(self):
-        """Mixed CJK+Latin text should be detected as CJK."""
-        assert _has_cjk_chars("北京 Beijing Road")
+    def test_mixed_script_detected(self):
+        """Mixed non-Latin + Latin text should be detected as non-Latin."""
+        assert _has_non_latin_alpha("北京 Beijing Road")
 
     def test_cross_script_detection(self):
         """Cross-script pairs should be detected."""
         assert _names_are_cross_script("皇后大道中", "Queen's Road Central")
         assert _names_are_cross_script("東京駅", "Tokyo Station")
-        assert not _names_are_cross_script("Main Street", "Oak Avenue")
-        assert not _names_are_cross_script("北京路", "上海路")
+        assert _names_are_cross_script("شارع الملك", "King Street")  # Arabic vs Latin
+        assert _names_are_cross_script("Невский", "Nevsky")  # Cyrillic vs Latin
+        assert not _names_are_cross_script("Main Street", "Oak Avenue")  # Both Latin
+        assert not _names_are_cross_script("北京路", "上海路")  # Both CJK
 
-    def test_cjk_phonetic_features_return_nan(self):
-        """Soundex and Metaphone should return NaN for CJK names."""
+    # -- Phonetic feature handling --
+
+    def test_non_latin_phonetic_features_return_nan(self):
+        """Soundex and Metaphone should return NaN for non-Latin names."""
         result = compute_name_similarity("皇后大道中", "北京路")
         assert math.isnan(result["soundex_match"])
         assert math.isnan(result["metaphone_similarity"])
 
-    def test_cjk_phonetic_nan_cross_script(self):
-        """Phonetics should return NaN when one name is CJK and other is Latin."""
+    def test_non_latin_phonetic_nan_cross_script(self):
+        """Phonetics should return NaN when one name is non-Latin and other is Latin."""
         result = compute_name_similarity("皇后大道中", "Queen's Road Central")
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
+
+    def test_arabic_phonetic_nan(self):
+        """Arabic names should also produce NaN phonetics."""
+        result = compute_name_similarity("شارع الملك", "King Street")
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
+
+    def test_cyrillic_phonetic_nan(self):
+        """Cyrillic names should also produce NaN phonetics."""
+        result = compute_name_similarity("Невский проспект", "Nevsky Prospect")
         assert math.isnan(result["soundex_match"])
         assert math.isnan(result["metaphone_similarity"])
 
@@ -255,8 +290,8 @@ class TestCJKNameHandling:
         assert not math.isnan(result["soundex_match"])
         assert not math.isnan(result["metaphone_similarity"])
 
-    def test_cjk_same_name_high_levenshtein(self):
-        """Identical CJK names should get high Levenshtein scores."""
+    def test_non_latin_same_name_high_levenshtein(self):
+        """Identical non-Latin names should get high Levenshtein scores."""
         result = compute_name_similarity("皇后大道中", "皇后大道中")
         assert result["levenshtein_ratio"] == pytest.approx(1.0)
         assert result["jaro_winkler"] == pytest.approx(1.0)
@@ -398,35 +433,282 @@ class TestCJKNameHandling:
         best = resolve_best_name_variant(ref_names_raw, "東京駅", "Tokyo Station")
         assert best == "Tokyo Station"
 
-    def test_extract_all_name_variants_returns_empty_for_none(self):
-        """None input should return empty list."""
+
+class TestExtractAllNameVariants:
+    """Exhaustive tests for _extract_all_name_variants covering the full Overture Names schema.
+
+    Overture Names schema has three sources of name strings:
+    - primary: Single default name string
+    - common: Dict of language code -> name (multilingual common names)
+    - rules: Array of NameRule dicts with value, variant, language, between, side
+
+    See: https://docs.overturemaps.org/schema/reference/transportation/segment/
+    """
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
         from matcher.features.semantic import _extract_all_name_variants
 
-        assert _extract_all_name_variants(None) == []
-        assert _extract_all_name_variants({}) == []
-        assert _extract_all_name_variants("not a dict") == []
+        self.extract = _extract_all_name_variants
 
-    def test_extract_all_name_variants_primary_only(self):
-        """Dict with only primary should return single variant."""
-        from matcher.features.semantic import _extract_all_name_variants
+    # -- Invalid / empty inputs --
 
-        assert _extract_all_name_variants({"primary": "Main Street"}) == ["Main Street"]
+    def test_none_returns_empty(self):
+        assert self.extract(None) == []
 
-    def test_extract_all_name_variants_with_rules(self):
-        """Dict with primary + rules should return all unique variants."""
-        from matcher.features.semantic import _extract_all_name_variants
+    def test_empty_dict_returns_empty(self):
+        assert self.extract({}) == []
 
+    def test_non_dict_returns_empty(self):
+        assert self.extract("not a dict") == []
+        assert self.extract(42) == []
+        assert self.extract([]) == []
+
+    # -- primary only --
+
+    def test_primary_only(self):
+        assert self.extract({"primary": "Main Street"}) == ["Main Street"]
+
+    def test_primary_none(self):
+        assert self.extract({"primary": None}) == []
+
+    def test_primary_empty_string(self):
+        assert self.extract({"primary": ""}) == []
+
+    def test_primary_non_string(self):
+        assert self.extract({"primary": 123}) == []
+
+    # -- common dict (Overture multilingual common names) --
+
+    def test_common_dict_multilingual(self):
+        """common dict should extract names from all languages."""
         names = {
-            "primary": "北京路",
+            "primary": "Le Léman",
+            "common": {
+                "de": "Genfersee",
+                "en": "Lake Geneva",
+                "fr": "Le Léman",  # duplicate of primary (case-insensitive)
+            },
+        }
+        variants = self.extract(names)
+        assert "Le Léman" in variants
+        assert "Genfersee" in variants
+        assert "Lake Geneva" in variants
+        assert len(variants) == 3  # Le Léman deduplicated
+
+    def test_common_dict_only_no_primary(self):
+        """common dict without primary should still extract names."""
+        names = {"common": {"en": "Lake Geneva", "fr": "Le Léman"}}
+        variants = self.extract(names)
+        assert len(variants) == 2
+        assert "Lake Geneva" in variants
+        assert "Le Léman" in variants
+
+    def test_common_dict_with_none_values(self):
+        """None values in common dict should be skipped."""
+        names = {"primary": "Main", "common": {"en": None, "fr": "Principale"}}
+        variants = self.extract(names)
+        assert variants == ["Main", "Principale"]
+
+    def test_common_dict_non_dict_ignored(self):
+        """Non-dict common should be ignored gracefully."""
+        names = {"primary": "Main", "common": "not a dict"}
+        assert self.extract(names) == ["Main"]
+
+    def test_common_dict_empty(self):
+        names = {"primary": "Main", "common": {}}
+        assert self.extract(names) == ["Main"]
+
+    # -- rules array --
+
+    def test_rules_with_multiple_variants(self):
+        """Rules with official, alternate, and short names."""
+        names = {
+            "primary": "City of New York",
             "rules": [
-                {"value": "Beijing Road", "language": "en"},
-                {"value": "北京路", "language": "zh"},  # duplicate of primary
+                {"value": "New York", "variant": "official", "language": "en"},
+                {"value": "New York City", "variant": "alternate", "language": "en"},
+                {"value": "The Big Apple", "variant": "alternate", "language": "en"},
+                {"value": "NYC", "variant": "alternate"},
             ],
         }
-        variants = _extract_all_name_variants(names)
+        variants = self.extract(names)
+        assert len(variants) == 5
+        assert "City of New York" in variants
+        assert "New York" in variants
+        assert "New York City" in variants
+        assert "The Big Apple" in variants
+        assert "NYC" in variants
+
+    def test_rules_with_between_ranges(self):
+        """Rules with between ranges should still have their values extracted.
+
+        Note: _extract_all_name_variants intentionally ignores the between range
+        for cross-language variant resolution. The LR name resolution in
+        parse_names_lr handles range-specific selection for the primary comparison.
+        """
+        names = {
+            "primary": "Fir St",
+            "rules": [
+                {"value": "2 Ave", "variant": "common", "between": [0, 0.3], "side": "left"},
+                {"value": "Fir St", "variant": "common", "between": [0.3, 1], "side": "left"},
+                {"value": "Fir St", "variant": "common", "side": "right"},
+            ],
+        }
+        variants = self.extract(names)
+        # "Fir St" appears 3 times but should be deduplicated
+        assert "Fir St" in variants
+        assert "2 Ave" in variants
         assert len(variants) == 2
-        assert "北京路" in variants
-        assert "Beijing Road" in variants
+
+    def test_rules_with_side_scoping(self):
+        """Rules with side (left/right) scoping."""
+        names = {
+            "primary": "Main St",
+            "rules": [
+                {"value": "Elm Dr", "variant": "common", "side": "left"},
+                {"value": "Main St", "variant": "common", "side": "right"},
+            ],
+        }
+        variants = self.extract(names)
+        assert len(variants) == 2
+        assert "Main St" in variants
+        assert "Elm Dr" in variants
+
+    def test_rules_multilingual_with_between(self):
+        """Multilingual rules with LR scoping — real-world HK scenario."""
+        names = {
+            "primary": "皇后大道中",
+            "rules": [
+                {
+                    "value": "皇后大道中",
+                    "variant": "common",
+                    "language": "zh",
+                    "between": [0.0, 1.0],
+                },
+                {
+                    "value": "Queen's Road Central",
+                    "variant": "common",
+                    "language": "en",
+                    "between": [0.0, 1.0],
+                },
+                {
+                    "value": "皇后大道西",
+                    "variant": "common",
+                    "language": "zh",
+                    "between": [0.0, 0.4],
+                },
+                {
+                    "value": "Queen's Road West",
+                    "variant": "common",
+                    "language": "en",
+                    "between": [0.0, 0.4],
+                },
+            ],
+        }
+        variants = self.extract(names)
+        assert "皇后大道中" in variants
+        assert "Queen's Road Central" in variants
+        assert "皇后大道西" in variants
+        assert "Queen's Road West" in variants
+        assert len(variants) == 4
+
+    # -- Deduplication --
+
+    def test_dedup_case_insensitive(self):
+        """Duplicate names differing only in case should be deduplicated."""
+        names = {
+            "primary": "MAIN STREET",
+            "common": {"en": "Main Street"},
+            "rules": [{"value": "main street", "variant": "common"}],
+        }
+        variants = self.extract(names)
+        assert len(variants) == 1
+        # First occurrence wins
+        assert variants[0] == "MAIN STREET"
+
+    def test_dedup_across_sources(self):
+        """Same name appearing in primary, common, and rules should appear once."""
+        names = {
+            "primary": "Oak Ave",
+            "common": {"en": "Oak Ave"},
+            "rules": [{"value": "Oak Ave", "variant": "official"}],
+        }
+        assert self.extract(names) == ["Oak Ave"]
+
+    # -- Malformed rules --
+
+    def test_rules_missing_value_key(self):
+        names = {
+            "primary": "Main",
+            "rules": [{"language": "en"}, {"value": "Alt", "language": "en"}],
+        }
+        assert self.extract(names) == ["Main", "Alt"]
+
+    def test_rules_none_value(self):
+        names = {"primary": "Main", "rules": [{"value": None}]}
+        assert self.extract(names) == ["Main"]
+
+    def test_rules_non_string_value(self):
+        names = {"primary": "Main", "rules": [{"value": 123}]}
+        assert self.extract(names) == ["Main"]
+
+    def test_rules_empty_string_value(self):
+        names = {"primary": "Main", "rules": [{"value": ""}]}
+        assert self.extract(names) == ["Main"]
+
+    def test_rules_non_dict_entries(self):
+        names = {"primary": "Main", "rules": ["not a dict", 42, None]}
+        assert self.extract(names) == ["Main"]
+
+    def test_rules_non_list(self):
+        names = {"primary": "Main", "rules": "not a list"}
+        assert self.extract(names) == ["Main"]
+
+    def test_rules_none(self):
+        names = {"primary": "Main", "rules": None}
+        assert self.extract(names) == ["Main"]
+
+    # -- Full Overture schema: primary + common + rules --
+
+    def test_all_three_sources(self):
+        """Extract from primary, common dict, and rules simultaneously."""
+        names = {
+            "primary": "皇后大道中",
+            "common": {
+                "en": "Queen's Road Central",
+                "zh-Hant": "皇后大道中",  # duplicate of primary
+            },
+            "rules": [
+                {"value": "QRC", "variant": "short", "language": "en"},
+                {"value": "皇后大道中", "variant": "common", "language": "zh"},  # dup
+            ],
+        }
+        variants = self.extract(names)
+        assert "皇后大道中" in variants
+        assert "Queen's Road Central" in variants
+        assert "QRC" in variants
+        assert len(variants) == 3
+
+    # -- resolve_best_name_variant with common dict --
+
+    def test_resolve_uses_common_dict(self):
+        """resolve_best_name_variant should find names from common dict."""
+        names = {
+            "primary": "Le Léman",
+            "common": {"en": "Lake Geneva", "de": "Genfersee"},
+        }
+        best = resolve_best_name_variant(names, "Le Léman", "Lake Geneva")
+        assert best == "Lake Geneva"
+
+    def test_resolve_uses_common_dict_cyrillic(self):
+        """Cyrillic primary with Latin common should resolve to Latin."""
+        names = {
+            "primary": "Невский проспект",
+            "common": {"en": "Nevsky Prospect"},
+        }
+        best = resolve_best_name_variant(names, "Невский проспект", "Nevsky Prospect")
+        assert best == "Nevsky Prospect"
 
 
 class TestClassInfo:
