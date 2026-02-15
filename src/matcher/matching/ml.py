@@ -284,6 +284,8 @@ def _compute_feature_chunk(chunk):
                     "target_idx": target_idx,
                     "ref_geom_aligned": ref_geom_aligned,
                     "target_geom_aligned": target_geom_aligned,
+                    "ref_is_full": ref_geom_aligned is ref_geom_full,
+                    "target_is_full": target_geom_aligned is target_geom_full,
                     "ref_class": lr_attrs.ref_class,
                     "target_class": lr_attrs.target_class,
                     "ref_subclass": lr_attrs.ref_subclass,
@@ -382,6 +384,23 @@ def _compute_feature_chunk(chunk):
         return (results, error_tracker.to_serializable())
 
     # ---- Pass 3: Per-pair non-batchable features + assembly ----
+    # Per-worker caches for sibling/crossing computations on full-geometry segments.
+    # When coverage >= 99.5%, aligned geom IS the full geom (identity), so sibling
+    # and crossing angle results depend only on the segment, not the pair.
+    # Many ref segments appear in 5-20+ candidate pairs, so caching avoids redundant
+    # spatial index queries + Numba JIT computation.
+    from ..features.compute import _compute_crossing_angle
+    from ..features.relational import find_parallel_sibling
+
+    if "_sibling_cache" not in _worker_data:
+        _worker_data["_sibling_cache"] = {}
+        _worker_data["_crossing_cache"] = {}
+    sibling_cache = _worker_data["_sibling_cache"]
+    crossing_cache = _worker_data["_crossing_cache"]
+
+    ref_sibling_ctx = _worker_data.get("ref_sibling_context_full")
+    target_sibling_ctx = _worker_data.get("target_sibling_context_full")
+
     for i, pd_item in enumerate(pair_data):
         chunk_idx = pd_item["chunk_idx"]
         try:
@@ -403,6 +422,101 @@ def _compute_feature_chunk(chunk):
                 collinear_gap_ratio=0.0,  # Filled by _compute_non_geometric_features
             )
 
+            # --- Cache lookup for sibling + crossing angle features ---
+            # Only cache when aligned geom is the full geom (identity check).
+            ref_seg_id = pd_item["ref_seg_id"]
+            target_seg_id = pd_item["target_seg_id"]
+            ref_is_full = pd_item["ref_is_full"]
+            target_is_full = pd_item["target_is_full"]
+
+            # Ref sibling cache
+            # Use primary name (same as what sibling context stores) for cache
+            # consistency — effective_ref_name depends on the target, but sibling
+            # detection is a within-dataset operation so the segment's own name
+            # is the correct input.
+            precomputed_sibling_ref = None
+            if ref_is_full:
+                cache_key = (ref_seg_id, "sibling")
+                if cache_key in sibling_cache:
+                    precomputed_sibling_ref = sibling_cache[cache_key]
+                elif ref_sibling_ctx is not None and ref_seg_id is not None:
+                    ref_name_raw = pd_item.get("ref_names_raw")
+                    ref_primary_name = (
+                        ref_name_raw.get("primary")
+                        if isinstance(ref_name_raw, dict)
+                        else ref_name_raw
+                    )
+                    result = find_parallel_sibling(
+                        segment=pd_item["ref_geom_aligned"],
+                        segment_id=ref_seg_id,
+                        segment_name=ref_primary_name,
+                        segment_class=pd_item["ref_class"],
+                        spatial_index=ref_sibling_ctx.spatial_index,
+                        segment_data=ref_sibling_ctx.segment_data,
+                    )
+                    precomputed_sibling_ref = (
+                        result.has_sibling,
+                        result.sibling_distance,
+                        result.parallel_fraction,
+                    )
+                    sibling_cache[cache_key] = precomputed_sibling_ref
+
+            # Target sibling cache
+            precomputed_sibling_target = None
+            if target_is_full:
+                cache_key = (target_seg_id, "sibling")
+                if cache_key in sibling_cache:
+                    precomputed_sibling_target = sibling_cache[cache_key]
+                elif target_sibling_ctx is not None and target_seg_id is not None:
+                    target_name_raw = pd_item.get("target_names_raw")
+                    target_primary_name = (
+                        target_name_raw.get("primary")
+                        if isinstance(target_name_raw, dict)
+                        else target_name_raw
+                    )
+                    result = find_parallel_sibling(
+                        segment=pd_item["target_geom_aligned"],
+                        segment_id=target_seg_id,
+                        segment_name=target_primary_name,
+                        segment_class=pd_item["target_class"],
+                        spatial_index=target_sibling_ctx.spatial_index,
+                        segment_data=target_sibling_ctx.segment_data,
+                    )
+                    precomputed_sibling_target = (result.has_sibling, result.sibling_distance)
+                    sibling_cache[cache_key] = precomputed_sibling_target
+
+            # Ref crossing angle cache
+            precomputed_crossing_ref = None
+            if ref_is_full:
+                cache_key = (ref_seg_id, "crossing")
+                if cache_key in crossing_cache:
+                    precomputed_crossing_ref = crossing_cache[cache_key]
+                else:
+                    precomputed_crossing_ref = _compute_crossing_angle(
+                        pd_item["ref_geom_aligned"],
+                        pd_item["ref_class"],
+                        ref_seg_id,
+                        ref_sibling_ctx,
+                    )
+                    crossing_cache[cache_key] = precomputed_crossing_ref
+
+            # Target crossing angle cache
+            # Note: target uses ref_sibling_ctx (Overture spatial index) for
+            # cross-tier detection, with no self-exclusion (seg_id=None)
+            precomputed_crossing_target = None
+            if target_is_full:
+                cache_key = (target_seg_id, "crossing")
+                if cache_key in crossing_cache:
+                    precomputed_crossing_target = crossing_cache[cache_key]
+                else:
+                    precomputed_crossing_target = _compute_crossing_angle(
+                        pd_item["target_geom_aligned"],
+                        pd_item["target_class"],
+                        None,  # target not in ref spatial index
+                        ref_sibling_ctx,
+                    )
+                    crossing_cache[cache_key] = precomputed_crossing_target
+
             non_geom = _compute_non_geometric_features(
                 ref_geom_aligned=pd_item["ref_geom_aligned"],
                 target_geom_aligned=pd_item["target_geom_aligned"],
@@ -421,20 +535,24 @@ def _compute_feature_chunk(chunk):
                 graphlet_features=pd_item["graphlet_features"],
                 ref_graphlet_data=pd_item["ref_graphlet_data"],
                 target_graphlet_data=pd_item["target_graphlet_data"],
-                ref_seg_id=pd_item["ref_seg_id"],
-                target_seg_id=pd_item["target_seg_id"],
+                ref_seg_id=ref_seg_id,
+                target_seg_id=target_seg_id,
                 geom_features=geom_features,
                 precomputed_lateral_offset=(
                     batch_mean_offsets[i],
                     batch_iqr_offsets[i],
                     batch_p95_offsets[i],
                 ),
-                ref_sibling_context_full=_worker_data.get("ref_sibling_context_full"),
-                target_sibling_context_full=_worker_data.get("target_sibling_context_full"),
+                ref_sibling_context_full=ref_sibling_ctx,
+                target_sibling_context_full=target_sibling_ctx,
                 ref_names_raw=pd_item.get("ref_names_raw"),
                 target_names_raw=pd_item.get("target_names_raw"),
                 target_topo_connectors=pd_item.get("target_topo_connectors"),
                 target_topo_node_features=pd_item.get("target_topo_node_features"),
+                precomputed_sibling_ref=precomputed_sibling_ref,
+                precomputed_sibling_target=precomputed_sibling_target,
+                precomputed_crossing_ref=precomputed_crossing_ref,
+                precomputed_crossing_target=precomputed_crossing_target,
             )
 
             # Aligned length: absolute overlap length in meters (uses full geometry)

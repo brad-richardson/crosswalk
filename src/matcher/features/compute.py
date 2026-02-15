@@ -191,6 +191,10 @@ def _compute_non_geometric_features(
     target_names_raw=None,
     target_topo_connectors: dict[str, list[tuple[float, int]]] | None = None,
     target_topo_node_features: dict[int, int] | None = None,
+    precomputed_sibling_ref: tuple[bool, float, float] | None = None,
+    precomputed_sibling_target: tuple[bool, float] | None = None,
+    precomputed_crossing_ref: dict[str, float] | None = None,
+    precomputed_crossing_target: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -239,6 +243,11 @@ def _compute_non_geometric_features(
             target topology when graphlet_data is not available for the target.
         target_topo_node_features: Node features for synthetic connectors,
             mapping node_id -> degree.
+        precomputed_sibling_ref: Cached (has_sibling, sibling_dist, parallel_fraction)
+            for the ref segment. Used when aligned geom is the full geom (identity).
+        precomputed_sibling_target: Cached (has_sibling, sibling_dist) for the target.
+        precomputed_crossing_ref: Cached crossing angle result dict for ref.
+        precomputed_crossing_target: Cached crossing angle result dict for target.
 
     Returns:
         Dictionary of non-geometric feature name -> value, plus per-pair geometric
@@ -473,10 +482,12 @@ def _compute_non_geometric_features(
     # Parallel sibling features (detect split vs centerline representation)
     # Computed per-pair on aligned portions for accuracy with partial alignments
     with timed_section("sibling_features"):
-        # Compute sibling detection on aligned portions (not precomputed full geometries)
-        if ref_sibling_context_full is not None and ref_seg_id is not None:
+        # Use precomputed values when available (cache hit for full-geometry pairs)
+        if precomputed_sibling_ref is not None:
+            has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = precomputed_sibling_ref
+        elif ref_sibling_context_full is not None and ref_seg_id is not None:
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = find_parallel_sibling(
-                segment=ref_geom_aligned,  # Use aligned portion, not full geometry
+                segment=ref_geom_aligned,
                 segment_id=ref_seg_id,
                 segment_name=effective_ref_name,
                 segment_class=ref_class,
@@ -492,9 +503,11 @@ def _compute_non_geometric_features(
                 0.0,
             )
 
-        if target_sibling_context_full is not None and target_seg_id is not None:
+        if precomputed_sibling_target is not None:
+            has_sibling_target, sibling_dist_target = precomputed_sibling_target
+        elif target_sibling_context_full is not None and target_seg_id is not None:
             has_sibling_target, sibling_dist_target, _ = find_parallel_sibling(
-                segment=target_geom_aligned,  # Use aligned portion, not full geometry
+                segment=target_geom_aligned,
                 segment_id=target_seg_id,
                 segment_name=effective_target_name,
                 segment_class=target_class,
@@ -576,18 +589,24 @@ def _compute_non_geometric_features(
     # are often single-type (e.g., all footway) making target_sibling_context useless
     # for cross-tier detection.
     with timed_section("crossing_angle"):
-        crossing_ref = _compute_crossing_angle(
-            ref_geom_aligned,
-            ref_class,
-            ref_seg_id,
-            ref_sibling_context_full,
-        )
-        crossing_target = _compute_crossing_angle(
-            target_geom_aligned,
-            target_class,
-            None,  # target not in ref spatial index, no self-exclusion needed
-            ref_sibling_context_full,
-        )
+        if precomputed_crossing_ref is not None:
+            crossing_ref = precomputed_crossing_ref
+        else:
+            crossing_ref = _compute_crossing_angle(
+                ref_geom_aligned,
+                ref_class,
+                ref_seg_id,
+                ref_sibling_context_full,
+            )
+        if precomputed_crossing_target is not None:
+            crossing_target = precomputed_crossing_target
+        else:
+            crossing_target = _compute_crossing_angle(
+                target_geom_aligned,
+                target_class,
+                None,  # target not in ref spatial index, no self-exclusion needed
+                ref_sibling_context_full,
+            )
 
     # Log timing summary periodically
     log_timing_summary_if_needed()

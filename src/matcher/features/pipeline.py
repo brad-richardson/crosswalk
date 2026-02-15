@@ -11,8 +11,9 @@ compute_features_only().
 """
 
 import logging
+import multiprocessing
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, NamedTuple
 
 import geopandas as gpd
@@ -162,25 +163,30 @@ def prepare_worker_data(
     ref_has_connectors = "connectors" in reference.columns
 
     t0 = time.perf_counter()
-    # Target: always use geometry inference with spatial index for synthetic connectors
-    # (explicit connectors don't exist in target data; even if they did, we need
-    # the spatial index for sampling degrees at arbitrary positions)
-    target_topo_result = compute_all_topology(
-        target,
-        id_column=target_id_column,
-        tolerance_m=5.0,
-        ids_to_compute=unique_target_ids,
-        return_spatial_index=True,
-    )
-    target_topology_by_id, target_topo_spatial_index = target_topo_result
+    # Target and ref topology are independent — compute in parallel threads.
+    # Both use STRtree (C code, releases GIL), so threading gives real speedup.
+    with ThreadPoolExecutor(max_workers=2) as topo_pool:
+        # Target: always use geometry inference with spatial index for synthetic connectors
+        target_topo_future = topo_pool.submit(
+            compute_all_topology,
+            target,
+            id_column=target_id_column,
+            tolerance_m=5.0,
+            ids_to_compute=unique_target_ids,
+            return_spatial_index=True,
+        )
+        ref_topo_future = topo_pool.submit(
+            compute_all_topology,
+            reference,
+            id_column=ref_id_column,
+            tolerance_m=5.0,
+            ids_to_compute=unique_ref_ids,
+            connectors_column="connectors" if ref_has_connectors else None,
+        )
+        target_topo_result = target_topo_future.result()
+        ref_topology_by_id = ref_topo_future.result()
 
-    ref_topology_by_id = compute_all_topology(
-        reference,
-        id_column=ref_id_column,
-        tolerance_m=5.0,
-        ids_to_compute=unique_ref_ids,
-        connectors_column="connectors" if ref_has_connectors else None,
-    )
+    target_topology_by_id, target_topo_spatial_index = target_topo_result
 
     # Map topology from segment IDs to DataFrame indices
     target_topology_full = {}
@@ -230,19 +236,24 @@ def prepare_worker_data(
     )
 
     t0 = time.perf_counter()
-    ref_graphlet_data = precompute_graphlet_features(
-        ref_candidates_only,
-        id_column=ref_id_column,
-        tolerance_m=5.0,
-        connectors_column="connectors" if ref_has_connectors else None,
-    )
-    logger.debug(f"[TIMING] graphlet_ref: {time.perf_counter() - t0:.2f}s")
-
-    t0 = time.perf_counter()
-    target_graphlet_data = precompute_graphlet_features(
-        target_candidates_only, id_column=target_id_column, tolerance_m=5.0
-    )
-    logger.debug(f"[TIMING] graphlet_target: {time.perf_counter() - t0:.2f}s")
+    # Ref and target graphlets are independent — compute in parallel threads.
+    with ThreadPoolExecutor(max_workers=2) as graphlet_pool:
+        ref_graphlet_future = graphlet_pool.submit(
+            precompute_graphlet_features,
+            ref_candidates_only,
+            id_column=ref_id_column,
+            tolerance_m=5.0,
+            connectors_column="connectors" if ref_has_connectors else None,
+        )
+        target_graphlet_future = graphlet_pool.submit(
+            precompute_graphlet_features,
+            target_candidates_only,
+            id_column=target_id_column,
+            tolerance_m=5.0,
+        )
+        ref_graphlet_data = ref_graphlet_future.result()
+        target_graphlet_data = target_graphlet_future.result()
+    logger.debug(f"[TIMING] graphlet_both: {time.perf_counter() - t0:.2f}s")
 
     # --- Step 7: Compute linestring alignments ---
     logger.info("Computing linestring alignments...")
@@ -255,22 +266,26 @@ def prepare_worker_data(
     # might not have any candidate matches in the target dataset
     logger.info("Building sibling search contexts...")
     t0 = time.perf_counter()
-    ref_sibling_context = build_sibling_search_context(
-        geometries=list(reference.geometry),
-        segment_ids=[str(sid) for sid in reference[ref_id_column]],
-        names=list(reference.get(ref_name_column, [None] * len(reference))),
-        classes=list(reference.get(ref_class_column, [None] * len(reference))),
-    )
-    logger.debug(f"[TIMING] sibling_context_ref: {time.perf_counter() - t0:.2f}s")
-
-    t0 = time.perf_counter()
-    target_sibling_context = build_sibling_search_context(
-        geometries=list(target.geometry),
-        segment_ids=[str(sid) for sid in target[target_id_column]],
-        names=list(target.get(target_name_column, [None] * len(target))),
-        classes=list(target.get(target_class_column, [None] * len(target))),
-    )
-    logger.debug(f"[TIMING] sibling_context_target: {time.perf_counter() - t0:.2f}s")
+    # Ref and target sibling contexts are independent — compute in parallel threads.
+    # STRtree construction (C code) releases the GIL.
+    with ThreadPoolExecutor(max_workers=2) as sibling_pool:
+        ref_sibling_future = sibling_pool.submit(
+            build_sibling_search_context,
+            geometries=list(reference.geometry),
+            segment_ids=[str(sid) for sid in reference[ref_id_column]],
+            names=list(reference.get(ref_name_column, [None] * len(reference))),
+            classes=list(reference.get(ref_class_column, [None] * len(reference))),
+        )
+        target_sibling_future = sibling_pool.submit(
+            build_sibling_search_context,
+            geometries=list(target.geometry),
+            segment_ids=[str(sid) for sid in target[target_id_column]],
+            names=list(target.get(target_name_column, [None] * len(target))),
+            classes=list(target.get(target_class_column, [None] * len(target))),
+        )
+        ref_sibling_context = ref_sibling_future.result()
+        target_sibling_context = target_sibling_future.result()
+    logger.debug(f"[TIMING] sibling_context_both: {time.perf_counter() - t0:.2f}s")
 
     # --- Step 9: Compute aligned endpoint features ---
     _, target_seg_to_connectors_ep, _, _ = (
@@ -404,9 +419,25 @@ def compute_features_parallel(
     )
     t0 = time.perf_counter()
 
-    with ProcessPoolExecutor(
-        max_workers=n_workers, initializer=_init_worker, initargs=(worker_data,)
-    ) as executor:
+    # On Linux (fork), set worker_data as a module-level global before forking.
+    # Child processes inherit the parent's memory via copy-on-write, avoiding
+    # the O(N_workers * pickle_time) cost of serializing multi-GB worker_data
+    # (STRtrees, geometry arrays, etc.) to each worker.
+    use_fork_shortcut = multiprocessing.get_start_method(allow_none=True) == "fork"
+    if use_fork_shortcut:
+        from ..matching import ml as _ml_module
+
+        _ml_module._worker_data = worker_data
+        executor_kwargs: dict[str, Any] = {"max_workers": n_workers}
+        logger.debug("Using fork shortcut: worker_data set via module global (COW)")
+    else:
+        executor_kwargs = {
+            "max_workers": n_workers,
+            "initializer": _init_worker,
+            "initargs": (worker_data,),
+        }
+
+    with ProcessPoolExecutor(**executor_kwargs) as executor:
         for chunk_results, chunk_errors in executor.map(_compute_feature_chunk, chunks):
             features_list.extend(chunk_results)
             total_errors.merge_serialized(chunk_errors)
