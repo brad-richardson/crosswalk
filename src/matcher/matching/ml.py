@@ -395,9 +395,6 @@ def _compute_feature_chunk(chunk):
                 buffer_iou_5m=float(batch_result.buffer_iou_5m[i]),
                 buffer_iou_15m=float(batch_result.buffer_iou_15m[i]),
                 heading_delta=float(batch_result.heading_deltas[i]),
-                length_ratio=float(batch_result.length_ratios[i]),
-                projection_distance=0.0,  # Filled by _compute_non_geometric_features
-                centroid_distance=float(batch_result.centroid_distances[i]),
                 overlap_ratio=float(batch_result.overlap_ratios[i]),
                 collinear_gap_ratio=0.0,  # Filled by _compute_non_geometric_features
             )
@@ -451,18 +448,9 @@ def _compute_feature_chunk(chunk):
                 alignment=alignment,
             )
 
-            # Use full geometries for length_ratio (not aligned portions)
-            target_length_full = _worker_data["target_geoms_full"][pd_item["target_idx"]].length
-            length_ratio = (
-                min(ref_length_full, target_length_full) / max(ref_length_full, target_length_full)
-                if max(ref_length_full, target_length_full) > 0
-                else 0.0
-            )
-
             # Assemble via shared function (single source of truth for clamping)
             features = assemble_feature_dict(
                 geom_features=geom_features,
-                length_ratio=length_ratio,
                 aligned_length_m=aligned_length_m,
                 non_geom=non_geom,
                 intersection_overlap_feats=intersection_overlap_feats,
@@ -783,7 +771,6 @@ class MLMatcher:
         exclude_features: list[str] | None = None,
         agent_weight: float = 0.0,
         min_agent_confidence: float = 0.0,
-        max_centroid_distance_m: float = 500.0,
         max_hausdorff_m: float = 1000.0,
         **kwargs,
     ) -> dict[str, Any]:
@@ -804,8 +791,6 @@ class MLMatcher:
                          When > 0, agent labels are included with this sample weight.
             min_agent_confidence: Minimum confidence threshold for including agent labels.
                                  Only agent labels with confidence >= this value are included.
-            max_centroid_distance_m: Max centroid distance for valid training pairs (meters).
-                                    Pairs exceeding this are dropped as corrupted.
             max_hausdorff_m: Max Hausdorff distance for valid training pairs (meters).
                             Pairs exceeding this are dropped as corrupted.
             **kwargs: Additional XGBoost parameters
@@ -901,7 +886,6 @@ class MLMatcher:
         # Validate feature plausibility (drop corrupted/stale pairs)
         df = self._validate_training_pairs(
             df,
-            max_centroid_distance_m=max_centroid_distance_m,
             max_hausdorff_m=max_hausdorff_m,
         )
 
@@ -968,7 +952,6 @@ class MLMatcher:
                                 # Validate agent labels too
                                 agent_with_features = self._validate_training_pairs(
                                     agent_with_features,
-                                    max_centroid_distance_m=max_centroid_distance_m,
                                     max_hausdorff_m=max_hausdorff_m,
                                 )
 
@@ -1253,7 +1236,6 @@ class MLMatcher:
     def _validate_training_pairs(
         self,
         df: pd.DataFrame,
-        max_centroid_distance_m: float = 500.0,
         max_hausdorff_m: float = 1000.0,
     ) -> pd.DataFrame:
         """Validate training pairs and drop those with implausible features.
@@ -1263,7 +1245,6 @@ class MLMatcher:
 
         Args:
             df: Training DataFrame with feature columns
-            max_centroid_distance_m: Max allowed centroid distance (default 500m)
             max_hausdorff_m: Max allowed Hausdorff distance (default 1000m)
 
         Returns:
@@ -1271,18 +1252,6 @@ class MLMatcher:
         """
         n_before = len(df)
         drop_mask = pd.Series(False, index=df.index)
-
-        # Check centroid distance
-        if "centroid_distance_m" in df.columns:
-            bad_centroid = df["centroid_distance_m"].notna() & (
-                df["centroid_distance_m"] > max_centroid_distance_m
-            )
-            if bad_centroid.any():
-                logger.warning(
-                    f"Validation: {bad_centroid.sum()} pairs with "
-                    f"centroid_distance_m > {max_centroid_distance_m}m"
-                )
-            drop_mask |= bad_centroid
 
         # Check Hausdorff distance
         if "hausdorff_distance_m" in df.columns:

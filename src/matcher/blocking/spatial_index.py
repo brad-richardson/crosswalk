@@ -112,7 +112,6 @@ class CandidatePair:
     target_idx: int  # Index in target GeoDataFrame
     distance_estimate: float
     heading_diff: float
-    length_ratio: float
 
 
 @dataclass
@@ -132,7 +131,6 @@ class CandidateBatch:
     target_idxs: np.ndarray  # int32 array of DataFrame indices
     distances: np.ndarray  # float32 array
     heading_diffs: np.ndarray  # float32 array
-    length_ratios: np.ndarray  # float32 array
 
     def __len__(self) -> int:
         return len(self.ref_idxs)
@@ -147,7 +145,6 @@ class CandidateBatch:
                 target_idx=int(self.target_idxs[i]),
                 distance_estimate=float(self.distances[i]),
                 heading_diff=float(self.heading_diffs[i]),
-                length_ratio=float(self.length_ratios[i]),
             )
 
     def __getitem__(self, idx: int) -> CandidatePair:
@@ -159,7 +156,6 @@ class CandidateBatch:
             target_idx=self.target_idxs[idx].item(),
             distance_estimate=self.distances[idx].item(),
             heading_diff=self.heading_diffs[idx].item(),
-            length_ratio=self.length_ratios[idx].item(),
         )
 
     def get_unique_indices(self) -> tuple[set[int], set[int]]:
@@ -178,7 +174,6 @@ class CandidateBatch:
             + self.target_idxs.nbytes
             + self.distances.nbytes
             + self.heading_diffs.nbytes
-            + self.length_ratios.nbytes
         )
         # Object arrays (IDs) - include nbytes plus estimated string storage
         # nbytes for object arrays only counts pointer storage (~8 bytes each)
@@ -280,7 +275,6 @@ def generate_candidates(
             target_idxs=np.array([], dtype=np.int32),
             distances=np.array([], dtype=np.float32),
             heading_diffs=np.array([], dtype=np.float32),
-            length_ratios=np.array([], dtype=np.float32),
         )
 
     # Convert to int32 for memory efficiency
@@ -312,23 +306,6 @@ def generate_candidates(
         np.float32
     )
 
-    # Compute length ratios for matched pairs
-    # Note: In geographic CRS, lengths are in degrees - but we only use ratios,
-    # so the units cancel out and the relative comparison is still valid
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=".*geographic CRS.*")
-        ref_lengths = reference.geometry.length.values
-        target_lengths = target.geometry.length.values
-
-    matched_ref_lengths = ref_lengths[ref_idxs]
-    matched_target_lengths = target_lengths[target_idxs]
-
-    min_lens = np.minimum(matched_ref_lengths, matched_target_lengths)
-    max_lens = np.maximum(matched_ref_lengths, matched_target_lengths)
-    length_ratios = (min_lens / np.maximum(max_lens, 0.1)).astype(np.float32)  # Inverted: 0-1 range
-
     # Compute centroid distances for matched pairs
     ref_centroids = shapely.centroid(ref_geoms[ref_idxs])
     target_centroids = shapely.centroid(target_geoms[target_idxs])
@@ -341,7 +318,6 @@ def generate_candidates(
         target_idxs=target_idxs,
         distances=distances,
         heading_diffs=heading_diffs,
-        length_ratios=length_ratios,
     )
 
     logger.info(
@@ -374,7 +350,6 @@ def generate_candidates_iter(
         target_row = target.iloc[target_idx]
         target_geom = target_row.geometry
         target_heading = _compute_overall_heading(target_geom)
-        target_length = target_geom.length
 
         if target_id_column in target_row.index:
             target_id = target_row[target_id_column]
@@ -388,14 +363,10 @@ def generate_candidates_iter(
         for ref_idx in candidate_indices:
             ref_row = reference.iloc[ref_idx]
             ref_heading = ref_headings.iloc[ref_idx]
-            ref_length = ref_row.geometry.length
-
             ref_id = ref_row[ref_id_column] if ref_id_column in ref_row.index else ref_idx
 
-            # Compute heading and length for ML features (not filtering)
+            # Compute heading for ML features (not filtering)
             heading_diff = _angle_diff(target_heading, ref_heading)
-            length_ratio = max(target_length, ref_length) / max(min(target_length, ref_length), 0.1)
-
             distance_estimate = target_geom.centroid.distance(ref_row.geometry.centroid)
 
             yield CandidatePair(
@@ -405,7 +376,6 @@ def generate_candidates_iter(
                 target_idx=target_idx,
                 distance_estimate=distance_estimate,
                 heading_diff=heading_diff,
-                length_ratio=1.0 / length_ratio,
             )
 
 

@@ -18,7 +18,7 @@ var HIGHER_BETTER = [
 // "lower is better" features (distances, deltas)
 var LOWER_BETTER = [
     'hausdorff_distance_m', 'mean_hausdorff_distance_m', 'hausdorff_p95_m',
-    'centroid_distance_m', 'lateral_offset_m', 'lateral_offset_iqr_m',
+    'lateral_offset_m', 'lateral_offset_iqr_m',
     'lateral_offset_p95_m', 'edge_distance_rmse_m',
     'min_endpoint_proximity_m', 'max_endpoint_proximity_m',
     'heading_delta', 'sinuosity_delta', 'heading_consistency_delta',
@@ -29,13 +29,12 @@ var LOWER_BETTER = [
 var MAX_DIST = 10000;
 var ERROR_DEFAULTS = {
     'hausdorff_distance_m': MAX_DIST, 'mean_hausdorff_distance_m': MAX_DIST,
-    'hausdorff_p95_m': MAX_DIST, 'centroid_distance_m': MAX_DIST,
+    'hausdorff_p95_m': MAX_DIST,
     'edge_distance_rmse_m': MAX_DIST,
     'lateral_offset_m': MAX_DIST, 'lateral_offset_iqr_m': MAX_DIST,
     'lateral_offset_p95_m': MAX_DIST,
     'min_endpoint_proximity_m': MAX_DIST, 'max_endpoint_proximity_m': MAX_DIST,
     'heading_delta': 180, 'collinear_gap_ratio': 1.0,
-    'length_ratio': 0,
 };
 
 function classifyFeature(name, value) {

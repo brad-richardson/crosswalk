@@ -26,7 +26,6 @@ def sample_features():
         "buffer_iou_5m": 0.8,
         "buffer_iou_15m": 0.9,
         "heading_delta": 5.0,
-        "length_ratio": 0.95,
         "name_levenshtein": 0.9,
         "name_jaro_winkler": 0.95,
         "class_similarity": 1.0,

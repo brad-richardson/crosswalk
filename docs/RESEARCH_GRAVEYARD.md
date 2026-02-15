@@ -4,6 +4,44 @@ Features that were implemented, tested, and removed or parked due to insufficien
 
 ---
 
+## Length Ratio (Removed 2026-02-15)
+
+### What It Was
+A geometric feature computing the ratio of full segment lengths:
+- `length_ratio` — `min(full_len_a, full_len_b) / max(full_len_a, full_len_b)` (0-1 scale)
+
+Part of the "Geometric" feature group. Deliberately used **full** segment geometries (not aligned sublines), since the aligned ratio is always ~1.0.
+
+### Why Removed
+- **Segmentation artifact**: Full segment length is an arbitrary data decision. A 50m local road overlapping a 500m Overture segment gives length_ratio=0.1, penalizing a perfectly valid match. The project's design principle is that segmentation should never affect matching quality.
+- **Subsumed by coverage features**: `ref_coverage`, `target_coverage`, `min_coverage`, and `coverage_ratio` capture the alignment relationship without encoding absolute segment lengths. Coverage is the #1 most important feature category by ablation (-1.72% F1).
+- **Zero impact**: Ablation showed no F1 degradation when excluded. Not in permutation importance top 14.
+
+### Ablation Results (Feb 2026)
+| Config | CV F1 | Accuracy |
+|--------|-------|----------|
+| Baseline (74 features) | 0.917 +/- 0.007 | 90.0% |
+| Excluding length_ratio + centroid_distance_m (72 features) | 0.918 +/- 0.006 | 90.1% |
+
+---
+
+## Centroid Distance (Removed 2026-02-15)
+
+### What It Was
+A geometric feature computing the distance between segment centroids:
+- `centroid_distance_m` — `shapely.distance(centroid(line_a), centroid(line_b))` (meters)
+
+Part of the "Geometric" feature group. Computed on aligned subline geometries.
+
+Also used in `_validate_training_pairs()` to filter corrupted training pairs (>500m threshold). This check was removed; the Hausdorff distance check (>1000m) provides equivalent coverage.
+
+### Why Removed
+- **Redundant**: Single-point summary that's fully captured by richer features: hausdorff distance (3 variants), buffer_iou (2 variants), lateral_offset (3 variants), and edge_distance_rmse.
+- **Low importance**: Not in permutation importance top 14 (below +0.11% F1 drop). Falls in the "geometric" category which showed only -0.25% F1 as a group (redundant classification).
+- **Zero impact**: See ablation results above (jointly removed with length_ratio).
+
+---
+
 ## Alignment at Intersection (Removed 2026-02-12)
 
 ### What It Was

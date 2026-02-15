@@ -462,20 +462,6 @@ class TestFeatureDataQuality:
             pytest.skip("No features data found")
         return df
 
-    def test_centroid_distance_plausible(self, features_df):
-        """Zero match-labeled pairs with centroid distance > 500m."""
-        if "centroid_distance_m" not in features_df.columns:
-            pytest.skip("centroid_distance_m not in features")
-        labels = LabelStore.load_human_labels(HUMAN_DIR)
-        matches = features_df.merge(
-            labels[labels["label"] == "match"][["gers_id", "target_id"]],
-            on=["gers_id", "target_id"],
-        )
-        bad = matches[matches["centroid_distance_m"] > 500.0]
-        if len(bad) > 0:
-            by_dataset = bad.groupby("dataset").size().to_dict()
-            pytest.fail(f"{len(bad)} match pairs with centroid_distance_m > 500m: {by_dataset}")
-
     def test_hausdorff_distance_plausible(self, features_df):
         """Zero match-labeled pairs with hausdorff_distance_m > 1000m."""
         if "hausdorff_distance_m" not in features_df.columns:
@@ -815,7 +801,7 @@ class TestMatchLabelFeatureQuality:
     def test_no_error_features_on_match_labels(self, match_features_df):
         """Match labels should not have error-default feature values.
 
-        Error features have hausdorff=10000, centroid=10000, buffer_iou=0,
+        Error features have hausdorff=10000, buffer_iou=0,
         indicating a computation failure that returned all defaults.
         """
         from matcher.config import MAX_DISTANCE_METERS
@@ -823,7 +809,6 @@ class TestMatchLabelFeatureQuality:
         df = match_features_df
         error_mask = (
             (df["hausdorff_distance_m"] >= MAX_DISTANCE_METERS)
-            & (df["centroid_distance_m"] >= MAX_DISTANCE_METERS)
             & (df["buffer_iou_5m"] == 0.0)
             & (df["buffer_iou_15m"] == 0.0)
         )
@@ -835,26 +820,6 @@ class TestMatchLabelFeatureQuality:
                 f"(hausdorff={MAX_DISTANCE_METERS}, buffer_iou=0): {by_dataset}\n"
                 f"This indicates feature computation failures. "
                 f"Run 'matcher backfill' to recompute."
-            )
-
-    def test_match_labels_centroid_distance_reasonable(self, match_features_df):
-        """Match labels should not be extremely far apart (> 5km).
-
-        Candidate generation uses a ~50m buffer, so matches should be
-        geographically close. A centroid distance > 5km suggests broken
-        features or a labeling error.
-        """
-        df = match_features_df
-        threshold = 5000.0
-        bad = df[df["centroid_distance_m"] > threshold]
-        if len(bad) > 0:
-            by_dataset = bad.groupby("dataset").size().to_dict()
-            worst = bad.nlargest(3, "centroid_distance_m")[
-                ["dataset", "gers_id", "target_id", "centroid_distance_m"]
-            ]
-            pytest.fail(
-                f"{len(bad)} match labels with centroid_distance > {threshold}m: {by_dataset}\n"
-                f"Worst offenders:\n{worst.to_string(index=False)}"
             )
 
     def test_match_labels_have_nonzero_overlap(self, match_features_df):

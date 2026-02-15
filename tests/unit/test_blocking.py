@@ -98,37 +98,6 @@ class TestGenerateCandidates:
         assert len(candidates) == 1
         assert candidates[0].heading_diff == 90.0  # 90° difference computed
 
-    def test_computes_length_ratio(self):
-        """Should compute length ratio as a feature (not filter)."""
-        reference = gpd.GeoDataFrame(
-            {
-                "id": ["ref_1"],
-                "geometry": [LineString([(0, 0), (100, 0)])],  # Length 100
-            },
-            crs="EPSG:32610",
-        )
-
-        # Target: much shorter line nearby
-        target = gpd.GeoDataFrame(
-            {
-                "local_id": ["target_1"],
-                "geometry": [LineString([(0, 10), (10, 10)])],  # Length 10
-            },
-            crs="EPSG:32610",
-        )
-
-        candidates = generate_candidates(
-            reference,
-            target,
-            buffer_distance_m=50.0,
-            ref_id_column="id",
-        )
-
-        # Length ratio is computed as a feature, not used as a filter
-        # The ML model uses this as a scoring feature
-        assert len(candidates) == 1
-        assert candidates[0].length_ratio == pytest.approx(0.1)  # 10/100 = 0.1
-
     def test_multiple_candidates_per_target(self):
         """Should generate multiple candidates when target matches multiple references."""
         # Two parallel reference lines

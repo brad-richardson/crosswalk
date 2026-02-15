@@ -26,9 +26,6 @@ REAL_LABELED_EXAMPLES = {
             "buffer_iou_15m": 0.9999,
             "overlap_ratio": 0.999,
             "heading_delta": 0.09,
-            "length_ratio": 0.999,
-            "projection_distance_m": 0.1,
-            "centroid_distance_m": 0.1,  # 0.1 meters
             "collinear_gap_ratio": 0.01,
             "name_levenshtein": 1.0,
             "name_jaro_winkler": 1.0,
@@ -96,9 +93,6 @@ REAL_LABELED_EXAMPLES = {
             "buffer_iou_15m": 0.4,
             "overlap_ratio": 0.3,
             "heading_delta": 20.0,
-            "length_ratio": 0.34,
-            "projection_distance_m": 40.0,
-            "centroid_distance_m": 15.0,  # 15 meters
             "collinear_gap_ratio": 0.6,
             "name_levenshtein": 0.0,
             "name_jaro_winkler": 0.0,
@@ -166,9 +160,6 @@ REAL_LABELED_EXAMPLES = {
             "buffer_iou_15m": 0.95,
             "overlap_ratio": 0.7,
             "heading_delta": 3.66,
-            "length_ratio": 0.74,
-            "projection_distance_m": 15.0,
-            "centroid_distance_m": 20.0,  # 20 meters
             "collinear_gap_ratio": 0.3,
             "name_levenshtein": 0.64,
             "name_jaro_winkler": 0.86,
@@ -237,9 +228,6 @@ REAL_LABELED_EXAMPLES = {
             "buffer_iou_15m": 0.998,
             "overlap_ratio": 0.9,
             "heading_delta": 0.64,
-            "length_ratio": 0.90,
-            "projection_distance_m": 5.0,
-            "centroid_distance_m": 3.0,  # 3 meters
             "collinear_gap_ratio": 0.1,
             "name_levenshtein": 0.0,  # Different names
             "name_jaro_winkler": 0.0,
@@ -375,7 +363,7 @@ class TestGoldenNonMatchPredictions:
             features["buffer_iou"] = 0.1
             features["heading_delta"] = 85.0
         elif feature_set == "no_overlap_far_apart":
-            features["centroid_distance_m"] = 1000.0  # 1km - very far apart
+            features["hausdorff_distance_m"] = 1000.0  # 1km - very far apart
         elif feature_set == "different_topology":
             features["buffer_iou"] = 0.6  # Moderate geometry
             features["name_levenshtein"] = 0.5  # Somewhat similar name
@@ -455,12 +443,10 @@ class TestScoreMonotonicity:
                 2.0,  # 2 meters (good) - lower is better for distance
                 {
                     "mean_hausdorff_distance_m": 150.0,
-                    "centroid_distance_m": 200.0,
                     "buffer_iou": 0.5,
                 },
                 {
                     "mean_hausdorff_distance_m": 1.5,
-                    "centroid_distance_m": 2.0,
                     "buffer_iou": 0.999,
                 },
             ),
@@ -611,7 +597,7 @@ class TestMissingFeatures:
         """Infinite feature values should be handled without crashing."""
         features = borderline_match_features.copy()
         features["hausdorff_distance_m"] = float("inf")
-        features["centroid_distance_m"] = float("inf")
+        features["mean_hausdorff_distance_m"] = float("inf")
 
         # Should not raise an exception
         confidence = trained_matcher.predict([features])[0]

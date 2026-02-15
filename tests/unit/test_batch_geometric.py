@@ -87,18 +87,6 @@ class TestBatchGeometricEquivalence:
                 single_results[i].heading_delta, abs=1e-6
             ), f"Heading delta mismatch for {name}"
 
-    def test_length_ratio(self, batch_results, single_results):
-        for i, (name, _, _) in enumerate(TEST_PAIRS):
-            assert batch_results.length_ratios[i] == pytest.approx(
-                single_results[i].length_ratio, abs=1e-6
-            ), f"Length ratio mismatch for {name}"
-
-    def test_centroid_distance(self, batch_results, single_results):
-        for i, (name, _, _) in enumerate(TEST_PAIRS):
-            assert batch_results.centroid_distances[i] == pytest.approx(
-                single_results[i].centroid_distance, abs=1e-6
-            ), f"Centroid distance mismatch for {name}"
-
     def test_overlap_ratio(self, batch_results, single_results):
         for i, (name, _, _) in enumerate(TEST_PAIRS):
             assert batch_results.overlap_ratios[i] == pytest.approx(
@@ -125,8 +113,6 @@ class TestBatchGeometricEdgeCases:
         assert result.buffer_iou_15m[0] == pytest.approx(1.0, abs=1e-6)
         assert result.buffer_iou_5m[0] == pytest.approx(1.0, abs=1e-6)
         assert result.heading_deltas[0] == pytest.approx(0.0, abs=1e-6)
-        assert result.length_ratios[0] == pytest.approx(1.0, abs=1e-6)
-        assert result.centroid_distances[0] == pytest.approx(0.0, abs=1e-6)
         assert result.overlap_ratios[0] == pytest.approx(1.0, abs=1e-6)
 
     def test_far_apart_lines_zero_iou(self):

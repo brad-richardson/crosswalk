@@ -147,17 +147,17 @@ FEATURE_VERSION = "2026-02-15"
 # Distance/length features use _m suffix to indicate meters
 #
 # GEOMETRY PROVENANCE (which geometry each feature is computed from):
-#   Aligned portion: hausdorff_*, buffer_iou_*, heading_delta, centroid_distance_m,
+#   Aligned portion: hausdorff_*, buffer_iou_*, heading_delta,
 #       lateral_offset_*, sinuosity_*, min_length_m, edge_distance_rmse_m,
 #       collinear_gap_ratio, angle_histogram_similarity, shape_complexity_*,
 #       heading_consistency_*, vertex_density_*, has_parallel_sibling_ref,
 #       parallel_fraction_ref, crossing_angle_*, transverse_neighbor_fraction_*
-#   Full geometry: length_ratio, aligned_length_m (full length * coverage fraction)
-#   Pre-computed on full: topology, graphlet, endpoint, coverage
-#   Context-dependent (aligned if graphlet_data available, else full): from_degree_*,
-#       to_degree_*, degree_match_score, degree_signature_similarity, is_dead_end_*,
-#       dead_end_match, is_intersection_*, intersection_match
+#   Full geometry: aligned_length_m (full length * coverage fraction)
+#   Alignment-aware (via connector snapping): endpoint proximity, graphlet, clustering
+#   Alignment-aware (via alignment fractions): topology (when graphlet_data available)
+#   Pre-computed on full (fallback): topology (when graphlet_data unavailable), coverage
 #   Semantic (no geometry): name_*, has_name_*, class_similarity, route_prefix_match
+#   Removed: see docs/RESEARCH_GRAVEYARD.md
 FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Geometric": [
         "hausdorff_distance_m",
@@ -166,8 +166,6 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "buffer_iou_5m",  # Tight alignment (exact centerline matches)
         "buffer_iou_15m",  # Offset alignment (sidewalks, bike lanes parallel to roads)
         "heading_delta",
-        "length_ratio",
-        "centroid_distance_m",
         "collinear_gap_ratio",
         "angle_histogram_similarity",  # Shape fingerprint via turn angle distribution
         "edge_distance_rmse_m",  # RMSE of sampled point distances (Hootenanny)
@@ -387,11 +385,7 @@ class MatcherSettings(BaseSettings):
         "Otherwise, uses geometry-only model if available.",
     )
 
-    # Training data validation
-    training_max_centroid_distance_m: float = Field(
-        default=500.0,
-        description="Max centroid distance for valid training pairs (meters)",
-    )
+    # Training data validation (centroid distance computed inline in _validate_training_pairs)
     training_max_hausdorff_m: float = Field(
         default=1000.0,
         description="Max Hausdorff distance for valid training pairs (meters)",
@@ -412,8 +406,7 @@ class MatcherSettings(BaseSettings):
             "mean_hausdorff_norm": 0.10,
             "buffer_iou": 0.30,
             "heading_norm": 0.10,
-            "length_ratio": 0.10,
-            "projection_norm": 0.10,
+            "projection_norm": 0.20,
             "name_similarity": 0.15,
             "class_similarity": 0.05,
         },
