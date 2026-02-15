@@ -203,8 +203,8 @@ class TestBackfillParity:
             "degree_signature": (2, 2),
         }
         cand = candidates[0]
-        worker_data["ref_topology"][cand.ref_idx] = stored_ref_topo
-        worker_data["target_topology"][cand.target_idx] = stored_target_topo
+        worker_data["ref_topology_full"][cand.ref_idx] = stored_ref_topo
+        worker_data["target_topology_full"][cand.target_idx] = stored_target_topo
 
         _init_worker(worker_data)
         work_items = [(cand.ref_idx, cand.target_idx)]

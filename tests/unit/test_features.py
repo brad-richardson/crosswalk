@@ -1188,8 +1188,8 @@ class TestComputePairFeaturesWithAlignment:
         )
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
@@ -1217,8 +1217,8 @@ class TestComputePairFeaturesWithAlignment:
         target = LineString([(0, 0), (100, 0)])
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class="residential",
             target_class="residential",
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -1243,8 +1243,8 @@ class TestComputePairFeaturesWithAlignment:
         alignment = linestring_alignment(ref, target)
 
         features_aligned = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1254,8 +1254,8 @@ class TestComputePairFeaturesWithAlignment:
         )
 
         features_unaligned = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -1287,8 +1287,8 @@ class TestComputePairFeaturesWithAlignment:
         )
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
@@ -1319,8 +1319,8 @@ class TestComputePairFeaturesWithAlignment:
         alignment = linestring_alignment(ref, target)
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1363,8 +1363,8 @@ class TestLengthRatioUsesFullGeometry:
         )
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1388,8 +1388,8 @@ class TestLengthRatioUsesFullGeometry:
         target = LineString([(0, 0), (200, 0)])  # 200m
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -1425,8 +1425,8 @@ class TestEndpointProximityInfCapping:
         }
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
@@ -1452,8 +1452,8 @@ class TestEndpointProximityInfCapping:
         }
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
@@ -2115,8 +2115,8 @@ class TestAlignedLengthM:
         target = LineString([(0, 2), (ref_length, 2)])
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=AlignmentResult(
@@ -2141,8 +2141,8 @@ class TestAlignedLengthM:
         target = LineString([(0, 5), (150, 5)])
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -2164,8 +2164,8 @@ class TestAlignedLengthM:
         target = LineString([(25, 12), (75, 12)])
 
         features = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=AlignmentResult(

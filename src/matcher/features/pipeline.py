@@ -178,17 +178,17 @@ def prepare_worker_data(
     )
 
     # Map topology from segment IDs to DataFrame indices
-    target_topology_features = {}
+    target_topology_full = {}
     for target_idx in unique_target_indices:
         seg_id = str(target_ids[target_idx])
-        target_topology_features[target_idx] = target_topology_by_id.get(
+        target_topology_full[target_idx] = target_topology_by_id.get(
             seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
         )
 
-    ref_topology_features = {}
+    ref_topology_full = {}
     for ref_idx in unique_ref_indices:
         seg_id = str(ref_ids[ref_idx])
-        ref_topology_features[ref_idx] = ref_topology_by_id.get(
+        ref_topology_full[ref_idx] = ref_topology_by_id.get(
             seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
         )
     logger.debug(f"[TIMING] topology_computation: {time.perf_counter() - t0:.2f}s")
@@ -269,8 +269,8 @@ def prepare_worker_data(
 
     # --- Step 10: Assemble worker_data ---
     worker_data = {
-        "ref_geoms": ref_geoms,
-        "target_geoms": target_geoms,
+        "ref_geoms_full": ref_geoms,
+        "target_geoms_full": target_geoms,
         "ref_names": ref_names,
         "target_names": target_names,
         "ref_classes": ref_classes,
@@ -286,12 +286,12 @@ def prepare_worker_data(
         "ref_ids": ref_ids,
         "target_ids": target_ids,
         "aligned_endpoint_features": aligned_endpoint_features,
-        "ref_topology": ref_topology_features,
-        "target_topology": target_topology_features,
+        "ref_topology_full": ref_topology_full,
+        "target_topology_full": target_topology_full,
         "ref_graphlet_data": ref_graphlet_data,
         "target_graphlet_data": target_graphlet_data,
-        "ref_sibling_context": ref_sibling_context,
-        "target_sibling_context": target_sibling_context,
+        "ref_sibling_context_full": ref_sibling_context,
+        "target_sibling_context_full": target_sibling_context,
         "alignments": alignments,
     }
 

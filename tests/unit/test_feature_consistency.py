@@ -190,10 +190,10 @@ class TestCallSiteContextConsistency:
         ref = LineString([(0, 0), (100, 0)])
         target = LineString([(0, 5), (100, 5)])
 
-        with pytest.raises(MissingContextError, match="ref_topology is required"):
+        with pytest.raises(MissingContextError, match="ref_topology_full is required"):
             compute_pair_features(
-                ref_geom=ref,
-                target_geom=target,
+                ref_geom_full=ref,
+                target_geom_full=target,
                 ref_class="residential",
                 target_class="residential",
                 endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -227,8 +227,8 @@ class TestCallSiteContextConsistency:
 
         # Should NOT raise - aligned path computes topology from graphlet data
         features = compute_pair_features(
-            ref_geom=gdf.geometry.iloc[0],
-            target_geom=gdf.geometry.iloc[1],
+            ref_geom_full=gdf.geometry.iloc[0],
+            target_geom_full=gdf.geometry.iloc[1],
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -268,8 +268,8 @@ class TestCallSiteContextConsistency:
 
         # Pass real topology to compute_pair_features
         features = compute_pair_features(
-            ref_geom=gdf.geometry.iloc[0],
-            target_geom=gdf.geometry.iloc[1],
+            ref_geom_full=gdf.geometry.iloc[0],
+            target_geom_full=gdf.geometry.iloc[1],
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,

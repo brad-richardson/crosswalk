@@ -134,8 +134,8 @@ class TestAlignmentIntegration:
 
         # Compute features with alignment
         features = compute_pair_features(
-            ref_geom=ref_geom,
-            target_geom=target_geom,
+            ref_geom_full=ref_geom,
+            target_geom_full=target_geom,
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
@@ -202,8 +202,8 @@ class TestAlignmentIntegration:
         }
 
         features_aligned = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -213,8 +213,8 @@ class TestAlignmentIntegration:
         )
 
         features_unaligned = compute_pair_features(
-            ref_geom=ref,
-            target_geom=target,
+            ref_geom_full=ref,
+            target_geom_full=target,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -248,8 +248,8 @@ class TestFeatureComputation:
         alignment = linestring_alignment(ref_geom, target_geom)
 
         features = compute_pair_features(
-            ref_geom=ref_geom,
-            target_geom=target_geom,
+            ref_geom_full=ref_geom,
+            target_geom_full=target_geom,
             ref_class="primary",
             target_class="primary",
             alignment=alignment,
@@ -284,8 +284,8 @@ class TestFeatureComputation:
         alignment = linestring_alignment(ref_geom, target_geom)
 
         features = compute_pair_features(
-            ref_geom=ref_geom,
-            target_geom=target_geom,
+            ref_geom_full=ref_geom,
+            target_geom_full=target_geom,
             ref_class="primary",
             target_class="primary",
             alignment=alignment,

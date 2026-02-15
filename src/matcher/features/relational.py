@@ -99,7 +99,9 @@ def build_sibling_search_context(
     """Build a SiblingSearchContext for parallel sibling detection.
 
     Args:
-        geometries: List of segment geometries (projected to meters)
+        geometries: List of full segment geometries (projected to meters).
+            Must be full/original geometries, not aligned sublines, since
+            the spatial index needs complete segments for sibling search.
         segment_ids: List of segment IDs
         names: List of segment names (may contain None, strings, dicts, or lists)
         classes: List of road classes (may contain None)

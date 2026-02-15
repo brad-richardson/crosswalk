@@ -245,6 +245,10 @@ def compute_geometric_features(
     single-pair callers. Non-batchable features (hausdorff stats, collinear
     gap) are computed per-pair after the batch call.
 
+    Note: Callers typically pass aligned geometries (from create_subline)
+    or full geometries when coverage >= 99.5%. See compute.py for the
+    selection logic (ref_geom_aligned / target_geom_aligned).
+
     Args:
         line_a: First geometry (LineString in projected CRS with meter units)
         line_b: Second geometry (LineString in projected CRS with meter units)
@@ -357,6 +361,10 @@ def compute_geometric_features_batch(
 
     This function performs all geometry operations that can be vectorized across
     arrays of LineStrings, avoiding per-pair Python dispatch overhead.
+
+    Note: Callers typically pass aligned geometries (from create_subline)
+    or full geometries when coverage >= 99.5%. See compute.py for the
+    selection logic (ref_geom_aligned / target_geom_aligned).
 
     Args:
         lines_a: Array of LineString geometries (N,), dtype=object

@@ -124,8 +124,8 @@ class TestPrepareWorkerData:
     @pytest.mark.parametrize(
         "key",
         [
-            "ref_geoms",
-            "target_geoms",
+            "ref_geoms_full",
+            "target_geoms_full",
             "ref_names",
             "target_names",
             "ref_classes",
@@ -141,12 +141,12 @@ class TestPrepareWorkerData:
             "ref_speed_limit_kph_lr",
             "target_speed_limit_kph_lr",
             "aligned_endpoint_features",
-            "ref_topology",
-            "target_topology",
+            "ref_topology_full",
+            "target_topology_full",
             "ref_graphlet_data",
             "target_graphlet_data",
-            "ref_sibling_context",
-            "target_sibling_context",
+            "ref_sibling_context_full",
+            "target_sibling_context_full",
             "alignments",
         ],
     )
@@ -158,8 +158,8 @@ class TestPrepareWorkerData:
     def test_geometry_array_lengths(self, simple_pair):
         ref, target, candidates = simple_pair
         wd = self._run(ref, target, candidates).worker_data
-        assert len(wd["ref_geoms"]) == len(ref)
-        assert len(wd["target_geoms"]) == len(target)
+        assert len(wd["ref_geoms_full"]) == len(ref)
+        assert len(wd["target_geoms_full"]) == len(target)
 
     def test_id_arrays(self, simple_pair):
         wd = self._run(*simple_pair).worker_data
@@ -192,10 +192,10 @@ class TestPrepareWorkerData:
         """Topology features should be keyed by DataFrame index."""
         result = self._run(*simple_pair)
         for idx in result.unique_ref_indices:
-            assert idx in result.worker_data["ref_topology"]
-            assert "from_degree" in result.worker_data["ref_topology"][idx]
+            assert idx in result.worker_data["ref_topology_full"]
+            assert "from_degree" in result.worker_data["ref_topology_full"][idx]
         for idx in result.unique_target_indices:
-            assert idx in result.worker_data["target_topology"]
+            assert idx in result.worker_data["target_topology_full"]
 
     def test_alignments_in_both_places(self, simple_pair):
         """alignments should appear in worker_data and as a top-level result."""
@@ -228,8 +228,8 @@ class TestPrepareWorkerDataParity:
 
     REQUIRED_KEYS = frozenset(
         {
-            "ref_geoms",
-            "target_geoms",
+            "ref_geoms_full",
+            "target_geoms_full",
             "ref_names",
             "target_names",
             "ref_classes",
@@ -245,12 +245,12 @@ class TestPrepareWorkerDataParity:
             "ref_ids",
             "target_ids",
             "aligned_endpoint_features",
-            "ref_topology",
-            "target_topology",
+            "ref_topology_full",
+            "target_topology_full",
             "ref_graphlet_data",
             "target_graphlet_data",
-            "ref_sibling_context",
-            "target_sibling_context",
+            "ref_sibling_context_full",
+            "target_sibling_context_full",
             "alignments",
         }
     )

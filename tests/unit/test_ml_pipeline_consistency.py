@@ -58,8 +58,8 @@ class TestPrecomputedFeaturePassthrough:
         precomputed = compute_endpoint_features(target_geom, spatial_index, exclude_segment_idx=0)
 
         features = compute_pair_features(
-            ref_geom=t_network.geometry.iloc[1],
-            target_geom=target_geom,
+            ref_geom_full=t_network.geometry.iloc[1],
+            target_geom_full=target_geom,
             ref_class=None,
             target_class=None,
             endpoint_features=precomputed,
@@ -87,8 +87,8 @@ class TestPrecomputedFeaturePassthrough:
         )
 
         features = compute_pair_features(
-            ref_geom=t_network.geometry.iloc[1],
-            target_geom=t_network.geometry.iloc[0],
+            ref_geom_full=t_network.geometry.iloc[1],
+            target_geom_full=t_network.geometry.iloc[0],
             ref_class=None,
             target_class=None,
             ref_topology=topology["main_e"],
@@ -117,8 +117,8 @@ class TestPrecomputedFeaturePassthrough:
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(
-            ref_geom=t_network.geometry.iloc[0],
-            target_geom=t_network.geometry.iloc[1],
+            ref_geom_full=t_network.geometry.iloc[0],
+            target_geom_full=t_network.geometry.iloc[1],
             ref_class=None,
             target_class=None,
             graphlet_features=graphlet_input,
@@ -286,8 +286,8 @@ class TestLabelStoreParity:
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(
-            ref_geom=LineString([(0, 0), (100, 0)]),
-            target_geom=LineString([(0, 5), (100, 5)]),
+            ref_geom_full=LineString([(0, 0), (100, 0)]),
+            target_geom_full=LineString([(0, 5), (100, 5)]),
             ref_class="residential",
             target_class="residential",
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
