@@ -12,6 +12,11 @@ fetch:
   id_prefix: hk_hongkong
   id_column: ROUTE_ID
   name_column: STREET_ENAME
+  name_columns:
+    en: STREET_ENAME
+    zh: STREET_CNAME
+    alias_en: ALIAS_ENAME
+    alias_zh: ALIAS_CNAME
   bbox:
   - 113.82
   - 22.15
@@ -37,8 +42,8 @@ last_fetch:
     - LineString
     output_path: data/raw
 quality_fingerprint:
-  computed_at: '2026-02-08T23:30:26.549038+00:00'
+  computed_at: '2026-02-15T13:44:49.397127+00:00'
   total_segments: 36107
-  name_coverage_ratio: 0.9549
+  name_coverage_ratio: 0.8374
   class_coverage_ratio: 0.0
 notes: GML format is automatically parsed during fetch.

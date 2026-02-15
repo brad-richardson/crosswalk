@@ -130,6 +130,7 @@ def backfill_lr_data(
             ref_road_flags_lr = ref_row.get("road_flags_lr")
             ref_oneway_lr = ref_row.get("oneway_lr")
             ref_speed_limit_kph_lr = ref_row.get("speed_limit_kph_lr")
+            ref_names_raw = ref_row.get("names")  # Full Overture names dict
         else:
             not_found += 1
             continue
@@ -141,6 +142,7 @@ def backfill_lr_data(
         target_road_flags_lr = None
         target_oneway_lr = None
         target_speed_limit_kph_lr = None
+        target_names_raw = None
 
         if target_by_id is not None and target_id in target_by_id.index:
             target_row = target_by_id.loc[target_id]
@@ -150,6 +152,7 @@ def backfill_lr_data(
             target_road_flags_lr = target_row.get("road_flags_lr")
             target_oneway_lr = target_row.get("oneway_lr")
             target_speed_limit_kph_lr = target_row.get("speed_limit_kph_lr")
+            target_names_raw = target_row.get("names")  # Full target names dict
 
         # Update the data store entry
         if not dry_run:
@@ -169,6 +172,16 @@ def backfill_lr_data(
                 ref_speed_limit_kph_lr=ref_speed_limit_kph_lr,
                 target_speed_limit_kph_lr=target_speed_limit_kph_lr,
             )
+            # Also persist raw names structs
+            ref_dict = ref_names_raw if isinstance(ref_names_raw, dict) else None
+            target_dict = target_names_raw if isinstance(target_names_raw, dict) else None
+            if ref_dict is not None or target_dict is not None:
+                store.update_names_raw(
+                    gers_id=gers_id,
+                    target_id=target_id,
+                    ref_names=ref_dict,
+                    target_names=target_dict,
+                )
             if success:
                 updated += 1
         else:

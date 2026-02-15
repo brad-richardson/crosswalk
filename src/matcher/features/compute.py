@@ -190,6 +190,7 @@ def _compute_non_geometric_features(
     ref_sibling_context: SiblingSearchContext | None = None,
     target_sibling_context: SiblingSearchContext | None = None,
     ref_names_raw=None,
+    target_names_raw=None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -227,6 +228,8 @@ def _compute_non_geometric_features(
         target_seg_id: Target segment ID
         geom_features: Pre-computed geometric features (batchable fields filled in)
         precomputed_lateral_offset: Optional pre-computed (mean, iqr, p95) from batch.
+        ref_names_raw: Raw Overture names dict for reference (all variants).
+        target_names_raw: Raw target names dict (all variants).
 
     Returns:
         Dictionary of non-geometric feature name -> value, plus per-pair geometric
@@ -244,14 +247,16 @@ def _compute_non_geometric_features(
         )
 
     # Semantic features
-    # When the raw Overture names dict is available and has multiple language variants,
-    # find the best-matching variant for the target name. This handles cross-script
+    # When raw names dicts are available with multiple language variants,
+    # find the best-matching variant pair. This handles cross-script
     # comparisons (e.g., Chinese primary name + English alt vs English target).
     with timed_section("name_variant_resolution"):
-        effective_ref_name = resolve_best_name_variant(ref_names_raw, ref_name, target_name)
+        effective_ref_name, effective_target_name = resolve_best_name_variant(
+            ref_names_raw, ref_name, target_name, target_names_raw
+        )
 
     with timed_section("name_similarity"):
-        name_sim = compute_name_similarity(effective_ref_name, target_name)
+        name_sim = compute_name_similarity(effective_ref_name, effective_target_name)
 
     with timed_section("class_similarity"):
         class_sim = compute_class_similarity(ref_class, target_class, ref_subclass, target_subclass)
@@ -312,11 +317,11 @@ def _compute_non_geometric_features(
 
     # Name numeric match
     with timed_section("name_numeric_match"):
-        name_numeric_match = compute_name_numeric_match(effective_ref_name, target_name)
+        name_numeric_match = compute_name_numeric_match(effective_ref_name, effective_target_name)
 
     # Route prefix match
     with timed_section("route_prefix_match"):
-        route_prefix_match = compute_route_prefix_match(effective_ref_name, target_name)
+        route_prefix_match = compute_route_prefix_match(effective_ref_name, effective_target_name)
 
     # Endpoint features
     with timed_section("endpoint_features_lookup"):
@@ -863,6 +868,7 @@ def compute_pair_features(
     ref_sibling_context: SiblingSearchContext | None = None,
     target_sibling_context: SiblingSearchContext | None = None,
     ref_names_raw=None,
+    target_names_raw=None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -893,6 +899,9 @@ def compute_pair_features(
         ref_names_raw: Raw Overture names dict with primary + common + rules.
             When provided, the best-matching name variant is selected before
             computing name similarity, improving scores for multilingual segments.
+        target_names_raw: Raw target names dict (Overture format).
+            When provided, bilateral variant resolution finds the best-matching
+            pair across all ref and target name variants.
 
     Returns:
         Dictionary of feature name -> value. Keys match FEATURE_COLUMNS from config.py.
@@ -1000,6 +1009,7 @@ def compute_pair_features(
             ref_sibling_context=ref_sibling_context,
             target_sibling_context=target_sibling_context,
             ref_names_raw=ref_names_raw,
+            target_names_raw=target_names_raw,
         )
 
         _current_phase = "merge_features"
@@ -1109,19 +1119,18 @@ def precompute_parallel_siblings(
     geometries = list(gdf.geometry)
     segment_ids = [str(sid) for sid in gdf[id_column]]
 
-    # Handle name column - may be nested dict, list, or string
+    # Handle name column - extract primary from names struct
     names: list[str | None] = []
-    for idx in range(len(gdf)):
-        name_val = gdf.iloc[idx].get(name_column) if name_column in gdf.columns else None
-        if name_val is None:
-            names.append(None)
-        elif isinstance(name_val, dict):
-            # Overture format: {"primary": "Main St", "common": [...]}
-            names.append(name_val.get("primary") or name_val.get("common", [None])[0])
-        elif isinstance(name_val, list) and len(name_val) > 0:
-            names.append(str(name_val[0]) if name_val[0] else None)
-        else:
-            names.append(str(name_val) if name_val else None)
+    if name_column in gdf.columns:
+        for name_val in gdf[name_column]:
+            if isinstance(name_val, dict):
+                names.append(name_val.get("primary"))
+            elif isinstance(name_val, str):
+                names.append(name_val)
+            else:
+                names.append(None)
+    else:
+        names = [None] * len(gdf)
 
     # Handle class column
     classes: list[str | None] = []

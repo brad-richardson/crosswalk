@@ -53,6 +53,82 @@ from .normalize import (
 DEFAULT_DATA_DIR = Path("data/raw")
 
 
+_SENTINEL_VALUES = {"-99", "", "\u2013\uff19\uff19"}
+
+
+def _is_valid_name(value) -> bool:
+    """Check if a name value is valid (not None, NaN, or sentinel)."""
+    if value is None:
+        return False
+    if isinstance(value, float) and pd.isna(value):
+        return False
+    s = str(value).strip()
+    return s not in _SENTINEL_VALUES
+
+
+def _build_multilingual_names(
+    gdf: gpd.GeoDataFrame,
+    name_columns: dict[str, str],
+    source_tags: list[dict],
+) -> list[dict | None]:
+    """Build Overture-compatible multilingual names structs from source columns.
+
+    Args:
+        gdf: Input GeoDataFrame
+        name_columns: Map of language code -> source column name.
+            Keys with 'alias_' prefix become alternate variant rules.
+        source_tags: List of source tag dicts (one per row)
+
+    Returns:
+        List of names dicts (Overture format) or None per row
+    """
+    results = []
+    # Separate primary/common columns from alias columns
+    primary_cols = {k: v for k, v in name_columns.items() if not k.startswith("alias_")}
+    alias_cols = {k: v for k, v in name_columns.items() if k.startswith("alias_")}
+
+    for tags in source_tags:
+        common = {}
+        rules = []
+
+        # Build common names from primary columns
+        for lang, col_name in primary_cols.items():
+            val = tags.get(col_name)
+            if _is_valid_name(val):
+                common[lang] = str(val).strip()
+
+        # Build alternate variant rules from alias columns
+        for key, col_name in alias_cols.items():
+            val = tags.get(col_name)
+            if _is_valid_name(val):
+                # Extract language from alias_XX key
+                lang = key.removeprefix("alias_")
+                rules.append(
+                    {
+                        "value": str(val).strip(),
+                        "variant": "alternate",
+                        "language": lang,
+                    }
+                )
+
+        if not common and not rules:
+            results.append(None)
+            continue
+
+        # Use first common value as primary
+        primary = next(iter(common.values()), None)
+
+        names_struct = {"primary": primary}
+        if common:
+            names_struct["common"] = common
+        if rules:
+            names_struct["rules"] = rules
+
+        results.append(names_struct)
+
+    return results
+
+
 def _transform_download_data(
     gdf: gpd.GeoDataFrame,
     fetch_config: FetchConfig,
@@ -178,7 +254,11 @@ def _transform_download_data(
     }
 
     # Names
-    if name_column and name_column in gdf.columns:
+    name_columns_config = fetch_config.name_columns
+    if name_columns_config:
+        # Build multilingual names struct from configured column mapping
+        data["names"] = _build_multilingual_names(gdf, name_columns_config, source_tags_data)
+    elif name_column and name_column in gdf.columns:
         data["names"] = (
             gdf[name_column]
             .apply(lambda x: {"primary": str(x)} if pd.notna(x) and x else None)

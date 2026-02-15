@@ -325,17 +325,32 @@ class TestNonLatinNameHandling:
     @pytest.mark.parametrize(
         "ref_names_raw,ref_name,target_name,expected",
         [
-            (None, "Main Street", "Main St", "Main Street"),
+            (None, "Main Street", "Main St", ("Main Street", "Main St")),
             (
                 {"primary": "Main St", "rules": [{"value": "Main St"}]},
                 "Main St",
                 None,
-                "Main St",
+                ("Main St", None),
             ),
-            ({"primary": "Main Street", "rules": []}, "Main Street", "Oak Ave", "Main Street"),
-            ({"primary": "Main Street"}, "Main Street", "Oak Ave", "Main Street"),
-            ({"primary": "Main St", "rules": "invalid"}, "Main St", "Oak Ave", "Main St"),
-            ({"primary": "皇后大道中", "rules": []}, "皇后大道中", "Queen's Road", "皇后大道中"),
+            (
+                {"primary": "Main Street", "rules": []},
+                "Main Street",
+                "Oak Ave",
+                ("Main Street", "Oak Ave"),
+            ),
+            ({"primary": "Main Street"}, "Main Street", "Oak Ave", ("Main Street", "Oak Ave")),
+            (
+                {"primary": "Main St", "rules": "invalid"},
+                "Main St",
+                "Oak Ave",
+                ("Main St", "Oak Ave"),
+            ),
+            (
+                {"primary": "皇后大道中", "rules": []},
+                "皇后大道中",
+                "Queen's Road",
+                ("皇后大道中", "Queen's Road"),
+            ),
             (
                 {
                     "primary": "皇后大道中",
@@ -345,7 +360,7 @@ class TestNonLatinNameHandling:
                 },
                 None,
                 "Queen's Road Central",
-                "Queen's Road Central",
+                ("Queen's Road Central", "Queen's Road Central"),
             ),
         ],
         ids=[
@@ -365,9 +380,9 @@ class TestNonLatinNameHandling:
     # -- resolve_best_name_variant: selection cases --
 
     @pytest.mark.parametrize(
-        "ref_names_raw,ref_name,target_name,expected",
+        "ref_names_raw,ref_name,target_name,expected_ref",
         [
-            # CJK primary + English alt → picks English
+            # CJK primary + English alt → picks English ref
             (
                 {
                     "primary": "皇后大道中",
@@ -435,11 +450,11 @@ class TestNonLatinNameHandling:
                 "Oak Avenue",
                 "Oak Avenue",
             ),
-            # Dict target_name
+            # Ref CJK with English variant, flat target string
             (
                 {"primary": "北京路", "rules": [{"value": "Beijing Road", "language": "en"}]},
                 "北京路",
-                {"primary": "Beijing Road"},
+                "Beijing Road",
                 "Beijing Road",
             ),
             # Malformed rules skipped, valid one picked
@@ -469,9 +484,10 @@ class TestNonLatinNameHandling:
             "malformed_rules_skipped",
         ],
     )
-    def test_resolve_variant_selects_best(self, ref_names_raw, ref_name, target_name, expected):
-        """Should select the closest-matching variant."""
-        assert resolve_best_name_variant(ref_names_raw, ref_name, target_name) == expected
+    def test_resolve_variant_selects_best(self, ref_names_raw, ref_name, target_name, expected_ref):
+        """Should select the closest-matching ref variant."""
+        result_ref, _result_target = resolve_best_name_variant(ref_names_raw, ref_name, target_name)
+        assert result_ref == expected_ref
 
 
 class TestExtractAllNameVariants:
@@ -537,6 +553,40 @@ class TestExtractAllNameVariants:
     )
     def test_common_dict_edge_cases(self, names_dict, expected):
         assert self.extract(names_dict) == expected
+
+    # -- common as Overture numpy array-of-arrays --
+
+    def test_common_numpy_array_format(self):
+        """Overture parquet stores common as numpy array of [lang, name] pairs."""
+        import numpy as np
+
+        variants = self.extract(
+            {
+                "primary": "海榮路 Hoi Wing Road",
+                "common": np.array(
+                    [
+                        np.array(["en", "Hoi Wing Road"], dtype=object),
+                        np.array(["zh", "海榮路"], dtype=object),
+                    ],
+                    dtype=object,
+                ),
+            }
+        )
+        assert "Hoi Wing Road" in variants
+        assert "海榮路" in variants
+        assert "海榮路 Hoi Wing Road" in variants
+        assert len(variants) == 3
+
+    def test_common_list_of_lists_format(self):
+        """After JSON round-trip, Overture common becomes list of lists."""
+        variants = self.extract(
+            {
+                "primary": "海榮路 Hoi Wing Road",
+                "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
+            }
+        )
+        assert "Hoi Wing Road" in variants
+        assert "海榮路" in variants
 
     # -- rules array --
 
@@ -668,7 +718,7 @@ class TestExtractAllNameVariants:
     # -- resolve_best_name_variant with common dict --
 
     @pytest.mark.parametrize(
-        "names,ref_name,target_name,expected",
+        "names,ref_name,target_name,expected_ref",
         [
             (
                 {"primary": "Le Léman", "common": {"en": "Lake Geneva", "de": "Genfersee"}},
@@ -685,8 +735,9 @@ class TestExtractAllNameVariants:
         ],
         ids=["french_to_english", "cyrillic_to_english"],
     )
-    def test_resolve_uses_common_dict(self, names, ref_name, target_name, expected):
-        assert resolve_best_name_variant(names, ref_name, target_name) == expected
+    def test_resolve_uses_common_dict(self, names, ref_name, target_name, expected_ref):
+        result_ref, _result_target = resolve_best_name_variant(names, ref_name, target_name)
+        assert result_ref == expected_ref
 
 
 class TestClassInfo:

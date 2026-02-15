@@ -40,6 +40,7 @@ class FetchConfig(BaseModel):
     id_prefix: str | None = None  # Prefix for generated IDs
     id_column: str | None = None  # Column to use as stable ID (required for data integrity)
     name_column: str | None = None  # Column containing road names
+    name_columns: dict[str, str] | None = None  # Language code -> source column mapping
     class_column: str | None = None  # Column for classification
     class_mapping: dict[str | int, str] | None = None  # Source value -> Overture class
     subclass_column: str | None = None  # Optional subclass column

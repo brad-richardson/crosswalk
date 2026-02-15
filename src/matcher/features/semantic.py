@@ -288,37 +288,29 @@ def _names_are_cross_script(name_a: str, name_b: str) -> bool:
 
 
 def _extract_name_string(name) -> str | None:
-    """Extract string from name, handling dict format.
+    """Validate that a name value is a plain string (or None).
 
-    Overture/OSM data often stores names as dicts like:
-    - {'primary': 'Main Street'}
-    - {'primary': 'Main St', 'common': None, 'rules': [...]}
+    After bilateral variant resolution, all inputs to similarity functions
+    must already be resolved to strings. A dict arriving here means a code
+    path skipped variant resolution — fail loudly so we fix it.
 
     Args:
-        name: String or dict containing name
+        name: String or None
 
     Returns:
-        Extracted name string or None
+        The name string or None
+
+    Raises:
+        TypeError: If name is a dict or other non-string type
     """
     if name is None:
         return None
     if isinstance(name, str):
         return name
-    if isinstance(name, dict):
-        # Try common keys in order of preference
-        for key in ["primary", "common", "name", "value"]:
-            if key in name and name[key]:
-                val = name[key]
-                # Handle nested extraction
-                if isinstance(val, str):
-                    return val
-                if isinstance(val, dict):
-                    return _extract_name_string(val)
-        # Last resort - return first non-None string value
-        for v in name.values():
-            if isinstance(v, str) and v:
-                return v
-    return None
+    raise TypeError(
+        f"Expected str or None after variant resolution, got {type(name).__name__}: "
+        f"{repr(name)[:200]}"
+    )
 
 
 def compute_name_similarity(
@@ -463,11 +455,16 @@ def _extract_all_name_variants(names_dict) -> list[str]:
     # 1. Primary name
     _add(names_dict.get("primary"))
 
-    # 2. Common names (dict of language code -> name)
+    # 2. Common names — dict format or Overture numpy array-of-arrays
     common = names_dict.get("common")
     if isinstance(common, dict):
         for lang_name in common.values():
             _add(lang_name)
+    elif hasattr(common, "__iter__") and common is not None:
+        # Overture format: numpy array of [lang_code, name] pairs
+        for item in common:
+            if hasattr(item, "__len__") and len(item) == 2:
+                _add(item[1])  # item[0] is lang code, item[1] is name
 
     # 3. Rules (array of NameRule dicts with value, variant, language, between, side)
     rules = names_dict.get("rules")
@@ -493,57 +490,108 @@ def resolve_best_name_variant(
     ref_names_raw,
     ref_name: str | None,
     target_name: str | None,
-) -> str | None:
-    """Find the best-matching reference name variant for the target name.
+    target_names_raw=None,
+) -> tuple[str | None, str | None]:
+    """Find the best-matching name variant pair across ref and target.
 
-    When Overture has multilingual names (e.g., Chinese primary + English alt),
-    the LR-resolved ref_name may be in a different script from the target name,
-    yielding ~0 similarity. This function tries ALL available name variants from
-    the Overture names dict and returns the highest-scoring one against the target.
+    Bilateral resolution: when both sides have multilingual names, finds the
+    (ref_variant, target_variant) pair with highest similarity. When only one
+    side has variants, resolves against the other side's flat name.
 
     Args:
         ref_names_raw: Raw Overture names dict with primary + rules, or None
         ref_name: Currently resolved reference name (may be None)
         target_name: Target segment name string (may be None)
+        target_names_raw: Raw target names dict (Overture format), or None
 
     Returns:
-        The best-matching name variant string, or ref_name if no variants available.
+        Tuple of (best_ref_name, best_target_name) — the best-matching pair.
     """
-    if not target_name or not ref_names_raw:
-        return ref_name
+    ref_variants = _extract_all_name_variants(ref_names_raw) if ref_names_raw else []
+    target_variants = _extract_all_name_variants(target_names_raw) if target_names_raw else []
 
-    # Extract target string from dict if needed
-    target_str = _extract_name_string(target_name)
-    if not target_str:
-        return ref_name
+    # Neither side has variants — return flat names unchanged
+    if not ref_variants and not target_variants:
+        return ref_name, target_name
 
-    # Extract all available name variants from the reference
-    variants = _extract_all_name_variants(ref_names_raw)
-    if not variants:
-        return ref_name
+    # Both sides have variants — find best (ref, target) pair
+    if ref_variants and target_variants:
+        best_score = -1.0
+        best_ref = ref_name
+        best_target = target_name
 
-    # Single variant: return it directly (may upgrade a None ref_name)
-    if len(variants) == 1:
-        return variants[0]
+        for rv in ref_variants:
+            norm_rv = _normalize_street_name(rv)
+            if not norm_rv:
+                continue
+            for tv in target_variants:
+                norm_tv = _normalize_street_name(tv)
+                if not norm_tv:
+                    continue
+                score = fuzz.ratio(norm_rv, norm_tv) / 100.0
+                if score > best_score:
+                    best_score = score
+                    best_ref = rv
+                    best_target = tv
+                    if score == 1.0:
+                        return best_ref, best_target
 
-    norm_target = _normalize_street_name(target_str)
-    if not norm_target:
-        return ref_name
+        return best_ref, best_target
+
+    # Only ref has variants — resolve against flat target name
+    if ref_variants and not target_variants:
+        target_str = _extract_name_string(target_name)
+        if not target_str:
+            return ref_name, target_name
+
+        if len(ref_variants) == 1:
+            return ref_variants[0], target_name
+
+        norm_target = _normalize_street_name(target_str)
+        if not norm_target:
+            return ref_name, target_name
+
+        best_score = -1.0
+        best_ref = ref_name
+        for rv in ref_variants:
+            norm_rv = _normalize_street_name(rv)
+            if not norm_rv:
+                continue
+            score = fuzz.ratio(norm_rv, norm_target) / 100.0
+            if score > best_score:
+                best_score = score
+                best_ref = rv
+                if score == 1.0:
+                    break
+
+        return best_ref, target_name
+
+    # Only target has variants — resolve against flat ref name
+    ref_str = _extract_name_string(ref_name)
+    if not ref_str:
+        return ref_name, target_name
+
+    if len(target_variants) == 1:
+        return ref_name, target_variants[0]
+
+    norm_ref = _normalize_street_name(ref_str)
+    if not norm_ref:
+        return ref_name, target_name
 
     best_score = -1.0
-    best_variant = ref_name
-    for variant in variants:
-        norm_variant = _normalize_street_name(variant)
-        if not norm_variant:
+    best_target = target_name
+    for tv in target_variants:
+        norm_tv = _normalize_street_name(tv)
+        if not norm_tv:
             continue
-        score = fuzz.ratio(norm_variant, norm_target) / 100.0
+        score = fuzz.ratio(norm_ref, norm_tv) / 100.0
         if score > best_score:
             best_score = score
-            best_variant = variant
+            best_target = tv
             if score == 1.0:
-                break  # Perfect match, no need to continue
+                break
 
-    return best_variant
+    return ref_name, best_target
 
 
 def _normalize_street_name(name: str) -> str:

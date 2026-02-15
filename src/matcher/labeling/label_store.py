@@ -331,6 +331,8 @@ class LabelStore:
         target_class_raw: str | None = None,
         ref_subclass: str | None = None,
         target_subclass: str | None = None,
+        ref_names: dict | None = None,
+        target_names: dict | None = None,
         ref_topology: dict | None = None,
         target_topology: dict | None = None,
     ) -> None:
@@ -428,6 +430,8 @@ class LabelStore:
                 target_class=target_class_raw,
                 ref_subclass=ref_subclass,
                 target_subclass=target_subclass,
+                ref_names=ref_names,
+                target_names=target_names,
                 ref_topology=ref_topology,
                 target_topology=target_topology,
             )

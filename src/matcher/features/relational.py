@@ -107,8 +107,6 @@ def build_sibling_search_context(
     Returns:
         SiblingSearchContext for use with find_parallel_sibling
     """
-    from .semantic import _extract_name_string
-
     n_segments = len(geometries)
     logger.info(f"Building sibling search context for {n_segments} segments...")
     t0 = time.perf_counter()
@@ -117,9 +115,9 @@ def build_sibling_search_context(
     t_tree = time.perf_counter() - t0
     logger.debug(f"[TIMING] STRtree construction: {t_tree:.2f}s ({n_segments} geometries)")
 
-    # Normalize names to plain strings using existing extraction logic
+    # Normalize names to plain strings — extract primary from any dicts
     t1 = time.perf_counter()
-    normalized_names = [_extract_name_string(n) for n in names]
+    normalized_names = [n.get("primary") if isinstance(n, dict) else n for n in names]
     t_names = time.perf_counter() - t1
     logger.debug(f"[TIMING] Name normalization: {t_names:.2f}s ({n_segments} names)")
 

@@ -230,6 +230,15 @@ def generate_agent_test_batch(
     from ..agent_labeling.context_generator import write_candidate_package
     from ..agent_labeling.sampler import SampledCandidate
 
+    def _get_primary_name(row) -> str | None:
+        """Extract primary name string from a GeoDataFrame row."""
+        if not hasattr(row, "get"):
+            return None
+        names = row.get("names")
+        if isinstance(names, dict):
+            return names.get("primary")
+        return names
+
     # Load human labels
     if not labels_dir.exists():
         console.print(f"[red]Error: Labels directory not found: {labels_dir}[/red]")
@@ -363,8 +372,8 @@ def generate_agent_test_batch(
             target_id=str(target_id),
             ref_geometry=ref_row.geometry,
             target_geometry=target_row.geometry,
-            ref_name=ref_row.get("names") if hasattr(ref_row, "get") else None,
-            target_name=target_row.get("names") if hasattr(target_row, "get") else None,
+            ref_name=_get_primary_name(ref_row),
+            target_name=_get_primary_name(target_row),
             ref_class=ref_row.get("class") if hasattr(ref_row, "get") else None,
             target_class=target_row.get("class") if hasattr(target_row, "get") else None,
             ml_confidence=row.get("original_confidence", 0.5),

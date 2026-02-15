@@ -13,9 +13,6 @@ import numpy as np
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..features.semantic import (
-    _extract_name_string,
-)
 from ..matching.types import MatchResult
 
 
@@ -224,9 +221,11 @@ def sample_candidates(
         ref_row = get_row(ref_lookup, result.ref_id)
         target_row = get_row(target_lookup, result.target_id)
 
-        ref_name = _extract_name_string(ref_row.get(ref_name_column)) if has_ref_name else None
+        ref_name_raw = ref_row.get(ref_name_column) if has_ref_name else None
+        ref_name = ref_name_raw.get("primary") if isinstance(ref_name_raw, dict) else ref_name_raw
+        target_name_raw = target_row.get(target_name_column) if has_target_name else None
         target_name = (
-            _extract_name_string(target_row.get(target_name_column)) if has_target_name else None
+            target_name_raw.get("primary") if isinstance(target_name_raw, dict) else target_name_raw
         )
         ref_class = ref_row.get(ref_class_column) if has_ref_class else None
         target_class = target_row.get(target_class_column) if has_target_class else None

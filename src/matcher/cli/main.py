@@ -1114,7 +1114,7 @@ def register_commands(app: typer.Typer) -> None:
                     stored_target_overrides[target_id] = pair_data["target_geometry"]
                     if target_lookup is None or target_id not in target_lookup.index:
                         stored_target_attrs[target_id] = {
-                            "names": pair_data.get("target_name"),
+                            "names": pair_data.get("target_names") or pair_data.get("target_name"),
                             "names_lr": pair_data.get("target_names_lr"),
                             "class": pair_data.get("target_class"),
                             "subclass": pair_data.get("target_subclass"),
@@ -1290,6 +1290,32 @@ def register_commands(app: typer.Typer) -> None:
                             ref_topology=ref_topo,
                             target_topology=target_topo,
                         )
+
+                # Backfill raw names structs into data store
+                if has_stored_data and pair_data is not None:
+                    ref_names_struct = (
+                        worker_data["ref_names"][candidates[i].ref_idx]
+                        if "ref_names" in worker_data
+                        else None
+                    )
+                    target_names_struct = (
+                        worker_data["target_names"][candidates[i].target_idx]
+                        if "target_names" in worker_data
+                        else None
+                    )
+                    if ref_names_struct is not None or target_names_struct is not None:
+                        # Only write dicts (not flat strings)
+                        ref_dict = ref_names_struct if isinstance(ref_names_struct, dict) else None
+                        target_dict = (
+                            target_names_struct if isinstance(target_names_struct, dict) else None
+                        )
+                        if ref_dict is not None or target_dict is not None:
+                            data_store.update_names_raw(
+                                gers_id,
+                                target_id,
+                                ref_names=ref_dict,
+                                target_names=target_dict,
+                            )
 
                 feature_store.add(gers_id=gers_id, target_id=target_id, features=result)
                 computed += 1

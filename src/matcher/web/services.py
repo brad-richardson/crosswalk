@@ -193,6 +193,8 @@ def record_label(
         target_class_raw=pair.target_class,
         ref_subclass=pair.ref_subclass,
         target_subclass=pair.target_subclass,
+        ref_names=pair.ref_names_raw,
+        target_names=pair.target_names_raw,
         ref_topology=pair.ref_topology,
         target_topology=pair.target_topology,
     )

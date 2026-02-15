@@ -25,6 +25,8 @@ DATA_COLUMNS = [
     "target_geometry",  # WKB geometry column
     "ref_name",
     "target_name",
+    "ref_names",  # Full names struct (all variants, all languages) - JSON-serialized
+    "target_names",  # Full names struct (all variants, all languages) - JSON-serialized
     "ref_class",
     "target_class",
     "ref_subclass",
@@ -273,6 +275,8 @@ class DataStore:
         target_oneway_lr: list | None = None,
         ref_speed_limit_kph_lr: list | None = None,
         target_speed_limit_kph_lr: list | None = None,
+        ref_names: dict | None = None,
+        target_names: dict | None = None,
         ref_topology: dict | None = None,
         target_topology: dict | None = None,
     ) -> None:
@@ -303,6 +307,8 @@ class DataStore:
             target_oneway_lr: Target linear-referenced one-way direction data
             ref_speed_limit_kph_lr: Reference linear-referenced speed limit (kph)
             target_speed_limit_kph_lr: Target linear-referenced speed limit (kph)
+            ref_names: Full reference names struct (all variants, all languages)
+            target_names: Full target names struct (all variants, all languages)
             ref_topology: Reference topology dict from compute_all_topology()
             target_topology: Target topology dict from compute_all_topology()
         """
@@ -313,6 +319,8 @@ class DataStore:
             "target_geometry": target_geometry,
             "ref_name": ref_name,
             "target_name": target_name,
+            "ref_names": _serialize_lr_data(ref_names),
+            "target_names": _serialize_lr_data(target_names),
             "ref_class": str(ref_class) if ref_class is not None else None,
             "target_class": str(target_class) if target_class is not None else None,
             "ref_subclass": str(ref_subclass) if ref_subclass is not None else None,
@@ -374,6 +382,8 @@ class DataStore:
             "target_geometry": row["target_geometry"],
             "ref_name": _str_or_none(row.get("ref_name")),
             "target_name": _str_or_none(row.get("target_name")),
+            "ref_names": _deserialize_lr_data(row.get("ref_names")),
+            "target_names": _deserialize_lr_data(row.get("target_names")),
             "ref_class": _str_or_none(row.get("ref_class")),
             "target_class": _str_or_none(row.get("target_class")),
             "ref_subclass": _str_or_none(row.get("ref_subclass")),
@@ -530,6 +540,36 @@ class DataStore:
             flat = _flatten_topology("target", target_topology)
             for col, val in flat.items():
                 self._gdf.at[idx, col] = val
+
+        return True
+
+    def update_names_raw(
+        self,
+        gers_id: str,
+        target_id: str,
+        ref_names: dict | None = None,
+        target_names: dict | None = None,
+    ) -> bool:
+        """Update raw names struct columns for an existing data record.
+
+        Used during backfill/migration to persist full names structs
+        so that variant resolution works from stored data.
+
+        Returns:
+            True if record was found and updated, False if not found
+        """
+        gdf = self.gdf
+        mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
+
+        if not mask.any():
+            return False
+
+        idx = gdf[mask].index[-1]
+
+        if ref_names is not None:
+            self._gdf.at[idx, "ref_names"] = _serialize_lr_data(ref_names)
+        if target_names is not None:
+            self._gdf.at[idx, "target_names"] = _serialize_lr_data(target_names)
 
         return True
 
