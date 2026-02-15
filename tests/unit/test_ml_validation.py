@@ -127,9 +127,7 @@ class TestValidateTrainingPairs:
         result = matcher._validate_training_pairs(df)
         assert len(result) == 1
         # With stricter thresholds, it fails
-        result = matcher._validate_training_pairs(
-            df, max_hausdorff_m=500.0
-        )
+        result = matcher._validate_training_pairs(df, max_hausdorff_m=500.0)
         assert len(result) == 0
 
     def test_boundary_values(self, matcher):
