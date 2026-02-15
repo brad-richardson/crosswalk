@@ -31,6 +31,22 @@ GENERIC_NAME_PATTERNS = [
 # Pre-compile patterns for efficiency
 _GENERIC_NAME_REGEX = re.compile("|".join(GENERIC_NAME_PATTERNS), re.IGNORECASE)
 
+
+def display_name(names_struct) -> str | None:
+    """Extract best display name from a names struct.
+
+    Prefers English from common names when available, falls back to primary.
+    """
+    if names_struct is None:
+        return None
+    if not isinstance(names_struct, dict):
+        return str(names_struct) if names_struct else None
+    common = names_struct.get("common")
+    if isinstance(common, dict) and "en" in common:
+        return common["en"]
+    return names_struct.get("primary")
+
+
 # Road class mapping to hierarchy levels
 # Expanded to include link roads, bike/pedestrian infrastructure
 # Lower numbers = higher hierarchy (motorways at top)

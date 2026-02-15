@@ -20,6 +20,7 @@ import pandas as pd
 from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..datasets.loader import DatasetLoader
 from ..datasets.schema import list_dataset_configs
+from ..features.semantic import display_name
 from ..filenames import (
     LABELING_CACHE_DIR,
     find_overture_segments,
@@ -187,8 +188,6 @@ def record_label(
         target_data_version=target_data_version,
         ref_geometry=pair.ref_geometry,
         target_geometry=pair.target_geometry,
-        ref_name_raw=pair.ref_name,
-        target_name_raw=pair.target_name,
         ref_class_raw=pair.ref_class,
         target_class_raw=pair.target_class,
         ref_subclass=pair.ref_subclass,
@@ -988,8 +987,8 @@ def _generate_batch_from_label_store(
                 target_id=target_id,
                 ref_geometry=data["ref_geometry"],
                 target_geometry=data["target_geometry"],
-                ref_name=data.get("ref_name"),
-                target_name=data.get("target_name"),
+                ref_name=display_name(data.get("ref_names")),
+                target_name=display_name(data.get("target_names")),
                 ref_class=data.get("ref_class"),
                 target_class=data.get("target_class"),
                 decision=decision,

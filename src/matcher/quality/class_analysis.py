@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from ..features.semantic import get_traffic_tier
+from ..features.semantic import display_name, get_traffic_tier
 from ..labeling.data_store import DataStore
 from ..labeling.label_store import DEFAULT_LABELS_DIR
 
@@ -197,8 +197,8 @@ def analyze_class_confusion_from_labels(
                 dataset_stats["tier_violations"] += 1
 
                 if len(report.tier_violations) < max_examples:
-                    ref_name = pair.get("ref_name") if pair else None
-                    target_name = pair.get("target_name") if pair else None
+                    ref_name = display_name(pair.get("ref_names")) if pair else None
+                    target_name = display_name(pair.get("target_names")) if pair else None
 
                     report.tier_violations.append(
                         {
@@ -221,8 +221,8 @@ def analyze_class_confusion_from_labels(
                 dataset_stats["low_similarity_matches"] += 1
 
                 if len(report.low_similarity_matches) < max_examples:
-                    ref_name = pair.get("ref_name") if pair else None
-                    target_name = pair.get("target_name") if pair else None
+                    ref_name = display_name(pair.get("ref_names")) if pair else None
+                    target_name = display_name(pair.get("target_names")) if pair else None
 
                     report.low_similarity_matches.append(
                         {
@@ -243,8 +243,8 @@ def analyze_class_confusion_from_labels(
                 dataset_stats["high_similarity_no_matches"] += 1
 
                 if len(report.high_similarity_no_matches) < max_examples:
-                    ref_name = pair.get("ref_name") if pair else None
-                    target_name = pair.get("target_name") if pair else None
+                    ref_name = display_name(pair.get("ref_names")) if pair else None
+                    target_name = display_name(pair.get("target_names")) if pair else None
 
                     report.high_similarity_no_matches.append(
                         {

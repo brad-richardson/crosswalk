@@ -325,8 +325,6 @@ class LabelStore:
         feature_version: str | None = None,
         ref_geometry: LineString | None = None,
         target_geometry: LineString | None = None,
-        ref_name_raw: str | None = None,
-        target_name_raw: str | None = None,
         ref_class_raw: str | None = None,
         target_class_raw: str | None = None,
         ref_subclass: str | None = None,
@@ -361,8 +359,6 @@ class LabelStore:
             feature_version: Feature computation version (defaults to FEATURE_VERSION)
             ref_geometry: Reference geometry (WGS84) for persistence in data store
             target_geometry: Target geometry (WGS84) for persistence in data store
-            ref_name_raw: Reference segment name for data store
-            target_name_raw: Target segment name for data store
             ref_class_raw: Reference road class for data store
             target_class_raw: Target road class for data store
             ref_subclass: Reference road subclass for data store
@@ -424,8 +420,6 @@ class LabelStore:
                 target_id=target_id,
                 ref_geometry=ref_geometry,
                 target_geometry=target_geometry,
-                ref_name=ref_name_raw,
-                target_name=target_name_raw,
                 ref_class=ref_class_raw,
                 target_class=target_class_raw,
                 ref_subclass=ref_subclass,

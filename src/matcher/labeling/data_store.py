@@ -23,8 +23,6 @@ DATA_COLUMNS = [
     "target_id",
     "ref_geometry",  # WKB geometry column
     "target_geometry",  # WKB geometry column
-    "ref_name",
-    "target_name",
     "ref_names",  # Full names struct (all variants, all languages) - JSON-serialized
     "target_names",  # Full names struct (all variants, all languages) - JSON-serialized
     "ref_class",
@@ -257,8 +255,6 @@ class DataStore:
         target_id: str,
         ref_geometry: LineString,
         target_geometry: LineString,
-        ref_name: str | None = None,
-        target_name: str | None = None,
         ref_class: str | None = None,
         target_class: str | None = None,
         ref_subclass: str | None = None,
@@ -289,8 +285,6 @@ class DataStore:
             target_id: Target segment ID
             ref_geometry: Reference geometry (WGS84 LineString)
             target_geometry: Target geometry (WGS84 LineString)
-            ref_name: Reference segment name
-            target_name: Target segment name
             ref_class: Reference road class
             target_class: Target road class
             ref_subclass: Reference road subclass
@@ -317,8 +311,6 @@ class DataStore:
             "target_id": str(target_id),
             "ref_geometry": ref_geometry,
             "target_geometry": target_geometry,
-            "ref_name": ref_name,
-            "target_name": target_name,
             "ref_names": _serialize_lr_data(ref_names),
             "target_names": _serialize_lr_data(target_names),
             "ref_class": str(ref_class) if ref_class is not None else None,
@@ -380,8 +372,6 @@ class DataStore:
             "target_id": row["target_id"],
             "ref_geometry": row["ref_geometry"],
             "target_geometry": row["target_geometry"],
-            "ref_name": _str_or_none(row.get("ref_name")),
-            "target_name": _str_or_none(row.get("target_name")),
             "ref_names": _deserialize_lr_data(row.get("ref_names")),
             "target_names": _deserialize_lr_data(row.get("target_names")),
             "ref_class": _str_or_none(row.get("ref_class")),

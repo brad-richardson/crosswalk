@@ -700,15 +700,11 @@ def generate_basemap_sweep(
                 val = geom_row["target_names"]
                 target_names_raw = json.loads(val) if isinstance(val, str) else val
 
-            # Extract flat names from structs or legacy columns
+            # Extract flat names from structs
             if isinstance(ref_names_raw, dict):
                 ref_name = ref_names_raw.get("primary")
-            elif "ref_name" in geom_row.index:
-                ref_name = geom_row["ref_name"]
             if isinstance(target_names_raw, dict):
                 target_name = target_names_raw.get("primary")
-            elif "target_name" in geom_row.index:
-                target_name = geom_row["target_name"]
 
             # Resolve best name variant pair
             ref_name, target_name = resolve_best_name_variant(

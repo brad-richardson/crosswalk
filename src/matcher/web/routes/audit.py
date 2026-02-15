@@ -16,11 +16,25 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from ...config import FEATURE_CATEGORIES, FEATURE_COLUMNS
+from ...features.semantic import display_name
 from ...labeling.data_store import DataStore
 from ...labeling.feature_store import FeatureStore
 from ...labeling.label_store import LabelStore
 
 logger = logging.getLogger(__name__)
+
+
+def _display_name_from_raw(raw) -> str | None:
+    """Derive display name from a raw names column value (JSON string or dict)."""
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    return display_name(raw)
+
 
 router = APIRouter(prefix="/audit")
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -70,8 +84,8 @@ def _load_audit_data(dataset: str) -> dict:
         for col in [
             "ref_geometry",
             "target_geometry",
-            "ref_name",
-            "target_name",
+            "ref_names",
+            "target_names",
             "ref_class",
             "target_class",
         ]:
@@ -93,8 +107,8 @@ def _load_audit_data(dataset: str) -> dict:
             "gers_id": str(row.get("gers_id", "")),
             "target_id": str(row.get("target_id", "")),
             "label": row.get("label", "unknown"),
-            "ref_name": row.get("ref_name") if pd.notna(row.get("ref_name")) else None,
-            "target_name": row.get("target_name") if pd.notna(row.get("target_name")) else None,
+            "ref_name": _display_name_from_raw(row.get("ref_names")),
+            "target_name": _display_name_from_raw(row.get("target_names")),
             "ref_class": row.get("ref_class") if pd.notna(row.get("ref_class")) else None,
             "target_class": row.get("target_class") if pd.notna(row.get("target_class")) else None,
             "features": {},
