@@ -169,8 +169,8 @@ def compute_features_simple(
     }
 
     return compute_pair_features(
-        ref_geom=ref_line,
-        target_geom=target_line,
+        ref_geom_full=ref_line,
+        target_geom_full=target_line,
         ref_class=ref_class,
         target_class=target_class,
         endpoint_features=endpoint_features,

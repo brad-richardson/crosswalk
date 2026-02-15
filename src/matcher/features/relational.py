@@ -79,7 +79,7 @@ class SiblingSearchContext:
     parallel siblings within a dataset. This is built once per dataset
     and reused for all pairs involving that dataset.
 
-    The search is performed per-pair on the aligned subline (not the full
+    The search is performed per-pair on the aligned portion (not the full
     geometry), allowing accurate sibling detection for partial alignments.
     """
 
@@ -99,7 +99,9 @@ def build_sibling_search_context(
     """Build a SiblingSearchContext for parallel sibling detection.
 
     Args:
-        geometries: List of segment geometries (projected to meters)
+        geometries: List of full segment geometries (projected to meters).
+            Must be full/original geometries, not aligned portions, since
+            the spatial index needs complete segments for sibling search.
         segment_ids: List of segment IDs
         names: List of segment names (may contain None, strings, dicts, or lists)
         classes: List of road classes (may contain None)

@@ -84,7 +84,7 @@ def _build_aligned_geometries(
     target_end_frac: float,
     proj_to_wgs84,
 ):
-    """Create aligned subline geometries and transform back to WGS84.
+    """Create aligned portion geometries and transform back to WGS84.
 
     Args:
         ref_proj_geom: Reference geometry in projected CRS

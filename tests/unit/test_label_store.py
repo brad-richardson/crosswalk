@@ -27,8 +27,8 @@ class TestFeatureParity:
         target_geom = LineString([(0, 5), (100, 5)])
 
         features = compute_pair_features(
-            ref_geom=ref_geom,
-            target_geom=target_geom,
+            ref_geom_full=ref_geom,
+            target_geom_full=target_geom,
             ref_class="residential",
             target_class="residential",
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),

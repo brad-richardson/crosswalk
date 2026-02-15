@@ -166,17 +166,17 @@ ALL_FEATURE_COLUMNS = FEATURE_COLUMNS
 
 
 def _compute_non_geometric_features(
-    geom_sim_ref,
-    geom_sim_target,
-    coords_ref: "np.ndarray",
-    coords_target: "np.ndarray",
+    ref_geom_aligned,
+    target_geom_aligned,
+    coords_aligned_ref: "np.ndarray",
+    coords_aligned_target: "np.ndarray",
     ref_class: str | None,
     target_class: str | None,
     ref_subclass: str | None,
     target_subclass: str | None,
     endpoint_features: dict[str, float],
-    ref_topology: dict | None,
-    target_topology: dict | None,
+    ref_topology_full: dict | None,
+    target_topology_full: dict | None,
     alignment: AlignmentResult | None,
     graphlet_features: dict[str, float] | None,
     ref_graphlet_data: tuple | None,
@@ -185,8 +185,8 @@ def _compute_non_geometric_features(
     target_seg_id: str | None,
     geom_features: GeometricFeatures,
     precomputed_lateral_offset: tuple[float, float, float] | None = None,
-    ref_sibling_context: SiblingSearchContext | None = None,
-    target_sibling_context: SiblingSearchContext | None = None,
+    ref_sibling_context_full: SiblingSearchContext | None = None,
+    target_sibling_context_full: SiblingSearchContext | None = None,
     ref_names_raw=None,
     target_names_raw=None,
 ) -> dict[str, float]:
@@ -205,17 +205,19 @@ def _compute_non_geometric_features(
     - Min length
 
     Args:
-        geom_sim_ref: Reference geometry for similarity (may be subline)
-        geom_sim_target: Target geometry for similarity (may be subline)
-        coords_ref: Pre-extracted coordinates for geom_sim_ref
-        coords_target: Pre-extracted coordinates for geom_sim_target
+        ref_geom_aligned: Reference geometry for similarity (aligned portion,
+            or full geometry when coverage >= 99.5%)
+        target_geom_aligned: Target geometry for similarity (aligned portion,
+            or full geometry when coverage >= 99.5%)
+        coords_aligned_ref: Pre-extracted coordinates for ref_geom_aligned
+        coords_aligned_target: Pre-extracted coordinates for target_geom_aligned
         ref_class: Reference road class
         target_class: Target road class
         ref_subclass: Reference road subclass
         target_subclass: Target road subclass
         endpoint_features: Pre-computed endpoint proximity features
-        ref_topology: Topology features for reference
-        target_topology: Topology features for target
+        ref_topology_full: Topology features for reference (full segment)
+        target_topology_full: Topology features for target (full segment)
         alignment: Alignment result
         graphlet_features: Pre-computed graphlet similarity features
         ref_graphlet_data: Graphlet data for reference
@@ -224,6 +226,10 @@ def _compute_non_geometric_features(
         target_seg_id: Target segment ID
         geom_features: Pre-computed geometric features (batchable fields filled in)
         precomputed_lateral_offset: Optional pre-computed (mean, iqr, p95) from batch.
+        ref_sibling_context_full: Sibling search context for reference (built from
+            full geometries of all segments, not just candidates)
+        target_sibling_context_full: Sibling search context for target (built from
+            full geometries of all segments, not just candidates)
         ref_names_raw: Raw Overture names dict for reference (all variants).
         target_names_raw: Raw target names dict (all variants).
 
@@ -234,12 +240,18 @@ def _compute_non_geometric_features(
     # Per-pair geometric features that can't be batched
     with timed_section("geom_hausdorff_stats"):
         mean_hausdorff, p95_hausdorff = _compute_hausdorff_stats(
-            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+            ref_geom_aligned,
+            target_geom_aligned,
+            coords_a=coords_aligned_ref,
+            coords_b=coords_aligned_target,
         )
 
     with timed_section("geom_collinear_gap"):
         collinear_gap_ratio = compute_collinear_gap_ratio(
-            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+            ref_geom_aligned,
+            target_geom_aligned,
+            coords_a=coords_aligned_ref,
+            coords_b=coords_aligned_target,
         )
 
     # Semantic features
@@ -263,25 +275,27 @@ def _compute_non_geometric_features(
             lateral_offset, lateral_iqr, lateral_p95 = precomputed_lateral_offset
         else:
             lateral_offset, lateral_iqr, lateral_p95 = compute_perpendicular_offset(
-                geom_sim_target, geom_sim_ref
+                target_geom_aligned, ref_geom_aligned
             )
 
     # Sinuosity
     with timed_section("sinuosity"):
-        sinuosity_ref = compute_sinuosity(geom_sim_ref, coords=coords_ref)
-        sinuosity_target = compute_sinuosity(geom_sim_target, coords=coords_target)
+        sinuosity_ref = compute_sinuosity(ref_geom_aligned, coords=coords_aligned_ref)
+        sinuosity_target = compute_sinuosity(target_geom_aligned, coords=coords_aligned_target)
         sinuosity_delta = abs(sinuosity_ref - sinuosity_target)
 
     # Heading consistency
     with timed_section("heading_consistency"):
-        heading_consistency_ref = compute_heading_consistency(geom_sim_ref)
-        heading_consistency_target = compute_heading_consistency(geom_sim_target)
+        heading_consistency_ref = compute_heading_consistency(ref_geom_aligned)
+        heading_consistency_target = compute_heading_consistency(target_geom_aligned)
         heading_consistency_delta = abs(heading_consistency_ref - heading_consistency_target)
 
     # Vertex density
     with timed_section("vertex_density"):
-        vertex_density_ref = compute_vertex_density(geom_sim_ref, coords=coords_ref)
-        vertex_density_target = compute_vertex_density(geom_sim_target, coords=coords_target)
+        vertex_density_ref = compute_vertex_density(ref_geom_aligned, coords=coords_aligned_ref)
+        vertex_density_target = compute_vertex_density(
+            target_geom_aligned, coords=coords_aligned_target
+        )
         if vertex_density_ref > 0 and vertex_density_target > 0:
             vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
                 vertex_density_ref, vertex_density_target
@@ -289,27 +303,32 @@ def _compute_non_geometric_features(
         else:
             vertex_density_ratio = 0.0
 
-    # Min length
+    # Min length (of aligned geometries)
     with timed_section("length_computation"):
-        ref_length = geom_sim_ref.length
-        target_length = geom_sim_target.length
-        min_length_m = min(ref_length, target_length)
+        ref_length_aligned = ref_geom_aligned.length
+        target_length_aligned = target_geom_aligned.length
+        min_length_m = min(ref_length_aligned, target_length_aligned)
 
     # Shape complexity
     with timed_section("shape_complexity"):
-        shape_complexity_ref = compute_shape_complexity(geom_sim_ref, coords=coords_ref)
-        shape_complexity_target = compute_shape_complexity(geom_sim_target, coords=coords_target)
+        shape_complexity_ref = compute_shape_complexity(ref_geom_aligned, coords=coords_aligned_ref)
+        shape_complexity_target = compute_shape_complexity(
+            target_geom_aligned, coords=coords_aligned_target
+        )
         shape_complexity_delta = abs(shape_complexity_ref - shape_complexity_target)
 
     # Angle histogram similarity (shape fingerprint)
     with timed_section("angle_histogram"):
         angle_histogram_similarity = compute_angle_histogram_similarity(
-            geom_sim_ref, geom_sim_target, coords_a=coords_ref, coords_b=coords_target
+            ref_geom_aligned,
+            target_geom_aligned,
+            coords_a=coords_aligned_ref,
+            coords_b=coords_aligned_target,
         )
 
     # Edge distance RMSE (Hootenanny's primary metric)
     with timed_section("edge_distance_rmse"):
-        edge_distance_rmse_m = compute_edge_distance_rmse(geom_sim_ref, geom_sim_target)
+        edge_distance_rmse_m = compute_edge_distance_rmse(ref_geom_aligned, target_geom_aligned)
 
     # Name numeric match
     with timed_section("name_numeric_match"):
@@ -323,10 +342,12 @@ def _compute_non_geometric_features(
     with timed_section("endpoint_features_lookup"):
         if endpoint_features is None:
             raise ValueError(
-                "endpoint_features is required - must be computed on aligned subline endpoints"
+                "endpoint_features is required - must be computed on aligned portion endpoints"
             )
 
     # Topology features
+    # Effective topology (ref_topo/target_topo) may be aligned or full depending
+    # on whether graphlet_data + alignment + seg_ids are all available.
     with timed_section("aligned_topology"):
         use_aligned_topology = (
             alignment is not None
@@ -361,24 +382,26 @@ def _compute_non_geometric_features(
             to_degree_ref = ref_aligned_topo["to_degree"]
             from_degree_target = target_aligned_topo["from_degree"]
             to_degree_target = target_aligned_topo["to_degree"]
-            ref_topology = ref_aligned_topo
-            target_topology = target_aligned_topo
+            ref_topo = ref_aligned_topo
+            target_topo = target_aligned_topo
         else:
-            if ref_topology is None:
+            if ref_topology_full is None:
                 raise MissingContextError(
                     "ref_topology is required when aligned topology path is not active. "
                     "Call compute_all_topology() and pass the result."
                 )
-            if target_topology is None:
+            if target_topology_full is None:
                 raise MissingContextError(
                     "target_topology is required when aligned topology path is not active. "
                     "Call compute_all_topology() and pass the result."
                 )
 
-            from_degree_ref = ref_topology.get("from_degree", float("nan"))
-            to_degree_ref = ref_topology.get("to_degree", float("nan"))
-            from_degree_target = target_topology.get("from_degree", float("nan"))
-            to_degree_target = target_topology.get("to_degree", float("nan"))
+            from_degree_ref = ref_topology_full.get("from_degree", float("nan"))
+            to_degree_ref = ref_topology_full.get("to_degree", float("nan"))
+            from_degree_target = target_topology_full.get("from_degree", float("nan"))
+            to_degree_target = target_topology_full.get("to_degree", float("nan"))
+            ref_topo = ref_topology_full
+            target_topo = target_topology_full
 
     # NaN-propagation guard: if any degree value is NaN, all derived topology
     # features must be NaN too. This avoids truthy/falsy issues with NaN in
@@ -406,18 +429,18 @@ def _compute_non_geometric_features(
 
         # Degree signature similarity
         with timed_section("degree_signature"):
-            ref_sig = ref_topology.get("degree_signature", (1,))
-            target_sig = target_topology.get("degree_signature", (1,))
+            ref_sig = ref_topo.get("degree_signature", (1,))
+            target_sig = target_topo.get("degree_signature", (1,))
             sig_similarity = compute_degree_signature_similarity(ref_sig, target_sig)
 
         # Topology flags
         with timed_section("topology_flags"):
-            is_dead_end_ref = 1.0 if ref_topology.get("is_dead_end", True) else 0.0
-            is_dead_end_target = 1.0 if target_topology.get("is_dead_end", True) else 0.0
+            is_dead_end_ref = 1.0 if ref_topo.get("is_dead_end", True) else 0.0
+            is_dead_end_target = 1.0 if target_topo.get("is_dead_end", True) else 0.0
             dead_end_match = 1.0 if is_dead_end_ref == is_dead_end_target else 0.0
 
-            is_intersection_ref = 1.0 if ref_topology.get("is_intersection", False) else 0.0
-            is_intersection_target = 1.0 if target_topology.get("is_intersection", False) else 0.0
+            is_intersection_ref = 1.0 if ref_topo.get("is_intersection", False) else 0.0
+            is_intersection_target = 1.0 if target_topo.get("is_intersection", False) else 0.0
             intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
     # Coverage features
@@ -425,39 +448,39 @@ def _compute_non_geometric_features(
         coverage_feats = compute_coverage_features(alignment)
 
     # Parallel sibling features (detect split vs centerline representation)
-    # Computed per-pair on the aligned sublines for accuracy with partial alignments
+    # Computed per-pair on aligned portions for accuracy with partial alignments
     with timed_section("sibling_features"):
-        # Compute sibling detection on sublines (not precomputed full geometries)
-        if ref_sibling_context is not None and ref_seg_id is not None:
+        # Compute sibling detection on aligned portions (not precomputed full geometries)
+        if ref_sibling_context_full is not None and ref_seg_id is not None:
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = find_parallel_sibling(
-                segment=geom_sim_ref,  # Use subline, not full geometry
+                segment=ref_geom_aligned,  # Use aligned portion, not full geometry
                 segment_id=ref_seg_id,
                 segment_name=effective_ref_name,
                 segment_class=ref_class,
-                spatial_index=ref_sibling_context.spatial_index,
-                segment_data=ref_sibling_context.segment_data,
+                spatial_index=ref_sibling_context_full.spatial_index,
+                segment_data=ref_sibling_context_full.segment_data,
             )
         else:
-            if ref_sibling_context is None:
-                logger.warning("ref_sibling_context is None - sibling detection disabled")
+            if ref_sibling_context_full is None:
+                logger.warning("ref_sibling_context_full is None - sibling detection disabled")
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = (
                 False,
                 MAX_DISTANCE_METERS,
                 0.0,
             )
 
-        if target_sibling_context is not None and target_seg_id is not None:
+        if target_sibling_context_full is not None and target_seg_id is not None:
             has_sibling_target, sibling_dist_target, _ = find_parallel_sibling(
-                segment=geom_sim_target,  # Use subline, not full geometry
+                segment=target_geom_aligned,  # Use aligned portion, not full geometry
                 segment_id=target_seg_id,
                 segment_name=effective_target_name,
                 segment_class=target_class,
-                spatial_index=target_sibling_context.spatial_index,
-                segment_data=target_sibling_context.segment_data,
+                spatial_index=target_sibling_context_full.spatial_index,
+                segment_data=target_sibling_context_full.segment_data,
             )
         else:
-            if target_sibling_context is None:
-                logger.warning("target_sibling_context is None - sibling detection disabled")
+            if target_sibling_context_full is None:
+                logger.warning("target_sibling_context_full is None - sibling detection disabled")
             has_sibling_target, sibling_dist_target = False, MAX_DISTANCE_METERS
 
         # Core sibling detection
@@ -531,16 +554,16 @@ def _compute_non_geometric_features(
     # for cross-tier detection.
     with timed_section("crossing_angle"):
         crossing_ref = _compute_crossing_angle(
-            geom_sim_ref,
+            ref_geom_aligned,
             ref_class,
             ref_seg_id,
-            ref_sibling_context,
+            ref_sibling_context_full,
         )
         crossing_target = _compute_crossing_angle(
-            geom_sim_target,
+            target_geom_aligned,
             target_class,
             None,  # target not in ref spatial index, no self-exclusion needed
-            ref_sibling_context,
+            ref_sibling_context_full,
         )
 
     # Log timing summary periodically
@@ -710,8 +733,8 @@ def _compute_crossing_angle(
 
 
 def _compute_intersection_overlap_features(
-    ref_geom,
-    target_geom,
+    ref_geom_full,
+    target_geom_full,
     alignment: AlignmentResult | None,
 ) -> dict[str, float]:
     """Compute intersection overlap features for a candidate pair.
@@ -722,8 +745,8 @@ def _compute_intersection_overlap_features(
     2. Max heading divergence at alignment boundaries
 
     Args:
-        ref_geom: Reference geometry (LineString, projected CRS)
-        target_geom: Target geometry (LineString, projected CRS)
+        ref_geom_full: Reference full geometry (LineString, projected CRS)
+        target_geom_full: Target full geometry (LineString, projected CRS)
         alignment: Alignment result (None → defaults)
 
     Returns:
@@ -749,10 +772,10 @@ def _compute_intersection_overlap_features(
     target_end = alignment.dataset_end_frac
 
     # Pre-compute coordinate arrays and per-segment lengths
-    ref_coords = np.array(ref_geom.coords)
-    target_coords = np.array(target_geom.coords)
-    ref_length = ref_geom.length
-    target_length = target_geom.length
+    ref_coords = np.array(ref_geom_full.coords)
+    target_coords = np.array(target_geom_full.coords)
+    ref_length_full = ref_geom_full.length
+    target_length_full = target_geom_full.length
 
     def _seg_lengths(coords):
         """Compute per-segment lengths from coordinate array."""
@@ -781,13 +804,13 @@ def _compute_intersection_overlap_features(
         if has_start_remainder:
             # Ref heading at the start boundary
             ref_heading_start = compute_heading_at_fraction_numba(
-                ref_coords, ref_seg_lens, ref_length, ref_start
+                ref_coords, ref_seg_lens, ref_length_full, ref_start
             )
             rad = np.radians(ref_heading_start)
             hdx, hdy = np.cos(rad), np.sin(rad)
 
             # Target remainder: from 0 to target_start (reversed — walk away from boundary)
-            remainder_sub = create_subline(target_geom, 0.0, target_start)
+            remainder_sub = create_subline(target_geom_full, 0.0, target_start)
             if remainder_sub is not None and remainder_sub.length > 0.5:
                 rem_coords = np.array(remainder_sub.coords)
                 # Reverse so we walk FROM boundary outward
@@ -798,13 +821,13 @@ def _compute_intersection_overlap_features(
         if has_end_remainder:
             # Ref heading at the end boundary
             ref_heading_end = compute_heading_at_fraction_numba(
-                ref_coords, ref_seg_lens, ref_length, ref_end
+                ref_coords, ref_seg_lens, ref_length_full, ref_end
             )
             rad = np.radians(ref_heading_end)
             hdx, hdy = np.cos(rad), np.sin(rad)
 
             # Target remainder: from target_end to 1.0
-            remainder_sub = create_subline(target_geom, target_end, 1.0)
+            remainder_sub = create_subline(target_geom_full, target_end, 1.0)
             if remainder_sub is not None and remainder_sub.length > 0.5:
                 rem_coords = np.array(remainder_sub.coords)
                 cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy)
@@ -820,18 +843,18 @@ def _compute_intersection_overlap_features(
     divergence_values = []
 
     ref_heading_at_start = compute_heading_at_fraction_numba(
-        ref_coords, ref_seg_lens, ref_length, ref_start
+        ref_coords, ref_seg_lens, ref_length_full, ref_start
     )
     target_heading_at_start = compute_heading_at_fraction_numba(
-        target_coords, target_seg_lens, target_length, target_start
+        target_coords, target_seg_lens, target_length_full, target_start
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_start, target_heading_at_start))
 
     ref_heading_at_end = compute_heading_at_fraction_numba(
-        ref_coords, ref_seg_lens, ref_length, ref_end
+        ref_coords, ref_seg_lens, ref_length_full, ref_end
     )
     target_heading_at_end = compute_heading_at_fraction_numba(
-        target_coords, target_seg_lens, target_length, target_end
+        target_coords, target_seg_lens, target_length_full, target_end
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_end, target_heading_at_end))
 
@@ -873,8 +896,8 @@ def assemble_feature_dict(
 
 
 def compute_pair_features(
-    ref_geom,
-    target_geom,
+    ref_geom_full,
+    target_geom_full,
     ref_class: str | None,
     target_class: str | None,
     ref_subclass: str | None = None,
@@ -900,8 +923,8 @@ def compute_pair_features(
     consistency between training and inference.
 
     Args:
-        ref_geom: Reference geometry (LineString)
-        target_geom: Target geometry (LineString)
+        ref_geom_full: Reference full geometry (LineString)
+        target_geom_full: Target full geometry (LineString)
         ref_class: Reference road class
         target_class: Target road class
         ref_subclass: Reference road subclass (optional)
@@ -911,12 +934,16 @@ def compute_pair_features(
             aligned topology path is active via graphlet_data + alignment + seg_ids)
         target_topology: Pre-computed topology features for target (required unless
             aligned topology path is active via graphlet_data + alignment + seg_ids)
-        alignment: Pre-computed alignment result for using aligned sublines (optional)
+        alignment: Pre-computed alignment result for extracting aligned portions (optional)
         graphlet_features: Pre-computed graphlet similarity features (optional)
         ref_graphlet_data: Graphlet data for reference (G, seg_to_connectors, node_features, use_connectors)
         target_graphlet_data: Graphlet data for target (G, seg_to_connectors, node_features, use_connectors)
         ref_seg_id: Reference segment ID (required for aligned topology when using graphlet_data)
         target_seg_id: Target segment ID (required for aligned topology when using graphlet_data)
+        ref_sibling_context: Sibling search context for reference (built from
+            full geometries of all segments)
+        target_sibling_context: Sibling search context for target (built from
+            full geometries of all segments)
         ref_names_raw: Raw Overture names dict with primary + common + rules.
             When provided, the best-matching name variant is selected before
             computing name similarity, improving scores for multilingual segments.
@@ -930,12 +957,12 @@ def compute_pair_features(
     _current_phase = "init"
     try:
         # Determine geometries for similarity features
-        # If alignment is provided, extract sublines for computing similarity features
+        # If alignment is provided, extract aligned portions for computing similarity features
         # (hausdorff, buffer_iou, etc.) on comparable portions only.
         # Topology/endpoint features still use full geometries.
         #
-        # Optimization: Skip subline extraction when coverage is >99.5%.
-        # When alignment covers nearly the full geometry, extracting a subline
+        # Optimization: Skip aligned portion extraction when coverage is >99.5%.
+        # When alignment covers nearly the full geometry, extracting a portion
         # just creates a nearly-identical geometry with unnecessary overhead.
         # Note: This threshold must be very high (>99%) to avoid conflicting
         # with divergence detection (PR #81) which trims alignment at 95-99%
@@ -950,42 +977,43 @@ def compute_pair_features(
                 ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
                 target_coverage = alignment.dataset_end_frac - alignment.dataset_start_frac
 
-                # Only extract subline if coverage is below threshold
+                # Only extract aligned portion if coverage is below threshold
                 if ref_coverage >= HIGH_COVERAGE_THRESHOLD:
-                    geom_for_similarity_ref = ref_geom  # Use original (cacheable)
+                    ref_geom_aligned = ref_geom_full  # Use original (cacheable)
                 else:
                     ref_subline = create_subline(
-                        ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+                        ref_geom_full, alignment.overture_start_frac, alignment.overture_end_frac
                     )
-                    geom_for_similarity_ref = ref_subline if ref_subline else ref_geom
+                    ref_geom_aligned = ref_subline if ref_subline else ref_geom_full
 
                 if target_coverage >= HIGH_COVERAGE_THRESHOLD:
-                    geom_for_similarity_target = target_geom  # Use original (cacheable)
+                    target_geom_aligned = target_geom_full  # Use original (cacheable)
                 else:
                     target_subline = create_subline(
-                        target_geom, alignment.dataset_start_frac, alignment.dataset_end_frac
+                        target_geom_full, alignment.dataset_start_frac, alignment.dataset_end_frac
                     )
-                    geom_for_similarity_target = target_subline if target_subline else target_geom
+                    target_geom_aligned = target_subline if target_subline else target_geom_full
             else:
-                geom_for_similarity_ref = ref_geom
-                geom_for_similarity_target = target_geom
+                ref_geom_aligned = ref_geom_full
+                target_geom_aligned = target_geom_full
 
-        # Aligned length: absolute overlap length in meters
+        # Aligned length: absolute overlap length in meters (uses full geometry length)
         # Coverage features express overlap as fractions, but absolute length matters:
         # 5% coverage on 1km = 50m (plausible), 80% coverage on 12m = ~10m (intersection-only)
+        ref_length_full = ref_geom_full.length
         if alignment is not None:
-            aligned_length_m = ref_geom.length * (
+            aligned_length_m = ref_length_full * (
                 alignment.overture_end_frac - alignment.overture_start_frac
             )
         else:
             aligned_length_m = 0.0  # No alignment → 0.0, consistent with coverage features
 
-        # Intersection overlap features (continuation, divergence)
+        # Intersection overlap features (continuation, divergence) - uses full geometries
         _current_phase = "intersection_overlap"
         with timed_section("intersection_overlap"):
             intersection_overlap_feats = _compute_intersection_overlap_features(
-                ref_geom=ref_geom,
-                target_geom=target_geom,
+                ref_geom_full=ref_geom_full,
+                target_geom_full=target_geom_full,
                 alignment=alignment,
             )
 
@@ -993,31 +1021,31 @@ def compute_pair_features(
         # Extract coords once for functions that accept optional coords parameter
         # This eliminates redundant np.array(line.coords) calls (~4.2 µs each)
         with timed_section("coord_extraction"):
-            coords_ref = np.array(geom_for_similarity_ref.coords)
-            coords_target = np.array(geom_for_similarity_target.coords)
+            coords_aligned_ref = np.array(ref_geom_aligned.coords)
+            coords_aligned_target = np.array(target_geom_aligned.coords)
 
         _current_phase = "geometric_features"
-        # Compute geometric features on aligned sublines (or full geom if no alignment)
+        # Compute geometric features on aligned portions (or full geom if no alignment)
         with timed_section("geometric_features"):
             geom_features = compute_geometric_features(
-                geom_for_similarity_ref,
-                geom_for_similarity_target,
+                ref_geom_aligned,
+                target_geom_aligned,
             )
 
         _current_phase = "non_geometric_features"
         # Compute non-geometric features (semantic, topology, etc.)
         non_geom = _compute_non_geometric_features(
-            geom_sim_ref=geom_for_similarity_ref,
-            geom_sim_target=geom_for_similarity_target,
-            coords_ref=coords_ref,
-            coords_target=coords_target,
+            ref_geom_aligned=ref_geom_aligned,
+            target_geom_aligned=target_geom_aligned,
+            coords_aligned_ref=coords_aligned_ref,
+            coords_aligned_target=coords_aligned_target,
             ref_class=ref_class,
             target_class=target_class,
             ref_subclass=ref_subclass,
             target_subclass=target_subclass,
             endpoint_features=endpoint_features,
-            ref_topology=ref_topology,
-            target_topology=target_topology,
+            ref_topology_full=ref_topology,
+            target_topology_full=target_topology,
             alignment=alignment,
             graphlet_features=graphlet_features,
             ref_graphlet_data=ref_graphlet_data,
@@ -1025,20 +1053,21 @@ def compute_pair_features(
             ref_seg_id=ref_seg_id,
             target_seg_id=target_seg_id,
             geom_features=geom_features,
-            ref_sibling_context=ref_sibling_context,
-            target_sibling_context=target_sibling_context,
+            ref_sibling_context_full=ref_sibling_context,
+            target_sibling_context_full=target_sibling_context,
             ref_names_raw=ref_names_raw,
             target_names_raw=target_names_raw,
         )
 
         _current_phase = "merge_features"
-        # Use original geometries for length_ratio, NOT sublines.
-        # Subline alignment clips both geometries to matching portions,
+        # Use full geometries for length_ratio, NOT aligned portions.
+        # Alignment clips both geometries to matching portions,
         # making their lengths nearly identical (ratio ~1.0 always).
         # The full-geometry ratio captures actual segmentation differences.
+        target_length_full = target_geom_full.length
         length_ratio = (
-            min(ref_geom.length, target_geom.length) / max(ref_geom.length, target_geom.length)
-            if max(ref_geom.length, target_geom.length) > 0
+            min(ref_length_full, target_length_full) / max(ref_length_full, target_length_full)
+            if max(ref_length_full, target_length_full) > 0
             else 0.0
         )
 
@@ -1250,7 +1279,7 @@ def compute_graphlet_similarity(
     """Compute graphlet similarity features for a segment pair.
 
     Uses alignment-aware comparison that finds the nearest connectors to the
-    aligned subline endpoints. For Overture data, uses explicit connectors.
+    aligned portion endpoints. For Overture data, uses explicit connectors.
     For spaghetti geometry, uses inferred connectors from spatial proximity
     (including mid-segment crossings).
 

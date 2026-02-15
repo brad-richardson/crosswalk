@@ -1253,9 +1253,9 @@ def register_commands(app: typer.Typer) -> None:
                     stored_ref_topo = pair_data.get("ref_topology")
                     stored_target_topo = pair_data.get("target_topology")
                     if stored_ref_topo:
-                        worker_data["ref_topology"][cand.ref_idx] = stored_ref_topo
+                        worker_data["ref_topology_full"][cand.ref_idx] = stored_ref_topo
                     if stored_target_topo:
-                        worker_data["target_topology"][cand.target_idx] = stored_target_topo
+                        worker_data["target_topology_full"][cand.target_idx] = stored_target_topo
 
             # --- Phase 6: Compute features through shared code path ---
             # Uses the exact same _compute_feature_chunk() that inference uses,
@@ -1282,8 +1282,8 @@ def register_commands(app: typer.Typer) -> None:
                     and pair_data is not None
                     and pair_data.get("ref_topology") is None
                 ):
-                    ref_topo = worker_data["ref_topology"].get(candidates[i].ref_idx)
-                    target_topo = worker_data["target_topology"].get(candidates[i].target_idx)
+                    ref_topo = worker_data["ref_topology_full"].get(candidates[i].ref_idx)
+                    target_topo = worker_data["target_topology_full"].get(candidates[i].target_idx)
                     if ref_topo is not None and target_topo is not None:
                         data_store.update_topology(
                             gers_id,

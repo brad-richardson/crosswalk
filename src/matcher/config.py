@@ -145,6 +145,19 @@ FEATURE_VERSION = "2026-02-15"
 
 # Feature categories - organized for display and documentation
 # Distance/length features use _m suffix to indicate meters
+#
+# GEOMETRY PROVENANCE (which geometry each feature is computed from):
+#   Aligned portion: hausdorff_*, buffer_iou_*, heading_delta, centroid_distance_m,
+#       lateral_offset_*, sinuosity_*, min_length_m, edge_distance_rmse_m,
+#       collinear_gap_ratio, angle_histogram_similarity, shape_complexity_*,
+#       heading_consistency_*, vertex_density_*, has_parallel_sibling_ref,
+#       parallel_fraction_ref, crossing_angle_*, transverse_neighbor_fraction_*
+#   Full geometry: length_ratio, aligned_length_m (full length * coverage fraction)
+#   Pre-computed on full: topology, graphlet, endpoint, coverage
+#   Context-dependent (aligned if graphlet_data available, else full): from_degree_*,
+#       to_degree_*, degree_match_score, degree_signature_similarity, is_dead_end_*,
+#       dead_end_match, is_intersection_*, intersection_match
+#   Semantic (no geometry): name_*, has_name_*, class_similarity, route_prefix_match
 FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Geometric": [
         "hausdorff_distance_m",

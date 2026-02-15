@@ -4,7 +4,7 @@ Ported from overture_udfs with Numba JIT compilation for performance.
 
 Key functions:
 - linestring_alignment: Find where two lines overlap, returns fractional positions
-- create_subline: Extract a portion of a linestring given start/end fractions
+- create_subline: Extract an aligned portion of a linestring given start/end fractions
 - walk_distance: Integrated Euclidean distance between two aligned lines
 - walk_parallelness: How parallel two aligned lines are (squared dot product)
 - compute_alignment_batch: Parallel batch processing for multiple pairs
@@ -979,8 +979,8 @@ def _compute_single_alignment(args):
     ref_idx, target_idx = args
 
     try:
-        ref_geom = _alignment_worker_data["ref_geoms"][ref_idx]
-        target_geom = _alignment_worker_data["target_geoms"][target_idx]
+        ref_geom = _alignment_worker_data["ref_geoms_full"][ref_idx]
+        target_geom = _alignment_worker_data["target_geoms_full"][target_idx]
 
         if ref_geom is None or target_geom is None:
             return None
@@ -1051,8 +1051,8 @@ def compute_alignment_batch(
 
     # Prepare worker data
     worker_data = {
-        "ref_geoms": ref_geoms_for_alignment,
-        "target_geoms": target_geoms_for_alignment,
+        "ref_geoms_full": ref_geoms_for_alignment,
+        "target_geoms_full": target_geoms_for_alignment,
     }
 
     # Prepare work items as simple tuples

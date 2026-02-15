@@ -173,7 +173,7 @@ def _compute_single_feature(args):
 def _compute_feature_chunk(chunk):
     """Process a chunk of pairs with 3-pass batch architecture.
 
-    Pass 1: Collect geometry pairs, extract sublines, gather per-pair data
+    Pass 1: Collect geometry pairs, extract aligned portions, gather per-pair data
     Pass 2: Batch geometric computation via compute_geometric_features_batch()
     Pass 3: Per-pair non-batchable features + assembly
 
@@ -218,8 +218,8 @@ def _compute_feature_chunk(chunk):
 
         try:
             with timed_section("worker_overhead"):
-                ref_geom = _worker_data["ref_geoms"][ref_idx]
-                target_geom = _worker_data["target_geoms"][target_idx]
+                ref_geom_full = _worker_data["ref_geoms_full"][ref_idx]
+                target_geom_full = _worker_data["target_geoms_full"][target_idx]
                 alignment = _worker_data.get("alignments", {}).get(pair_key)
 
                 endpoint_features = _worker_data.get("aligned_endpoint_features", {}).get(pair_key)
@@ -227,8 +227,8 @@ def _compute_feature_chunk(chunk):
                     # results[chunk_idx] stays None
                     continue
 
-                ref_topology = _worker_data.get("ref_topology", {}).get(ref_idx)
-                target_topology = _worker_data.get("target_topology", {}).get(target_idx)
+                ref_topology_full = _worker_data.get("ref_topology_full", {}).get(ref_idx)
+                target_topology_full = _worker_data.get("target_topology_full", {}).get(target_idx)
                 ref_graphlet_data = _worker_data.get("ref_graphlet_data")
                 target_graphlet_data = _worker_data.get("target_graphlet_data")
                 ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
@@ -243,32 +243,34 @@ def _compute_feature_chunk(chunk):
                     alignment,
                 )
 
-            # Subline extraction (same logic as compute_pair_features)
+            # Aligned portion extraction (same logic as compute_pair_features)
             with timed_section("subline_extraction"):
                 if alignment is not None:
                     ref_coverage = alignment.overture_end_frac - alignment.overture_start_frac
                     target_coverage = alignment.dataset_end_frac - alignment.dataset_start_frac
 
                     if ref_coverage >= HIGH_COVERAGE_THRESHOLD:
-                        geom_sim_ref = ref_geom
+                        ref_geom_aligned = ref_geom_full
                     else:
                         ref_subline = create_subline(
-                            ref_geom, alignment.overture_start_frac, alignment.overture_end_frac
+                            ref_geom_full,
+                            alignment.overture_start_frac,
+                            alignment.overture_end_frac,
                         )
-                        geom_sim_ref = ref_subline if ref_subline else ref_geom
+                        ref_geom_aligned = ref_subline if ref_subline else ref_geom_full
 
                     if target_coverage >= HIGH_COVERAGE_THRESHOLD:
-                        geom_sim_target = target_geom
+                        target_geom_aligned = target_geom_full
                     else:
                         target_subline = create_subline(
-                            target_geom,
+                            target_geom_full,
                             alignment.dataset_start_frac,
                             alignment.dataset_end_frac,
                         )
-                        geom_sim_target = target_subline if target_subline else target_geom
+                        target_geom_aligned = target_subline if target_subline else target_geom_full
                 else:
-                    geom_sim_ref = ref_geom
-                    geom_sim_target = target_geom
+                    ref_geom_aligned = ref_geom_full
+                    target_geom_aligned = target_geom_full
 
             # Extract aligned attributes from LR data (using alignment fractions)
             lr_attrs = _extract_lr_attributes_for_pair(ref_idx, target_idx, alignment, _worker_data)
@@ -278,8 +280,8 @@ def _compute_feature_chunk(chunk):
                     "chunk_idx": chunk_idx,
                     "ref_idx": ref_idx,
                     "target_idx": target_idx,
-                    "geom_sim_ref": geom_sim_ref,
-                    "geom_sim_target": geom_sim_target,
+                    "ref_geom_aligned": ref_geom_aligned,
+                    "target_geom_aligned": target_geom_aligned,
                     "ref_class": lr_attrs.ref_class,
                     "target_class": lr_attrs.target_class,
                     "ref_subclass": lr_attrs.ref_subclass,
@@ -289,8 +291,8 @@ def _compute_feature_chunk(chunk):
                     "ref_speed_limit_kph": lr_attrs.ref_speed_limit_kph,
                     "target_speed_limit_kph": lr_attrs.target_speed_limit_kph,
                     "endpoint_features": endpoint_features,
-                    "ref_topology": ref_topology,
-                    "target_topology": target_topology,
+                    "ref_topology_full": ref_topology_full,
+                    "target_topology_full": target_topology_full,
                     "alignment": alignment,
                     "graphlet_features": graphlet_features,
                     "ref_graphlet_data": ref_graphlet_data,
@@ -326,8 +328,8 @@ def _compute_feature_chunk(chunk):
         return (results, error_tracker.to_serializable())
 
     # ---- Pass 2: Batch geometric computation ----
-    arr_a = np.array([pd["geom_sim_ref"] for pd in pair_data], dtype=object)
-    arr_b = np.array([pd["geom_sim_target"] for pd in pair_data], dtype=object)
+    arr_a = np.array([pd["ref_geom_aligned"] for pd in pair_data], dtype=object)
+    arr_b = np.array([pd["target_geom_aligned"] for pd in pair_data], dtype=object)
 
     try:
         with timed_section("batch_geometric"):
@@ -380,8 +382,8 @@ def _compute_feature_chunk(chunk):
         chunk_idx = pd_item["chunk_idx"]
         try:
             with timed_section("coord_extraction"):
-                coords_ref = np.array(pd_item["geom_sim_ref"].coords)
-                coords_target = np.array(pd_item["geom_sim_target"].coords)
+                coords_aligned_ref = np.array(pd_item["ref_geom_aligned"].coords)
+                coords_aligned_target = np.array(pd_item["target_geom_aligned"].coords)
 
             # Build a GeometricFeatures stub with batch values for _compute_non_geometric_features
             from ..features.geometric import GeometricFeatures
@@ -401,10 +403,10 @@ def _compute_feature_chunk(chunk):
             )
 
             non_geom = _compute_non_geometric_features(
-                geom_sim_ref=pd_item["geom_sim_ref"],
-                geom_sim_target=pd_item["geom_sim_target"],
-                coords_ref=coords_ref,
-                coords_target=coords_target,
+                ref_geom_aligned=pd_item["ref_geom_aligned"],
+                target_geom_aligned=pd_item["target_geom_aligned"],
+                coords_aligned_ref=coords_aligned_ref,
+                coords_aligned_target=coords_aligned_target,
                 ref_class=pd_item["ref_class"],
                 target_class=pd_item["target_class"],
                 ref_subclass=pd_item["ref_subclass"],
@@ -412,8 +414,8 @@ def _compute_feature_chunk(chunk):
                 # Note: ref_oneway, target_oneway, ref_speed_limit_kph, target_speed_limit_kph
                 # are extracted but not passed - features parked (see RESEARCH_GRAVEYARD.md)
                 endpoint_features=pd_item["endpoint_features"],
-                ref_topology=pd_item["ref_topology"],
-                target_topology=pd_item["target_topology"],
+                ref_topology_full=pd_item["ref_topology_full"],
+                target_topology_full=pd_item["target_topology_full"],
                 alignment=pd_item["alignment"],
                 graphlet_features=pd_item["graphlet_features"],
                 ref_graphlet_data=pd_item["ref_graphlet_data"],
@@ -426,34 +428,34 @@ def _compute_feature_chunk(chunk):
                     batch_iqr_offsets[i],
                     batch_p95_offsets[i],
                 ),
-                ref_sibling_context=_worker_data.get("ref_sibling_context"),
-                target_sibling_context=_worker_data.get("target_sibling_context"),
+                ref_sibling_context_full=_worker_data.get("ref_sibling_context_full"),
+                target_sibling_context_full=_worker_data.get("target_sibling_context_full"),
                 ref_names_raw=pd_item.get("ref_names_raw"),
                 target_names_raw=pd_item.get("target_names_raw"),
             )
 
-            # Aligned length: absolute overlap length in meters
+            # Aligned length: absolute overlap length in meters (uses full geometry)
             alignment = pd_item["alignment"]
+            ref_length_full = _worker_data["ref_geoms_full"][pd_item["ref_idx"]].length
             if alignment is not None:
-                aligned_length_m = _worker_data["ref_geoms"][pd_item["ref_idx"]].length * (
+                aligned_length_m = ref_length_full * (
                     alignment.overture_end_frac - alignment.overture_start_frac
                 )
             else:
                 aligned_length_m = 0.0
 
-            # Intersection overlap features (continuation, divergence)
+            # Intersection overlap features (continuation, divergence) - uses full geometries
             intersection_overlap_feats = _compute_intersection_overlap_features(
-                ref_geom=_worker_data["ref_geoms"][pd_item["ref_idx"]],
-                target_geom=_worker_data["target_geoms"][pd_item["target_idx"]],
+                ref_geom_full=_worker_data["ref_geoms_full"][pd_item["ref_idx"]],
+                target_geom_full=_worker_data["target_geoms_full"][pd_item["target_idx"]],
                 alignment=alignment,
             )
 
-            # Use original geometries for length_ratio (not sublines)
-            ref_len = _worker_data["ref_geoms"][pd_item["ref_idx"]].length
-            target_len = _worker_data["target_geoms"][pd_item["target_idx"]].length
+            # Use full geometries for length_ratio (not aligned portions)
+            target_length_full = _worker_data["target_geoms_full"][pd_item["target_idx"]].length
             length_ratio = (
-                min(ref_len, target_len) / max(ref_len, target_len)
-                if max(ref_len, target_len) > 0
+                min(ref_length_full, target_length_full) / max(ref_length_full, target_length_full)
+                if max(ref_length_full, target_length_full) > 0
                 else 0.0
             )
 
@@ -1631,7 +1633,7 @@ class MLMatcher:
         valid_candidates = [p[0] for p in valid_pairs]
         valid_features = [p[1] for p in valid_pairs]
 
-        # Check for degenerate geometry errors (aligned sublines becoming points/empty)
+        # Check for degenerate geometry errors (aligned portions becoming points/empty)
         # These pairs get error default features but may indicate data quality issues
         error_features_list = [f for f in valid_features if f.get("_error")]
         if error_features_list or total_errors.has_errors():
@@ -1663,7 +1665,7 @@ class MLMatcher:
                 raise ValueError(
                     f"Feature computation error rate {error_rate:.1%} exceeds 20% threshold. "
                     f"{len(error_features_list)} of {len(valid_features)} pairs had errors "
-                    "(likely degenerate aligned sublines). "
+                    "(likely degenerate aligned portions). "
                     "This may indicate poor alignment coverage or bad geometry data."
                 )
 

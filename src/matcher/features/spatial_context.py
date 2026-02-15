@@ -628,7 +628,7 @@ def compute_aligned_endpoint_features(
     seg_id: str | None = None,
     seg_to_connectors: dict[str, list[tuple[float, int]]] | None = None,
 ) -> dict[str, float]:
-    """Compute endpoint proximity at aligned subline endpoints.
+    """Compute endpoint proximity at aligned portion endpoints.
 
     Instead of using the full geometry endpoints, this function uses the
     coordinates at the alignment boundaries (start_frac, end_frac). This
@@ -2214,7 +2214,7 @@ def compute_aligned_topology_at_position(
 
     This function enables alignment-aware topology computation. For partial
     overlaps, instead of using full geometry endpoints, we use the degrees
-    at the aligned subline endpoints (where the segments actually overlap).
+    at the aligned portion endpoints (where the segments actually overlap).
 
     Args:
         seg_to_connectors: Maps segment ID -> list of (at_position, node_id) tuples
@@ -2251,11 +2251,11 @@ def compute_aligned_topology_features(
     start_frac: float = 0.0,
     end_frac: float = 1.0,
 ) -> dict[str, int | float | bool | tuple]:
-    """Compute topology features at aligned subline endpoints.
+    """Compute topology features at aligned portion endpoints.
 
     This is the alignment-aware version of compute_topology_features().
     Instead of using the full geometry endpoints, it uses the degrees
-    at the aligned subline endpoints.
+    at the aligned portion endpoints.
 
     For partial overlaps (e.g., only 43% of the segment overlaps), this
     gives the correct topology at the boundaries of the actual overlap,
@@ -2298,7 +2298,7 @@ def get_alignment_connectors(
     start_frac: float = 0.0,
     end_frac: float = 1.0,
 ) -> tuple[int | None, int | None]:
-    """Get connector nodes at the endpoints of an aligned subline.
+    """Get connector nodes at the endpoints of an aligned portion.
 
     For partial matches (when alignment trims the segment), this finds the
     connectors nearest to where the alignment starts and ends.
@@ -2334,7 +2334,7 @@ def graphlet_similarity_with_alignment(
     target_start_frac: float = 0.0,
     target_end_frac: float = 1.0,
 ) -> dict[str, float]:
-    """Compare graphlet features at aligned subline endpoints using connector positions.
+    """Compare graphlet features at aligned portion endpoints using connector positions.
 
     This function accounts for alignment by finding the nearest connectors to
     the aligned portion endpoints, rather than always using segment endpoints.
