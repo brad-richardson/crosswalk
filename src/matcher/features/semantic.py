@@ -223,6 +223,27 @@ def _is_generic_name(name: str | None) -> bool:
     return bool(_GENERIC_NAME_REGEX.match(name.strip()))
 
 
+def _get_char_script(ch: str) -> str | None:
+    """Get the Unicode script category for an alphabetic character.
+
+    Uses the first word of unicodedata.name(), which identifies the script:
+    LATIN, CJK, ARABIC, CYRILLIC, HANGUL, HIRAGANA, KATAKANA, DEVANAGARI, THAI, etc.
+    """
+    if not ch.isalpha():
+        return None
+    name = unicodedata.name(ch, "")
+    return name.split()[0] if name else None
+
+
+def _get_text_scripts(text: str) -> set[str]:
+    """Get the set of Unicode script categories used in text.
+
+    Returns script names like {"LATIN"}, {"CJK", "HIRAGANA"}, {"ARABIC"}, etc.
+    Non-alphabetic characters (digits, punctuation, spaces) are ignored.
+    """
+    return {s for ch in text if (s := _get_char_script(ch)) is not None}
+
+
 def _has_non_latin_alpha(text: str) -> bool:
     """Check if text contains non-Latin alphabetic characters.
 
@@ -232,29 +253,23 @@ def _has_non_latin_alpha(text: str) -> bool:
     return any(ch.isalpha() and "LATIN" not in unicodedata.name(ch, "") for ch in text)
 
 
-def _has_latin_chars(text: str) -> bool:
-    """Check if text contains Latin alphabet characters."""
-    return any(ch.isalpha() and "LATIN" in unicodedata.name(ch, "") for ch in text)
-
-
 def _names_are_cross_script(name_a: str, name_b: str) -> bool:
-    """Check if two names are in different scripts (e.g., CJK vs Latin, Arabic vs Latin).
+    """Check if two names use different writing systems.
 
-    Returns True when one name has non-Latin characters and the other is Latin,
-    indicating that character-level similarity metrics will be unreliable.
+    Extracts Unicode script categories (LATIN, CJK, ARABIC, CYRILLIC, etc.)
+    from each name and checks for overlap. No shared scripts means
+    character-level similarity metrics will be unreliable.
+
+    Handles mixed-script text correctly: "北京 Beijing Road" shares LATIN
+    with "Queen's Road Central", so they are NOT considered cross-script.
     """
-    a_non_latin = _has_non_latin_alpha(name_a)
-    b_non_latin = _has_non_latin_alpha(name_b)
+    scripts_a = _get_text_scripts(name_a)
+    scripts_b = _get_text_scripts(name_b)
 
-    # If both are non-Latin or neither is non-Latin, scripts are compatible
-    if a_non_latin == b_non_latin:
+    if not scripts_a or not scripts_b:
         return False
 
-    # One is non-Latin, the other might be Latin
-    a_latin = _has_latin_chars(name_a)
-    b_latin = _has_latin_chars(name_b)
-
-    return (a_non_latin and b_latin) or (b_non_latin and a_latin)
+    return not scripts_a & scripts_b
 
 
 def _extract_name_string(name) -> str | None:
@@ -468,9 +483,7 @@ def resolve_best_name_variant(
     When Overture has multilingual names (e.g., Chinese primary + English alt),
     the LR-resolved ref_name may be in a different script from the target name,
     yielding ~0 similarity. This function tries ALL available name variants from
-    the Overture names dict and returns the one that best matches the target.
-
-    If no variant scores better than the current ref_name, returns ref_name unchanged.
+    the Overture names dict and returns the highest-scoring one against the target.
 
     Args:
         ref_names_raw: Raw Overture names dict with primary + rules, or None
@@ -478,7 +491,7 @@ def resolve_best_name_variant(
         target_name: Target segment name string (may be None)
 
     Returns:
-        The best-matching name variant string, or ref_name if no improvement found.
+        The best-matching name variant string, or ref_name if no variants available.
     """
     if not target_name or not ref_names_raw:
         return ref_name
@@ -490,9 +503,12 @@ def resolve_best_name_variant(
 
     # Extract all available name variants from the reference
     variants = _extract_all_name_variants(ref_names_raw)
-    if len(variants) <= 1:
-        # Only one variant (or none) — no alternatives to try
+    if not variants:
         return ref_name
+
+    # Single variant: return it directly (may upgrade a None ref_name)
+    if len(variants) == 1:
+        return variants[0]
 
     norm_target = _normalize_street_name(target_str)
     if not norm_target:
