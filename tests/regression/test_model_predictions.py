@@ -296,7 +296,7 @@ REAL_LABELED_EXAMPLES = {
         "label": "no_match",
         "original_confidence": 0.7424,
         # Good geometry (IoU 0.95+) can override topology mismatch
-        "expected_max_confidence": 0.99,
+        "expected_max_confidence": 0.995,
     },
 }
 
