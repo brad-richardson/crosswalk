@@ -80,7 +80,7 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ### Add Permutation Importance to Ablation Script
 
-**Problem:** Single-feature ablation systematically underestimates feature importance with tree ensembles due to redundancy masking — XGBoost routes around any one missing feature via correlated alternatives. Feb 2026 ablation classified 64/74 features as "noise", but bulk-removing them causes -2.9% F1. Permutation importance (shuffling feature values) avoids this by breaking correlations without removing the feature entirely.
+**Problem:** Single-feature ablation systematically underestimates feature importance with tree ensembles due to redundancy masking — XGBoost routes around any one missing feature via correlated alternatives. Feb 2026 ablation classified 64/72 features as "noise", but bulk-removing them causes -2.9% F1. Permutation importance (shuffling feature values) avoids this by breaking correlations without removing the feature entirely.
 
 **Solution:** Add `--permutation` mode (or include alongside existing modes) that:
 1. Trains a single model on the train split
@@ -127,26 +127,6 @@ LINESTRING (144.734621881638 -37.8674845946421, 144.73467978024 -37.867457431670
 
 Features: `from_degree_ref=4, to_degree_ref=4` (correct), `from_degree_target=1, to_degree_target=1` (incorrect — should reflect intersection degree at alignment boundary).
 
-### HIGH: Drop `length_ratio` and `centroid_distance_m` Features
-
-**Priority:** High
-
-**Background:** Full audit of all 74 features' geometry provenance (Feb 2026) confirmed that most features correctly use aligned sublines. Two features should be dropped:
-
-**`length_ratio`** — `min(full_len_a, full_len_b) / max(full_len_a, full_len_b)` using full segment lengths. This is purely a segmentation artifact: a 50m local road overlapping a 500m Overture segment gives 0.1, penalizing a perfectly valid match. Coverage features (`ref_coverage`, `target_coverage`, `coverage_ratio`) already capture the alignment relationship meaningfully. The aligned-geometry ratio would always be ~1.0, confirming it measures segmentation, not match quality.
-
-**`centroid_distance_m`** — Distance between centroids of aligned sublines. Redundant single-point summary: hausdorff distance (3 variants), buffer_iou (2 variants), lateral_offset (3 variants), and edge_distance_rmse already capture geometric similarity in richer detail. Not in the permutation importance top 14 (below +0.11% F1 drop).
-
-**Steps:**
-1. Remove `length_ratio` from `FEATURE_CATEGORIES["Geometric"]` in `config.py`
-2. Remove `centroid_distance_m` from `FEATURE_CATEGORIES["Geometric"]` in `config.py`
-3. Remove length_ratio computation in `compute.py` (`compute_pair_features` + `assemble_feature_dict`)
-4. Remove centroid_distance from `geometric.py` (`GeometricFeatures` NamedTuple, `BatchGeometricResult`, batch computation)
-5. Clean up references in `data_loader.py`, `features.js`, `ml.py`
-6. Backfill features (`matcher backfill`), retrain model (`matcher train`)
-7. Run ablation: compare CV F1 before/after to confirm no degradation
-8. Run before/after match comparison on Boston datasets
-
 ### Medium: Audit Topology Fallback Path Usage
 
 **Priority:** Medium
@@ -173,14 +153,12 @@ The `GEOMETRY PROVENANCE` comment in `config.py` (lines 149-160) needs updates a
 - Endpoint features are already alignment-aware (via `compute_aligned_endpoint_features_batch`), not "pre-computed on full"
 - Topology features are alignment-aware when graphlet_data is available (the common ML scoring path)
 - `aligned_length_m` is semantically aligned (computed via `full_length * fraction`)
-- Remove references to dropped features (`length_ratio`, `centroid_distance_m`)
-
 **Audit results summary (Feb 2026):**
 - 34 features correctly use aligned sublines
 - 11 features correctly use full geometry by design (coverage, intersection overlap, aligned_length_m)
 - 8 features are alignment-aware via connector snapping (endpoint, graphlet, clustering)
 - 11 semantic features use no geometry
-- 2 features dropped (length_ratio, centroid_distance_m)
+- 2 features dropped: length_ratio, centroid_distance_m (see RESEARCH_GRAVEYARD.md)
 - 12 topology features: aligned when graphlet_data available (common path), full geometry in fallback (audit needed)
 
 ### Dual Carriageway / Centerline Handling

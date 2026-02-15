@@ -3,7 +3,7 @@
 import multiprocessing
 from pathlib import Path
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 
 # Maximum distance value for features (used instead of infinity to avoid XGBoost issues)
@@ -385,7 +385,7 @@ class MatcherSettings(BaseSettings):
         "Otherwise, uses geometry-only model if available.",
     )
 
-    # Training data validation (centroid distance computed inline in _validate_training_pairs)
+    # Training data validation thresholds
     training_max_hausdorff_m: float = Field(
         default=1000.0,
         description="Max Hausdorff distance for valid training pairs (meters)",
@@ -400,28 +400,6 @@ class MatcherSettings(BaseSettings):
         default=5,
         description="Maximum number of sample errors to log (one per phase:type)",
     )
-    matching_weights: dict[str, float] = Field(
-        default={
-            "hausdorff_norm": 0.10,
-            "mean_hausdorff_norm": 0.10,
-            "buffer_iou": 0.30,
-            "heading_norm": 0.10,
-            "projection_norm": 0.20,
-            "name_similarity": 0.15,
-            "class_similarity": 0.05,
-        },
-        description="Feature weights for match scoring (must sum to 1.0)",
-    )
-
-    @field_validator("matching_weights")
-    @classmethod
-    def validate_weights_sum(cls, v: dict[str, float]) -> dict[str, float]:
-        """Validate that matching weights sum to 1.0."""
-        total = sum(v.values())
-        if not (0.99 <= total <= 1.01):  # Allow small floating point tolerance
-            raise ValueError(f"matching_weights must sum to 1.0, got {total:.4f}")
-        return v
-
     # Relational feature settings
     anchor_search_radius_m: float = Field(
         default=30.0,

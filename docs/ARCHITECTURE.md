@@ -7,7 +7,7 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 74 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 72 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Training**: `matcher train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
@@ -67,11 +67,11 @@ matcher eval --model data/models/matcher_model_combined.joblib -d us_frisco_trai
 
 ## Feature Categories
 
-74 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+72 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
-| Geometric | 11 | hausdorff_distance_m, mean_hausdorff_distance_m, hausdorff_p95_m, buffer_iou_5m, buffer_iou_15m, heading_delta, length_ratio, centroid_distance_m, collinear_gap_ratio, angle_histogram_similarity, edge_distance_rmse_m |
+| Geometric | 9 | hausdorff_distance_m, mean_hausdorff_distance_m, hausdorff_p95_m, buffer_iou_5m, buffer_iou_15m, heading_delta, collinear_gap_ratio, angle_histogram_similarity, edge_distance_rmse_m |
 | Name Similarity | 10 | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic, name_numeric_match, route_prefix_match |
 | Class | 1 | class_similarity |
 | Endpoint/Connectivity | 3 | min_endpoint_proximity_m, max_endpoint_proximity_m, shared_endpoint_count |
@@ -96,7 +96,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (74 features)
+config.py::FEATURE_COLUMNS (72 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |

@@ -40,10 +40,6 @@ Metric Selection Rationale:
 - **overlap_ratio**: What fraction of line A falls within line B's buffer? Answers
   "how much of this segment has a corresponding segment in the other dataset?"
 
-- **projection_distance**: Average perpendicular distance between curves. Computed
-  bidirectionally (A→B and B→A) for symmetry. More stable than Hausdorff for
-  typical road matching scenarios.
-
 - **heading_delta**: Overall direction difference. Handles bidirectional roads
   (0° and 180° both score well). Helps distinguish parallel roads from the same road.
 
