@@ -189,6 +189,8 @@ def _compute_non_geometric_features(
     target_sibling_context_full: SiblingSearchContext | None = None,
     ref_names_raw=None,
     target_names_raw=None,
+    target_topo_connectors: dict[str, list[tuple[float, int]]] | None = None,
+    target_topo_node_features: dict[int, int] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -232,6 +234,11 @@ def _compute_non_geometric_features(
             full geometries of all segments, not just candidates)
         ref_names_raw: Raw Overture names dict for reference (all variants).
         target_names_raw: Raw target names dict (all variants).
+        target_topo_connectors: Synthetic topology connectors for target segments,
+            mapping seg_id -> [(frac, node_id), ...]. Used for alignment-aware
+            target topology when graphlet_data is not available for the target.
+        target_topo_node_features: Node features for synthetic connectors,
+            mapping node_id -> degree.
 
     Returns:
         Dictionary of non-geometric feature name -> value, plus per-pair geometric
@@ -345,63 +352,79 @@ def _compute_non_geometric_features(
                 "endpoint_features is required - must be computed on aligned portion endpoints"
             )
 
-    # Topology features
-    # Effective topology (ref_topo/target_topo) may be aligned or full depending
-    # on whether graphlet_data + alignment + seg_ids are all available.
+    # Topology features — unified code path via compute_aligned_topology_features()
+    # Both sides use connector-based alignment-aware topology:
+    #   - Ref: Overture explicit connectors (from ref_graphlet_data)
+    #   - Target: Synthetic connectors sampled from full-network topology spatial index
+    #     (from target_topo_connectors/target_topo_node_features)
+    # Fallback: full-segment topology (ref_topology_full/target_topology_full) when
+    # connector data is unavailable (e.g., labeling UI without full pipeline).
     with timed_section("aligned_topology"):
-        use_aligned_topology = (
-            alignment is not None
-            and ref_graphlet_data is not None
-            and target_graphlet_data is not None
-            and ref_seg_id is not None
-            and target_seg_id is not None
+        from .spatial_context import compute_aligned_topology_features
+
+        # --- Ref side topology ---
+        ref_has_aligned = (
+            alignment is not None and ref_graphlet_data is not None and ref_seg_id is not None
         )
-
-        if use_aligned_topology:
-            from .spatial_context import compute_aligned_topology_features
-
+        if ref_has_aligned:
             _, ref_seg_to_connectors, ref_node_features, _ = ref_graphlet_data
-            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
-
-            ref_aligned_topo = compute_aligned_topology_features(
+            ref_topo = compute_aligned_topology_features(
                 ref_seg_id,
                 ref_seg_to_connectors,
                 ref_node_features,
                 alignment.overture_start_frac,
                 alignment.overture_end_frac,
             )
-            target_aligned_topo = compute_aligned_topology_features(
+        elif ref_topology_full is not None:
+            ref_topo = ref_topology_full
+        else:
+            raise MissingContextError(
+                "ref_topology is required when aligned topology path is not active. "
+                "Call compute_all_topology() and pass the result."
+            )
+
+        # --- Target side topology ---
+        # Prefer synthetic connectors (sampled from full network spatial index)
+        target_has_synthetic = (
+            alignment is not None
+            and target_topo_connectors is not None
+            and target_topo_node_features is not None
+            and target_seg_id is not None
+        )
+        # Fallback: graphlet-based connectors (candidates-only graph — less accurate)
+        target_has_graphlet = (
+            alignment is not None and target_graphlet_data is not None and target_seg_id is not None
+        )
+
+        if target_has_synthetic:
+            target_topo = compute_aligned_topology_features(
+                target_seg_id,
+                target_topo_connectors,
+                target_topo_node_features,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+        elif target_has_graphlet:
+            _, target_seg_to_connectors, target_node_features, _ = target_graphlet_data
+            target_topo = compute_aligned_topology_features(
                 target_seg_id,
                 target_seg_to_connectors,
                 target_node_features,
                 alignment.dataset_start_frac,
                 alignment.dataset_end_frac,
             )
-
-            from_degree_ref = ref_aligned_topo["from_degree"]
-            to_degree_ref = ref_aligned_topo["to_degree"]
-            from_degree_target = target_aligned_topo["from_degree"]
-            to_degree_target = target_aligned_topo["to_degree"]
-            ref_topo = ref_aligned_topo
-            target_topo = target_aligned_topo
-        else:
-            if ref_topology_full is None:
-                raise MissingContextError(
-                    "ref_topology is required when aligned topology path is not active. "
-                    "Call compute_all_topology() and pass the result."
-                )
-            if target_topology_full is None:
-                raise MissingContextError(
-                    "target_topology is required when aligned topology path is not active. "
-                    "Call compute_all_topology() and pass the result."
-                )
-
-            from_degree_ref = ref_topology_full.get("from_degree", float("nan"))
-            to_degree_ref = ref_topology_full.get("to_degree", float("nan"))
-            from_degree_target = target_topology_full.get("from_degree", float("nan"))
-            to_degree_target = target_topology_full.get("to_degree", float("nan"))
-            ref_topo = ref_topology_full
+        elif target_topology_full is not None:
             target_topo = target_topology_full
+        else:
+            raise MissingContextError(
+                "target_topology is required when aligned topology path is not active. "
+                "Call compute_all_topology() and pass the result."
+            )
+
+        from_degree_ref = ref_topo.get("from_degree", float("nan"))
+        to_degree_ref = ref_topo.get("to_degree", float("nan"))
+        from_degree_target = target_topo.get("from_degree", float("nan"))
+        to_degree_target = target_topo.get("to_degree", float("nan"))
 
     # NaN-propagation guard: if any degree value is NaN, all derived topology
     # features must be NaN too. This avoids truthy/falsy issues with NaN in
@@ -912,6 +935,8 @@ def compute_pair_features(
     target_sibling_context: SiblingSearchContext | None = None,
     ref_names_raw=None,
     target_names_raw=None,
+    target_topo_connectors: dict[str, list[tuple[float, int]]] | None = None,
+    target_topo_node_features: dict[int, int] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -1054,6 +1079,8 @@ def compute_pair_features(
             target_sibling_context_full=target_sibling_context,
             ref_names_raw=ref_names_raw,
             target_names_raw=target_names_raw,
+            target_topo_connectors=target_topo_connectors,
+            target_topo_node_features=target_topo_node_features,
         )
 
         _current_phase = "merge_features"

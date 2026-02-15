@@ -26,6 +26,7 @@ from ..features.spatial_context import (
     SpatialContextIndex,
     compute_aligned_endpoint_features_batch,
     compute_all_topology,
+    sample_topology_along_segment,
 )
 
 logger = logging.getLogger(__name__)
@@ -159,16 +160,20 @@ def prepare_worker_data(
     )
 
     ref_has_connectors = "connectors" in reference.columns
-    target_has_connectors = "connectors" in target.columns
 
     t0 = time.perf_counter()
-    target_topology_by_id = compute_all_topology(
+    # Target: always use geometry inference with spatial index for synthetic connectors
+    # (explicit connectors don't exist in target data; even if they did, we need
+    # the spatial index for sampling degrees at arbitrary positions)
+    target_topo_result = compute_all_topology(
         target,
         id_column=target_id_column,
         tolerance_m=5.0,
         ids_to_compute=unique_target_ids,
-        connectors_column="connectors" if target_has_connectors else None,
+        return_spatial_index=True,
     )
+    target_topology_by_id, target_topo_spatial_index = target_topo_result
+
     ref_topology_by_id = compute_all_topology(
         reference,
         id_column=ref_id_column,
@@ -192,6 +197,30 @@ def prepare_worker_data(
             seg_id, DEFAULT_TOPOLOGY_FEATURES.copy()
         )
     logger.debug(f"[TIMING] topology_computation: {time.perf_counter() - t0:.2f}s")
+
+    # --- Step 4b: Compute synthetic topology connectors for target segments ---
+    # Sample topology degrees at 50m intervals along each target candidate,
+    # using the full-network spatial index. This produces synthetic connectors
+    # in the same format as Overture connectors, enabling alignment-aware
+    # topology for target segments.
+    t0 = time.perf_counter()
+    target_topo_connectors: dict[str, list[tuple[float, int]]] = {}
+    target_topo_node_features: dict[int, int] = {}
+
+    # Project target geometries if needed (spatial index is in projected CRS)
+    work_target = target
+    if target.crs is not None and target.crs.is_geographic:
+        work_target = target.to_crs(target.estimate_utm_crs())
+
+    for target_idx in unique_target_indices:
+        seg_id = str(target_ids[target_idx])
+        geom = work_target.geometry.iloc[target_idx]
+        connectors, node_feats = sample_topology_along_segment(geom, target_topo_spatial_index)
+        target_topo_connectors[seg_id] = connectors
+        target_topo_node_features.update(node_feats)
+
+    logger.info(f"Sampled topology connectors for {len(target_topo_connectors)} target segments")
+    logger.debug(f"[TIMING] target_topo_connectors: {time.perf_counter() - t0:.2f}s")
 
     # --- Step 5: Filter reference to candidate-only segments ---
     sorted_ref_indices = sorted(unique_ref_indices)
@@ -288,6 +317,8 @@ def prepare_worker_data(
         "aligned_endpoint_features": aligned_endpoint_features,
         "ref_topology_full": ref_topology_full,
         "target_topology_full": target_topology_full,
+        "target_topo_connectors": target_topo_connectors,
+        "target_topo_node_features": target_topo_node_features,
         "ref_graphlet_data": ref_graphlet_data,
         "target_graphlet_data": target_graphlet_data,
         "ref_sibling_context_full": ref_sibling_context,

@@ -53,6 +53,7 @@ DATA_COLUMNS = [
     "target_is_dead_end",
     "target_is_intersection",
     "target_degree_signature",  # JSON-serialized tuple
+    "target_topo_sampled",  # JSON-serialized list of (frac, degree) tuples
 ]
 
 
@@ -117,6 +118,59 @@ def _deserialize_degree_sig(raw) -> tuple | None:
         return tuple(json.loads(raw))
     except (json.JSONDecodeError, TypeError):
         return None
+
+
+def _serialize_topo_sampled(sampled: list[tuple[float, int]] | None) -> str | None:
+    """Serialize sampled topology connectors to JSON string.
+
+    Format: [[frac, degree], ...] — same semantics as (frac, node_id) connectors
+    but we store degree directly instead of node_id since node_ids are ephemeral.
+    """
+    if sampled is None:
+        return None
+    try:
+        return json.dumps([[frac, deg] for frac, deg in sampled])
+    except (TypeError, ValueError):
+        return None
+
+
+def _deserialize_topo_sampled(raw) -> list[tuple[float, int]] | None:
+    """Deserialize sampled topology connectors from JSON string.
+
+    Returns list of (frac, degree) tuples.
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    try:
+        data = json.loads(raw)
+        return [(float(frac), int(deg)) for frac, deg in data]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def reconstruct_topo_connectors_from_sampled(
+    sampled: list[tuple[float, int]],
+) -> tuple[list[tuple[float, int]], dict[int, int]]:
+    """Reconstruct connector format from stored sampled topology data.
+
+    The stored format is (frac, degree) tuples. We need to reconstruct
+    (frac, virtual_node_id) connectors + {node_id: degree} node_features
+    for use with compute_aligned_topology_features().
+
+    Args:
+        sampled: List of (frac, degree) tuples from DataStore
+
+    Returns:
+        Tuple of (connectors, node_features) compatible with
+        compute_aligned_topology_features()
+    """
+    connectors = []
+    node_features = {}
+    for i, (frac, degree) in enumerate(sampled):
+        node_id = i  # Sequential IDs — unique within this segment
+        connectors.append((frac, node_id))
+        node_features[node_id] = degree
+    return connectors, node_features
 
 
 def _flatten_topology(prefix: str, topo: dict | None) -> dict:
@@ -275,6 +329,7 @@ class DataStore:
         target_names: dict | None = None,
         ref_topology: dict | None = None,
         target_topology: dict | None = None,
+        target_topo_sampled: list[tuple[float, int]] | None = None,
     ) -> None:
         """Add or update a data record for a labeled pair.
 
@@ -305,6 +360,8 @@ class DataStore:
             target_names: Full target names struct (all variants, all languages)
             ref_topology: Reference topology dict from compute_all_topology()
             target_topology: Target topology dict from compute_all_topology()
+            target_topo_sampled: Sampled topology connectors for target segment,
+                as list of (frac, degree) tuples from sample_topology_along_segment()
         """
         new_row = {
             "gers_id": str(gers_id),
@@ -331,6 +388,7 @@ class DataStore:
             "target_speed_limit_kph_lr": _serialize_lr_data(target_speed_limit_kph_lr),
             **_flatten_topology("ref", ref_topology),
             **_flatten_topology("target", target_topology),
+            "target_topo_sampled": _serialize_topo_sampled(target_topo_sampled),
         }
 
         gdf = self.gdf
@@ -391,6 +449,9 @@ class DataStore:
         # Reconstruct topology dicts (None if columns missing — backward compat)
         result["ref_topology"] = _reconstruct_topology("ref", row)
         result["target_topology"] = _reconstruct_topology("target", row)
+
+        # Sampled target topology connectors (None if not stored — backward compat)
+        result["target_topo_sampled"] = _deserialize_topo_sampled(row.get("target_topo_sampled"))
 
         return result
 
@@ -560,6 +621,33 @@ class DataStore:
             self._gdf.at[idx, "ref_names"] = _serialize_lr_data(ref_names)
         if target_names is not None:
             self._gdf.at[idx, "target_names"] = _serialize_lr_data(target_names)
+
+        return True
+
+    def update_topo_sampled(
+        self,
+        gers_id: str,
+        target_id: str,
+        target_topo_sampled: list[tuple[float, int]] | None = None,
+    ) -> bool:
+        """Update sampled topology connectors for an existing data record.
+
+        Used during backfill to persist sampled target topology so that the
+        full target dataset isn't needed for future backfill runs.
+
+        Returns:
+            True if record was found and updated, False if not found
+        """
+        gdf = self.gdf
+        mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
+
+        if not mask.any():
+            return False
+
+        idx = gdf[mask].index[-1]
+
+        if target_topo_sampled is not None:
+            self._gdf.at[idx, "target_topo_sampled"] = _serialize_topo_sampled(target_topo_sampled)
 
         return True
 

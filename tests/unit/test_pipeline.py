@@ -246,6 +246,8 @@ class TestPrepareWorkerDataParity:
             "aligned_endpoint_features",
             "ref_topology_full",
             "target_topology_full",
+            "target_topo_connectors",
+            "target_topo_node_features",
             "ref_graphlet_data",
             "target_graphlet_data",
             "ref_sibling_context_full",

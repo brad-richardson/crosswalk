@@ -1247,6 +1247,9 @@ def register_commands(app: typer.Typer) -> None:
 
             # --- Phase 5: Override topology with stored values ---
             # 3-tier fallback: stored topology > computed by pipeline > NaN defaults
+            # Also override synthetic connectors from stored sampled topology
+            from matcher.labeling.data_store import reconstruct_topo_connectors_from_sampled
+
             for cand, (_gid, _tid, pair_data) in zip(candidates, candidate_metadata):
                 if pair_data is not None:
                     stored_ref_topo = pair_data.get("ref_topology")
@@ -1255,6 +1258,16 @@ def register_commands(app: typer.Typer) -> None:
                         worker_data["ref_topology_full"][cand.ref_idx] = stored_ref_topo
                     if stored_target_topo:
                         worker_data["target_topology_full"][cand.target_idx] = stored_target_topo
+
+                    # Override synthetic connectors from stored sampled topology
+                    stored_sampled = pair_data.get("target_topo_sampled")
+                    if stored_sampled:
+                        seg_id = str(worker_data["target_ids"][cand.target_idx])
+                        connectors, node_feats = reconstruct_topo_connectors_from_sampled(
+                            stored_sampled
+                        )
+                        worker_data["target_topo_connectors"][seg_id] = connectors
+                        worker_data["target_topo_node_features"].update(node_feats)
 
             # --- Phase 6: Compute features through shared code path ---
             # Uses the exact same _compute_feature_chunk() that inference uses,
@@ -1289,6 +1302,27 @@ def register_commands(app: typer.Typer) -> None:
                             target_id,
                             ref_topology=ref_topo,
                             target_topology=target_topo,
+                        )
+
+                # Backfill sampled target topology connectors into data store
+                if (
+                    has_stored_data
+                    and pair_data is not None
+                    and pair_data.get("target_topo_sampled") is None
+                ):
+                    seg_id = str(worker_data["target_ids"][candidates[i].target_idx])
+                    sampled_connectors = worker_data.get("target_topo_connectors", {}).get(seg_id)
+                    sampled_node_feats = worker_data.get("target_topo_node_features", {})
+                    if sampled_connectors:
+                        # Convert from (frac, node_id) to (frac, degree) for storage
+                        sampled_for_storage = [
+                            (frac, sampled_node_feats.get(nid, 1))
+                            for frac, nid in sampled_connectors
+                        ]
+                        data_store.update_topo_sampled(
+                            gers_id,
+                            target_id,
+                            target_topo_sampled=sampled_for_storage,
                         )
 
                 # Backfill raw names structs into data store
