@@ -477,20 +477,18 @@ def _extract_all_name_variants(names_dict) -> list[str]:
 
 def resolve_best_name_variant(
     ref_names_raw,
-    ref_name: str | None,
-    target_name: str | None,
     target_names_raw=None,
 ) -> tuple[str | None, str | None]:
     """Find the best-matching name variant pair across ref and target.
 
     Bilateral resolution: when both sides have multilingual names, finds the
     (ref_variant, target_variant) pair with highest similarity. When only one
-    side has variants, resolves against the other side's flat name.
+    side has variants, resolves against the other side's primary name.
+
+    Primary names are derived from the structs — no flat name params needed.
 
     Args:
         ref_names_raw: Raw Overture names dict with primary + rules, or None
-        ref_name: Currently resolved reference name (may be None)
-        target_name: Target segment name string (may be None)
         target_names_raw: Raw target names dict (Overture format), or None
 
     Returns:
@@ -499,7 +497,11 @@ def resolve_best_name_variant(
     ref_variants = _extract_all_name_variants(ref_names_raw) if ref_names_raw else []
     target_variants = _extract_all_name_variants(target_names_raw) if target_names_raw else []
 
-    # Neither side has variants — return flat names unchanged
+    # Derive primary names from structs
+    ref_name = ref_names_raw.get("primary") if isinstance(ref_names_raw, dict) else None
+    target_name = target_names_raw.get("primary") if isinstance(target_names_raw, dict) else None
+
+    # Neither side has variants — return primary names
     if not ref_variants and not target_variants:
         return ref_name, target_name
 
@@ -527,7 +529,7 @@ def resolve_best_name_variant(
 
         return best_ref, best_target
 
-    # Only ref has variants — resolve against flat target name
+    # Only ref has variants — resolve against target primary
     if ref_variants and not target_variants:
         if not target_name:
             return ref_name, target_name
@@ -554,7 +556,7 @@ def resolve_best_name_variant(
 
         return best_ref, target_name
 
-    # Only target has variants — resolve against flat ref name
+    # Only target has variants — resolve against ref primary
     if not ref_name:
         return ref_name, target_name
 

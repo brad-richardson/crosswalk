@@ -60,8 +60,6 @@ class TestPrecomputedFeaturePassthrough:
         features = compute_pair_features(
             ref_geom=t_network.geometry.iloc[1],
             target_geom=target_geom,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=precomputed,
@@ -91,8 +89,6 @@ class TestPrecomputedFeaturePassthrough:
         features = compute_pair_features(
             ref_geom=t_network.geometry.iloc[1],
             target_geom=t_network.geometry.iloc[0],
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             ref_topology=topology["main_e"],
@@ -123,8 +119,6 @@ class TestPrecomputedFeaturePassthrough:
         features = compute_pair_features(
             ref_geom=t_network.geometry.iloc[0],
             target_geom=t_network.geometry.iloc[1],
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             graphlet_features=graphlet_input,
@@ -294,8 +288,6 @@ class TestLabelStoreParity:
         features = compute_pair_features(
             ref_geom=LineString([(0, 0), (100, 0)]),
             target_geom=LineString([(0, 5), (100, 5)]),
-            ref_name="Main Street",
-            target_name="Main St",
             ref_class="residential",
             target_class="residential",
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),

@@ -138,6 +138,9 @@ def compute_features_simple(
     Convenience wrapper that fills in defaults for non-geometric params.
     No alignment, topology, or graphlet data - just raw geometry comparison.
     """
+    # Build names structs from flat convenience params
+    ref_names_raw = {"primary": ref_name} if ref_name else None
+    target_names_raw = {"primary": target_name} if target_name else None
     # Compute endpoint features manually
     ref_coords = np.array(ref_line.coords)
     target_coords = np.array(target_line.coords)
@@ -168,13 +171,13 @@ def compute_features_simple(
     return compute_pair_features(
         ref_geom=ref_line,
         target_geom=target_line,
-        ref_name=ref_name,
-        target_name=target_name,
         ref_class=ref_class,
         target_class=target_class,
         endpoint_features=endpoint_features,
         ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
+        ref_names_raw=ref_names_raw,
+        target_names_raw=target_names_raw,
     )
 
 

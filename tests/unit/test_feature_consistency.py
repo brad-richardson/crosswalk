@@ -78,8 +78,6 @@ class TestComputePairFeaturesConsistency:
         features = compute_pair_features(
             ref_geom,
             target_geom,
-            "Main St",
-            "Main St",
             "residential",
             "residential",
             ref_topology=MOCK_TOPOLOGY_FEATURES.copy(),
@@ -95,8 +93,6 @@ class TestComputePairFeaturesConsistency:
         features = compute_pair_features(
             ref_geom,
             target_geom,
-            "Main St",
-            "Main St",
             "residential",
             "residential",
             graphlet_features={"graphlet_similarity": 0.8, "endpoint_degree_similarity": 0.9},
@@ -113,8 +109,6 @@ class TestComputePairFeaturesConsistency:
         features = compute_pair_features(
             ref_geom,
             target_geom,
-            "Main St",
-            "Main St",
             "residential",
             "residential",
             graphlet_features=None,
@@ -200,8 +194,6 @@ class TestCallSiteContextConsistency:
             compute_pair_features(
                 ref_geom=ref,
                 target_geom=target,
-                ref_name="Main St",
-                target_name="Main St",
                 ref_class="residential",
                 target_class="residential",
                 endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -237,8 +229,6 @@ class TestCallSiteContextConsistency:
         features = compute_pair_features(
             ref_geom=gdf.geometry.iloc[0],
             target_geom=gdf.geometry.iloc[1],
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -280,8 +270,6 @@ class TestCallSiteContextConsistency:
         features = compute_pair_features(
             ref_geom=gdf.geometry.iloc[0],
             target_geom=gdf.geometry.iloc[1],
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,

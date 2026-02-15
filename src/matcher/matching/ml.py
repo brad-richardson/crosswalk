@@ -40,7 +40,7 @@ from ..config import (
     default_worker_count,
 )
 from ..utils.crs import validate_projected_crs
-from ..utils.linear_ref import extract_lr_name, extract_lr_value
+from ..utils.linear_ref import extract_lr_value
 from .types import MatchDecision, MatchResult
 
 # Default XGBoost hyperparameters (F1-optimized via Optuna tuning).
@@ -63,8 +63,6 @@ DEFAULT_XGB_PARAMS: dict[str, Any] = {
 class LRAttributes(NamedTuple):
     """Attributes extracted from linear-referenced data for a candidate pair."""
 
-    ref_name: str | None
-    target_name: str | None
     ref_class: str | None
     target_class: str | None
     ref_subclass: str | None
@@ -105,7 +103,7 @@ def _extract_lr_attributes_for_pair(
         worker_data: Worker data dict with LR columns
 
     Returns:
-        LRAttributes named tuple with ref/target name, class, subclass,
+        LRAttributes named tuple with ref/target class, subclass,
         oneway, and speed_limit_kph values.
     """
     # Get alignment fractions
@@ -117,18 +115,6 @@ def _extract_lr_attributes_for_pair(
     else:
         ref_start, ref_end = 0.0, 1.0
         target_start, target_end = 0.0, 1.0
-
-    # Extract reference name from LR data
-    # All datasets are expected to have names_lr populated (Overture has native LR,
-    # target datasets get trivial LR via _add_trivial_lr_columns)
-    ref_name = _extract_lr_name_from_column(
-        worker_data.get("ref_names_lr"), ref_idx, ref_start, ref_end
-    )
-
-    # Extract target name from LR data
-    target_name = _extract_lr_name_from_column(
-        worker_data.get("target_names_lr"), target_idx, target_start, target_end
-    )
 
     # Classes and subclasses - use flat values for now (LR support can be added)
     ref_class = worker_data["ref_classes"][ref_idx]
@@ -153,8 +139,6 @@ def _extract_lr_attributes_for_pair(
     )
 
     return LRAttributes(
-        ref_name=ref_name,
-        target_name=target_name,
         ref_class=ref_class,
         target_class=target_class,
         ref_subclass=ref_subclass,
@@ -172,16 +156,6 @@ def _extract_lr_value_from_column(lr_column, idx: int, start_frac: float, end_fr
         return None
     lr_data = lr_column[idx]
     return extract_lr_value(lr_data, start_frac, end_frac)
-
-
-def _extract_lr_name_from_column(
-    lr_column, idx: int, start_frac: float, end_frac: float
-) -> str | None:
-    """Extract name from an LR column array for a given index and alignment range."""
-    if lr_column is None:
-        return None
-    lr_data = lr_column[idx]
-    return extract_lr_name(lr_data, start_frac, end_frac)
 
 
 def _compute_single_feature(args):
@@ -305,8 +279,6 @@ def _compute_feature_chunk(chunk):
                     "target_idx": target_idx,
                     "geom_sim_ref": geom_sim_ref,
                     "geom_sim_target": geom_sim_target,
-                    "ref_name": lr_attrs.ref_name,
-                    "target_name": lr_attrs.target_name,
                     "ref_class": lr_attrs.ref_class,
                     "target_class": lr_attrs.target_class,
                     "ref_subclass": lr_attrs.ref_subclass,
@@ -432,8 +404,6 @@ def _compute_feature_chunk(chunk):
                 geom_sim_target=pd_item["geom_sim_target"],
                 coords_ref=coords_ref,
                 coords_target=coords_target,
-                ref_name=pd_item["ref_name"],
-                target_name=pd_item["target_name"],
                 ref_class=pd_item["ref_class"],
                 target_class=pd_item["target_class"],
                 ref_subclass=pd_item["ref_subclass"],

@@ -235,12 +235,8 @@ def generate_agent_test_batch(
         """Resolve best name pair using bilateral variant resolution."""
         ref_names = ref_row.get("names") if hasattr(ref_row, "get") else None
         target_names = target_row.get("names") if hasattr(target_row, "get") else None
-        ref_primary = ref_names.get("primary") if isinstance(ref_names, dict) else None
-        target_primary = target_names.get("primary") if isinstance(target_names, dict) else None
         return resolve_best_name_variant(
             ref_names if isinstance(ref_names, dict) else None,
-            ref_primary,
-            target_primary,
             target_names if isinstance(target_names, dict) else None,
         )
 
@@ -700,16 +696,8 @@ def generate_basemap_sweep(
                 val = geom_row["target_names"]
                 target_names_raw = json.loads(val) if isinstance(val, str) else val
 
-            # Extract flat names from structs
-            if isinstance(ref_names_raw, dict):
-                ref_name = ref_names_raw.get("primary")
-            if isinstance(target_names_raw, dict):
-                target_name = target_names_raw.get("primary")
-
             # Resolve best name variant pair
-            ref_name, target_name = resolve_best_name_variant(
-                ref_names_raw, ref_name, target_name, target_names_raw
-            )
+            ref_name, target_name = resolve_best_name_variant(ref_names_raw, target_names_raw)
 
             # Class from direct columns
             if "ref_class" in geom_row.index:

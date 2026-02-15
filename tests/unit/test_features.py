@@ -323,34 +323,37 @@ class TestNonLatinNameHandling:
     # -- resolve_best_name_variant: fallback cases --
 
     @pytest.mark.parametrize(
-        "ref_names_raw,ref_name,target_name,expected",
+        "ref_names_raw,target_names_raw,expected",
         [
-            (None, "Main Street", "Main St", ("Main Street", "Main St")),
+            # Both sides have simple primary-only structs
+            ({"primary": "Main Street"}, {"primary": "Main St"}, ("Main Street", "Main St")),
+            # ref has struct with rules, no target
             (
                 {"primary": "Main St", "rules": [{"value": "Main St"}]},
-                "Main St",
                 None,
                 ("Main St", None),
             ),
+            # ref has struct with empty rules, target has primary-only struct
             (
                 {"primary": "Main Street", "rules": []},
-                "Main Street",
-                "Oak Ave",
+                {"primary": "Oak Ave"},
                 ("Main Street", "Oak Ave"),
             ),
-            ({"primary": "Main Street"}, "Main Street", "Oak Ave", ("Main Street", "Oak Ave")),
+            # ref has primary-only struct, target has primary-only struct
+            ({"primary": "Main Street"}, {"primary": "Oak Ave"}, ("Main Street", "Oak Ave")),
+            # ref has invalid rules, target has primary-only struct
             (
                 {"primary": "Main St", "rules": "invalid"},
-                "Main St",
-                "Oak Ave",
+                {"primary": "Oak Ave"},
                 ("Main St", "Oak Ave"),
             ),
+            # CJK primary with empty rules, target has English primary
             (
                 {"primary": "皇后大道中", "rules": []},
-                "皇后大道中",
-                "Queen's Road",
+                {"primary": "Queen's Road"},
                 ("皇后大道中", "Queen's Road"),
             ),
+            # CJK primary with English rule variant — picks English to match target
             (
                 {
                     "primary": "皇后大道中",
@@ -358,31 +361,30 @@ class TestNonLatinNameHandling:
                         {"value": "Queen's Road Central", "language": "en"},
                     ],
                 },
-                None,
-                "Queen's Road Central",
+                {"primary": "Queen's Road Central"},
                 ("Queen's Road Central", "Queen's Road Central"),
             ),
         ],
         ids=[
-            "none_raw",
-            "none_target",
+            "both_primary",
+            "no_target",
             "empty_rules",
-            "no_rules_key",
-            "non_list_rules",
-            "single_cjk_variant",
-            "none_ref_picks_variant",
+            "primary_only",
+            "invalid_rules",
+            "cjk_vs_english",
+            "cjk_picks_english_variant",
         ],
     )
-    def test_resolve_variant_fallback(self, ref_names_raw, ref_name, target_name, expected):
+    def test_resolve_variant_fallback(self, ref_names_raw, target_names_raw, expected):
         """Edge cases should fall back gracefully."""
-        assert resolve_best_name_variant(ref_names_raw, ref_name, target_name) == expected
+        assert resolve_best_name_variant(ref_names_raw, target_names_raw) == expected
 
     # -- resolve_best_name_variant: selection cases --
 
     @pytest.mark.parametrize(
-        "ref_names_raw,ref_name,target_name,expected_ref",
+        "ref_names_raw,target_names_raw,expected_ref",
         [
-            # CJK primary + English alt → picks English ref
+            # CJK primary + English alt → picks English ref to match target
             (
                 {
                     "primary": "皇后大道中",
@@ -391,8 +393,7 @@ class TestNonLatinNameHandling:
                         {"value": "Queen's Road Central", "language": "en"},
                     ],
                 },
-                "皇后大道中",
-                "Queen's Road Central",
+                {"primary": "Queen's Road Central"},
                 "Queen's Road Central",
             ),
             # French vs English → picks closer to target
@@ -404,11 +405,10 @@ class TestNonLatinNameHandling:
                         {"value": "Rivoli Street", "language": "en"},
                     ],
                 },
-                "Rue de Rivoli",
-                "Rivoli Street",
+                {"primary": "Rivoli Street"},
                 "Rivoli Street",
             ),
-            # Three languages → picks Korean
+            # Three languages → picks Korean to match target
             (
                 {
                     "primary": "東京駅",
@@ -418,11 +418,10 @@ class TestNonLatinNameHandling:
                         {"value": "도쿄역", "language": "ko"},
                     ],
                 },
-                "東京駅",
-                "도쿄역",
+                {"primary": "도쿄역"},
                 "도쿄역",
             ),
-            # Three languages → picks English
+            # Three languages → picks English to match target
             (
                 {
                     "primary": "東京駅",
@@ -432,8 +431,7 @@ class TestNonLatinNameHandling:
                         {"value": "도쿄역", "language": "ko"},
                     ],
                 },
-                "東京駅",
-                "Tokyo Station",
+                {"primary": "Tokyo Station"},
                 "Tokyo Station",
             ),
             # Deduplicates case-insensitive, picks best match
@@ -446,15 +444,13 @@ class TestNonLatinNameHandling:
                         {"value": "Oak Avenue", "variant": "alt"},
                     ],
                 },
-                "Main Street",
-                "Oak Avenue",
+                {"primary": "Oak Avenue"},
                 "Oak Avenue",
             ),
-            # Ref CJK with English variant, flat target string
+            # Ref CJK with English variant, target has English primary
             (
                 {"primary": "北京路", "rules": [{"value": "Beijing Road", "language": "en"}]},
-                "北京路",
-                "Beijing Road",
+                {"primary": "Beijing Road"},
                 "Beijing Road",
             ),
             # Malformed rules skipped, valid one picked
@@ -469,8 +465,7 @@ class TestNonLatinNameHandling:
                         {"value": "Beijing Road", "language": "en"},
                     ],
                 },
-                "北京路",
-                "Beijing Road",
+                {"primary": "Beijing Road"},
                 "Beijing Road",
             ),
         ],
@@ -484,9 +479,9 @@ class TestNonLatinNameHandling:
             "malformed_rules_skipped",
         ],
     )
-    def test_resolve_variant_selects_best(self, ref_names_raw, ref_name, target_name, expected_ref):
+    def test_resolve_variant_selects_best(self, ref_names_raw, target_names_raw, expected_ref):
         """Should select the closest-matching ref variant."""
-        result_ref, _result_target = resolve_best_name_variant(ref_names_raw, ref_name, target_name)
+        result_ref, _result_target = resolve_best_name_variant(ref_names_raw, target_names_raw)
         assert result_ref == expected_ref
 
 
@@ -503,9 +498,7 @@ class TestBilateralResolution:
             "primary": "Hoi Wing Road 海榮路",
             "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
         }
-        ref_result, target_result = resolve_best_name_variant(
-            ref_names, "海榮路 Hoi Wing Road", "Hoi Wing Road 海榮路", target_names
-        )
+        ref_result, target_result = resolve_best_name_variant(ref_names, target_names)
         # Should find exact English match on both sides
         assert ref_result == "Hoi Wing Road"
         assert target_result == "Hoi Wing Road"
@@ -520,9 +513,7 @@ class TestBilateralResolution:
             "primary": "北京路",
             "common": [["en", "Beijing Rd"], ["zh", "北京路"]],
         }
-        ref_result, target_result = resolve_best_name_variant(
-            ref_names, "北京路", "Beijing Rd", target_names
-        )
+        ref_result, target_result = resolve_best_name_variant(ref_names, target_names)
         # Exact CJK match should beat partial English match
         assert ref_result == "北京路"
         assert target_result == "北京路"
@@ -537,9 +528,7 @@ class TestBilateralResolution:
             "primary": "Queen's Road Central",
             "common": [["en", "Queen's Road Central"], ["zh", "皇后大道中"]],
         }
-        ref_result, target_result = resolve_best_name_variant(
-            ref_names, "皇后大道中", "Queen's Road Central", target_names
-        )
+        ref_result, target_result = resolve_best_name_variant(ref_names, target_names)
         # Should find exact English or CJK match
         assert ref_result in ("Queen's Road Central", "皇后大道中")
         assert target_result == ref_result  # Should be the same string
@@ -554,21 +543,19 @@ class TestBilateralResolution:
             "primary": "Main Street",
             "common": [["en", "Main Street"], ["fr", "Rue Principale"]],
         }
-        ref_result, target_result = resolve_best_name_variant(
-            ref_names, "Hauptstraße", "Main Street", target_names
-        )
+        ref_result, target_result = resolve_best_name_variant(ref_names, target_names)
         # No matching language, returns best fuzzy pair
         assert ref_result is not None
         assert target_result is not None
 
     def test_target_only_variants_resolves_best(self):
-        """Only target has names struct, ref has flat name."""
+        """Only target has names struct, ref has primary name."""
         target_names = {
             "primary": "海榮路 Hoi Wing Road",
             "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
         }
         ref_result, target_result = resolve_best_name_variant(
-            None, "Hoi Wing Road", "海榮路 Hoi Wing Road", target_names
+            {"primary": "Hoi Wing Road"}, target_names
         )
         # Should pick English target variant to match ref
         assert ref_result == "Hoi Wing Road"
@@ -592,17 +579,15 @@ class TestBilateralResolution:
             "primary": "Hoi Wing Road",
             "common": [["en", "Hoi Wing Road"], ["zh", "海榮路"]],
         }
-        ref_result, target_result = resolve_best_name_variant(
-            ref_names, "海榮路 Hoi Wing Road", "Hoi Wing Road", target_names
-        )
+        ref_result, target_result = resolve_best_name_variant(ref_names, target_names)
         assert ref_result == "Hoi Wing Road"
         assert target_result == "Hoi Wing Road"
 
-    def test_both_none_names_raw_returns_flat(self):
-        """When both names_raw are None, returns flat names unchanged."""
-        ref_result, target_result = resolve_best_name_variant(None, "Main St", "Main Street", None)
-        assert ref_result == "Main St"
-        assert target_result == "Main Street"
+    def test_both_none_returns_none(self):
+        """When both names_raw are None, returns (None, None)."""
+        ref_result, target_result = resolve_best_name_variant(None, None)
+        assert ref_result is None
+        assert target_result is None
 
 
 class TestExtractAllNameVariants:
@@ -833,25 +818,23 @@ class TestExtractAllNameVariants:
     # -- resolve_best_name_variant with common dict --
 
     @pytest.mark.parametrize(
-        "names,ref_name,target_name,expected_ref",
+        "ref_names_raw,target_names_raw,expected_ref",
         [
             (
                 {"primary": "Le Léman", "common": {"en": "Lake Geneva", "de": "Genfersee"}},
-                "Le Léman",
-                "Lake Geneva",
+                {"primary": "Lake Geneva"},
                 "Lake Geneva",
             ),
             (
                 {"primary": "Невский проспект", "common": {"en": "Nevsky Prospect"}},
-                "Невский проспект",
-                "Nevsky Prospect",
+                {"primary": "Nevsky Prospect"},
                 "Nevsky Prospect",
             ),
         ],
         ids=["french_to_english", "cyrillic_to_english"],
     )
-    def test_resolve_uses_common_dict(self, names, ref_name, target_name, expected_ref):
-        result_ref, _result_target = resolve_best_name_variant(names, ref_name, target_name)
+    def test_resolve_uses_common_dict(self, ref_names_raw, target_names_raw, expected_ref):
+        result_ref, _result_target = resolve_best_name_variant(ref_names_raw, target_names_raw)
         assert result_ref == expected_ref
 
 
@@ -1207,8 +1190,6 @@ class TestComputePairFeaturesWithAlignment:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name="Main Street",
-            target_name="Main Street",
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
@@ -1238,8 +1219,6 @@ class TestComputePairFeaturesWithAlignment:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name="Main Street",
-            target_name="Main Street",
             ref_class="residential",
             target_class="residential",
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -1266,8 +1245,6 @@ class TestComputePairFeaturesWithAlignment:
         features_aligned = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1279,8 +1256,6 @@ class TestComputePairFeaturesWithAlignment:
         features_unaligned = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -1314,8 +1289,6 @@ class TestComputePairFeaturesWithAlignment:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name="Main Street",
-            target_name="Main Street",
             ref_class="residential",
             target_class="residential",
             alignment=alignment,
@@ -1348,8 +1321,6 @@ class TestComputePairFeaturesWithAlignment:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1394,8 +1365,6 @@ class TestLengthRatioUsesFullGeometry:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=alignment,
@@ -1421,8 +1390,6 @@ class TestLengthRatioUsesFullGeometry:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=MOCK_ENDPOINT_FEATURES,
@@ -1460,8 +1427,6 @@ class TestEndpointProximityInfCapping:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
@@ -1489,8 +1454,6 @@ class TestEndpointProximityInfCapping:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             endpoint_features=endpoint_features,
@@ -2154,8 +2117,6 @@ class TestAlignedLengthM:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=AlignmentResult(
@@ -2182,8 +2143,6 @@ class TestAlignedLengthM:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=None,
@@ -2207,8 +2166,6 @@ class TestAlignedLengthM:
         features = compute_pair_features(
             ref_geom=ref,
             target_geom=target,
-            ref_name=None,
-            target_name=None,
             ref_class=None,
             target_class=None,
             alignment=AlignmentResult(

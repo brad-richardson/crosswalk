@@ -170,8 +170,6 @@ def _compute_non_geometric_features(
     geom_sim_target,
     coords_ref: "np.ndarray",
     coords_target: "np.ndarray",
-    ref_name: str | None,
-    target_name: str | None,
     ref_class: str | None,
     target_class: str | None,
     ref_subclass: str | None,
@@ -211,8 +209,6 @@ def _compute_non_geometric_features(
         geom_sim_target: Target geometry for similarity (may be subline)
         coords_ref: Pre-extracted coordinates for geom_sim_ref
         coords_target: Pre-extracted coordinates for geom_sim_target
-        ref_name: Reference segment name
-        target_name: Target segment name
         ref_class: Reference road class
         target_class: Target road class
         ref_subclass: Reference road subclass
@@ -252,7 +248,7 @@ def _compute_non_geometric_features(
     # comparisons (e.g., Chinese primary name + English alt vs English target).
     with timed_section("name_variant_resolution"):
         effective_ref_name, effective_target_name = resolve_best_name_variant(
-            ref_names_raw, ref_name, target_name, target_names_raw
+            ref_names_raw, target_names_raw
         )
 
     with timed_section("name_similarity"):
@@ -436,7 +432,7 @@ def _compute_non_geometric_features(
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = find_parallel_sibling(
                 segment=geom_sim_ref,  # Use subline, not full geometry
                 segment_id=ref_seg_id,
-                segment_name=ref_name,
+                segment_name=effective_ref_name,
                 segment_class=ref_class,
                 spatial_index=ref_sibling_context.spatial_index,
                 segment_data=ref_sibling_context.segment_data,
@@ -454,7 +450,7 @@ def _compute_non_geometric_features(
             has_sibling_target, sibling_dist_target, _ = find_parallel_sibling(
                 segment=geom_sim_target,  # Use subline, not full geometry
                 segment_id=target_seg_id,
-                segment_name=target_name,
+                segment_name=effective_target_name,
                 segment_class=target_class,
                 spatial_index=target_sibling_context.spatial_index,
                 segment_data=target_sibling_context.segment_data,
@@ -850,8 +846,6 @@ def _compute_intersection_overlap_features(
 def compute_pair_features(
     ref_geom,
     target_geom,
-    ref_name: str | None,
-    target_name: str | None,
     ref_class: str | None,
     target_class: str | None,
     ref_subclass: str | None = None,
@@ -879,8 +873,6 @@ def compute_pair_features(
     Args:
         ref_geom: Reference geometry (LineString)
         target_geom: Target geometry (LineString)
-        ref_name: Reference segment name
-        target_name: Target segment name
         ref_class: Reference road class
         target_class: Target road class
         ref_subclass: Reference road subclass (optional)
@@ -990,8 +982,6 @@ def compute_pair_features(
             geom_sim_target=geom_for_similarity_target,
             coords_ref=coords_ref,
             coords_target=coords_target,
-            ref_name=ref_name,
-            target_name=target_name,
             ref_class=ref_class,
             target_class=target_class,
             ref_subclass=ref_subclass,
