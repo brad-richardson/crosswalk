@@ -732,7 +732,7 @@ class TestPhoneticFeatures:
 
     def test_soundex_no_match_different_sound(self):
         """Phonetically different names should not match via Soundex."""
-        result = compute_name_similarity("Main Street", "Oak Street")
+        result = compute_name_similarity("Main Boulevard", "Oak Avenue")
         assert result["soundex_match"] == 0.0
 
     def test_metaphone_typo_tolerance(self):

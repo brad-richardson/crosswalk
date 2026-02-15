@@ -189,6 +189,33 @@ STREET_ABBREVIATIONS = {
 # Default result when names are missing - use NaN for similarity scores
 # so the ML model (XGBoost) can learn to handle missing names natively.
 # has_name_ref/has_name_target encode name presence as binary indicators.
+# Road type words to exclude from Soundex comparison — these appear in most names
+# and match trivially ("Main Street" vs "Oak Street" would match on "street").
+# Derived from the expanded forms in STREET_ABBREVIATIONS plus common types.
+_ROAD_TYPE_WORDS = frozenset(
+    w
+    for phrase in STREET_ABBREVIATIONS.values()
+    for w in phrase.split()
+) | {
+    "calle", "avenida", "paseo", "camino",  # Spanish
+    "rue", "chemin", "impasse",  # French
+    "rua", "estrada",  # Portuguese
+    "strasse", "weg", "gasse",  # German
+}
+
+
+def _soundex_content_words(name: str) -> set[str]:
+    """Compute Soundex codes for content words (excluding road type words)."""
+    words = [w for w in name.split() if w and w not in _ROAD_TYPE_WORDS]
+    if not words:
+        # All words were road types — fall back to longest word
+        words = name.split()
+        if not words:
+            return set()
+        words = [max(words, key=len)]
+    return {jellyfish.soundex(w) for w in words}
+
+
 _nan = float("nan")
 _MISSING_NAMES_RESULT = {
     "levenshtein_ratio": _nan,
@@ -374,12 +401,13 @@ def compute_name_similarity(
         soundex_match = _nan
         metaphone_similarity = _nan
     else:
-        # Use first word for Soundex (usually the main street name)
-        first_word_a = norm_a.split()[0] if norm_a else ""
-        first_word_b = norm_b.split()[0] if norm_b else ""
-        soundex_a = jellyfish.soundex(first_word_a) if first_word_a else ""
-        soundex_b = jellyfish.soundex(first_word_b) if first_word_b else ""
-        soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
+        # Soundex on content words (excluding road type suffixes/prefixes).
+        # After normalization, abbreviations are expanded ("st" → "street", etc.)
+        # so we filter those out to compare the distinguishing name parts.
+        # Works for both English ("Main Street") and Romance ("Calle Nueva").
+        codes_a = _soundex_content_words(norm_a)
+        codes_b = _soundex_content_words(norm_b)
+        soundex_match = 1.0 if codes_a and codes_b and codes_a & codes_b else 0.0
 
         # Metaphone on full name for better typo tolerance
         metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
