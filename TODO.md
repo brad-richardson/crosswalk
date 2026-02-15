@@ -127,20 +127,61 @@ LINESTRING (144.734621881638 -37.8674845946421, 144.73467978024 -37.867457431670
 
 Features: `from_degree_ref=4, to_degree_ref=4` (correct), `from_degree_target=1, to_degree_target=1` (incorrect — should reflect intersection degree at alignment boundary).
 
-### Audit Full-Geometry vs Subline Usage Across Pipeline
+### HIGH: Drop `length_ratio` and `centroid_distance_m` Features
+
+**Priority:** High
+
+**Background:** Full audit of all 74 features' geometry provenance (Feb 2026) confirmed that most features correctly use aligned sublines. Two features should be dropped:
+
+**`length_ratio`** — `min(full_len_a, full_len_b) / max(full_len_a, full_len_b)` using full segment lengths. This is purely a segmentation artifact: a 50m local road overlapping a 500m Overture segment gives 0.1, penalizing a perfectly valid match. Coverage features (`ref_coverage`, `target_coverage`, `coverage_ratio`) already capture the alignment relationship meaningfully. The aligned-geometry ratio would always be ~1.0, confirming it measures segmentation, not match quality.
+
+**`centroid_distance_m`** — Distance between centroids of aligned sublines. Redundant single-point summary: hausdorff distance (3 variants), buffer_iou (2 variants), lateral_offset (3 variants), and edge_distance_rmse already capture geometric similarity in richer detail. Not in the permutation importance top 14 (below +0.11% F1 drop).
+
+**Steps:**
+1. Remove `length_ratio` from `FEATURE_CATEGORIES["Geometric"]` in `config.py`
+2. Remove `centroid_distance_m` from `FEATURE_CATEGORIES["Geometric"]` in `config.py`
+3. Remove length_ratio computation in `compute.py` (`compute_pair_features` + `assemble_feature_dict`)
+4. Remove centroid_distance from `geometric.py` (`GeometricFeatures` NamedTuple, `BatchGeometricResult`, batch computation)
+5. Clean up references in `data_loader.py`, `features.js`, `ml.py`
+6. Backfill features (`matcher backfill`), retrain model (`matcher train`)
+7. Run ablation: compare CV F1 before/after to confirm no degradation
+8. Run before/after match comparison on Boston datasets
+
+### Medium: Audit Topology Fallback Path Usage
 
 **Priority:** Medium
-**Problem:** Some features use original (full) geometries while others use alignment-clipped sublines, and the rationale isn't always clear. Inconsistencies have already caused bugs (e.g. `length_ratio` divergence between compute.py and ml.py, fixed in PR #189).
 
-**Audit scope:**
-- `length_ratio` — currently uses full-geometry lengths. Subline ratio is always ~1.0 (useless). But full-geometry ratio penalizes segmentation differences that are normal. Coverage features (`ref_coverage`, `target_coverage`, `coverage_ratio`) may already subsume this — consider dropping `length_ratio` entirely.
-- `hausdorff_distance_m` — uses sublines (via `ref_geom_aligned/target_geom_aligned`). Correct for measuring shape similarity of the matched portion.
-- `centroid_distance_m` — uses sublines. Should this use full geometries instead? Centroid of a subline vs centroid of the full segment could give different signals.
-- Lateral offset features — uses sublines. Correct (measures offset of matched portion).
-- `heading_delta` — uses sublines. Correct for partial matches where only part of the segment aligns.
-- Document the rationale for each choice and whether any features should switch.
+**Problem:** Topology features have two computation paths:
+1. **Aligned path** (when `graphlet_data` available): Uses `compute_aligned_topology_features()` to find nearest connectors at alignment boundary fractions. Correct.
+2. **Fallback path** (when `graphlet_data` unavailable): Uses `ref_topology_full`/`target_topology_full` with full segment endpoint degrees. Incorrect for partial matches.
 
-**Location:** `src/matcher/features/compute.py` (subline extraction logic ~line 950), `src/matcher/matching/ml.py` (batch path)
+In `pipeline.py`, both ref and target graphlet data are always precomputed, so the aligned path should always be active during ML scoring. The fallback may only trigger in labeling UI or edge cases.
+
+**Steps:**
+1. Add logging to trace whether `use_aligned_topology=False` ever triggers in practice
+2. If the fallback IS used: ensure `graphlet_data` is always precomputed (make non-optional)
+3. If effectively dead code: add assertion/warning, document
+4. Connects to "Target-Side Aligned Topology" item above
+
+**Location:** `src/matcher/features/compute.py` (lines 351-404)
+
+### Low: Update Geometry Provenance Documentation
+
+**Priority:** Low
+
+The `GEOMETRY PROVENANCE` comment in `config.py` (lines 149-160) needs updates after the full audit:
+- Endpoint features are already alignment-aware (via `compute_aligned_endpoint_features_batch`), not "pre-computed on full"
+- Topology features are alignment-aware when graphlet_data is available (the common ML scoring path)
+- `aligned_length_m` is semantically aligned (computed via `full_length * fraction`)
+- Remove references to dropped features (`length_ratio`, `centroid_distance_m`)
+
+**Audit results summary (Feb 2026):**
+- 34 features correctly use aligned sublines
+- 11 features correctly use full geometry by design (coverage, intersection overlap, aligned_length_m)
+- 8 features are alignment-aware via connector snapping (endpoint, graphlet, clustering)
+- 11 semantic features use no geometry
+- 2 features dropped (length_ratio, centroid_distance_m)
+- 12 topology features: aligned when graphlet_data available (common path), full geometry in fallback (audit needed)
 
 ### Dual Carriageway / Centerline Handling
 
