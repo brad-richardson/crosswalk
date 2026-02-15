@@ -342,15 +342,6 @@ class MatcherSettings(BaseSettings):
         default=50.0,
         description="Candidate search radius (meters)",
     )
-    max_heading_diff: float = Field(
-        default=45.0,
-        description="Maximum heading difference for candidates (degrees)",
-    )
-    max_length_ratio: float = Field(
-        default=5.0,
-        description="Maximum length ratio for candidates",
-    )
-
     # Scoring thresholds (per-candidate, used by ML scorer for bridge file output)
     scoring_match_threshold: float = Field(
         default=0.5,

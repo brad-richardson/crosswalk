@@ -27,9 +27,7 @@ class PipelineError(Exception):
 def score_candidates_from_geodataframes(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
-    buffer_distance_m: float = 75.0,
-    max_heading_diff: float = 90.0,
-    max_length_ratio: float = 20.0,
+    buffer_distance_m: float | None = None,
     ref_id_column: str = "id",
     target_id_column: str = "id",
     ref_name_column: str = NAMES_COLUMN,
@@ -49,9 +47,7 @@ def score_candidates_from_geodataframes(
     Args:
         reference: Reference GeoDataFrame (Overture)
         target: Target GeoDataFrame (local data)
-        buffer_distance_m: Candidate search radius in meters
-        max_heading_diff: Max heading difference for blocking filter
-        max_length_ratio: Max length ratio for blocking filter
+        buffer_distance_m: Candidate search radius in meters (None = settings default)
         ref_id_column: ID column in reference
         target_id_column: ID column in target
         ref_name_column: Name column in reference
@@ -81,8 +77,6 @@ def score_candidates_from_geodataframes(
         reference=reference_proj,
         target=target_proj,
         buffer_distance_m=buffer_distance_m,
-        max_heading_diff=max_heading_diff,
-        max_length_ratio=max_length_ratio,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )
@@ -184,8 +178,6 @@ def run_pipeline(
     output_path: Path,
     method: str = "xgboost",
     buffer_distance_m: float = 75.0,
-    max_heading_diff: float = 90.0,  # Relaxed for aggressive matching
-    max_length_ratio: float = 20.0,  # Relaxed for aggressive matching
     min_confidence: float = 0.1,  # Lower = more aggressive matching
     progress_callback: Callable[[int], None] | None = None,
     ref_id_column: str = "id",
@@ -286,8 +278,6 @@ def run_pipeline(
         reference=reference,
         target=target,
         buffer_distance_m=buffer_distance_m,
-        max_heading_diff=max_heading_diff,
-        max_length_ratio=max_length_ratio,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
         ref_name_column=ref_name_column,
