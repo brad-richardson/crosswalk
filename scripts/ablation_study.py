@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from matcher.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
 from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
 from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import MLMatcher, segment_aware_split
+from matcher.matching.ml import DEFAULT_XGB_PARAMS, MLMatcher, segment_aware_split
 
 
 def _make_ablation_categories() -> dict[str, list[str]]:
@@ -120,24 +120,14 @@ def classify_feature(f1_delta: float) -> str:
 
 
 def _get_xgb_params(seed: int, scale_pos_weight: float) -> dict:
-    """Return XGBoost hyperparameters used across all ablation experiments."""
+    """Return XGBoost hyperparameters from the shared default in ml.py."""
     try:
         import xgboost  # noqa: F401
     except ImportError as err:
         raise ImportError("XGBoost is required. Install with: pip install xgboost") from err
 
     return {
-        "n_estimators": 912,
-        "max_depth": 7,
-        "learning_rate": 0.010636101749852585,
-        "min_child_weight": 5,
-        "subsample": 0.8761081830856152,
-        "colsample_bytree": 0.9616639656253169,
-        "gamma": 0.30396926808636227,
-        "reg_alpha": 1.724985773632091,
-        "reg_lambda": 2.7011840568401686,
-        "max_bin": 147,
-        "tree_method": "hist",
+        **DEFAULT_XGB_PARAMS,
         "objective": "binary:logistic",
         "eval_metric": "logloss",
         "random_state": seed,
@@ -291,9 +281,7 @@ def run_permutation_importance(
 
     logger.info("Running permutation importance analysis...")
 
-    X_train, X_test, y_train, y_test, _, _, _, feature_names = _prepare_data(
-        labels_dir, seed
-    )
+    X_train, X_test, y_train, y_test, _, _, _, feature_names = _prepare_data(labels_dir, seed)
     model, _ = _train_model(X_train, y_train, X_test, y_test, seed)
 
     # Baseline test F1
