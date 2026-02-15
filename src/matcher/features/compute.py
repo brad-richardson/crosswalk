@@ -547,8 +547,8 @@ def _compute_non_geometric_features(
 
     return {
         # Per-pair geometric features (not batchable)
-        "mean_hausdorff_distance_m": mean_hausdorff,
-        "hausdorff_p95_m": p95_hausdorff,
+        "mean_hausdorff_distance_m": min(mean_hausdorff, MAX_DISTANCE_METERS),
+        "hausdorff_p95_m": min(p95_hausdorff, MAX_DISTANCE_METERS),
         "collinear_gap_ratio": collinear_gap_ratio,
         # Semantic - name
         "name_levenshtein": name_sim["levenshtein_ratio"],
@@ -638,7 +638,7 @@ def _compute_non_geometric_features(
         "likely_representation_mismatch": likely_representation_mismatch,
         # Shape/geometric features (new)
         "angle_histogram_similarity": angle_histogram_similarity,
-        "edge_distance_rmse_m": edge_distance_rmse_m,
+        "edge_distance_rmse_m": min(edge_distance_rmse_m, MAX_DISTANCE_METERS),
         # Crossing angle features (4) - detect ACROSS-role segments (2 per side)
         "crossing_angle_min_ref": crossing_ref["crossing_angle_min"],
         "transverse_neighbor_fraction_ref": crossing_ref["transverse_neighbor_fraction"],
@@ -1006,7 +1006,7 @@ def compute_pair_features(
         # Merge batchable geometric features with non-geometric features
         features = {
             # Batchable geometric features (from compute_geometric_features)
-            "hausdorff_distance_m": geom_features.hausdorff_distance,
+            "hausdorff_distance_m": min(geom_features.hausdorff_distance, MAX_DISTANCE_METERS),
             "buffer_iou_5m": geom_features.buffer_iou_5m,
             "buffer_iou_15m": geom_features.buffer_iou_15m,
             "heading_delta": geom_features.heading_delta,
@@ -1018,7 +1018,7 @@ def compute_pair_features(
             / max(ref_geom.length, target_geom.length)
             if max(ref_geom.length, target_geom.length) > 0
             else 0.0,
-            "centroid_distance_m": geom_features.centroid_distance,
+            "centroid_distance_m": min(geom_features.centroid_distance, MAX_DISTANCE_METERS),
             # Aligned length (computed in this function, not _compute_non_geometric_features)
             "aligned_length_m": aligned_length_m,
             # Non-geometric and per-pair geometric features
