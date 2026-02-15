@@ -46,6 +46,7 @@ from shapely import distance as shapely_distance
 
 from ..config import (
     DEFAULT_EXPECTED_HALF_WIDTH_M,
+    DEFAULT_SNAP_TOLERANCE_M,
     EXPECTED_HALF_WIDTH_BY_CLASS_M,
     PARALLEL_SIBLING_MAX_OFFSET_M,
     PARALLEL_SIBLING_MIN_OFFSET_M,
@@ -399,7 +400,7 @@ def compute_relational_features(
 def compute_endpoint_proximity(
     target_geom: LineString,
     endpoint_coords: np.ndarray,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     *,
     target_coords: np.ndarray | None = None,
 ) -> tuple[float, float, int]:

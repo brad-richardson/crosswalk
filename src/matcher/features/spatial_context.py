@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from matcher.topology.sparse_graph import SparseGraph
 
-from matcher.config import MAX_DISTANCE_METERS
+from matcher.config import DEFAULT_SNAP_TOLERANCE_M, MAX_DISTANCE_METERS
 
 from ._jit_helpers import query_nearby_endpoints_numba
 from .relational import (
@@ -458,7 +458,7 @@ class SpatialContextIndex:
     def infer_connectivity(
         self,
         segment_idx: int,
-        tolerance_m: float = 5.0,
+        tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     ) -> list[int]:
         """Infer segments connected to this one via endpoint proximity.
 
@@ -516,7 +516,7 @@ class SpatialContextIndex:
 def infer_endpoint_degree(
     geom: LineString,
     context: SpatialContextIndex,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
 ) -> tuple[int, int]:
     """Infer degree at each endpoint based on nearby segment count.
 
@@ -566,7 +566,7 @@ def compute_endpoint_features(
     target_geom: LineString,
     context: SpatialContextIndex,
     exclude_segment_idx: int | None = None,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
 ) -> dict[str, float]:
     """Compute endpoint connectivity features for a target segment.
 
@@ -643,7 +643,7 @@ def compute_aligned_endpoint_features(
     start_frac: float = 0.0,
     end_frac: float = 1.0,
     exclude_segment_idx: int | None = None,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     seg_id: str | None = None,
     seg_to_connectors: dict[str, list[tuple[float, int]]] | None = None,
 ) -> dict[str, float]:
@@ -741,7 +741,7 @@ def compute_aligned_endpoint_features_batch(
 
     import shapely
 
-    tolerance_m = 5.0
+    tolerance_m = DEFAULT_SNAP_TOLERANCE_M
     radius = tolerance_m * 2  # Same search radius as compute_aligned_endpoint_features
 
     # 1. Extract alignment data into arrays
@@ -878,7 +878,7 @@ def compute_aligned_endpoint_features_batch(
 def compute_topology_features(
     geom: LineString,
     context: SpatialContextIndex,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
 ) -> dict[str, float]:
     """Compute topology features for a segment based on inferred connectivity.
 
@@ -1196,7 +1196,7 @@ def compute_all_topology_explicit(
 def compute_all_topology(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     ids_to_compute: set[str] | None = None,
     connectors_column: str | None = None,
     return_spatial_index: bool = False,
@@ -1608,7 +1608,7 @@ def compute_degree_signature_similarity(
 def build_inferred_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
 ) -> tuple["SparseGraph", dict[str, int], dict[str, int]]:
     """Build sparse graph from spaghetti geometry using endpoint clustering.
 
@@ -1984,7 +1984,7 @@ def build_connector_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
     connectors_column: str = "connectors",
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     degrees_only: bool = False,
 ) -> tuple[
     "SparseGraph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]
@@ -2125,7 +2125,7 @@ def _build_inferred_graph_with_features(
 def build_inferred_connector_graph(
     gdf: gpd.GeoDataFrame,
     id_column: str = "id",
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     degrees_only: bool = False,
 ) -> tuple[
     "SparseGraph | None", dict[str, list[tuple[float, int]]], dict[int, np.ndarray] | dict[int, int]

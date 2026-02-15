@@ -9,7 +9,7 @@ import geopandas as gpd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..config import CLASS_COLUMN, DATA_VERSION, NAMES_COLUMN
+from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN
 from ..filenames import extract_version_from_filename
 from ..matching import MatchDecision, optimize_with_one_to_many
 from ..resolution import generate_bridge_file, generate_unmatched_report
@@ -335,7 +335,7 @@ def run_pipeline(
         # Contiguity tolerance: segments within 5m of each other are considered
         # connected for 1:N matching. This is tighter than buffer_distance (75m)
         # because we want to be confident segments are actually adjacent, not just nearby.
-        contiguity_tolerance=5.0,
+        contiguity_tolerance=DEFAULT_SNAP_TOLERANCE_M,
         target_id_column=target_id_column,
     )
 

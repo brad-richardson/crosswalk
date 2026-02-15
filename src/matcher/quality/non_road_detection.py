@@ -17,6 +17,8 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import LineString, Point, Polygon
 
+from ..config import DEFAULT_SNAP_TOLERANCE_M
+
 
 @dataclass
 class NonRoadDetectionReport:
@@ -54,7 +56,7 @@ class NonRoadDetectionReport:
         }
 
 
-def is_closed_loop(geometry: LineString, tolerance_m: float = 5.0) -> bool:
+def is_closed_loop(geometry: LineString, tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M) -> bool:
     """Detect if linestring forms a closed polygon-like shape.
 
     Plazas, squares, and roundabouts often form closed loops.
@@ -149,7 +151,7 @@ def detect_non_road_features(
     non_road_type_codes: set[str] | None = None,
     check_closed_loops: bool = True,
     compactness_threshold: float = 0.3,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
 ) -> pd.Series:
     """Flag features that appear to be non-roads.
 
@@ -205,7 +207,7 @@ def analyze_non_road_features(
     non_road_type_codes: set[str] | None = None,
     check_closed_loops: bool = True,
     compactness_threshold: float = 0.3,
-    tolerance_m: float = 5.0,
+    tolerance_m: float = DEFAULT_SNAP_TOLERANCE_M,
     max_examples: int = 20,
     id_column: str = "id",
     name_column: str | None = "names",
