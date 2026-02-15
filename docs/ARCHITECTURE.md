@@ -47,16 +47,16 @@ Use cross-validation or holdout evaluation for unbiased metrics:
 
 ```bash
 # Cross-validation (default: 5-fold, segment-aware splitting)
-matcher ml eval
+matcher eval
 
 # Evaluate an existing model on 20% holdout
-matcher ml eval --model data/models/matcher_model_combined.joblib
+matcher eval --model data/models/matcher_model_combined.joblib
 
 # Custom folds or seed
-matcher ml eval --cv-folds 10 --seed 123
+matcher eval --cv-folds 10 --seed 123
 
 # Evaluate on specific dataset(s)
-matcher ml eval --model data/models/matcher_model_combined.joblib -d us_frisco_trails
+matcher eval --model data/models/matcher_model_combined.joblib -d us_frisco_trails
 ```
 
 **Why holdout/CV matters:**

@@ -230,7 +230,7 @@ class TestLabelFeatureParity:
                 pytest.fail(
                     f"{len(missing)} labels ({missing_pct:.1f}%) without features. "
                     f"Sample: {sample}\n"
-                    f"Run 'matcher labels backfill' to compute missing features."
+                    f"Run 'matcher backfill' to compute missing features."
                 )
             else:
                 import warnings
@@ -490,7 +490,7 @@ class TestCrossStoreReferentialIntegrity:
                     by_ds[ds] = by_ds.get(ds, 0) + 1
                 pytest.fail(
                     f"{len(missing)} agent labels ({missing_pct:.1f}%) without features: {by_ds}\n"
-                    f"Run 'matcher labels backfill' to compute missing features."
+                    f"Run 'matcher backfill' to compute missing features."
                 )
 
     def test_labels_have_backing_data(self):
@@ -788,7 +788,7 @@ class TestMatchLabelFeatureQuality:
                 f"{len(bad)} match labels have error-default features "
                 f"(hausdorff={MAX_DISTANCE_METERS}, buffer_iou=0): {by_dataset}\n"
                 f"This indicates feature computation failures. "
-                f"Run 'matcher labels backfill' to recompute."
+                f"Run 'matcher backfill' to recompute."
             )
 
     def test_match_labels_centroid_distance_reasonable(self, match_features_df):

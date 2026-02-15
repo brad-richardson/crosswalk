@@ -598,7 +598,7 @@ class LabelStore:
 
         if len(result) < len(human_labels):
             missing = len(human_labels) - len(result)
-            logger.warning(f"{missing} labels missing features (run 'matcher labels backfill')")
+            logger.warning(f"{missing} labels missing features (run 'matcher backfill')")
 
         return result
 

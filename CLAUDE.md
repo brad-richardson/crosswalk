@@ -59,7 +59,7 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
    - Add to `compute_pair_features()` return dict
    - Add to `_get_error_features()` with a sensible default
 
-4. **Backfill existing labels**: Run `matcher labels backfill` to compute the new feature for all existing labeled pairs
+4. **Backfill existing labels**: Run `matcher backfill` to compute the new feature for all existing labeled pairs
 
 **Automated verification:**
 - Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
@@ -122,7 +122,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture inclu
 
 **The backfill command MUST remain a thin wrapper around the shared pipeline.**
 
-Backfill (`matcher labels backfill`) recomputes features for existing labeled pairs. It routes
+Backfill (`matcher backfill`) recomputes features for existing labeled pairs. It routes
 through the same `prepare_worker_data()` → `_compute_feature_chunk()` code path that inference
 uses. The only backfill-specific code handles:
 
