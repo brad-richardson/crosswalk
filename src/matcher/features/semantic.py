@@ -189,31 +189,25 @@ STREET_ABBREVIATIONS = {
 # Default result when names are missing - use NaN for similarity scores
 # so the ML model (XGBoost) can learn to handle missing names natively.
 # has_name_ref/has_name_target encode name presence as binary indicators.
-# Road type words to exclude from Soundex comparison — these appear in most names
-# and match trivially ("Main Street" vs "Oak Street" would match on "street").
-# Derived from the expanded forms in STREET_ABBREVIATIONS plus common types.
+# Road type words to exclude from Soundex — derived from the expanded forms
+# already maintained in STREET_ABBREVIATIONS (street, avenue, boulevard, etc.).
 _ROAD_TYPE_WORDS = frozenset(
-    w
-    for phrase in STREET_ABBREVIATIONS.values()
-    for w in phrase.split()
-) | {
-    "calle", "avenida", "paseo", "camino",  # Spanish
-    "rue", "chemin", "impasse",  # French
-    "rua", "estrada",  # Portuguese
-    "strasse", "weg", "gasse",  # German
-}
+    w for phrase in STREET_ABBREVIATIONS.values() for w in phrase.split()
+)
 
 
-def _soundex_content_words(name: str) -> set[str]:
-    """Compute Soundex codes for content words (excluding road type words)."""
-    words = [w for w in name.split() if w and w not in _ROAD_TYPE_WORDS]
+def _soundex_key_word(name: str) -> str:
+    """Pick the longest content word for Soundex comparison.
+
+    Filters out road type words (street, avenue, north, etc.) from the expanded
+    abbreviations, then returns the longest remaining word. Falls back to the
+    longest word overall if all words are road types.
+    """
+    words = name.split()
     if not words:
-        # All words were road types — fall back to longest word
-        words = name.split()
-        if not words:
-            return set()
-        words = [max(words, key=len)]
-    return {jellyfish.soundex(w) for w in words}
+        return ""
+    content = [w for w in words if w not in _ROAD_TYPE_WORDS]
+    return max(content or words, key=len)
 
 
 _nan = float("nan")
@@ -401,13 +395,13 @@ def compute_name_similarity(
         soundex_match = _nan
         metaphone_similarity = _nan
     else:
-        # Soundex on content words (excluding road type suffixes/prefixes).
-        # After normalization, abbreviations are expanded ("st" → "street", etc.)
-        # so we filter those out to compare the distinguishing name parts.
-        # Works for both English ("Main Street") and Romance ("Calle Nueva").
-        codes_a = _soundex_content_words(norm_a)
-        codes_b = _soundex_content_words(norm_b)
-        soundex_match = 1.0 if codes_a and codes_b and codes_a & codes_b else 0.0
+        # Soundex on the key content word (longest word after filtering road type
+        # words like street/avenue/north derived from STREET_ABBREVIATIONS).
+        key_a = _soundex_key_word(norm_a)
+        key_b = _soundex_key_word(norm_b)
+        soundex_a = jellyfish.soundex(key_a) if key_a else ""
+        soundex_b = jellyfish.soundex(key_b) if key_b else ""
+        soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
 
         # Metaphone on full name for better typo tolerance
         metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
