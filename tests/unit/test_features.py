@@ -299,11 +299,134 @@ class TestCJKNameHandling:
                 {"value": "Rivoli Street", "language": "en", "variant": "common"},
             ],
         }
-        best = resolve_best_name_variant(
-            ref_names_raw, "Rue de Rivoli", "Rivoli Street"
-        )
+        best = resolve_best_name_variant(ref_names_raw, "Rue de Rivoli", "Rivoli Street")
         # Should prefer the English variant since it matches the target better
         assert best == "Rivoli Street"
+
+    def test_resolve_best_variant_none_target(self):
+        """When target_name is None, should return ref_name unchanged."""
+        ref_names_raw = {
+            "primary": "Main Street",
+            "rules": [{"value": "Main St", "language": "en"}],
+        }
+        best = resolve_best_name_variant(ref_names_raw, "Main Street", None)
+        assert best == "Main Street"
+
+    def test_resolve_best_variant_none_ref_name(self):
+        """When ref_name is None but variants exist, should still pick best."""
+        ref_names_raw = {
+            "primary": "皇后大道中",
+            "rules": [
+                {"value": "Queen's Road Central", "language": "en", "variant": "common"},
+            ],
+        }
+        best = resolve_best_name_variant(ref_names_raw, None, "Queen's Road Central")
+        # ref_name is None, but target_name exists so we still resolve variants
+        assert best == "Queen's Road Central"
+
+    def test_resolve_best_variant_duplicate_values_deduplicated(self):
+        """Duplicate name values (case-insensitive) should be deduplicated."""
+        ref_names_raw = {
+            "primary": "Main Street",
+            "rules": [
+                {"value": "main street", "language": "en"},
+                {"value": "MAIN STREET", "language": "en", "variant": "official"},
+                {"value": "Oak Avenue", "language": "en", "variant": "alt"},
+            ],
+        }
+        best = resolve_best_name_variant(ref_names_raw, "Main Street", "Oak Avenue")
+        assert best == "Oak Avenue"
+
+    def test_resolve_best_variant_empty_rules_list(self):
+        """Empty rules list should fall back to ref_name (only 1 variant)."""
+        ref_names_raw = {"primary": "Main Street", "rules": []}
+        best = resolve_best_name_variant(ref_names_raw, "Main Street", "Oak Avenue")
+        assert best == "Main Street"
+
+    def test_resolve_best_variant_no_rules_key(self):
+        """Missing rules key should fall back to ref_name (only 1 variant)."""
+        ref_names_raw = {"primary": "Main Street"}
+        best = resolve_best_name_variant(ref_names_raw, "Main Street", "Oak Avenue")
+        assert best == "Main Street"
+
+    def test_resolve_best_variant_malformed_rules(self):
+        """Rules with missing/invalid values should be skipped gracefully."""
+        ref_names_raw = {
+            "primary": "北京路",
+            "rules": [
+                {"language": "zh"},  # Missing 'value' key
+                {"value": None, "language": "en"},  # None value
+                {"value": 123, "language": "en"},  # Non-string value
+                {"value": "", "language": "en"},  # Empty string
+                {"value": "Beijing Road", "language": "en"},  # Valid
+            ],
+        }
+        best = resolve_best_name_variant(ref_names_raw, "北京路", "Beijing Road")
+        assert best == "Beijing Road"
+
+    def test_resolve_best_variant_non_dict_rules(self):
+        """Non-list rules should fall back to ref_name."""
+        ref_names_raw = {"primary": "Main Street", "rules": "invalid"}
+        best = resolve_best_name_variant(ref_names_raw, "Main Street", "Oak Avenue")
+        assert best == "Main Street"
+
+    def test_resolve_best_variant_target_is_dict(self):
+        """Target name as dict format should be handled."""
+        ref_names_raw = {
+            "primary": "北京路",
+            "rules": [
+                {"value": "Beijing Road", "language": "en"},
+            ],
+        }
+        best = resolve_best_name_variant(ref_names_raw, "北京路", {"primary": "Beijing Road"})
+        assert best == "Beijing Road"
+
+    def test_resolve_best_variant_three_languages(self):
+        """Should pick the best match from three language variants."""
+        ref_names_raw = {
+            "primary": "東京駅",
+            "rules": [
+                {"value": "東京駅", "language": "ja", "variant": "common"},
+                {"value": "Tokyo Station", "language": "en", "variant": "common"},
+                {"value": "도쿄역", "language": "ko", "variant": "common"},
+            ],
+        }
+        # Target is Korean
+        best = resolve_best_name_variant(ref_names_raw, "東京駅", "도쿄역")
+        assert best == "도쿄역"
+        # Target is English
+        best = resolve_best_name_variant(ref_names_raw, "東京駅", "Tokyo Station")
+        assert best == "Tokyo Station"
+
+    def test_extract_all_name_variants_returns_empty_for_none(self):
+        """None input should return empty list."""
+        from matcher.features.semantic import _extract_all_name_variants
+
+        assert _extract_all_name_variants(None) == []
+        assert _extract_all_name_variants({}) == []
+        assert _extract_all_name_variants("not a dict") == []
+
+    def test_extract_all_name_variants_primary_only(self):
+        """Dict with only primary should return single variant."""
+        from matcher.features.semantic import _extract_all_name_variants
+
+        assert _extract_all_name_variants({"primary": "Main Street"}) == ["Main Street"]
+
+    def test_extract_all_name_variants_with_rules(self):
+        """Dict with primary + rules should return all unique variants."""
+        from matcher.features.semantic import _extract_all_name_variants
+
+        names = {
+            "primary": "北京路",
+            "rules": [
+                {"value": "Beijing Road", "language": "en"},
+                {"value": "北京路", "language": "zh"},  # duplicate of primary
+            ],
+        }
+        variants = _extract_all_name_variants(names)
+        assert len(variants) == 2
+        assert "北京路" in variants
+        assert "Beijing Road" in variants
 
 
 class TestClassInfo:
