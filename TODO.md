@@ -94,72 +94,22 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Feature Ideas
 
-### HIGH: Target-Side Aligned Topology (Degree at Subline Endpoints)
-
-**Priority:** High
-**Problem:** Target topology uses full segment endpoints for degree computation, but target datasets often don't split segments at intersections (unlike Overture which has explicit connectors). A target road passing *through* an intersection gets degree 1 at its distant endpoints, even though the alignment boundary is at a high-degree intersection node. This makes target-side topology features unreliable for partial matches.
-
-**Solution:** At alignment boundary points, query the target spatial index for nearby target segment endpoints to compute degree at that position (analogous to `compute_aligned_topology_at_position()` which already does this for the ref side using Overture connectors).
-
-**Impact:** Would improve `from_degree_target`, `to_degree_target`, `degree_match_score`, `degree_signature_similarity`, and related features for partial-match cases.
-
-**Location:** `src/matcher/features/spatial_context.py:compute_all_topology()` (geometry-based fallback, lines 1177+)
-
-**Reproduction pair** (target passes through two 4-way intersections but gets degree 1/1):
-- Dataset: `au_melbourne_roads`
-- GERS: `5001b7be-3b4f-41dc-b395-df221ba66741`
-- Target: `au_melbourne_8043_88be630a1b`
-
-<details>
-<summary>WKT geometries</summary>
-
-REF:
-```
-LINESTRING (144.7344467 -37.8673933, 144.7345845 -37.867333)
-```
-
-TGT:
-```
-LINESTRING (144.734621881638 -37.8674845946421, 144.73467978024 -37.8674574316707, 144.734604739062 -37.8673078641339, 144.734537848093 -37.8673383138165)
-```
-
-</details>
-
-Features: `from_degree_ref=4, to_degree_ref=4` (correct), `from_degree_target=1, to_degree_target=1` (incorrect — should reflect intersection degree at alignment boundary).
-
-### Medium: Audit Topology Fallback Path Usage
+### Medium: Pre-compute Context to Eliminate Dataset Requirements for Backfill
 
 **Priority:** Medium
 
-**Problem:** Topology features have two computation paths:
-1. **Aligned path** (when `graphlet_data` available): Uses `compute_aligned_topology_features()` to find nearest connectors at alignment boundary fractions. Correct.
-2. **Fallback path** (when `graphlet_data` unavailable): Uses `ref_topology_full`/`target_topology_full` with full segment endpoint degrees. Incorrect for partial matches.
+The sampled connector pattern (PR #192) can be extended so backfill eventually needs ZERO external datasets:
 
-In `pipeline.py`, both ref and target graphlet data are always precomputed, so the aligned path should always be active during ML scoring. The fallback may only trigger in labeling UI or edge cases.
+| Feature group | Currently requires | Pre-compute + store pattern |
+|---|---|---|
+| **Target topology** | ~~Full target dataset~~ | Sampled connectors (done in PR #192) |
+| **Ref topology** | Full ref dataset (Overture) | Already has explicit connectors; could sample and store |
+| **Crossing angles** | `ref_sibling_context_full` | Pre-compute per-pair crossing features and store |
+| **Sibling detection** | `ref_sibling_context_full` + `target_sibling_context_full` | Same approach |
 
-**Steps:**
-1. Add logging to trace whether `use_aligned_topology=False` ever triggers in practice
-2. If the fallback IS used: ensure `graphlet_data` is always precomputed (make non-optional)
-3. If effectively dead code: add assertion/warning, document
-4. Connects to "Target-Side Aligned Topology" item above
+The pattern: during candidate generation (when full datasets are loaded), pre-compute all network-context-dependent features, store the results per-pair. Backfill then only needs stored pair data.
 
-**Location:** `src/matcher/features/compute.py` (lines 351-404)
-
-### Low: Update Geometry Provenance Documentation
-
-**Priority:** Low
-
-The `GEOMETRY PROVENANCE` comment in `config.py` (lines 149-160) needs updates after the full audit:
-- Endpoint features are already alignment-aware (via `compute_aligned_endpoint_features_batch`), not "pre-computed on full"
-- Topology features are alignment-aware when graphlet_data is available (the common ML scoring path)
-- `aligned_length_m` is semantically aligned (computed via `full_length * fraction`)
-**Audit results summary (Feb 2026):**
-- 34 features correctly use aligned sublines
-- 11 features correctly use full geometry by design (coverage, intersection overlap, aligned_length_m)
-- 8 features are alignment-aware via connector snapping (endpoint, graphlet, clustering)
-- 11 semantic features use no geometry
-- 2 features dropped: length_ratio, centroid_distance_m (see RESEARCH_GRAVEYARD.md)
-- 12 topology features: aligned when graphlet_data available (common path), full geometry in fallback (audit needed)
+**Location:** `src/matcher/features/pipeline.py`, `src/matcher/labeling/data_store.py`
 
 ### Dual Carriageway / Centerline Handling
 

@@ -231,6 +231,8 @@ def _compute_feature_chunk(chunk):
                 target_topology_full = _worker_data.get("target_topology_full", {}).get(target_idx)
                 ref_graphlet_data = _worker_data.get("ref_graphlet_data")
                 target_graphlet_data = _worker_data.get("target_graphlet_data")
+                target_topo_connectors = _worker_data.get("target_topo_connectors")
+                target_topo_node_features = _worker_data.get("target_topo_node_features")
                 ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
                 target_seg_id = str(_worker_data["target_ids"][target_idx])
 
@@ -297,6 +299,8 @@ def _compute_feature_chunk(chunk):
                     "graphlet_features": graphlet_features,
                     "ref_graphlet_data": ref_graphlet_data,
                     "target_graphlet_data": target_graphlet_data,
+                    "target_topo_connectors": target_topo_connectors,
+                    "target_topo_node_features": target_topo_node_features,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
                     "ref_names_raw": (
@@ -429,6 +433,8 @@ def _compute_feature_chunk(chunk):
                 target_sibling_context_full=_worker_data.get("target_sibling_context_full"),
                 ref_names_raw=pd_item.get("ref_names_raw"),
                 target_names_raw=pd_item.get("target_names_raw"),
+                target_topo_connectors=pd_item.get("target_topo_connectors"),
+                target_topo_node_features=pd_item.get("target_topo_node_features"),
             )
 
             # Aligned length: absolute overlap length in meters (uses full geometry)

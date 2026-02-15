@@ -147,16 +147,18 @@ FEATURE_VERSION = "2026-02-15"
 # Distance/length features use _m suffix to indicate meters
 #
 # GEOMETRY PROVENANCE (which geometry each feature is computed from):
-#   Aligned portion: hausdorff_*, buffer_iou_*, heading_delta,
+#   Aligned portion (34): hausdorff_*, buffer_iou_*, heading_delta,
 #       lateral_offset_*, sinuosity_*, min_length_m, edge_distance_rmse_m,
 #       collinear_gap_ratio, angle_histogram_similarity, shape_complexity_*,
 #       heading_consistency_*, vertex_density_*, has_parallel_sibling_ref,
 #       parallel_fraction_ref, crossing_angle_*, transverse_neighbor_fraction_*
-#   Full geometry: aligned_length_m (full length * coverage fraction)
-#   Alignment-aware (via connector snapping): endpoint proximity, graphlet, clustering
-#   Alignment-aware (via alignment fractions): topology (when graphlet_data available)
-#   Pre-computed on full (fallback): topology (when graphlet_data unavailable), coverage
-#   Semantic (no geometry): name_*, has_name_*, class_similarity, route_prefix_match
+#   Full geometry (11): aligned_length_m, coverage_*, intersection_overlap_*
+#   Alignment-aware via connector snapping (8): endpoint proximity, graphlet, clustering
+#   Alignment-aware via connectors (12): topology features — both ref (Overture explicit
+#       connectors) and target (synthetic connectors sampled from full-network spatial index)
+#       are computed via compute_aligned_topology_features() with connector data.
+#       Fallback to full-segment topology only in labeling UI edge cases.
+#   Semantic (11): name_*, has_name_*, class_similarity, route_prefix_match
 #   Removed: see docs/RESEARCH_GRAVEYARD.md
 FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Geometric": [

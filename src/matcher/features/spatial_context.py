@@ -35,6 +35,25 @@ from .relational import (
 
 
 @dataclass
+class TopologySpatialIndex:
+    """Spatial index of topology cluster centroids for querying degree at arbitrary positions.
+
+    Built during compute_all_topology() from the Union-Find clustering of all
+    segment endpoints. Enables sampling topology degrees at positions along
+    segments (e.g., for target-side aligned topology via synthetic connectors).
+
+    Attributes:
+        centroids: Nx2 array of cluster centroid coordinates (in projected CRS)
+        degrees: 1D array of degree per cluster (same order as centroids)
+        tree: STRtree built from centroid Point geometries for spatial queries
+    """
+
+    centroids: np.ndarray
+    degrees: np.ndarray
+    tree: "STRtree"
+
+
+@dataclass
 class AnchorMatch:
     """Result of matching a segment to its anchor road."""
 
@@ -1180,7 +1199,8 @@ def compute_all_topology(
     tolerance_m: float = 5.0,
     ids_to_compute: set[str] | None = None,
     connectors_column: str | None = None,
-) -> dict[str, dict]:
+    return_spatial_index: bool = False,
+) -> dict[str, dict] | tuple[dict[str, dict], "TopologySpatialIndex"]:
     """Compute topology features for all segments.
 
     When connectors_column is provided and the data contains explicit connector
@@ -1213,15 +1233,29 @@ def compute_all_topology(
         ids_to_compute: If provided, only return topology for these IDs
         connectors_column: Column name for explicit connector data. If provided and
             data is available, uses explicit topology instead of geometry inference.
+        return_spatial_index: If True, also return a TopologySpatialIndex for querying
+            degree at arbitrary positions (used for synthetic connector sampling).
+            Only supported for geometry-inferred topology (not explicit connectors).
 
     Returns:
-        Dict mapping segment_id -> topology features dict with:
-        - from_degree: Number of segments connected at start
-        - to_degree: Number of segments connected at end
-        - is_dead_end: True if either endpoint has degree 1
-        - is_intersection: True if either endpoint has degree > 2
-        - degree_signature: Tuple of sorted [from_degree, to_degree]
+        If return_spatial_index is False:
+            Dict mapping segment_id -> topology features dict with:
+            - from_degree: Number of segments connected at start
+            - to_degree: Number of segments connected at end
+            - is_dead_end: True if either endpoint has degree 1
+            - is_intersection: True if either endpoint has degree > 2
+            - degree_signature: Tuple of sorted [from_degree, to_degree]
+        If return_spatial_index is True:
+            Tuple of (topology_dict, TopologySpatialIndex)
     """
+    # Explicit connectors and spatial index are mutually exclusive —
+    # the spatial index is built from geometry-inferred clustering, not connectors.
+    if connectors_column is not None and return_spatial_index:
+        raise ValueError(
+            "return_spatial_index=True is not supported with connectors_column. "
+            "The spatial index requires geometry-inferred clustering."
+        )
+
     # Try explicit connector-based topology first (if available)
     if connectors_column is not None:
         explicit_result = compute_all_topology_explicit(gdf, id_column, connectors_column)
@@ -1328,6 +1362,43 @@ def compute_all_topology(
         f"[topology] Step 5: Built {len(cluster_segments)} clusters in {time.perf_counter() - t0:.2f}s"
     )
 
+    # Step 5b: Build spatial index of cluster centroids (if requested)
+    topology_spatial_index = None
+    if return_spatial_index:
+        t0_si = time.perf_counter()
+        # Pre-build cluster membership in O(N) — avoids O(N*C) nested scan
+        from collections import defaultdict
+
+        import shapely
+
+        cluster_members: dict[int, list[int]] = defaultdict(list)
+        for ep_idx in range(n_endpoints):
+            cluster_members[uf.find(ep_idx)].append(ep_idx)
+
+        # Compute centroid and degree for each cluster
+        cluster_ids = sorted(cluster_segments.keys())
+        n_clusters = len(cluster_ids)
+        cluster_centroids = np.empty((n_clusters, 2), dtype=np.float64)
+        cluster_degrees = np.empty(n_clusters, dtype=np.int32)
+
+        for ci, root in enumerate(cluster_ids):
+            member_coords = endpoint_coords_arr[cluster_members[root]]
+            cluster_centroids[ci] = member_coords.mean(axis=0)
+            cluster_degrees[ci] = len(cluster_segments[root])
+
+        # Build STRtree from centroid points
+        centroid_points = shapely.points(cluster_centroids[:, 0], cluster_centroids[:, 1])
+        tree = STRtree(centroid_points)
+        topology_spatial_index = TopologySpatialIndex(
+            centroids=cluster_centroids,
+            degrees=cluster_degrees,
+            tree=tree,
+        )
+        logger.debug(
+            f"[topology] Step 5b: Built spatial index with {n_clusters} clusters "
+            f"in {time.perf_counter() - t0_si:.2f}s"
+        )
+
     # Step 6: Compute degrees for each segment
     t0 = time.perf_counter()
     # For each segment, find the cluster its start and end belong to
@@ -1381,7 +1452,126 @@ def compute_all_topology(
     logger.info(
         f"[topology] Complete: {len(topology)} segments in {time.perf_counter() - t_start:.2f}s total"
     )
+    if return_spatial_index:
+        return topology, topology_spatial_index
     return topology
+
+
+def sample_topology_along_segment(
+    geom,
+    topology_index: TopologySpatialIndex,
+    sample_interval_m: float = 50.0,
+    tolerance_m: float = 10.0,
+) -> tuple[list[tuple[float, int]], dict[int, int]]:
+    """Sample topology degrees along a single segment. Thin wrapper around sample_topology_batch()."""
+    seg_to_conn, node_features = sample_topology_batch(
+        [geom], ["_single"], topology_index, sample_interval_m, tolerance_m
+    )
+    return seg_to_conn.get("_single", []), node_features
+
+
+def sample_topology_batch(
+    geoms: list,
+    seg_ids: list[str],
+    topology_index: TopologySpatialIndex,
+    sample_interval_m: float = 50.0,
+    tolerance_m: float = 10.0,
+) -> tuple[dict[str, list[tuple[float, int]]], dict[int, int]]:
+    """Batch-sample topology degrees for multiple segments in one spatial query.
+
+    More efficient than calling sample_topology_along_segment() per-segment
+    because all sample points are batched into a single STRtree.query_nearest().
+
+    Args:
+        geoms: List of LineString geometries (projected CRS)
+        seg_ids: Corresponding segment IDs
+        topology_index: Spatial index from compute_all_topology()
+        sample_interval_m: Distance between sample points in meters
+        tolerance_m: Max distance to match a cluster centroid
+
+    Returns:
+        Tuple of (seg_to_connectors, node_features) where:
+        - seg_to_connectors: {seg_id: [(frac, node_id), ...]}
+        - node_features: {node_id: degree}
+    """
+    import shapely
+
+    if not geoms:
+        return {}, {}
+
+    # Phase 1: generate all sample fractions and points per segment
+    all_fracs = []  # flat array of fractions
+    all_points = []  # flat array of shapely points
+    seg_offsets = []  # (seg_idx, start, end) into flat arrays
+
+    offset = 0
+    for seg_idx, geom in enumerate(geoms):
+        if geom is None or geom.is_empty or geom.length <= 0:
+            seg_offsets.append((seg_idx, offset, offset))
+            continue
+
+        length = geom.length
+        if length > sample_interval_m:
+            n_interior = int(length / sample_interval_m)
+            interior = np.arange(1, n_interior + 1) * sample_interval_m / length
+            interior = interior[interior < 1.0]
+            fracs = np.concatenate(([0.0], interior, [1.0]))
+        else:
+            fracs = np.array([0.0, 1.0])
+
+        points = shapely.line_interpolate_point(geom, fracs * length)
+        all_fracs.append(fracs)
+        all_points.append(points)
+        seg_offsets.append((seg_idx, offset, offset + len(fracs)))
+        offset += len(fracs)
+
+    if offset == 0:
+        return {seg_id: [] for seg_id in seg_ids}, {}
+
+    # Phase 2: single batch spatial query
+    all_points_arr = np.concatenate(all_points)
+    all_fracs_arr = np.concatenate(all_fracs)
+
+    nearest_indices, nearest_dists = topology_index.tree.query_nearest(
+        all_points_arr, max_distance=tolerance_m, return_distance=True
+    )
+
+    # Deduplicate: keep closest match per input point
+    best_tree_idx = np.full(offset, -1, dtype=np.intp)
+    best_dist = np.full(offset, np.inf)
+
+    if nearest_indices.shape[1] > 0:
+        input_idxs = nearest_indices[0]
+        tree_idxs = nearest_indices[1]
+        for k in range(len(input_idxs)):
+            inp = input_idxs[k]
+            if nearest_dists[k] < best_dist[inp]:
+                best_dist[inp] = nearest_dists[k]
+                best_tree_idx[inp] = tree_idxs[k]
+
+    # Phase 3: split results back per segment
+    seg_to_connectors: dict[str, list[tuple[float, int]]] = {}
+    node_features: dict[int, int] = {}
+
+    for seg_idx, start, end in seg_offsets:
+        sid = seg_ids[seg_idx]
+        if start == end:
+            seg_to_connectors[sid] = []
+            continue
+
+        connectors = []
+        for i in range(start, end):
+            tid = int(best_tree_idx[i])
+            if tid >= 0:
+                connectors.append((float(all_fracs_arr[i]), tid))
+                node_features[tid] = int(topology_index.degrees[tid])
+            else:
+                vid = -(i + 1)
+                connectors.append((float(all_fracs_arr[i]), vid))
+                node_features[vid] = 1
+        seg_to_connectors[sid] = connectors
+
+    return seg_to_connectors, node_features
 
 
 def compute_degree_signature_similarity(

@@ -9,6 +9,7 @@ from shapely import LineString
 
 from matcher.features.spatial_context import (
     SpatialContextIndex,
+    TopologySpatialIndex,
     UnionFind,
     _cluster_endpoints_fast,
     compute_aligned_endpoint_features,
@@ -20,6 +21,7 @@ from matcher.features.spatial_context import (
     compute_degree_signature_similarity,
     compute_topology_features,
     find_nearest_connector_position,
+    sample_topology_along_segment,
 )
 
 
@@ -2000,3 +2002,212 @@ class TestAlignedEndpointFeaturesBatch:
 
         assert (0, 0) in result
         assert (1, 1) not in result
+
+
+class TestTopologySpatialIndex:
+    """Tests for TopologySpatialIndex and return_spatial_index parameter."""
+
+    def test_compute_all_topology_return_spatial_index(self):
+        """compute_all_topology with return_spatial_index=True returns tuple."""
+        # Simple T-junction: one long segment, two shorter segments meeting it
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["long", "arm1", "arm2"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),  # Horizontal
+                    LineString([(50, 0), (50, 50)]),  # Vertical, meets at midpoint
+                    LineString([(50, 0), (50, -50)]),  # Vertical, other direction
+                ],
+            },
+            crs="EPSG:32632",
+        )
+        result = compute_all_topology(gdf, tolerance_m=5.0, return_spatial_index=True)
+
+        # Should return tuple
+        assert isinstance(result, tuple)
+        topo_dict, spatial_index = result
+
+        # Check topology dict
+        assert isinstance(topo_dict, dict)
+        assert len(topo_dict) == 3
+
+        # Check spatial index
+        assert isinstance(spatial_index, TopologySpatialIndex)
+        assert len(spatial_index.centroids) > 0
+        assert len(spatial_index.degrees) == len(spatial_index.centroids)
+        assert spatial_index.tree is not None
+
+    def test_spatial_index_captures_junction_degree(self):
+        """Spatial index should capture high degree at junction points."""
+        # 4-way intersection: 4 segments meeting at (50, 50)
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n", "s", "e", "w"],
+                "geometry": [
+                    LineString([(50, 50), (50, 100)]),  # North
+                    LineString([(50, 50), (50, 0)]),  # South
+                    LineString([(50, 50), (100, 50)]),  # East
+                    LineString([(50, 50), (0, 50)]),  # West
+                ],
+            },
+            crs="EPSG:32632",
+        )
+        _, spatial_index = compute_all_topology(gdf, tolerance_m=5.0, return_spatial_index=True)
+
+        # One cluster at (50,50) with degree 4
+        assert 4 in spatial_index.degrees
+
+    def test_without_return_spatial_index_returns_dict_only(self):
+        """Default behavior should just return dict (not tuple)."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["a"],
+                "geometry": [LineString([(0, 0), (100, 0)])],
+            },
+            crs="EPSG:32632",
+        )
+        result = compute_all_topology(gdf, tolerance_m=5.0)
+        assert isinstance(result, dict)
+
+
+class TestSampleTopologyAlongSegment:
+    """Tests for sample_topology_along_segment()."""
+
+    def _make_intersection_index(self):
+        """Create a spatial index with a 4-way intersection at (50, 50)."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["n", "s", "e", "w"],
+                "geometry": [
+                    LineString([(50, 50), (50, 100)]),
+                    LineString([(50, 50), (50, 0)]),
+                    LineString([(50, 50), (100, 50)]),
+                    LineString([(50, 50), (0, 50)]),
+                ],
+            },
+            crs="EPSG:32632",
+        )
+        _, spatial_index = compute_all_topology(gdf, tolerance_m=5.0, return_spatial_index=True)
+        return spatial_index
+
+    def test_sample_returns_connectors_and_node_features(self):
+        """Should return list of connectors and dict of node features."""
+        spatial_index = self._make_intersection_index()
+
+        # A segment passing through the intersection
+        geom = LineString([(0, 50), (100, 50)])
+        connectors, node_features = sample_topology_along_segment(
+            geom, spatial_index, sample_interval_m=50.0, tolerance_m=10.0
+        )
+
+        assert len(connectors) > 0
+        assert len(node_features) > 0
+
+        # All connectors should have (frac, node_id) format
+        for frac, node_id in connectors:
+            assert 0.0 <= frac <= 1.0
+            assert node_id in node_features
+
+    def test_includes_endpoints(self):
+        """Should always include frac=0.0 and frac=1.0."""
+        spatial_index = self._make_intersection_index()
+        geom = LineString([(0, 50), (100, 50)])
+        connectors, _ = sample_topology_along_segment(geom, spatial_index, sample_interval_m=50.0)
+
+        fracs = [c[0] for c in connectors]
+        assert 0.0 in fracs
+        assert 1.0 in fracs
+
+    def test_detects_junction_along_segment(self):
+        """Segment passing through a junction should have degree > 1 at that sample."""
+        spatial_index = self._make_intersection_index()
+
+        # Segment passing through the junction at (50, 50)
+        geom = LineString([(0, 50), (100, 50)])
+        connectors, node_features = sample_topology_along_segment(
+            geom, spatial_index, sample_interval_m=25.0, tolerance_m=10.0
+        )
+
+        # At least one sample should have degree > 1 (the junction)
+        degrees = [node_features[nid] for _, nid in connectors]
+        assert max(degrees) > 1, f"Expected junction detection, got degrees: {degrees}"
+
+    def test_t_junction_detection(self):
+        """Sampling should detect branches meeting at an interior point.
+
+        The topology spatial index clusters segment ENDPOINTS. When two branch
+        segments have endpoints at the same point (200,0) that's on the main
+        road's interior, sampling the main road picks up that cluster (degree=2).
+
+        Note: The cluster degree is 2 (branches only), not 3 (branches + main),
+        because the main road has no endpoint at (200,0). Full T-junction degree
+        would require mid-segment crossing detection (future enhancement).
+        """
+        # Build a network with a T-junction at approximately (200, 0)
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["main", "branch_n", "branch_s"],
+                "geometry": [
+                    LineString([(0, 0), (400, 0)]),  # Main road
+                    LineString([(200, 0), (200, 100)]),  # Branch north
+                    LineString([(200, 0), (200, -100)]),  # Branch south
+                ],
+            },
+            crs="EPSG:32632",
+        )
+        _, spatial_index = compute_all_topology(gdf, tolerance_m=5.0, return_spatial_index=True)
+
+        # Sample along the main road
+        main_geom = gdf.geometry.iloc[0]
+        connectors, node_features = sample_topology_along_segment(
+            main_geom, spatial_index, sample_interval_m=50.0, tolerance_m=10.0
+        )
+
+        # The junction cluster at (200,0) has degree 2 (branch_n + branch_s endpoints)
+        # Sample point near (200,0) should pick up degree > 1
+        degrees = [node_features[nid] for _, nid in connectors]
+        assert max(degrees) >= 2, (
+            f"Branch junction at (200,0) should give degree >= 2, got: {degrees}"
+        )
+
+    def test_compatible_with_compute_aligned_topology_features(self):
+        """Output format should work with compute_aligned_topology_features()."""
+        spatial_index = self._make_intersection_index()
+
+        geom = LineString([(0, 50), (100, 50)])
+        connectors, node_features = sample_topology_along_segment(
+            geom, spatial_index, sample_interval_m=25.0, tolerance_m=10.0
+        )
+
+        # Build the connector dict format expected by compute_aligned_topology_features
+        seg_to_connectors = {"test_seg": connectors}
+
+        # Should work without error
+        result = compute_aligned_topology_features(
+            "test_seg", seg_to_connectors, node_features, 0.0, 1.0
+        )
+
+        assert "from_degree" in result
+        assert "to_degree" in result
+        assert "is_dead_end" in result
+        assert "is_intersection" in result
+        assert "degree_signature" in result
+
+    def test_empty_geometry_returns_empty(self):
+        """Empty or None geometry should return empty results."""
+        spatial_index = self._make_intersection_index()
+
+        connectors, node_features = sample_topology_along_segment(None, spatial_index)
+        assert connectors == []
+        assert node_features == {}
+
+    def test_short_segment_only_endpoints(self):
+        """A segment shorter than sample_interval should only get endpoints."""
+        spatial_index = self._make_intersection_index()
+
+        # 10m segment (shorter than 50m interval)
+        geom = LineString([(45, 50), (55, 50)])
+        connectors, _ = sample_topology_along_segment(geom, spatial_index, sample_interval_m=50.0)
+
+        fracs = [c[0] for c in connectors]
+        assert fracs == [0.0, 1.0]
