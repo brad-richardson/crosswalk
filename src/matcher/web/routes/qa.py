@@ -2,13 +2,12 @@
 
 import json
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
-from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
 from ...filenames import integration_cache_dir
+from ..jinja import templates
 from ..services import (
     list_datasets,
     load_qa_edges,
@@ -18,7 +17,6 @@ from ..services import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # Color mapping for edge layers
 LAYER_COLORS = {

@@ -22,31 +22,14 @@
 <!-- Features drawer backdrop (click to dismiss) -->
 <div class="features-backdrop hidden" id="features-backdrop" onclick="closeFeatures()"></div>
 
-<!-- Features drawer panel (slide-up, closed by default) -->
+<!-- Features drawer panel (slide-up, closed by default, content lazy-loaded) -->
 <div class="features-drawer" id="features-drawer">
     <div class="features-drawer-header">
         <div class="handle" onclick="closeFeatures()"></div>
         <h4>Feature Details</h4>
         <button class="features-close" onclick="closeFeatures()">&times;</button>
     </div>
-    {% if pair and pair.features %}
-    <table class="features-table">
-        <thead>
-            <tr><th>Feature</th><th>Value</th><th></th></tr>
-        </thead>
-        <tbody>
-            {% for key, value in pair.features.items() %}
-            <tr>
-                <td>{{ key }}</td>
-                <td class="feature-value">{{ "%.4f"|format(value) if value is number else value }}</td>
-                <td class="feature-signal" data-feature="{{ key }}" data-value="{{ value }}"></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p>No features available.</p>
-    {% endif %}
+    <div id="features-drawer-body"></div>
 </div>
 {% endblock %}
 
@@ -73,7 +56,7 @@
 {% endif %}
 
 <!-- Feature signal constants and classification (shared across modes) -->
-<script src="/static/js/features.js"></script>
+<script src="/static/js/features.js?v={{cache_bust}}"></script>
 
 <script>
     function toggleFeatures() {
@@ -82,6 +65,17 @@
         if (drawer) {
             drawer.classList.toggle('open');
             if (backdrop) backdrop.classList.toggle('hidden', !drawer.classList.contains('open'));
+            // Lazy-load features on first open for this pair
+            var body = document.getElementById('features-drawer-body');
+            if (drawer.classList.contains('open') && body && !body.querySelector('.features-table')) {
+                var params = new URLSearchParams(window.location.search);
+                var dataset = params.get('dataset');
+                var index = params.get('index') || '0';
+                htmx.ajax('GET', '/batch/features?dataset=' + encodeURIComponent(dataset) + '&index=' + index, {
+                    target: '#features-drawer-body',
+                    swap: 'innerHTML'
+                });
+            }
         }
     }
 
@@ -91,6 +85,57 @@
         if (drawer) drawer.classList.remove('open');
         if (backdrop) backdrop.classList.add('hidden');
     }
+
+    // Keep MapLibre controls above the info card / features drawer on narrow viewports
+    (function() {
+        var mql = window.matchMedia('(max-width: 768px)');
+        var resizeObs = null;
+        var mutationObs = null;
+
+        function updateOffset() {
+            var card = document.getElementById('pair-card');
+            var drawer = document.getElementById('features-drawer');
+            var vh = window.innerHeight;
+            var cardH = card ? card.offsetHeight : 0;
+            var drawerOpen = drawer && drawer.classList.contains('open');
+            var drawerH = drawerOpen ? drawer.offsetHeight : 0;
+            var offset = Math.max(cardH, drawerH) + 8;
+            document.getElementById('map').style.setProperty('--card-offset', offset + 'px');
+        }
+
+        function observe() {
+            var card = document.getElementById('pair-card');
+            var drawer = document.getElementById('features-drawer');
+
+            resizeObs = new ResizeObserver(updateOffset);
+            if (card) resizeObs.observe(card);
+            if (drawer) resizeObs.observe(drawer);
+
+            // Watch for the drawer's 'open' class toggling
+            if (drawer) {
+                mutationObs = new MutationObserver(updateOffset);
+                mutationObs.observe(drawer, { attributes: true, attributeFilter: ['class'] });
+            }
+
+            updateOffset();
+        }
+
+        function disconnect() {
+            if (resizeObs) { resizeObs.disconnect(); resizeObs = null; }
+            if (mutationObs) { mutationObs.disconnect(); mutationObs = null; }
+            var mapEl = document.getElementById('map');
+            if (mapEl) mapEl.style.removeProperty('--card-offset');
+        }
+
+        function onBreakpoint(e) { e.matches ? observe() : disconnect(); }
+        mql.addEventListener('change', onBreakpoint);
+        if (mql.matches) observe();
+
+        // Re-observe after HTMX swaps in a new card
+        document.addEventListener('htmx:afterSwap', function() {
+            if (mql.matches) { disconnect(); observe(); }
+        });
+    })();
 
     // Keyboard shortcuts for labeling
     document.addEventListener('keydown', function(e) {

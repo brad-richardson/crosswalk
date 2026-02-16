@@ -1,12 +1,11 @@
 """Label review routes for the matcher web UI."""
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
+from ..jinja import templates
 from ..services import (
     delete_review_label,
     get_labels_for_review,
@@ -17,7 +16,6 @@ from ..services import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/review")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 @router.get("")

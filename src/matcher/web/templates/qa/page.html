@@ -14,7 +14,7 @@
     const dataset = {{ dataset|tojson }};
     const edgeType = {{ edge_type|tojson }};
 </script>
-<script src="/static/js/qa-map.js"></script>
+<script src="/static/js/qa-map.js?v={{cache_bust}}"></script>
 {% elif not dataset %}
 <script>
     // Clear any existing layers when no dataset selected

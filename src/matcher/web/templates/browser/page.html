@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/browser.js"></script>
+<script src="/static/js/browser.js?v={{cache_bust}}"></script>
 {% if dataset %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {

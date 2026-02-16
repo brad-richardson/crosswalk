@@ -1,90 +1,139 @@
 /**
  * QA map layer for interactive edge review.
  *
- * Renders integration edges on the Leaflet map with color-coded layers.
+ * Renders integration edges on the MapLibre map with color-coded layers.
  * Non-reference edges are clickable and fetch edge detail via HTMX.
  */
 (function () {
     "use strict";
 
     var map = window.matcherMap;
-    var pairLayer = window.matcherPairLayer;
+    var geojsonBounds = window.matcherGeojsonBounds;
 
-    if (!map || !pairLayer) {
-        console.error("qa-map.js: matcherMap or matcherPairLayer not available");
+    if (!map) {
+        console.error("qa-map.js: matcherMap not available");
         return;
     }
 
-    // Clear existing layers
-    pairLayer.clearLayers();
-
-    // Track the currently selected layer for highlight
-    var selectedLayer = null;
+    // Clear existing pair source data
+    var pairSource = window.matcherPairLayer;
+    if (pairSource && map.getSource(pairSource)) {
+        map.getSource(pairSource).setData({ type: "FeatureCollection", features: [] });
+    }
 
     if (typeof edgeGeojson === "undefined" || !edgeGeojson || !edgeGeojson.features) {
         return;
     }
 
-    var nonRefBounds = L.latLngBounds();
+    var QA_SOURCE = "qa-edges";
+    var QA_REF_LAYER = "qa-edges-reference";
+    var QA_LAYER = "qa-edges-interactive";
+    var selectedEdgeId = null;
 
-    edgeGeojson.features.forEach(function (feature) {
-        var props = feature.properties || {};
-        var isReference = props.layer === "reference";
+    function setup() {
+        // Remove previous QA layers/source if they exist
+        [QA_LAYER, QA_REF_LAYER].forEach(function (id) {
+            if (map.getLayer(id)) map.removeLayer(id);
+        });
+        if (map.getSource(QA_SOURCE)) map.removeSource(QA_SOURCE);
 
-        var style = {
-            color: props.color || "#999",
-            weight: isReference ? 2 : 3,
-            opacity: isReference ? 0.4 : 0.8,
-            interactive: !isReference,
-        };
+        // Tag features with _isReference for filtering
+        var features = edgeGeojson.features.map(function (f) {
+            var props = Object.assign({}, f.properties || {});
+            props._isReference = props.layer === "reference";
+            return { type: "Feature", geometry: f.geometry, properties: props };
+        });
 
-        var layer = L.geoJSON(feature, {
-            style: function () {
-                return style;
-            },
-            interactive: !isReference,
-            onEachFeature: function (feat, lyr) {
-                if (!isReference) {
-                    // Track bounds for non-reference edges
-                    var bounds = lyr.getBounds();
-                    if (bounds.isValid()) {
-                        nonRefBounds.extend(bounds);
-                    }
+        map.addSource(QA_SOURCE, {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: features },
+        });
 
-                    lyr.on("click", function () {
-                        // Reset previously selected layer
-                        if (selectedLayer) {
-                            selectedLayer.setStyle({ weight: 3 });
-                        }
-
-                        // Highlight clicked layer
-                        lyr.setStyle({ weight: 6 });
-                        selectedLayer = lyr;
-
-                        // Fetch edge detail via HTMX
-                        var edgeId = feat.properties.edge_id;
-                        var url =
-                            "/qa/edge/" +
-                            edgeId +
-                            "?dataset=" +
-                            encodeURIComponent(dataset) +
-                            "&type=" +
-                            encodeURIComponent(edgeType);
-
-                        htmx.ajax("GET", url, {
-                            target: "#edge-detail",
-                            swap: "innerHTML",
-                        });
-                    });
-                }
+        // Reference layer (underneath, non-interactive)
+        map.addLayer({
+            id: QA_REF_LAYER,
+            type: "line",
+            source: QA_SOURCE,
+            filter: ["==", ["get", "_isReference"], true],
+            paint: {
+                "line-color": ["coalesce", ["get", "color"], "#999"],
+                "line-width": 2,
+                "line-opacity": 0.4,
             },
         });
 
-        layer.addTo(pairLayer);
-    });
+        // Interactive (non-reference) layer
+        map.addLayer({
+            id: QA_LAYER,
+            type: "line",
+            source: QA_SOURCE,
+            filter: ["==", ["get", "_isReference"], false],
+            paint: {
+                "line-color": ["coalesce", ["get", "color"], "#999"],
+                "line-width": [
+                    "case",
+                    ["==", ["get", "edge_id"], selectedEdgeId || ""],
+                    6,
+                    3,
+                ],
+                "line-opacity": 0.8,
+            },
+        });
 
-    // Fit map bounds to non-reference edges
-    if (nonRefBounds.isValid()) {
-        map.fitBounds(nonRefBounds, { padding: [60, 60] });
+        // Click handler for non-reference edges
+        map.on("click", QA_LAYER, function (e) {
+            if (!e.features || !e.features.length) return;
+
+            var feat = e.features[0];
+            var edgeId = feat.properties.edge_id;
+            selectedEdgeId = edgeId;
+
+            // Update line widths to highlight selection
+            map.setPaintProperty(QA_LAYER, "line-width", [
+                "case",
+                ["==", ["get", "edge_id"], edgeId],
+                6,
+                3,
+            ]);
+
+            // Fetch edge detail via HTMX
+            var url =
+                "/qa/edge/" +
+                edgeId +
+                "?dataset=" +
+                encodeURIComponent(dataset) +
+                "&type=" +
+                encodeURIComponent(edgeType);
+
+            htmx.ajax("GET", url, {
+                target: "#edge-detail",
+                swap: "innerHTML",
+            });
+        });
+
+        // Change cursor on hover
+        map.on("mouseenter", QA_LAYER, function () {
+            map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", QA_LAYER, function () {
+            map.getCanvas().style.cursor = "";
+        });
+
+        // Fit bounds to non-reference features
+        var nonRefFC = {
+            type: "FeatureCollection",
+            features: features.filter(function (f) { return !f.properties._isReference; }),
+        };
+        var bbox = geojsonBounds(nonRefFC);
+        if (bbox) {
+            map.fitBounds(bbox, { padding: 60 });
+        }
+    }
+
+    // Run setup after style is loaded (in case map.js style.load hasn't fired yet)
+    if (map.isStyleLoaded()) {
+        setup();
+    } else {
+        map.on("load", setup);
     }
 })();

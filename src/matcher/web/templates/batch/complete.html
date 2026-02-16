@@ -12,13 +12,6 @@
 
 {% if request.headers.get('HX-Request') %}
 <span id="pair-progress" hx-swap-oob="innerHTML">{{ batch_labeled }} / {{ batch_total }} - Complete!</span>
-<!-- OOB swap to update features drawer -->
-<div id="features-drawer" hx-swap-oob="innerHTML">
-    <div class="features-drawer-header">
-        <div class="handle" onclick="closeFeatures()"></div>
-        <h4>Feature Details</h4>
-        <button class="features-close" onclick="closeFeatures()">&times;</button>
-    </div>
-    <p>Batch complete. No pair selected.</p>
-</div>
+<!-- OOB swap to clear features drawer -->
+<div id="features-drawer-body" hx-swap-oob="innerHTML"></div>
 {% endif %}

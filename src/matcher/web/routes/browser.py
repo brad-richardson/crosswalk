@@ -9,15 +9,14 @@ from pathlib import Path
 import geopandas as gpd
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-from fastapi.templating import Jinja2Templates
 
 from ...datasets.schema import get_dataset_config, list_dataset_configs
 from ...filenames import find_target_file
+from ..jinja import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/browser")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # Project root for data directory
 PROJECT_ROOT = Path(__file__).parents[4]

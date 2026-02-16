@@ -2,13 +2,17 @@
  * Dataset browser for the matcher web UI.
  *
  * Loads and displays raw fetched features on the map for any dataset.
- * Uses the persistent Leaflet map from map.js.
+ * Uses the persistent MapLibre map from map.js.
  */
 (function () {
     "use strict";
 
     var map = window.matcherMap;
-    var featureLayer = null;
+    var geojsonBounds = window.matcherGeojsonBounds;
+
+    var BROWSER_SOURCE = "browser-features";
+    var BROWSER_LAYER = "browser-features-line";
+    var popup = null;
 
     // Class-based color scheme
     var classColors = {
@@ -27,40 +31,17 @@
         unknown: "#9e9e9e",
     };
 
-    function getColor(cls) {
-        return classColors[cls] || "#9e9e9e";
-    }
-
-    function styleFeature(feature) {
-        var cls = (feature.properties && feature.properties["class"]) || "unknown";
-        return {
-            color: getColor(cls),
-            weight: 3,
-            opacity: 0.8,
-        };
-    }
-
-    function onEachFeature(feature, layer) {
-        if (!feature.properties) return;
-
-        var props = feature.properties;
-        var parts = [];
-
-        if (props.name) parts.push("<b>" + escapeHtml(props.name) + "</b>");
-        if (props.id) parts.push("<span style='font-family:monospace;font-size:0.8em;color:#888'>" + escapeHtml(props.id) + "</span>");
-        if (props["class"]) parts.push("Class: <b>" + escapeHtml(props["class"]) + "</b>");
-        if (props.subclass) parts.push("Subclass: " + escapeHtml(props.subclass));
-
-        if (parts.length > 0) {
-            layer.bindPopup(parts.join("<br>"), { maxWidth: 300 });
-        }
-    }
-
     function escapeHtml(str) {
         if (!str) return "";
         var div = document.createElement("div");
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    function clearBrowserLayer() {
+        if (popup) { popup.remove(); popup = null; }
+        if (map.getLayer(BROWSER_LAYER)) map.removeLayer(BROWSER_LAYER);
+        if (map.getSource(BROWSER_SOURCE)) map.removeSource(BROWSER_SOURCE);
     }
 
     function showInfo(metadata) {
@@ -91,6 +72,62 @@
         infoEl.classList.remove("hidden");
     }
 
+    function addBrowserLayer(data) {
+        // Build a match expression for class → color
+        var colorExpr = ["match", ["coalesce", ["get", "class"], "unknown"]];
+        var keys = Object.keys(classColors);
+        for (var i = 0; i < keys.length; i++) {
+            colorExpr.push(keys[i]);
+            colorExpr.push(classColors[keys[i]]);
+        }
+        colorExpr.push("#9e9e9e"); // fallback
+
+        map.addSource(BROWSER_SOURCE, {
+            type: "geojson",
+            data: data,
+        });
+
+        map.addLayer({
+            id: BROWSER_LAYER,
+            type: "line",
+            source: BROWSER_SOURCE,
+            paint: {
+                "line-color": colorExpr,
+                "line-width": 3,
+                "line-opacity": 0.8,
+            },
+        });
+
+        // Click to show popup
+        map.on("click", BROWSER_LAYER, function (e) {
+            if (!e.features || !e.features.length) return;
+
+            var props = e.features[0].properties || {};
+            var parts = [];
+
+            if (props.name) parts.push("<b>" + escapeHtml(props.name) + "</b>");
+            if (props.id) parts.push("<span style='font-family:monospace;font-size:0.8em;color:#888'>" + escapeHtml(props.id) + "</span>");
+            if (props["class"]) parts.push("Class: <b>" + escapeHtml(props["class"]) + "</b>");
+            if (props.subclass) parts.push("Subclass: " + escapeHtml(props.subclass));
+
+            if (parts.length > 0) {
+                if (popup) popup.remove();
+                popup = new maplibregl.Popup({ maxWidth: "300px" })
+                    .setLngLat(e.lngLat)
+                    .setHTML(parts.join("<br>"))
+                    .addTo(map);
+            }
+        });
+
+        // Cursor change on hover
+        map.on("mouseenter", BROWSER_LAYER, function () {
+            map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", BROWSER_LAYER, function () {
+            map.getCanvas().style.cursor = "";
+        });
+    }
+
     function loadDataset(dataset) {
         if (!dataset) return;
 
@@ -103,10 +140,7 @@
         }
 
         // Clear existing features
-        if (featureLayer) {
-            map.removeLayer(featureLayer);
-            featureLayer = null;
-        }
+        clearBrowserLayer();
 
         fetch("/browser/features?dataset=" + encodeURIComponent(dataset))
             .then(function (resp) {
@@ -116,21 +150,26 @@
             .then(function (data) {
                 var metadata = data.metadata || {};
 
-                // Remove metadata before passing to Leaflet
+                // Remove metadata before passing to MapLibre
                 delete data.metadata;
 
-                featureLayer = L.geoJSON(data, {
-                    style: styleFeature,
-                    onEachFeature: onEachFeature,
-                }).addTo(map);
+                // Wait for style to be loaded before adding layers
+                function doAdd() {
+                    addBrowserLayer(data);
 
-                // Fit bounds
-                var bounds = featureLayer.getBounds();
-                if (bounds.isValid()) {
-                    map.fitBounds(bounds, { padding: [40, 40] });
+                    var bbox = geojsonBounds(data);
+                    if (bbox) {
+                        map.fitBounds(bbox, { padding: 40 });
+                    }
+
+                    showInfo(metadata);
                 }
 
-                showInfo(metadata);
+                if (map.isStyleLoaded()) {
+                    doAdd();
+                } else {
+                    map.on("load", doAdd);
+                }
             })
             .catch(function (err) {
                 console.error("Browser load error:", err);

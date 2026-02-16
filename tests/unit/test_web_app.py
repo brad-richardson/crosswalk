@@ -62,16 +62,15 @@ class TestRoutes:
 class TestBaseTemplate:
     """Tests for the base HTML template content."""
 
-    def test_leaflet_css_included(self, client):
-        """Template should include Leaflet CSS from CDN."""
+    def test_maplibre_css_included(self, client):
+        """Template should include MapLibre GL CSS from CDN."""
         response = client.get("/labeling")
-        assert "leaflet.css" in response.text
-        assert "unpkg.com/leaflet@1.9" in response.text
+        assert "maplibre-gl.css" in response.text
 
-    def test_leaflet_js_included(self, client):
-        """Template should include Leaflet JS from CDN."""
+    def test_maplibre_js_included(self, client):
+        """Template should include MapLibre GL JS from CDN."""
         response = client.get("/labeling")
-        assert "leaflet.js" in response.text
+        assert "maplibre-gl.js" in response.text
 
     def test_htmx_included(self, client):
         """Template should include HTMX from CDN."""
@@ -145,10 +144,10 @@ class TestStaticFiles:
         response = client.get("/static/css/app.css")
         assert "768px" in response.text
 
-    def test_js_creates_leaflet_map(self, client):
-        """JS should initialize a Leaflet map."""
+    def test_js_creates_maplibre_map(self, client):
+        """JS should initialize a MapLibre GL map."""
         response = client.get("/static/js/map.js")
-        assert "L.map" in response.text
+        assert "maplibregl.Map" in response.text
         assert "42.36" in response.text
         assert "-71.06" in response.text
 

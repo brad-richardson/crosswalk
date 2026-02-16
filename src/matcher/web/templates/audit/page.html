@@ -61,6 +61,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/features.js"></script>
-<script src="/static/js/audit.js"></script>
+<script src="/static/js/features.js?v={{cache_bust}}"></script>
+<script src="/static/js/audit.js?v={{cache_bust}}"></script>
 {% endblock %}

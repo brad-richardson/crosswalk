@@ -3,14 +3,13 @@
 import contextlib
 import json
 import logging
-from pathlib import Path
 from threading import Thread
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
+from ..jinja import templates
 from ..services import (
     CONFIG_FILE,
     get_unlabeled_candidates,
@@ -23,13 +22,13 @@ from ..services import (
     record_label,
     undo_last_label,
 )
+from ..utils import round_geom
 
 logger = logging.getLogger(__name__)
 
 VALID_LABELS = {"match", "no_match", "unsure"}
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # Module-level cache for loaded candidates per dataset
 _candidate_cache: dict[str, list] = {}
@@ -95,20 +94,20 @@ def _pair_to_geojson(pair) -> str:
         JSON string suitable for embedding in an HTML data attribute.
     """
     result = {
-        "reference_full": mapping(pair.ref_geometry),
-        "target_full": mapping(pair.target_geometry),
+        "reference_full": round_geom(mapping(pair.ref_geometry)),
+        "target_full": round_geom(mapping(pair.target_geometry)),
     }
 
     # Use aligned geometries if available, otherwise fall back to full
     if pair.ref_aligned_geometry is not None:
-        result["reference"] = mapping(pair.ref_aligned_geometry)
+        result["reference"] = round_geom(mapping(pair.ref_aligned_geometry))
     else:
-        result["reference"] = mapping(pair.ref_geometry)
+        result["reference"] = result["reference_full"]
 
     if pair.target_aligned_geometry is not None:
-        result["target"] = mapping(pair.target_aligned_geometry)
+        result["target"] = round_geom(mapping(pair.target_aligned_geometry))
     else:
-        result["target"] = mapping(pair.target_geometry)
+        result["target"] = result["target_full"]
 
     return json.dumps(result)
 
@@ -381,6 +380,22 @@ async def undo_label(
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)
+
+
+@router.get("/labeling/features")
+async def labeling_features(request: Request, dataset: str, index: int = 0):
+    """Return features HTML for a specific pair (lazy-loaded by the features drawer)."""
+    if dataset not in _candidate_cache:
+        return HTMLResponse("<p>No features available.</p>")
+
+    all_candidates = _candidate_cache[dataset]
+    unlabeled = get_unlabeled_candidates(dataset, all_candidates)
+
+    pair = None
+    if unlabeled and 0 <= index < len(unlabeled):
+        pair = unlabeled[index]
+
+    return templates.TemplateResponse(request, "labeling/features.html", {"pair": pair})
 
 
 @router.post("/labeling/refresh")

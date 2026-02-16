@@ -49,7 +49,7 @@ classification:
   source_classification:
     column: RD_CATG__1
 quality_fingerprint:
-  computed_at: '2026-02-14T16:37:26.746331+00:00'
+  computed_at: '2026-02-16T15:53:29.856033+00:00'
   total_segments: 664
   name_coverage_ratio: 1.0
   class_coverage_ratio: 0.9232

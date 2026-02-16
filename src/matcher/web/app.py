@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from .routes.audit import router as audit_router
 from .routes.batch import router as batch_router
@@ -85,8 +86,9 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(title="Matcher Web UI", docs_url=None, redoc_url=None, lifespan=lifespan)
 
-    # Middleware (runs before routers)
+    # Middleware (runs before routers, outermost first)
     app.add_middleware(LabelerNameMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     # Mount static files
     STATIC_DIR.mkdir(parents=True, exist_ok=True)

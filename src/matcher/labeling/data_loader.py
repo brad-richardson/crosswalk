@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from pyproj import Transformer
 from shapely import wkt
@@ -24,6 +25,21 @@ from ..utils import ensure_projected_crs, filter_to_linestrings
 from ..utils.linear_ref import extract_lr_name
 
 logger = logging.getLogger(__name__)
+
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy types."""
+
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        return super().default(obj)
 
 
 def extract_pair_attributes(
@@ -265,8 +281,8 @@ class CandidatePairView:
             "target_subclass": self.target_subclass,
             "decision": self.decision,
             "confidence": self.confidence,
-            "score_breakdown_json": json.dumps(self.score_breakdown),
-            "features_json": json.dumps(self.features),
+            "score_breakdown_json": json.dumps(self.score_breakdown, cls=_NumpyEncoder),
+            "features_json": json.dumps(self.features, cls=_NumpyEncoder),
             # Aligned geometries (may be None)
             "ref_aligned_geometry_wkt": self.ref_aligned_geometry.wkt
             if self.ref_aligned_geometry
@@ -280,11 +296,17 @@ class CandidatePairView:
             "target_start_frac": self.target_start_frac,
             "target_end_frac": self.target_end_frac,
             # Topology context
-            "ref_topology_json": json.dumps(self._serialize_topology(self.ref_topology)),
-            "target_topology_json": json.dumps(self._serialize_topology(self.target_topology)),
+            "ref_topology_json": json.dumps(
+                self._serialize_topology(self.ref_topology), cls=_NumpyEncoder
+            ),
+            "target_topology_json": json.dumps(
+                self._serialize_topology(self.target_topology), cls=_NumpyEncoder
+            ),
             # Full names structs
-            "ref_names_raw_json": json.dumps(self.ref_names_raw) if self.ref_names_raw else None,
-            "target_names_raw_json": json.dumps(self.target_names_raw)
+            "ref_names_raw_json": json.dumps(self.ref_names_raw, cls=_NumpyEncoder)
+            if self.ref_names_raw
+            else None,
+            "target_names_raw_json": json.dumps(self.target_names_raw, cls=_NumpyEncoder)
             if self.target_names_raw
             else None,
         }

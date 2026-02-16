@@ -1,0 +1,18 @@
+{% if pair and pair.features %}
+<table class="features-table">
+    <thead>
+        <tr><th>Feature</th><th>Value</th><th></th></tr>
+    </thead>
+    <tbody>
+        {% for key, value in pair.features.items() %}
+        <tr>
+            <td>{{ key }}</td>
+            <td class="feature-value">{{ "%.4f"|format(value) if value is number else value }}</td>
+            <td class="feature-signal" data-feature="{{ key }}" data-value="{{ value }}"></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No features available.</p>
+{% endif %}

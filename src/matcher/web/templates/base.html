@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Matcher - {% if mode == 'labeling' %}Label Creation{% elif mode == 'batch' %}Batch Label{% elif mode == 'review' %}Label Review{% elif mode == 'qa' %}Integration QA{% elif mode == 'browser' %}Browse{% elif mode == 'audit' %}Feature Audit{% else %}Label Creation{% endif %}</title>
 
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin="anonymous">
+    <!-- MapLibre GL CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
 
     <!-- App CSS -->
-    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/app.css?v={{cache_bust}}">
 </head>
 <body>
     <!-- Fullscreen map container -->
@@ -81,17 +79,15 @@
         <span id="progress-text">Loading...</span>
     </div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin="anonymous"></script>
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@2.0/dist/htmx.min.js"
             crossorigin="anonymous"></script>
 
     <!-- App JS -->
-    <script src="/static/js/map.js"></script>
+    <script src="/static/js/map.js?v={{cache_bust}}"></script>
 
     <!-- Menu toggle and dataset switcher -->
     <script>

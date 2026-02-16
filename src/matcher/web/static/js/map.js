@@ -1,93 +1,281 @@
 /**
- * Persistent Leaflet map for the matcher web UI.
+ * Persistent MapLibre GL map for the matcher web UI.
  *
- * Creates a fullscreen map centered on Boston with multiple tile layers,
- * a layer group for pair geometries, and HTMX integration for dynamic
- * content loading.
+ * Creates a fullscreen map centered on Boston with vector tile basemaps,
+ * dark mode auto-switching, a layer group for pair geometries, and HTMX
+ * integration for dynamic content loading.
  */
 (function () {
     "use strict";
 
+    // --- Basemap styles ---
+    var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+    var STYLES = {
+        Carto: {
+            light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+            dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        },
+        OSM: {
+            // OpenMapTiles styles fetched and patched to use OSM US tile server
+            light: "https://openmaptiles.github.io/osm-bright-gl-style/style-cdn.json",
+            dark: "https://openmaptiles.github.io/dark-matter-gl-style/style-cdn.json",
+        },
+        Satellite: {
+            light: {
+                version: 8,
+                sources: {
+                    esri: {
+                        type: "raster",
+                        tiles: [
+                            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                        ],
+                        tileSize: 256,
+                        maxzoom: 19,
+                        attribution: "&copy; Esri",
+                    },
+                },
+                layers: [{ id: "esri-satellite", type: "raster", source: "esri" }],
+            },
+        },
+    };
+    // Satellite has no dark variant
+    STYLES.Satellite.dark = STYLES.Satellite.light;
+
+    // Cache for patched OSM styles (avoid re-fetching on every switch)
+    var osmStyleCache = {};
+
+    var activeBasemap = "Carto";
+
+    function getStyleUrl(name) {
+        var entry = STYLES[name] || STYLES.Carto;
+        return prefersDark ? entry.dark : entry.light;
+    }
+
+    /**
+     * Patch an OpenMapTiles style to use OSM US vector tile server
+     * instead of the default MapTiler API (which requires a key).
+     */
+    function patchOsmStyle(style) {
+        var patched = JSON.parse(JSON.stringify(style));
+        // Replace the openmaptiles source with OSM US tiles
+        if (patched.sources && patched.sources.openmaptiles) {
+            patched.sources.openmaptiles = {
+                type: "vector",
+                url: "https://tiles.openstreetmap.us/vector/openmaptiles.json",
+            };
+        }
+        // Replace MapTiler font glyphs with a free alternative
+        patched.glyphs = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
+        return patched;
+    }
+
+    /**
+     * Load a style, patching OSM styles to use free tile sources.
+     * Returns a promise that resolves to the style object or URL string.
+     */
+    function loadStyle(name) {
+        var styleUrl = getStyleUrl(name);
+
+        // Non-OSM styles: return URL directly (or inline object for Satellite)
+        if (name !== "OSM") {
+            return Promise.resolve(styleUrl);
+        }
+
+        // Check cache
+        var cacheKey = styleUrl;
+        if (osmStyleCache[cacheKey]) {
+            return Promise.resolve(osmStyleCache[cacheKey]);
+        }
+
+        // Fetch and patch OSM style
+        return fetch(styleUrl)
+            .then(function (resp) {
+                if (!resp.ok) throw new Error("Failed to load OSM style: " + resp.status);
+                return resp.json();
+            })
+            .then(function (style) {
+                var patched = patchOsmStyle(style);
+                osmStyleCache[cacheKey] = patched;
+                return patched;
+            })
+            .catch(function (err) {
+                console.error("OSM style load failed, falling back to Carto:", err);
+                return getStyleUrl("Carto");
+            });
+    }
+
     // --- Map initialization ---
-    var map = L.map("map", {
-        center: [42.36, -71.06],
+    var map = new maplibregl.Map({
+        container: "map",
+        style: getStyleUrl(activeBasemap),
+        center: [-71.06, 42.36],
         zoom: 14,
         maxZoom: 22,
-        zoomControl: false,
     });
 
     // Add zoom control to bottom-left
-    L.control.zoom({ position: "bottomleft" }).addTo(map);
-
-    // --- Tile layers ---
-    var light = L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-            subdomains: "abcd",
-            maxNativeZoom: 20,
-            maxZoom: 22,
-        }
+    map.addControl(
+        new maplibregl.NavigationControl({ showCompass: false }),
+        "bottom-left"
     );
 
-    var satellite = L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        {
-            attribution: "&copy; Esri",
-            maxNativeZoom: 19,
-            maxZoom: 22,
+    // --- Custom layer switcher control ---
+    var LayerSwitcher = (function () {
+        function LayerSwitcher() {}
+        LayerSwitcher.prototype.onAdd = function (map) {
+            this._map = map;
+            this._container = document.createElement("div");
+            this._container.className = "maplibregl-ctrl maplibregl-ctrl-group layer-switcher";
+
+            var names = Object.keys(STYLES);
+            for (var i = 0; i < names.length; i++) {
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = names[i];
+                btn.className = "layer-switcher-btn" + (names[i] === activeBasemap ? " active" : "");
+                btn.dataset.basemap = names[i];
+                btn.addEventListener("click", this._onClick.bind(this));
+                this._container.appendChild(btn);
+            }
+            return this._container;
+        };
+        LayerSwitcher.prototype.onRemove = function () {
+            this._container.parentNode.removeChild(this._container);
+            this._map = undefined;
+        };
+        LayerSwitcher.prototype._onClick = function (e) {
+            var name = e.target.dataset.basemap;
+            if (name === activeBasemap) return;
+            activeBasemap = name;
+
+            // Update active button state
+            var btns = this._container.querySelectorAll(".layer-switcher-btn");
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].classList.toggle("active", btns[i].dataset.basemap === name);
+            }
+
+            loadStyle(name).then(function (style) {
+                map.setStyle(style);
+            });
+        };
+        return LayerSwitcher;
+    })();
+
+    map.addControl(new LayerSwitcher(), "bottom-left");
+
+    // --- Dark mode auto-switching ---
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
+        prefersDark = e.matches;
+        loadStyle(activeBasemap).then(function (style) {
+            map.setStyle(style);
+        });
+    });
+
+    // --- Pair geometry rendering ---
+    var currentGeojson = null;
+    var PAIR_SOURCE = "pair-geojson";
+    var EMPTY_FC = { type: "FeatureCollection", features: [] };
+
+    var LAYER_DEFS = [
+        { id: "pair-reference-full", type: "line", filter: ["==", ["get", "_role"], "referenceFull"], paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 } },
+        { id: "pair-target-full", type: "line", filter: ["==", ["get", "_role"], "targetFull"], paint: { "line-color": "#FF5722", "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] } },
+        { id: "pair-reference", type: "line", filter: ["==", ["get", "_role"], "reference"], paint: { "line-color": "#2196F3", "line-width": 4, "line-opacity": 0.9 } },
+        { id: "pair-target", type: "line", filter: ["==", ["get", "_role"], "target"], paint: { "line-color": "#FF5722", "line-width": 4, "line-opacity": 0.9 } },
+    ];
+
+    function addPairLayers() {
+        if (map.getSource(PAIR_SOURCE)) return;
+
+        map.addSource(PAIR_SOURCE, { type: "geojson", data: EMPTY_FC });
+
+        for (var i = 0; i < LAYER_DEFS.length; i++) {
+            var def = LAYER_DEFS[i];
+            map.addLayer({
+                id: def.id,
+                type: def.type,
+                source: PAIR_SOURCE,
+                filter: def.filter,
+                paint: def.paint,
+            });
         }
-    );
+    }
 
-    var osm = L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-            maxNativeZoom: 19,
-            maxZoom: 22,
+    /**
+     * Build a FeatureCollection from pair geometry data, tagging each feature
+     * with a _role property for style filtering.
+     */
+    function buildPairFC(data) {
+        var features = [];
+
+        function addFeatures(geojson, role) {
+            if (!geojson) return;
+            // Handle both Feature and FeatureCollection
+            var items = geojson.type === "FeatureCollection" ? geojson.features : [geojson];
+            for (var i = 0; i < items.length; i++) {
+                var f = items[i];
+                // If it's just a geometry (not a Feature), wrap it
+                if (!f.type || f.type !== "Feature") {
+                    f = { type: "Feature", geometry: f, properties: {} };
+                }
+                // Clone properties and add role
+                var props = {};
+                if (f.properties) {
+                    var keys = Object.keys(f.properties);
+                    for (var k = 0; k < keys.length; k++) {
+                        props[keys[k]] = f.properties[keys[k]];
+                    }
+                }
+                props._role = role;
+                features.push({ type: "Feature", geometry: f.geometry, properties: props });
+            }
         }
-    );
 
-    // Default to light tiles
-    light.addTo(map);
+        addFeatures(data.reference_full, "referenceFull");
+        addFeatures(data.target_full, "targetFull");
+        addFeatures(data.reference, "reference");
+        addFeatures(data.target, "target");
 
-    // Layer control
-    L.control
-        .layers(
-            { Light: light, Satellite: satellite, OSM: osm },
-            {},
-            { position: "bottomleft" }
-        )
-        .addTo(map);
+        return { type: "FeatureCollection", features: features };
+    }
 
-    // --- Pair geometry layer group ---
-    var pairLayer = L.featureGroup().addTo(map);
+    /**
+     * Compute a [west, south, east, north] bounding box from a GeoJSON object.
+     */
+    function geojsonBounds(geojson) {
+        var coords = [];
 
-    // Style definitions for geometry types
-    var styles = {
-        reference: {
-            color: "#2196F3",
-            weight: 4,
-            opacity: 0.9,
-        },
-        target: {
-            color: "#FF5722",
-            weight: 4,
-            opacity: 0.9,
-            dashArray: "8, 6",
-        },
-        referenceFull: {
-            color: "#2196F3",
-            weight: 2,
-            opacity: 0.3,
-        },
-        targetFull: {
-            color: "#FF5722",
-            weight: 2,
-            opacity: 0.3,
-            dashArray: "8, 6",
-        },
-    };
+        function extractCoords(geometry) {
+            if (!geometry) return;
+            if (geometry.type === "Feature") { extractCoords(geometry.geometry); return; }
+            if (geometry.type === "FeatureCollection") {
+                for (var i = 0; i < geometry.features.length; i++) extractCoords(geometry.features[i]);
+                return;
+            }
+            if (geometry.type === "GeometryCollection") {
+                for (var j = 0; j < geometry.geometries.length; j++) extractCoords(geometry.geometries[j]);
+                return;
+            }
+            flattenCoords(geometry.coordinates);
+        }
+
+        function flattenCoords(c) {
+            if (typeof c[0] === "number") { coords.push(c); return; }
+            for (var i = 0; i < c.length; i++) flattenCoords(c[i]);
+        }
+
+        extractCoords(geojson);
+        if (coords.length === 0) return null;
+
+        var w = coords[0][0], s = coords[0][1], e = coords[0][0], n = coords[0][1];
+        for (var i = 1; i < coords.length; i++) {
+            if (coords[i][0] < w) w = coords[i][0];
+            if (coords[i][0] > e) e = coords[i][0];
+            if (coords[i][1] < s) s = coords[i][1];
+            if (coords[i][1] > n) n = coords[i][1];
+        }
+        return [[w, s], [e, n]];
+    }
 
     /**
      * Display pair geometries on the map from a data-geometry attribute.
@@ -101,9 +289,13 @@
      * }
      */
     function showPairGeometry(geojsonData) {
-        pairLayer.clearLayers();
-
-        if (!geojsonData) return;
+        if (!geojsonData) {
+            currentGeojson = null;
+            if (map.getSource(PAIR_SOURCE)) {
+                map.getSource(PAIR_SOURCE).setData(EMPTY_FC);
+            }
+            return;
+        }
 
         var data;
         if (typeof geojsonData === "string") {
@@ -117,35 +309,55 @@
             data = geojsonData;
         }
 
-        // Add full geometries first (underneath, faded)
-        if (data.reference_full) {
-            L.geoJSON(data.reference_full, { style: styles.referenceFull }).addTo(pairLayer);
-        }
-        if (data.target_full) {
-            L.geoJSON(data.target_full, { style: styles.targetFull }).addTo(pairLayer);
-        }
+        currentGeojson = data;
 
-        // Add primary geometries on top
+        // Defer rendering if style isn't loaded yet
+        if (!map.isStyleLoaded()) return;
+        renderOverlays(data);
+    }
+
+    function renderOverlays(data) {
+        if (!data) return;
+
+        addPairLayers();
+
+        var fc = buildPairFC(data);
+        map.getSource(PAIR_SOURCE).setData(fc);
+
+        // Fit bounds to primary geometries (reference + target sublines)
+        var boundsFC = { type: "FeatureCollection", features: [] };
         if (data.reference) {
-            L.geoJSON(data.reference, { style: styles.reference }).addTo(pairLayer);
+            var ref = data.reference;
+            if (ref.type === "FeatureCollection") {
+                boundsFC.features = boundsFC.features.concat(ref.features);
+            } else {
+                boundsFC.features.push(ref);
+            }
         }
         if (data.target) {
-            L.geoJSON(data.target, { style: styles.target }).addTo(pairLayer);
+            var tgt = data.target;
+            if (tgt.type === "FeatureCollection") {
+                boundsFC.features = boundsFC.features.concat(tgt.features);
+            } else {
+                boundsFC.features.push(tgt);
+            }
         }
 
-        // Fit map bounds to the aligned sublines (not full segments)
-        var sublineBounds = L.featureGroup();
-        if (data.reference) {
-            L.geoJSON(data.reference).addTo(sublineBounds);
-        }
-        if (data.target) {
-            L.geoJSON(data.target).addTo(sublineBounds);
-        }
-        var bounds = sublineBounds.getBounds();
-        if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [60, 60] });
+        var bbox = geojsonBounds(boundsFC);
+        if (bbox) {
+            var isMobile = window.innerWidth < 768;
+            map.fitBounds(bbox, { padding: isMobile ? 150 : 60, animate: false });
         }
     }
+
+    // Re-add overlays after style change (setStyle strips all custom sources/layers)
+    map.on("style.load", function () {
+        // Re-create source and layers
+        if (map.getSource(PAIR_SOURCE)) return; // already present (initial load)
+        if (currentGeojson) {
+            renderOverlays(currentGeojson);
+        }
+    });
 
     /**
      * Read geometry from a <script type="application/json" id="pair-geometry">
@@ -164,7 +376,9 @@
     }
 
     // --- Initial load ---
-    loadPairGeometry();
+    map.on("load", function () {
+        loadPairGeometry();
+    });
 
     // --- HTMX integration ---
     // After HTMX swaps in new content, re-read the geometry data
@@ -172,8 +386,9 @@
         loadPairGeometry();
     });
 
-    // Expose map and helpers for console debugging
+    // Expose map and helpers for console debugging and other scripts
     window.matcherMap = map;
-    window.matcherPairLayer = pairLayer;
+    window.matcherPairLayer = PAIR_SOURCE;
     window.matcherShowGeometry = showPairGeometry;
+    window.matcherGeojsonBounds = geojsonBounds;
 })();

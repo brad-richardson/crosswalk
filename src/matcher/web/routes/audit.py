@@ -13,13 +13,13 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-from fastapi.templating import Jinja2Templates
 
 from ...config import FEATURE_CATEGORIES, FEATURE_COLUMNS
 from ...features.semantic import display_name
 from ...labeling.data_store import DataStore
 from ...labeling.feature_store import FeatureStore
 from ...labeling.label_store import LabelStore
+from ..jinja import templates
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ def _display_name_from_raw(raw) -> str | None:
 
 
 router = APIRouter(prefix="/audit")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 PROJECT_ROOT = Path(__file__).parents[4]
 LABELS_DIR = PROJECT_ROOT / "labels"

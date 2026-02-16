@@ -89,32 +89,8 @@
         Select a dataset
     {% endif %}
 </span>
-<!-- OOB swap to update features drawer with current pair's features -->
-<div id="features-drawer" hx-swap-oob="innerHTML">
-    <div class="features-drawer-header">
-        <div class="handle" onclick="closeFeatures()"></div>
-        <h4>Feature Details</h4>
-        <button class="features-close" onclick="closeFeatures()">&times;</button>
-    </div>
-    {% if pair and pair.features %}
-    <table class="features-table">
-        <thead>
-            <tr><th>Feature</th><th>Value</th><th></th></tr>
-        </thead>
-        <tbody>
-            {% for key, value in pair.features.items() %}
-            <tr>
-                <td>{{ key }}</td>
-                <td class="feature-value">{{ "%.4f"|format(value) if value is number else value }}</td>
-                <td class="feature-signal" data-feature="{{ key }}" data-value="{{ value }}"></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p>No features available.</p>
-    {% endif %}
-</div>
+<!-- OOB swap to reset features drawer (lazy-loaded on demand) -->
+<div id="features-drawer-body" hx-swap-oob="innerHTML"></div>
 {% endif %}
 
 <!-- Update URL to reflect current position (bookmarkable) -->

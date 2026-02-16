@@ -2,14 +2,13 @@
 
 import json
 import logging
-from pathlib import Path
 from threading import Thread
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from shapely.geometry import mapping
 
+from ..jinja import templates
 from ..services import (
     delete_batch_manifest,
     generate_batch,
@@ -26,13 +25,13 @@ from ..services import (
     record_label,
     undo_last_label,
 )
+from ..utils import round_geom
 
 logger = logging.getLogger(__name__)
 
 VALID_LABELS = {"match", "no_match", "unsure"}
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # Module-level cache for loaded batch candidates per dataset
 _batch_cache: dict[str, list] = {}
@@ -44,19 +43,19 @@ _audit_datasets: set[str] = set()
 def _pair_to_geojson(pair) -> str:
     """Convert a CandidatePairView's geometries to a GeoJSON JSON string."""
     result = {
-        "reference_full": mapping(pair.ref_geometry),
-        "target_full": mapping(pair.target_geometry),
+        "reference_full": round_geom(mapping(pair.ref_geometry)),
+        "target_full": round_geom(mapping(pair.target_geometry)),
     }
 
     if pair.ref_aligned_geometry is not None:
-        result["reference"] = mapping(pair.ref_aligned_geometry)
+        result["reference"] = round_geom(mapping(pair.ref_aligned_geometry))
     else:
-        result["reference"] = mapping(pair.ref_geometry)
+        result["reference"] = result["reference_full"]
 
     if pair.target_aligned_geometry is not None:
-        result["target"] = mapping(pair.target_aligned_geometry)
+        result["target"] = round_geom(mapping(pair.target_aligned_geometry))
     else:
-        result["target"] = mapping(pair.target_geometry)
+        result["target"] = result["target_full"]
 
     return json.dumps(result)
 
@@ -454,6 +453,27 @@ async def undo_batch_label(
     }
 
     return templates.TemplateResponse(request, "labeling/pair.html", context)
+
+
+@router.get("/batch/features")
+async def batch_features(request: Request, dataset: str, index: int = 0):
+    """Return features HTML for a specific batch pair (lazy-loaded by the features drawer)."""
+    if dataset not in _batch_cache:
+        return HTMLResponse("<p>No features available.</p>")
+
+    all_candidates = _batch_cache[dataset]
+    is_audit = dataset in _audit_datasets
+
+    if is_audit:
+        working_list = all_candidates
+    else:
+        working_list = get_unlabeled_candidates(dataset, all_candidates)
+
+    pair = None
+    if working_list and 0 <= index < len(working_list):
+        pair = working_list[index]
+
+    return templates.TemplateResponse(request, "labeling/features.html", {"pair": pair})
 
 
 @router.post("/batch/regenerate")
