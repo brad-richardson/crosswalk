@@ -100,6 +100,31 @@ The pattern: during candidate generation (when full datasets are loaded), pre-co
 
 **Location:** `src/matcher/features/pipeline.py`, `src/matcher/labeling/data_store.py`
 
+### Medium: Spatially-Grounded Topology Features
+
+**Priority:** Medium
+
+**Problem:** Current topology features are not spatially discriminative for dense networks (footpaths, bike lanes):
+
+- Endpoint features (`min/max_endpoint_proximity_m`, `shared_endpoint_count`) only measure target-to-target connectivity via `target_index` built at `pipeline.py:150`. For dense networks, these are uniformly high and non-discriminative.
+- Topology cross-comparison (`degree_match_score`, `graphlet_similarity`, `endpoint_degree_similarity`) compare topological patterns without spatial co-location. `degree_match_score` at `spatial_context.py:921` just compares degree numbers from different physical locations.
+
+**Proposed feature: Connector set IOU**
+
+Compute a Jaccard similarity (IOU) over the Overture connector sets that each aligned portion connects to:
+
+- For the ref aligned portion: collect the set of Overture connector node IDs along that portion
+- For the target aligned portion: find which Overture connectors are within tolerance of the target's path/endpoints
+- Compute IOU = |ref_connectors ∩ target_connectors| / |ref_connectors ∪ target_connectors|
+
+This is spatially grounded — a true match should connect to the SAME Overture intersection nodes (high IOU), while a parallel sidewalk 40m away connects to DIFFERENT nodes (IOU ≈ 0).
+
+Could be computed at both 5m and 15m buffer tolerances to align with existing buffer_iou features.
+
+**Also consider:** Cross-network endpoint proximity — measure distance from target aligned endpoints to nearest **reference** connector (not target connector). Currently `min_endpoint_proximity_m` measures target-to-target only.
+
+**Location:** `src/matcher/features/spatial_context.py`, `src/matcher/features/pipeline.py`
+
 ### Dual Carriageway / Centerline Handling
 
 **Priority:** Medium
