@@ -726,6 +726,7 @@ def compute_features_only(
         return pd.DataFrame()
 
     # Prepare worker data using shared pipeline setup
+    # Physical overlap filtering happens inside prepare_worker_data()
     pipeline_result = prepare_worker_data(
         candidates=candidates,
         reference=reference_proj,
@@ -740,6 +741,10 @@ def compute_features_only(
     )
     worker_data = pipeline_result.worker_data
     alignments = pipeline_result.alignments
+    candidates = pipeline_result.candidates
+
+    if not candidates:
+        return pd.DataFrame()
 
     # Parallel feature computation using shared dispatch
     parallel_result = compute_features_parallel(

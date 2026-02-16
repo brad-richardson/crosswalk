@@ -18,8 +18,14 @@ from typing import Any, NamedTuple
 
 import geopandas as gpd
 import numpy as np
+import shapely as shapely_mod
 
-from ..config import DEFAULT_SNAP_TOLERANCE_M, DEFAULT_TOPOLOGY_FEATURES, default_worker_count
+from ..config import (
+    DEFAULT_SNAP_TOLERANCE_M,
+    DEFAULT_TOPOLOGY_FEATURES,
+    PHYSICAL_OVERLAP_MIN_M,
+    default_worker_count,
+)
 from ..features.alignment import compute_alignment_batch
 from ..features.compute import precompute_graphlet_features
 from ..features.relational import build_sibling_search_context
@@ -40,6 +46,8 @@ class WorkerDataResult(NamedTuple):
     alignments: dict
     unique_ref_indices: set[int]
     unique_target_indices: set[int]
+    candidates: list
+    """Candidates after filtering (may be fewer than input if overlap filter is on)."""
 
 
 def _extract_column_array(gdf: gpd.GeoDataFrame, column: str, fallback_len: int) -> np.ndarray:
@@ -71,6 +79,7 @@ def prepare_worker_data(
     n_jobs: int = -1,
     ref_geoms: np.ndarray | None = None,
     target_geoms: np.ndarray | None = None,
+    filter_physical_overlap: bool = True,
 ) -> WorkerDataResult:
     """Prepare worker_data dict for parallel feature computation.
 
@@ -96,9 +105,13 @@ def prepare_worker_data(
         ref_geoms: Pre-extracted reference geometry array (avoids re-conversion
             if caller already materialized it, e.g., for overlap filtering)
         target_geoms: Pre-extracted target geometry array (same optimization)
+        filter_physical_overlap: If True (default), remove candidates where
+            the reference geometry within a PHYSICAL_OVERLAP_MIN_M buffer corridor
+            around the target is shorter than PHYSICAL_OVERLAP_MIN_M.
+            This filters collinear segments that barely touch at tips.
 
     Returns:
-        WorkerDataResult with worker_data dict and side-products
+        WorkerDataResult with worker_data dict, side-products, and filtered candidates
     """
     t_total = time.perf_counter()
 
@@ -128,6 +141,42 @@ def prepare_worker_data(
     target_ids = target[target_id_column].to_numpy()
 
     logger.debug(f"[TIMING] data_extraction: {time.perf_counter() - t0:.2f}s")
+
+    # --- Step 1b: Filter by physical overlap (buffered-distance overlap) ---
+    # Measures the length of the ref geometry falling within a buffer corridor
+    # around the target. Removes collinear segments that barely touch at tips —
+    # these dominate labeling time but are almost never real matches. Applied here
+    # so both ML scoring and labeling paths get the same filter.
+    if filter_physical_overlap and candidates:
+        t0 = time.perf_counter()
+        ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
+        target_geom_arr = np.array([target_geoms[c.target_idx] for c in candidates], dtype=object)
+
+        target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
+        intersections = shapely_mod.intersection(ref_geom_arr, target_buffers)
+        overlap_lengths = shapely_mod.length(intersections)
+
+        mask = overlap_lengths >= PHYSICAL_OVERLAP_MIN_M
+        filtered_candidates = [c for c, keep in zip(candidates, mask) if keep]
+
+        n_filtered = len(candidates) - len(filtered_candidates)
+        if n_filtered > 0:
+            logger.info(
+                f"Physical overlap filter: removed {n_filtered} candidates "
+                f"(<{PHYSICAL_OVERLAP_MIN_M}m overlap), {len(filtered_candidates)} remaining"
+            )
+        candidates = filtered_candidates
+        logger.debug(f"[TIMING] physical_overlap_filter: {time.perf_counter() - t0:.2f}s")
+
+        if not candidates:
+            logger.info("All candidates filtered by physical overlap threshold")
+            return WorkerDataResult(
+                worker_data={},
+                alignments={},
+                unique_ref_indices=set(),
+                unique_target_indices=set(),
+                candidates=[],
+            )
 
     # --- Step 2: Get unique indices, filter to candidate segments ---
     t0 = time.perf_counter()
@@ -345,6 +394,7 @@ def prepare_worker_data(
         alignments=alignments,
         unique_ref_indices=unique_ref_indices,
         unique_target_indices=unique_target_indices,
+        candidates=candidates,
     )
 
 

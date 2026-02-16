@@ -1572,49 +1572,9 @@ class MLMatcher:
         # Timing instrumentation for pipeline profiling (visible at DEBUG log level)
         timings = {}
 
-        # Filter candidates by physical overlap (actual geometric intersection, no translation)
-        # This removes collinear segments that barely touch at tips, which dominate labeling
-        # time but are almost never real matches. 5m threshold gives 5.9:1 no_match:match ratio.
-        from ..config import PHYSICAL_OVERLAP_MIN_M
-
-        t0 = time.perf_counter()
-
-        # Batch computation using vectorized shapely for performance
-        import shapely as shapely_mod
-
-        ref_geoms_arr = reference.geometry.to_numpy()
-        target_geoms_arr = target.geometry.to_numpy()
-        ref_geom_arr = np.array([ref_geoms_arr[c.ref_idx] for c in candidates], dtype=object)
-        target_geom_arr = np.array(
-            [target_geoms_arr[c.target_idx] for c in candidates], dtype=object
-        )
-
-        # Buffer targets and intersect with refs (vectorized)
-        target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
-        intersections = shapely_mod.intersection(ref_geom_arr, target_buffers)
-        overlap_lengths = shapely_mod.length(intersections)
-
-        # Filter candidates that meet threshold
-        mask = overlap_lengths >= PHYSICAL_OVERLAP_MIN_M
-        filtered_candidates = [c for c, keep in zip(candidates, mask) if keep]
-
-        n_filtered = len(candidates) - len(filtered_candidates)
-        if n_filtered > 0:
-            logger.info(
-                f"Physical overlap filter: removed {n_filtered} candidates "
-                f"(<{PHYSICAL_OVERLAP_MIN_M}m overlap), {len(filtered_candidates)} remaining"
-            )
-        candidates = filtered_candidates
-        timings["physical_overlap_filter"] = time.perf_counter() - t0
-        logger.debug(f"[TIMING] physical_overlap_filter: {timings['physical_overlap_filter']:.2f}s")
-
-        # Handle case where all candidates were filtered
-        if not candidates:
-            logger.info("All candidates filtered by physical overlap threshold")
-            return []
-
         # Prepare worker data using shared pipeline setup
-        # Pass pre-extracted geometry arrays to avoid redundant GeoSeries->ndarray conversion
+        # Physical overlap filtering happens inside prepare_worker_data() so both
+        # ML scoring and labeling paths get the same filter automatically.
         from ..features.pipeline import prepare_worker_data
 
         t0 = time.perf_counter()
@@ -1631,12 +1591,16 @@ class MLMatcher:
             ref_subclass_column=ref_subclass_column,
             target_subclass_column=target_subclass_column,
             n_jobs=n_jobs,
-            ref_geoms=ref_geoms_arr,
-            target_geoms=target_geoms_arr,
         )
         worker_data = pipeline_result.worker_data
         alignments = pipeline_result.alignments
+        candidates = pipeline_result.candidates
         timings["prepare_worker_data"] = time.perf_counter() - t0
+
+        # Handle case where all candidates were filtered (e.g., by physical overlap)
+        if not candidates:
+            logger.info("All candidates filtered during pipeline setup")
+            return []
 
         # Parallel feature computation using shared dispatch
         from ..features.pipeline import compute_features_parallel

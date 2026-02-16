@@ -1234,8 +1234,10 @@ def register_commands(app: typer.Typer) -> None:
                 reference=ref_gdf_proj,
                 target=augmented_target,
                 n_jobs=1,  # small dataset, no need for parallel alignment
+                filter_physical_overlap=False,  # backfill: keep all labeled pairs
             )
             worker_data = pipeline_result.worker_data
+            candidates = pipeline_result.candidates
 
             # --- Phase 4b: Override graphlet data with full-network computation ---
             # The shared pipeline computes graphlets on candidate-only subsets (efficient
