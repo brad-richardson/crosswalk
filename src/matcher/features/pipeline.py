@@ -105,8 +105,9 @@ def prepare_worker_data(
         ref_geoms: Pre-extracted reference geometry array (avoids re-conversion
             if caller already materialized it, e.g., for overlap filtering)
         target_geoms: Pre-extracted target geometry array (same optimization)
-        filter_physical_overlap: If True (default), remove candidates with
-            less than PHYSICAL_OVERLAP_MIN_M of actual geometric intersection.
+        filter_physical_overlap: If True (default), remove candidates where
+            the reference geometry within a PHYSICAL_OVERLAP_MIN_M buffer corridor
+            around the target is shorter than PHYSICAL_OVERLAP_MIN_M.
             This filters collinear segments that barely touch at tips.
 
     Returns:
@@ -141,10 +142,11 @@ def prepare_worker_data(
 
     logger.debug(f"[TIMING] data_extraction: {time.perf_counter() - t0:.2f}s")
 
-    # --- Step 1b: Filter by physical overlap (actual geometric intersection) ---
-    # Removes collinear segments that barely touch at tips — these dominate labeling
-    # time but are almost never real matches. Applied here so both ML scoring and
-    # labeling paths get the same filter.
+    # --- Step 1b: Filter by physical overlap (buffered-distance overlap) ---
+    # Measures the length of the ref geometry falling within a buffer corridor
+    # around the target. Removes collinear segments that barely touch at tips —
+    # these dominate labeling time but are almost never real matches. Applied here
+    # so both ML scoring and labeling paths get the same filter.
     if filter_physical_overlap and candidates:
         t0 = time.perf_counter()
         ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
