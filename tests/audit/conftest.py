@@ -111,6 +111,14 @@ FEATURE_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "offset_vs_half_corridor_ratio": (0, None),
     "offset_over_expected_halfwidth": (0, None),
     "likely_representation_mismatch": (0, 1),
+    # Interior connector sequence (topology)
+    "interior_junction_count_ref": (0, None),
+    "interior_junction_count_target": (0, None),
+    "interior_junction_count_delta": (0, None),
+    "interior_connector_jaccard": (0, 1),
+    "interior_junction_position_sim": (0, 1),
+    # Shared anchor count (0, 1, or 2 endpoints matching)
+    "shared_anchor_count": (0, 2),
 }
 
 

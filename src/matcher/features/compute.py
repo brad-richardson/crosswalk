@@ -159,6 +159,8 @@ from .spatial_context import (
     compute_clustering_coefficient_features,
     compute_degree_match_score,
     compute_degree_signature_similarity,
+    compute_interior_connector_features,
+    compute_shared_anchor_features,
     graphlet_similarity_with_alignment,
 )
 
@@ -196,6 +198,7 @@ def _compute_non_geometric_features(
     precomputed_sibling_target: tuple[bool, float] | None = None,
     precomputed_crossing_ref: dict[str, float] | None = None,
     precomputed_crossing_target: dict[str, float] | None = None,
+    target_overture_connectors: dict[str, list[tuple[float, int]]] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -609,6 +612,79 @@ def _compute_non_geometric_features(
                 ref_sibling_context_full,
             )
 
+    # Interior connector sequence features
+    _nan = float("nan")
+    with timed_section("interior_connectors"):
+        interior_feats: dict[str, float]
+        if (
+            alignment is not None
+            and ref_graphlet_data is not None
+            and ref_seg_id is not None
+            and target_seg_id is not None
+        ):
+            _, ref_seg_to_connectors_ic, ref_node_features_ic, _ = ref_graphlet_data
+            # Use Overture connectors projected onto target (same ID space as ref)
+            target_conn_ic = target_overture_connectors or {}
+
+            # Both sides use the same Overture connector graph node_features
+            interior_feats = compute_interior_connector_features(
+                ref_seg_id,
+                target_seg_id,
+                ref_seg_to_connectors_ic,
+                target_conn_ic,
+                ref_node_features_ic,
+                ref_node_features_ic,  # Same node_features — shared Overture ID space
+                alignment.overture_start_frac,
+                alignment.overture_end_frac,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+        else:
+            interior_feats = {
+                "interior_junction_count_ref": _nan,
+                "interior_junction_count_target": _nan,
+                "interior_junction_count_delta": _nan,
+                "interior_connector_jaccard": _nan,
+                "interior_junction_position_sim": _nan,
+            }
+
+    # Shared anchor count (alignment endpoints landing on the same Overture connector)
+    with timed_section("shared_anchor"):
+        shared_anchor_feats: dict[str, float]
+        if (
+            alignment is not None
+            and ref_graphlet_data is not None
+            and ref_seg_id is not None
+            and target_seg_id is not None
+        ):
+            _, ref_seg_to_connectors_sa, _, _ = ref_graphlet_data
+            target_conn_sa = target_overture_connectors or {}
+            # Derive full segment lengths from aligned geometry + coverage fracs.
+            # Connectors are stored as fracs of the full segment, so we need
+            # the full length to convert tolerance_m to fractional position.
+            ref_cov = alignment.overture_end_frac - alignment.overture_start_frac
+            target_cov = alignment.dataset_end_frac - alignment.dataset_start_frac
+            ref_len = ref_geom_aligned.length / ref_cov if ref_cov > 0 else ref_geom_aligned.length
+            target_len = (
+                target_geom_aligned.length / target_cov
+                if target_cov > 0
+                else target_geom_aligned.length
+            )
+            shared_anchor_feats = compute_shared_anchor_features(
+                ref_seg_id,
+                target_seg_id,
+                ref_seg_to_connectors_sa,
+                target_conn_sa,
+                alignment.overture_start_frac,
+                alignment.overture_end_frac,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+                ref_len,
+                target_len,
+            )
+        else:
+            shared_anchor_feats = {"shared_anchor_count": _nan}
+
     # Log timing summary periodically
     log_timing_summary_if_needed()
 
@@ -711,6 +787,10 @@ def _compute_non_geometric_features(
         "transverse_neighbor_fraction_ref": crossing_ref["transverse_neighbor_fraction"],
         "crossing_angle_min_target": crossing_target["crossing_angle_min"],
         "transverse_neighbor_fraction_target": crossing_target["transverse_neighbor_fraction"],
+        # Interior connector sequence features (5)
+        **interior_feats,
+        # Shared anchor count (1)
+        **shared_anchor_feats,
     }
 
 
@@ -957,6 +1037,7 @@ def compute_pair_features(
     target_names_raw=None,
     target_topo_connectors: dict[str, list[tuple[float, int]]] | None = None,
     target_topo_node_features: dict[int, int] | None = None,
+    target_overture_connectors: dict[str, list[tuple[float, int]]] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -1101,6 +1182,7 @@ def compute_pair_features(
             target_names_raw=target_names_raw,
             target_topo_connectors=target_topo_connectors,
             target_topo_node_features=target_topo_node_features,
+            target_overture_connectors=target_overture_connectors,
         )
 
         _current_phase = "merge_features"

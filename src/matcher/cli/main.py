@@ -1239,19 +1239,40 @@ def register_commands(app: typer.Typer) -> None:
             worker_data = pipeline_result.worker_data
             candidates = pipeline_result.candidates
 
-            # --- Phase 4b: Override graphlet data with full-network computation ---
+            # --- Phase 4b: Override ref graphlet data with full-network computation ---
             # The shared pipeline computes graphlets on candidate-only subsets (efficient
             # for inference with ~10K candidates). For backfill with ~100-200 labeled pairs,
             # the candidate-only graph is too sparse for meaningful clustering coefficients.
-            # Recompute on full GDFs so clustering_coef reflects the actual network topology.
+            # Recompute ref on full GDF for accurate connector IDs.
+            # Target graphlet is NOT recomputed: the expensive inferred connector graph
+            # (170s for Mumbai) only benefits target-side clustering (#33) and graphlet
+            # similarity (#65) — low-importance features. Target topology uses Overture
+            # connectors projected via rebuild_connector_indices() instead.
             ref_has_connectors = "connectors" in ref_gdf_proj.columns
             worker_data["ref_graphlet_data"] = precompute_graphlet_features(
                 ref_gdf_proj,
                 connectors_column="connectors" if ref_has_connectors else None,
             )
-            worker_data["target_graphlet_data"] = precompute_graphlet_features(
-                augmented_target,
-            )
+
+            # --- Phase 4c: Rebuild derived indices from overridden graphlet data ---
+            # The node IDs in the full-network graphlet differ from the candidate-only
+            # graphlet that prepare_worker_data() used to build
+            # target_overture_connectors. Rebuild it.
+            from matcher.features.pipeline import rebuild_connector_indices
+
+            unique_target_idxs = {c.target_idx for c in candidates}
+            target_ids_arr = worker_data["target_ids"]
+            geoms_by_ref_id = {
+                str(ref_gdf_proj["id"].iloc[i]): ref_gdf_proj.geometry.iloc[i]
+                for i in range(len(ref_gdf_proj))
+                if ref_gdf_proj.geometry.iloc[i] is not None
+                and not ref_gdf_proj.geometry.iloc[i].is_empty
+            }
+            geoms_by_target_id = {
+                str(target_ids_arr[idx]): augmented_target.geometry.iloc[idx]
+                for idx in unique_target_idxs
+            }
+            rebuild_connector_indices(worker_data, geoms_by_ref_id, geoms_by_target_id)
 
             # --- Phase 5: Override topology with stored values ---
             # 3-tier fallback: stored topology > computed by pipeline > NaN defaults
