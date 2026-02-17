@@ -14,9 +14,9 @@ fetch:
     '1': primary
     '2': secondary
     '3': tertiary
-    '4': residential
+    '4': pedestrian
     '5': unclassified
-    '6': pedestrian
+    '6': unclassified
     '7': unclassified
   bbox:
   - -74.25
@@ -70,11 +70,11 @@ classification:
   - source_value: 3
     target_class: tertiary
   - source_value: 4
-    target_class: residential
+    target_class: pedestrian
   - source_value: 5
     target_class: unclassified
   - source_value: 6
-    target_class: pedestrian
+    target_class: unclassified
   - source_value: 7
     target_class: unclassified
 quality_fingerprint:

@@ -17,6 +17,10 @@ fetch:
     II: secondary
     III: tertiary
     IV: residential
+    # V = "Nicht StEP" (uncategorized) — defaults to service, but many are
+    # footways/pedestrian areas.  strassenklasse2 overrides (FUWE→footway,
+    # PLAT→pedestrian, FUBR→footway, PSTR→path, KGA/PARK→service) are
+    # applied by `matcher data reclassify de_berlin_roads` after fetch.
     V: service
   bbox:
   - 13.088

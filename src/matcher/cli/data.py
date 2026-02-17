@@ -1586,3 +1586,316 @@ def compute_features(
             err_str = err if len(err) <= 120 else err[:120] + "..."
             console.print(f"    [red]✗[/red] {name}: {escape(err_str)}")
         raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Reclassify command — fix incorrect class mappings in stored data
+# ---------------------------------------------------------------------------
+
+# Per-dataset corrected mapping logic.  Each function takes a GeoDataFrame
+# (from the raw parquet) and returns a Series of corrected class values.
+
+def _reclassify_co_bogota(gdf):
+    """Bogotá: MVITCLA 4=Peatonal→pedestrian, 6=Sin definir→unclassified (were swapped)."""
+    cls = gdf["class"].copy()
+    tags = gdf.get("source_tags")
+    if tags is not None:
+        for i, tag in enumerate(tags):
+            if not isinstance(tag, dict):
+                continue
+            raw = str(tag.get("MVITCLA", ""))
+            if raw == "4":
+                cls.iat[i] = "pedestrian"
+            elif raw == "6":
+                cls.iat[i] = "unclassified"
+    return cls
+
+
+def _reclassify_nl_amsterdam(gdf):
+    """Amsterdam: switch from wegbehsrt (administrator) to bst_code (road type)."""
+    import pandas as pd
+
+    bst_map = {
+        "FP": "cycleway",
+        "VP": "footway",
+        "BUS": "service",
+        "ERF": "living_street",
+        "PP": "service",
+        "VZ": "service",
+        "PST": "service",
+        "AFR": "trunk",
+        "OPR": "trunk",
+        "PAR": "service",
+        "NRB": "residential",
+        "HR": "primary",
+    }
+    frc_map = {
+        0: "motorway",
+        1: "trunk",
+        2: "primary",
+        3: "secondary",
+        4: "tertiary",
+        5: "tertiary",
+        6: "residential",
+        7: "residential",
+    }
+
+    tags = gdf.get("source_tags")
+    new_cls = pd.Series("unclassified", index=gdf.index)
+    if tags is None:
+        return new_cls
+
+    for i, tag in enumerate(tags):
+        if not isinstance(tag, dict):
+            continue
+        bst = str(tag.get("bst_code", "")).strip().upper()
+        if bst in bst_map:
+            new_cls.iat[i] = bst_map[bst]
+        elif bst == "RB":
+            # RB = carriageway — fall back to FRC hierarchy
+            frc = tag.get("frc")
+            if frc is not None:
+                try:
+                    new_cls.iat[i] = frc_map.get(int(frc), "residential")
+                except (ValueError, TypeError):
+                    new_cls.iat[i] = "residential"
+            else:
+                new_cls.iat[i] = "residential"
+        else:
+            # Unknown bst_code — use frc fallback
+            frc = tag.get("frc")
+            if frc is not None:
+                try:
+                    new_cls.iat[i] = frc_map.get(int(frc), "unclassified")
+                except (ValueError, TypeError):
+                    new_cls.iat[i] = "unclassified"
+    return new_cls
+
+
+def _reclassify_de_berlin(gdf):
+    """Berlin: override V-class segments using strassenklasse2."""
+    v_overrides = {
+        "FUWE": "footway",
+        "PLAT": "pedestrian",
+        "FUBR": "footway",
+        "PSTR": "path",
+        "KGA": "service",
+        "PARK": "service",
+    }
+
+    tags = gdf.get("source_tags")
+    cls = gdf["class"].copy()
+    if tags is None:
+        return cls
+
+    for i, tag in enumerate(tags):
+        if not isinstance(tag, dict):
+            continue
+        sk1 = str(tag.get("strassenklasse1", "")).strip()
+        if sk1 == "V":
+            sk2 = str(tag.get("strassenklasse2", "")).strip().upper()
+            if sk2 in v_overrides:
+                cls.iat[i] = v_overrides[sk2]
+            # else: keep "service" (the V default)
+    return cls
+
+
+def _reclassify_ke_kisumu(gdf):
+    """Kisumu: derive class from RID_8 prefix letter."""
+    import pandas as pd
+
+    prefix_map = {
+        "A": "trunk",
+        "B": "trunk",
+        "C": "primary",
+        "D": "secondary",
+        "E": "tertiary",
+    }
+
+    tags = gdf.get("source_tags")
+    new_cls = pd.Series("unclassified", index=gdf.index)
+    if tags is None:
+        return new_cls
+
+    for i, tag in enumerate(tags):
+        if not isinstance(tag, dict):
+            continue
+        rid8 = str(tag.get("RID_8", "")).strip()
+        if rid8:
+            prefix = rid8[0].upper()
+            new_cls.iat[i] = prefix_map.get(prefix, "unclassified")
+    return new_cls
+
+
+def _reclassify_sg_singapore_footpaths(gdf):
+    """Singapore footpaths: fix unknown→footway (type=sidewalk)."""
+    cls = gdf["class"].copy()
+    cls = cls.replace({"unknown": "footway"})
+    return cls
+
+
+_RECLASSIFY_HANDLERS: dict = {
+    "co_bogota_roads": _reclassify_co_bogota,
+    "nl_amsterdam_roads": _reclassify_nl_amsterdam,
+    "de_berlin_roads": _reclassify_de_berlin,
+    "ke_kisumu_roads": _reclassify_ke_kisumu,
+    "sg_singapore_footpaths": _reclassify_sg_singapore_footpaths,
+}
+
+
+@data_app.command("reclassify")
+def reclassify(
+    dataset_name: str = typer.Argument(
+        None,
+        help="Dataset to reclassify (e.g., co_bogota_roads). Omit for --all.",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Reclassify all datasets with known mapping errors",
+    ),
+    data_dir: Path = typer.Option(
+        Path("data/raw"),
+        "--data-dir",
+        "-d",
+        help="Directory containing raw parquet files",
+    ),
+    labels_dir: Path = typer.Option(
+        Path("labels"),
+        "--labels",
+        "-l",
+        help="Directory containing labels (for data store updates)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would change without modifying files",
+    ),
+):
+    """Fix incorrect road class mappings in raw parquet and data store.
+
+    Updates the `class` column in raw parquet files and corresponding
+    data store records for datasets with known classification errors.
+
+    After reclassifying, run `matcher backfill` to recompute class_similarity
+    features for all affected labeled pairs.
+
+    Supported datasets: co_bogota_roads, nl_amsterdam_roads, de_berlin_roads,
+    ke_kisumu_roads, sg_singapore_footpaths.
+
+    Examples:
+        matcher data reclassify co_bogota_roads          # Single dataset
+        matcher data reclassify --all                     # All known datasets
+        matcher data reclassify co_bogota_roads --dry-run # Preview changes
+    """
+    import geopandas as gpd
+
+    from ..filenames import find_target_file
+    from ..labeling.data_store import DataStore
+
+    datasets: list[str] = []
+    if all_datasets:
+        datasets = list(_RECLASSIFY_HANDLERS.keys())
+    elif dataset_name:
+        if dataset_name not in _RECLASSIFY_HANDLERS:
+            console.print(f"[red]No reclassify handler for '{dataset_name}'[/red]")
+            console.print(f"[yellow]Available: {', '.join(sorted(_RECLASSIFY_HANDLERS))}[/yellow]")
+            raise typer.Exit(1)
+        datasets = [dataset_name]
+    else:
+        console.print("[red]Error: Provide a dataset name or --all[/red]")
+        raise typer.Exit(1)
+
+    total_raw_changed = 0
+    total_store_updated = 0
+
+    for ds_name in sorted(datasets):
+        console.print(f"\n[bold blue]Reclassifying {ds_name}...[/bold blue]")
+        handler = _RECLASSIFY_HANDLERS[ds_name]
+
+        # 1. Load raw parquet
+        target_path = find_target_file(data_dir, ds_name)
+        if target_path is None:
+            console.print(f"  [yellow]Raw parquet not found in {data_dir}, skipping[/yellow]")
+            continue
+
+        gdf = gpd.read_parquet(target_path)
+        old_cls = gdf["class"].copy()
+
+        # 2. Compute corrected classes
+        new_cls = handler(gdf)
+
+        # 3. Summarize changes to raw parquet
+        changed_mask = old_cls != new_cls
+        n_changed = int(changed_mask.sum())
+        total_raw_changed += n_changed
+
+        console.print(f"  Raw parquet: {n_changed:,} / {len(gdf):,} records changed")
+
+        if n_changed > 0:
+            # Show before/after distribution for changed records
+            old_dist = old_cls[changed_mask].value_counts()
+            new_dist = new_cls[changed_mask].value_counts()
+            console.print("  [dim]Changed records — old class distribution:[/dim]")
+            for cls_val, count in old_dist.items():
+                console.print(f"    {cls_val}: {count:,}")
+            console.print("  [dim]Changed records — new class distribution:[/dim]")
+            for cls_val, count in new_dist.items():
+                console.print(f"    {cls_val}: {count:,}")
+
+        # 4. Update data store records
+        data_store_dir = Path(labels_dir) / "data"
+        store = DataStore(ds_name, data_dir=data_store_dir)
+        store_gdf = store.gdf
+
+        store_updated = 0
+        if len(store_gdf) > 0:
+            # Build lookup: target_id → corrected class for ALL records
+            # (covers both raw-parquet changes and stale data store values)
+            id_to_class: dict[str, str] = {}
+            for idx in gdf.index:
+                tid = str(gdf.at[idx, "id"])
+                id_to_class[tid] = str(
+                    new_cls.iat[idx] if hasattr(new_cls, "iat") else new_cls.iloc[idx]
+                )
+
+            # Update data store records where target_class differs
+            for _, row in store_gdf.iterrows():
+                target_id = str(row["target_id"])
+                if target_id in id_to_class:
+                    new_val = id_to_class[target_id]
+                    old_val = str(row.get("target_class", ""))
+                    if old_val != new_val and store.update_class(
+                        gers_id=str(row["gers_id"]),
+                        target_id=target_id,
+                        target_class=new_val,
+                    ):
+                        store_updated += 1
+
+        total_store_updated += store_updated
+        console.print(f"  Data store: {store_updated:,} / {len(store_gdf):,} records updated")
+
+        # 5. Save changes
+        if not dry_run and (n_changed > 0 or store_updated > 0):
+            if n_changed > 0:
+                gdf["class"] = new_cls
+                gdf.to_parquet(target_path)
+                console.print(f"  [green]Saved raw parquet: {target_path}[/green]")
+            if store_updated > 0:
+                store.save()
+                console.print(f"  [green]Saved data store for {ds_name}[/green]")
+        elif dry_run:
+            console.print("  [yellow]Dry run — no files modified[/yellow]")
+
+    # Summary
+    console.print("\n[bold]Summary:[/bold]")
+    console.print(f"  Raw parquet records changed: {total_raw_changed:,}")
+    console.print(f"  Data store records updated: {total_store_updated:,}")
+    if dry_run:
+        console.print("  [yellow]Dry run — no files were modified[/yellow]")
+    else:
+        console.print(
+            "\n[blue]Next step: run 'matcher backfill' to recompute "
+            "class_similarity features[/blue]"
+        )

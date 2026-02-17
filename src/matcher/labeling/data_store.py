@@ -659,6 +659,36 @@ class DataStore:
 
         return True
 
+    def update_class(
+        self,
+        gers_id: str,
+        target_id: str,
+        target_class: str | None = None,
+        ref_class: str | None = None,
+    ) -> bool:
+        """Update road class columns for an existing data record.
+
+        Used by the reclassify command to fix incorrect class mappings
+        in stored pair data.
+
+        Returns:
+            True if record was found and updated, False if not found
+        """
+        gdf = self.gdf
+        mask = (gdf["gers_id"] == str(gers_id)) & (gdf["target_id"] == str(target_id))
+
+        if not mask.any():
+            return False
+
+        idx = gdf[mask].index[-1]
+
+        if target_class is not None:
+            self._gdf.at[idx, "target_class"] = target_class
+        if ref_class is not None:
+            self._gdf.at[idx, "ref_class"] = ref_class
+
+        return True
+
     def save(self) -> None:
         """Save data to Parquet atomically with backup.
 

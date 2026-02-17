@@ -9,6 +9,10 @@ source:
 fetch:
   id_prefix: ke_kisumu
   id_column: OBJECTID
+  # Class derived from RID_8 prefix: A/B=trunk, C=primary, D=secondary,
+  # E=tertiary, others=unclassified.  Requires prefix extraction which
+  # simple class_mapping can't express.  Run `matcher data reclassify
+  # ke_kisumu_roads` after fetch to apply class from RID_8.
   bbox:
   - 34.65
   - -0.25

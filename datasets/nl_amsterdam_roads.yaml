@@ -11,13 +11,26 @@ fetch:
   id_prefix: ams_road
   id_column: wvk_id
   name_column: stt_naam
-  class_column: wegbehsrt
+  # bst_code = road type (fietspad, voetpad, rijbaan etc.)
+  # Previous: wegbehsrt = road administrator, not road class
+  class_column: bst_code
   class_mapping:
-    G: residential
-    R: trunk
-    P: secondary
-    T: secondary
-    W: tertiary
+    FP: cycleway
+    VP: footway
+    BUS: service
+    ERF: living_street
+    PP: service
+    VZ: service
+    PST: service
+    AFR: trunk
+    OPR: trunk
+    PAR: service
+    NRB: residential
+    HR: primary
+    # RB = rijbaan (carriageway) — ideally falls back to frc column for
+    # hierarchy, but simple mapping defaults to residential (most common).
+    # Run `matcher data reclassify nl_amsterdam_roads` for frc-based fallback.
+    RB: residential
   bbox:
   - 4.75
   - 52.3
@@ -61,7 +74,7 @@ last_fetch:
     output_path: data/raw
 classification:
   source_classification:
-    column: wegbehsrt
+    column: bst_code
 quality_fingerprint:
   computed_at: '2026-02-14T15:14:43.364324+00:00'
   total_segments: 48663
