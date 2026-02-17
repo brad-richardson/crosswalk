@@ -31,6 +31,11 @@ def run(
         Path("cbench_results.jsonl"), "--results", help="JSONL results file"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
+    match_level: str = typer.Option(
+        "target",
+        "--match-level",
+        help="Evaluation level: 'pair' (exact ref+target pairs) or 'target' (target-level)",
+    ),
     # Tool-specific options passed as key=value
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
@@ -39,8 +44,13 @@ def run(
 
     from cbench.adapters import REGISTRY
     from cbench.eval.labels import load_labels
-    from cbench.eval.metrics import evaluate
+    from cbench.eval.metrics import MatchLevel, evaluate
     from cbench.results.store import create_result, save_result
+
+    if match_level not in ("pair", "target"):
+        console.print(f"[red]Invalid match-level: {match_level} (must be 'pair' or 'target')[/red]")
+        raise typer.Exit(1)
+    eval_match_level = MatchLevel(match_level)
 
     # Validate input files exist
     for path, desc in [
@@ -86,7 +96,7 @@ def run(
     # Load labels and evaluate
     console.print("Evaluating against ground truth...")
     ground_truth = load_labels(labels, dataset)
-    result = evaluate(tool_output.matches, ground_truth)
+    result = evaluate(tool_output.matches, ground_truth, match_level=eval_match_level)
 
     # Display results
     console.print()
@@ -104,7 +114,7 @@ def run(
         tool=tool,
         dataset=dataset,
         metrics=result.to_dict(),
-        metadata=tool_output.metadata,
+        metadata={**tool_output.metadata, "match_level": match_level},
     )
     save_result(bench_result, results_file)
     console.print(f"\nResult saved to {results_file}")
