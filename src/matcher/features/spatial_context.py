@@ -3048,7 +3048,6 @@ def compute_interior_connector_features(
         interior_junction_position_sim
     """
     _nan = float("nan")
-    ENDPOINT_TOL = 0.01  # Tolerance for "at endpoint" exclusion
 
     def _get_degree(node_features: dict, node_id: int) -> int:
         """Extract degree from node_features, handling both int and ndarray values."""
@@ -3057,27 +3056,27 @@ def compute_interior_connector_features(
             return int(val[0])  # degree is index 0 of feature vector
         return int(val)
 
-    def _get_interior_connectors(
+    def _get_aligned_connectors(
         seg_id: str,
         seg_to_connectors: dict[str, list[tuple[float, int]]],
         node_features: dict,
         start_frac: float,
         end_frac: float,
     ) -> list[tuple[float, int]]:
-        """Get connectors strictly inside the aligned range."""
+        """Get junction connectors within the aligned range (inclusive)."""
         connectors = seg_to_connectors.get(seg_id, [])
-        interior = []
+        aligned = []
         for frac, node_id in connectors:
-            if (start_frac + ENDPOINT_TOL) < frac < (end_frac - ENDPOINT_TOL):
+            if start_frac <= frac <= end_frac:
                 degree = _get_degree(node_features, node_id)
                 if degree >= 2:  # Only count junctions
-                    interior.append((frac, node_id))
-        return interior
+                    aligned.append((frac, node_id))
+        return aligned
 
-    ref_interior = _get_interior_connectors(
+    ref_interior = _get_aligned_connectors(
         ref_seg_id, ref_seg_to_connectors, ref_node_features, ref_start_frac, ref_end_frac
     )
-    target_interior = _get_interior_connectors(
+    target_interior = _get_aligned_connectors(
         target_seg_id,
         target_seg_to_connectors,
         target_node_features,

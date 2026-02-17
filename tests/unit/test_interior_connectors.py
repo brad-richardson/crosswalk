@@ -8,7 +8,6 @@ from matcher.features.spatial_context import (
     compute_shared_anchor_features,
 )
 
-
 # Shared test fixtures: node_features with degree >= 2 (junctions)
 JUNCTIONS = {10: 3, 20: 2, 30: 4, 40: 2, 50: 3}
 # Dead-end node (degree 1) — should be filtered out by interior connector logic
@@ -50,11 +49,16 @@ class TestInteriorConnectorJaccard:
     )
     def test_jaccard(self, ref_connectors, target_connectors, expected_jaccard):
         result = compute_interior_connector_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.0, 99)] + ref_connectors + [(1.0, 98)]},  # endpoints at 0/1
             {"tgt": [(0.0, 99)] + target_connectors + [(1.0, 98)]},
-            JUNCTIONS, JUNCTIONS,
-            0.0, 1.0, 0.0, 1.0,
+            JUNCTIONS,
+            JUNCTIONS,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
         )
         assert result["interior_connector_jaccard"] == pytest.approx(expected_jaccard)
 
@@ -74,11 +78,16 @@ class TestInteriorConnectorCounts:
     )
     def test_counts(self, ref_interior, target_interior, exp_ref, exp_target, exp_delta):
         result = compute_interior_connector_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": ref_interior},
             {"tgt": target_interior},
-            JUNCTIONS, JUNCTIONS,
-            0.0, 1.0, 0.0, 1.0,
+            JUNCTIONS,
+            JUNCTIONS,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
         )
         assert result["interior_junction_count_ref"] == exp_ref
         assert result["interior_junction_count_target"] == exp_target
@@ -86,42 +95,57 @@ class TestInteriorConnectorCounts:
 
 
 class TestInteriorConnectorFiltering:
-    """Test that endpoint and dead-end connectors are excluded."""
+    """Test that dead-end connectors are excluded and alignment range is respected."""
 
-    def test_endpoint_connectors_excluded(self):
-        """Connectors at alignment endpoints (within 0.01 tolerance) are not interior."""
+    def test_endpoint_connectors_included(self):
+        """Connectors at alignment endpoints are included (inclusive range)."""
         result = compute_interior_connector_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.0, 10), (0.005, 20), (0.5, 30), (0.995, 40), (1.0, 50)]},
             {"tgt": []},
-            JUNCTIONS, JUNCTIONS,
-            0.0, 1.0, 0.0, 1.0,
+            JUNCTIONS,
+            JUNCTIONS,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
         )
-        # Only node 30 at frac 0.5 is interior; 10/20 near start, 40/50 near end
-        assert result["interior_junction_count_ref"] == 1
+        # All 5 nodes are junctions (degree >= 2) and within [0.0, 1.0]
+        assert result["interior_junction_count_ref"] == 5
 
     def test_dead_ends_excluded(self):
         """Nodes with degree < 2 are not counted as junctions."""
         result = compute_interior_connector_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.5, 10)]},  # node 10 has degree 1 in DEAD_END
             {"tgt": []},
-            DEAD_END, DEAD_END,
-            0.0, 1.0, 0.0, 1.0,
+            DEAD_END,
+            DEAD_END,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
         )
         assert result["interior_junction_count_ref"] == 0
 
     def test_partial_alignment_range(self):
-        """Only connectors within the aligned fraction range are interior."""
+        """Only connectors within the aligned fraction range are counted."""
         # Alignment covers 0.2–0.8; connectors at 0.1, 0.5, 0.9
         result = compute_interior_connector_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.1, 10), (0.5, 20), (0.9, 30)]},
             {"tgt": []},
-            JUNCTIONS, JUNCTIONS,
-            0.2, 0.8, 0.0, 1.0,  # ref aligned 0.2–0.8
+            JUNCTIONS,
+            JUNCTIONS,
+            0.2,
+            0.8,
+            0.0,
+            1.0,  # ref aligned 0.2–0.8
         )
-        # Only node 20 at 0.5 is inside (0.2+0.01, 0.8-0.01)
+        # Only node 20 at 0.5 is inside [0.2, 0.8]
         assert result["interior_junction_count_ref"] == 1
 
 
@@ -149,10 +173,16 @@ class TestInteriorPositionSimilarity:
         # All nodes are junctions
         nf = {i * 10: 3 for i in range(10)}
         result = compute_interior_connector_features(
-            "ref", "tgt",
-            {"ref": ref_conns}, {"tgt": tgt_conns},
-            nf, nf,
-            0.0, 1.0, 0.0, 1.0,
+            "ref",
+            "tgt",
+            {"ref": ref_conns},
+            {"tgt": tgt_conns},
+            nf,
+            nf,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
         )
         assert result["interior_junction_position_sim"] == pytest.approx(expected_sim, abs=1e-9)
 
@@ -179,10 +209,16 @@ class TestSharedAnchorCount:
     )
     def test_shared_anchor_count(self, ref_conns, target_conns, expected_count):
         result = compute_shared_anchor_features(
-            "ref", "tgt",
-            {"ref": ref_conns}, {"tgt": target_conns},
-            0.0, 1.0, 0.0, 1.0,
-            ref_length_m=100.0, target_length_m=100.0,
+            "ref",
+            "tgt",
+            {"ref": ref_conns},
+            {"tgt": target_conns},
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            ref_length_m=100.0,
+            target_length_m=100.0,
             tolerance_m=5.0,
         )
         assert result["shared_anchor_count"] == expected_count
@@ -190,11 +226,16 @@ class TestSharedAnchorCount:
     def test_tolerance_converts_to_frac(self):
         """5m tolerance on a 100m segment = 0.05 frac; connector at 0.04 should match."""
         result = compute_shared_anchor_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.04, 10)]},  # 4m from start on 100m segment
             {"tgt": [(0.03, 10)]},  # 3m from start on 100m segment
-            0.0, 1.0, 0.0, 1.0,
-            ref_length_m=100.0, target_length_m=100.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            ref_length_m=100.0,
+            target_length_m=100.0,
             tolerance_m=5.0,
         )
         assert result["shared_anchor_count"] == 1
@@ -202,11 +243,16 @@ class TestSharedAnchorCount:
     def test_tolerance_too_tight(self):
         """Connector outside fractional tolerance shouldn't match."""
         result = compute_shared_anchor_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.1, 10)]},  # 10m from start on 100m segment
             {"tgt": [(0.0, 10)]},  # at start
-            0.0, 1.0, 0.0, 1.0,
-            ref_length_m=100.0, target_length_m=100.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            ref_length_m=100.0,
+            target_length_m=100.0,
             tolerance_m=5.0,  # 5m = 0.05 frac, but gap is 0.1
         )
         assert result["shared_anchor_count"] == 0
@@ -215,11 +261,16 @@ class TestSharedAnchorCount:
         """Works correctly with long segments and small alignment fractions."""
         # 10km segment, alignment covers 0.001–0.006 (50m)
         result = compute_shared_anchor_features(
-            "ref", "tgt",
+            "ref",
+            "tgt",
             {"ref": [(0.001, 10), (0.006, 20)]},
             {"tgt": [(0.0, 10), (1.0, 20)]},
-            0.001, 0.006, 0.0, 1.0,
-            ref_length_m=10000.0, target_length_m=50.0,
+            0.001,
+            0.006,
+            0.0,
+            1.0,
+            ref_length_m=10000.0,
+            target_length_m=50.0,
             tolerance_m=5.0,  # 0.0005 frac on ref, 0.1 frac on target
         )
         assert result["shared_anchor_count"] == 2
