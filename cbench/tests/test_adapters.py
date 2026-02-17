@@ -76,8 +76,6 @@ class TestMatcherAdapter:
         assert output.metadata["total_rows"] == 2
 
 
-_has_geopandas = pytest.importorskip is not None  # always True, used below
-
 try:
     import geopandas  # noqa: F401
 

@@ -84,11 +84,17 @@ def list_datasets(labels_path: Path) -> dict[str, int]:
 
         csv_path = d / "data.csv"
         if csv_path.exists():
-            datasets[name] = len(pd.read_csv(csv_path))
+            try:
+                datasets[name] = len(pd.read_csv(csv_path))
+            except Exception as exc:
+                logger.warning(f"Failed to read {csv_path}: {exc}")
             continue
 
         parquet_path = d / "data.parquet"
         if parquet_path.exists():
-            datasets[name] = len(pd.read_parquet(parquet_path))
+            try:
+                datasets[name] = len(pd.read_parquet(parquet_path))
+            except Exception as exc:
+                logger.warning(f"Failed to read {parquet_path}: {exc}")
 
     return datasets

@@ -49,8 +49,13 @@ class MatcherAdapter:
             str(bridge_path),
         ]
 
+        timeout = int(kwargs.get("timeout", 3600))
+
         logger.info(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"matcher match timed out after {timeout}s") from exc
 
         if result.returncode != 0:
             logger.error(f"matcher match failed:\n{result.stderr}")

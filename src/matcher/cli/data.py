@@ -1595,6 +1595,7 @@ def compute_features(
 # Per-dataset corrected mapping logic.  Each function takes a GeoDataFrame
 # (from the raw parquet) and returns a Series of corrected class values.
 
+
 def _reclassify_co_bogota(gdf):
     """Bogotá: MVITCLA 4=Peatonal→pedestrian, 6=Sin definir→unclassified (were swapped)."""
     cls = gdf["class"].copy()

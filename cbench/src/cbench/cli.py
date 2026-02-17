@@ -42,6 +42,16 @@ def run(
     from cbench.eval.metrics import evaluate
     from cbench.results.store import create_result, save_result
 
+    # Validate input files exist
+    for path, desc in [
+        (reference, "Reference file"),
+        (target, "Target file"),
+        (labels, "Labels dir"),
+    ]:
+        if not path.exists():
+            console.print(f"[red]{desc} not found: {path}[/red]")
+            raise typer.Exit(1)
+
     if tool not in REGISTRY:
         console.print(f"[red]Unknown tool: {tool}[/red]")
         console.print(f"Available: {', '.join(REGISTRY.keys())}")
