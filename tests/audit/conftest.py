@@ -119,11 +119,6 @@ FEATURE_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "interior_junction_position_sim": (0, 1),
     # Shared anchor count (0, 1, or 2 endpoints matching)
     "shared_anchor_count": (0, 2),
-    # Neighbor consistency
-    "neighbor_candidate_fraction_ref": (0, 1),
-    "neighbor_candidate_fraction_target": (0, 1),
-    "shared_neighbor_pair_count": (0, None),
-    "neighbor_consistency_score": (0, 1),
 }
 
 

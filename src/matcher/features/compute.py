@@ -160,7 +160,6 @@ from .spatial_context import (
     compute_degree_match_score,
     compute_degree_signature_similarity,
     compute_interior_connector_features,
-    compute_neighbor_consistency_features,
     compute_shared_anchor_features,
     graphlet_similarity_with_alignment,
 )
@@ -690,45 +689,6 @@ def _compute_non_geometric_features(
         else:
             shared_anchor_feats = {"shared_anchor_count": _nan}
 
-    # Neighbor consistency features (uses shared Overture connector ID space)
-    with timed_section("neighbor_consistency"):
-        neighbor_feats: dict[str, float]
-        if (
-            alignment is not None
-            and ref_seg_id is not None
-            and target_seg_id is not None
-            and ref_node_to_segments is not None
-            and target_node_to_segments is not None
-        ):
-            # Ref connectors from graphlet data (native Overture IDs)
-            if ref_graphlet_data is not None:
-                _, ref_conn_nc, _, _ = ref_graphlet_data
-            else:
-                ref_conn_nc = {}
-
-            # Target connectors in Overture ID space
-            target_conn_nc = target_overture_connectors or {}
-
-            neighbor_feats = compute_neighbor_consistency_features(
-                ref_seg_id,
-                target_seg_id,
-                ref_conn_nc,
-                target_conn_nc,
-                ref_node_to_segments,
-                target_node_to_segments,
-                alignment.overture_start_frac,
-                alignment.overture_end_frac,
-                alignment.dataset_start_frac,
-                alignment.dataset_end_frac,
-            )
-        else:
-            neighbor_feats = {
-                "neighbor_candidate_fraction_ref": _nan,
-                "neighbor_candidate_fraction_target": _nan,
-                "shared_neighbor_pair_count": _nan,
-                "neighbor_consistency_score": _nan,
-            }
-
     # Log timing summary periodically
     log_timing_summary_if_needed()
 
@@ -835,8 +795,6 @@ def _compute_non_geometric_features(
         **interior_feats,
         # Shared anchor count (1)
         **shared_anchor_feats,
-        # Neighbor consistency features (4)
-        **neighbor_feats,
     }
 
 

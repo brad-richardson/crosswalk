@@ -223,21 +223,11 @@ class TestExcludeSemanticFlag:
         )
         assert shape_complexity_count == 3, "Should have 3 shape complexity features"
 
-        # Neighbor consistency features
-        neighbor_features = [
-            "neighbor_candidate_fraction_ref",
-            "neighbor_candidate_fraction_target",
-            "shared_neighbor_pair_count",
-            "neighbor_consistency_score",
-        ]
-        neighbor_count = sum(1 for f in geom_only_features if f in neighbor_features)
-        assert neighbor_count == 4, "Should have 4 neighbor consistency features"
-
         # Total geometry-only features:
         # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 18 (topology) + 4 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
         # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) + 2 (intersection_overlap) + 4 (neighbor_consistency) = 71
-        assert len(geom_only_features) == 71, (
-            f"Expected 71 geometry-only features, got {len(geom_only_features)}"
+        # 4 (crossing_angle) + 2 (intersection_overlap) = 67
+        assert len(geom_only_features) == 67, (
+            f"Expected 67 geometry-only features, got {len(geom_only_features)}"
         )

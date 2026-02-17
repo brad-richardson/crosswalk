@@ -282,12 +282,6 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "post_node_continuation_m",  # How far target continues past alignment boundary along ref heading (meters)
         "endpoint_heading_divergence",  # Max heading difference at alignment boundaries (0-90°)
     ],
-    "Neighbor Consistency": [
-        "neighbor_candidate_fraction_ref",  # Fraction of ref's graph neighbors in candidate set
-        "neighbor_candidate_fraction_target",  # Fraction of target's graph neighbors in candidate set
-        "shared_neighbor_pair_count",  # Count of (ref_neighbor, target_neighbor) candidate pairs
-        "neighbor_consistency_score",  # Normalized shared_neighbor_pair_count / max_possible
-    ],
     # Road Properties features (oneway_match, speed_limit_similarity) moved to graveyard
     # - Data is still fetched (oneway_lr, speed_limit_kph_lr columns) for future use
     # - See docs/RESEARCH_GRAVEYARD.md for ablation results
