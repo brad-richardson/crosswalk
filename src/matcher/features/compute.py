@@ -664,12 +664,10 @@ def _compute_non_geometric_features(
             # the full length to convert tolerance_m to fractional position.
             ref_cov = alignment.overture_end_frac - alignment.overture_start_frac
             target_cov = alignment.dataset_end_frac - alignment.dataset_start_frac
-            ref_len = (
-                ref_geom_aligned.length / ref_cov if ref_cov > 0.01 else ref_geom_aligned.length
-            )
+            ref_len = ref_geom_aligned.length / ref_cov if ref_cov > 0 else ref_geom_aligned.length
             target_len = (
                 target_geom_aligned.length / target_cov
-                if target_cov > 0.01
+                if target_cov > 0
                 else target_geom_aligned.length
             )
             shared_anchor_feats = compute_shared_anchor_features(
