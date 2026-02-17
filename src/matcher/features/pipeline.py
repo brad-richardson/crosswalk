@@ -55,19 +55,17 @@ def rebuild_connector_indices(
 
     Rebuilds: target_overture_connectors.
     """
-    ref_graphlet_data = worker_data.get("ref_graphlet_data")
+    ref_graphlet_data = worker_data["ref_graphlet_data"]
+    _, ref_s2c, _, _ = ref_graphlet_data
 
     target_overture_connectors: dict[str, list[tuple[float, int]]] = {}
 
-    if ref_graphlet_data is not None:
-        _, ref_s2c, _, _ = ref_graphlet_data
-
-        # Build Overture connector spatial index and find connectors near targets
-        connector_index = build_overture_connector_spatial_index(ref_s2c, reference_geoms_by_id)
-        if connector_index is not None:
-            target_overture_connectors = find_overture_connectors_for_targets(
-                target_geoms_by_id, connector_index, tolerance_m=tolerance_m
-            )
+    # Build Overture connector spatial index and find connectors near targets
+    connector_index = build_overture_connector_spatial_index(ref_s2c, reference_geoms_by_id)
+    if connector_index is not None:
+        target_overture_connectors = find_overture_connectors_for_targets(
+            target_geoms_by_id, connector_index, tolerance_m=tolerance_m
+        )
 
     worker_data["target_overture_connectors"] = target_overture_connectors
 
