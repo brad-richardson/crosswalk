@@ -47,10 +47,12 @@ class LabelerNameMiddleware(BaseHTTPMiddleware):
     """Inject the configured labeler name into every request's state."""
 
     async def dispatch(self, request, call_next):
+        from ..config import MIN_LABELS_PER_DATASET
         from .services import get_dataset_label_counts, get_labeler_name
 
         request.state.labeler_name = get_labeler_name()
         request.state.dataset_label_counts = get_dataset_label_counts()
+        request.state.min_labels_per_dataset = MIN_LABELS_PER_DATASET
         return await call_next(request)
 
 
