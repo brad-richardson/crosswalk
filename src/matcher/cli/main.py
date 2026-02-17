@@ -1243,7 +1243,7 @@ def register_commands(app: typer.Typer) -> None:
             # The shared pipeline computes graphlets on candidate-only subsets (efficient
             # for inference with ~10K candidates). For backfill with ~100-200 labeled pairs,
             # the candidate-only graph is too sparse for meaningful clustering coefficients.
-            # Recompute ref on full GDF for accurate ref_node_to_segments and connector IDs.
+            # Recompute ref on full GDF for accurate connector IDs.
             # Target graphlet is NOT recomputed: the expensive inferred connector graph
             # (170s for Mumbai) only benefits target-side clustering (#33) and graphlet
             # similarity (#65) — low-importance features. Target topology uses Overture
@@ -1256,8 +1256,8 @@ def register_commands(app: typer.Typer) -> None:
 
             # --- Phase 4c: Rebuild derived indices from overridden graphlet data ---
             # The node IDs in the full-network graphlet differ from the candidate-only
-            # graphlet that prepare_worker_data() used to build ref_node_to_segments,
-            # target_node_to_segments, and target_overture_connectors. Rebuild them.
+            # graphlet that prepare_worker_data() used to build
+            # target_overture_connectors. Rebuild it.
             from matcher.features.pipeline import rebuild_connector_indices
 
             unique_target_idxs = {c.target_idx for c in candidates}

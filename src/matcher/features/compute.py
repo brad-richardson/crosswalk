@@ -199,8 +199,6 @@ def _compute_non_geometric_features(
     precomputed_crossing_ref: dict[str, float] | None = None,
     precomputed_crossing_target: dict[str, float] | None = None,
     target_overture_connectors: dict[str, list[tuple[float, int]]] | None = None,
-    ref_node_to_segments: dict[int, set[str]] | None = None,
-    target_node_to_segments: dict[int, set[str]] | None = None,
 ) -> dict[str, float]:
     """Compute all non-batchable features for a single candidate pair.
 
@@ -1042,8 +1040,6 @@ def compute_pair_features(
     target_topo_connectors: dict[str, list[tuple[float, int]]] | None = None,
     target_topo_node_features: dict[int, int] | None = None,
     target_overture_connectors: dict[str, list[tuple[float, int]]] | None = None,
-    ref_node_to_segments: dict[int, set[str]] | None = None,
-    target_node_to_segments: dict[int, set[str]] | None = None,
 ) -> dict[str, float]:
     """Compute all features for a single candidate pair.
 
@@ -1189,8 +1185,6 @@ def compute_pair_features(
             target_topo_connectors=target_topo_connectors,
             target_topo_node_features=target_topo_node_features,
             target_overture_connectors=target_overture_connectors,
-            ref_node_to_segments=ref_node_to_segments,
-            target_node_to_segments=target_node_to_segments,
         )
 
         _current_phase = "merge_features"

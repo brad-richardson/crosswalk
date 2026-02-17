@@ -53,20 +53,14 @@ def rebuild_connector_indices(
     Must be called after overriding worker_data["ref_graphlet_data"] or
     worker_data["target_graphlet_data"] to keep derived indices consistent.
 
-    Rebuilds: ref_node_to_segments, target_overture_connectors, target_node_to_segments.
+    Rebuilds: target_overture_connectors.
     """
     ref_graphlet_data = worker_data.get("ref_graphlet_data")
 
-    # Ref: invert ref graphlet connectors (native Overture IDs)
-    ref_node_to_segments: dict[int, set[str]] = {}
     target_overture_connectors: dict[str, list[tuple[float, int]]] = {}
 
     if ref_graphlet_data is not None:
         _, ref_s2c, _, _ = ref_graphlet_data
-        if isinstance(ref_s2c, dict):
-            for seg_id, connectors in ref_s2c.items():
-                for _, node_id in connectors:
-                    ref_node_to_segments.setdefault(node_id, set()).add(seg_id)
 
         # Build Overture connector spatial index and find connectors near targets
         connector_index = build_overture_connector_spatial_index(ref_s2c, reference_geoms_by_id)
@@ -75,15 +69,7 @@ def rebuild_connector_indices(
                 target_geoms_by_id, connector_index, tolerance_m=tolerance_m
             )
 
-    # Target: invert target_overture_connectors (projected Overture IDs)
-    target_node_to_segments: dict[int, set[str]] = {}
-    for seg_id, connectors in target_overture_connectors.items():
-        for _, node_id in connectors:
-            target_node_to_segments.setdefault(node_id, set()).add(seg_id)
-
-    worker_data["ref_node_to_segments"] = ref_node_to_segments
     worker_data["target_overture_connectors"] = target_overture_connectors
-    worker_data["target_node_to_segments"] = target_node_to_segments
 
 
 class WorkerDataResult(NamedTuple):
@@ -370,16 +356,11 @@ def prepare_worker_data(
     _wd_temp: dict[str, Any] = {"ref_graphlet_data": ref_graphlet_data}
     rebuild_connector_indices(_wd_temp, geoms_by_ref_id, geoms_by_target_id)
     target_overture_connectors = _wd_temp["target_overture_connectors"]
-    ref_node_to_segments = _wd_temp["ref_node_to_segments"]
-    target_node_to_segments = _wd_temp["target_node_to_segments"]
     if target_overture_connectors:
         logger.info(
             f"Matched Overture connectors to {len(target_overture_connectors)} target segments"
         )
-    logger.debug(
-        f"[TIMING] connector_indices: {time.perf_counter() - t0:.2f}s "
-        f"({len(ref_node_to_segments)} ref nodes, {len(target_node_to_segments)} target nodes)"
-    )
+    logger.debug(f"[TIMING] connector_indices: {time.perf_counter() - t0:.2f}s")
 
     # --- Step 7: Compute linestring alignments ---
     logger.info("Computing linestring alignments...")
@@ -462,8 +443,6 @@ def prepare_worker_data(
         "target_graphlet_data": target_graphlet_data,
         "ref_sibling_context_full": ref_sibling_context,
         "target_sibling_context_full": target_sibling_context,
-        "ref_node_to_segments": ref_node_to_segments,
-        "target_node_to_segments": target_node_to_segments,
         "alignments": alignments,
     }
 

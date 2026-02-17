@@ -253,8 +253,6 @@ class TestPrepareWorkerDataParity:
             "target_graphlet_data",
             "ref_sibling_context_full",
             "target_sibling_context_full",
-            "ref_node_to_segments",
-            "target_node_to_segments",
             "alignments",
         }
     )

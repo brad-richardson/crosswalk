@@ -234,8 +234,6 @@ def _compute_feature_chunk(chunk):
                 target_topo_connectors = _worker_data.get("target_topo_connectors")
                 target_topo_node_features = _worker_data.get("target_topo_node_features")
                 target_overture_connectors = _worker_data.get("target_overture_connectors")
-                ref_node_to_segments = _worker_data.get("ref_node_to_segments")
-                target_node_to_segments = _worker_data.get("target_node_to_segments")
                 ref_seg_id = str(_worker_data["ref_ids"][ref_idx])
                 target_seg_id = str(_worker_data["target_ids"][target_idx])
 
@@ -307,8 +305,6 @@ def _compute_feature_chunk(chunk):
                     "target_topo_connectors": target_topo_connectors,
                     "target_topo_node_features": target_topo_node_features,
                     "target_overture_connectors": target_overture_connectors,
-                    "ref_node_to_segments": ref_node_to_segments,
-                    "target_node_to_segments": target_node_to_segments,
                     "ref_seg_id": ref_seg_id,
                     "target_seg_id": target_seg_id,
                     "ref_names_raw": (
@@ -560,8 +556,6 @@ def _compute_feature_chunk(chunk):
                 precomputed_crossing_ref=precomputed_crossing_ref,
                 precomputed_crossing_target=precomputed_crossing_target,
                 target_overture_connectors=pd_item.get("target_overture_connectors"),
-                ref_node_to_segments=pd_item.get("ref_node_to_segments"),
-                target_node_to_segments=pd_item.get("target_node_to_segments"),
             )
 
             # Aligned length: absolute overlap length in meters (uses full geometry)
