@@ -46,6 +46,9 @@ DEFAULT_SNAP_TOLERANCE_M = 5.0
 # tested and rejected — they also remove valid matches at any useful threshold.
 PHYSICAL_OVERLAP_MIN_M = 5.0
 
+# Minimum number of labels per dataset before it's considered "done" for labeling
+MIN_LABELS_PER_DATASET = 200
+
 # Tolerance for matching Overture connectors to target segments.
 # How close a target segment must pass to an Overture connector position
 # to be considered "at" that junction. 5m matches DEFAULT_SNAP_TOLERANCE_M

@@ -1381,6 +1381,11 @@ def compute_features(
         "-c",
         help="Also generate scored candidates cache for labeling UI (runs ML scoring)",
     ),
+    needs_labels: bool = typer.Option(
+        False,
+        "--needs-labels",
+        help="Only cache datasets with fewer than MIN_LABELS_PER_DATASET labels",
+    ),
 ):
     """Compute and cache features for dataset(s) without ML scoring.
 
@@ -1556,6 +1561,29 @@ def compute_features(
         console.print("[red]Error: Provide a dataset name, --prefix, or --all[/red]")
         raise typer.Exit(1)
 
+    if needs_labels:
+        from ..config import MIN_LABELS_PER_DATASET
+        from ..labeling.label_store import LabelStore
+
+        filtered = []
+        for ds in datasets_to_process:
+            store = LabelStore(ds)
+            if len(store.df) < MIN_LABELS_PER_DATASET:
+                filtered.append(ds)
+
+        skipped = len(datasets_to_process) - len(filtered)
+        datasets_to_process = filtered
+        console.print(
+            f"[blue]Filtered to {len(datasets_to_process)} datasets needing labels "
+            f"({skipped} already have >= {MIN_LABELS_PER_DATASET})[/blue]"
+        )
+
+        if not datasets_to_process:
+            console.print(
+                f"[yellow]All datasets already have >= {MIN_LABELS_PER_DATASET} labels; nothing to do.[/yellow]"
+            )
+            raise typer.Exit(0)
+
     # Process datasets sequentially
     success_count = 0
     skip_count = 0
@@ -1594,6 +1622,7 @@ def compute_features(
 
 # Per-dataset corrected mapping logic.  Each function takes a GeoDataFrame
 # (from the raw parquet) and returns a Series of corrected class values.
+
 
 def _reclassify_co_bogota(gdf):
     """Bogotá: MVITCLA 4=Peatonal→pedestrian, 6=Sin definir→unclassified (were swapped)."""
