@@ -23,6 +23,7 @@ import shapely as shapely_mod
 from ..config import (
     DEFAULT_SNAP_TOLERANCE_M,
     DEFAULT_TOPOLOGY_FEATURES,
+    OVERTURE_ANCHOR_TOLERANCE_M,
     PHYSICAL_OVERLAP_MIN_M,
     default_worker_count,
 )
@@ -31,12 +32,58 @@ from ..features.compute import precompute_graphlet_features
 from ..features.relational import build_sibling_search_context
 from ..features.spatial_context import (
     SpatialContextIndex,
+    build_overture_connector_spatial_index,
     compute_aligned_endpoint_features_batch,
     compute_all_topology,
+    find_overture_connectors_for_targets,
     sample_topology_batch,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def rebuild_connector_indices(
+    worker_data: dict,
+    reference_geoms_by_id: dict[str, Any],
+    target_geoms_by_id: dict[str, Any],
+    tolerance_m: float = OVERTURE_ANCHOR_TOLERANCE_M,
+) -> None:
+    """Rebuild all indices derived from graphlet data (in-place).
+
+    Must be called after overriding worker_data["ref_graphlet_data"] or
+    worker_data["target_graphlet_data"] to keep derived indices consistent.
+
+    Rebuilds: ref_node_to_segments, target_overture_connectors, target_node_to_segments.
+    """
+    ref_graphlet_data = worker_data.get("ref_graphlet_data")
+
+    # Ref: invert ref graphlet connectors (native Overture IDs)
+    ref_node_to_segments: dict[int, set[str]] = {}
+    target_overture_connectors: dict[str, list[tuple[float, int]]] = {}
+
+    if ref_graphlet_data is not None:
+        _, ref_s2c, _, _ = ref_graphlet_data
+        if isinstance(ref_s2c, dict):
+            for seg_id, connectors in ref_s2c.items():
+                for _, node_id in connectors:
+                    ref_node_to_segments.setdefault(node_id, set()).add(seg_id)
+
+        # Build Overture connector spatial index and find connectors near targets
+        connector_index = build_overture_connector_spatial_index(ref_s2c, reference_geoms_by_id)
+        if connector_index is not None:
+            target_overture_connectors = find_overture_connectors_for_targets(
+                target_geoms_by_id, connector_index, tolerance_m=tolerance_m
+            )
+
+    # Target: invert target_overture_connectors (projected Overture IDs)
+    target_node_to_segments: dict[int, set[str]] = {}
+    for seg_id, connectors in target_overture_connectors.items():
+        for _, node_id in connectors:
+            target_node_to_segments.setdefault(node_id, set()).add(seg_id)
+
+    worker_data["ref_node_to_segments"] = ref_node_to_segments
+    worker_data["target_overture_connectors"] = target_overture_connectors
+    worker_data["target_node_to_segments"] = target_node_to_segments
 
 
 class WorkerDataResult(NamedTuple):
@@ -274,6 +321,13 @@ def prepare_worker_data(
     logger.info(f"Sampled topology connectors for {len(target_topo_connectors)} target segments")
     logger.debug(f"[TIMING] target_topo_connectors: {time.perf_counter() - t0:.2f}s")
 
+    # --- Step 4c: Build target geometry lookup (for later spatial connector matching) ---
+    t0 = time.perf_counter()
+    geoms_by_target_id = {
+        str(target_ids[idx]): work_target.geometry.iloc[idx] for idx in unique_target_indices
+    }
+    logger.debug(f"[TIMING] target_geoms_by_id: {time.perf_counter() - t0:.2f}s")
+
     # --- Step 5: Filter reference to candidate-only segments ---
     sorted_ref_indices = sorted(unique_ref_indices)
     ref_candidates_only = reference.iloc[sorted_ref_indices].reset_index(drop=True)
@@ -303,6 +357,29 @@ def prepare_worker_data(
         ref_graphlet_data = ref_graphlet_future.result()
         target_graphlet_data = target_graphlet_future.result()
     logger.debug(f"[TIMING] graphlet_both: {time.perf_counter() - t0:.2f}s")
+
+    # --- Step 6a/6b: Build connector indices (Overture spatial anchoring + reverse maps) ---
+    # Use Overture connectors as spatial anchors: find which Overture connectors
+    # are near each target segment. This puts both sides in the same ID space
+    # for direct Jaccard comparison of shared junctions.
+    t0 = time.perf_counter()
+    geoms_by_ref_id = {
+        str(ref_ids[idx]): reference.geometry.iloc[idx] for idx in unique_ref_indices
+    }
+    # Assemble a temporary worker_data with graphlet data for rebuild
+    _wd_temp: dict[str, Any] = {"ref_graphlet_data": ref_graphlet_data}
+    rebuild_connector_indices(_wd_temp, geoms_by_ref_id, geoms_by_target_id)
+    target_overture_connectors = _wd_temp["target_overture_connectors"]
+    ref_node_to_segments = _wd_temp["ref_node_to_segments"]
+    target_node_to_segments = _wd_temp["target_node_to_segments"]
+    if target_overture_connectors:
+        logger.info(
+            f"Matched Overture connectors to {len(target_overture_connectors)} target segments"
+        )
+    logger.debug(
+        f"[TIMING] connector_indices: {time.perf_counter() - t0:.2f}s "
+        f"({len(ref_node_to_segments)} ref nodes, {len(target_node_to_segments)} target nodes)"
+    )
 
     # --- Step 7: Compute linestring alignments ---
     logger.info("Computing linestring alignments...")
@@ -380,10 +457,13 @@ def prepare_worker_data(
         "target_topology_full": target_topology_full,
         "target_topo_connectors": target_topo_connectors,
         "target_topo_node_features": target_topo_node_features,
+        "target_overture_connectors": target_overture_connectors,
         "ref_graphlet_data": ref_graphlet_data,
         "target_graphlet_data": target_graphlet_data,
         "ref_sibling_context_full": ref_sibling_context,
         "target_sibling_context_full": target_sibling_context,
+        "ref_node_to_segments": ref_node_to_segments,
+        "target_node_to_segments": target_node_to_segments,
         "alignments": alignments,
     }
 

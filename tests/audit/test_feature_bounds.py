@@ -35,6 +35,19 @@ class TestBoundsOnSyntheticPairs:
         # "Test Road" has no numeric suffix or route prefix
         "name_numeric_match",
         "route_prefix_match",
+        # No alignment/graphlet context — interior connector features are NaN
+        "interior_junction_count_ref",
+        "interior_junction_count_target",
+        "interior_junction_count_delta",
+        "interior_connector_jaccard",
+        "interior_junction_position_sim",
+        # No alignment/connector context — shared anchor count is NaN
+        "shared_anchor_count",
+        # No alignment/neighbor context — neighbor consistency features are NaN
+        "neighbor_candidate_fraction_ref",
+        "neighbor_candidate_fraction_target",
+        "shared_neighbor_pair_count",
+        "neighbor_consistency_score",
     }
 
     # Additional features that are NaN when names are None
@@ -236,6 +249,19 @@ class TestBoundsOnRealData:
         "route_prefix_match",
         # Class similarity (NaN when class missing/unknown)
         "class_similarity",
+        # Interior connectors (NaN when graphlet/connector data unavailable)
+        "interior_junction_count_ref",
+        "interior_junction_count_target",
+        "interior_junction_count_delta",
+        "interior_connector_jaccard",
+        "interior_junction_position_sim",
+        # Shared anchor count (NaN when alignment/connector data unavailable)
+        "shared_anchor_count",
+        # Neighbor consistency (NaN when Overture connector data unavailable)
+        "neighbor_candidate_fraction_ref",
+        "neighbor_candidate_fraction_target",
+        "shared_neighbor_pair_count",
+        "neighbor_consistency_score",
     }
 
     def test_no_nan_in_real_data(self, labeled_features):

@@ -46,6 +46,12 @@ DEFAULT_SNAP_TOLERANCE_M = 5.0
 # tested and rejected — they also remove valid matches at any useful threshold.
 PHYSICAL_OVERLAP_MIN_M = 5.0
 
+# Tolerance for matching Overture connectors to target segments.
+# How close a target segment must pass to an Overture connector position
+# to be considered "at" that junction. 5m matches DEFAULT_SNAP_TOLERANCE_M
+# and the typical GPS/digitization error budget.
+OVERTURE_ANCHOR_TOLERANCE_M = 5.0
+
 # Alignment divergence detection thresholds
 # Used to truncate alignment at points where roads diverge significantly
 DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance threshold
@@ -134,7 +140,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-15"
+FEATURE_VERSION = "2026-02-16.1"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -156,9 +162,10 @@ FEATURE_VERSION = "2026-02-15"
 #       parallel_fraction_ref, crossing_angle_*, transverse_neighbor_fraction_*
 #   Full geometry (11): aligned_length_m, coverage_*, intersection_overlap_*
 #   Alignment-aware via connector snapping (8): endpoint proximity, graphlet, clustering
-#   Alignment-aware via connectors (12): topology features — both ref (Overture explicit
+#   Alignment-aware via connectors (13): topology features — both ref (Overture explicit
 #       connectors) and target (synthetic connectors sampled from full-network spatial index)
 #       are computed via compute_aligned_topology_features() with connector data.
+#       shared_anchor_count uses Overture connectors projected onto both sides.
 #       Fallback to full-segment topology only in labeling UI edge cases.
 #   Semantic (11): name_*, has_name_*, class_similarity, route_prefix_match
 #   Removed: see docs/RESEARCH_GRAVEYARD.md
@@ -212,6 +219,12 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "is_intersection_ref",
         "is_intersection_target",
         "intersection_match",
+        "interior_junction_count_ref",
+        "interior_junction_count_target",
+        "interior_junction_count_delta",
+        "interior_connector_jaccard",
+        "interior_junction_position_sim",
+        "shared_anchor_count",
     ],
     "Alignment Coverage": [
         "ref_coverage",
@@ -268,6 +281,12 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
     "Intersection Overlap": [
         "post_node_continuation_m",  # How far target continues past alignment boundary along ref heading (meters)
         "endpoint_heading_divergence",  # Max heading difference at alignment boundaries (0-90°)
+    ],
+    "Neighbor Consistency": [
+        "neighbor_candidate_fraction_ref",  # Fraction of ref's graph neighbors in candidate set
+        "neighbor_candidate_fraction_target",  # Fraction of target's graph neighbors in candidate set
+        "shared_neighbor_pair_count",  # Count of (ref_neighbor, target_neighbor) candidate pairs
+        "neighbor_consistency_score",  # Normalized shared_neighbor_pair_count / max_possible
     ],
     # Road Properties features (oneway_match, speed_limit_similarity) moved to graveyard
     # - Data is still fetched (oneway_lr, speed_limit_kph_lr columns) for future use

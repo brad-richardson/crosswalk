@@ -248,10 +248,13 @@ class TestPrepareWorkerDataParity:
             "target_topology_full",
             "target_topo_connectors",
             "target_topo_node_features",
+            "target_overture_connectors",
             "ref_graphlet_data",
             "target_graphlet_data",
             "ref_sibling_context_full",
             "target_sibling_context_full",
+            "ref_node_to_segments",
+            "target_node_to_segments",
             "alignments",
         }
     )

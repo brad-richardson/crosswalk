@@ -1574,6 +1574,174 @@ def sample_topology_batch(
     return seg_to_connectors, node_features
 
 
+def build_overture_connector_spatial_index(
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    ref_geoms_by_id: dict[str, "LineString"],
+) -> tuple[np.ndarray, np.ndarray, object] | None:
+    """Build spatial index of Overture connector positions.
+
+    Computes physical positions of all Overture connectors by interpolating
+    along ref segment geometries, then builds an STRtree for efficient
+    spatial queries. This enables using Overture connectors as spatial
+    anchors for both ref and target segments.
+
+    Args:
+        ref_seg_to_connectors: From build_connector_graph — {seg_id: [(frac, node_id), ...]}
+        ref_geoms_by_id: Ref segment geometries — {seg_id: LineString}
+
+    Returns:
+        (node_ids_array, points_array, STRtree) or None if no connectors.
+    """
+    import shapely as shp
+
+    # Compute positions for all unique connectors
+    connector_positions: dict[int, tuple[float, float]] = {}
+    for seg_id, connectors in ref_seg_to_connectors.items():
+        geom = ref_geoms_by_id.get(seg_id)
+        if geom is None or geom.is_empty:
+            continue
+        for frac, node_id in connectors:
+            if node_id not in connector_positions:
+                pt = geom.interpolate(frac, normalized=True)
+                connector_positions[node_id] = (pt.x, pt.y)
+
+    if not connector_positions:
+        return None
+
+    node_ids = np.array(list(connector_positions.keys()), dtype=np.int64)
+    coords = np.array(list(connector_positions.values()), dtype=np.float64)
+    points = shp.points(coords)
+    tree = shp.STRtree(points)
+
+    return node_ids, points, tree
+
+
+def find_overture_connectors_for_targets(
+    target_geoms_by_id: dict[str, "LineString"],
+    connector_index: tuple[np.ndarray, np.ndarray, object],
+    tolerance_m: float = 5.0,
+) -> dict[str, list[tuple[float, int]]]:
+    """Find Overture connectors near each target segment via spatial query.
+
+    Projects Overture connector positions onto target segments, returning
+    results in the same ID space as ref_seg_to_connectors. This enables
+    direct Jaccard comparison of connector sets between ref and target.
+
+    Args:
+        target_geoms_by_id: Target segment geometries — {seg_id: LineString}
+        connector_index: From build_overture_connector_spatial_index()
+        tolerance_m: Max distance for a connector to be considered "near" a segment
+
+    Returns:
+        {target_seg_id: [(frac, overture_node_id), ...]} sorted by frac.
+        Uses the same node IDs as ref_seg_to_connectors.
+    """
+    import shapely as shp
+
+    node_ids, points, tree = connector_index
+    result: dict[str, list[tuple[float, int]]] = {}
+
+    for target_id, target_geom in target_geoms_by_id.items():
+        if target_geom is None or target_geom.is_empty:
+            result[target_id] = []
+            continue
+
+        # Query tree for connectors within tolerance (dwithin avoids buffer overhead)
+        nearby_indices = tree.query(target_geom, predicate="dwithin", distance=tolerance_m)
+
+        if len(nearby_indices) == 0:
+            result[target_id] = []
+            continue
+
+        # Project each nearby connector onto the target geometry
+        connectors = []
+        for idx in nearby_indices:
+            frac = float(shp.line_locate_point(target_geom, points[idx]) / target_geom.length)
+            frac = max(0.0, min(1.0, frac))
+            connectors.append((frac, int(node_ids[idx])))
+
+        connectors.sort(key=lambda x: x[0])
+        result[target_id] = connectors
+
+    return result
+
+
+def _connectors_near_endpoint(
+    connectors: list[tuple[float, int]],
+    endpoint_frac: float,
+    frac_tolerance: float,
+) -> set[int]:
+    """Return node IDs of all connectors within frac_tolerance of endpoint_frac."""
+    return {node_id for frac, node_id in connectors if abs(frac - endpoint_frac) <= frac_tolerance}
+
+
+def compute_shared_anchor_features(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    target_overture_connectors: dict[str, list[tuple[float, int]]],
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+    ref_length_m: float,
+    target_length_m: float,
+    tolerance_m: float = 5.0,
+) -> dict[str, float]:
+    """Count alignment endpoints where ref and target share an Overture connector.
+
+    At each alignment endpoint, collects ALL connectors within tolerance_m
+    (converted to fractional position using segment length), then checks
+    set intersection. This avoids picking a single "nearest" winner that
+    might not match across sides.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_seg_to_connectors: Ref connector mapping {seg_id: [(frac, node_id), ...]}
+        target_overture_connectors: Target connector mapping {seg_id: [(frac, node_id), ...]}
+        ref_start_frac: Alignment start fraction on ref
+        ref_end_frac: Alignment end fraction on ref
+        target_start_frac: Alignment start fraction on target
+        target_end_frac: Alignment end fraction on target
+        ref_length_m: Reference segment length in meters
+        target_length_m: Target segment length in meters
+        tolerance_m: Max distance along segment to consider a connector "at" an endpoint
+
+    Returns:
+        {"shared_anchor_count": count} where count is 0, 1, or 2
+    """
+    ref_connectors = ref_seg_to_connectors.get(ref_seg_id, [])
+    target_connectors = target_overture_connectors.get(target_seg_id, [])
+
+    if not ref_connectors or not target_connectors:
+        return {"shared_anchor_count": 0.0}
+
+    # Convert absolute meter tolerance to fractional position per segment
+    ref_frac_tol = tolerance_m / ref_length_m if ref_length_m > 0 else 0.0
+    target_frac_tol = tolerance_m / target_length_m if target_length_m > 0 else 0.0
+
+    count = 0
+
+    # Start endpoint: collect all connectors within tolerance, check intersection
+    ref_start_nodes = _connectors_near_endpoint(ref_connectors, ref_start_frac, ref_frac_tol)
+    target_start_nodes = _connectors_near_endpoint(
+        target_connectors, target_start_frac, target_frac_tol
+    )
+    if ref_start_nodes & target_start_nodes:
+        count += 1
+
+    # End endpoint: same logic
+    ref_end_nodes = _connectors_near_endpoint(ref_connectors, ref_end_frac, ref_frac_tol)
+    target_end_nodes = _connectors_near_endpoint(
+        target_connectors, target_end_frac, target_frac_tol
+    )
+    if ref_end_nodes & target_end_nodes:
+        count += 1
+
+    return {"shared_anchor_count": float(count)}
+
+
 def compute_degree_signature_similarity(
     sig_a: tuple[int, ...],
     sig_b: tuple[int, ...],
@@ -2826,4 +2994,276 @@ def compute_clustering_coefficient_features(
         "clustering_coef_ref": clustering_coef_ref,
         "clustering_coef_target": clustering_coef_target,
         "clustering_coef_delta": clustering_coef_delta,
+    }
+
+
+def compute_interior_connector_features(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    target_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    ref_node_features: dict[int, int | np.ndarray],
+    target_node_features: dict[int, int | np.ndarray],
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+) -> dict[str, float]:
+    """Compare interior connector sequences along the aligned portion.
+
+    Interior connectors are those strictly between the alignment endpoints
+    (exclusive of start/end). This captures whether two segments have similar
+    junction patterns along their aligned overlap — a strong indicator of
+    structural correspondence.
+
+    For the target side, expects Overture connectors projected onto the
+    target segment (from find_overture_connectors_for_targets), ensuring
+    both sides use the same connector ID space for direct Jaccard comparison.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_seg_to_connectors: Ref connector map {seg_id: [(frac, node_id), ...]}
+        target_seg_to_connectors: Target connector map (junction-filtered)
+        ref_node_features: Ref node features {node_id: degree or feature vector}
+        target_node_features: Target node features {node_id: degree or feature vector}
+        ref_start_frac: Start of alignment on ref (0-1)
+        ref_end_frac: End of alignment on ref (0-1)
+        target_start_frac: Start of alignment on target (0-1)
+        target_end_frac: End of alignment on target (0-1)
+
+    Returns:
+        Dict with interior_junction_count_ref, interior_junction_count_target,
+        interior_junction_count_delta, interior_connector_jaccard,
+        interior_junction_position_sim
+    """
+    _nan = float("nan")
+    ENDPOINT_TOL = 0.01  # Tolerance for "at endpoint" exclusion
+
+    def _get_degree(node_features: dict, node_id: int) -> int:
+        """Extract degree from node_features, handling both int and ndarray values."""
+        val = node_features.get(node_id, 1)
+        if isinstance(val, np.ndarray):
+            return int(val[0])  # degree is index 0 of feature vector
+        return int(val)
+
+    def _get_interior_connectors(
+        seg_id: str,
+        seg_to_connectors: dict[str, list[tuple[float, int]]],
+        node_features: dict,
+        start_frac: float,
+        end_frac: float,
+    ) -> list[tuple[float, int]]:
+        """Get connectors strictly inside the aligned range."""
+        connectors = seg_to_connectors.get(seg_id, [])
+        interior = []
+        for frac, node_id in connectors:
+            if (start_frac + ENDPOINT_TOL) < frac < (end_frac - ENDPOINT_TOL):
+                degree = _get_degree(node_features, node_id)
+                if degree >= 2:  # Only count junctions
+                    interior.append((frac, node_id))
+        return interior
+
+    ref_interior = _get_interior_connectors(
+        ref_seg_id, ref_seg_to_connectors, ref_node_features, ref_start_frac, ref_end_frac
+    )
+    target_interior = _get_interior_connectors(
+        target_seg_id,
+        target_seg_to_connectors,
+        target_node_features,
+        target_start_frac,
+        target_end_frac,
+    )
+
+    count_ref = len(ref_interior)
+    count_target = len(target_interior)
+    count_delta = abs(count_ref - count_target)
+
+    # Connector ID Jaccard: both sides use Overture connector node IDs
+    # (same ID space), so set intersection measures shared physical junctions
+    ref_ids = set(nid for _, nid in ref_interior)
+    target_ids = set(nid for _, nid in target_interior)
+    if not ref_ids and not target_ids:
+        connector_jaccard = 1.0  # Both empty = perfect match
+    elif not ref_ids or not target_ids:
+        connector_jaccard = 0.0  # One has junctions, other doesn't
+    else:
+        connector_jaccard = len(ref_ids & target_ids) / len(ref_ids | target_ids)
+
+    # Position similarity: rescale interior positions to [0,1] within alignment,
+    # then match by nearest position
+    if count_ref == 0 and count_target == 0:
+        position_sim = 1.0
+    elif count_ref == 0 or count_target == 0:
+        position_sim = 0.0
+    else:
+        ref_span = ref_end_frac - ref_start_frac
+        target_span = target_end_frac - target_start_frac
+
+        ref_positions = sorted(
+            (frac - ref_start_frac) / ref_span if ref_span > 0 else 0.5 for frac, _ in ref_interior
+        )
+        target_positions = sorted(
+            (frac - target_start_frac) / target_span if target_span > 0 else 0.5
+            for frac, _ in target_interior
+        )
+
+        # Greedy nearest matching: pair each position in the shorter list
+        # with its nearest in the longer list
+        if len(ref_positions) <= len(target_positions):
+            shorter, longer = ref_positions, target_positions
+        else:
+            shorter, longer = target_positions, ref_positions
+
+        total_diff = 0.0
+        used = set()
+        for pos in shorter:
+            best_diff = float("inf")
+            best_idx = 0
+            for j, lpos in enumerate(longer):
+                if j not in used:
+                    d = abs(pos - lpos)
+                    if d < best_diff:
+                        best_diff = d
+                        best_idx = j
+            total_diff += best_diff
+            used.add(best_idx)
+
+        # Penalize unmatched positions in the longer list
+        n_unmatched = len(longer) - len(shorter)
+        # Unmatched positions contribute 0.5 each (midrange penalty)
+        total_diff += n_unmatched * 0.5
+        max_count = max(len(shorter), len(longer))
+        mean_diff = total_diff / max_count if max_count > 0 else 0.0
+        position_sim = max(0.0, 1.0 - mean_diff)
+
+    return {
+        "interior_junction_count_ref": float(count_ref),
+        "interior_junction_count_target": float(count_target),
+        "interior_junction_count_delta": float(count_delta),
+        "interior_connector_jaccard": connector_jaccard,
+        "interior_junction_position_sim": position_sim,
+    }
+
+
+def compute_neighbor_consistency_features(
+    ref_seg_id: str,
+    target_seg_id: str,
+    ref_seg_to_connectors: dict[str, list[tuple[float, int]]],
+    target_overture_connectors: dict[str, list[tuple[float, int]]],
+    ref_node_to_segments: dict[int, set[str]],
+    target_node_to_segments_overture: dict[int, set[str]],
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+) -> dict[str, float]:
+    """Measure cross-network consistency of graph neighbors via shared Overture connectors.
+
+    Both sides use the Overture connector ID space: ref natively, target via
+    spatial projection. For each side's alignment-endpoint neighbors, we check
+    whether those neighbors share Overture connectors with segments on the
+    other side — indicating structural correspondence without needing the
+    candidate set.
+
+    Args:
+        ref_seg_id: Reference segment ID
+        target_seg_id: Target segment ID
+        ref_seg_to_connectors: Ref connector map (Overture node IDs)
+        target_overture_connectors: Target connector map (Overture node IDs)
+        ref_node_to_segments: Reverse index: Overture node_id -> set of ref seg IDs
+        target_node_to_segments_overture: Reverse index: Overture node_id -> set of target seg IDs
+        ref_start_frac: Start of alignment on ref
+        ref_end_frac: End of alignment on ref
+        target_start_frac: Start of alignment on target
+        target_end_frac: End of alignment on target
+
+    Returns:
+        Dict with neighbor_candidate_fraction_ref, neighbor_candidate_fraction_target,
+        shared_neighbor_pair_count, neighbor_consistency_score
+    """
+    _nan = float("nan")
+
+    # Find alignment endpoint connectors (both in Overture ID space)
+    ref_start_node, ref_end_node = get_alignment_connectors(
+        ref_seg_id, ref_seg_to_connectors, ref_start_frac, ref_end_frac
+    )
+    target_start_node, target_end_node = get_alignment_connectors(
+        target_seg_id, target_overture_connectors, target_start_frac, target_end_frac
+    )
+
+    # Endpoint nodes for each side
+    ref_endpoint_nodes = {n for n in (ref_start_node, ref_end_node) if n is not None}
+    target_endpoint_nodes = {n for n in (target_start_node, target_end_node) if n is not None}
+    shared_endpoint_nodes = ref_endpoint_nodes & target_endpoint_nodes
+
+    # Collect ref neighbors at ref's alignment endpoints
+    ref_neighbors: set[str] = set()
+    for node in ref_endpoint_nodes:
+        ref_neighbors |= ref_node_to_segments.get(node, set())
+    ref_neighbors.discard(ref_seg_id)
+
+    # Collect target neighbors at target's alignment endpoints (Overture space)
+    target_neighbors: set[str] = set()
+    for node in target_endpoint_nodes:
+        target_neighbors |= target_node_to_segments_overture.get(node, set())
+    target_neighbors.discard(target_seg_id)
+
+    # Fraction of ref neighbors that share an Overture connector with any
+    # target segment (excluding target_seg_id itself)
+    if ref_neighbors:
+        covered = 0
+        for rn in ref_neighbors:
+            rn_nodes = {nid for _, nid in ref_seg_to_connectors.get(rn, [])}
+            for nid in rn_nodes:
+                target_segs = target_node_to_segments_overture.get(nid, set())
+                if target_segs - {target_seg_id}:
+                    covered += 1
+                    break
+        neighbor_candidate_fraction_ref = covered / len(ref_neighbors)
+    else:
+        neighbor_candidate_fraction_ref = _nan
+
+    # Fraction of target neighbors that share an Overture connector with any
+    # ref segment (excluding ref_seg_id itself)
+    if target_neighbors:
+        covered = 0
+        for tn in target_neighbors:
+            tn_nodes = {nid for _, nid in target_overture_connectors.get(tn, [])}
+            for nid in tn_nodes:
+                ref_segs = ref_node_to_segments.get(nid, set())
+                if ref_segs - {ref_seg_id}:
+                    covered += 1
+                    break
+        neighbor_candidate_fraction_target = covered / len(target_neighbors)
+    else:
+        neighbor_candidate_fraction_target = _nan
+
+    # Cross-network: count (ref_neighbor, target_neighbor) pairs that share an
+    # Overture connector BEYOND the shared endpoint nodes
+    shared = 0
+    for rn in ref_neighbors:
+        rn_nodes = {nid for _, nid in ref_seg_to_connectors.get(rn, [])} - shared_endpoint_nodes
+        if not rn_nodes:
+            continue
+        for tn in target_neighbors:
+            tn_nodes = {
+                nid for _, nid in target_overture_connectors.get(tn, [])
+            } - shared_endpoint_nodes
+            if rn_nodes & tn_nodes:
+                shared += 1
+
+    shared_neighbor_pair_count = float(shared)
+
+    max_possible = len(ref_neighbors) * len(target_neighbors)
+    if max_possible > 0:
+        neighbor_consistency_score = shared / max_possible
+    else:
+        neighbor_consistency_score = _nan
+
+    return {
+        "neighbor_candidate_fraction_ref": neighbor_candidate_fraction_ref,
+        "neighbor_candidate_fraction_target": neighbor_candidate_fraction_target,
+        "shared_neighbor_pair_count": shared_neighbor_pair_count,
+        "neighbor_consistency_score": neighbor_consistency_score,
     }
