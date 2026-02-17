@@ -1,14 +1,14 @@
 {
-  "run_date": "2026-02-17T02:31:06.138724+00:00",
+  "run_date": "2026-02-17T03:32:49.233310+00:00",
   "baseline": {
-    "accuracy": 0.8982078853046594,
-    "f1": 0.9090909090909091,
-    "cv_f1_mean": 0.9173461520821042,
-    "cv_f1_std": 0.002222849307131412,
-    "n_features": 82
+    "accuracy": 0.9003584229390681,
+    "f1": 0.9109545163356823,
+    "cv_f1_mean": 0.9165411011024611,
+    "cv_f1_std": 0.003434288412001886,
+    "n_features": 78
   },
   "quality_check": {
-    "meets_accuracy_threshold": false,
+    "meets_accuracy_threshold": true,
     "meets_cv_f1_threshold": true,
     "accuracy_threshold": 0.9,
     "cv_f1_threshold": 0.9
@@ -20,418 +20,399 @@
     "important": "<= -0.01"
   },
   "classification_counts": {
-    "noise": 67,
-    "redundant": 15
+    "noise": 12,
+    "redundant": 64,
+    "useful": 2
   },
   "feature_ranking_by_importance": [
     {
       "feature": "class_similarity",
-      "f1_delta": -0.004821827590262284,
+      "f1_delta": -0.009855615236781134,
+      "classification": "useful"
+    },
+    {
+      "feature": "endpoint_degree_similarity",
+      "f1_delta": -0.005245728651269155,
+      "classification": "useful"
+    },
+    {
+      "feature": "to_degree_ref",
+      "f1_delta": -0.004784850525913598,
       "classification": "redundant"
     },
     {
       "feature": "ref_coverage",
-      "f1_delta": -0.003841229193341844,
+      "f1_delta": -0.00442442670700105,
       "classification": "redundant"
     },
     {
-      "feature": "neighbor_candidate_fraction_ref",
-      "f1_delta": -0.0028007935581747523,
+      "feature": "name_numeric_match",
+      "f1_delta": -0.003962855014322364,
       "classification": "redundant"
     },
     {
-      "feature": "neighbor_candidate_fraction_target",
-      "f1_delta": -0.0022187189817247654,
+      "feature": "sinuosity_ref",
+      "f1_delta": -0.003499503482211841,
       "classification": "redundant"
     },
     {
-      "feature": "shared_neighbor_pair_count",
-      "f1_delta": -0.0022187189817247654,
+      "feature": "from_degree_ref",
+      "f1_delta": -0.0033807037554511865,
       "classification": "redundant"
     },
     {
-      "feature": "neighbor_consistency_score",
-      "f1_delta": -0.0022187189817247654,
+      "feature": "vertex_density_ref",
+      "f1_delta": -0.0033807037554511865,
       "classification": "redundant"
     },
     {
-      "feature": "mean_hausdorff_distance_m",
-      "f1_delta": -0.0009341974659893282,
+      "feature": "is_intersection_target",
+      "f1_delta": -0.0032622086433745645,
       "classification": "redundant"
     },
     {
-      "feature": "interior_junction_count_target",
-      "f1_delta": -0.0009341974659893282,
+      "feature": "shared_anchor_count",
+      "f1_delta": -0.0032622086433745645,
       "classification": "redundant"
     },
     {
-      "feature": "has_name_ref",
-      "f1_delta": -0.0008163741326024931,
-      "classification": "redundant"
-    },
-    {
-      "feature": "to_degree_ref",
-      "f1_delta": -0.0008163741326024931,
-      "classification": "redundant"
-    },
-    {
-      "feature": "from_degree_target",
-      "f1_delta": -0.0006988527167899328,
-      "classification": "redundant"
-    },
-    {
-      "feature": "intersection_match",
-      "f1_delta": -0.00046800046800044015,
-      "classification": "redundant"
-    },
-    {
-      "feature": "route_prefix_match",
-      "f1_delta": -0.0002333994631812386,
-      "classification": "redundant"
-    },
-    {
-      "feature": "likely_representation_mismatch",
-      "f1_delta": -0.0002333994631812386,
-      "classification": "redundant"
-    },
-    {
-      "feature": "interior_connector_jaccard",
-      "f1_delta": -0.00011655011655009595,
+      "feature": "heading_consistency_ref",
+      "f1_delta": -0.0032622086433745645,
       "classification": "redundant"
     },
     {
       "feature": "min_endpoint_proximity_m",
-      "f1_delta": 0.0,
-      "classification": "noise"
-    },
-    {
-      "feature": "shared_anchor_count",
-      "f1_delta": 0.0,
-      "classification": "noise"
-    },
-    {
-      "feature": "hausdorff_distance_m",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_levenshtein",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_jaro_winkler",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_soundex",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_metaphone",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "lateral_offset_m",
-      "f1_delta": 0.0002338497515346205,
-      "classification": "noise"
-    },
-    {
-      "feature": "lateral_offset_p95_m",
-      "f1_delta": 0.00035032404974599807,
-      "classification": "noise"
-    },
-    {
-      "feature": "aligned_length_m",
-      "f1_delta": 0.00035032404974599807,
-      "classification": "noise"
-    },
-    {
-      "feature": "transverse_neighbor_fraction_ref",
-      "f1_delta": 0.00035032404974599807,
-      "classification": "noise"
-    },
-    {
-      "feature": "transverse_neighbor_fraction_target",
-      "f1_delta": 0.00035032404974599807,
-      "classification": "noise"
-    },
-    {
-      "feature": "clustering_coef_target",
-      "f1_delta": 0.00046649950434429766,
-      "classification": "noise"
-    },
-    {
-      "feature": "shape_complexity_ref",
-      "f1_delta": 0.00046649950434429766,
-      "classification": "noise"
-    },
-    {
-      "feature": "parallel_fraction_ref",
-      "f1_delta": 0.00046649950434429766,
-      "classification": "noise"
-    },
-    {
-      "feature": "endpoint_degree_similarity",
-      "f1_delta": 0.0005823772639916847,
-      "classification": "noise"
-    },
-    {
-      "feature": "heading_consistency_target",
-      "f1_delta": 0.0005823772639916847,
-      "classification": "noise"
-    },
-    {
-      "feature": "has_parallel_sibling_ref",
-      "f1_delta": 0.0005823772639916847,
-      "classification": "noise"
-    },
-    {
-      "feature": "shape_complexity_delta",
-      "f1_delta": 0.0006979584714710274,
-      "classification": "noise"
-    },
-    {
-      "feature": "lateral_offset_iqr_m",
-      "f1_delta": 0.0008132442637235338,
-      "classification": "noise"
-    },
-    {
-      "feature": "sinuosity_delta",
-      "f1_delta": 0.0008190008190008813,
-      "classification": "noise"
-    },
-    {
-      "feature": "post_node_continuation_m",
-      "f1_delta": 0.0008190008190008813,
-      "classification": "noise"
-    },
-    {
-      "feature": "clustering_coef_delta",
-      "f1_delta": 0.0009347978499649745,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_numeric_match",
-      "f1_delta": 0.0010502975843156293,
-      "classification": "noise"
-    },
-    {
-      "feature": "graphlet_similarity",
-      "f1_delta": 0.0010502975843156293,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_token_sort",
-      "f1_delta": 0.0011655011655011815,
-      "classification": "noise"
+      "f1_delta": -0.003144016975887065,
+      "classification": "redundant"
     },
     {
       "feature": "max_endpoint_proximity_m",
-      "f1_delta": 0.0011655011655011815,
-      "classification": "noise"
+      "f1_delta": -0.003144016975887065,
+      "classification": "redundant"
     },
     {
       "feature": "shared_endpoint_count",
-      "f1_delta": 0.0011655011655011815,
-      "classification": "noise"
-    },
-    {
-      "feature": "is_intersection_target",
-      "f1_delta": 0.0013950244129272704,
-      "classification": "noise"
-    },
-    {
-      "feature": "sinuosity_ref",
-      "f1_delta": 0.0014049054615700163,
-      "classification": "noise"
-    },
-    {
-      "feature": "name_is_generic",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
-    },
-    {
-      "feature": "interior_junction_count_ref",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
-    },
-    {
-      "feature": "heading_consistency_delta",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
-    },
-    {
-      "feature": "vertex_density_target",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
-    },
-    {
-      "feature": "shape_complexity_target",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
-    },
-    {
-      "feature": "crossing_angle_min_ref",
-      "f1_delta": 0.0016348455654814353,
-      "classification": "noise"
+      "f1_delta": -0.003144016975887065,
+      "classification": "redundant"
     },
     {
       "feature": "buffer_iou_5m",
-      "f1_delta": 0.0017493731412910885,
-      "classification": "noise"
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
     },
     {
-      "feature": "edge_distance_rmse_m",
-      "f1_delta": 0.0017493731412910885,
-      "classification": "noise"
+      "feature": "name_metaphone",
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
     },
     {
       "feature": "degree_signature_similarity",
-      "f1_delta": 0.0017493731412910885,
-      "classification": "noise"
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
     },
     {
-      "feature": "clustering_coef_ref",
-      "f1_delta": 0.0017493731412910885,
-      "classification": "noise"
+      "feature": "heading_consistency_delta",
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
     },
     {
-      "feature": "min_length_m",
-      "f1_delta": 0.0017493731412910885,
-      "classification": "noise"
+      "feature": "shape_complexity_ref",
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
+    },
+    {
+      "feature": "likely_representation_mismatch",
+      "f1_delta": -0.0027978047107625192,
+      "classification": "redundant"
+    },
+    {
+      "feature": "name_soundex",
+      "f1_delta": -0.002679981377375684,
+      "classification": "redundant"
+    },
+    {
+      "feature": "sinuosity_target",
+      "f1_delta": -0.002679981377375684,
+      "classification": "redundant"
+    },
+    {
+      "feature": "shape_complexity_delta",
+      "f1_delta": -0.002679981377375684,
+      "classification": "redundant"
+    },
+    {
+      "feature": "has_parallel_sibling_ref",
+      "f1_delta": -0.002679981377375684,
+      "classification": "redundant"
+    },
+    {
+      "feature": "has_name_target",
+      "f1_delta": -0.002562459961563124,
+      "classification": "redundant"
+    },
+    {
+      "feature": "interior_junction_position_sim",
+      "f1_delta": -0.002562459961563124,
+      "classification": "redundant"
+    },
+    {
+      "feature": "clustering_coef_target",
+      "f1_delta": -0.002562459961563124,
+      "classification": "redundant"
+    },
+    {
+      "feature": "transverse_neighbor_fraction_target",
+      "f1_delta": -0.0024452393043322695,
+      "classification": "redundant"
+    },
+    {
+      "feature": "has_name_ref",
+      "f1_delta": -0.0022141564385099732,
+      "classification": "redundant"
+    },
+    {
+      "feature": "shape_complexity_target",
+      "f1_delta": -0.0022141564385099732,
+      "classification": "redundant"
     },
     {
       "feature": "is_dead_end_ref",
-      "f1_delta": 0.001863607244773191,
-      "classification": "noise"
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "dead_end_match",
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "interior_junction_count_ref",
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "interior_connector_jaccard",
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "clustering_coef_delta",
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "sinuosity_delta",
+      "f1_delta": -0.0020970067079544297,
+      "classification": "redundant"
+    },
+    {
+      "feature": "vertex_density_target",
+      "f1_delta": -0.0016297574932385706,
+      "classification": "redundant"
+    },
+    {
+      "feature": "transverse_neighbor_fraction_ref",
+      "f1_delta": -0.0016297574932385706,
+      "classification": "redundant"
+    },
+    {
+      "feature": "edge_distance_rmse_m",
+      "f1_delta": -0.001513283195027193,
+      "classification": "redundant"
+    },
+    {
+      "feature": "name_token_sort",
+      "f1_delta": -0.001513283195027193,
+      "classification": "redundant"
+    },
+    {
+      "feature": "degree_match_score",
+      "f1_delta": -0.001513283195027193,
+      "classification": "redundant"
+    },
+    {
+      "feature": "clustering_coef_ref",
+      "f1_delta": -0.001513283195027193,
+      "classification": "redundant"
+    },
+    {
+      "feature": "mean_hausdorff_distance_m",
+      "f1_delta": -0.0013971077404288934,
+      "classification": "redundant"
+    },
+    {
+      "feature": "name_jaro_winkler",
+      "f1_delta": -0.0013971077404288934,
+      "classification": "redundant"
+    },
+    {
+      "feature": "lateral_offset_p95_m",
+      "f1_delta": -0.0013971077404288934,
+      "classification": "redundant"
+    },
+    {
+      "feature": "crossing_angle_min_target",
+      "f1_delta": -0.0013971077404288934,
+      "classification": "redundant"
+    },
+    {
+      "feature": "to_degree_target",
+      "f1_delta": -0.0012812299807815064,
+      "classification": "redundant"
+    },
+    {
+      "feature": "min_length_m",
+      "f1_delta": -0.0012812299807815064,
+      "classification": "redundant"
+    },
+    {
+      "feature": "aligned_length_m",
+      "f1_delta": -0.0012812299807815064,
+      "classification": "redundant"
+    },
+    {
+      "feature": "lateral_offset_iqr_m",
+      "f1_delta": -0.0011656487733021637,
+      "classification": "redundant"
+    },
+    {
+      "feature": "from_degree_target",
+      "f1_delta": -0.0011656487733021637,
+      "classification": "redundant"
+    },
+    {
+      "feature": "lateral_offset_m",
+      "f1_delta": -0.0009288093948082166,
+      "classification": "redundant"
+    },
+    {
+      "feature": "is_dead_end_target",
+      "f1_delta": -0.0009288093948082166,
+      "classification": "redundant"
+    },
+    {
+      "feature": "intersection_match",
+      "f1_delta": -0.0009288093948082166,
+      "classification": "redundant"
     },
     {
       "feature": "vertex_density_ratio",
-      "f1_delta": 0.001863607244773191,
-      "classification": "noise"
+      "f1_delta": -0.0009288093948082166,
+      "classification": "redundant"
     },
     {
-      "feature": "min_coverage",
-      "f1_delta": 0.0020911995352890234,
+      "feature": "interior_junction_count_target",
+      "f1_delta": -0.0006981060792720095,
+      "classification": "redundant"
+    },
+    {
+      "feature": "name_levenshtein",
+      "f1_delta": -0.000583197513659206,
+      "classification": "redundant"
+    },
+    {
+      "feature": "route_prefix_match",
+      "f1_delta": -0.000583197513659206,
+      "classification": "redundant"
+    },
+    {
+      "feature": "target_coverage",
+      "f1_delta": -0.000583197513659206,
+      "classification": "redundant"
+    },
+    {
+      "feature": "graphlet_similarity",
+      "f1_delta": -0.000583197513659206,
+      "classification": "redundant"
+    },
+    {
+      "feature": "crossing_angle_min_ref",
+      "f1_delta": -0.000583197513659206,
+      "classification": "redundant"
+    },
+    {
+      "feature": "buffer_iou_15m",
+      "f1_delta": -0.00034358385979804673,
+      "classification": "redundant"
+    },
+    {
+      "feature": "parallel_fraction_ref",
+      "f1_delta": -0.00034358385979804673,
+      "classification": "redundant"
+    },
+    {
+      "feature": "is_intersection_ref",
+      "f1_delta": -0.00022876167929175573,
+      "classification": "redundant"
+    },
+    {
+      "feature": "heading_consistency_target",
+      "f1_delta": -0.00022876167929175573,
+      "classification": "redundant"
+    },
+    {
+      "feature": "endpoint_heading_divergence",
+      "f1_delta": -0.00022876167929175573,
+      "classification": "redundant"
+    },
+    {
+      "feature": "interior_junction_count_delta",
+      "f1_delta": 0.00011394175772783122,
       "classification": "noise"
     },
     {
       "feature": "angle_histogram_similarity",
-      "f1_delta": 0.0021060021060020917,
-      "classification": "noise"
-    },
-    {
-      "feature": "offset_over_expected_halfwidth",
-      "f1_delta": 0.0021060021060020917,
+      "f1_delta": 0.000583945202779268,
       "classification": "noise"
     },
     {
       "feature": "collinear_gap_ratio",
-      "f1_delta": 0.002220144893666731,
+      "f1_delta": 0.000697212217454779,
       "classification": "noise"
     },
     {
-      "feature": "to_degree_target",
-      "f1_delta": 0.002220144893666731,
+      "feature": "name_is_generic",
+      "f1_delta": 0.000697212217454779,
       "classification": "noise"
     },
     {
-      "feature": "interior_junction_position_sim",
-      "f1_delta": 0.002220144893666731,
+      "feature": "offset_over_expected_halfwidth",
+      "f1_delta": 0.0008101895466706699,
       "classification": "noise"
     },
     {
-      "feature": "heading_consistency_ref",
-      "f1_delta": 0.002333994631812386,
-      "classification": "noise"
-    },
-    {
-      "feature": "heading_delta",
-      "f1_delta": 0.00256081946222797,
-      "classification": "noise"
-    },
-    {
-      "feature": "coverage_ratio",
-      "f1_delta": 0.002673796791443861,
-      "classification": "noise"
-    },
-    {
-      "feature": "hausdorff_p95_m",
-      "f1_delta": 0.002806197018415668,
-      "classification": "noise"
-    },
-    {
-      "feature": "buffer_iou_15m",
-      "f1_delta": 0.002806197018415668,
-      "classification": "noise"
-    },
-    {
-      "feature": "is_intersection_ref",
-      "f1_delta": 0.002806197018415668,
-      "classification": "noise"
-    },
-    {
-      "feature": "sinuosity_target",
-      "f1_delta": 0.0029193670812168726,
-      "classification": "noise"
-    },
-    {
-      "feature": "endpoint_heading_divergence",
-      "f1_delta": 0.0029193670812168726,
-      "classification": "noise"
-    },
-    {
-      "feature": "is_dead_end_target",
-      "f1_delta": 0.0030322467782378792,
-      "classification": "noise"
-    },
-    {
-      "feature": "interior_junction_count_delta",
-      "f1_delta": 0.0030322467782378792,
-      "classification": "noise"
-    },
-    {
-      "feature": "crossing_angle_min_target",
-      "f1_delta": 0.003393003393003413,
-      "classification": "noise"
-    },
-    {
-      "feature": "has_name_target",
-      "f1_delta": 0.003505491937368599,
-      "classification": "noise"
-    },
-    {
-      "feature": "vertex_density_ref",
-      "f1_delta": 0.003505491937368599,
-      "classification": "noise"
-    },
-    {
-      "feature": "degree_match_score",
-      "f1_delta": 0.003617691679309143,
-      "classification": "noise"
-    },
-    {
-      "feature": "target_coverage",
-      "f1_delta": 0.003841229193341955,
-      "classification": "noise"
-    },
-    {
-      "feature": "from_degree_ref",
-      "f1_delta": 0.004315120415184559,
-      "classification": "noise"
-    },
-    {
-      "feature": "dead_end_match",
-      "f1_delta": 0.004315120415184559,
+      "feature": "post_node_continuation_m",
+      "f1_delta": 0.0008291282232359976,
       "classification": "noise"
     },
     {
       "feature": "offset_vs_half_corridor_ratio",
-      "f1_delta": 0.004315120415184559,
+      "f1_delta": 0.0009425897736424771,
+      "classification": "noise"
+    },
+    {
+      "feature": "min_coverage",
+      "f1_delta": 0.001505547562081322,
+      "classification": "noise"
+    },
+    {
+      "feature": "hausdorff_p95_m",
+      "f1_delta": 0.001977621948568764,
+      "classification": "noise"
+    },
+    {
+      "feature": "heading_delta",
+      "f1_delta": 0.001977621948568764,
+      "classification": "noise"
+    },
+    {
+      "feature": "hausdorff_distance_m",
+      "f1_delta": 0.0020889619251872604,
+      "classification": "noise"
+    },
+    {
+      "feature": "coverage_ratio",
+      "f1_delta": 0.0020889619251872604,
       "classification": "noise"
     }
   ],
@@ -439,20 +420,31 @@
   "noise_candidates": [
     "hausdorff_distance_m",
     "hausdorff_p95_m",
-    "buffer_iou_5m",
-    "buffer_iou_15m",
     "heading_delta",
     "collinear_gap_ratio",
     "angle_histogram_similarity",
+    "name_is_generic",
+    "interior_junction_count_delta",
+    "min_coverage",
+    "coverage_ratio",
+    "offset_vs_half_corridor_ratio",
+    "offset_over_expected_halfwidth",
+    "post_node_continuation_m"
+  ],
+  "redundant_candidates": [
+    "mean_hausdorff_distance_m",
+    "buffer_iou_5m",
+    "buffer_iou_15m",
     "edge_distance_rmse_m",
     "name_levenshtein",
     "name_jaro_winkler",
     "name_token_sort",
     "name_soundex",
     "name_metaphone",
+    "has_name_ref",
     "has_name_target",
-    "name_is_generic",
     "name_numeric_match",
+    "route_prefix_match",
     "min_endpoint_proximity_m",
     "max_endpoint_proximity_m",
     "shared_endpoint_count",
@@ -460,6 +452,8 @@
     "lateral_offset_iqr_m",
     "lateral_offset_p95_m",
     "from_degree_ref",
+    "to_degree_ref",
+    "from_degree_target",
     "to_degree_target",
     "degree_match_score",
     "degree_signature_similarity",
@@ -468,15 +462,15 @@
     "dead_end_match",
     "is_intersection_ref",
     "is_intersection_target",
+    "intersection_match",
     "interior_junction_count_ref",
-    "interior_junction_count_delta",
+    "interior_junction_count_target",
+    "interior_connector_jaccard",
     "interior_junction_position_sim",
     "shared_anchor_count",
+    "ref_coverage",
     "target_coverage",
-    "min_coverage",
-    "coverage_ratio",
     "graphlet_similarity",
-    "endpoint_degree_similarity",
     "clustering_coef_ref",
     "clustering_coef_target",
     "clustering_coef_delta",
@@ -496,51 +490,43 @@
     "shape_complexity_delta",
     "has_parallel_sibling_ref",
     "parallel_fraction_ref",
-    "offset_vs_half_corridor_ratio",
-    "offset_over_expected_halfwidth",
+    "likely_representation_mismatch",
     "crossing_angle_min_ref",
     "transverse_neighbor_fraction_ref",
     "crossing_angle_min_target",
     "transverse_neighbor_fraction_target",
-    "post_node_continuation_m",
     "endpoint_heading_divergence"
-  ],
-  "redundant_candidates": [
-    "mean_hausdorff_distance_m",
-    "has_name_ref",
-    "route_prefix_match",
-    "class_similarity",
-    "to_degree_ref",
-    "from_degree_target",
-    "intersection_match",
-    "interior_junction_count_target",
-    "interior_connector_jaccard",
-    "ref_coverage",
-    "likely_representation_mismatch",
-    "neighbor_candidate_fraction_ref",
-    "neighbor_candidate_fraction_target",
-    "shared_neighbor_pair_count",
-    "neighbor_consistency_score"
   ],
   "important_features": [],
   "recommendations": {
     "safe_to_remove": [
       "hausdorff_distance_m",
       "hausdorff_p95_m",
-      "buffer_iou_5m",
-      "buffer_iou_15m",
       "heading_delta",
       "collinear_gap_ratio",
       "angle_histogram_similarity",
+      "name_is_generic",
+      "interior_junction_count_delta",
+      "min_coverage",
+      "coverage_ratio",
+      "offset_vs_half_corridor_ratio",
+      "offset_over_expected_halfwidth",
+      "post_node_continuation_m"
+    ],
+    "consider_removing": [
+      "mean_hausdorff_distance_m",
+      "buffer_iou_5m",
+      "buffer_iou_15m",
       "edge_distance_rmse_m",
       "name_levenshtein",
       "name_jaro_winkler",
       "name_token_sort",
       "name_soundex",
       "name_metaphone",
+      "has_name_ref",
       "has_name_target",
-      "name_is_generic",
       "name_numeric_match",
+      "route_prefix_match",
       "min_endpoint_proximity_m",
       "max_endpoint_proximity_m",
       "shared_endpoint_count",
@@ -548,6 +534,8 @@
       "lateral_offset_iqr_m",
       "lateral_offset_p95_m",
       "from_degree_ref",
+      "to_degree_ref",
+      "from_degree_target",
       "to_degree_target",
       "degree_match_score",
       "degree_signature_similarity",
@@ -556,15 +544,15 @@
       "dead_end_match",
       "is_intersection_ref",
       "is_intersection_target",
+      "intersection_match",
       "interior_junction_count_ref",
-      "interior_junction_count_delta",
+      "interior_junction_count_target",
+      "interior_connector_jaccard",
       "interior_junction_position_sim",
       "shared_anchor_count",
+      "ref_coverage",
       "target_coverage",
-      "min_coverage",
-      "coverage_ratio",
       "graphlet_similarity",
-      "endpoint_degree_similarity",
       "clustering_coef_ref",
       "clustering_coef_target",
       "clustering_coef_delta",
@@ -584,31 +572,12 @@
       "shape_complexity_delta",
       "has_parallel_sibling_ref",
       "parallel_fraction_ref",
-      "offset_vs_half_corridor_ratio",
-      "offset_over_expected_halfwidth",
+      "likely_representation_mismatch",
       "crossing_angle_min_ref",
       "transverse_neighbor_fraction_ref",
       "crossing_angle_min_target",
       "transverse_neighbor_fraction_target",
-      "post_node_continuation_m",
       "endpoint_heading_divergence"
-    ],
-    "consider_removing": [
-      "mean_hausdorff_distance_m",
-      "has_name_ref",
-      "route_prefix_match",
-      "class_similarity",
-      "to_degree_ref",
-      "from_degree_target",
-      "intersection_match",
-      "interior_junction_count_target",
-      "interior_connector_jaccard",
-      "ref_coverage",
-      "likely_representation_mismatch",
-      "neighbor_candidate_fraction_ref",
-      "neighbor_candidate_fraction_target",
-      "shared_neighbor_pair_count",
-      "neighbor_consistency_score"
     ],
     "keep": []
   }

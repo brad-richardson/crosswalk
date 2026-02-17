@@ -1619,7 +1619,7 @@ def build_overture_connector_spatial_index(
 def find_overture_connectors_for_targets(
     target_geoms_by_id: dict[str, "LineString"],
     connector_index: tuple[np.ndarray, np.ndarray, object],
-    tolerance_m: float = 5.0,
+    tolerance_m: float | None = None,
 ) -> dict[str, list[tuple[float, int]]]:
     """Find Overture connectors near each target segment via spatial query.
 
@@ -1638,11 +1638,16 @@ def find_overture_connectors_for_targets(
     """
     import shapely as shp
 
+    from ..config import OVERTURE_ANCHOR_TOLERANCE_M
+
+    if tolerance_m is None:
+        tolerance_m = OVERTURE_ANCHOR_TOLERANCE_M
+
     node_ids, points, tree = connector_index
     result: dict[str, list[tuple[float, int]]] = {}
 
     for target_id, target_geom in target_geoms_by_id.items():
-        if target_geom is None or target_geom.is_empty:
+        if target_geom is None or target_geom.is_empty or target_geom.length == 0:
             result[target_id] = []
             continue
 
@@ -1686,7 +1691,7 @@ def compute_shared_anchor_features(
     target_end_frac: float,
     ref_length_m: float,
     target_length_m: float,
-    tolerance_m: float = 5.0,
+    tolerance_m: float | None = None,
 ) -> dict[str, float]:
     """Count alignment endpoints where ref and target share an Overture connector.
 
@@ -1711,6 +1716,11 @@ def compute_shared_anchor_features(
     Returns:
         {"shared_anchor_count": count} where count is 0, 1, or 2
     """
+    if tolerance_m is None:
+        from ..config import OVERTURE_ANCHOR_TOLERANCE_M
+
+        tolerance_m = OVERTURE_ANCHOR_TOLERANCE_M
+
     ref_connectors = ref_seg_to_connectors.get(ref_seg_id, [])
     target_connectors = target_overture_connectors.get(target_seg_id, [])
 
