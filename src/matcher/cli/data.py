@@ -1578,6 +1578,12 @@ def compute_features(
             f"({skipped} already have >= {MIN_LABELS_PER_DATASET})[/blue]"
         )
 
+        if not datasets_to_process:
+            console.print(
+                f"[yellow]All datasets already have >= {MIN_LABELS_PER_DATASET} labels; nothing to do.[/yellow]"
+            )
+            raise typer.Exit(0)
+
     # Process datasets sequentially
     success_count = 0
     skip_count = 0
