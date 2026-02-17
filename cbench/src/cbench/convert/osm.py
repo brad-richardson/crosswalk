@@ -147,7 +147,15 @@ class OSMConverter:
         return self.connector_node_map[connector_id]
 
     def _create_node(self, lon: float, lat: float) -> int:
-        """Create a new unique node (no deduplication)."""
+        """Create a new unique node (no deduplication).
+
+        TODO: This destroys topology for non-connector vertices. Two adjacent
+        segments sharing an endpoint get different node IDs, so Hootenanny
+        treats them as disconnected. Fix by adding a coordinate-based dedup
+        index (e.g., round to 7dp and reuse existing node at same coords).
+        See also: connector nodes use raw precision while these are rounded,
+        creating an inconsistency.
+        """
         node_id = self.node_id_counter
         self.node_id_counter -= 1
         self.nodes[node_id] = (round(lon, 7), round(lat, 7))

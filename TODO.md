@@ -58,6 +58,29 @@ LINESTRING (-112.23242434877292 46.720523234706526, -112.23247237989453 46.72059
 - **Race condition in model selection** in `ml.py` — checks file existence but doesn't validate model is loadable
 - **CRS validation gap** in `pipeline/runner.py` — no check for null/invalid geometries after reprojection
 
+### Medium: cbench OSM Converter Produces No-Topology Output for Hootenanny
+
+**Problem:** `cbench/src/cbench/convert/osm.py` generates OSM XML where non-connector vertices always get unique node IDs. Two adjacent segments sharing an endpoint get different nodes, so Hootenanny treats them as disconnected. This disables Hootenanny's junction-based matching algorithms and makes benchmarks measure geometry-only matching rather than realistic conflation.
+
+Three compounding issues:
+1. **`_create_node()` never deduplicates** — every call returns a fresh negative ID, even if a node already exists at those exact coordinates.
+2. **Reference connectors intentionally skipped** — shared connector nodes trigger Hootenanny's LinearSnapMerger bug ("No node ID specified for RemoveNodeByEid"). The old benchmark script worked around this by passing `connectors_path=None`.
+3. **Target datasets mostly lack connectors** — non-Overture datasets (Boston streets, Utah roads, etc.) have no `connectors` column, so no topology sharing is possible.
+
+**Fix:** Add coordinate-based node deduplication to `OSMConverter._create_node()`:
+```python
+rounded = (round(lon, 7), round(lat, 7))
+if rounded in self._node_by_coords:
+    return self._node_by_coords[rounded]
+# ... create new node and register in _node_by_coords
+```
+
+This preserves topology from shared endpoints without relying on connector data, and avoids the Hootenanny LinearSnapMerger bug (which was triggered by connector-based hash IDs, not by coordinate-based dedup).
+
+After fixing, re-run Hootenanny benchmarks and compare results to verify the fix helps.
+
+**Location:** `cbench/src/cbench/convert/osm.py`, `cbench/src/cbench/adapters/hootenanny.py`
+
 ### Low: Datasets with Polygon Geometries
 
 Some target datasets have Polygon geometries instead of LineStrings (files deleted, need re-fetch):
