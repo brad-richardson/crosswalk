@@ -3062,12 +3062,13 @@ def compute_interior_connector_features(
         node_features: dict,
         start_frac: float,
         end_frac: float,
+        eps: float = 1e-4,
     ) -> list[tuple[float, int]]:
-        """Get junction connectors within the aligned range (inclusive)."""
+        """Get junction connectors within the aligned range (inclusive, with epsilon)."""
         connectors = seg_to_connectors.get(seg_id, [])
         aligned = []
         for frac, node_id in connectors:
-            if start_frac <= frac <= end_frac:
+            if (start_frac - eps) <= frac <= (end_frac + eps):
                 degree = _get_degree(node_features, node_id)
                 if degree >= 2:  # Only count junctions
                     aligned.append((frac, node_id))

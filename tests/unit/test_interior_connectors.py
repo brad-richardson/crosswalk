@@ -148,6 +148,41 @@ class TestInteriorConnectorFiltering:
         # Only node 20 at 0.5 is inside [0.2, 0.8]
         assert result["interior_junction_count_ref"] == 1
 
+    def test_epsilon_captures_boundary_drift(self):
+        """Connector just outside alignment range (within 1e-4 eps) is included."""
+        # Alignment is 0.2–0.8, connector at 0.19995 (half of eps outside start)
+        result = compute_interior_connector_features(
+            "ref",
+            "tgt",
+            {"ref": [(0.19995, 10), (0.5, 20), (0.80005, 30)]},
+            {"tgt": []},
+            JUNCTIONS,
+            JUNCTIONS,
+            0.2,
+            0.8,
+            0.0,
+            1.0,
+        )
+        # All 3 within eps tolerance of [0.2, 0.8]
+        assert result["interior_junction_count_ref"] == 3
+
+    def test_epsilon_does_not_overreach(self):
+        """Connector well outside alignment range is excluded despite epsilon."""
+        result = compute_interior_connector_features(
+            "ref",
+            "tgt",
+            {"ref": [(0.19, 10), (0.5, 20), (0.81, 30)]},
+            {"tgt": []},
+            JUNCTIONS,
+            JUNCTIONS,
+            0.2,
+            0.8,
+            0.0,
+            1.0,
+        )
+        # Only node 20 at 0.5; 0.19 and 0.81 are > 1e-4 outside range
+        assert result["interior_junction_count_ref"] == 1
+
 
 class TestInteriorPositionSimilarity:
     """Test position similarity scoring."""
