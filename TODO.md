@@ -81,6 +81,25 @@ After fixing, re-run Hootenanny benchmarks and compare results to verify the fix
 
 **Location:** `cbench/src/cbench/convert/osm.py`, `cbench/src/cbench/adapters/hootenanny.py`
 
+### Medium: Optimizer Blocks N:1 Matches (Multiple Refs → Same Target)
+
+**Problem:** `optimize_with_one_to_many()` only handles 1:N (one ref → many contiguous targets). The reverse case — N:1, where multiple reference segments cover the same target — is actively blocked by the 1:1 optimization step (`assigned_targets` set in `optimize_matches_greedy`). Once a target is claimed by one ref, no other ref can match it.
+
+This is wrong for real-world data: a long local road can be covered by multiple shorter Overture segments, just as a long Overture segment can cover multiple local road segments.
+
+**Scope:** Needs design thought before implementation. The "correct" behavior depends on the use case:
+- **GERS assignment** (Overture): each target segment gets one GERS ID → 1:1 or 1:N is fine, N:1 may not apply
+- **Benchmarking**: which segments overlap? → N:1 absolutely valid
+- **Full conflation**: geometry merge quality → N:1 groups need merge logic
+
+**Fix would involve:**
+1. A reverse `resolve_many_to_one` that groups by target_id and checks ref contiguity
+2. Updating the optimizer to run both passes without conflicts (a pair could be in both a 1:N and N:1 group)
+3. Updating bridge output format to represent N:1 groups
+4. Updating cbench evaluation to handle N:1 pairs
+
+**Location:** `src/matcher/matching/optimizer.py` (lines 380-608)
+
 ### Low: Datasets with Polygon Geometries
 
 Some target datasets have Polygon geometries instead of LineStrings (files deleted, need re-fetch):
