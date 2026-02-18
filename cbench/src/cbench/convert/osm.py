@@ -1,7 +1,5 @@
 """Convert GeoParquet road data to OSM XML format.
 
-Moved from matcher/scripts/convert_to_osm.py. Self-contained, no matcher imports.
-
 The conversion:
 - Creates OSM <node> elements for vertices
 - Creates OSM <way> elements for each LineString

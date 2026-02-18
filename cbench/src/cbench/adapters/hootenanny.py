@@ -1,9 +1,4 @@
-"""Hootenanny tool adapter.
-
-Extracted from:
-- matcher/scripts/benchmark_hootenanny.py (conflation logic, match extraction)
-- matcher/src/matcher/external/hootenanny.py (Docker lifecycle)
-"""
+"""Hootenanny tool adapter."""
 
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ HOOT_BIN = "/var/lib/hootenanny/bin/hoot"
 
 
 # ---------------------------------------------------------------------------
-# Docker lifecycle (from matcher/src/matcher/external/hootenanny.py)
+# Docker lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -248,7 +243,16 @@ def extract_matches_alternative(
 
 
 class HootAdapter:
-    """Adapter for Hootenanny conflation tool."""
+    """Adapter for Hootenanny conflation tool.
+
+    TODO: Manage Docker lifecycle automatically:
+    - Auto-detect hoot_dir (sibling dir, HOOTENANNY_DIR env, or prompt)
+    - Start docker compose services if not running, tear down on completion
+    - Stream conflation progress (parse STATUS lines for element counts,
+      show a progress bar or periodic updates for long-running jobs)
+    - Timeout protection for the optimization phase which can hang on
+      large datasets (London 873K ways took 60+ min)
+    """
 
     name: str = "hootenanny"
     eval_mode: EvalMode = EvalMode.RAW_MATCH
