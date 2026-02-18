@@ -324,9 +324,9 @@ def run_pipeline(
     if progress_callback:
         progress_callback(70)
 
-    # Step 4: Optimize matches with 1:N support (resolve conflicts)
-    # 1:N matching allows multiple contiguous target segments to match the same reference
-    # This handles different segmentation schemes between datasets
+    # Step 4: Optimize matches with M:N grouping (resolve conflicts)
+    # Grouping allows multiple contiguous segments and supports 1:1, 1:N, N:1, and M:N match types
+    # This handles different segmentation schemes and overlapping relationships between datasets
     logger.info(
         f"Step 4: Optimizing matches with M:N grouping (min_confidence={min_confidence})..."
     )
