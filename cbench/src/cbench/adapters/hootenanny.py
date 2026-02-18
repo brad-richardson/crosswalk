@@ -245,13 +245,25 @@ def extract_matches_alternative(
 class HootAdapter:
     """Adapter for Hootenanny conflation tool.
 
+    By default runs in match-only mode (conflate.match.only=true), which
+    identifies matching features without merging geometries. This is faster
+    and sufficient for benchmarking match quality. All matches appear as
+    review relations in the output.
+
+    To run full conflation (match + merge), pass match_only=false via --opt.
+    Full conflation uses HighwayMergerCreator to merge matched geometries,
+    but the optimization/merge phase can be very slow on large datasets
+    (London 873K ways took 60+ min). When a CONFLATION eval mode is added,
+    this adapter should support it by running with match_only=false and
+    evaluating merge quality in addition to match identification.
+
     TODO: Manage Docker lifecycle automatically:
     - Auto-detect hoot_dir (sibling dir, HOOTENANNY_DIR env, or prompt)
     - Start docker compose services if not running, tear down on completion
     - Stream conflation progress (parse STATUS lines for element counts,
       show a progress bar or periodic updates for long-running jobs)
     - Timeout protection for the optimization phase which can hang on
-      large datasets (London 873K ways took 60+ min)
+      large datasets
     """
 
     name: str = "hootenanny"
@@ -268,6 +280,7 @@ class HootAdapter:
                 hoot_dir: Path to Hootenanny repo.
                 connectors: Path to connectors parquet.
                 skip_conflate: If True, skip conflation and reuse existing output.
+                match_only: If True (default), run matching without merging.
 
         Returns:
             Path to conflated OSM output.
@@ -275,6 +288,7 @@ class HootAdapter:
         hoot_dir = _find_hoot_dir(kwargs.get("hoot_dir"))
         connectors = kwargs.get("connectors")
         skip_conflate = kwargs.get("skip_conflate", False)
+        match_only = str(kwargs.get("match_only", "true")).lower() != "false"
 
         output_dir.mkdir(parents=True, exist_ok=True)
         dataset_name = target.stem
@@ -300,7 +314,7 @@ class HootAdapter:
 
             # Run conflation
             ensure_compose_running(hoot_dir)
-            _run_conflate(ref_osm, tgt_osm, out_osm, hoot_dir)
+            _run_conflate(ref_osm, tgt_osm, out_osm, hoot_dir, match_only=match_only)
         else:
             if not out_osm.exists():
                 raise FileNotFoundError(f"--skip-conflate specified but {out_osm} doesn't exist")
@@ -350,8 +364,16 @@ def _run_conflate(
     target_osm: Path,
     output_osm: Path,
     hoot_dir: Path,
+    *,
+    match_only: bool = True,
 ) -> None:
-    """Run Hootenanny conflation via Docker compose."""
+    """Run Hootenanny conflation via Docker compose.
+
+    Args:
+        match_only: If True, run matching without merging (conflate.match.only=true).
+            This skips the expensive optimization/merge phase and outputs all matches
+            as review relations. Sufficient for benchmarking match identification.
+    """
     hoot_data = hoot_dir / "data"
     hoot_data.mkdir(exist_ok=True)
 
@@ -362,7 +384,8 @@ def _run_conflate(
     shutil.copy2(reference_osm, ref_dest)
     shutil.copy2(target_osm, tgt_dest)
 
-    logger.info("Running Hootenanny conflation...")
+    mode = "match-only" if match_only else "full conflation"
+    logger.info(f"Running Hootenanny {mode}...")
 
     cmd = [
         "docker",
@@ -376,10 +399,18 @@ def _run_conflate(
         "match.creators=HighwayMatchCreator",
         "-D",
         "merger.creators=HighwayMergerCreator",
-        f"/var/lib/hootenanny/data/{reference_osm.name}",
-        f"/var/lib/hootenanny/data/{target_osm.name}",
-        f"/var/lib/hootenanny/data/{output_osm.name}",
     ]
+
+    if match_only:
+        cmd.extend(["-D", "conflate.match.only=true"])
+
+    cmd.extend(
+        [
+            f"/var/lib/hootenanny/data/{reference_osm.name}",
+            f"/var/lib/hootenanny/data/{target_osm.name}",
+            f"/var/lib/hootenanny/data/{output_osm.name}",
+        ]
+    )
 
     process = subprocess.Popen(
         cmd,
