@@ -1,66 +1,66 @@
 # Benchmarking Guide
 
-This guide explains how to compare matcher against external tools like Hootenanny.
+This guide explains how to benchmark matcher against external tools like Hootenanny using `cbench`.
 
-## GeoParquet to OSM Conversion
+## cbench CLI
 
-Convert any GeoParquet dataset to OSM XML format for use with external conflation tools.
+`cbench` is the standalone benchmarking harness in `matcher/cbench/`. It runs conflation tools and evaluates their output against human-labeled ground truth.
+
+### Installation
 
 ```bash
-# Basic conversion (no topology)
-python scripts/convert_to_osm.py data/raw/boston_streets.parquet -o boston.osm
-
-# With Overture data and connectors (preserves topology)
-python scripts/convert_to_osm.py data/raw/overture_segments.parquet \
-    --connectors data/raw/overture_connectors.parquet \
-    -o overture.osm
-
-# With custom column names
-python scripts/convert_to_osm.py data.parquet \
-    --id-column segment_id \
-    --class-column road_type \
-    --name-column street_name \
-    -o output.osm
+cd matcher/cbench
+uv pip install -e ".[hootenanny,dev]"
 ```
 
-### Conversion Details
+### Running Benchmarks
 
-The converter:
-- Creates OSM `<node>` elements for vertices
-- Creates OSM `<way>` elements for each LineString
-- Maps the `class` column to `highway=*` tags using standard mappings
-- Preserves the `names` column as `name=*` tags
-- Adds `matcher:id` tag with the original segment ID for traceability
+```bash
+# Run matcher on a dataset
+cbench run matcher us_boston_streets \
+    --labels ../labels/human \
+    --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+    --target ../data/raw/us_boston_streets_v1.0.parquet
 
-### Topology Preservation
+# Run Hootenanny on the same dataset
+cbench run hootenanny us_boston_streets \
+    --labels ../labels/human \
+    --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+    --target ../data/raw/us_boston_streets_v1.0.parquet \
+    --opt hoot_dir=../../hootenanny
 
-When the `--connectors` option is provided with Overture connector data, the converter preserves network topology:
+# Compare results
+cbench compare cbench_results.jsonl
 
-- Segments sharing the same `connector_id` will reference the same OSM node
-- Connector IDs are hashed to stable negative integers for deterministic output
-- Without connectors, each vertex gets a unique node (no topology inference)
+# List available tool adapters
+cbench list-tools
+```
 
-### Supported Class Mappings
+### Evaluation Modes
 
-| Input Class | OSM highway Tag |
-|-------------|-----------------|
-| motorway, trunk, primary, secondary, tertiary | Same |
-| residential, living_street, service | Same |
-| footway, sidewalk | footway |
-| path, pedestrian, cycleway, track, steps | Same |
-| unclassified, (unknown) | unclassified |
+cbench supports two evaluation levels via `--match-level`:
 
-## Hootenanny Comparison
+- **target** (default): Target-level matching. A labeled match target is a TP if
+  it appears in *any* prediction, regardless of which reference segment was chosen.
+  Avoids penalizing tools for picking a different reference segment that covers a
+  different subsegment of the same target road.
 
-[Hootenanny](https://github.com/ngageoint/hootenanny) is a vector conflation tool from NGA that can be used for comparison benchmarking.
+- **pair**: Exact `(ref_id, target_id)` pair matching. More strict — a prediction
+  is TP only if the exact pair appears in ground truth.
 
-> **Note**: Hootenanny installation is complex. There is no pre-built Docker image available.
+```bash
+# Default: target-level evaluation
+cbench run matcher us_boston_streets --labels ../labels/human ...
 
-### Installation Options
+# Strict pair-level evaluation
+cbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
+```
 
-#### Option 1: Docker Compose (Recommended)
+## Hootenanny Setup
 
-Use Hootenanny's official docker-compose setup. This builds from source and runs all services in containers:
+[Hootenanny](https://github.com/ngageoint/hootenanny) is a vector conflation tool from NGA.
+
+### Docker Compose (Recommended)
 
 ```bash
 # Clone Hootenanny as a sibling to matcher
@@ -75,84 +75,21 @@ make -f Makefile.docker up
 docker compose exec core-services /var/lib/hootenanny/bin/hoot --version
 ```
 
-Once running, use the Python wrapper:
-
-```python
-from pathlib import Path
-from matcher.external.hootenanny import conflate
-
-# Files are automatically copied to/from the Hootenanny container
-conflate(
-    reference=Path("osm/reference.osm"),
-    target=Path("osm/target.osm"),
-    output=Path("osm/conflated.osm"),
-    data_dir=Path("/path/to/matcher/data"),
-)
-```
-
-Or run commands directly:
-
-```bash
-# Copy your OSM files to hootenanny/data/
-cp data/osm/*.osm ../hootenanny/data/
-
-# Run conflation
-cd ../hootenanny
-docker compose exec core-services /var/lib/hootenanny/bin/hoot conflate \
-    -D match.creators="HighwayMatchCreator" \
-    -D merger.creators="HighwayMergerCreator" \
-    /var/lib/hootenanny/data/reference.osm \
-    /var/lib/hootenanny/data/target.osm \
-    /var/lib/hootenanny/data/conflated.osm
-```
-
 To stop services: `make -f Makefile.docker down`
 
-#### Option 2: Vagrant + VirtualBox
+### OSM Conversion
 
-Alternative for systems where Docker is problematic:
+cbench handles GeoParquet to OSM conversion automatically when running the Hootenanny adapter. The converter:
 
-```bash
-sudo apt-get install vagrant virtualbox
-git clone https://github.com/ngageoint/hootenanny.git
-cd hootenanny
-vagrant up
-vagrant ssh
-# Inside VM: hoot --version
-```
+- Creates OSM `<node>` elements for vertices
+- Creates OSM `<way>` elements for each LineString
+- Maps the `class` column to `highway=*` tags
+- Preserves the `names` column as `name=*` tags
+- Adds provenance tags (`matcher_ref_*` / `matcher_tgt_*`) for match extraction
 
-#### Option 3: RPM Installation (CentOS 7 only)
+When connectors are provided (via `--opt connectors=path/to/connectors.parquet`), segments sharing the same `connector_id` will reference the same OSM node, preserving network topology.
 
-For legacy CentOS 7 systems:
-
-```bash
-sudo curl -o /etc/yum.repos.d/hootenanny.repo \
-    https://s3.amazonaws.com/hoot-repo/el7/release/hoot.repo
-sudo yum install hootenanny-core
-hoot --version
-```
-
-See [hootenanny-rpms](https://github.com/ngageoint/hootenanny-rpms) for details.
-
-### Running Hootenanny Conflation
-
-Once Hootenanny is installed and accessible via the `hoot` command:
-
-```bash
-# Convert data to OSM format
-python scripts/convert_to_osm.py data/raw/overture_segments.parquet -o reference.osm
-python scripts/convert_to_osm.py data/raw/boston_streets.parquet -o target.osm
-
-# Run Hootenanny conflation (roads only)
-hoot conflate \
-    -D match.creators="HighwayMatchCreator" \
-    -D merger.creators="HighwayMergerCreator" \
-    reference.osm target.osm conflated.osm
-```
-
-### Alternative Tools
-
-If Hootenanny is too complex to install, consider these alternatives for comparison:
+## Alternative Tools
 
 - **[RoadMatcher](https://github.com/vividsolutions/roadmatcher)** - Java-based open source tool
 - **[JOSM Conflation Plugin](https://josm.openstreetmap.de/)** - Semi-automated conflation in JOSM editor
@@ -160,38 +97,19 @@ If Hootenanny is too complex to install, consider these alternatives for compari
 
 ## Troubleshooting
 
-### Hootenanny Installation Issues
-
-**Vagrant VM won't start:**
-- Ensure VirtualBox is installed and running
-- Check that virtualization is enabled in BIOS
-- Try `vagrant destroy && vagrant up` for a fresh start
-
-**RPM installation fails on CentOS:**
-- Ensure you're running CentOS 7 (not 8+)
-- Check that EPEL repository is enabled: `sudo yum install epel-release`
-
-**"hoot: command not found":**
-- If using Vagrant, make sure you're inside the VM (`vagrant ssh`)
-- If using RPMs, check that `/usr/local/bin` is in your PATH
+### Hootenanny Issues
 
 **Hootenanny conflation hangs:**
-- Large datasets may take significant time
-- Try with a smaller subset first
-- Check system memory (Hootenanny can be memory-intensive)
+- Large datasets (>100K ways) can take a long time in the optimization phase
+- London (873K ways) takes 60+ minutes; Boston (33K ways) completes in ~5 minutes
+- Check process is still alive: `docker compose exec core-services ps aux | grep hoot`
+
+**"No node ID specified for RemoveNodeByEid":**
+- Known LinearSnapMerger bug triggered by shared connector nodes
+- The cbench adapter skips reference connectors by default to avoid this
 
 ### Conversion Issues
 
-**"No features parsed from output":**
-- Check that input file contains LineString geometries
-- Verify CRS is set (EPSG:4326 expected or will be reprojected)
-
 **Empty highway tags:**
 - Check that `class` column exists in your data
-- Use `--class-column` to specify a different column name
-
-## References
-
-- [Hootenanny documentation](https://github.com/ngageoint/hootenanny): Vector conflation tool
-- [MapStitcher paper](https://dl.acm.org/doi/10.1145/2996913.2996999): Graph sampling methodology
-- [GraphSamplingToolkit](https://github.com/pfoser/GraphSamplingToolkit): Reference implementation
+- The converter maps standard road classes to OSM highway tags

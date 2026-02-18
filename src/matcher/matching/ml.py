@@ -1539,10 +1539,10 @@ class MLMatcher:
         Returns:
             List of MatchResult objects
         """
+        from ..config import settings
+
         # Handle auto model selection
         if self.model is None and self._auto_select:
-            from ..config import settings
-
             if settings.auto_select_model:
                 # Auto-select model based on target dataset
                 # select_model_for_dataset uses settings defaults when paths are None
