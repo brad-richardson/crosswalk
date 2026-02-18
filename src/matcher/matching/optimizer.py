@@ -296,6 +296,150 @@ def _create_group_results(
     return tagged
 
 
+def _expand_greedy_matches(
+    greedy_matches: list[MatchResult],
+    all_candidates: list[MatchResult],
+    ref_geoms: dict[Any, LineString],
+    target_geoms: dict[Any, LineString],
+    tolerance: float,
+    min_confidence: float,
+) -> list[MatchResult]:
+    """Expand greedy 1:1 matches to 1:N/N:1 groups where contiguous candidates exist.
+
+    After greedy 1:1 optimization, some refs/targets have additional high-confidence
+    candidates for contiguous segments that were excluded by the 1:1 constraint.
+    This post-processing step adds those contiguous candidates, expanding 1:1 matches
+    to 1:N (one ref → multiple contiguous targets) or N:1 (multiple contiguous refs
+    → one target) groups.
+
+    This is safe because it only ADDS matches — existing assignments are never removed.
+
+    Args:
+        greedy_matches: 1:1 matches from greedy optimization
+        all_candidates: All candidate MatchResults (pre-optimization pool)
+        ref_geoms: Reference geometry lookup
+        target_geoms: Target geometry lookup
+        tolerance: Contiguity tolerance in meters
+        min_confidence: Minimum confidence for expansion candidates
+
+    Returns:
+        Expanded list of MatchResult objects (original 1:1 + new group members)
+    """
+    if not greedy_matches:
+        return []
+
+    # Track which (ref, target) pairs already exist in greedy matches
+    existing_pairs = {(r.ref_id, r.target_id) for r in greedy_matches}
+
+    # Build candidate lookup from ALL candidates (not just greedy winners)
+    candidates_by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
+    candidates_by_target: dict[Any, list[MatchResult]] = defaultdict(list)
+    for r in all_candidates:
+        if r.confidence >= min_confidence:
+            candidates_by_ref[r.ref_id].append(r)
+            candidates_by_target[r.target_id].append(r)
+
+    expanded: list[MatchResult] = []
+    expanded_pairs: set = set()
+
+    # 1:N expansion: for each assigned ref, find contiguous candidate targets.
+    # Targets already assigned to OTHER refs are allowed — this creates
+    # legitimate N:1/M:N patterns where a target is covered by multiple refs.
+    for match in greedy_matches:
+        ref_id = match.ref_id
+        assigned_target = match.target_id
+
+        # Find other high-confidence candidates for this ref (any target, even claimed)
+        other_targets = [
+            c.target_id
+            for c in candidates_by_ref[ref_id]
+            if c.target_id != assigned_target
+            and (ref_id, c.target_id) not in existing_pairs
+            and (ref_id, c.target_id) not in expanded_pairs
+        ]
+
+        if not other_targets:
+            continue
+
+        # Check which are contiguous with the assigned target
+        all_target_ids = [assigned_target] + other_targets
+        target_groups = _find_contiguous_id_groups(all_target_ids, target_geoms, tolerance)
+
+        # Find the group containing the assigned target
+        for tg in target_groups:
+            if assigned_target in tg and len(tg) > 1:
+                new_target_ids = set(tg) - {assigned_target}
+                for c in candidates_by_ref[ref_id]:
+                    if (
+                        c.target_id in new_target_ids
+                        and (ref_id, c.target_id) not in expanded_pairs
+                    ):
+                        expanded.append(c)
+                        expanded_pairs.add((ref_id, c.target_id))
+
+    # N:1 expansion: for each assigned target, find contiguous candidate refs.
+    # Refs already assigned to OTHER targets are allowed.
+    for match in greedy_matches:
+        target_id = match.target_id
+        assigned_ref = match.ref_id
+
+        other_refs = [
+            c.ref_id
+            for c in candidates_by_target[target_id]
+            if c.ref_id != assigned_ref
+            and (c.ref_id, target_id) not in existing_pairs
+            and (c.ref_id, target_id) not in expanded_pairs
+        ]
+
+        if not other_refs:
+            continue
+
+        all_ref_ids = [assigned_ref] + other_refs
+        ref_groups = _find_contiguous_id_groups(all_ref_ids, ref_geoms, tolerance)
+
+        for rg in ref_groups:
+            if assigned_ref in rg and len(rg) > 1:
+                new_ref_ids = set(rg) - {assigned_ref}
+                for c in candidates_by_target[target_id]:
+                    if c.ref_id in new_ref_ids and (c.ref_id, target_id) not in expanded_pairs:
+                        expanded.append(c)
+                        expanded_pairs.add((c.ref_id, target_id))
+
+    if not expanded:
+        return greedy_matches
+
+    # Group expanded by ref (for 1:N tagging) and by target (for N:1 tagging)
+    expanded_by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
+    expanded_by_target: dict[Any, list[MatchResult]] = defaultdict(list)
+    for r in expanded:
+        expanded_by_ref[r.ref_id].append(r)
+        expanded_by_target[r.target_id].append(r)
+
+    # Re-tag original greedy matches that were expanded
+    result: list[MatchResult] = []
+    for match in greedy_matches:
+        ref_expanded = match.ref_id in expanded_by_ref
+        target_expanded = match.target_id in expanded_by_target
+
+        if ref_expanded:
+            # This ref got additional targets → tag as 1:N
+            all_group = [match] + expanded_by_ref[match.ref_id]
+            tagged = _create_group_results(all_group, "1:N")
+            result.extend(tagged)
+            # Remove from expanded_by_ref so we don't double-count
+            del expanded_by_ref[match.ref_id]
+        elif target_expanded:
+            # This target got additional refs → tag as N:1
+            all_group = [match] + expanded_by_target[match.target_id]
+            tagged = _create_group_results(all_group, "N:1")
+            result.extend(tagged)
+            del expanded_by_target[match.target_id]
+        else:
+            result.append(match)
+
+    return result
+
+
 def _classify_and_resolve_component(
     component_results: list[MatchResult],
     ref_geoms: dict[Any, LineString],
@@ -308,7 +452,8 @@ def _classify_and_resolve_component(
     - |R|=1, |T|=1  → 1:1 candidate (pass to greedy optimizer)
     - |R|=1, |T|>1  → check target contiguity → contiguous subgroups = 1:N
     - |R|>1, |T|=1  → check ref contiguity → contiguous subgroups = N:1
-    - |R|>1, |T|>1  → check BOTH sides fully contiguous → M:N, else 1:1 fallback
+    - |R|>1, |T|>1  → check BOTH sides fully contiguous → M:N, else decompose
+                       into per-ref 1:N and per-target N:1 sub-problems
 
     Args:
         component_results: MatchResults in this component
@@ -381,7 +526,9 @@ def _classify_and_resolve_component(
         # Both sides fully contiguous → M:N group
         return _create_group_results(component_results, "M:N"), []
 
-    # Not fully contiguous on both sides → fall back to 1:1 for all
+    # Not fully contiguous on both sides → fall back to 1:1 for all.
+    # Post-expansion step in optimize_matches_with_grouping will attempt
+    # to expand these 1:1 assignments to 1:N/N:1 groups afterward.
     return [], component_results
 
 
@@ -459,22 +606,36 @@ def optimize_matches_with_grouping(
     else:
         optimized_1to1 = []
 
+    # Step 5: Post-expansion — expand 1:1 matches to 1:N/N:1 where
+    # contiguous candidates exist. Uses ALL candidates (not just unclaimed
+    # leftover) so refs can expand to targets claimed by other refs.
+    # This only ADDS matches, never removes existing assignments.
+    if optimized_1to1:
+        optimized_1to1 = _expand_greedy_matches(
+            optimized_1to1,
+            results,  # All candidates, not just unclaimed
+            ref_geoms,
+            target_geoms,
+            contiguity_tolerance,
+            min_confidence,
+        )
+
     # Combine results
     final = all_group_results + optimized_1to1
 
-    # Log summary
-    group_types = defaultdict(int)
-    for r in all_group_results:
+    # Log summary — count match types across ALL results
+    type_counts = defaultdict(int)
+    for r in final:
         mt = r.features.get("match_type", "1:1")
-        group_types[mt] += 1
+        type_counts[mt] += 1
 
     t1 = time.perf_counter()
     logger.info(
         f"  Optimization complete in {t1 - t0:.2f}s: "
-        f"{len(optimized_1to1)} 1:1, "
-        f"{group_types.get('1:N', 0)} 1:N, "
-        f"{group_types.get('N:1', 0)} N:1, "
-        f"{group_types.get('M:N', 0)} M:N"
+        f"{type_counts.get('1:1', 0)} 1:1, "
+        f"{type_counts.get('1:N', 0)} 1:N, "
+        f"{type_counts.get('N:1', 0)} N:1, "
+        f"{type_counts.get('M:N', 0)} M:N"
     )
     logger.info(f"  Total output: {len(final)} matches")
 

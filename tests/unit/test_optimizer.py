@@ -361,6 +361,88 @@ class TestOptimizeMatchesWithGrouping:
         assert optimized[0].ref_id == "r1"
         assert optimized[0].confidence == 0.9
 
+    def test_post_expansion_adds_contiguous_targets(self):
+        """Post-expansion adds contiguous targets to 1:1 greedy matches.
+
+        Scenario: M:N component (refs not contiguous) falls to 1:1 greedy.
+        After greedy assigns r1→t1, post-expansion detects t2 is contiguous
+        with t1 and adds it → 1:N group for r1.
+        """
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(200, 0), (250, 0)]),  # Far from r1
+        }
+        target_geoms = {
+            "t1": LineString([(0, 5), (30, 5)]),
+            "t2": LineString([(30, 5), (60, 5)]),  # Contiguous with t1
+            "t3": LineString([(200, 5), (260, 5)]),
+        }
+        ref_gdf = self._make_gdf("id", ref_geoms)
+        target_gdf = self._make_gdf("local_id", target_geoms)
+
+        # M:N component: r1→t1(0.9), r1→t2(0.85), r2→t2(0.7), r2→t3(0.75)
+        results = [
+            MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r1", "t2", MatchDecision.MATCH, 0.85, {}, {}),
+            MatchResult("r2", "t2", MatchDecision.MATCH, 0.7, {}, {}),
+            MatchResult("r2", "t3", MatchDecision.MATCH, 0.75, {}, {}),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results, ref_gdf, target_gdf, min_confidence=0.5, contiguity_tolerance=5.0
+        )
+
+        # Greedy assigns r1→t1 (highest conf), r2→t3 (next available)
+        # Post-expansion: r1 has candidate t2, contiguous with t1 → add t2
+        r1_matches = [r for r in optimized if r.ref_id == "r1"]
+        assert len(r1_matches) == 2
+        assert {r.target_id for r in r1_matches} == {"t1", "t2"}
+        for r in r1_matches:
+            assert r.features["match_type"] == "1:N"
+
+        # r2 keeps its 1:1 assignment to t3
+        r2_matches = [r for r in optimized if r.ref_id == "r2"]
+        assert len(r2_matches) == 1
+        assert r2_matches[0].target_id == "t3"
+
+    def test_post_expansion_adds_contiguous_refs(self):
+        """Post-expansion adds contiguous refs to 1:1 greedy matches (N:1)."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),  # Contiguous with r1
+            "r3": LineString([(200, 0), (250, 0)]),
+        }
+        target_geoms = {
+            "t1": LineString([(0, 5), (100, 5)]),
+            "t2": LineString([(200, 5), (250, 5)]),
+        }
+        ref_gdf = self._make_gdf("id", ref_geoms)
+        target_gdf = self._make_gdf("local_id", target_geoms)
+
+        # M:N component via shared target t1
+        # r1→t1(0.9), r2→t1(0.85), r3→t1(0.6), r3→t2(0.7)
+        results = [
+            MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r2", "t1", MatchDecision.MATCH, 0.85, {}, {}),
+            MatchResult("r3", "t1", MatchDecision.MATCH, 0.6, {}, {}),
+            MatchResult("r3", "t2", MatchDecision.MATCH, 0.7, {}, {}),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results, ref_gdf, target_gdf, min_confidence=0.5, contiguity_tolerance=5.0
+        )
+
+        # Greedy: r1→t1, r3→t2 (r2 blocked by r1 on t1)
+        # Post-expansion N:1: t1 has candidate r2 (contiguous with r1) → add r2
+        n1_matches = [r for r in optimized if r.features.get("match_type") == "N:1"]
+        assert len(n1_matches) == 2
+        assert {r.ref_id for r in n1_matches} == {"r1", "r2"}
+
+        # r3 keeps 1:1 assignment to t2
+        r3_matches = [r for r in optimized if r.ref_id == "r3"]
+        assert len(r3_matches) == 1
+        assert r3_matches[0].target_id == "t2"
+
     def test_preserves_alignment_fractions(self):
         """Group results should preserve original alignment fractions."""
         ref_geoms = {
