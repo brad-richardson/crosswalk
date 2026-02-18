@@ -21,7 +21,7 @@ BRIDGE_SCHEMA = pa.schema(
         ("local_id", pa.string()),
         ("gers_id", pa.string()),
         ("confidence", pa.float64()),
-        ("match_type", pa.string()),  # "1:1", "1:N", "N:1"
+        ("match_type", pa.string()),  # "1:1", "1:N", "N:1", "M:N"
         ("match_method", pa.string()),  # "rule", "xgboost", "gnn"
         ("match_decision", pa.string()),  # "match", "review", "no_match"
         ("matched_at", pa.timestamp("us", tz="UTC")),

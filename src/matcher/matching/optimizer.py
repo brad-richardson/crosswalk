@@ -1,127 +1,29 @@
-"""Global match optimization using bipartite matching.
+"""Global match optimization with M:N group detection.
 
-Resolves conflicts where multiple targets match the same reference
-(or vice versa) by finding the globally optimal assignment.
+Resolves conflicts using a bipartite connected-components approach
+that handles 1:1, 1:N, N:1, and M:N match groups in one pass.
 
-Supports both 1:1 matching (Hungarian algorithm) and 1:N matching
-(where one reference can match multiple contiguous target segments).
-
-Uses a two-tier approach:
-- Hungarian algorithm (optimal, O(n³)) for problems under size/memory limits
-- Greedy algorithm (near-optimal, O(n log n)) for large problems
+Algorithm:
+1. Filter results above min_confidence
+2. Build bipartite graph: nodes = (ref_ids ∪ target_ids), edges = match pairs
+3. Find connected components via BFS → list of component edge-lists
+4. For each component, classify as 1:1, 1:N, N:1, or M:N based on
+   contiguity of the multi-side
+5. Run greedy 1:1 optimization on unclaimed leftovers
+6. Return group_results + optimized_1to1
 """
 
-from collections import defaultdict
-from dataclasses import dataclass, field
+from collections import defaultdict, deque
 from typing import Any
 
 import geopandas as gpd
 import numpy as np
 from loguru import logger
-from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
 from shapely import LineString
 
 from ..config import DEFAULT_SNAP_TOLERANCE_M, settings
 from .types import MatchDecision, MatchResult
-
-
-@dataclass
-class MultiMatchResult:
-    """Result of a 1:N match where one reference matches multiple targets."""
-
-    ref_id: Any
-    target_ids: list[Any]
-    decision: MatchDecision
-    confidence: float
-    match_type: str = "1:N"
-    individual_confidences: list[float] = field(default_factory=list)
-
-
-def optimize_matches(
-    results: list[MatchResult],
-    min_confidence: float = 0.5,
-    allow_multiple: bool = False,
-) -> list[MatchResult]:
-    """Optimize 1:1 matching using Hungarian algorithm.
-
-    Finds the globally optimal assignment that maximizes total confidence
-    while ensuring each reference and target is matched at most once.
-
-    Args:
-        results: List of MatchResult objects
-        min_confidence: Minimum confidence to consider a match
-        allow_multiple: If True, allow 1:N matches (not yet implemented)
-
-    Returns:
-        List of optimal MatchResult objects (1:1 assignments)
-    """
-    import time
-
-    t0 = time.perf_counter()
-    logger.info(f"Optimizing {len(results)} match results with Hungarian algorithm...")
-
-    # Filter by minimum confidence
-    valid_results = [r for r in results if r.confidence >= min_confidence]
-    logger.info(f"  {len(valid_results)} results above min_confidence={min_confidence}")
-
-    if not valid_results:
-        return []
-
-    # Build unique ID mappings
-    ref_ids = sorted(set(r.ref_id for r in valid_results), key=str)
-    target_ids = sorted(set(r.target_id for r in valid_results), key=str)
-
-    ref_to_idx = {r: i for i, r in enumerate(ref_ids)}
-    target_to_idx = {t: i for i, t in enumerate(target_ids)}
-
-    n_ref = len(ref_ids)
-    n_target = len(target_ids)
-    matrix_mb = (n_ref * n_target * 8) / (1024 * 1024)
-
-    logger.info(f"  Building {n_ref} x {n_target} cost matrix ({matrix_mb:.1f} MB)")
-
-    # Build cost matrix (use negative confidence for minimization)
-    # Large penalty for invalid pairs
-    UNMATCHED_COST = 1e9
-    cost_matrix = np.full((n_ref, n_target), UNMATCHED_COST, dtype=np.float64)
-
-    # Build result lookup for extracting optimal matches
-    result_lookup = {}
-
-    for result in valid_results:
-        i = ref_to_idx[result.ref_id]
-        j = target_to_idx[result.target_id]
-
-        # Use negative confidence (minimize cost = maximize confidence)
-        cost = -result.confidence
-
-        # Keep the best score if multiple candidates for same pair
-        if cost_matrix[i, j] == UNMATCHED_COST or cost < cost_matrix[i, j]:
-            cost_matrix[i, j] = cost
-            result_lookup[(i, j)] = result
-
-    t1 = time.perf_counter()
-    logger.info(f"  Matrix built in {t1 - t0:.2f}s, running linear_sum_assignment...")
-
-    # Solve assignment problem
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
-
-    t2 = time.perf_counter()
-    logger.info(f"  linear_sum_assignment completed in {t2 - t1:.2f}s")
-
-    # Extract optimal matches
-    optimal_matches = []
-    for i, j in zip(row_ind, col_ind):
-        if cost_matrix[i, j] < UNMATCHED_COST / 2:  # Valid match exists
-            if (i, j) in result_lookup:
-                optimal_matches.append(result_lookup[(i, j)])
-
-    logger.info(
-        f"  Found {len(optimal_matches)} optimal 1:1 matches in {time.perf_counter() - t0:.2f}s total"
-    )
-
-    return optimal_matches
 
 
 def optimize_matches_greedy(
@@ -135,8 +37,6 @@ def optimize_matches_greedy(
 
     Time complexity: O(n log n) for sorting
     Space complexity: O(n) where n = number of candidates
-
-    Quality: Achieves ~97-99% of optimal in practice.
 
     Args:
         results: List of MatchResult objects
@@ -177,432 +77,566 @@ def optimize_matches_greedy(
     return optimal_matches
 
 
-def optimize_matches_auto(
+def _find_match_components(
     results: list[MatchResult],
-    min_confidence: float = 0.5,
-    memory_limit_gb: float | None = None,
-) -> list[MatchResult]:
-    """Auto-select optimization strategy based on problem size.
+    min_confidence: float,
+) -> list[list[MatchResult]]:
+    """Find connected components in the bipartite ref-target match graph.
 
-    Two-tier approach:
-    - Hungarian algorithm: optimal solution, O(n³) time, for smaller problems
-    - Greedy algorithm: near-optimal (~97-99%), O(n log n) time, for large problems
-
-    Decision criteria:
-    - Use greedy if matrix dimension > 50k (O(n³) would take minutes)
-    - Use greedy if matrix memory > limit (avoid OOM)
-    - Otherwise use Hungarian for optimal solution
+    Builds an undirected bipartite graph with namespaced nodes
+    ("ref", id) / ("target", id) and edges from match pairs.
+    Returns one list of MatchResult per connected component.
 
     Args:
-        results: List of MatchResult objects
-        min_confidence: Minimum confidence to consider a match
-        memory_limit_gb: Memory limit in GB (default: settings.optimizer_memory_limit_gb)
+        results: All match results
+        min_confidence: Minimum confidence threshold
 
     Returns:
-        List of optimal MatchResult objects (1:1 assignments)
+        List of components, each a list of MatchResult edges
     """
-    if memory_limit_gb is None:
-        memory_limit_gb = settings.optimizer_memory_limit_gb
-
-    valid_results = [r for r in results if r.confidence >= min_confidence]
-    if not valid_results:
+    valid = [r for r in results if r.confidence >= min_confidence]
+    if not valid:
         return []
 
-    n_ref = len(set(r.ref_id for r in valid_results))
-    n_target = len(set(r.target_id for r in valid_results))
-    max_dim = max(n_ref, n_target)
+    # Build adjacency list with namespaced nodes
+    adj: dict[tuple[str, Any], set[tuple[str, Any]]] = defaultdict(set)
+    # Track which edges (MatchResults) connect each node pair
+    edge_lookup: dict[tuple[tuple[str, Any], tuple[str, Any]], MatchResult] = {}
 
-    # Memory: dense matrix is n_ref * n_target * 8 bytes (float64)
-    matrix_memory_gb = (n_ref * n_target * 8) / (1024**3)
+    for r in valid:
+        ref_node = ("ref", r.ref_id)
+        tgt_node = ("target", r.target_id)
+        adj[ref_node].add(tgt_node)
+        adj[tgt_node].add(ref_node)
+        # Keep highest confidence if duplicate pair
+        key = (ref_node, tgt_node)
+        if key not in edge_lookup or r.confidence > edge_lookup[key].confidence:
+            edge_lookup[key] = r
 
-    # Time constraint: Hungarian is O(n³), gets slow above 50k dimension
-    MAX_DIMENSION = 50000
+    # BFS to find connected components
+    visited: set[tuple[str, Any]] = set()
+    components: list[list[MatchResult]] = []
 
-    logger.info(
-        f"[optimizer] Problem: {n_ref} refs × {n_target} targets, "
-        f"matrix={matrix_memory_gb * 1024:.1f} MB"
-    )
-
-    # Use greedy for large problems (time or memory constrained)
-    if max_dim > MAX_DIMENSION:
-        logger.info(f"[optimizer] Using greedy (dimension {max_dim} > {MAX_DIMENSION} limit)")
-        return optimize_matches_greedy(valid_results, min_confidence)
-
-    if matrix_memory_gb > memory_limit_gb:
-        logger.info(
-            f"[optimizer] Using greedy (memory {matrix_memory_gb:.1f} GB > {memory_limit_gb} GB limit)"
-        )
-        return optimize_matches_greedy(valid_results, min_confidence)
-
-    # Use Hungarian for smaller problems (optimal solution)
-    logger.info("[optimizer] Using Hungarian algorithm (optimal)")
-    try:
-        return optimize_matches(valid_results, min_confidence)
-    except MemoryError:
-        logger.warning("[optimizer] Hungarian hit memory limit, falling back to greedy")
-        return optimize_matches_greedy(valid_results, min_confidence)
-
-
-def resolve_conflicts(
-    results: list[MatchResult],
-    strategy: str = "best_confidence",
-) -> list[MatchResult]:
-    """Resolve matching conflicts using a simple strategy.
-
-    Simpler alternative to full optimization when speed is preferred.
-
-    Args:
-        results: List of MatchResult objects
-        strategy: Resolution strategy:
-            - "best_confidence": Keep highest confidence match per target
-            - "best_per_reference": Keep highest confidence match per reference
-            - "mutual_best": Keep only mutual best matches
-
-    Returns:
-        List of resolved MatchResult objects
-    """
-    if strategy == "best_confidence":
-        return _resolve_best_per_target(results)
-    elif strategy == "best_per_reference":
-        return _resolve_best_per_reference(results)
-    elif strategy == "mutual_best":
-        return _resolve_mutual_best(results)
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
-
-
-def _resolve_best_per_target(results: list[MatchResult]) -> list[MatchResult]:
-    """Keep only the best match for each target."""
-    best = {}
-
-    for result in results:
-        if result.decision == MatchDecision.NO_MATCH:
+    for start_node in adj:
+        if start_node in visited:
             continue
 
-        target_id = result.target_id
+        # BFS from start_node
+        component_nodes: set[tuple[str, Any]] = set()
+        queue = deque([start_node])
 
-        if target_id not in best or result.confidence > best[target_id].confidence:
-            best[target_id] = result
+        while queue:
+            node = queue.popleft()
+            if node in visited:
+                continue
+            visited.add(node)
+            component_nodes.add(node)
+            for neighbor in adj[node]:
+                if neighbor not in visited:
+                    queue.append(neighbor)
 
-    return list(best.values())
+        # Collect edges for this component
+        component_edges: list[MatchResult] = []
+        ref_nodes = {n for n in component_nodes if n[0] == "ref"}
+        tgt_nodes = {n for n in component_nodes if n[0] == "target"}
 
+        for rn in ref_nodes:
+            for tn in adj[rn]:
+                if tn in tgt_nodes:
+                    key = (rn, tn)
+                    if key in edge_lookup:
+                        component_edges.append(edge_lookup[key])
 
-def _resolve_best_per_reference(results: list[MatchResult]) -> list[MatchResult]:
-    """Keep only the best match for each reference."""
-    best = {}
+        if component_edges:
+            components.append(component_edges)
 
-    for result in results:
-        if result.decision == MatchDecision.NO_MATCH:
-            continue
-
-        ref_id = result.ref_id
-
-        if ref_id not in best or result.confidence > best[ref_id].confidence:
-            best[ref_id] = result
-
-    return list(best.values())
-
-
-def _resolve_mutual_best(results: list[MatchResult]) -> list[MatchResult]:
-    """Keep only matches that are mutually best.
-
-    A match is mutual best if:
-    - It's the best match for the target among all candidates
-    - AND it's the best match for the reference among all candidates
-    """
-    # Get best per target
-    best_per_target = {}
-    for result in results:
-        if result.decision == MatchDecision.NO_MATCH:
-            continue
-        tid = result.target_id
-        if tid not in best_per_target or result.confidence > best_per_target[tid].confidence:
-            best_per_target[tid] = result
-
-    # Get best per reference
-    best_per_ref = {}
-    for result in results:
-        if result.decision == MatchDecision.NO_MATCH:
-            continue
-        rid = result.ref_id
-        if rid not in best_per_ref or result.confidence > best_per_ref[rid].confidence:
-            best_per_ref[rid] = result
-
-    # Find mutual bests
-    mutual = []
-    for result in best_per_target.values():
-        # Check if this target's best is also the reference's best
-        if result.ref_id in best_per_ref:
-            ref_best = best_per_ref[result.ref_id]
-            if ref_best.target_id == result.target_id:
-                mutual.append(result)
-
-    return mutual
+    return components
 
 
-def compute_match_statistics(results: list[MatchResult]) -> dict[str, Any]:
-    """Compute statistics about match results.
-
-    Args:
-        results: List of MatchResult objects
-
-    Returns:
-        Dictionary of statistics
-    """
-    if not results:
-        return {
-            "n_total": 0,
-            "n_match": 0,
-            "n_review": 0,
-            "n_no_match": 0,
-        }
-
-    confidences = [r.confidence for r in results]
-
-    n_match = sum(1 for r in results if r.decision == MatchDecision.MATCH)
-    n_review = sum(1 for r in results if r.decision == MatchDecision.REVIEW)
-    n_no_match = sum(1 for r in results if r.decision == MatchDecision.NO_MATCH)
-
-    return {
-        "n_total": len(results),
-        "n_match": n_match,
-        "n_review": n_review,
-        "n_no_match": n_no_match,
-        "confidence_mean": np.mean(confidences),
-        "confidence_std": np.std(confidences),
-        "confidence_min": np.min(confidences),
-        "confidence_max": np.max(confidences),
-        "confidence_median": np.median(confidences),
-        "match_rate": n_match / len(results) if results else 0,
-    }
-
-
-def resolve_one_to_many(
-    results: list[MatchResult],
-    target: gpd.GeoDataFrame,
-    min_confidence: float = 0.5,
-    contiguity_tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
-    target_id_column: str = "local_id",
-) -> tuple[list[MatchResult], list[MultiMatchResult]]:
-    """Resolve 1:N matches where one reference matches multiple targets.
-
-    A 1:N match is valid when multiple target segments that match the same
-    reference are spatially contiguous (their endpoints are close together).
-
-    Args:
-        results: List of MatchResult objects
-        target: Target GeoDataFrame (needed for contiguity check)
-        min_confidence: Minimum confidence to consider
-        contiguity_tolerance: Maximum distance between endpoints to consider contiguous (meters)
-        target_id_column: Column name for target IDs
-
-    Returns:
-        Tuple of (resolved 1:1 matches, new 1:N matches)
-    """
-    logger.info(f"Resolving 1:N matches from {len(results)} results...")
-
-    # Filter by confidence
-    valid_results = [r for r in results if r.confidence >= min_confidence]
-
-    # Group by reference ID
-    by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
-    for r in valid_results:
-        by_ref[r.ref_id].append(r)
-
-    # Build target geometry lookup (vectorized - avoid iterrows())
-    if target_id_column in target.columns:
-        target_geoms = dict(zip(target[target_id_column], target.geometry))
-    else:
-        target_geoms = dict(zip(target.index, target.geometry))
-
-    one_to_one = []
-    one_to_many = []
-
-    for ref_id, matches in by_ref.items():
-        if len(matches) == 1:
-            # Simple 1:1 match
-            one_to_one.append(matches[0])
-        else:
-            # Check if multiple targets are contiguous
-            contiguous_groups = _find_contiguous_groups(matches, target_geoms, contiguity_tolerance)
-
-            for group in contiguous_groups:
-                if len(group) == 1:
-                    # Single match in group
-                    one_to_one.append(group[0])
-                else:
-                    # Multiple contiguous matches -> 1:N
-                    avg_confidence = np.mean([m.confidence for m in group])
-                    target_ids = [m.target_id for m in group]
-                    individual_confidences = [m.confidence for m in group]
-                    multi_match = MultiMatchResult(
-                        ref_id=ref_id,
-                        target_ids=target_ids,
-                        decision=MatchDecision.MATCH
-                        if avg_confidence >= settings.optimizer_review_threshold
-                        else MatchDecision.REVIEW,
-                        confidence=avg_confidence,
-                        match_type="1:N",
-                        individual_confidences=individual_confidences,
-                    )
-                    one_to_many.append(multi_match)
-                    # Note: Individual 1:N matches are NOT added to one_to_one here.
-                    # They're handled by optimize_with_one_to_many() to avoid duplicates.
-
-    logger.info(
-        f"  Resolved to {len(one_to_one)} individual matches, {len(one_to_many)} 1:N groups"
-    )
-    return one_to_one, one_to_many
-
-
-def _find_contiguous_groups(
-    matches: list[MatchResult],
-    target_geoms: dict[Any, LineString],
+def _find_contiguous_id_groups(
+    ids: list[Any],
+    geom_lookup: dict[Any, LineString],
     tolerance: float,
-) -> list[list[MatchResult]]:
-    """Find groups of contiguous target geometries among matches.
+) -> list[list[Any]]:
+    """Find groups of IDs whose geometries are contiguous.
 
-    Two targets are contiguous if one's endpoint is within tolerance of the other's.
-    Uses KD-tree for O(n log n) endpoint proximity detection instead of O(n²).
+    Two geometries are contiguous if one's endpoint is within tolerance
+    of the other's endpoint. Uses KD-tree for O(n log n) proximity detection.
 
     Args:
-        matches: List of MatchResult for same reference
-        target_geoms: Dictionary mapping target_id to geometry
-        tolerance: Maximum endpoint distance to consider contiguous
+        ids: List of IDs to check
+        geom_lookup: Dictionary mapping ID to LineString geometry
+        tolerance: Maximum endpoint distance to consider contiguous (meters)
 
     Returns:
-        List of groups, where each group is a list of contiguous MatchResult
+        List of groups, each a list of contiguous IDs.
+        Single-element groups are included for IDs with no contiguous neighbors.
     """
-    if len(matches) <= 1:
-        return [matches] if matches else []
+    if len(ids) <= 1:
+        return [ids] if ids else []
 
-    # Extract all endpoints and track which match index they belong to
+    # Extract endpoints for each ID
     all_endpoints = []
-    endpoint_to_match_idx = []
-    valid_match_indices = []
+    endpoint_to_idx = []  # which id-index does each endpoint belong to
+    valid_id_indices = []
 
-    for i, m in enumerate(matches):
-        if m.target_id not in target_geoms:
-            continue
-        geom = target_geoms[m.target_id]
+    for i, id_ in enumerate(ids):
+        geom = geom_lookup.get(id_)
         if geom is None or geom.is_empty:
             continue
         coords = list(geom.coords)
         if len(coords) < 2:
             continue
 
-        valid_match_indices.append(i)
-        # Add both endpoints (slice to 2D in case of 3D geometries)
+        valid_id_indices.append(i)
         all_endpoints.append(coords[0][:2])
         all_endpoints.append(coords[-1][:2])
-        endpoint_to_match_idx.append(i)
-        endpoint_to_match_idx.append(i)
+        endpoint_to_idx.append(i)
+        endpoint_to_idx.append(i)
 
     if len(all_endpoints) < 2:
-        # Not enough valid geometries to form connections
-        return [[m] for m in matches]
+        return [[id_] for id_ in ids]
 
     # Build KD-tree for fast proximity queries
     endpoints_array = np.array(all_endpoints)
     tree = cKDTree(endpoints_array)
-
-    # Query for pairs within tolerance
     pairs = tree.query_pairs(tolerance)
 
     # Build adjacency from KD-tree results
-    adjacent: dict[int, set] = defaultdict(set)
+    adjacent: dict[int, set[int]] = defaultdict(set)
     for ep_i, ep_j in pairs:
-        match_i = endpoint_to_match_idx[ep_i]
-        match_j = endpoint_to_match_idx[ep_j]
-        if match_i != match_j:  # Skip same-geometry connections
-            adjacent[match_i].add(match_j)
-            adjacent[match_j].add(match_i)
+        idx_i = endpoint_to_idx[ep_i]
+        idx_j = endpoint_to_idx[ep_j]
+        if idx_i != idx_j:
+            adjacent[idx_i].add(idx_j)
+            adjacent[idx_j].add(idx_i)
 
     # Find connected components using BFS
-    visited: set = set()
-    groups = []
-    n = len(matches)
+    visited: set[int] = set()
+    groups: list[list[Any]] = []
 
-    for start in range(n):
-        if start in visited:
+    for i in range(len(ids)):
+        if i in visited:
             continue
 
-        # BFS from start
-        group_indices = []
-        queue = [start]
+        group_indices: list[int] = []
+        queue = deque([i])
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             if node in visited:
                 continue
-
             visited.add(node)
             group_indices.append(node)
-
             for neighbor in adjacent[node]:
                 if neighbor not in visited:
                     queue.append(neighbor)
 
-        groups.append([matches[i] for i in group_indices])
+        groups.append([ids[idx] for idx in group_indices])
 
     return groups
 
 
-def optimize_with_one_to_many(
+def _create_group_results(
     results: list[MatchResult],
+    match_type: str,
+) -> list[MatchResult]:
+    """Tag MatchResult objects with group metadata.
+
+    Preserves original MatchResult objects (including alignment fractions,
+    confidence, score_breakdown) and adds group metadata to features.
+
+    Sets group decision: MATCH if avg_confidence >= optimizer_review_threshold,
+    else REVIEW.
+
+    Args:
+        results: MatchResult objects belonging to this group
+        match_type: One of "1:N", "N:1", "M:N"
+
+    Returns:
+        List of tagged MatchResult objects (same objects, mutated features)
+    """
+    if not results:
+        return []
+
+    avg_confidence = np.mean([r.confidence for r in results])
+    group_decision = (
+        MatchDecision.MATCH
+        if avg_confidence >= settings.optimizer_review_threshold
+        else MatchDecision.REVIEW
+    )
+
+    ref_ids = set(r.ref_id for r in results)
+    target_ids = set(r.target_id for r in results)
+
+    tagged: list[MatchResult] = []
+    for r in results:
+        # Create new MatchResult preserving all original fields
+        tagged.append(
+            MatchResult(
+                ref_id=r.ref_id,
+                target_id=r.target_id,
+                decision=group_decision,
+                confidence=r.confidence,
+                score_breakdown=r.score_breakdown,
+                features={
+                    **r.features,
+                    "match_type": match_type,
+                    "group_size": len(results),
+                    "group_ref_count": len(ref_ids),
+                    "group_target_count": len(target_ids),
+                },
+                gers_start_frac=r.gers_start_frac,
+                gers_end_frac=r.gers_end_frac,
+                local_start_frac=r.local_start_frac,
+                local_end_frac=r.local_end_frac,
+            )
+        )
+
+    return tagged
+
+
+def _expand_greedy_matches(
+    greedy_matches: list[MatchResult],
+    all_candidates: list[MatchResult],
+    ref_geoms: dict[Any, LineString],
+    target_geoms: dict[Any, LineString],
+    tolerance: float,
+    min_confidence: float,
+) -> list[MatchResult]:
+    """Expand greedy 1:1 matches to 1:N/N:1 groups where contiguous candidates exist.
+
+    After greedy 1:1 optimization, some refs/targets have additional high-confidence
+    candidates for contiguous segments that were excluded by the 1:1 constraint.
+    This post-processing step adds those contiguous candidates, expanding 1:1 matches
+    to 1:N (one ref → multiple contiguous targets) or N:1 (multiple contiguous refs
+    → one target) groups.
+
+    This is safe because it only ADDS matches — existing assignments are never removed.
+
+    Args:
+        greedy_matches: 1:1 matches from greedy optimization
+        all_candidates: All candidate MatchResults (pre-optimization pool)
+        ref_geoms: Reference geometry lookup
+        target_geoms: Target geometry lookup
+        tolerance: Contiguity tolerance in meters
+        min_confidence: Minimum confidence for expansion candidates
+
+    Returns:
+        Expanded list of MatchResult objects (original 1:1 + new group members)
+    """
+    if not greedy_matches:
+        return []
+
+    # Track which (ref, target) pairs already exist in greedy matches
+    existing_pairs = {(r.ref_id, r.target_id) for r in greedy_matches}
+
+    # Build candidate lookup from ALL candidates (not just greedy winners)
+    candidates_by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
+    candidates_by_target: dict[Any, list[MatchResult]] = defaultdict(list)
+    for r in all_candidates:
+        if r.confidence >= min_confidence:
+            candidates_by_ref[r.ref_id].append(r)
+            candidates_by_target[r.target_id].append(r)
+
+    expanded: list[MatchResult] = []
+    expanded_pairs: set = set()
+
+    # 1:N expansion: for each assigned ref, find contiguous candidate targets.
+    # Targets already assigned to OTHER refs are allowed — this creates
+    # legitimate N:1/M:N patterns where a target is covered by multiple refs.
+    for match in greedy_matches:
+        ref_id = match.ref_id
+        assigned_target = match.target_id
+
+        # Find other high-confidence candidates for this ref (any target, even claimed)
+        other_targets = [
+            c.target_id
+            for c in candidates_by_ref[ref_id]
+            if c.target_id != assigned_target
+            and (ref_id, c.target_id) not in existing_pairs
+            and (ref_id, c.target_id) not in expanded_pairs
+        ]
+
+        if not other_targets:
+            continue
+
+        # Check which are contiguous with the assigned target
+        all_target_ids = [assigned_target] + other_targets
+        target_groups = _find_contiguous_id_groups(all_target_ids, target_geoms, tolerance)
+
+        # Find the group containing the assigned target
+        for tg in target_groups:
+            if assigned_target in tg and len(tg) > 1:
+                new_target_ids = set(tg) - {assigned_target}
+                for c in candidates_by_ref[ref_id]:
+                    if (
+                        c.target_id in new_target_ids
+                        and (ref_id, c.target_id) not in expanded_pairs
+                    ):
+                        expanded.append(c)
+                        expanded_pairs.add((ref_id, c.target_id))
+
+    # N:1 expansion: for each assigned target, find contiguous candidate refs.
+    # Refs already assigned to OTHER targets are allowed.
+    for match in greedy_matches:
+        target_id = match.target_id
+        assigned_ref = match.ref_id
+
+        other_refs = [
+            c.ref_id
+            for c in candidates_by_target[target_id]
+            if c.ref_id != assigned_ref
+            and (c.ref_id, target_id) not in existing_pairs
+            and (c.ref_id, target_id) not in expanded_pairs
+        ]
+
+        if not other_refs:
+            continue
+
+        all_ref_ids = [assigned_ref] + other_refs
+        ref_groups = _find_contiguous_id_groups(all_ref_ids, ref_geoms, tolerance)
+
+        for rg in ref_groups:
+            if assigned_ref in rg and len(rg) > 1:
+                new_ref_ids = set(rg) - {assigned_ref}
+                for c in candidates_by_target[target_id]:
+                    if c.ref_id in new_ref_ids and (c.ref_id, target_id) not in expanded_pairs:
+                        expanded.append(c)
+                        expanded_pairs.add((c.ref_id, target_id))
+
+    if not expanded:
+        return greedy_matches
+
+    # Group expanded by ref (for 1:N tagging) and by target (for N:1 tagging)
+    expanded_by_ref: dict[Any, list[MatchResult]] = defaultdict(list)
+    expanded_by_target: dict[Any, list[MatchResult]] = defaultdict(list)
+    for r in expanded:
+        expanded_by_ref[r.ref_id].append(r)
+        expanded_by_target[r.target_id].append(r)
+
+    # Re-tag original greedy matches that were expanded
+    result: list[MatchResult] = []
+    for match in greedy_matches:
+        ref_expanded = match.ref_id in expanded_by_ref
+        target_expanded = match.target_id in expanded_by_target
+
+        if ref_expanded:
+            # This ref got additional targets → tag as 1:N
+            all_group = [match] + expanded_by_ref[match.ref_id]
+            tagged = _create_group_results(all_group, "1:N")
+            result.extend(tagged)
+            # Remove from expanded_by_ref so we don't double-count
+            del expanded_by_ref[match.ref_id]
+        elif target_expanded:
+            # This target got additional refs → tag as N:1
+            all_group = [match] + expanded_by_target[match.target_id]
+            tagged = _create_group_results(all_group, "N:1")
+            result.extend(tagged)
+            del expanded_by_target[match.target_id]
+        else:
+            result.append(match)
+
+    return result
+
+
+def _classify_and_resolve_component(
+    component_results: list[MatchResult],
+    ref_geoms: dict[Any, LineString],
+    target_geoms: dict[Any, LineString],
+    tolerance: float,
+) -> tuple[list[MatchResult], list[MatchResult]]:
+    """Classify a connected component and resolve it into groups.
+
+    Classification rules:
+    - |R|=1, |T|=1  → 1:1 candidate (pass to greedy optimizer)
+    - |R|=1, |T|>1  → check target contiguity → contiguous subgroups = 1:N
+    - |R|>1, |T|=1  → check ref contiguity → contiguous subgroups = N:1
+    - |R|>1, |T|>1  → check BOTH sides fully contiguous → M:N, else decompose
+                       into per-ref 1:N and per-target N:1 sub-problems
+
+    Args:
+        component_results: MatchResults in this component
+        ref_geoms: Reference geometry lookup
+        target_geoms: Target geometry lookup
+        tolerance: Contiguity tolerance in meters
+
+    Returns:
+        Tuple of (group_results, leftover_1to1_candidates)
+    """
+    ref_ids = list(set(r.ref_id for r in component_results))
+    target_ids = list(set(r.target_id for r in component_results))
+
+    n_refs = len(ref_ids)
+    n_targets = len(target_ids)
+
+    # Case 1: 1:1 — single ref, single target
+    if n_refs == 1 and n_targets == 1:
+        return [], component_results
+
+    # Case 2: 1:N — single ref, multiple targets
+    if n_refs == 1 and n_targets > 1:
+        target_groups = _find_contiguous_id_groups(target_ids, target_geoms, tolerance)
+
+        group_results: list[MatchResult] = []
+        leftover: list[MatchResult] = []
+
+        for tg in target_groups:
+            tg_set = set(tg)
+            group_matches = [r for r in component_results if r.target_id in tg_set]
+
+            if len(tg) > 1:
+                # Contiguous multi-target subgroup → 1:N
+                group_results.extend(_create_group_results(group_matches, "1:N"))
+            else:
+                # Singleton → 1:1 candidate
+                leftover.extend(group_matches)
+
+        return group_results, leftover
+
+    # Case 3: N:1 — multiple refs, single target
+    if n_refs > 1 and n_targets == 1:
+        ref_groups = _find_contiguous_id_groups(ref_ids, ref_geoms, tolerance)
+
+        group_results = []
+        leftover = []
+
+        for rg in ref_groups:
+            rg_set = set(rg)
+            group_matches = [r for r in component_results if r.ref_id in rg_set]
+
+            if len(rg) > 1:
+                # Contiguous multi-ref subgroup → N:1
+                group_results.extend(_create_group_results(group_matches, "N:1"))
+            else:
+                # Singleton → 1:1 candidate
+                leftover.extend(group_matches)
+
+        return group_results, leftover
+
+    # Case 4: M:N — multiple refs AND multiple targets
+    # v1: require BOTH sides to be fully contiguous
+    ref_groups = _find_contiguous_id_groups(ref_ids, ref_geoms, tolerance)
+    target_groups = _find_contiguous_id_groups(target_ids, target_geoms, tolerance)
+
+    refs_fully_contiguous = len(ref_groups) == 1 and len(ref_groups[0]) == n_refs
+    targets_fully_contiguous = len(target_groups) == 1 and len(target_groups[0]) == n_targets
+
+    if refs_fully_contiguous and targets_fully_contiguous:
+        # Both sides fully contiguous → M:N group
+        return _create_group_results(component_results, "M:N"), []
+
+    # Not fully contiguous on both sides → fall back to 1:1 for all.
+    # Post-expansion step in optimize_matches_with_grouping will attempt
+    # to expand these 1:1 assignments to 1:N/N:1 groups afterward.
+    return [], component_results
+
+
+def optimize_matches_with_grouping(
+    results: list[MatchResult],
+    reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
     min_confidence: float = 0.5,
     contiguity_tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
+    ref_id_column: str = "id",
     target_id_column: str = "local_id",
 ) -> list[MatchResult]:
-    """Optimize matches with support for 1:N relationships.
+    """Optimize matches with M:N group detection.
 
-    First resolves 1:N matches for contiguous target segments,
-    then runs the optimization algorithm on remaining conflicts.
-    Automatically selects the best algorithm based on problem size.
+    Unified bipartite connected-components approach that handles
+    1:1, 1:N, N:1, and M:N match groups in one pass.
 
     Args:
         results: List of MatchResult objects
-        target: Target GeoDataFrame
+        reference: Reference GeoDataFrame (for ref geometry lookup)
+        target: Target GeoDataFrame (for target geometry lookup)
         min_confidence: Minimum confidence threshold
-        contiguity_tolerance: Max distance for contiguity check
+        contiguity_tolerance: Max distance for contiguity check (meters)
+        ref_id_column: Column name for reference IDs
         target_id_column: Column name for target IDs
 
     Returns:
         List of optimized MatchResult objects
     """
-    # First pass: identify and resolve 1:N matches
-    # individual_matches contains only 1:1 matches (single matches per reference)
-    # multi_matches contains 1:N groups
-    individual_matches, multi_matches = resolve_one_to_many(
-        results, target, min_confidence, contiguity_tolerance, target_id_column
-    )
+    import time
 
-    # Run optimization on 1:1 matches to resolve remaining conflicts
-    # Uses auto-selection to choose best algorithm based on problem size
-    if individual_matches:
-        optimized = optimize_matches_auto(individual_matches, min_confidence)
+    t0 = time.perf_counter()
+    logger.info(f"Optimizing {len(results)} results with M:N grouping...")
+
+    # Build geometry lookups
+    if ref_id_column in reference.columns:
+        ref_geoms = dict(zip(reference[ref_id_column], reference.geometry))
     else:
-        optimized = []
+        ref_geoms = dict(zip(reference.index, reference.geometry))
 
-    # Add the 1:N matches as individual results
-    for mm in multi_matches:
-        # Validate that individual_confidences matches target_ids length
-        has_valid_confidences = mm.individual_confidences and len(mm.individual_confidences) == len(
-            mm.target_ids
+    if target_id_column in target.columns:
+        target_geoms = dict(zip(target[target_id_column], target.geometry))
+    else:
+        target_geoms = dict(zip(target.index, target.geometry))
+
+    # Step 1: Find connected components
+    components = _find_match_components(results, min_confidence)
+    logger.info(f"  Found {len(components)} connected components")
+
+    # Step 2: Classify and resolve each component
+    all_group_results: list[MatchResult] = []
+    all_leftover: list[MatchResult] = []
+
+    for component in components:
+        group_results, leftover = _classify_and_resolve_component(
+            component, ref_geoms, target_geoms, contiguity_tolerance
         )
-        for i, tid in enumerate(mm.target_ids):
-            # Use individual confidence if available and valid, otherwise fall back to group average
-            confidence = mm.individual_confidences[i] if has_valid_confidences else mm.confidence
-            optimized.append(
-                MatchResult(
-                    ref_id=mm.ref_id,
-                    target_id=tid,
-                    decision=mm.decision,
-                    confidence=confidence,
-                    score_breakdown={},
-                    features={"match_type": "1:N", "group_size": len(mm.target_ids)},
-                )
-            )
+        all_group_results.extend(group_results)
+        all_leftover.extend(leftover)
 
-    return optimized
+    # Step 3: Track claimed refs/targets from groups
+    claimed_refs = {r.ref_id for r in all_group_results}
+    claimed_targets = {r.target_id for r in all_group_results}
+
+    # Filter leftover to exclude any already claimed
+    unclaimed_leftover = [
+        r
+        for r in all_leftover
+        if r.ref_id not in claimed_refs and r.target_id not in claimed_targets
+    ]
+
+    # Step 4: Run greedy 1:1 optimization on unclaimed leftovers
+    if unclaimed_leftover:
+        optimized_1to1 = optimize_matches_greedy(unclaimed_leftover, min_confidence)
+    else:
+        optimized_1to1 = []
+
+    # Step 5: Post-expansion — expand 1:1 matches to 1:N/N:1 where
+    # contiguous candidates exist. Uses ALL candidates (not just unclaimed
+    # leftover) so refs can expand to targets claimed by other refs.
+    # This only ADDS matches, never removes existing assignments.
+    if optimized_1to1:
+        optimized_1to1 = _expand_greedy_matches(
+            optimized_1to1,
+            results,  # All candidates, not just unclaimed
+            ref_geoms,
+            target_geoms,
+            contiguity_tolerance,
+            min_confidence,
+        )
+
+    # Combine results
+    final = all_group_results + optimized_1to1
+
+    # Log summary — count match types across ALL results
+    type_counts = defaultdict(int)
+    for r in final:
+        mt = r.features.get("match_type", "1:1")
+        type_counts[mt] += 1
+
+    t1 = time.perf_counter()
+    logger.info(
+        f"  Optimization complete in {t1 - t0:.2f}s: "
+        f"{type_counts.get('1:1', 0)} 1:1, "
+        f"{type_counts.get('1:N', 0)} 1:N, "
+        f"{type_counts.get('N:1', 0)} N:1, "
+        f"{type_counts.get('M:N', 0)} M:N"
+    )
+    logger.info(f"  Total output: {len(final)} matches")
+
+    return final

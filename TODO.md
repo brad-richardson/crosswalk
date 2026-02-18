@@ -81,24 +81,21 @@ After fixing, re-run Hootenanny benchmarks and compare results to verify the fix
 
 **Location:** `cbench/src/cbench/convert/osm.py`, `cbench/src/cbench/adapters/hootenanny.py`
 
-### Medium: Optimizer Blocks N:1 Matches (Multiple Refs → Same Target)
+### Medium: cbench Target-Level Eval Inflates FP Due to Label Coverage Gaps
 
-**Problem:** `optimize_with_one_to_many()` only handles 1:N (one ref → many contiguous targets). The reverse case — N:1, where multiple reference segments cover the same target — is actively blocked by the 1:1 optimization step (`assigned_targets` set in `optimize_matches_greedy`). Once a target is claimed by one ref, no other ref can match it.
+**Problem:** Target-level evaluation (cbench default, `--match-level target`) counts a target as FP if it's labeled "no_match" and appears in any bridge row. But "no_match" labels are per-pair — labelers saw specific (ref, target) pairs and said "these don't match." The target often matches a *different* ref that was never presented for labeling.
 
-This is wrong for real-world data: a long local road can be covered by multiple shorter Overture segments, just as a long Overture segment can cover multiple local road segments.
+**Impact:** With the M:N optimizer (PR #198), the bridge covers 99% of targets (up from ~94%). The extra 5% includes targets that only have "no_match" labels — not because they're wrong, but because their true matching ref was never labeled. This causes FP to spike from 14→278 on Boston, making target-level F1 appear to regress (0.846→0.654) even though pair-level F1 improved (→0.965).
 
-**Scope:** Needs design thought before implementation. The "correct" behavior depends on the use case:
-- **GERS assignment** (Overture): each target segment gets one GERS ID → 1:1 or 1:N is fine, N:1 may not apply
-- **Benchmarking**: which segments overlap? → N:1 absolutely valid
-- **Full conflation**: geometry merge quality → N:1 groups need merge logic
+**Evidence (Boston streets):** 278 FP targets analyzed — nearly all are valid matches to different ref segments of the same road:
+- "Cambridge Street" target labeled no_match with Cambridge St ref A → bridge matches Cambridge St ref B at 0.99+
+- "Knapp Street" labeled no_match with "Kneeland Street" → correctly matches "Knapp Street"
+- Median FP target length: 58m (vs 90m overall) — shorter intersection/mid-block segments
+- The FP rate per matched target is constant (~2.5%) across all match types — no quality difference
 
-**Fix would involve:**
-1. A reverse `resolve_many_to_one` that groups by target_id and checks ref contiguity
-2. Updating the optimizer to run both passes without conflicts (a pair could be in both a 1:N and N:1 group)
-3. Updating bridge output format to represent N:1 groups
-4. Updating cbench evaluation to handle N:1 pairs
+**Recommendation:** Use pair-level eval (`--match-level pair`) for optimizer comparisons. Target-level is only meaningful when labels cover all valid refs for each target. Could also add a "target-pair" hybrid mode: target is FP only if the bridge ref is itself labeled no_match for that target.
 
-**Location:** `src/matcher/matching/optimizer.py` (lines 380-608)
+**Location:** `cbench/src/cbench/eval/metrics.py`
 
 ### Low: Datasets with Polygon Geometries
 
