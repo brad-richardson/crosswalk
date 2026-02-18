@@ -11,7 +11,7 @@ from loguru import logger
 from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN
 from ..filenames import extract_version_from_filename
-from ..matching import MatchDecision, optimize_with_one_to_many
+from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.crs import ProjectionResult
@@ -327,15 +327,16 @@ def run_pipeline(
     # Step 4: Optimize matches with 1:N support (resolve conflicts)
     # 1:N matching allows multiple contiguous target segments to match the same reference
     # This handles different segmentation schemes between datasets
-    logger.info(f"Step 4: Optimizing matches with 1:N support (min_confidence={min_confidence})...")
-    optimized = optimize_with_one_to_many(
+    logger.info(
+        f"Step 4: Optimizing matches with M:N grouping (min_confidence={min_confidence})..."
+    )
+    optimized = optimize_matches_with_grouping(
         results,
-        target,
+        reference=reference,
+        target=target,
         min_confidence=min_confidence,
-        # Contiguity tolerance: segments within 5m of each other are considered
-        # connected for 1:N matching. This is tighter than buffer_distance (75m)
-        # because we want to be confident segments are actually adjacent, not just nearby.
         contiguity_tolerance=DEFAULT_SNAP_TOLERANCE_M,
+        ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )
 
