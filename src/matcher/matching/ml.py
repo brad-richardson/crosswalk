@@ -1226,8 +1226,9 @@ class MLMatcher:
                     X_cv_train, X_cv_test = X[cv_train_idx], X[cv_test_idx]
                     y_cv_train, y_cv_test = y[cv_train_idx], y[cv_test_idx]
 
-                    # Train and score this fold
-                    cv_model = xgb.XGBClassifier(**params)
+                    # Train and score this fold (n_jobs=1 to avoid thread
+                    # oversubscription since folds run sequentially)
+                    cv_model = xgb.XGBClassifier(**{**params, "n_jobs": 1})
                     cv_model.fit(X_cv_train, y_cv_train)
                     y_cv_pred = cv_model.predict(X_cv_test)
                     fold_f1 = f1_score(
