@@ -22,7 +22,7 @@ from loguru import logger
 from scipy.spatial import cKDTree
 from shapely import LineString
 
-from ..config import ALIGNMENT_OVERLAP_TOLERANCE, DEFAULT_SNAP_TOLERANCE_M, settings
+from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
 from .types import MatchDecision, MatchResult
 
 
@@ -445,7 +445,8 @@ def _merge_singletons_by_alignment(
     singleton_results: list[MatchResult],
     frac_start_key: str,  # "gers_start_frac" or "local_start_frac"
     frac_end_key: str,  # "gers_end_frac" or "local_end_frac"
-    overlap_tolerance: float = ALIGNMENT_OVERLAP_TOLERANCE,
+    shared_segment_length_m: float,
+    max_overlap_m: float = MAX_ALIGNMENT_OVERLAP_M,
 ) -> tuple[list[MatchResult], list[MatchResult]]:
     """Merge singletons into groups if their alignment fractions don't overlap.
 
@@ -458,7 +459,8 @@ def _merge_singletons_by_alignment(
         singleton_results: MatchResults that were singletons from contiguity check
         frac_start_key: Attribute name for start fraction on the shared segment
         frac_end_key: Attribute name for end fraction on the shared segment
-        overlap_tolerance: Maximum fraction overlap to still consider compatible
+        shared_segment_length_m: Length of the shared segment in meters
+        max_overlap_m: Maximum accepted overlap in meters
 
     Returns:
         Tuple of (merged_group_results, remaining_leftovers)
@@ -474,9 +476,11 @@ def _merge_singletons_by_alignment(
         return (min(start, end), max(start, end))
 
     def _ranges_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
-        """Check if two fraction ranges overlap beyond tolerance."""
-        overlap = min(a[1], b[1]) - max(a[0], b[0])
-        return overlap > overlap_tolerance
+        """Check if two fraction ranges overlap by more than max_overlap_m."""
+        overlap_frac = min(a[1], b[1]) - max(a[0], b[0])
+        if overlap_frac <= 0:
+            return False
+        return overlap_frac * shared_segment_length_m > max_overlap_m
 
     # Collect coverage ranges of existing group members
     group_ranges: list[tuple[float, float]] = []
@@ -564,11 +568,14 @@ def _classify_and_resolve_component(
 
         # Try to merge singletons into the contiguous group by alignment fractions
         if contiguous_group_matches and singleton_matches:
+            ref_id = ref_ids[0]
+            ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
             contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
                 contiguous_group_matches,
                 singleton_matches,
                 frac_start_key="gers_start_frac",
                 frac_end_key="gers_end_frac",
+                shared_segment_length_m=ref_length_m,
             )
 
         if contiguous_group_matches:
@@ -599,11 +606,14 @@ def _classify_and_resolve_component(
 
         # Try to merge singletons into the contiguous group by alignment fractions
         if contiguous_group_matches and singleton_matches:
+            target_id = target_ids[0]
+            target_length_m = target_geoms[target_id].length if target_id in target_geoms else 0.0
             contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
                 contiguous_group_matches,
                 singleton_matches,
                 frac_start_key="local_start_frac",
                 frac_end_key="local_end_frac",
+                shared_segment_length_m=target_length_m,
             )
 
         if contiguous_group_matches:
@@ -676,18 +686,19 @@ def _classify_and_resolve_component(
 
 def _validate_assignment_coverage(
     results: list[MatchResult],
+    ref_geoms: dict[Any, LineString],
+    max_overlap_m: float = MAX_ALIGNMENT_OVERLAP_M,
 ) -> list[MatchResult]:
     """Detect conflicting alignment coverage in assigned matches.
 
     Checks per reference segment: no two targets should claim overlapping
-    portions (>50% mutual overlap = conflict). When a conflict is found,
-    the lower-confidence match is demoted to REVIEW.
-
-    NOTE: No minimum coverage check — short targets legitimately match long refs,
-    and the 5m physical overlap filter in candidate generation already handles noise.
+    portions. When the overlap exceeds max_overlap_m, the lower-confidence
+    match is demoted to REVIEW.
 
     Args:
         results: Optimized match results
+        ref_geoms: Reference geometries for computing overlap in meters
+        max_overlap_m: Maximum accepted overlap in meters
 
     Returns:
         Results with conflicting lower-confidence matches demoted to REVIEW
@@ -703,8 +714,12 @@ def _validate_assignment_coverage(
     # Track indices that need demotion
     demote_indices: set[int] = set()
 
-    for _ref_id, indices in by_ref.items():
+    for ref_id, indices in by_ref.items():
         if len(indices) < 2:
+            continue
+
+        ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
+        if ref_length_m <= 0:
             continue
 
         # Check all pairs for overlap on the ref side
@@ -716,7 +731,6 @@ def _validate_assignment_coverage(
             if a_start is None or a_end is None:
                 continue
             a_lo, a_hi = min(a_start, a_end), max(a_start, a_end)
-            a_span = a_hi - a_lo
 
             for b_pos in range(a_pos + 1, len(indices)):
                 b_idx = indices[b_pos]
@@ -726,18 +740,14 @@ def _validate_assignment_coverage(
                 if b_start is None or b_end is None:
                     continue
                 b_lo, b_hi = min(b_start, b_end), max(b_start, b_end)
-                b_span = b_hi - b_lo
 
-                # Compute overlap
-                overlap = max(0.0, min(a_hi, b_hi) - max(a_lo, b_lo))
-                if overlap <= 0:
+                # Compute overlap in meters
+                overlap_frac = max(0.0, min(a_hi, b_hi) - max(a_lo, b_lo))
+                if overlap_frac <= 0:
                     continue
 
-                # Check mutual overlap: overlap must be >50% of BOTH spans
-                min_span = min(a_span, b_span)
-                if min_span <= 0:
-                    continue
-                if overlap / min_span > 0.5:
+                overlap_m = overlap_frac * ref_length_m
+                if overlap_m > max_overlap_m:
                     # Conflict — demote the lower-confidence one
                     if a.confidence <= b.confidence:
                         demote_indices.add(a_idx)
@@ -862,7 +872,7 @@ def optimize_matches_with_grouping(
         )
 
     # Combine results and validate alignment coverage
-    final = _validate_assignment_coverage(all_group_results + optimized_1to1)
+    final = _validate_assignment_coverage(all_group_results + optimized_1to1, ref_geoms)
 
     # Log summary — count match types across ALL results
     type_counts = defaultdict(int)
