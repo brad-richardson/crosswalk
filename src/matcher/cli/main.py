@@ -269,7 +269,7 @@ def _cross_validate(
 
     from ..config import METRIC_AVERAGE
     from ..labeling.label_store import LabelStore
-    from ..matching.ml import MLMatcher, create_segment_groups
+    from ..matching.ml import DEFAULT_XGB_PARAMS, MLMatcher, create_segment_groups
 
     if not labels_dir.exists():
         console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
@@ -343,10 +343,14 @@ def _cross_validate(
         # Train model for this fold
         from xgboost import XGBClassifier
 
+        # Compute scale_pos_weight for this fold's class balance
+        n_neg = int((y_train == 0).sum())
+        n_pos = int((y_train == 1).sum())
+        fold_spw = n_neg / n_pos if n_pos > 0 else 1.0
+
         model = XGBClassifier(
-            n_estimators=500,
-            max_depth=6,
-            learning_rate=0.05,
+            **DEFAULT_XGB_PARAMS,
+            scale_pos_weight=fold_spw,
             random_state=seed,
             n_jobs=-1,
         )
