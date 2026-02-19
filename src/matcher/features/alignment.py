@@ -122,7 +122,6 @@ def _get_score_numba(
     dataset_length: float,
     dx: float,
     buffer_distance: float,
-    min_overlap_m: float,
     num_samples: int = 16,
 ) -> float:
     """
@@ -133,7 +132,7 @@ def _get_score_numba(
     comparison_end = min(overture_length, dataset_length + dx)
     comparison_length = comparison_end - comparison_start
 
-    if comparison_length <= min_overlap_m:
+    if comparison_length <= 0.0:
         return 0.0
 
     sqsum = 0.0
@@ -200,7 +199,6 @@ def _detect_divergence_endpoints(
     distance_multiplier: float = 3.0,
     min_distance_threshold: float = 20.0,
     parallelness_threshold: float = 0.5,
-    min_overlap_m: float = 3.0,
 ) -> tuple[float, float]:
     """Detect divergence points at both ends of the alignment.
 
@@ -222,7 +220,6 @@ def _detect_divergence_endpoints(
         distance_multiplier: Multiply buffer_distance for distance threshold
         min_distance_threshold: Minimum distance threshold (meters)
         parallelness_threshold: Dot product below this indicates divergence
-        min_overlap_m: Minimum overlap length in meters
 
     Returns:
         Tuple of (start_frac, end_frac) as fractions along the reference line
@@ -233,7 +230,7 @@ def _detect_divergence_endpoints(
     comparison_end = min(ref_length, target_length + offset)
     comparison_length = comparison_end - comparison_start
 
-    if comparison_length <= min_overlap_m:
+    if comparison_length <= 0.0:
         # No valid overlap, return defaults
         return comparison_start / ref_length, comparison_end / ref_length
 
@@ -353,7 +350,6 @@ def _find_best_alignment_numba(
     dataset_length: float,
     grid_samples: int,
     refinement_steps: int,
-    min_overlap_m: float,
     seed_offset: float = np.nan,
 ) -> tuple[float, float]:
     """
@@ -393,7 +389,6 @@ def _find_best_alignment_numba(
             dataset_length,
             seed_offset,
             buffer_distance,
-            min_overlap_m,
         )
         if seed_score > best_score:
             best_score = seed_score
@@ -411,7 +406,6 @@ def _find_best_alignment_numba(
             dataset_length,
             x,
             buffer_distance,
-            min_overlap_m,
         )
         if score > best_score:
             best_score = score
@@ -435,7 +429,6 @@ def _find_best_alignment_numba(
             dataset_length,
             offset_left,
             buffer_distance,
-            min_overlap_m,
         )
         score_right = _get_score_numba(
             overture_coords,
@@ -446,7 +439,6 @@ def _find_best_alignment_numba(
             dataset_length,
             offset_right,
             buffer_distance,
-            min_overlap_m,
         )
 
         if score_left > best_score and score_left > score_right:
@@ -483,7 +475,6 @@ def linestring_alignment(
     grid_samples: int = 24,
     refinement_steps: int = 16,
     detect_divergence: bool = True,
-    min_overlap_m: float = 3.0,
 ) -> AlignmentResult:
     """
     Calculates the best alignment between two LineStrings.
@@ -554,7 +545,6 @@ def linestring_alignment(
             target_length,
             midpoint_seed,
             buffer_distance_for_seed,
-            min_overlap_m,
         )
 
         # Check if any endpoint seed scores dramatically better than midpoint
@@ -570,7 +560,6 @@ def linestring_alignment(
                 target_length,
                 s,
                 buffer_distance_for_seed,
-                min_overlap_m,
             )
             if score > mp_score * _ENDPOINT_SEED_THRESHOLD and score > best_ep_score:
                 best_ep_seed = s
@@ -586,7 +575,6 @@ def linestring_alignment(
             target_length,
             grid_samples,
             refinement_steps,
-            min_overlap_m,
             midpoint_seed,
         )
 
@@ -601,7 +589,6 @@ def linestring_alignment(
                 target_length,
                 grid_samples,
                 refinement_steps,
-                min_overlap_m,
                 best_ep_seed,
             )
             if ep_score > best_score:
@@ -664,7 +651,6 @@ def linestring_alignment(
             distance_multiplier=DIVERGENCE_DISTANCE_MULTIPLIER,
             min_distance_threshold=DIVERGENCE_MIN_DISTANCE_M,
             parallelness_threshold=DIVERGENCE_PARALLELNESS_THRESHOLD,
-            min_overlap_m=min_overlap_m,
         )
 
         # Only apply truncation if it actually reduces coverage

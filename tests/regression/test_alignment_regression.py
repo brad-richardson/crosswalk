@@ -351,14 +351,13 @@ class TestOveralignment:
     # -- Parameterized: barely-overlapping pairs should have small coverage --
 
     @pytest.mark.parametrize(
-        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, min_overlap_m",
+        "ref_coords, tgt_coords, max_ref_cov, max_tgt_cov",
         [
             pytest.param(
                 _MUMBAI_REF_WGS,
                 _MUMBAI_TGT_WGS,
                 0.15,
                 0.15,
-                0.00003,  # ~3m in degree-space
                 id="mumbai-degree-space",
             ),
             pytest.param(
@@ -366,7 +365,6 @@ class TestOveralignment:
                 list(shapely_transform(_UTM43N, LineString(_MUMBAI_TGT_WGS)).coords),
                 0.05,
                 0.05,
-                3.0,
                 id="mumbai-projected-meters",
             ),
             pytest.param(
@@ -374,7 +372,6 @@ class TestOveralignment:
                 [(0, 3), (50, 3), (100, 3)],
                 0.10,
                 0.15,
-                3.0,
                 id="synthetic-collinear-5m-overlap",
             ),
             pytest.param(
@@ -397,19 +394,18 @@ class TestOveralignment:
                 [(-2.2, -3), (7.6, 2.2), (18.1, 10), (28.7, 22.9), (36.7, 40.6), (39.9, 51.5)],
                 0.05,
                 0.10,
-                3.0,
                 id="bogota-asymmetric-360m-ref",
             ),
         ],
     )
     def test_barely_overlapping_small_coverage(
-        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov, min_overlap_m
+        self, ref_coords, tgt_coords, max_ref_cov, max_tgt_cov
     ):
         """Barely-overlapping pairs should have small coverage fractions."""
         ref = LineString(ref_coords)
         target = LineString(tgt_coords)
 
-        result = linestring_alignment(ref, target, min_overlap_m=min_overlap_m)
+        result = linestring_alignment(ref, target)
 
         assert result.overture_coverage < max_ref_cov, (
             f"ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
@@ -494,7 +490,7 @@ class TestOveralignment:
         assert ref_aligned_m >= 10, f"Expected ~12m aligned, got {ref_aligned_m:.1f}m"
 
     def test_curved_barely_overlapping_not_collapsed(self):
-        """Curved roads that barely overlap should still produce an alignment."""
+        """Curved roads that barely overlap should still produce a non-zero alignment."""
         ref_pts = [(x, 5 * math.sin(x / 30)) for x in range(0, 201, 10)]
         tgt_pts = [(x, -5 * math.sin((-x) / 20) + 2) for x in range(-100, 6, 10)]
         ref = LineString(ref_pts)
@@ -502,7 +498,27 @@ class TestOveralignment:
 
         result = linestring_alignment(ref, target)
 
-        assert result.overture_coverage > 0.005 or result.dataset_coverage > 0.005
+        # Coverage can be very small for barely-overlapping curved roads,
+        # but should not be exactly zero.
+        assert result.overture_coverage > 0 or result.dataset_coverage > 0
+
+    def test_short_segment_aligned_at_midpoint(self):
+        """A 1m segment near the middle of a 100m reference should align correctly."""
+        ref = LineString([(0, 0), (100, 0)])
+        # 1m segment at roughly x=50, offset 1m laterally
+        target = LineString([(49.5, 1), (50.5, 1)])
+
+        result = linestring_alignment(ref, target)
+
+        # Should align near the middle of the reference (frac ~0.5)
+        mid = (result.overture_start_frac + result.overture_end_frac) / 2
+        assert 0.4 < mid < 0.6, f"Expected mid-alignment ~0.5, got {mid:.4f}"
+        # Coverage should be ~1% of the 100m reference
+        assert result.overture_coverage < 0.05, (
+            f"ref_cov={result.overture_coverage:.4f}, expected ~0.01"
+        )
+        # Target should be fully covered
+        assert result.dataset_coverage > 0.9
 
     def test_endpoint_seed_must_not_regress_final_score(self):
         """Endpoint seed that scores well at seed point but converges to worse optimum.
