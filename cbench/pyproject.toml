@@ -2,7 +2,7 @@
 name = "cbench"
 version = "0.1.0"
 description = "Conflation benchmarking harness - compare road matching tools against ground truth"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Brad Richardson" }]
 

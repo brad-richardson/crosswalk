@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from cbench.util import setup_logging
 
@@ -15,6 +17,75 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _parse_opts(opt: list[str]) -> dict[str, str]:
+    """Parse --opt key=value pairs into a dict.
+
+    Raises typer.Exit(1) on invalid format.
+    """
+    kwargs: dict[str, str] = {}
+    for o in opt:
+        if "=" not in o:
+            console.print(f"[red]Invalid option format: {o} (expected key=value)[/red]")
+            raise typer.Exit(1)
+        k, v = o.split("=", 1)
+        kwargs[k] = v
+    return kwargs
+
+
+def _coerce_path_opts(kwargs: dict) -> dict:
+    """Coerce known path-like option values to Path objects."""
+    for key in ("hoot_dir", "connectors"):
+        if key in kwargs:
+            kwargs[key] = Path(kwargs[key])
+    return kwargs
+
+
+def _get_adapter(tool: str):
+    """Look up a tool adapter by name, or exit with error."""
+    from cbench.adapters import REGISTRY
+
+    if tool not in REGISTRY:
+        console.print(f"[red]Unknown tool: {tool}[/red]")
+        console.print(f"Available: {', '.join(REGISTRY.keys())}")
+        raise typer.Exit(1)
+    return REGISTRY[tool]()
+
+
+def _print_eval_result(tool: str, dataset: str, result) -> None:
+    """Print evaluation results for a single run."""
+    er = result.eval_result
+    console.print(f"[bold]Results: {tool} on {dataset}[/bold]")
+    console.print(f"  Precision: {er.precision:.4f}")
+    console.print(f"  Recall:    {er.recall:.4f}")
+    console.print(f"  F1:        [bold]{er.f1:.4f}[/bold]")
+    console.print(
+        f"  TP={er.true_positives}  FP={er.false_positives}  "
+        f"FN={er.false_negatives}  Unlabeled={er.unlabeled_predictions}"
+    )
+    if result.resource_stats:
+        rs = result.resource_stats
+        console.print(
+            f"  Time: {rs.wall_time_s:.1f}s  "
+            f"CPU: {rs.cpu_user_s:.1f}u+{rs.cpu_system_s:.1f}s  "
+            f"Peak RSS: {rs.peak_rss_mb:.0f} MB"
+        )
+
+
+def load_datasets_config(config_path: Path) -> dict:
+    """Load and validate datasets TOML config.
+
+    Returns:
+        Dict with 'defaults' and 'datasets' keys.
+    """
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    with open(config_path, "rb") as f:
+        config = tomllib.load(f)
+    if "datasets" not in config:
+        raise ValueError(f"Config file missing [datasets] section: {config_path}")
+    return config
 
 
 @app.command()
@@ -31,83 +102,189 @@ def run(
         Path("cbench_results.jsonl"), "--results", help="JSONL results file"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
-    # Tool-specific options passed as key=value
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
     """Run a tool on a dataset and evaluate against ground truth."""
     setup_logging(verbose)
 
-    from cbench.adapters import REGISTRY
-    from cbench.eval.labels import load_labels
-    from cbench.eval.metrics import evaluate
-    from cbench.results.store import create_result, save_result
+    from cbench.runner import run_single
 
-    # Validate input files exist
-    for path, desc in [
-        (reference, "Reference file"),
-        (target, "Target file"),
-        (labels, "Labels dir"),
-    ]:
-        if not path.exists():
-            console.print(f"[red]{desc} not found: {path}[/red]")
-            raise typer.Exit(1)
+    adapter = _get_adapter(tool)
+    kwargs = _coerce_path_opts(_parse_opts(opt))
 
-    if tool not in REGISTRY:
-        console.print(f"[red]Unknown tool: {tool}[/red]")
-        console.print(f"Available: {', '.join(REGISTRY.keys())}")
-        raise typer.Exit(1)
+    try:
+        result = run_single(
+            adapter=adapter,
+            dataset=dataset,
+            reference=reference,
+            target=target,
+            labels_dir=labels,
+            output_dir=output_dir,
+            results_file=results_file,
+            **kwargs,
+        )
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
-    # Parse tool options
-    kwargs = {}
-    for o in opt:
-        if "=" not in o:
-            console.print(f"[red]Invalid option format: {o} (expected key=value)[/red]")
-            raise typer.Exit(1)
-        k, v = o.split("=", 1)
-        kwargs[k] = v
-
-    # Coerce path-like options
-    for key in ("hoot_dir", "connectors"):
-        if key in kwargs:
-            kwargs[key] = Path(kwargs[key])
-
-    adapter = REGISTRY[tool]()
-    tool_output_dir = output_dir / tool / dataset
-
-    # Run tool
-    console.print(f"[bold]Running {tool}[/bold] on {dataset}...")
-    output_path = adapter.run(reference, target, tool_output_dir, **kwargs)
-
-    # Parse output
-    console.print("Parsing output...")
-    tool_output = adapter.parse_output(output_path)
-    console.print(f"Found {len(tool_output.matches)} match predictions")
-
-    # Load labels and evaluate
-    console.print("Evaluating against ground truth...")
-    ground_truth = load_labels(labels, dataset)
-    result = evaluate(tool_output.matches, ground_truth)
-
-    # Display results
     console.print()
-    console.print(f"[bold]Results: {tool} on {dataset}[/bold]")
-    console.print(f"  Precision: {result.precision:.4f}")
-    console.print(f"  Recall:    {result.recall:.4f}")
-    console.print(f"  F1:        [bold]{result.f1:.4f}[/bold]")
-    console.print(
-        f"  TP={result.true_positives}  FP={result.false_positives}  "
-        f"FN={result.false_negatives}  Unlabeled={result.unlabeled_predictions}"
-    )
-
-    # Save result
-    bench_result = create_result(
-        tool=tool,
-        dataset=dataset,
-        metrics=result.to_dict(),
-        metadata=tool_output.metadata,
-    )
-    save_result(bench_result, results_file)
+    _print_eval_result(tool, dataset, result)
     console.print(f"\nResult saved to {results_file}")
+
+
+@app.command("run-batch")
+def run_batch(
+    tool: str = typer.Argument(help="Tool adapter name (e.g., 'matcher', 'hootenanny')"),
+    config: Path = typer.Option(
+        Path("datasets.toml"), "--config", "-c", help="Datasets TOML config file"
+    ),
+    data_dir: Path | None = typer.Option(
+        None, "--data-dir", "-d", help="Override data directory from config"
+    ),
+    labels_dir: Path | None = typer.Option(
+        None, "--labels-dir", "-l", help="Override labels directory from config"
+    ),
+    dataset: list[str] | None = typer.Option(
+        None, "--dataset", help="Run only these datasets (repeatable)"
+    ),
+    output_dir: Path = typer.Option(
+        Path("cbench_output"), "--output-dir", "-o", help="Output directory"
+    ),
+    results_file: Path = typer.Option(
+        Path("cbench_results.jsonl"), "--results", help="JSONL results file"
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
+) -> None:
+    """Run a tool on multiple datasets from a TOML config."""
+    setup_logging(verbose)
+
+    from cbench.runner import run_single
+
+    adapter = _get_adapter(tool)
+    extra_kwargs = _coerce_path_opts(_parse_opts(opt))
+
+    try:
+        cfg = load_datasets_config(config)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    defaults = cfg.get("defaults", {})
+    resolved_data_dir = data_dir or Path(defaults.get("data_dir", "."))
+    resolved_labels_dir = labels_dir or Path(defaults.get("labels_dir", "."))
+
+    datasets = cfg["datasets"]
+    if dataset:
+        unknown = set(dataset) - set(datasets)
+        if unknown:
+            console.print(f"[red]Unknown datasets: {', '.join(sorted(unknown))}[/red]")
+            console.print(f"Available: {', '.join(datasets.keys())}")
+            raise typer.Exit(1)
+        datasets = {k: v for k, v in datasets.items() if k in dataset}
+
+    from cbench.runner import RunResult
+
+    batch_results: list[tuple[str, RunResult | None, str | None]] = []
+
+    for ds_name, ds_cfg in datasets.items():
+        console.rule(f"[bold]{ds_name}[/bold]")
+
+        reference = resolved_data_dir / ds_cfg["reference"]
+        target = resolved_data_dir / ds_cfg["target"]
+
+        # Auto-wire connectors from config into tool kwargs
+        run_kwargs = dict(extra_kwargs)
+        if "connectors" in ds_cfg and "connectors" not in run_kwargs:
+            run_kwargs["connectors"] = resolved_data_dir / ds_cfg["connectors"]
+
+        try:
+            result = run_single(
+                adapter=adapter,
+                dataset=ds_name,
+                reference=reference,
+                target=target,
+                labels_dir=resolved_labels_dir,
+                output_dir=output_dir,
+                results_file=results_file,
+                **run_kwargs,
+            )
+            f1 = result.eval_result.f1
+            rs = result.resource_stats
+            time_str = f"  ({rs.wall_time_s:.1f}s)" if rs else ""
+            console.print(f"  F1: [bold]{f1:.4f}[/bold]{time_str}")
+            batch_results.append((ds_name, result, None))
+        except Exception as exc:
+            console.print(f"  [red]FAILED: {exc}[/red]")
+            batch_results.append((ds_name, None, str(exc)))
+
+    # Summary table
+    console.print()
+    table = Table(title=f"Batch Results: {tool}")
+    table.add_column("Dataset", style="cyan")
+    table.add_column("F1", justify="right")
+    table.add_column("Time", justify="right")
+    table.add_column("Peak RSS", justify="right")
+    table.add_column("Status", justify="center")
+
+    passed = 0
+    for ds_name, res, _error in batch_results:
+        if res is not None:
+            rs = res.resource_stats
+            time_str = f"{rs.wall_time_s:.1f}s" if rs else "-"
+            rss_str = f"{rs.peak_rss_mb:.0f} MB" if rs else "-"
+            table.add_row(
+                ds_name, f"{res.eval_result.f1:.4f}", time_str, rss_str, "[green]OK[/green]"
+            )
+            passed += 1
+        else:
+            table.add_row(ds_name, "-", "-", "-", "[red]FAIL[/red]")
+
+    console.print(table)
+    console.print(f"\n{passed}/{len(batch_results)} datasets completed successfully.")
+
+
+@app.command("list-datasets")
+def list_datasets(
+    config: Path = typer.Option(
+        Path("datasets.toml"), "--config", "-c", help="Datasets TOML config file"
+    ),
+    labels_dir: Path | None = typer.Option(
+        None, "--labels-dir", "-l", help="Labels directory to check availability"
+    ),
+) -> None:
+    """List datasets from a TOML config and check label availability."""
+    try:
+        cfg = load_datasets_config(config)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    defaults = cfg.get("defaults", {})
+    resolved_labels_dir = labels_dir or Path(defaults.get("labels_dir", "."))
+
+    table = Table(title="Configured Datasets")
+    table.add_column("Dataset", style="cyan")
+    table.add_column("Reference")
+    table.add_column("Target")
+    table.add_column("Connectors")
+    table.add_column("Labels", justify="center")
+
+    for name, ds_cfg in cfg["datasets"].items():
+        labels_path = resolved_labels_dir / f"dataset={name}" / "data.csv"
+        has_labels = "[green]yes[/green]" if labels_path.exists() else "[red]no[/red]"
+        table.add_row(
+            name,
+            ds_cfg.get("reference", "-"),
+            ds_cfg.get("target", "-"),
+            ds_cfg.get("connectors", "-"),
+            has_labels,
+        )
+
+    console.print(table)
 
 
 @app.command()
