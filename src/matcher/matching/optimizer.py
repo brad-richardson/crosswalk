@@ -22,7 +22,7 @@ from loguru import logger
 from scipy.spatial import cKDTree
 from shapely import LineString
 
-from ..config import DEFAULT_SNAP_TOLERANCE_M, settings
+from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
 from .types import MatchDecision, MatchResult
 
 
@@ -440,6 +440,78 @@ def _expand_greedy_matches(
     return result
 
 
+def _merge_singletons_by_alignment(
+    contiguous_group_results: list[MatchResult],
+    singleton_results: list[MatchResult],
+    frac_start_key: str,  # "gers_start_frac" or "local_start_frac"
+    frac_end_key: str,  # "gers_end_frac" or "local_end_frac"
+    shared_segment_length_m: float,
+    max_overlap_m: float = MAX_ALIGNMENT_OVERLAP_M,
+) -> tuple[list[MatchResult], list[MatchResult]]:
+    """Merge singletons into groups if their alignment fractions don't overlap.
+
+    For each singleton, checks whether its coverage on the shared segment
+    is compatible (non-overlapping) with the existing contiguous group.
+    If so, merges it into the group.
+
+    Args:
+        contiguous_group_results: MatchResults already in a contiguous group
+        singleton_results: MatchResults that were singletons from contiguity check
+        frac_start_key: Attribute name for start fraction on the shared segment
+        frac_end_key: Attribute name for end fraction on the shared segment
+        shared_segment_length_m: Length of the shared segment in meters
+        max_overlap_m: Maximum accepted overlap in meters
+
+    Returns:
+        Tuple of (merged_group_results, remaining_leftovers)
+    """
+    if not singleton_results or not contiguous_group_results:
+        return contiguous_group_results, singleton_results
+
+    def _get_frac_range(r: MatchResult) -> tuple[float, float] | None:
+        start = getattr(r, frac_start_key)
+        end = getattr(r, frac_end_key)
+        if start is None or end is None:
+            return None
+        return (min(start, end), max(start, end))
+
+    def _ranges_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        """Check if two fraction ranges overlap by more than max_overlap_m."""
+        overlap_frac = min(a[1], b[1]) - max(a[0], b[0])
+        if overlap_frac <= 0:
+            return False
+        return overlap_frac * shared_segment_length_m > max_overlap_m
+
+    # Collect coverage ranges of existing group members
+    group_ranges: list[tuple[float, float]] = []
+    for r in contiguous_group_results:
+        rng = _get_frac_range(r)
+        if rng is not None:
+            group_ranges.append(rng)
+
+    merged = list(contiguous_group_results)
+    remaining: list[MatchResult] = []
+
+    for singleton in singleton_results:
+        s_range = _get_frac_range(singleton)
+        if s_range is None:
+            # No alignment fractions → can't merge by alignment, keep as leftover
+            remaining.append(singleton)
+            continue
+
+        # Check if singleton overlaps with ANY existing group member
+        overlaps = any(_ranges_overlap(s_range, gr) for gr in group_ranges)
+
+        if not overlaps:
+            # Compatible — merge into the group
+            merged.append(singleton)
+            group_ranges.append(s_range)
+        else:
+            remaining.append(singleton)
+
+    return merged, remaining
+
+
 def _classify_and_resolve_component(
     component_results: list[MatchResult],
     ref_geoms: dict[Any, LineString],
@@ -481,16 +553,34 @@ def _classify_and_resolve_component(
         group_results: list[MatchResult] = []
         leftover: list[MatchResult] = []
 
+        # Collect contiguous groups and singletons
+        contiguous_group_matches: list[MatchResult] = []
+        singleton_matches: list[MatchResult] = []
+
         for tg in target_groups:
             tg_set = set(tg)
             group_matches = [r for r in component_results if r.target_id in tg_set]
 
             if len(tg) > 1:
-                # Contiguous multi-target subgroup → 1:N
-                group_results.extend(_create_group_results(group_matches, "1:N"))
+                contiguous_group_matches.extend(group_matches)
             else:
-                # Singleton → 1:1 candidate
-                leftover.extend(group_matches)
+                singleton_matches.extend(group_matches)
+
+        # Try to merge singletons into the contiguous group by alignment fractions
+        if contiguous_group_matches and singleton_matches:
+            ref_id = ref_ids[0]
+            ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
+            contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
+                contiguous_group_matches,
+                singleton_matches,
+                frac_start_key="gers_start_frac",
+                frac_end_key="gers_end_frac",
+                shared_segment_length_m=ref_length_m,
+            )
+
+        if contiguous_group_matches:
+            group_results.extend(_create_group_results(contiguous_group_matches, "1:N"))
+        leftover.extend(singleton_matches)
 
         return group_results, leftover
 
@@ -501,21 +591,39 @@ def _classify_and_resolve_component(
         group_results = []
         leftover = []
 
+        # Collect contiguous groups and singletons
+        contiguous_group_matches: list[MatchResult] = []
+        singleton_matches: list[MatchResult] = []
+
         for rg in ref_groups:
             rg_set = set(rg)
             group_matches = [r for r in component_results if r.ref_id in rg_set]
 
             if len(rg) > 1:
-                # Contiguous multi-ref subgroup → N:1
-                group_results.extend(_create_group_results(group_matches, "N:1"))
+                contiguous_group_matches.extend(group_matches)
             else:
-                # Singleton → 1:1 candidate
-                leftover.extend(group_matches)
+                singleton_matches.extend(group_matches)
+
+        # Try to merge singletons into the contiguous group by alignment fractions
+        if contiguous_group_matches and singleton_matches:
+            target_id = target_ids[0]
+            target_length_m = target_geoms[target_id].length if target_id in target_geoms else 0.0
+            contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
+                contiguous_group_matches,
+                singleton_matches,
+                frac_start_key="local_start_frac",
+                frac_end_key="local_end_frac",
+                shared_segment_length_m=target_length_m,
+            )
+
+        if contiguous_group_matches:
+            group_results.extend(_create_group_results(contiguous_group_matches, "N:1"))
+        leftover.extend(singleton_matches)
 
         return group_results, leftover
 
     # Case 4: M:N — multiple refs AND multiple targets
-    # v1: require BOTH sides to be fully contiguous
+    # Decompose using contiguity groups on both sides, then match sub-components
     ref_groups = _find_contiguous_id_groups(ref_ids, ref_geoms, tolerance)
     target_groups = _find_contiguous_id_groups(target_ids, target_geoms, tolerance)
 
@@ -526,10 +634,153 @@ def _classify_and_resolve_component(
         # Both sides fully contiguous → M:N group
         return _create_group_results(component_results, "M:N"), []
 
-    # Not fully contiguous on both sides → fall back to 1:1 for all.
-    # Post-expansion step in optimize_matches_with_grouping will attempt
-    # to expand these 1:1 assignments to 1:N/N:1 groups afterward.
-    return [], component_results
+    # Decompose into sub-components by matching contiguity groups on each side.
+    # For each (ref_group, target_group) pair, collect connecting edges.
+    # Build edge lookup for quick access
+    edge_by_pair: dict[tuple, MatchResult] = {}
+    for r in component_results:
+        edge_by_pair[(r.ref_id, r.target_id)] = r
+
+    group_results: list[MatchResult] = []
+    leftover: list[MatchResult] = []
+    used_edges: set[tuple] = set()
+
+    for rg in ref_groups:
+        rg_set = set(rg)
+        for tg in target_groups:
+            tg_set = set(tg)
+            # Collect edges connecting this ref_group to this target_group
+            sub_edges = [
+                edge_by_pair[(rid, tid)] for rid in rg for tid in tg if (rid, tid) in edge_by_pair
+            ]
+            if not sub_edges:
+                continue
+
+            sub_ref_ids = {r.ref_id for r in sub_edges}
+            sub_target_ids = {r.target_id for r in sub_edges}
+
+            # Classify the sub-component
+            if len(sub_ref_ids) == 1 and len(sub_target_ids) == 1:
+                # 1:1 sub-component → leftover for greedy
+                leftover.extend(sub_edges)
+            elif len(sub_ref_ids) == 1 and len(sub_target_ids) > 1:
+                # 1:N sub-component
+                group_results.extend(_create_group_results(sub_edges, "1:N"))
+            elif len(sub_ref_ids) > 1 and len(sub_target_ids) == 1:
+                # N:1 sub-component
+                group_results.extend(_create_group_results(sub_edges, "N:1"))
+            else:
+                # Smaller M:N sub-component
+                group_results.extend(_create_group_results(sub_edges, "M:N"))
+
+            for e in sub_edges:
+                used_edges.add((e.ref_id, e.target_id))
+
+    # Any edges not assigned to a sub-component go to leftover
+    for r in component_results:
+        if (r.ref_id, r.target_id) not in used_edges:
+            leftover.append(r)
+
+    return group_results, leftover
+
+
+def _validate_assignment_coverage(
+    results: list[MatchResult],
+    ref_geoms: dict[Any, LineString],
+    max_overlap_m: float = MAX_ALIGNMENT_OVERLAP_M,
+) -> list[MatchResult]:
+    """Detect conflicting alignment coverage in assigned matches.
+
+    Checks per reference segment: no two targets should claim overlapping
+    portions. When the overlap exceeds max_overlap_m, the lower-confidence
+    match is demoted to REVIEW.
+
+    Args:
+        results: Optimized match results
+        ref_geoms: Reference geometries for computing overlap in meters
+        max_overlap_m: Maximum accepted overlap in meters
+
+    Returns:
+        Results with conflicting lower-confidence matches demoted to REVIEW
+    """
+    if not results:
+        return results
+
+    # Group results by ref_id
+    by_ref: dict[Any, list[int]] = defaultdict(list)
+    for i, r in enumerate(results):
+        by_ref[r.ref_id].append(i)
+
+    # Track indices that need demotion
+    demote_indices: set[int] = set()
+
+    for ref_id, indices in by_ref.items():
+        if len(indices) < 2:
+            continue
+
+        ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
+        if ref_length_m <= 0:
+            continue
+
+        # Check all pairs for overlap on the ref side
+        for a_pos in range(len(indices)):
+            a_idx = indices[a_pos]
+            a = results[a_idx]
+            a_start = a.gers_start_frac
+            a_end = a.gers_end_frac
+            if a_start is None or a_end is None:
+                continue
+            a_lo, a_hi = min(a_start, a_end), max(a_start, a_end)
+
+            for b_pos in range(a_pos + 1, len(indices)):
+                b_idx = indices[b_pos]
+                b = results[b_idx]
+                b_start = b.gers_start_frac
+                b_end = b.gers_end_frac
+                if b_start is None or b_end is None:
+                    continue
+                b_lo, b_hi = min(b_start, b_end), max(b_start, b_end)
+
+                # Compute overlap in meters
+                overlap_frac = max(0.0, min(a_hi, b_hi) - max(a_lo, b_lo))
+                if overlap_frac <= 0:
+                    continue
+
+                overlap_m = overlap_frac * ref_length_m
+                if overlap_m > max_overlap_m:
+                    # Conflict — demote the lower-confidence one
+                    if a.confidence <= b.confidence:
+                        demote_indices.add(a_idx)
+                    else:
+                        demote_indices.add(b_idx)
+
+    if not demote_indices:
+        return results
+
+    demote_count = len(demote_indices)
+    logger.info(f"  Coverage validation: demoting {demote_count} conflicting matches to REVIEW")
+
+    validated: list[MatchResult] = []
+    for i, r in enumerate(results):
+        if i in demote_indices and r.decision != MatchDecision.REVIEW:
+            validated.append(
+                MatchResult(
+                    ref_id=r.ref_id,
+                    target_id=r.target_id,
+                    decision=MatchDecision.REVIEW,
+                    confidence=r.confidence,
+                    score_breakdown=r.score_breakdown,
+                    features={**r.features, "coverage_conflict": 1.0},
+                    gers_start_frac=r.gers_start_frac,
+                    gers_end_frac=r.gers_end_frac,
+                    local_start_frac=r.local_start_frac,
+                    local_end_frac=r.local_end_frac,
+                )
+            )
+        else:
+            validated.append(r)
+
+    return validated
 
 
 def optimize_matches_with_grouping(
@@ -620,8 +871,8 @@ def optimize_matches_with_grouping(
             min_confidence,
         )
 
-    # Combine results
-    final = all_group_results + optimized_1to1
+    # Combine results and validate alignment coverage
+    final = _validate_assignment_coverage(all_group_results + optimized_1to1, ref_geoms)
 
     # Log summary — count match types across ALL results
     type_counts = defaultdict(int)
