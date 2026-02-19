@@ -61,6 +61,10 @@ DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance
 DIVERGENCE_MIN_DISTANCE_M = 20.0  # Minimum absolute distance threshold (meters)
 DIVERGENCE_PARALLELNESS_THRESHOLD = 0.5  # dot2 < this = diverging (>45 degrees)
 
+# Alignment overlap tolerance for grouping (0.05 = 5%)
+# Matches whose ref coverage overlaps by less than this are considered compatible
+ALIGNMENT_OVERLAP_TOLERANCE = 0.05
+
 # Parallel sibling detection thresholds
 # Used to detect split carriageway representation (dual highways)
 PARALLEL_SIBLING_MIN_OFFSET_M = 5.0  # Minimum lateral offset for sibling
