@@ -82,9 +82,16 @@ def load_datasets_config(config_path: Path) -> dict:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(config_path, "rb") as f:
-        config = tomllib.load(f)
+        try:
+            config = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML syntax in {config_path}: {exc}") from exc
     if "datasets" not in config:
         raise ValueError(f"Config file missing [datasets] section: {config_path}")
+    for name, ds in config["datasets"].items():
+        for key in ("reference", "target"):
+            if key not in ds:
+                raise ValueError(f"Dataset '{name}' missing required key '{key}' in {config_path}")
     return config
 
 

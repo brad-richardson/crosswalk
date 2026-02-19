@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import resource
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,9 @@ class ResourceStats:
 def _measure_children() -> tuple[float, float, float]:
     """Snapshot child-process CPU time and peak RSS."""
     usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-    return usage.ru_utime, usage.ru_stime, usage.ru_maxrss / 1024  # KB -> MB on Linux
+    # ru_maxrss is KB on Linux, bytes on macOS/BSD
+    rss_divisor = 1024 if sys.platform == "linux" else 1024 * 1024
+    return usage.ru_utime, usage.ru_stime, usage.ru_maxrss / rss_divisor
 
 
 @dataclass
