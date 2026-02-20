@@ -145,14 +145,11 @@ class OSMConverter:
         return self.connector_node_map[connector_id]
 
     def _create_node(self, lon: float, lat: float) -> int:
-        """Create a new unique node (no deduplication).
+        """Create a new unique node for a non-connector vertex.
 
-        TODO: This destroys topology for non-connector vertices. Two adjacent
-        segments sharing an endpoint get different node IDs, so Hootenanny
-        treats them as disconnected. Fix by adding a coordinate-based dedup
-        index (e.g., round to 7dp and reuse existing node at same coords).
-        See also: connector nodes use raw precision while these are rounded,
-        creating an inconsistency.
+        Non-connector vertices are interior points that don't represent
+        junctions. They get unique node IDs by design — topology sharing
+        happens only through connector-based node sharing.
         """
         node_id = self.node_id_counter
         self.node_id_counter -= 1
@@ -211,40 +208,49 @@ class OSMConverter:
                 logger.warning(f"Skipping non-line geometry: {geom.geom_type}")
                 continue
 
-            connector_at_map = {}
+            segment_connector_ids = []
             if has_connectors:
                 connectors_val = row.get(connectors_column)
                 if connectors_val is not None:
                     for conn in connectors_val:
                         if isinstance(conn, dict):
-                            at_pos = conn.get("at")
                             conn_id = conn.get("connector_id")
-                            if at_pos is not None and conn_id:
-                                connector_at_map[float(at_pos)] = str(conn_id)
+                            if conn_id:
+                                segment_connector_ids.append(str(conn_id))
 
             for line in lines:
                 if not isinstance(line, LineString):
                     continue
 
                 coords = list(line.coords)
-                num_coords = len(coords)
                 node_ids = []
+
+                # Pre-compute vertex→connector map using geometry proximity
+                vertex_connector: dict[int, str] = {}
+                for conn_id in segment_connector_ids:
+                    if conn_id not in self.connector_geom_map:
+                        continue
+                    conn_pt = self.connector_geom_map[conn_id]
+                    best_idx, best_dist_sq = -1, float("inf")
+                    for i, (lon, lat, *_) in enumerate(coords):
+                        dist_sq = (lon - conn_pt.x) ** 2 + (lat - conn_pt.y) ** 2
+                        if dist_sq < best_dist_sq:
+                            best_dist_sq = dist_sq
+                            best_idx = i
+                    if best_dist_sq < 1e-12:  # ~1e-6 degrees squared ≈ 0.1m
+                        vertex_connector[best_idx] = conn_id
+                    else:
+                        logger.debug(
+                            f"Connector {conn_id} has no vertex within tolerance "
+                            f"(best_dist={best_dist_sq**0.5:.2e} deg)"
+                        )
 
                 for i, coord in enumerate(coords):
                     lon, lat = coord[0], coord[1]
-                    at_pos = i / (num_coords - 1) if num_coords > 1 else 0.0
-
-                    connector_id = None
-                    for conn_at, conn_id in connector_at_map.items():
-                        if abs(conn_at - at_pos) < 0.001:
-                            connector_id = conn_id
-                            break
-
-                    if connector_id and connector_id in self.connector_geom_map:
-                        node_id = self._get_connector_node_id(connector_id)
+                    if i in vertex_connector:
+                        node_id = self._get_connector_node_id(vertex_connector[i])
                     else:
                         node_id = self._create_node(lon, lat)
-
                     node_ids.append(node_id)
 
                 unique_node_ids = set(node_ids)
