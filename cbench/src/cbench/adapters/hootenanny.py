@@ -252,7 +252,7 @@ class HootAdapter:
     also discards match results — so it's not useful for benchmarking.
 
     The optimization/merge phase can be slow on large datasets (London 873K
-    ways took 60+ min). When a CONFLATION eval mode is added, this adapter
+    ways took 60+ min). When STITCH/MERGE eval modes are added, this adapter
     can also evaluate merge quality in addition to match identification.
 
     TODO: Manage Docker lifecycle automatically:
@@ -265,7 +265,7 @@ class HootAdapter:
     """
 
     name: str = "hootenanny"
-    eval_mode: EvalMode = EvalMode.RAW_MATCH
+    eval_mode: EvalMode = EvalMode.PAIR_MATCH
 
     def run(self, reference: Path, target: Path, output_dir: Path, **kwargs) -> Path:
         """Convert inputs to OSM, run Hootenanny conflation, return output path.

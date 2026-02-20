@@ -16,7 +16,17 @@ The bridge file enables:
 - **Update tracking** - Detect changes by comparing GERS matches over time
 - **Network integration** - Merge local roads into the Overture network while preserving provenance
 
-## What Is a Match?
+## Pipeline Stages
+
+The conflation pipeline has three stages. See [docs/MATCHING_AND_MERGING_RULES.md](docs/MATCHING_AND_MERGING_RULES.md) for the full canonical ruleset.
+
+1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Produces candidate matches with confidence scores. Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_AND_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
+
+2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_AND_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
+
+3. **Merging** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_AND_MERGING_RULES.md#section-3-merging-rules-network-integration))
+
+### What Is a Match?
 
 A match requires that the aligned overlapping portions represent the **same network role**, not just overlapping geometry. Two segments that intersect or overlap spatially are not necessarily a match — they must represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
@@ -26,7 +36,7 @@ A match requires that the aligned overlapping portions represent the **same netw
 
 ### Network Roles
 
-Matching is constrained by the segment's role in the network. See [docs/MATCHING_RULES.md](docs/MATCHING_RULES.md) for the full canonical ruleset.
+Matching is constrained by the segment's role in the network.
 
 - **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
 - **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
@@ -43,12 +53,12 @@ Matching is constrained by the segment's role in the network. See [docs/MATCHING
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Overlap only at/inside intersection | No Match | Overlap alone is not sufficient for a match |
-| Colinear overlap <10m near node then diverge | No Match | Must continue ≥10m past node along shared direction |
+| Short overlap at intersection | Match (low confidence) | Identity preserved; stitching decides promotion |
+| Short colinear overlap near node | Match (low confidence) | Same traveled way for that subsegment; confidence reflects brevity |
 
 ### Intersection Rule
 
-Never match based on overlap alone. For a match at an intersection, the target must continue **≥10m past the reference node** along the shared direction while staying aligned. Exception: if both segments are entirely inside the same intersection footprint and represent the same through-movement, they may match (rare).
+Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps produce low-confidence matches that stitching resolves. Exception: if both segments are entirely inside the same intersection footprint and represent the same through-movement, they may match (rare).
 
 ### 1:N Matching
 
@@ -69,23 +79,24 @@ flowchart TB
     subgraph Match["2. Matching Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
         E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
-        F --> G[Score with XGBoost<br/>Binary classifier]
-        G --> H[Optimize 1:N Matches<br/>Hungarian algorithm]
-        H --> I{Quality<br/>Acceptable?}
+        F --> G["Score with XGBoost<br/>(Pair Matching)"]
+        G --> H["Stitch<br/>(Planned) Graph-level resolution"]
+        H --> I[Optimize 1:N Matches<br/>Hungarian algorithm]
+        I --> J{Quality<br/>Acceptable?}
     end
 
     subgraph Label["3. Labeling Loop"]
-        I -->|No| J[Launch Labeling UI]
-        J --> K[Label Match/No-Match]
-        K --> L[Retrain Model]
-        L --> F
+        J -->|No| K[Launch Labeling UI]
+        K --> L[Label Match/No-Match]
+        L --> M[Retrain Model]
+        M --> F
     end
 
     subgraph Output["4. Integration"]
-        I -->|Yes| M[Generate Bridge File<br/>local_id → GERS_id + confidence]
-        M --> N[Integrate Unmatched Segments]
-        N --> O[QA Review]
-        O --> P[Final Network]
+        J -->|Yes| N[Generate Bridge File<br/>local_id → GERS_id + confidence]
+        N --> O["Merge<br/>(Planned) Network integration"]
+        O --> P[QA Review]
+        P --> Q[Final Network]
     end
 
     style Data fill:#e1f5fe
