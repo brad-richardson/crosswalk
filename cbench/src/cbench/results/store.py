@@ -85,10 +85,16 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
     table.add_column("TP", justify="right")
     table.add_column("FP", justify="right")
     table.add_column("FN", justify="right")
+    table.add_column("Time", justify="right")
+    table.add_column("Peak RSS", justify="right")
     table.add_column("Timestamp")
 
     for r in results:
         m = r.metrics
+        wall = m.get("wall_time_s")
+        time_str = f"{wall:.1f}s" if wall is not None else "-"
+        rss = m.get("peak_rss_mb")
+        rss_str = f"{rss:.0f} MB" if rss is not None else "-"
         table.add_row(
             r.tool,
             r.dataset,
@@ -98,6 +104,8 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
             str(m.get("true_positives", 0)),
             str(m.get("false_positives", 0)),
             str(m.get("false_negatives", 0)),
+            time_str,
+            rss_str,
             r.timestamp[:19],
         )
 
