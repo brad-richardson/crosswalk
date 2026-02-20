@@ -52,25 +52,32 @@ def generate_top_k_alternatives(
         if key not in edge_confidence or e["confidence"] > edge_confidence[key]:
             edge_confidence[key] = e["confidence"]
 
-    # Build per-target options: which refs can each target be assigned to?
-    target_options: dict[str, list[str | None]] = {}
-    for tid in target_ids:
-        options = [rid for rid in ref_ids if (rid, tid) in edge_confidence]
-        # Add "unassigned" option
-        options.append(None)
-        target_options[tid] = options
-
-    # Decide enumeration strategy
-    n_combos = 1
-    for tid in target_ids:
-        n_combos *= len(target_options[tid])
-
-    if len(target_ids) <= 6 and n_combos <= 10000:
-        alternatives = _exhaustive_enumeration(target_ids, target_options, edge_confidence, ref_ids)
+    # For N:1 groups (multiple refs, 1 target), enumerate per-ref assignment
+    # (each ref independently maps to the target or not). For 1:N and M:N,
+    # enumerate per-target assignment (each target maps to a ref or not).
+    if len(target_ids) == 1 and len(ref_ids) > 1:
+        alternatives = _enumerate_n_to_1(ref_ids, target_ids[0], edge_confidence, k)
     else:
-        alternatives = _greedy_perturbation(
-            target_ids, target_options, edge_confidence, ref_ids, k * 3
-        )
+        # Build per-target options: which refs can each target be assigned to?
+        target_options: dict[str, list[str | None]] = {}
+        for tid in target_ids:
+            options = [rid for rid in ref_ids if (rid, tid) in edge_confidence]
+            options.append(None)  # "unassigned" option
+            target_options[tid] = options
+
+        # Decide enumeration strategy
+        n_combos = 1
+        for tid in target_ids:
+            n_combos *= len(target_options[tid])
+
+        if len(target_ids) <= 6 and n_combos <= 10000:
+            alternatives = _exhaustive_enumeration(
+                target_ids, target_options, edge_confidence, ref_ids
+            )
+        else:
+            alternatives = _greedy_perturbation(
+                target_ids, target_options, edge_confidence, ref_ids, k * 3
+            )
 
     # Sort by total confidence descending
     alternatives.sort(key=lambda a: a["total_confidence"], reverse=True)
@@ -125,6 +132,66 @@ def _exhaustive_enumeration(
                 "summary": summary,
             }
         )
+
+    return alternatives
+
+
+def _enumerate_n_to_1(
+    ref_ids: list[str],
+    target_id: str,
+    edge_confidence: dict[tuple[str, str], float],
+    k: int,
+) -> list[dict]:
+    """Enumerate N:1 alternatives: each ref independently maps to the target or not.
+
+    For N refs, there are 2^N - 1 non-empty subsets. Enumerate all for N <= 10,
+    otherwise use greedy + perturbation.
+    """
+    n = len(ref_ids)
+    alternatives = []
+
+    if n <= 10:
+        # Enumerate all non-empty subsets of refs
+        for mask in range(1, 1 << n):
+            edges = []
+            total_conf = 0.0
+            for i, rid in enumerate(ref_ids):
+                if mask & (1 << i):
+                    conf = edge_confidence.get((rid, target_id), 0.0)
+                    edges.append(
+                        {"ref_id": rid, "target_id": target_id, "confidence": round(conf, 4)}
+                    )
+                    total_conf += conf
+            summary = _build_summary(edges, ref_ids)
+            alternatives.append(
+                {"edges": edges, "total_confidence": round(total_conf, 4), "summary": summary}
+            )
+    else:
+        # Greedy: include all refs, then generate perturbations by dropping each one
+        all_edges = []
+        total = 0.0
+        for rid in ref_ids:
+            conf = edge_confidence.get((rid, target_id), 0.0)
+            all_edges.append({"ref_id": rid, "target_id": target_id, "confidence": round(conf, 4)})
+            total += conf
+        alternatives.append(
+            {
+                "edges": list(all_edges),
+                "total_confidence": round(total, 4),
+                "summary": _build_summary(all_edges, ref_ids),
+            }
+        )
+        # Drop each ref one at a time
+        for i in range(len(ref_ids)):
+            subset = [e for j, e in enumerate(all_edges) if j != i]
+            sub_conf = sum(e["confidence"] for e in subset)
+            alternatives.append(
+                {
+                    "edges": subset,
+                    "total_confidence": round(sub_conf, 4),
+                    "summary": _build_summary(subset, ref_ids),
+                }
+            )
 
     return alternatives
 

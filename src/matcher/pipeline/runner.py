@@ -452,9 +452,15 @@ def run_pipeline(
         target_class_column=target_class_column,
         n_jobs=n_jobs,
     )
-    # Keep original (WGS84) GeoDataFrames for sidecar export
-    reference_wgs84 = reference
-    target_wgs84 = target
+    # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326)
+    if reference.crs and not reference.crs.equals("EPSG:4326"):
+        reference_wgs84 = reference.to_crs("EPSG:4326")
+    else:
+        reference_wgs84 = reference
+    if target.crs and not target.crs.equals("EPSG:4326"):
+        target_wgs84 = target.to_crs("EPSG:4326")
+    else:
+        target_wgs84 = target
     # Update reference/target to projected versions for downstream use
     reference = projection_result.reference
     target = projection_result.target

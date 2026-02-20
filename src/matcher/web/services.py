@@ -1121,7 +1121,6 @@ def record_stitching_label(
 
     store.add(
         group_id=group_id,
-        dataset_id=dataset_id,
         selected_option_index=selected_option_index,
         selected_edges=selected_edges,
         match_type=match_type,

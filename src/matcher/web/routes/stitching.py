@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _validate_dataset(dataset: str) -> bool:
+    """Check dataset exists in the known dataset list (prevents path traversal)."""
+    if not dataset:
+        return False
+    return dataset in list_datasets()
+
+
 def _build_group_geojson(group: dict, option_index: int = 0) -> str:
     """Build GeoJSON FeatureCollection for a group's current option.
 
@@ -88,7 +95,7 @@ def _build_group_geojson(group: dict, option_index: int = 0) -> str:
             }
         )
 
-    return json.dumps({"type": "FeatureCollection", "features": features})
+    return {"type": "FeatureCollection", "features": features}
 
 
 @router.get("/stitching-review", response_class=HTMLResponse)
@@ -110,6 +117,9 @@ async def stitching_review(request: Request, dataset: str = ""):
                 "no_groups": True,
             },
         )
+
+    if not _validate_dataset(dataset):
+        return HTMLResponse("Unknown dataset", status_code=404)
 
     try:
         batch = load_stitch_batch(dataset)
@@ -179,6 +189,8 @@ async def stitching_group(
     option_index: int = 0,
 ):
     """HTMX fragment: renders group card + map data for a specific option."""
+    if not _validate_dataset(dataset):
+        return HTMLResponse("Unknown dataset", status_code=404)
     try:
         batch = load_stitch_batch(dataset)
     except Exception:
@@ -225,6 +237,8 @@ async def stitching_select(
     option_index: int = Form(0),
 ):
     """Records selection, returns next group via HTMX swap."""
+    if not _validate_dataset(dataset):
+        return HTMLResponse("Unknown dataset", status_code=404)
     try:
         batch = load_stitch_batch(dataset)
     except Exception:
@@ -298,6 +312,8 @@ async def stitching_skip(
     group_id: str = Form(""),
 ):
     """Skips current group, loads next unreviewed group after it."""
+    if not _validate_dataset(dataset):
+        return HTMLResponse("Unknown dataset", status_code=404)
     try:
         batch = load_stitch_batch(dataset)
     except Exception:

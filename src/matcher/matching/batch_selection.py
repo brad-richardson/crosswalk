@@ -91,10 +91,16 @@ def select_stitching_batch(
     if not scored_groups:
         return []
 
-    # Tier-based selection
-    n_overlap = max(1, int(k * 0.4))  # ~40%
-    n_borderline = max(1, int(k * 0.4))  # ~40%
-    n_clear = k - n_overlap - n_borderline  # ~20%
+    # Tier-based selection (clamp so sizes are non-negative and sum to k)
+    n_overlap = max(1, int(k * 0.4))
+    n_borderline = max(1, int(k * 0.4))
+    n_clear = max(0, k - n_overlap - n_borderline)
+    # If tier minimums exceed k, scale back to fit
+    total_tiers = n_overlap + n_borderline + n_clear
+    if total_tiers > k:
+        n_overlap = max(1, k // 2)
+        n_borderline = max(0, k - n_overlap)
+        n_clear = 0
 
     selected: list[dict] = []
     used_ids: set[str] = set()

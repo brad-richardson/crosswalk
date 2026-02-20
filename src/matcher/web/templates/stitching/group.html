@@ -2,7 +2,7 @@
 <span id="group-progress-text" style="display:none">Group {{ group_index + 1 }} of {{ total_groups }}</span>
 
 <!-- Embedded geometry for map rendering -->
-<script type="application/json" id="group-geometry">{{ group_geojson | safe }}</script>
+<script type="application/json" id="group-geometry">{{ group_geojson | tojson }}</script>
 
 <!-- Group card (bottom of screen) -->
 <div class="info-card map-overlay group-card" id="group-card"
