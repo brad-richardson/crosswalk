@@ -26,6 +26,7 @@ from ..filenames import (
     find_overture_segments,
     find_target_file,
     integration_cache_dir,
+    stitch_batch_path,
 )
 from ..integration_qa.decision_store import MergedDecisionStore, OrphanDecisionStore
 from ..labeling.data_loader import (
@@ -1051,3 +1052,81 @@ def _generate_batch_from_label_store(
         f"({len(pair_ids)} requested, {len(pair_ids) - len(views)} missing)"
     )
     return views
+
+
+# --- Stitching Review service functions ---
+
+
+def load_stitch_batch(dataset_id: str) -> dict | None:
+    """Load a stitching review batch from disk.
+
+    Args:
+        dataset_id: Dataset identifier
+
+    Returns:
+        Batch dict or None if not found
+    """
+    path = stitch_batch_path(dataset_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        logger.exception("Failed to load stitch batch for %s", dataset_id)
+        return None
+
+
+def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[dict]:
+    """Filter groups to only those not yet reviewed.
+
+    Args:
+        dataset_id: Dataset identifier
+        groups: List of group dicts from the batch
+
+    Returns:
+        List of unreviewed group dicts
+    """
+    from ..labeling.stitching_store import StitchingLabelStore
+
+    store = StitchingLabelStore(dataset_id)
+    reviewed_ids = store.get_reviewed_group_ids(dataset_id)
+    return [g for g in groups if g.get("group_id") not in reviewed_ids]
+
+
+def record_stitching_label(
+    dataset_id: str,
+    group_id: str,
+    selected_option_index: int,
+    selected_edges: list[dict],
+    match_type: str,
+    num_refs: int,
+    num_targets: int,
+) -> None:
+    """Record a stitching review label.
+
+    Args:
+        dataset_id: Dataset identifier
+        group_id: Group identifier
+        selected_option_index: Which alternative was selected
+        selected_edges: List of {ref_id, target_id} dicts
+        match_type: "1:N", "N:1", or "M:N"
+        num_refs: Number of ref segments
+        num_targets: Number of target segments
+    """
+    from ..labeling.stitching_store import StitchingLabelStore
+
+    store = StitchingLabelStore(dataset_id)
+    labeler = get_labeler_name()
+    session_id = get_session_id()
+
+    store.add(
+        group_id=group_id,
+        dataset_id=dataset_id,
+        selected_option_index=selected_option_index,
+        selected_edges=selected_edges,
+        match_type=match_type,
+        num_refs=num_refs,
+        num_targets=num_targets,
+        labeler=labeler,
+        session_id=session_id,
+    )

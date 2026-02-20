@@ -22,6 +22,9 @@ LABELING_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "labeling"
 # Cache directory for integration results
 INTEGRATION_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "integration"
 
+# Cache directory for stitching review batches
+STITCH_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "stitch"
+
 # ============================================================================
 # FILENAME PATTERNS (with version suffix)
 # ============================================================================
@@ -260,3 +263,45 @@ def integration_cache_dir(dataset_name: str) -> Path:
         us_boston_streets -> data/cache/integration/us_boston_streets/
     """
     return INTEGRATION_CACHE_DIR / dataset_name
+
+
+# ============================================================================
+# GROUPS SIDECAR (stitching review)
+# ============================================================================
+
+
+def groups_sidecar_path(bridge_path: Path) -> Path:
+    """Get path to the groups sidecar JSON alongside a bridge file.
+
+    Args:
+        bridge_path: Path to the bridge parquet file
+
+    Returns:
+        Path to groups sidecar JSON
+
+    Example:
+        data/output/us_boston_streets_bridge.parquet
+        -> data/output/us_boston_streets_groups.json
+    """
+    stem = bridge_path.stem  # us_boston_streets_bridge
+    # Replace _bridge suffix with _groups
+    if stem.endswith("_bridge"):
+        stem = stem[: -len("_bridge")] + "_groups"
+    else:
+        stem = stem + "_groups"
+    return bridge_path.parent / f"{stem}.json"
+
+
+def stitch_batch_path(dataset_id: str) -> Path:
+    """Get path to stitching review batch file.
+
+    Args:
+        dataset_id: Dataset identifier (e.g., "us_boston_streets")
+
+    Returns:
+        Path to batch JSON file
+
+    Example:
+        us_boston_streets -> data/cache/stitch/us_boston_streets_batch.json
+    """
+    return STITCH_CACHE_DIR / f"{dataset_id}_batch.json"

@@ -13,6 +13,7 @@ Algorithm:
 6. Return group_results + optimized_1to1
 """
 
+import hashlib
 from collections import defaultdict, deque
 from typing import Any
 
@@ -24,6 +25,27 @@ from shapely import LineString
 
 from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
 from .types import MatchDecision, MatchResult
+
+
+def compute_group_id(ref_ids: set, target_ids: set) -> str:
+    """Compute a deterministic short ID for a match group.
+
+    Hashes sorted ref_ids + target_ids into an 8-character hex string.
+    The same set of IDs always produces the same group_id.
+
+    Args:
+        ref_ids: Set of reference segment IDs in the group
+        target_ids: Set of target segment IDs in the group
+
+    Returns:
+        8-character hex string uniquely identifying this group
+    """
+    key = (
+        "|".join(sorted(str(r) for r in ref_ids))
+        + "||"
+        + "|".join(sorted(str(t) for t in target_ids))
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
 
 
 def optimize_matches_greedy(
@@ -77,7 +99,7 @@ def optimize_matches_greedy(
     return optimal_matches
 
 
-def _find_match_components(
+def find_match_components(
     results: list[MatchResult],
     min_confidence: float,
 ) -> list[list[MatchResult]]:
@@ -268,6 +290,7 @@ def _create_group_results(
 
     ref_ids = set(r.ref_id for r in results)
     target_ids = set(r.target_id for r in results)
+    group_id = compute_group_id(ref_ids, target_ids)
 
     tagged: list[MatchResult] = []
     for r in results:
@@ -282,6 +305,7 @@ def _create_group_results(
                 features={
                     **r.features,
                     "match_type": match_type,
+                    "group_id": group_id,
                     "group_size": len(results),
                     "group_ref_count": len(ref_ids),
                     "group_target_count": len(target_ids),
@@ -826,7 +850,7 @@ def optimize_matches_with_grouping(
         target_geoms = dict(zip(target.index, target.geometry))
 
     # Step 1: Find connected components
-    components = _find_match_components(results, min_confidence)
+    components = find_match_components(results, min_confidence)
     logger.info(f"  Found {len(components)} connected components")
 
     # Step 2: Classify and resolve each component

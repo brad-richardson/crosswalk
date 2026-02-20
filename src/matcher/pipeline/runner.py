@@ -10,8 +10,9 @@ from loguru import logger
 
 from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN
-from ..filenames import extract_version_from_filename
+from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
+from ..matching.optimizer import compute_group_id, find_match_components
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.crs import ProjectionResult
@@ -172,6 +173,171 @@ class PipelineResult:
     n_screen_warned: int | None = None
 
 
+def _export_groups_sidecar(
+    results: list,
+    optimized: list,
+    output_path: Path,
+    reference: gpd.GeoDataFrame,
+    target: gpd.GeoDataFrame,
+    min_confidence: float,
+    ref_id_column: str = "id",
+    target_id_column: str = "id",
+) -> Path | None:
+    """Export a groups sidecar JSON alongside the bridge file.
+
+    For each non-1:1 connected component, serializes the group's edges,
+    optimizer assignment, and geometries (WGS84 GeoJSON) for downstream
+    stitching review.
+
+    Args:
+        results: All raw MatchResult objects (pre-optimization)
+        optimized: Optimized MatchResult objects (post-optimization)
+        output_path: Path to bridge file (sidecar written alongside)
+        reference: Reference GeoDataFrame (WGS84 / original CRS)
+        target: Target GeoDataFrame (WGS84 / original CRS)
+        min_confidence: Minimum confidence used during optimization
+        ref_id_column: Reference ID column name
+        target_id_column: Target ID column name
+
+    Returns:
+        Path to sidecar file, or None if no groups to export
+    """
+    import json
+
+    from shapely import to_geojson
+
+    # Coordinate precision for GeoJSON output. 7 decimal places in WGS84
+    # gives ~1.1cm accuracy, sufficient for road geometry display while
+    # keeping file size reasonable.
+    GEOJSON_COORD_PRECISION = 7
+
+    # Re-derive components from raw results
+    components = find_match_components(results, min_confidence)
+
+    # Build optimizer assignment lookup from optimized results
+    optimizer_edges: dict[str, list[dict]] = {}  # group_id -> list of edge dicts
+    for r in optimized:
+        gid = r.features.get("group_id")
+        if gid:
+            if gid not in optimizer_edges:
+                optimizer_edges[gid] = []
+            optimizer_edges[gid].append(
+                {
+                    "ref_id": str(r.ref_id),
+                    "target_id": str(r.target_id),
+                    "confidence": round(float(r.confidence), 4),
+                }
+            )
+
+    # Build geometry lookups
+    if ref_id_column in reference.columns:
+        ref_geom_lookup = dict(zip(reference[ref_id_column], reference.geometry))
+    else:
+        ref_geom_lookup = dict(zip(reference.index, reference.geometry))
+
+    if target_id_column in target.columns:
+        tgt_geom_lookup = dict(zip(target[target_id_column], target.geometry))
+    else:
+        tgt_geom_lookup = dict(zip(target.index, target.geometry))
+
+    groups = []
+    for component in components:
+        ref_ids = set(r.ref_id for r in component)
+        target_ids = set(r.target_id for r in component)
+
+        # Skip 1:1 components
+        if len(ref_ids) == 1 and len(target_ids) == 1:
+            continue
+
+        group_id = compute_group_id(ref_ids, target_ids)
+
+        # Classify match type
+        if len(ref_ids) == 1:
+            match_type = "1:N"
+        elif len(target_ids) == 1:
+            match_type = "N:1"
+        else:
+            match_type = "M:N"
+
+        # Serialize edges (cast numpy scalars to Python float for JSON)
+        edges = []
+        for r in component:
+            edge = {
+                "ref_id": str(r.ref_id),
+                "target_id": str(r.target_id),
+                "confidence": round(float(r.confidence), 4),
+            }
+            if r.gers_start_frac is not None:
+                edge["gers_start_frac"] = round(float(r.gers_start_frac), 4)
+                edge["gers_end_frac"] = round(float(r.gers_end_frac), 4)
+            if r.local_start_frac is not None:
+                edge["local_start_frac"] = round(float(r.local_start_frac), 4)
+                edge["local_end_frac"] = round(float(r.local_end_frac), 4)
+            edges.append(edge)
+
+        # Serialize geometries as GeoJSON with coordinate rounding
+        def _round_coords(coords):
+            """Recursively round coordinates to GEOJSON_COORD_PRECISION."""
+            if isinstance(coords[0], (list, tuple)):
+                return [_round_coords(c) for c in coords]
+            return [round(v, GEOJSON_COORD_PRECISION) for v in coords]
+
+        def _geom_to_geojson(geom) -> dict | None:
+            if geom is None or geom.is_empty:
+                return None
+            gj = json.loads(to_geojson(geom))
+            gj["coordinates"] = _round_coords(gj["coordinates"])
+            return gj
+
+        ref_geometries = {}
+        for rid in sorted(str(r) for r in ref_ids):
+            geom = ref_geom_lookup.get(rid) or ref_geom_lookup.get(
+                int(rid) if rid.isdigit() else rid
+            )
+            if geom is not None:
+                gj = _geom_to_geojson(geom)
+                if gj:
+                    ref_geometries[str(rid)] = gj
+
+        target_geometries = {}
+        for tid in sorted(str(t) for t in target_ids):
+            geom = tgt_geom_lookup.get(tid) or tgt_geom_lookup.get(
+                int(tid) if tid.isdigit() else tid
+            )
+            if geom is not None:
+                gj = _geom_to_geojson(geom)
+                if gj:
+                    target_geometries[str(tid)] = gj
+
+        groups.append(
+            {
+                "group_id": group_id,
+                "match_type": match_type,
+                "ref_ids": sorted(str(r) for r in ref_ids),
+                "target_ids": sorted(str(t) for t in target_ids),
+                "edges": edges,
+                "optimizer_assignment": optimizer_edges.get(group_id, []),
+                "ref_geometries": ref_geometries,
+                "target_geometries": target_geometries,
+            }
+        )
+
+    if not groups:
+        return None
+
+    sidecar_path = groups_sidecar_path(output_path)
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sidecar = {
+        "n_groups": len(groups),
+        "groups": groups,
+    }
+
+    sidecar_path.write_text(json.dumps(sidecar, indent=2))
+    logger.info(f"Exported {len(groups)} match groups to {sidecar_path}")
+    return sidecar_path
+
+
 def run_pipeline(
     reference_path: Path,
     target_path: Path,
@@ -286,6 +452,9 @@ def run_pipeline(
         target_class_column=target_class_column,
         n_jobs=n_jobs,
     )
+    # Keep original (WGS84) GeoDataFrames for sidecar export
+    reference_wgs84 = reference
+    target_wgs84 = target
     # Update reference/target to projected versions for downstream use
     reference = projection_result.reference
     target = projection_result.target
@@ -336,6 +505,18 @@ def run_pipeline(
         target=target,
         min_confidence=min_confidence,
         contiguity_tolerance=DEFAULT_SNAP_TOLERANCE_M,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+    )
+
+    # Export groups sidecar for stitching review (using WGS84 geometries)
+    _export_groups_sidecar(
+        results=results,
+        optimized=optimized,
+        output_path=output_path,
+        reference=reference_wgs84,
+        target=target_wgs84,
+        min_confidence=min_confidence,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
     )

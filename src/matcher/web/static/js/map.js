@@ -520,10 +520,143 @@
         loadPairGeometry();
     });
 
+    // --- Group geometry rendering (stitching review) ---
+    var GROUP_SOURCE = "group-geojson";
+    var currentGroupGeojson = null;
+
+    var GROUP_LAYER_DEFS = [
+        {
+            id: "group-assigned",
+            type: "line",
+            filter: ["==", ["get", "_assigned"], true],
+            paint: {
+                "line-color": ["get", "_assignment_color"],
+                "line-width": 5,
+                "line-opacity": 0.9,
+            },
+        },
+        {
+            id: "group-unassigned",
+            type: "line",
+            filter: ["==", ["get", "_assigned"], false],
+            paint: {
+                "line-color": "#999999",
+                "line-width": 2.5,
+                "line-opacity": 0.5,
+                "line-dasharray": [4, 4],
+            },
+        },
+    ];
+
+    function addGroupLayers() {
+        if (map.getSource(GROUP_SOURCE)) return;
+
+        map.addSource(GROUP_SOURCE, { type: "geojson", data: EMPTY_FC });
+
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            var def = GROUP_LAYER_DEFS[i];
+            map.addLayer({
+                id: def.id,
+                type: def.type,
+                source: GROUP_SOURCE,
+                filter: def.filter,
+                paint: def.paint,
+            });
+        }
+    }
+
+    function removeGroupLayers() {
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            if (map.getLayer(GROUP_LAYER_DEFS[i].id)) {
+                map.removeLayer(GROUP_LAYER_DEFS[i].id);
+            }
+        }
+        if (map.getSource(GROUP_SOURCE)) {
+            map.removeSource(GROUP_SOURCE);
+        }
+    }
+
+    /**
+     * Display group geometries on the map for stitching review.
+     *
+     * Expected: GeoJSON FeatureCollection where each feature has:
+     * - _role: "ref" or "target"
+     * - _id: segment ID
+     * - _assignment_color: hex color
+     * - _assigned: boolean
+     */
+    function showGroupGeometry(geojsonData) {
+        if (!geojsonData) {
+            currentGroupGeojson = null;
+            if (map.getSource(GROUP_SOURCE)) {
+                map.getSource(GROUP_SOURCE).setData(EMPTY_FC);
+            }
+            return;
+        }
+
+        var data;
+        if (typeof geojsonData === "string") {
+            try {
+                data = JSON.parse(geojsonData);
+            } catch (e) {
+                console.error("Failed to parse group geometry:", e);
+                return;
+            }
+        } else {
+            data = geojsonData;
+        }
+
+        currentGroupGeojson = data;
+
+        if (!map.isStyleLoaded()) return;
+        renderGroupOverlays(data);
+    }
+
+    function renderGroupOverlays(data) {
+        if (!data) return;
+
+        // Remove pair layers if present (different mode)
+        if (map.getSource(PAIR_SOURCE)) {
+            map.getSource(PAIR_SOURCE).setData(EMPTY_FC);
+        }
+
+        // Ensure context layer exists below group layers
+        if (contextVisible && contextGeojson) {
+            showContextOnMap();
+        }
+
+        addGroupLayers();
+
+        // Re-order context below groups
+        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("group-assigned")) {
+            map.moveLayer(CONTEXT_LAYER, "group-assigned");
+        }
+
+        map.getSource(GROUP_SOURCE).setData(data);
+
+        // Fit bounds
+        var bbox = geojsonBounds(data);
+        if (bbox) {
+            var isMobile = window.innerWidth < 768;
+            map.fitBounds(bbox, { padding: isMobile ? 150 : 60, animate: false });
+        }
+    }
+
+    // Re-add group overlays after style change
+    map.on("style.load", function () {
+        if (currentGroupGeojson) {
+            // Remove stale source first (style change strips them)
+            if (!map.getSource(GROUP_SOURCE)) {
+                renderGroupOverlays(currentGroupGeojson);
+            }
+        }
+    });
+
     // Expose map and helpers for console debugging and other scripts
     window.matcherMap = map;
     window.matcherPairLayer = PAIR_SOURCE;
     window.matcherShowGeometry = showPairGeometry;
+    window.matcherShowGroupGeometry = showGroupGeometry;
     window.matcherGeojsonBounds = geojsonBounds;
     window.matcherToggleContext = toggleContextLayer;
 })();

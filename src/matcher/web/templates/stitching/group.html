@@ -1,0 +1,80 @@
+<!-- Hidden progress text for JS to read after HTMX swap -->
+<span id="group-progress-text" style="display:none">Group {{ group_index + 1 }} of {{ total_groups }}</span>
+
+<!-- Embedded geometry for map rendering -->
+<script type="application/json" id="group-geometry">{{ group_geojson | safe }}</script>
+
+<!-- Group card (bottom of screen) -->
+<div class="info-card map-overlay group-card" id="group-card"
+     data-group-index="{{ group_index }}"
+     data-group-id="{{ group.group_id }}">
+
+    <!-- Match type badge + segment counts -->
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
+            {{ group.match_type }}
+        </span>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">
+            {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
+        </span>
+        {% if group.review_tier is defined %}
+        <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: auto;">
+            {{ group.review_tier }}
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Option selector pills -->
+    {% if group.alternatives is defined and group.alternatives | length > 0 %}
+    <div class="option-pills">
+        {% for alt in group.alternatives %}
+        <button class="option-pill{% if loop.index0 == option_index %} active{% endif %}"
+                onclick="selectOption({{ loop.index0 }})">
+            {{ loop.index }}
+        </button>
+        {% endfor %}
+    </div>
+
+    <!-- Current option details -->
+    {% set current_option = group.alternatives[option_index] %}
+    <div style="margin: 8px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="pair-confidence">
+                Confidence: {{ "%.2f" | format(current_option.total_confidence) }}
+            </span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">
+                Option {{ option_index + 1 }} of {{ group.alternatives | length }}
+            </span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">
+            {{ current_option.summary }}
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Action buttons -->
+    <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <form style="flex: 1;"
+              hx-post="/stitching-review/select"
+              hx-target="#group-content"
+              hx-swap="innerHTML">
+            <input type="hidden" name="dataset" value="{{ dataset }}">
+            <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <input type="hidden" name="group_index" value="{{ group_index }}">
+            <input type="hidden" name="option_index" value="{{ option_index }}">
+            <button type="submit" class="btn-select">
+                Select This
+            </button>
+        </form>
+
+        <form hx-post="/stitching-review/skip"
+              hx-target="#group-content"
+              hx-swap="innerHTML">
+            <input type="hidden" name="dataset" value="{{ dataset }}">
+            <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <button type="submit" class="btn-skip-stitch">
+                Skip
+            </button>
+        </form>
+    </div>
+</div>
