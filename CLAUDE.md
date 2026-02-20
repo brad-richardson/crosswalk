@@ -118,6 +118,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture inclu
 - Decision thresholds (ML scoring vs optimizer settings)
 - Test coverage matrix for consistency
 
+### Coverage Asymmetry
+
+Reference (Overture) and target (local) datasets often have very different segmentation strategies. A short local segment (10m) matched against a long Overture segment (1km) will have `target_coverage ≈ 1.0` but `ref_coverage ≈ 0.01`. When filtering by coverage, prefer `max(ref_coverage, target_coverage)` over `min_coverage` — the latter unfairly penalizes legitimate matches with asymmetric segmentation.
+
 ### Backfill Architecture
 
 **The backfill command MUST remain a thin wrapper around the shared pipeline.**

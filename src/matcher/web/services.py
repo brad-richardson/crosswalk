@@ -934,8 +934,23 @@ def _generate_batch_from_label_store(
     Returns:
         List of CandidatePairView objects for the specified pairs
     """
+    from ..features.alignment import create_subline
+
     feature_store = FeatureStore(dataset_id)
     data_store = DataStore(dataset_id)
+
+    # Load label metadata to get alignment fractions
+    label_store = LabelStore(dataset_id)
+    labels_df = label_store.df
+    alignment_lookup = {}
+    for _, row in labels_df.iterrows():
+        key = (str(row["gers_id"]), str(row["target_id"]))
+        alignment_lookup[key] = {
+            "ref_start_frac": float(row.get("ref_start_pct", 0.0)),
+            "ref_end_frac": float(row.get("ref_end_pct", 1.0)),
+            "target_start_frac": float(row.get("target_start_pct", 0.0)),
+            "target_end_frac": float(row.get("target_end_pct", 1.0)),
+        }
 
     # Collect features and geometry data for requested pairs
     features_for_prediction = []
@@ -981,12 +996,33 @@ def _generate_batch_from_label_store(
 
         score_breakdown = _compute_score_breakdown_from_features(feature_dict)
 
+        # Get alignment fractions from label metadata
+        alignment = alignment_lookup.get(
+            (ref_id, target_id),
+            {
+                "ref_start_frac": 0.0,
+                "ref_end_frac": 1.0,
+                "target_start_frac": 0.0,
+                "target_end_frac": 1.0,
+            },
+        )
+        ref_start = alignment["ref_start_frac"]
+        ref_end = alignment["ref_end_frac"]
+        target_start = alignment["target_start_frac"]
+        target_end = alignment["target_end_frac"]
+
+        # Build aligned sub-geometries from fractions
+        ref_geom = data["ref_geometry"]
+        target_geom = data["target_geometry"]
+        ref_aligned = create_subline(ref_geom, ref_start, ref_end)
+        target_aligned = create_subline(target_geom, target_start, target_end)
+
         views.append(
             CandidatePairView(
                 ref_id=ref_id,
                 target_id=target_id,
-                ref_geometry=data["ref_geometry"],
-                target_geometry=data["target_geometry"],
+                ref_geometry=ref_geom,
+                target_geometry=target_geom,
                 ref_name=display_name(data.get("ref_names")),
                 target_name=display_name(data.get("target_names")),
                 ref_class=data.get("ref_class"),
@@ -997,6 +1033,12 @@ def _generate_batch_from_label_store(
                 features=feature_dict,
                 ref_topology=data.get("ref_topology"),
                 target_topology=data.get("target_topology"),
+                ref_aligned_geometry=ref_aligned,
+                target_aligned_geometry=target_aligned,
+                ref_start_frac=ref_start,
+                ref_end_frac=ref_end,
+                target_start_frac=target_start,
+                target_end_frac=target_end,
             )
         )
 

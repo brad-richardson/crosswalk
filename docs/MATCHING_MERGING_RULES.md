@@ -2,11 +2,17 @@
 
 Defines the two-stage pipeline for road network conflation: **stitch** (pair matching + graph-level resolution + M:N optimization) and **merge** (network integration). The README has a concise summary; this document is the full reference.
 
+### Pipeline Contract
+
+- **Pair Matching** answers: "Are these the same physical traveled way?"
+- **Graph-Level Resolution** answers: "Which of these matches can coexist in a consistent network mapping?"
+- **Merging** answers: "How do we modify the base network given accepted matches?"
+
 ---
 
 ## Section 1: Pair Matching Rules (Pure Identity)
 
-Pair matching determines whether two segments represent the same physical traveled way. It is intentionally recall-biased — over-matching is acceptable because graph-level resolution (Section 2) resolves false positives using graph context. Pair matching does **not** enforce graph consistency.
+Pair matching determines whether two segments represent the same physical traveled way. Pair matching is intentionally recall-biased. Borderline same-role overlaps should be labeled as matches; graph-level resolution (Section 2) enforces consistency and resolves conflicts. Pair matching does **not** enforce graph consistency.
 
 ### Core Principle
 
@@ -36,7 +42,7 @@ Every segment in a transportation network serves one of three roles. Match compa
 
 #### ALONG — Longitudinal / Corridor Movement
 
-Movement along a facility. The most common role. This includes short intersection-internal slices that some datasets produce to represent continuity inside a junction — these are treated as ALONG segments (they naturally receive low confidence due to short overlap length).
+Movement along a facility. The most common role. This includes short intersection-internal slices that some datasets produce to represent continuity inside a junction — these are treated as ALONG segments.
 
 Examples: road mainline, bike lane along a road, sidewalk along a street, rail track segment, canal segment, intersection-internal centerline slices.
 
@@ -76,7 +82,7 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — graph-level resolution resolves |
+| Short overlap at intersection | Match | Same traveled way; graph-level resolution evaluates consistency |
 | Short colinear overlap near node | Match | Same traveled way for that subsegment; graph-level resolution resolves |
 | Road mainline vs slip road/ramp | No Match | Different roles: ALONG vs TURN |
 | Bike lane on same pavement as road | Match (to road) | Same physical surface, ALONG + ALONG |
@@ -90,7 +96,7 @@ Geometric overlap at an intersection is not sufficient when roles differ. Many d
 
 #### Same-Role Overlaps Near Intersections
 
-If any subsegment represents the same physical traveled way, it is a match regardless of length. Small gaps from GPS noise, digitization offset, or simplification do not disqualify. Pair matching is intentionally recall-biased — over-matching is acceptable because graph-level resolution (Section 2) resolves false positives using graph context.
+If any subsegment represents the same physical traveled way, it is a match regardless of length. Length alone is not a disqualifier in pair matching; short overlaps are resolved at the graph level. Small gaps from GPS noise, digitization offset, or simplification do not disqualify.
 
 For same-role overlaps near intersection nodes:
 1. If the segments share a subsegment along the same direction, they are a match
@@ -101,7 +107,7 @@ For same-role overlaps near intersection nodes:
 The ML classifier operates as a pair-level identity matcher:
 
 - Primarily 1:1 correspondences (with M:N for split carriageways / different segmentation)
-- Recall-biased: over-matching is acceptable; graph-level resolution resolves false positives
+- Recall-biased: borderline same-role overlaps should be matches; graph-level resolution resolves conflicts
 - Pair matching does not enforce graph consistency
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
 
@@ -129,12 +135,13 @@ In junction zones:
 - Short overlaps are provisional anchors (not automatically rejected)
 - Multiple candidates may temporarily exist
 - Final acceptance requires neighborhood consistency (Section 2.4)
+- Junction anchors preserve topological continuity but do not automatically authorize attribute transfer
 
-### 2.3 Match Roles
+### 2.3 Resolution Status
 
-Graph-level resolution assigns each match a role reflecting its graph-level status:
+Graph-level resolution assigns each match a status reflecting its graph-level outcome:
 
-| Role | Description |
+| Status | Description |
 |------|-------------|
 | **STRONG_EDGE** | High-confidence corridor match with neighbor agreement |
 | **JUNCTION_ANCHOR** | Short overlap near intersection, preserved for topology continuity |
@@ -144,7 +151,7 @@ Graph-level resolution assigns each match a role reflecting its graph-level stat
 ### 2.4 Neighborhood Consistency
 
 A match survives graph-level resolution if:
-- It is supported by at least one adjacent segment mapping into the same base neighborhood, OR
+- It is supported by at least one adjacent segment whose accepted match shares a node or corridor with the candidate reference segment, OR
 - It is the only geometrically plausible mapping within a defined corridor
 
 Matches without neighborhood support are demoted to AMBIGUOUS and may be rejected if competing candidates exist.
@@ -155,6 +162,7 @@ When multiple matches compete for the same segment:
 1. Prefer longer overlap
 2. Prefer better role compatibility
 3. Prefer neighborhood-supported candidates
+4. Prefer corridor-continuous candidates over isolated short matches
 
 Cap max matches per segment except for defined M:N split cases (e.g., dual carriageway).
 
@@ -176,7 +184,7 @@ Graph-level resolution produces:
 ### 3.1 Geometry Policy
 
 For each accepted match, determine how to handle geometry:
-- **Replace**: Use reference geometry (default for high-confidence matches)
+- **Replace**: Use reference geometry (default for STRONG_EDGE matches)
 - **Average**: Blend reference and target geometry (for moderate confidence)
 - **Keep**: Retain target geometry as-is (when reference geometry is lower quality)
 
@@ -192,7 +200,7 @@ Transfer attributes from target to reference based on:
 Unmatched target segments are candidates for addition to the reference network. Gating criteria:
 - Must pass screening (not water, not building, not landcover)
 - Must pass minimum length and connectivity checks
-- **Key rule**: Unmatched segments inside junction zones should NOT automatically be treated as net new — they must pass additional absence checks to confirm the reference network genuinely lacks this feature
+- **Key rule**: Unmatched segments inside junction zones require explicit absence confirmation before being classified as net new — they must pass additional absence checks to confirm the reference network genuinely lacks this feature
 
 ### 3.4 Provenance
 
