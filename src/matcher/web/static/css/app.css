@@ -835,6 +835,28 @@ body {
     font-weight: 600;
 }
 
+/* === Context Toggle Control === */
+.context-toggle-btn {
+    padding: 4px 10px;
+    border: none;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    text-align: left;
+}
+
+.context-toggle-btn:hover {
+    background: var(--hover-bg);
+}
+
+.context-toggle-btn.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-weight: 600;
+}
+
 /* === Desktop Features Panel (>= 769px) === */
 @media (min-width: 769px) {
     .info-card {

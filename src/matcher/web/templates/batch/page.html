@@ -160,6 +160,9 @@
             case 'm': label = 'match'; break;
             case 'n': label = 'no_match'; break;
             case 'u': label = 'unsure'; break;
+            case 'c':
+                if (window.matcherToggleContext) window.matcherToggleContext();
+                return;
             case 'f':
                 toggleFeatures();
                 return;
