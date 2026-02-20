@@ -13,9 +13,8 @@ import pandas as pd
 class EvalMode(Enum):
     """What kind of output a tool produces for evaluation."""
 
-    PAIR_MATCH = "pair_match"  # Pair-level match identification
+    STITCH = "stitch"  # Pair matching + M:N optimization
     # Future:
-    # STITCH = "stitch"              # Graph-level consistency evaluation
     # MERGE = "merge"                # Integration quality evaluation
 
 

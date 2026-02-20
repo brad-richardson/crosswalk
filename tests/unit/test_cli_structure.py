@@ -22,11 +22,11 @@ def strip_ansi(text: str) -> str:
 class TestTopLevelCommands:
     """Test that top-level commands are accessible."""
 
-    def test_match_help(self):
-        """Test match command is at top level."""
-        result = runner.invoke(app, ["match", "--help"])
+    def test_stitch_help(self):
+        """Test stitch command is at top level."""
+        result = runner.invoke(app, ["stitch", "--help"])
         assert result.exit_code == 0
-        assert "matching pipeline" in result.output.lower()
+        assert "stitch pipeline" in result.output.lower()
 
     def test_train_help(self):
         """Test train command is at top level."""
@@ -303,7 +303,7 @@ class TestMainAppStructure:
         output = strip_ansi(result.output)
 
         # Top-level commands
-        assert "match" in output.lower()
+        assert "stitch" in output.lower()
         assert "train" in output.lower()
         assert "eval" in output.lower()
         assert "backfill" in output.lower()
@@ -322,92 +322,3 @@ class TestMainAppStructure:
         # no_args_is_help=True shows help with exit code 0 or 2 depending on Typer version
         assert result.exit_code in (0, 2)
         assert "Usage:" in result.output
-
-
-class TestOldCommandsRemoved:
-    """Test that old command paths are no longer valid."""
-
-    def test_old_fetch_command_not_at_top_level(self):
-        """Old 'matcher fetch' should not work directly."""
-        result = runner.invoke(app, ["fetch", "--help"])
-        # Should fail since fetch is now under data
-        assert result.exit_code != 0
-        assert "No such command 'fetch'" in result.output
-
-    def test_old_eval_model_not_at_top_level(self):
-        """Old 'matcher eval-model' should not work."""
-        result = runner.invoke(app, ["eval-model", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_eval_bridge_not_at_top_level(self):
-        """Old 'matcher eval-bridge' should not work."""
-        result = runner.invoke(app, ["eval-bridge", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_topology_not_at_top_level(self):
-        """Old 'matcher topology' should not work (now data topology)."""
-        result = runner.invoke(app, ["topology", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_discover_classes_not_at_top_level(self):
-        """Old 'matcher discover-classes' should not work (now class discover)."""
-        result = runner.invoke(app, ["discover-classes", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_qa_integration_not_at_top_level(self):
-        """Old 'matcher qa-integration' should not work (now matcher ui)."""
-        result = runner.invoke(app, ["qa-integration", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_label_not_at_top_level(self):
-        """Old 'matcher label' should not work (now matcher ui)."""
-        result = runner.invoke(app, ["label", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_match_eval_not_at_top_level(self):
-        """Old 'matcher match-eval' should not work (now analyze bridge)."""
-        result = runner.invoke(app, ["match-eval", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_screen_not_at_top_level(self):
-        """Old 'matcher screen' should not work (now analyze screen)."""
-        result = runner.invoke(app, ["screen", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_ml_eval_not_available(self):
-        """Old 'matcher ml eval' should not work (now matcher eval)."""
-        result = runner.invoke(app, ["ml", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_labels_backfill_not_available(self):
-        """Old 'matcher labels backfill' should not work (now matcher backfill)."""
-        result = runner.invoke(app, ["labels", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_integrate_run_not_available(self):
-        """Old 'matcher integrate run' should not work (now analyze integrate)."""
-        result = runner.invoke(app, ["integrate", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_validate_matching_not_available(self):
-        """Old 'matcher validate matching' should not work (now analyze validate)."""
-        result = runner.invoke(app, ["validate", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output
-
-    def test_old_ml_features_not_available(self):
-        """Old 'matcher ml features' should not work (now data cache)."""
-        result = runner.invoke(app, ["ml", "features", "--help"])
-        assert result.exit_code != 0
-        assert "No such command" in result.output

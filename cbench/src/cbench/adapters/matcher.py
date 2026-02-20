@@ -1,4 +1,4 @@
-"""Matcher tool adapter - shells out to `matcher match` CLI."""
+"""Matcher tool adapter - shells out to `matcher stitch` CLI."""
 
 from __future__ import annotations
 
@@ -14,14 +14,14 @@ from cbench.adapters.base import EvalMode, ToolOutput
 class MatcherAdapter:
     """Adapter for the matcher road conflation tool.
 
-    Runs `matcher match` via subprocess and parses the bridge parquet output.
+    Runs `matcher stitch` via subprocess and parses the bridge parquet output.
     """
 
     name: str = "matcher"
-    eval_mode: EvalMode = EvalMode.PAIR_MATCH
+    eval_mode: EvalMode = EvalMode.STITCH
 
     def run(self, reference: Path, target: Path, output_dir: Path, **kwargs) -> Path:
-        """Run matcher match and return path to bridge parquet.
+        """Run matcher stitch and return path to bridge parquet.
 
         Args:
             reference: Path to reference (Overture) parquet.
@@ -40,7 +40,7 @@ class MatcherAdapter:
 
         cmd = [
             "matcher",
-            "match",
+            "stitch",
             str(reference),
             str(target),
             "-m",
@@ -55,11 +55,11 @@ class MatcherAdapter:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"matcher match timed out after {timeout}s") from exc
+            raise RuntimeError(f"matcher stitch timed out after {timeout}s") from exc
 
         if result.returncode != 0:
-            logger.error(f"matcher match failed:\n{result.stderr}")
-            raise RuntimeError(f"matcher match exited with code {result.returncode}")
+            logger.error(f"matcher stitch failed:\n{result.stderr}")
+            raise RuntimeError(f"matcher stitch exited with code {result.returncode}")
 
         if not bridge_path.exists():
             raise FileNotFoundError(f"Expected output not found: {bridge_path}")

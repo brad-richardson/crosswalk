@@ -104,21 +104,20 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ---
 
-## Pipeline Architecture: Match → Stitch → Merge
+## Pipeline Architecture: Stitch → Merge
 
-### Implement Stitching Stage in Matcher Pipeline
+### Stitch Pipeline — Graph-Level Resolution (Planned)
 
-**Priority:** HIGH
-**Status:** Design complete (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
+**Priority:** Medium
+**Status:** Core pipeline implemented (`matcher stitch`); graph-level resolution planned (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
 
-Implement graph-level match resolution as a post-scoring step in the matcher pipeline:
+`matcher stitch` currently runs: candidate generation → feature computation → ML scoring → M:N optimization. The following graph-level resolution features would run after scoring and before optimization:
+
 - Junction zone detection (degree≠2 node proximity)
 - Match role assignment (STRONG_EDGE, JUNCTION_ANCHOR, PARALLEL_COMPANION, AMBIGUOUS)
 - Neighborhood consistency enforcement
 - Conflict resolution for competing matches
 - Confidence promotion/demotion based on graph context
-
-Should run after pair scoring and before 1:N optimization.
 
 **Location:** New module `src/matcher/stitching/` or extend `src/matcher/matching/`
 
@@ -134,13 +133,11 @@ Formalize the merge step as a distinct stage with explicit policy:
 
 Currently partially implemented in `src/matcher/integration/`.
 
-### CLI: Separate Match, Stitch, Merge Commands
+### CLI: Separate Stitch and Merge Commands
 
 **Priority:** Medium
 
-Make the three-stage pipeline explicit in the CLI:
-- `matcher match` — Pair matching (exists, may need scope refinement)
-- `matcher stitch` — Graph-level resolution (new)
+- `matcher stitch` — Pair matching + M:N optimization (done)
 - `matcher merge` — Network integration (currently `matcher analyze integrate`, rename/restructure)
 
 ### cbench: Stage-Level Evaluation
@@ -148,9 +145,10 @@ Make the three-stage pipeline explicit in the CLI:
 **Priority:** Medium
 
 Add evaluation modes to cbench for each pipeline stage:
-- **Pair matching**: Pair-level F1 (exists as `--match-level pair`)
-- **Stitching**: Graph consistency metrics (new) — junction coverage, gap rate, false net-new rate
-- **Merging**: Integration quality metrics
+- **Stitch**: Graph consistency metrics (planned) — junction coverage, gap rate, false net-new rate
+- **Merging**: Integration quality metrics (planned)
+
+Pair-level F1 already exists as `--match-level pair`.
 
 **Location:** `cbench/src/cbench/eval/`
 

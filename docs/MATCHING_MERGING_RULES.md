@@ -1,12 +1,12 @@
 # Matching & Merging Rules — Canonical Ruleset
 
-Defines the three-stage pipeline for road network conflation: **pair matching** (identity), **stitching** (graph consistency), and **merging** (network integration). The README has a concise summary; this document is the full reference.
+Defines the two-stage pipeline for road network conflation: **stitch** (pair matching + graph-level resolution + M:N optimization) and **merge** (network integration). The README has a concise summary; this document is the full reference.
 
 ---
 
 ## Section 1: Pair Matching Rules (Pure Identity)
 
-Pair matching determines whether two segments represent the same physical traveled way. It is intentionally recall-biased — over-matching is acceptable because stitching (Section 2) resolves false positives using graph context. Pair matching does **not** enforce graph consistency.
+Pair matching determines whether two segments represent the same physical traveled way. It is intentionally recall-biased — over-matching is acceptable because graph-level resolution (Section 2) resolves false positives using graph context. Pair matching does **not** enforce graph consistency.
 
 ### Core Principle
 
@@ -76,8 +76,8 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — stitching resolves |
-| Short colinear overlap near node | Match | Same traveled way for that subsegment; stitching resolves |
+| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — graph-level resolution resolves |
+| Short colinear overlap near node | Match | Same traveled way for that subsegment; graph-level resolution resolves |
 | Road mainline vs slip road/ramp | No Match | Different roles: ALONG vs TURN |
 | Bike lane on same pavement as road | Match (to road) | Same physical surface, ALONG + ALONG |
 | Separated cycle track (raised/curbed) | No Match (to road) | Different physical feature |
@@ -90,18 +90,18 @@ Geometric overlap at an intersection is not sufficient when roles differ. Many d
 
 #### Same-Role Overlaps Near Intersections
 
-If a contiguous subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because stitching (Section 2) resolves false positives using graph context.
+If any subsegment represents the same physical traveled way, it is a match regardless of length. Small gaps from GPS noise, digitization offset, or simplification do not disqualify. Pair matching is intentionally recall-biased — over-matching is acceptable because graph-level resolution (Section 2) resolves false positives using graph context.
 
 For same-role overlaps near intersection nodes:
-1. If the segments share a contiguous subsegment along the same direction, they are a match
-2. Stitching decides whether to keep, demote, or reject based on neighborhood context
+1. If the segments share a subsegment along the same direction, they are a match
+2. Graph-level resolution decides whether to keep, demote, or reject based on neighborhood context
 
 ### Pair Matching Scope
 
 The ML classifier operates as a pair-level identity matcher:
 
 - Primarily 1:1 correspondences (with M:N for split carriageways / different segmentation)
-- Recall-biased: over-matching is acceptable; stitching resolves false positives
+- Recall-biased: over-matching is acceptable; graph-level resolution resolves false positives
 - Pair matching does not enforce graph consistency
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
 
@@ -111,13 +111,13 @@ A helpful mental model: if replacing one aligned subline with the other would ch
 
 ---
 
-## Section 2: Stitching Rules (Graph-Level Match Resolution)
+## Section 2: Graph-Level Resolution (Planned)
 
-> **Status: Planned** — Not yet implemented in code. Defines the target architecture for graph-level match resolution.
+> **Status: Planned** — Not yet implemented in code. This stage runs within the stitch pipeline after pair scoring and before M:N optimization.
 
 ### 2.1 Purpose
 
-Stitching resolves pairwise matches into a coherent network mapping. It may promote, demote, or reject matches based on graph context. The goal is to enforce topological consistency across the match set without losing identity signal from pair matching.
+Graph-level resolution resolves pairwise matches into a coherent network mapping. It may promote, demote, or reject matches based on graph context. The goal is to enforce topological consistency across the match set without losing identity signal from pair matching.
 
 ### 2.2 Junction Zones
 
@@ -132,7 +132,7 @@ In junction zones:
 
 ### 2.3 Match Roles
 
-Stitching assigns each match a role reflecting its graph-level status:
+Graph-level resolution assigns each match a role reflecting its graph-level status:
 
 | Role | Description |
 |------|-------------|
@@ -143,7 +143,7 @@ Stitching assigns each match a role reflecting its graph-level status:
 
 ### 2.4 Neighborhood Consistency
 
-A match survives stitching if:
+A match survives graph-level resolution if:
 - It is supported by at least one adjacent segment mapping into the same base neighborhood, OR
 - It is the only geometrically plausible mapping within a defined corridor
 
@@ -158,9 +158,9 @@ When multiple matches compete for the same segment:
 
 Cap max matches per segment except for defined M:N split cases (e.g., dual carriageway).
 
-### 2.6 Stitching Output
+### 2.6 Output
 
-Stitching produces:
+Graph-level resolution produces:
 - **Final accepted matches** with upgraded/downgraded confidence
 - **Unmatched segments** classified as:
   - Likely covered (match exists nearby but didn't meet threshold)

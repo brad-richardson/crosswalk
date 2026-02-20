@@ -18,13 +18,11 @@ The bridge file enables:
 
 ## Pipeline Stages
 
-The conflation pipeline has three stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
+The conflation pipeline has two stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
 
-1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Intentionally recall-biased (over-matching is acceptable). Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
+1. **Stitch** (`matcher stitch`) — Candidate generation, feature computation, ML pair scoring, and M:N optimization. Pair matching is intentionally recall-biased (over-matching is acceptable). Graph-level resolution *(planned)* will add junction consistency enforcement, conflict resolution, and confidence promotion/demotion based on neighborhood context. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity), [Section 2](docs/MATCHING_MERGING_RULES.md#section-2-graph-level-resolution-planned))
 
-2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
-
-3. **Merging** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_MERGING_RULES.md#section-3-merging-rules-network-integration))
+2. **Merge** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_MERGING_RULES.md#section-3-merging-rules-network-integration))
 
 ### What Is a Match?
 
@@ -52,12 +50,12 @@ Matching is constrained by the segment's role in the network.
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — stitching resolves |
-| Short colinear overlap near node | Match | Same traveled way for that subsegment; stitching resolves |
+| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — graph-level resolution resolves |
+| Short colinear overlap near node | Match | Same traveled way for that subsegment; graph-level resolution resolves |
 
 ### Intersection Rule
 
-Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because stitching resolves false positives.
+Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if any subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because the graph-level resolution stage resolves false positives.
 
 ### M:N Matching
 
@@ -75,11 +73,11 @@ flowchart TB
         C --> D[Fetch Overture Reference]
     end
 
-    subgraph Match["2. Matching Pipeline"]
+    subgraph Match["2. Stitch Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
         E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
-        F --> G["Score with XGBoost<br/>(Pair Matching)"]
-        G --> H["Stitch<br/>(Planned) Graph-level resolution"]
+        F --> G[Score with XGBoost]
+        G --> H["Graph-Level Resolution<br/>(Planned)"]
         H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
         I --> J{Quality<br/>Acceptable?}
     end
@@ -125,14 +123,14 @@ matcher data fetch all us_boston_streets
 matcher train
 
 # 3. Run matching
-matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+matcher stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
 # 4. If match quality needs improvement, label more examples (auto-discovers datasets)
 matcher ui
 
 # 5. Retrain and re-match until satisfied
-matcher train && matcher match ...
+matcher train && matcher stitch ...
 ```
 
 ## Installation
@@ -194,7 +192,7 @@ matcher data fetch list
 
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions on adding new datasets.
 
-### Step 2: Feature Computation & Matching
+### Step 2: Stitch (Feature Computation + Matching + Optimization)
 
 The matcher computes 72 features for each candidate pair across 16 categories:
 
@@ -220,7 +218,7 @@ The matcher computes 72 features for each candidate pair across 16 categories:
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
 
 ```bash
-matcher match data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+matcher stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 ```
 
@@ -270,7 +268,7 @@ matcher class discover data/raw/new_dataset.parquet \
 
 | Command | Description |
 |---------|-------------|
-| `matcher match` | Run the matching pipeline |
+| `matcher stitch` | Run the stitch pipeline (pair matching + M:N optimization) |
 | `matcher train` | Train ML model on labeled data |
 | `matcher eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
 | `matcher backfill` | Recompute features for labeled pairs |

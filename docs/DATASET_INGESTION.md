@@ -121,10 +121,10 @@ Or fetch target + reference together:
 matcher data fetch all xx_example_sidewalks
 ```
 
-## 5) Run matching
+## 5) Run stitch pipeline
 
 ```bash
-matcher match \
+matcher stitch \
   data/raw/xx_example_sidewalks_overture_segments_*.parquet \
   data/raw/xx_example_sidewalks_target_*.parquet \
   -o data/output/xx_example_sidewalks_bridge.parquet
@@ -182,4 +182,4 @@ This writes `quality_fingerprint` into the dataset YAML for regression checks.
 - `matcher data fetch verify` passes
 - `matcher data fetch target` succeeds
 - `matcher data fetch reference -s overture` succeeds
-- `matcher match` runs and produces bridge output
+- `matcher stitch` runs and produces bridge output

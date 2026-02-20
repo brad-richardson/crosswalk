@@ -16,7 +16,7 @@ from cbench.runner import run_single
 @dataclass
 class _FakeAdapter:
     name: str = "fake"
-    eval_mode: EvalMode = EvalMode.RAW_MATCH
+    eval_mode: EvalMode = EvalMode.STITCH
 
     def run(self, reference, target, output_dir, **kwargs):
         output_dir.mkdir(parents=True, exist_ok=True)

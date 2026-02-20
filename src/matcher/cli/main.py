@@ -528,7 +528,7 @@ def register_commands(app: typer.Typer) -> None:
     """Register top-level commands on the given app."""
 
     @app.command()
-    def match(
+    def stitch(
         reference: Path = typer.Argument(..., help="Reference edges (Overture)"),
         target: Path = typer.Argument(..., help="Target edges (local data)"),
         output: Path = typer.Option(
@@ -561,13 +561,13 @@ def register_commands(app: typer.Typer) -> None:
             help="Enable per-feature timing breakdown (sets MATCHER_PROFILE=1)",
         ),
     ):
-        """Run the full matching pipeline."""
+        """Run the stitch pipeline (pair matching + M:N optimization)."""
         from ..pipeline import run_pipeline
 
         if profile:
             os.environ["MATCHER_PROFILE"] = "1"
 
-        console.print("[blue]Running matching pipeline...[/blue]")
+        console.print("[blue]Running stitch pipeline...[/blue]")
         console.print(f"  Reference: {reference}")
         console.print(f"  Target: {target}")
         console.print(f"  Method: {method}")
@@ -582,7 +582,7 @@ def register_commands(app: typer.Typer) -> None:
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task("Matching...", total=None)
+            task = progress.add_task("Stitching...", total=None)
 
             result = run_pipeline(
                 reference_path=reference,

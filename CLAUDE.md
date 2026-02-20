@@ -147,12 +147,12 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-uv run matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher stitch data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-uv run matcher match data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher stitch data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
 

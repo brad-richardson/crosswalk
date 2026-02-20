@@ -25,7 +25,7 @@ class TestMatcherAdapter:
     def test_name_and_eval_mode(self):
         adapter = MatcherAdapter()
         assert adapter.name == "matcher"
-        assert adapter.eval_mode == EvalMode.PAIR_MATCH
+        assert adapter.eval_mode == EvalMode.STITCH
 
     @patch("cbench.adapters.matcher.subprocess.run")
     def test_run_calls_matcher_cli(self, mock_run, tmp_path):
@@ -53,7 +53,7 @@ class TestMatcherAdapter:
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "matcher"
-        assert cmd[1] == "match"
+        assert cmd[1] == "stitch"
 
     def test_parse_output(self, tmp_path):
         bridge_path = tmp_path / "bridge.parquet"
@@ -91,4 +91,4 @@ class TestHootAdapter:
 
         adapter = HootAdapter()
         assert adapter.name == "hootenanny"
-        assert adapter.eval_mode == EvalMode.PAIR_MATCH
+        assert adapter.eval_mode == EvalMode.STITCH

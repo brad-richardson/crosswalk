@@ -247,15 +247,14 @@ A "no_match" means: not the correct correspondence — either a different physic
 
     # Section 2: Label definitions
     prompt += """LABELS:
-- match: Same physical traveled way with same network role and >=10% spatial overlap
-- no_match: Different features, different network roles, or segments that do not spatially overlap
+- match: Same physical traveled way with same network role and spatial overlap (small gaps from GPS noise, digitization offset, or simplification do not disqualify)
+- no_match: Different features, different network roles, or segments with no spatial overlap (not even accounting for GPS noise or digitization offset)
 - unsure: Ambiguous cases where reasonable people would disagree
 
 NETWORK ROLES (constrains what can match):
-- ALONG: Longitudinal movement (road mainlines, bike lanes, sidewalks). Matches only ALONG.
+- ALONG: Longitudinal movement (road mainlines, bike lanes, sidewalks, intersection-internal slices). Matches only ALONG.
 - ACROSS: Crossing movement (crosswalks, rail crossings). Never matches ALONG or TURN.
 - TURN: Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns). Matches only same role+intent.
-- INTERNAL: Intersection-scoped slices. May match other INTERNAL with same through-movement.
 
 """
 
@@ -287,9 +286,8 @@ ML FEATURE REFERENCE (rough thresholds for context):
 These are guidelines only - always defer to the image over raw numbers.
 
 INTERSECTION RULE:
-- Overlap only at/inside an intersection is NOT sufficient for a match.
-- For a match near an intersection node, the target must continue >=10m past the reference node along the shared direction while staying aligned.
-- Exception: both segments entirely inside the same intersection footprint representing the same through-movement may match (rare).
+- Overlap only at/inside an intersection is NOT sufficient for a match when roles differ (e.g., crosswalk overlapping a road).
+- For same-role overlaps near intersections: if any subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is recall-biased — over-matching is acceptable.
 
 NO_MATCH EXAMPLES:
 - Two lines running parallel but visually offset (separate infrastructure)
@@ -300,12 +298,11 @@ NO_MATCH EXAMPLES:
 - Segments that share an intersection endpoint but continue in different directions
 - Road mainline vs crosswalk at intersection (ALONG vs ACROSS)
 - Road mainline vs turn lane/ramp (ALONG vs TURN)
-- Segments that overlap only inside an intersection then diverge
 
 MATCH EXAMPLES:
 - Lines that overlap on the same path (even with different class labels)
 - Same road with 3-5m digitization offset along its length
-- Segments of different lengths that share overlapping portions (>=10%)
+- Segments of different lengths that share any overlapping portion
 - Centerline matched to one carriageway of a divided road
 - Same feature with different names or abbreviations
 
