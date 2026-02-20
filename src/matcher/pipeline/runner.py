@@ -173,6 +173,11 @@ class PipelineResult:
     n_screen_warned: int | None = None
 
 
+# Coordinate precision for GeoJSON output in groups sidecar.
+# 7 decimal places in WGS84 gives ~1.1cm accuracy.
+GEOJSON_COORD_PRECISION = 7
+
+
 def _export_groups_sidecar(
     results: list,
     optimized: list,
@@ -205,11 +210,6 @@ def _export_groups_sidecar(
     import json
 
     from shapely import to_geojson
-
-    # Coordinate precision for GeoJSON output. 7 decimal places in WGS84
-    # gives ~1.1cm accuracy, sufficient for road geometry display while
-    # keeping file size reasonable.
-    GEOJSON_COORD_PRECISION = 7
 
     # Re-derive components from raw results
     components = find_match_components(results, min_confidence)
