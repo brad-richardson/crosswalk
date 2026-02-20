@@ -18,7 +18,7 @@ class MatcherAdapter:
     """
 
     name: str = "matcher"
-    eval_mode: EvalMode = EvalMode.RAW_MATCH
+    eval_mode: EvalMode = EvalMode.PAIR_MATCH
 
     def run(self, reference: Path, target: Path, output_dir: Path, **kwargs) -> Path:
         """Run matcher match and return path to bridge parquet.

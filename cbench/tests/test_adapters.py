@@ -25,7 +25,7 @@ class TestMatcherAdapter:
     def test_name_and_eval_mode(self):
         adapter = MatcherAdapter()
         assert adapter.name == "matcher"
-        assert adapter.eval_mode == EvalMode.RAW_MATCH
+        assert adapter.eval_mode == EvalMode.PAIR_MATCH
 
     @patch("cbench.adapters.matcher.subprocess.run")
     def test_run_calls_matcher_cli(self, mock_run, tmp_path):
@@ -91,4 +91,4 @@ class TestHootAdapter:
 
         adapter = HootAdapter()
         assert adapter.name == "hootenanny"
-        assert adapter.eval_mode == EvalMode.RAW_MATCH
+        assert adapter.eval_mode == EvalMode.PAIR_MATCH

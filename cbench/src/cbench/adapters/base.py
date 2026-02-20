@@ -13,10 +13,10 @@ import pandas as pd
 class EvalMode(Enum):
     """What kind of output a tool produces for evaluation."""
 
-    RAW_MATCH = "raw_match"  # Match pair identification
+    PAIR_MATCH = "pair_match"  # Pair-level match identification
     # Future:
-    # CONFLATION = "conflation"      # Geometry merge quality
-    # SEQUENCED = "sequenced"        # Ordered matching
+    # STITCH = "stitch"              # Graph-level consistency evaluation
+    # MERGE = "merge"                # Integration quality evaluation
 
 
 @dataclass

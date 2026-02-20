@@ -16,7 +16,17 @@ The bridge file enables:
 - **Update tracking** - Detect changes by comparing GERS matches over time
 - **Network integration** - Merge local roads into the Overture network while preserving provenance
 
-## What Is a Match?
+## Pipeline Stages
+
+The conflation pipeline has three stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
+
+1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Intentionally recall-biased (over-matching is acceptable). Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
+
+2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
+
+3. **Merging** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_MERGING_RULES.md#section-3-merging-rules-network-integration))
+
+### What Is a Match?
 
 A match requires that the aligned overlapping portions represent the **same network role**, not just overlapping geometry. Two segments that intersect or overlap spatially are not necessarily a match — they must represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
 
@@ -26,33 +36,32 @@ A match requires that the aligned overlapping portions represent the **same netw
 
 ### Network Roles
 
-Matching is constrained by the segment's role in the network. See [docs/MATCHING_RULES.md](docs/MATCHING_RULES.md) for the full canonical ruleset.
+Matching is constrained by the segment's role in the network.
 
-- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
+- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks, intersection-internal slices). Matches with other ALONG segments.
 - **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
 - **TURN** — Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns at intersections). Matches only with same role and intent.
-- **INTERNAL** — Intersection-scoped slices. May match other INTERNAL segments representing the same through-movement.
 
 ### Common Edge Cases
 
 | Scenario | Result | Why |
 |----------|--------|-----|
 | Different segmentation points | Match | Same road, just split differently between datasets |
-| Split carriageways vs single centerline | 1:N Match | One Overture centerline corresponds to multiple local segments |
+| Split carriageways vs single centerline | M:N Match | Carriageway modeling and segmentation may differ between datasets |
 | Road vs parallel sidewalk | No Match | Different physical features, even if close together |
 | Same road, different names | Match | Names are a signal, not a requirement |
-| Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
+| Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Overlap only at/inside intersection | No Match | Overlap alone is not sufficient for a match |
-| Colinear overlap <10m near node then diverge | No Match | Must continue ≥10m past node along shared direction |
+| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — stitching resolves |
+| Short colinear overlap near node | Match | Same traveled way for that subsegment; stitching resolves |
 
 ### Intersection Rule
 
-Never match based on overlap alone. For a match at an intersection, the target must continue **≥10m past the reference node** along the shared direction while staying aligned. Exception: if both segments are entirely inside the same intersection footprint and represent the same through-movement, they may match (rare).
+Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because stitching resolves false positives.
 
-### 1:N Matching
+### M:N Matching
 
-A single Overture segment can correctly correspond to multiple local segments. This happens with split highways where the local dataset has separate segments for each direction but Overture has a single centerline.
+Multiple segments on either side can correspond to each other. The most common case: Overture models a divided road as two split carriageway segments while the local dataset uses a single centerline (or vice versa). Combined with different segmentation points, this produces M:N match groups.
 
 ## How It Works
 
@@ -69,23 +78,24 @@ flowchart TB
     subgraph Match["2. Matching Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
         E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
-        F --> G[Score with XGBoost<br/>Binary classifier]
-        G --> H[Optimize 1:N Matches<br/>Hungarian algorithm]
-        H --> I{Quality<br/>Acceptable?}
+        F --> G["Score with XGBoost<br/>(Pair Matching)"]
+        G --> H["Stitch<br/>(Planned) Graph-level resolution"]
+        H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
+        I --> J{Quality<br/>Acceptable?}
     end
 
     subgraph Label["3. Labeling Loop"]
-        I -->|No| J[Launch Labeling UI]
-        J --> K[Label Match/No-Match]
-        K --> L[Retrain Model]
-        L --> F
+        J -->|No| K[Launch Labeling UI]
+        K --> L[Label Match/No-Match]
+        L --> M[Retrain Model]
+        M --> F
     end
 
     subgraph Output["4. Integration"]
-        I -->|Yes| M[Generate Bridge File<br/>local_id → GERS_id + confidence]
-        M --> N[Integrate Unmatched Segments]
-        N --> O[QA Review]
-        O --> P[Final Network]
+        J -->|Yes| N[Generate Bridge File<br/>local_id → GERS_id + confidence]
+        N --> O["Merge<br/>(Planned) Network integration"]
+        O --> P[QA Review]
+        P --> Q[Final Network]
     end
 
     style Data fill:#e1f5fe
@@ -99,7 +109,7 @@ flowchart TB
 | Concept | Description |
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
-| **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
+| **M:N Matching** | Multiple segments on either side can match (different carriageway modeling or segmentation) |
 | **Features** | 72 features across 17 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 

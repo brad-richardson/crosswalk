@@ -104,6 +104,88 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ---
 
+## Pipeline Architecture: Match → Stitch → Merge
+
+### Implement Stitching Stage in Matcher Pipeline
+
+**Priority:** HIGH
+**Status:** Design complete (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
+
+Implement graph-level match resolution as a post-scoring step in the matcher pipeline:
+- Junction zone detection (degree≠2 node proximity)
+- Match role assignment (STRONG_EDGE, JUNCTION_ANCHOR, PARALLEL_COMPANION, AMBIGUOUS)
+- Neighborhood consistency enforcement
+- Conflict resolution for competing matches
+- Confidence promotion/demotion based on graph context
+
+Should run after pair scoring and before 1:N optimization.
+
+**Location:** New module `src/matcher/stitching/` or extend `src/matcher/matching/`
+
+### Implement Merging Stage
+
+**Priority:** Medium
+**Status:** Design outlined (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 3)
+
+Formalize the merge step as a distinct stage with explicit policy:
+- Geometry integration policy (replace/average/keep)
+- Attribute transfer rules and thresholds
+- Net-new gating with junction zone awareness
+
+Currently partially implemented in `src/matcher/integration/`.
+
+### CLI: Separate Match, Stitch, Merge Commands
+
+**Priority:** Medium
+
+Make the three-stage pipeline explicit in the CLI:
+- `matcher match` — Pair matching (exists, may need scope refinement)
+- `matcher stitch` — Graph-level resolution (new)
+- `matcher merge` — Network integration (currently `matcher analyze integrate`, rename/restructure)
+
+### cbench: Stage-Level Evaluation
+
+**Priority:** Medium
+
+Add evaluation modes to cbench for each pipeline stage:
+- **Pair matching**: Pair-level F1 (exists as `--match-level pair`)
+- **Stitching**: Graph consistency metrics (new) — junction coverage, gap rate, false net-new rate
+- **Merging**: Integration quality metrics
+
+**Location:** `cbench/src/cbench/eval/`
+
+### cbench: Add README
+
+**Priority:** Low
+
+cbench has no README. Add one documenting:
+- What cbench does (benchmarking conflation tools)
+- Available adapters (matcher, hootenanny)
+- Evaluation modes and their relationship to the match/stitch/merge pipeline
+- CLI usage and examples
+
+### Audit Existing Labels for Rule Change Impact
+
+**Priority:** HIGH (blocks retraining with new philosophy)
+
+Relaxing the ≥10m intersection rule means some existing `no_match` labels are now `match` under the new criteria. Need to identify and relabel affected pairs.
+
+**Criteria for audit candidates** (pairs likely mislabeled under old rules):
+- `no_match` pairs where aligned overlap is >0 but <15m
+- `no_match` pairs where both endpoints are near intersection nodes (degree≠2)
+- `no_match` pairs with high geometric similarity (buffer_iou, low hausdorff) but short overlap
+- `no_match` pairs where the rejection reason was likely "intersection-only overlap"
+
+**Approach:**
+1. Query labeled pairs matching the above criteria
+2. Surface them in the labeling UI for re-review
+3. Relabel under the new philosophy: if same traveled way → match regardless of length
+4. Retrain after relabeling
+
+**Location:** Could extend `matcher agent batch` or add a `matcher labels audit` command
+
+---
+
 ## Ablation Study
 
 ### Add Permutation Importance to Ablation Script
