@@ -999,8 +999,12 @@ def _generate_batch_from_label_store(
         # Get alignment fractions from label metadata
         alignment = alignment_lookup.get(
             (ref_id, target_id),
-            {"ref_start_frac": 0.0, "ref_end_frac": 1.0,
-             "target_start_frac": 0.0, "target_end_frac": 1.0},
+            {
+                "ref_start_frac": 0.0,
+                "ref_end_frac": 1.0,
+                "target_start_frac": 0.0,
+                "target_end_frac": 1.0,
+            },
         )
         ref_start = alignment["ref_start_frac"]
         ref_end = alignment["ref_end_frac"]
