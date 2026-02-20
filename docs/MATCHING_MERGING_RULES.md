@@ -71,7 +71,7 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 | Scenario | Result | Why |
 |----------|--------|-----|
 | Different segmentation points | Match | Same road, split differently |
-| Split carriageways vs single centerline | 1:N Match | One Overture centerline to multiple local segments |
+| Split carriageways vs single centerline | M:N Match | Carriageway modeling and segmentation may differ between datasets |
 | Road vs parallel sidewalk | No Match | Different physical features |
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
@@ -101,7 +101,7 @@ For same-role overlaps near intersection nodes:
 
 The ML classifier operates as a pair-level identity matcher:
 
-- Primarily 1:1 correspondences (with 1:N for split carriageways)
+- Primarily 1:1 correspondences (with M:N for split carriageways / different segmentation)
 - Safe for replace/average geometry operations
 - Pair matching produces candidates with confidence scores; it does not enforce graph consistency
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
@@ -157,7 +157,7 @@ When multiple matches compete for the same segment:
 2. Prefer better role compatibility
 3. Prefer neighborhood-supported candidates
 
-Cap max matches per segment except for defined 1:N split cases (e.g., dual carriageway).
+Cap max matches per segment except for defined M:N split cases (e.g., dual carriageway).
 
 ### 2.6 Stitching Output
 
@@ -199,5 +199,5 @@ Unmatched target segments are candidates for addition to the reference network. 
 
 All merge operations record:
 - Source match confidence
-- Match type (1:1, 1:N, net new)
+- Match type (1:1, M:N, net new)
 - Original source dataset and segment ID

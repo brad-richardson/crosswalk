@@ -47,7 +47,7 @@ Matching is constrained by the segment's role in the network.
 | Scenario | Result | Why |
 |----------|--------|-----|
 | Different segmentation points | Match | Same road, just split differently between datasets |
-| Split carriageways vs single centerline | 1:N Match | One Overture centerline corresponds to multiple local segments |
+| Split carriageways vs single centerline | M:N Match | Carriageway modeling and segmentation may differ between datasets |
 | Road vs parallel sidewalk | No Match | Different physical features, even if close together |
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
@@ -59,9 +59,9 @@ Matching is constrained by the segment's role in the network.
 
 Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps produce low-confidence matches that stitching resolves.
 
-### 1:N Matching
+### M:N Matching
 
-A single Overture segment can correctly correspond to multiple local segments. This happens with split highways where the local dataset has separate segments for each direction but Overture has a single centerline.
+Multiple segments on either side can correspond to each other. The most common case: Overture models a divided road as two split carriageway segments while the local dataset uses a single centerline (or vice versa). Combined with different segmentation points, this produces M:N match groups.
 
 ## How It Works
 
@@ -80,7 +80,7 @@ flowchart TB
         E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
         F --> G["Score with XGBoost<br/>(Pair Matching)"]
         G --> H["Stitch<br/>(Planned) Graph-level resolution"]
-        H --> I[Optimize 1:N Matches<br/>Hungarian algorithm]
+        H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
         I --> J{Quality<br/>Acceptable?}
     end
 
@@ -109,7 +109,7 @@ flowchart TB
 | Concept | Description |
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
-| **1:N Matching** | One Overture segment can match multiple local segments (different segmentation) |
+| **M:N Matching** | Multiple segments on either side can match (different carriageway modeling or segmentation) |
 | **Features** | 72 features across 17 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 
