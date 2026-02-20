@@ -212,6 +212,11 @@ async def stitching_group(
         )
 
     group = groups[group_index]
+    n_alts = len(group.get("alternatives", []))
+    if n_alts > 0:
+        option_index = max(0, min(option_index, n_alts - 1))
+    else:
+        option_index = 0
     geojson = _build_group_geojson(group, option_index)
 
     return templates.TemplateResponse(

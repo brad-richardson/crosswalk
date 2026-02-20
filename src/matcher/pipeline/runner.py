@@ -323,6 +323,12 @@ def _export_groups_sidecar(
         )
 
     if not groups:
+        # Remove stale sidecar from a previous run so batch generation
+        # doesn't pick up outdated group data.
+        stale = groups_sidecar_path(output_path)
+        if stale.exists():
+            stale.unlink()
+            logger.info(f"Removed stale groups sidecar: {stale}")
         return None
 
     sidecar_path = groups_sidecar_path(output_path)
