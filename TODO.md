@@ -109,7 +109,7 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 ### Implement Stitching Stage in Matcher Pipeline
 
 **Priority:** HIGH
-**Status:** Design complete (see [docs/MATCHING_AND_MERGING_RULES.md](docs/MATCHING_AND_MERGING_RULES.md) Section 2)
+**Status:** Design complete (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
 
 Implement graph-level match resolution as a post-scoring step in the matcher pipeline:
 - Junction zone detection (degree≠2 node proximity)
@@ -125,7 +125,7 @@ Should run after pair scoring and before 1:N optimization.
 ### Implement Merging Stage
 
 **Priority:** Medium
-**Status:** Design outlined (see [docs/MATCHING_AND_MERGING_RULES.md](docs/MATCHING_AND_MERGING_RULES.md) Section 3)
+**Status:** Design outlined (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 3)
 
 Formalize the merge step as a distinct stage with explicit policy:
 - Geometry integration policy (replace/average/keep)

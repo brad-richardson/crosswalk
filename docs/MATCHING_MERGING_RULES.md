@@ -1,4 +1,4 @@
-# Matching and Merging Rules — Canonical Ruleset
+# Matching & Merging Rules — Canonical Ruleset
 
 Defines the three-stage pipeline for road network conflation: **pair matching** (identity), **stitching** (graph consistency), and **merging** (network integration). The README has a concise summary; this document is the full reference.
 

@@ -18,13 +18,13 @@ The bridge file enables:
 
 ## Pipeline Stages
 
-The conflation pipeline has three stages. See [docs/MATCHING_AND_MERGING_RULES.md](docs/MATCHING_AND_MERGING_RULES.md) for the full canonical ruleset.
+The conflation pipeline has three stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
 
-1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Produces candidate matches with confidence scores. Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_AND_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
+1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Produces candidate matches with confidence scores. Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
 
-2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_AND_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
+2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
 
-3. **Merging** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_AND_MERGING_RULES.md#section-3-merging-rules-network-integration))
+3. **Merging** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_MERGING_RULES.md#section-3-merging-rules-network-integration))
 
 ### What Is a Match?
 
