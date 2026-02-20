@@ -50,7 +50,7 @@ Matching is constrained by the segment's role in the network.
 | Split carriageways vs single centerline | M:N Match | Carriageway modeling and segmentation may differ between datasets |
 | Road vs parallel sidewalk | No Match | Different physical features, even if close together |
 | Same road, different names | Match | Names are a signal, not a requirement |
-| Opposite carriageways of divided road | Match (each to its own) | Each carriageway matches independently |
+| Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
 | Short overlap at intersection | Match (low confidence) | Identity preserved; stitching decides promotion |
 | Short colinear overlap near node | Match (low confidence) | Same traveled way for that subsegment; confidence reflects brevity |
