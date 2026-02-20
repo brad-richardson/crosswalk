@@ -24,6 +24,7 @@ from ..config import (
     DEFAULT_SNAP_TOLERANCE_M,
     DEFAULT_TOPOLOGY_FEATURES,
     OVERTURE_ANCHOR_TOLERANCE_M,
+    PHYSICAL_OVERLAP_FLOOR_M,
     PHYSICAL_OVERLAP_MIN_M,
     default_worker_count,
 )
@@ -138,8 +139,8 @@ def prepare_worker_data(
         target_geoms: Pre-extracted target geometry array (same optimization)
         filter_physical_overlap: If True (default), remove candidates where
             the reference geometry within a PHYSICAL_OVERLAP_MIN_M buffer corridor
-            around the target is shorter than PHYSICAL_OVERLAP_MIN_M.
-            This filters collinear segments that barely touch at tips.
+            around the target is shorter than an adaptive threshold based on
+            the shorter segment's length (scales down for short segments).
 
     Returns:
         WorkerDataResult with worker_data dict, side-products, and filtered candidates
@@ -173,28 +174,40 @@ def prepare_worker_data(
 
     logger.debug(f"[TIMING] data_extraction: {time.perf_counter() - t0:.2f}s")
 
-    # --- Step 1b: Filter by physical overlap (buffered-distance overlap) ---
+    # --- Step 1b: Filter by physical overlap (adaptive threshold) ---
     # Measures the length of the ref geometry falling within a buffer corridor
-    # around the target. Removes collinear segments that barely touch at tips —
-    # these dominate labeling time but are almost never real matches. Applied here
-    # so both ML scoring and labeling paths get the same filter.
+    # around the target. Threshold adapts to segment length so short segments
+    # (sidewalks, footpaths) aren't penalized: max(1m, min(5m, 50% of shorter)).
+    # Applied here so both ML scoring and labeling paths get the same filter.
     if filter_physical_overlap and candidates:
         t0 = time.perf_counter()
         ref_geom_arr = np.array([ref_geoms[c.ref_idx] for c in candidates], dtype=object)
         target_geom_arr = np.array([target_geoms[c.target_idx] for c in candidates], dtype=object)
 
+        # Adaptive threshold: scale down for short segments so sidewalks/footpaths
+        # aren't penalized by requiring 5m of overlap on a 3m segment.
+        ref_lengths = shapely_mod.length(ref_geom_arr)
+        target_lengths = shapely_mod.length(target_geom_arr)
+        shorter_lengths = np.minimum(ref_lengths, target_lengths)
+        thresholds = np.maximum(
+            PHYSICAL_OVERLAP_FLOOR_M,
+            np.minimum(PHYSICAL_OVERLAP_MIN_M, shorter_lengths * 0.5),
+        )
+
+        # Buffer corridor stays at fixed width for proximity check
         target_buffers = shapely_mod.buffer(target_geom_arr, PHYSICAL_OVERLAP_MIN_M)
         intersections = shapely_mod.intersection(ref_geom_arr, target_buffers)
         overlap_lengths = shapely_mod.length(intersections)
 
-        mask = overlap_lengths >= PHYSICAL_OVERLAP_MIN_M
+        mask = overlap_lengths >= thresholds
         filtered_candidates = [c for c, keep in zip(candidates, mask) if keep]
 
         n_filtered = len(candidates) - len(filtered_candidates)
         if n_filtered > 0:
             logger.info(
                 f"Physical overlap filter: removed {n_filtered} candidates "
-                f"(<{PHYSICAL_OVERLAP_MIN_M}m overlap), {len(filtered_candidates)} remaining"
+                f"(adaptive threshold {PHYSICAL_OVERLAP_FLOOR_M}-{PHYSICAL_OVERLAP_MIN_M}m), "
+                f"{len(filtered_candidates)} remaining"
             )
         candidates = filtered_candidates
         logger.debug(f"[TIMING] physical_overlap_filter: {time.perf_counter() - t0:.2f}s")

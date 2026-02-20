@@ -38,13 +38,14 @@ ALIGNMENT_FULL_TOLERANCE = 0.01
 # typically ranges from 1-5 meters
 DEFAULT_SNAP_TOLERANCE_M = 5.0
 
-# Minimum physical overlap for candidate pairs (meters)
-# Pairs with less actual geometric intersection (without alignment translation)
-# are rejected early. Based on label analysis: 5m gives 5.9:1 no_match:match
-# filter ratio (removes 46.5% of no_match while only losing 6.7% of match).
-# Other geometric filters (hausdorff, coverage, buffer_iou thresholds) were
-# tested and rejected — they also remove valid matches at any useful threshold.
+# Physical overlap filter for candidate pairs (meters)
+# The buffer corridor width stays fixed at PHYSICAL_OVERLAP_MIN_M, but the
+# acceptance threshold adapts to segment length:
+#   threshold = max(FLOOR, min(MIN, shorter_segment_length * 0.5))
+# For segments >=10m this behaves identically to the old fixed 5m threshold.
+# For shorter segments (sidewalks, footpaths) it scales down, with a 1m floor.
 PHYSICAL_OVERLAP_MIN_M = 5.0
+PHYSICAL_OVERLAP_FLOOR_M = 1.0
 
 # Minimum number of labels per dataset before it's considered "done" for labeling
 MIN_LABELS_PER_DATASET = 200
