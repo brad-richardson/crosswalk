@@ -172,10 +172,126 @@
         });
     });
 
+    var EMPTY_FC = { type: "FeatureCollection", features: [] };
+
+    // --- Context layer (target dataset background) ---
+    var CONTEXT_SOURCE = "context-geojson";
+    var CONTEXT_LAYER = "context-features-line";
+    var contextGeojson = null;   // cached GeoJSON for current dataset
+    var contextDataset = null;   // dataset ID for cache invalidation
+    var contextVisible = true;   // default on
+    var contextLoading = false;
+
+    function addContextLayer() {
+        if (map.getSource(CONTEXT_SOURCE)) return;
+        map.addSource(CONTEXT_SOURCE, { type: "geojson", data: EMPTY_FC });
+        map.addLayer({
+            id: CONTEXT_LAYER,
+            type: "line",
+            source: CONTEXT_SOURCE,
+            paint: {
+                "line-color": "#E57373",
+                "line-width": 1.5,
+                "line-opacity": 0.35,
+                "line-dasharray": [2, 4],
+            },
+            layout: {
+                visibility: contextVisible ? "visible" : "none",
+            },
+        });
+    }
+
+    function showContextOnMap() {
+        if (!contextGeojson) return;
+        addContextLayer();
+        map.getSource(CONTEXT_SOURCE).setData(contextGeojson);
+        // Ensure context layer renders below pair layers
+        if (map.getLayer("pair-reference-full")) {
+            map.moveLayer(CONTEXT_LAYER, "pair-reference-full");
+        }
+    }
+
+    function loadContextLayer(dataset) {
+        if (!dataset) return;
+        // Skip if already cached for this dataset
+        if (contextGeojson && contextDataset === dataset) {
+            if (contextVisible) showContextOnMap();
+            return;
+        }
+        if (contextLoading) return;
+        contextLoading = true;
+        fetch("/browser/features?dataset=" + encodeURIComponent(dataset))
+            .then(function (resp) {
+                if (!resp.ok) throw new Error("Context fetch failed: " + resp.status);
+                return resp.json();
+            })
+            .then(function (geojson) {
+                contextGeojson = geojson;
+                contextDataset = dataset;
+                contextLoading = false;
+                if (contextVisible && map.isStyleLoaded()) {
+                    showContextOnMap();
+                }
+            })
+            .catch(function (err) {
+                console.error("Failed to load context layer:", err);
+                contextLoading = false;
+            });
+    }
+
+    function toggleContextLayer() {
+        contextVisible = !contextVisible;
+        // Update map layer visibility if it exists
+        if (map.getLayer(CONTEXT_LAYER)) {
+            map.setLayoutProperty(
+                CONTEXT_LAYER,
+                "visibility",
+                contextVisible ? "visible" : "none"
+            );
+        }
+        // If turning on and data not yet loaded, trigger fetch
+        if (contextVisible && !contextGeojson) {
+            var params = new URLSearchParams(window.location.search);
+            var dataset = params.get("dataset");
+            if (dataset) loadContextLayer(dataset);
+        } else if (contextVisible && contextGeojson && !map.getSource(CONTEXT_SOURCE)) {
+            showContextOnMap();
+        }
+        // Update button active state
+        var btn = document.querySelector(".context-toggle-btn");
+        if (btn) btn.classList.toggle("active", contextVisible);
+    }
+
+    // --- Custom context toggle control ---
+    var ContextToggle = (function () {
+        function ContextToggle() {}
+        ContextToggle.prototype.onAdd = function (map) {
+            this._map = map;
+            this._container = document.createElement("div");
+            this._container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = "Context";
+            btn.className = "context-toggle-btn" + (contextVisible ? " active" : "");
+            btn.title = "Toggle target dataset context (C)";
+            btn.addEventListener("click", toggleContextLayer);
+            this._container.appendChild(btn);
+
+            return this._container;
+        };
+        ContextToggle.prototype.onRemove = function () {
+            this._container.parentNode.removeChild(this._container);
+            this._map = undefined;
+        };
+        return ContextToggle;
+    })();
+
+    map.addControl(new ContextToggle(), "bottom-left");
+
     // --- Pair geometry rendering ---
     var currentGeojson = null;
     var PAIR_SOURCE = "pair-geojson";
-    var EMPTY_FC = { type: "FeatureCollection", features: [] };
 
     var LAYER_DEFS = [
         { id: "pair-reference-full", type: "line", filter: ["==", ["get", "_role"], "referenceFull"], paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 } },
@@ -319,7 +435,17 @@
     function renderOverlays(data) {
         if (!data) return;
 
+        // Ensure context layer exists below pair layers
+        if (contextVisible && contextGeojson) {
+            showContextOnMap();
+        }
+
         addPairLayers();
+
+        // Re-order context below pairs if both exist
+        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("pair-reference-full")) {
+            map.moveLayer(CONTEXT_LAYER, "pair-reference-full");
+        }
 
         var fc = buildPairFC(data);
         map.getSource(PAIR_SOURCE).setData(fc);
@@ -354,6 +480,10 @@
     map.on("style.load", function () {
         // Re-create source and layers
         if (map.getSource(PAIR_SOURCE)) return; // already present (initial load)
+        // Re-add context layer first (so it's below pair layers)
+        if (contextVisible && contextGeojson) {
+            showContextOnMap();
+        }
         if (currentGeojson) {
             renderOverlays(currentGeojson);
         }
@@ -378,6 +508,10 @@
     // --- Initial load ---
     map.on("load", function () {
         loadPairGeometry();
+        // Load context layer for current dataset
+        var params = new URLSearchParams(window.location.search);
+        var dataset = params.get("dataset");
+        if (dataset) loadContextLayer(dataset);
     });
 
     // --- HTMX integration ---
@@ -391,4 +525,5 @@
     window.matcherPairLayer = PAIR_SOURCE;
     window.matcherShowGeometry = showPairGeometry;
     window.matcherGeojsonBounds = geojsonBounds;
+    window.matcherToggleContext = toggleContextLayer;
 })();
