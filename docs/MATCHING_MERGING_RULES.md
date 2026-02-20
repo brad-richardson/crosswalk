@@ -32,15 +32,15 @@ Not the correct correspondence. Either:
 
 ### Network Roles
 
-Every segment in a transportation network serves one of four roles. Match compatibility is constrained by role. Roles are a conceptual tool for labeling and reasoning — they may be inferred implicitly from geometry, topology, and tags rather than stored explicitly.
+Every segment in a transportation network serves one of three roles. Match compatibility is constrained by role. Roles are a conceptual tool for labeling and reasoning — they may be inferred implicitly from geometry, topology, and tags rather than stored explicitly.
 
 #### ALONG — Longitudinal / Corridor Movement
 
-Movement along a facility. The most common role.
+Movement along a facility. The most common role. This includes short intersection-internal slices that some datasets produce to represent continuity inside a junction — these are treated as ALONG segments (they naturally receive low confidence due to short overlap length).
 
-Examples: road mainline, bike lane along a road, sidewalk along a street, rail track segment, canal segment.
+Examples: road mainline, bike lane along a road, sidewalk along a street, rail track segment, canal segment, intersection-internal centerline slices.
 
-**Match rule:** Matches primarily with other ALONG segments representing the same facility. May rarely match INTERNAL segments that are clearly clipped ALONG (be conservative). Parallel but laterally separated segments (e.g., opposite carriageways, frontage roads, parallel service roads) are not matches unless they represent the same traveled way.
+**Match rule:** Matches with other ALONG segments representing the same facility. Parallel but laterally separated segments (e.g., opposite carriageways, frontage roads, parallel service roads) are not matches unless they represent the same traveled way.
 
 #### ACROSS — Crossing / Transverse Movement
 
@@ -58,24 +58,13 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 
 **Match rule:** Matches only with same role and same intent (e.g., an off-ramp matches another off-ramp, not a through-lane).
 
-#### INTERNAL — Intersection-Scoped Slices
-
-Geometry that exists only to represent continuity inside a junction. Not all datasets produce these.
-
-Examples: short centerline slices inside intersections, pedestrian "through" slices clipped at junctions.
-
-**Match rule:**
-- INTERNAL to INTERNAL: may match if they represent the same through-movement
-- INTERNAL to ALONG: only if the INTERNAL segment is clearly a clipped ALONG (rare — be conservative)
-
 #### Role Compatibility Matrix
 
-| | ALONG | ACROSS | TURN | INTERNAL |
-|---|:---:|:---:|:---:|:---:|
-| **ALONG** | Yes | Never | Never | Rare |
-| **ACROSS** | Never | Yes | Never | Never |
-| **TURN** | Never | Never | Same intent | Never |
-| **INTERNAL** | Rare | Never | Never | Yes |
+| | ALONG | ACROSS | TURN |
+|---|:---:|:---:|:---:|
+| **ALONG** | Yes | Never | Never |
+| **ACROSS** | Never | Yes | Never |
+| **TURN** | Never | Never | Same intent |
 
 ### Edge Cases
 
@@ -107,10 +96,6 @@ For same-role overlaps near intersection nodes:
 1. If the segments share a contiguous subsegment along the same direction, they are a match candidate
 2. Shorter overlaps produce lower confidence scores
 3. Stitching (Section 2) decides whether to promote, demote, or reject based on neighborhood context
-
-#### Intersection-Internal Exception
-
-If **both** aligned subsegments are fully contained within the same intersection footprint, and they represent the same through-movement, they may be considered a Match even if the overlap is short. This is rare and should be applied conservatively.
 
 ### Pair Matching Scope
 

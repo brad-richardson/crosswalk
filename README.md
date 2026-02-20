@@ -38,10 +38,9 @@ A match requires that the aligned overlapping portions represent the **same netw
 
 Matching is constrained by the segment's role in the network.
 
-- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks). Matches primarily with ALONG (rarely with INTERNAL).
+- **ALONG** — Longitudinal/corridor movement (road mainlines, bike lanes, sidewalks, intersection-internal slices). Matches with other ALONG segments.
 - **ACROSS** — Crossing/transverse movement (crosswalks, rail crossings). Never matches ALONG or TURN.
 - **TURN** — Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns at intersections). Matches only with same role and intent.
-- **INTERNAL** — Intersection-scoped slices. May match other INTERNAL segments representing the same through-movement.
 
 ### Common Edge Cases
 
@@ -58,7 +57,7 @@ Matching is constrained by the segment's role in the network.
 
 ### Intersection Rule
 
-Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps produce low-confidence matches that stitching resolves. Exception: if both segments are entirely inside the same intersection footprint and represent the same through-movement, they may match (rare).
+Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps produce low-confidence matches that stitching resolves.
 
 ### 1:N Matching
 
