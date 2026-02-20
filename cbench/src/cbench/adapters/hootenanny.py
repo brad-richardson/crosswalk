@@ -295,16 +295,10 @@ class HootAdapter:
 
         if not skip_conflate:
             # Convert parquet -> OSM
-            # TODO: Neither input gets proper topology right now:
-            # - Reference: connectors are only passed if caller provides them via --opt.
-            #   The old benchmark script intentionally skipped them because shared connector
-            #   nodes triggered Hootenanny's LinearSnapMerger bug ("No node ID specified
-            #   for RemoveNodeByEid"). Needs investigation on newer Hootenanny versions.
-            # - Target: most non-Overture datasets lack a connectors column entirely.
-            # - Even WITH connectors, non-connector vertices get unique node IDs (see
-            #   OSMConverter._create_node TODO). This means Hootenanny sees disconnected
-            #   ways at junctions, disabling its graph-based matching algorithms.
-            # Net effect: benchmark measures geometry-only matching, not realistic conflation.
+            # Reference: connectors are passed when provided via --opt, enabling
+            # connector-based node sharing for network topology.
+            # Target: most non-Overture datasets lack connectors, so target
+            # conversion produces unique nodes (no fabricated topology).
             convert_parquet_to_osm(reference, ref_osm, connectors_path=connectors, source_tag="ref")
             convert_parquet_to_osm(target, tgt_osm, source_tag="tgt")
 
