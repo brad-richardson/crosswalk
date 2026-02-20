@@ -525,25 +525,38 @@
     var currentGroupGeojson = null;
 
     var GROUP_LAYER_DEFS = [
+        // Tier 1: Full geometries (thin, faded) — show full extent of each segment
         {
-            id: "group-assigned",
+            id: "group-ref-full",
             type: "line",
-            filter: ["==", ["get", "_assigned"], true],
+            filter: ["==", ["get", "_role"], "ref-full"],
+            paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 },
+        },
+        {
+            id: "group-target-full",
+            type: "line",
+            filter: ["==", ["get", "_role"], "target-full"],
+            paint: { "line-color": "#FF5722", "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] },
+        },
+        // Tier 2: Aligned sub-segments (thick, bright, assignment-colored)
+        {
+            id: "group-ref-aligned",
+            type: "line",
+            filter: ["==", ["get", "_role"], "ref-aligned"],
             paint: {
                 "line-color": ["get", "_assignment_color"],
-                "line-width": 5,
+                "line-width": 4,
                 "line-opacity": 0.9,
             },
         },
         {
-            id: "group-unassigned",
+            id: "group-target-aligned",
             type: "line",
-            filter: ["==", ["get", "_assigned"], false],
+            filter: ["==", ["get", "_role"], "target-aligned"],
             paint: {
-                "line-color": "#999999",
-                "line-width": 2.5,
-                "line-opacity": 0.5,
-                "line-dasharray": [4, 4],
+                "line-color": ["get", "_assignment_color"],
+                "line-width": 4,
+                "line-opacity": 0.9,
             },
         },
     ];
@@ -579,11 +592,10 @@
     /**
      * Display group geometries on the map for stitching review.
      *
-     * Expected: GeoJSON FeatureCollection where each feature has:
-     * - _role: "ref" or "target"
-     * - _id: segment ID
-     * - _assignment_color: hex color
-     * - _assigned: boolean
+     * Expected: GeoJSON FeatureCollection with two tiers:
+     * - _role "ref-full"/"target-full": full segment geometries (thin, faded)
+     * - _role "ref-aligned"/"target-aligned": aligned sub-segments (thick, bright)
+     *   with _assignment_color for group coloring
      */
     function showGroupGeometry(geojsonData) {
         if (!geojsonData) {
@@ -628,8 +640,8 @@
         addGroupLayers();
 
         // Re-order context below groups
-        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("group-assigned")) {
-            map.moveLayer(CONTEXT_LAYER, "group-assigned");
+        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("group-ref-full")) {
+            map.moveLayer(CONTEXT_LAYER, "group-ref-full");
         }
 
         map.getSource(GROUP_SOURCE).setData(data);

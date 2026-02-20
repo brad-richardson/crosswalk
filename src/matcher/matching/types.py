@@ -17,6 +17,15 @@ class MatchDecision(Enum):
     NO_MATCH = "no_match"
 
 
+class MatchType(str, Enum):
+    """Match group cardinality types."""
+
+    ONE_TO_ONE = "1:1"
+    ONE_TO_N = "1:N"
+    N_TO_ONE = "N:1"
+    M_TO_N = "M:N"
+
+
 @dataclass
 class MatchResult:
     """Result of matching a candidate pair."""

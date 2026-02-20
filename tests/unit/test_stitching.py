@@ -165,6 +165,47 @@ class TestGenerateTopKAlternatives:
         assert len(alts) == 1
         assert alts[0]["edges"][0]["confidence"] == 0.9
 
+    def test_alignment_fracs_preserved(self):
+        """Alignment fractions from input edges should flow through to output."""
+        edges = [
+            {
+                "ref_id": "r1",
+                "target_id": "t1",
+                "confidence": 0.9,
+                "gers_start_frac": 0.0,
+                "gers_end_frac": 0.5,
+                "local_start_frac": 0.0,
+                "local_end_frac": 1.0,
+            },
+            {
+                "ref_id": "r1",
+                "target_id": "t2",
+                "confidence": 0.8,
+                "gers_start_frac": 0.5,
+                "gers_end_frac": 1.0,
+                "local_start_frac": 0.0,
+                "local_end_frac": 1.0,
+            },
+        ]
+        alts = generate_top_k_alternatives(edges, k=3)
+        top = alts[0]
+        # Top alternative has both edges; check fracs are preserved
+        for edge in top["edges"]:
+            assert "gers_start_frac" in edge
+            assert "gers_end_frac" in edge
+            assert "local_start_frac" in edge
+            assert "local_end_frac" in edge
+        # Verify specific values
+        t1_edge = next(e for e in top["edges"] if e["target_id"] == "t1")
+        assert t1_edge["gers_start_frac"] == 0.0
+        assert t1_edge["gers_end_frac"] == 0.5
+
+    def test_alignment_fracs_absent_when_not_in_input(self):
+        """Edges without alignment fracs should not have them in output."""
+        edges = [_edge("r1", "t1", 0.9)]
+        alts = generate_top_k_alternatives(edges, k=1)
+        assert "gers_start_frac" not in alts[0]["edges"][0]
+
 
 # ---------------------------------------------------------------------------
 # select_stitching_batch

@@ -8,6 +8,16 @@ top K alternatives ranked by total confidence.
 import itertools
 from collections import defaultdict
 
+# Enumeration strategy thresholds: groups below these limits use exhaustive
+# enumeration (all combos via itertools.product); larger groups fall back to
+# greedy assignment + perturbation.
+MAX_EXHAUSTIVE_TARGETS = 6  # max target segments for exhaustive 1:N / M:N
+MAX_EXHAUSTIVE_COMBOS = 10_000  # max total combos before switching to greedy
+MAX_EXHAUSTIVE_N_TO_1_REFS = 10  # max ref segments for exhaustive N:1 (2^N subsets)
+
+# Alignment fraction keys preserved from sidecar edges through to alternatives
+_ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
+
 
 def generate_top_k_alternatives(
     component_edges: list[dict],
@@ -20,12 +30,14 @@ def generate_top_k_alternatives(
     For each target, enumerates which ref it could be assigned to (or
     unassigned). Ranks by total confidence and returns the top K.
 
-    For groups with <= 6 targets, uses exhaustive enumeration via
-    itertools.product. For larger groups, falls back to greedy
-    perturbation.
+    For groups with <= MAX_EXHAUSTIVE_TARGETS targets, uses exhaustive
+    enumeration via itertools.product. For larger groups, falls back to
+    greedy perturbation.
 
     Args:
-        component_edges: List of edge dicts with ref_id, target_id, confidence
+        component_edges: List of edge dicts with ref_id, target_id, confidence,
+            and optional alignment fracs (gers_start_frac, gers_end_frac,
+            local_start_frac, local_end_frac)
         ref_geoms: Reserved for future contiguity filtering (currently unused)
         target_geoms: Reserved for future contiguity filtering (currently unused)
         k: Number of top alternatives to return
@@ -33,7 +45,7 @@ def generate_top_k_alternatives(
     Returns:
         List of alternative dicts, each with:
         - option_index: int
-        - edges: list of {ref_id, target_id, confidence}
+        - edges: list of {ref_id, target_id, confidence, ...alignment fracs}
         - total_confidence: float
         - summary: human-readable string
     """
@@ -44,24 +56,24 @@ def generate_top_k_alternatives(
     ref_ids = sorted(set(e["ref_id"] for e in component_edges))
     target_ids = sorted(set(e["target_id"] for e in component_edges))
 
-    # Build lookup: (ref_id, target_id) -> confidence
-    edge_confidence: dict[tuple[str, str], float] = {}
+    # Build lookup: (ref_id, target_id) -> full edge data (confidence + alignment fracs).
+    # On duplicate keys, keep the edge with highest confidence.
+    edge_data: dict[tuple[str, str], dict] = {}
     for e in component_edges:
         key = (e["ref_id"], e["target_id"])
-        # Keep highest confidence if duplicate
-        if key not in edge_confidence or e["confidence"] > edge_confidence[key]:
-            edge_confidence[key] = e["confidence"]
+        if key not in edge_data or e["confidence"] > edge_data[key]["confidence"]:
+            edge_data[key] = e
 
     # For N:1 groups (multiple refs, 1 target), enumerate per-ref assignment
     # (each ref independently maps to the target or not). For 1:N and M:N,
     # enumerate per-target assignment (each target maps to a ref or not).
     if len(target_ids) == 1 and len(ref_ids) > 1:
-        alternatives = _enumerate_n_to_1(ref_ids, target_ids[0], edge_confidence, k)
+        alternatives = _enumerate_n_to_1(ref_ids, target_ids[0], edge_data, k)
     else:
         # Build per-target options: which refs can each target be assigned to?
         target_options: dict[str, list[str | None]] = {}
         for tid in target_ids:
-            options = [rid for rid in ref_ids if (rid, tid) in edge_confidence]
+            options = [rid for rid in ref_ids if (rid, tid) in edge_data]
             options.append(None)  # "unassigned" option
             target_options[tid] = options
 
@@ -70,13 +82,11 @@ def generate_top_k_alternatives(
         for tid in target_ids:
             n_combos *= len(target_options[tid])
 
-        if len(target_ids) <= 6 and n_combos <= 10000:
-            alternatives = _exhaustive_enumeration(
-                target_ids, target_options, edge_confidence, ref_ids
-            )
+        if len(target_ids) <= MAX_EXHAUSTIVE_TARGETS and n_combos <= MAX_EXHAUSTIVE_COMBOS:
+            alternatives = _exhaustive_enumeration(target_ids, target_options, edge_data, ref_ids)
         else:
             alternatives = _greedy_perturbation(
-                target_ids, target_options, edge_confidence, ref_ids, k * 3
+                target_ids, target_options, edge_data, ref_ids, k * 3
             )
 
     # Sort by total confidence descending
@@ -99,10 +109,24 @@ def generate_top_k_alternatives(
     return top_k
 
 
+def _make_edge(edge_data: dict[tuple[str, str], dict], rid: str, tid: str) -> dict:
+    """Build an output edge dict from the source edge data, preserving alignment fracs."""
+    source = edge_data.get((rid, tid), {})
+    edge = {
+        "ref_id": rid,
+        "target_id": tid,
+        "confidence": round(source.get("confidence", 0.0), 4),
+    }
+    for key in _ALIGNMENT_KEYS:
+        if key in source:
+            edge[key] = source[key]
+    return edge
+
+
 def _exhaustive_enumeration(
     target_ids: list[str],
     target_options: dict[str, list[str | None]],
-    edge_confidence: dict[tuple[str, str], float],
+    edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
 ) -> list[dict]:
     """Enumerate all valid assignment combos via itertools.product."""
@@ -116,9 +140,9 @@ def _exhaustive_enumeration(
 
         for tid, rid in zip(target_ids, combo):
             if rid is not None:
-                conf = edge_confidence.get((rid, tid), 0.0)
-                edges.append({"ref_id": rid, "target_id": tid, "confidence": round(conf, 4)})
-                total_conf += conf
+                edge = _make_edge(edge_data, rid, tid)
+                edges.append(edge)
+                total_conf += edge["confidence"]
 
         # Skip empty assignments
         if not edges:
@@ -139,7 +163,7 @@ def _exhaustive_enumeration(
 def _enumerate_n_to_1(
     ref_ids: list[str],
     target_id: str,
-    edge_confidence: dict[tuple[str, str], float],
+    edge_data: dict[tuple[str, str], dict],
     k: int,
 ) -> list[dict]:
     """Enumerate N:1 alternatives: each ref independently maps to the target or not.
@@ -150,30 +174,24 @@ def _enumerate_n_to_1(
     n = len(ref_ids)
     alternatives = []
 
-    if n <= 10:
+    if n <= MAX_EXHAUSTIVE_N_TO_1_REFS:
         # Enumerate all non-empty subsets of refs
         for mask in range(1, 1 << n):
             edges = []
             total_conf = 0.0
             for i, rid in enumerate(ref_ids):
                 if mask & (1 << i):
-                    conf = edge_confidence.get((rid, target_id), 0.0)
-                    edges.append(
-                        {"ref_id": rid, "target_id": target_id, "confidence": round(conf, 4)}
-                    )
-                    total_conf += conf
+                    edge = _make_edge(edge_data, rid, target_id)
+                    edges.append(edge)
+                    total_conf += edge["confidence"]
             summary = _build_summary(edges, ref_ids)
             alternatives.append(
                 {"edges": edges, "total_confidence": round(total_conf, 4), "summary": summary}
             )
     else:
         # Greedy: include all refs, then generate perturbations by dropping each one
-        all_edges = []
-        total = 0.0
-        for rid in ref_ids:
-            conf = edge_confidence.get((rid, target_id), 0.0)
-            all_edges.append({"ref_id": rid, "target_id": target_id, "confidence": round(conf, 4)})
-            total += conf
+        all_edges = [_make_edge(edge_data, rid, target_id) for rid in ref_ids]
+        total = sum(e["confidence"] for e in all_edges)
         alternatives.append(
             {
                 "edges": list(all_edges),
@@ -199,7 +217,7 @@ def _enumerate_n_to_1(
 def _greedy_perturbation(
     target_ids: list[str],
     target_options: dict[str, list[str | None]],
-    edge_confidence: dict[tuple[str, str], float],
+    edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
     max_alternatives: int = 30,
 ) -> list[dict]:
@@ -218,14 +236,14 @@ def _greedy_perturbation(
         for rid in target_options[tid]:
             if rid is None:
                 continue
-            conf = edge_confidence.get((rid, tid), 0.0)
+            conf = edge_data.get((rid, tid), {}).get("confidence", 0.0)
             if conf > best_conf:
                 best_conf = conf
                 best_rid = rid
         greedy_assignment[tid] = best_rid
 
     # Add greedy as first alternative
-    _add_alternative(greedy_assignment, target_ids, edge_confidence, ref_ids, alternatives)
+    _add_alternative(greedy_assignment, target_ids, edge_data, ref_ids, alternatives)
 
     # Perturb: for each target, try each alternative ref
     for tid in target_ids:
@@ -235,7 +253,7 @@ def _greedy_perturbation(
                 continue
             perturbed = dict(greedy_assignment)
             perturbed[tid] = alt_rid
-            _add_alternative(perturbed, target_ids, edge_confidence, ref_ids, alternatives)
+            _add_alternative(perturbed, target_ids, edge_data, ref_ids, alternatives)
             if len(alternatives) >= max_alternatives:
                 return alternatives
 
@@ -246,12 +264,12 @@ def _greedy_perturbation(
             perturbed[tid1], perturbed[tid2] = perturbed[tid2], perturbed[tid1]
             # Only valid if edges exist
             valid = True
-            if perturbed[tid1] is not None and (perturbed[tid1], tid1) not in edge_confidence:
+            if perturbed[tid1] is not None and (perturbed[tid1], tid1) not in edge_data:
                 valid = False
-            if perturbed[tid2] is not None and (perturbed[tid2], tid2) not in edge_confidence:
+            if perturbed[tid2] is not None and (perturbed[tid2], tid2) not in edge_data:
                 valid = False
             if valid:
-                _add_alternative(perturbed, target_ids, edge_confidence, ref_ids, alternatives)
+                _add_alternative(perturbed, target_ids, edge_data, ref_ids, alternatives)
             if len(alternatives) >= max_alternatives:
                 return alternatives
 
@@ -261,7 +279,7 @@ def _greedy_perturbation(
 def _add_alternative(
     assignment: dict[str, str | None],
     target_ids: list[str],
-    edge_confidence: dict[tuple[str, str], float],
+    edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
     alternatives: list[dict],
 ) -> None:
@@ -272,9 +290,9 @@ def _add_alternative(
     for tid in target_ids:
         rid = assignment[tid]
         if rid is not None:
-            conf = edge_confidence.get((rid, tid), 0.0)
-            edges.append({"ref_id": rid, "target_id": tid, "confidence": round(conf, 4)})
-            total_conf += conf
+            edge = _make_edge(edge_data, rid, tid)
+            edges.append(edge)
+            total_conf += edge["confidence"]
 
     if not edges:
         return

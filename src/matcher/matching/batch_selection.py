@@ -7,6 +7,19 @@ borderline cases where the optimizer's assignment is uncertain.
 
 from loguru import logger
 
+# Scoring weights for composite review value.
+# Label overlap is weighted higher because groups with existing human pair
+# labels give us direct comparison data for evaluating optimizer accuracy.
+LABEL_OVERLAP_WEIGHT = 2.0
+BORDERLINE_WEIGHT = 1.0
+
+# Tier fractions control batch composition.
+# 40% label overlap: groups that overlap with existing human pair labels
+# 40% borderline: groups where top-2 alternatives are close in confidence
+# 20% clear winner: calibration groups where one alternative clearly dominates
+TIER_OVERLAP_FRAC = 0.4
+TIER_BORDERLINE_FRAC = 0.4
+
 
 def select_stitching_batch(
     groups: list[dict],
@@ -77,7 +90,9 @@ def select_stitching_batch(
             borderline_score = 0.0
 
         # Composite review value
-        review_value = label_overlap_score * 2.0 + borderline_score * 1.0
+        review_value = (
+            label_overlap_score * LABEL_OVERLAP_WEIGHT + borderline_score * BORDERLINE_WEIGHT
+        )
 
         scored_groups.append(
             {
@@ -92,8 +107,8 @@ def select_stitching_batch(
         return []
 
     # Tier-based selection (clamp so sizes are non-negative and sum to k)
-    n_overlap = max(1, int(k * 0.4))
-    n_borderline = max(1, int(k * 0.4))
+    n_overlap = max(1, int(k * TIER_OVERLAP_FRAC))
+    n_borderline = max(1, int(k * TIER_BORDERLINE_FRAC))
     n_clear = max(0, k - n_overlap - n_borderline)
     # If tier minimums exceed k, scale back to fit
     total_tiers = n_overlap + n_borderline + n_clear

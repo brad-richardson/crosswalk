@@ -20,7 +20,7 @@ STITCHING_LABEL_COLUMNS = [
     "group_id",
     "dataset_id",
     "selected_option_index",
-    "selected_edges",  # JSON string of [{ref_id, target_id}, ...]
+    "selected_edges",  # JSON: [{ref_id, target_id, gers_start_frac, gers_end_frac, local_start_frac, local_end_frac}, ...]
     "match_type",
     "num_refs",
     "num_targets",

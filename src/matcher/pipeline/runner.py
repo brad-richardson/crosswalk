@@ -1,5 +1,6 @@
 """Pipeline orchestration - runs the full matching pipeline."""
 
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES
 from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..matching.optimizer import compute_group_id, find_match_components
+from ..matching.types import MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.crs import ProjectionResult
@@ -177,6 +179,10 @@ class PipelineResult:
 # 7 decimal places in WGS84 gives ~1.1cm accuracy.
 GEOJSON_COORD_PRECISION = 7
 
+# Precision for alignment fraction values (0-1 linear reference along a segment).
+# 7 decimal places gives sub-mm precision on typical road segments.
+ALIGNMENT_FRAC_PRECISION = 7
+
 
 def _export_groups_sidecar(
     results: list,
@@ -215,30 +221,22 @@ def _export_groups_sidecar(
     components = find_match_components(results, min_confidence)
 
     # Build optimizer assignment lookup from optimized results
-    optimizer_edges: dict[str, list[dict]] = {}  # group_id -> list of edge dicts
+    optimizer_edges: dict[str, list[dict]] = defaultdict(list)
     for r in optimized:
         gid = r.features.get("group_id")
-        if gid:
-            if gid not in optimizer_edges:
-                optimizer_edges[gid] = []
-            optimizer_edges[gid].append(
-                {
-                    "ref_id": str(r.ref_id),
-                    "target_id": str(r.target_id),
-                    "confidence": round(float(r.confidence), 4),
-                }
-            )
+        if not gid:
+            continue
+        optimizer_edges[gid].append(
+            {
+                "ref_id": str(r.ref_id),
+                "target_id": str(r.target_id),
+                "confidence": round(float(r.confidence), 4),
+            }
+        )
 
-    # Build geometry lookups
-    if ref_id_column in reference.columns:
-        ref_geom_lookup = dict(zip(reference[ref_id_column], reference.geometry))
-    else:
-        ref_geom_lookup = dict(zip(reference.index, reference.geometry))
-
-    if target_id_column in target.columns:
-        tgt_geom_lookup = dict(zip(target[target_id_column], target.geometry))
-    else:
-        tgt_geom_lookup = dict(zip(target.index, target.geometry))
+    # Build geometry lookups (column must exist; caller passes ref/target_id_column)
+    ref_geom_lookup = dict(zip(reference[ref_id_column], reference.geometry))
+    tgt_geom_lookup = dict(zip(target[target_id_column], target.geometry))
 
     groups = []
     for component in components:
@@ -253,11 +251,11 @@ def _export_groups_sidecar(
 
         # Classify match type
         if len(ref_ids) == 1:
-            match_type = "1:N"
+            match_type = MatchType.ONE_TO_N
         elif len(target_ids) == 1:
-            match_type = "N:1"
+            match_type = MatchType.N_TO_ONE
         else:
-            match_type = "M:N"
+            match_type = MatchType.M_TO_N
 
         # Serialize edges (cast numpy scalars to Python float for JSON)
         edges = []
@@ -268,11 +266,13 @@ def _export_groups_sidecar(
                 "confidence": round(float(r.confidence), 4),
             }
             if r.gers_start_frac is not None:
-                edge["gers_start_frac"] = round(float(r.gers_start_frac), 4)
-                edge["gers_end_frac"] = round(float(r.gers_end_frac), 4)
+                edge["gers_start_frac"] = round(float(r.gers_start_frac), ALIGNMENT_FRAC_PRECISION)
+                edge["gers_end_frac"] = round(float(r.gers_end_frac), ALIGNMENT_FRAC_PRECISION)
             if r.local_start_frac is not None:
-                edge["local_start_frac"] = round(float(r.local_start_frac), 4)
-                edge["local_end_frac"] = round(float(r.local_end_frac), 4)
+                edge["local_start_frac"] = round(
+                    float(r.local_start_frac), ALIGNMENT_FRAC_PRECISION
+                )
+                edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
             edges.append(edge)
 
         # Serialize geometries as GeoJSON with coordinate rounding
@@ -312,7 +312,7 @@ def _export_groups_sidecar(
         groups.append(
             {
                 "group_id": group_id,
-                "match_type": match_type,
+                "match_type": match_type.value,
                 "ref_ids": sorted(str(r) for r in ref_ids),
                 "target_ids": sorted(str(t) for t in target_ids),
                 "edges": edges,
