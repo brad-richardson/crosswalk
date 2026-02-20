@@ -140,15 +140,11 @@ Currently partially implemented in `src/matcher/integration/`.
 - `matcher stitch` — Pair matching + M:N optimization (done)
 - `matcher merge` — Network integration (currently `matcher analyze integrate`, rename/restructure)
 
-### cbench: Stage-Level Evaluation
+### cbench: Merge Evaluation Mode
 
-**Priority:** Medium
+**Priority:** Low
 
-Add evaluation modes to cbench for each pipeline stage:
-- **Stitch**: Graph consistency metrics (planned) — junction coverage, gap rate, false net-new rate
-- **Merging**: Integration quality metrics (planned)
-
-Pair-level F1 already exists as `--match-level pair`.
+Add a MERGE evaluation mode to cbench for assessing integration quality (geometry replacement, attribute transfer). The current STITCH mode already handles pair-level F1. Graph consistency metrics (junction coverage, gap rate, false net-new rate) can be added to the existing STITCH evaluation when graph-level resolution is implemented.
 
 **Location:** `cbench/src/cbench/eval/`
 
@@ -159,7 +155,7 @@ Pair-level F1 already exists as `--match-level pair`.
 cbench has no README. Add one documenting:
 - What cbench does (benchmarking conflation tools)
 - Available adapters (matcher, hootenanny)
-- Evaluation modes and their relationship to the match/stitch/merge pipeline
+- Current evaluation (pair-level F1) and planned MERGE mode
 - CLI usage and examples
 
 ### Audit Existing Labels for Rule Change Impact
