@@ -6,7 +6,7 @@ Defines the three-stage pipeline for road network conflation: **pair matching** 
 
 ## Section 1: Pair Matching Rules (Pure Identity)
 
-Pair matching determines whether two segments represent the same physical traveled way. It produces candidate matches with confidence scores. It does **not** enforce graph consistency — that is the role of stitching (Section 2).
+Pair matching determines whether two segments represent the same physical traveled way. It is intentionally recall-biased — over-matching is acceptable because stitching (Section 2) resolves false positives using graph context. Pair matching does **not** enforce graph consistency.
 
 ### Core Principle
 
@@ -76,8 +76,8 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Short overlap at intersection | Match (low confidence) | Identity is preserved; stitching decides promotion |
-| Short colinear overlap near node | Match (low confidence) | Same traveled way for that subsegment; confidence reflects brevity |
+| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — stitching resolves |
+| Short colinear overlap near node | Match | Same traveled way for that subsegment; stitching resolves |
 | Road mainline vs slip road/ramp | No Match | Different roles: ALONG vs TURN |
 | Bike lane on same pavement as road | Match (to road) | Same physical surface, ALONG + ALONG |
 | Separated cycle track (raised/curbed) | No Match (to road) | Different physical feature |
@@ -90,20 +90,19 @@ Geometric overlap at an intersection is not sufficient when roles differ. Many d
 
 #### Same-Role Overlaps Near Intersections
 
-If a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps near junctions produce low-confidence matches that stitching resolves. The key principle: preserve the identity signal and let downstream stages enforce graph consistency.
+If a contiguous subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because stitching (Section 2) resolves false positives using graph context.
 
 For same-role overlaps near intersection nodes:
-1. If the segments share a contiguous subsegment along the same direction, they are a match candidate
-2. Shorter overlaps produce lower confidence scores
-3. Stitching (Section 2) decides whether to promote, demote, or reject based on neighborhood context
+1. If the segments share a contiguous subsegment along the same direction, they are a match
+2. Stitching decides whether to keep, demote, or reject based on neighborhood context
 
 ### Pair Matching Scope
 
 The ML classifier operates as a pair-level identity matcher:
 
 - Primarily 1:1 correspondences (with M:N for split carriageways / different segmentation)
-- Safe for replace/average geometry operations
-- Pair matching produces candidates with confidence scores; it does not enforce graph consistency
+- Recall-biased: over-matching is acceptable; stitching resolves false positives
+- Pair matching does not enforce graph consistency
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
 
 ### Heuristic: The Replacement Test

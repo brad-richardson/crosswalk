@@ -20,7 +20,7 @@ The bridge file enables:
 
 The conflation pipeline has three stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
 
-1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Produces candidate matches with confidence scores. Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
+1. **Pair Matching** — Determines whether two segments represent the same physical traveled way. Intentionally recall-biased (over-matching is acceptable). Does NOT enforce graph consistency. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity))
 
 2. **Stitching** *(Planned)* — Resolves pairwise matches into a coherent network mapping. Enforces junction consistency, resolves conflicts, promotes/demotes matches based on neighborhood context. ([Section 2](docs/MATCHING_MERGING_RULES.md#section-2-stitching-rules-graph-level-match-resolution))
 
@@ -52,12 +52,12 @@ Matching is constrained by the segment's role in the network.
 | Same road, different names | Match | Names are a signal, not a requirement |
 | Opposite carriageways of divided road | No Match | Different physical traveled ways, even if part of the same road |
 | Road vs crosswalk at intersection | No Match | Different roles: ALONG vs ACROSS |
-| Short overlap at intersection | Match (low confidence) | Identity preserved; stitching decides promotion |
-| Short colinear overlap near node | Match (low confidence) | Same traveled way for that subsegment; confidence reflects brevity |
+| Short overlap at intersection | Match | Same traveled way; over-matching is acceptable — stitching resolves |
+| Short colinear overlap near node | Match | Same traveled way for that subsegment; stitching resolves |
 
 ### Intersection Rule
 
-Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match candidate regardless of length. Short overlaps produce low-confidence matches that stitching resolves.
+Never match different roles based on overlap alone (e.g., crosswalk overlapping a road is still No Match). For same-role overlaps near intersections: if a contiguous subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is intentionally recall-biased — over-matching is acceptable because stitching resolves false positives.
 
 ### M:N Matching
 
