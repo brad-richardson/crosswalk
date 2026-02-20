@@ -389,10 +389,12 @@ class LabelStore:
         }
 
         # Remove any existing label for this pair (re-labeling replaces, not duplicates)
-        if self._df is not None and len(self._df) > 0:
-            mask = (self._df["gers_id"] == str(gers_id)) & (self._df["target_id"] == str(target_id))
+        # Use self.df (property) to ensure data is loaded from disk first
+        df = self.df
+        if len(df) > 0:
+            mask = (df["gers_id"] == str(gers_id)) & (df["target_id"] == str(target_id))
             if mask.any():
-                self._df = self._df[~mask]
+                self._df = df[~mask]
 
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
