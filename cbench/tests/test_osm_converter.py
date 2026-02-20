@@ -135,7 +135,7 @@ class TestIntermediateConnectorMatching:
 class TestConnectorWithoutMatchingVertex:
     """A connector whose Point is far from all vertices is skipped."""
 
-    def test_connector_without_matching_vertex(self, caplog):
+    def test_connector_without_matching_vertex(self):
         # Connector is far from any vertex
         far_pt = Point(-70.00, 41.00)
         connectors_gdf = _make_connectors_gdf([{"id": "conn-far", "geometry": far_pt}])

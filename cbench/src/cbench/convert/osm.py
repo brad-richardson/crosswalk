@@ -237,7 +237,7 @@ class OSMConverter:
                         if dist_sq < best_dist_sq:
                             best_dist_sq = dist_sq
                             best_idx = i
-                    if best_dist_sq < 1e-12:  # ~1e-6 degrees squared ≈ 0.1m
+                    if best_dist_sq < 1e-12:  # ~1e-6 degrees squared ≈ 0.1m at equator
                         vertex_connector[best_idx] = conn_id
                     else:
                         logger.debug(
