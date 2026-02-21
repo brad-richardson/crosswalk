@@ -1,9 +1,11 @@
 """Tests for label loading."""
 
+import json
+
 import pandas as pd
 import pytest
 
-from cbench.eval.labels import list_datasets, load_labels
+from cbench.eval.labels import list_datasets, load_labels, load_stitch_labels
 
 
 def test_load_labels_csv(labels_dir):
@@ -78,3 +80,33 @@ def test_list_datasets_empty(tmp_path):
 def test_list_datasets_nonexistent(tmp_path):
     datasets = list_datasets(tmp_path / "nonexistent")
     assert datasets == {}
+
+
+def test_load_stitch_labels(tmp_path):
+    """Load stitching labels from hive-partitioned CSV."""
+    dataset_dir = tmp_path / "dataset=test_city"
+    dataset_dir.mkdir()
+    labels = pd.DataFrame(
+        {
+            "group_id": ["abc123"],
+            "dataset_id": ["test_city"],
+            "selected_edges": [json.dumps([{"ref_id": "r1", "target_id": "t1"}])],
+            "match_type": ["1:1"],
+            "num_refs": [1],
+            "num_targets": [1],
+            "labeler": ["test"],
+            "labeled_at": ["2026-02-21T00:00:00Z"],
+            "session_id": ["s1"],
+        }
+    )
+    labels.to_csv(dataset_dir / "data.csv", index=False)
+
+    result = load_stitch_labels(tmp_path, "test_city")
+    assert len(result) == 1
+    assert "selected_edges" in result.columns
+
+
+def test_load_stitch_labels_missing_returns_none(tmp_path):
+    """Return None when no stitch labels exist."""
+    result = load_stitch_labels(tmp_path, "nonexistent")
+    assert result is None

@@ -71,6 +71,13 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
             f"CPU: {rs.cpu_user_s:.1f}u+{rs.cpu_system_s:.1f}s  "
             f"Peak RSS: {rs.peak_rss_mb:.0f} MB"
         )
+    if result.stitch_result is not None:
+        sr = result.stitch_result
+        console.print(f"  [bold]Stitch-level ({sr.groups_evaluated} groups):[/bold]")
+        console.print(f"    Precision: {sr.precision:.4f}")
+        console.print(f"    Recall:    {sr.recall:.4f}")
+        console.print(f"    F1:        [bold]{sr.f1:.4f}[/bold]")
+        console.print(f"    Curated edges: {sr.total_curated_edges}  Extra: {sr.total_extra_edges}")
 
 
 def load_datasets_config(config_path: Path) -> dict:
@@ -108,6 +115,9 @@ def run(
     results_file: Path = typer.Option(
         Path("cbench_results.jsonl"), "--results", help="JSONL results file"
     ),
+    stitch_labels: Path | None = typer.Option(
+        None, "--stitch-labels", help="Path to stitching labels directory"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
@@ -128,6 +138,7 @@ def run(
             labels_dir=labels,
             output_dir=output_dir,
             results_file=results_file,
+            stitch_labels_dir=stitch_labels,
             **kwargs,
         )
     except FileNotFoundError as exc:
@@ -183,6 +194,9 @@ def run_batch(
     defaults = cfg.get("defaults", {})
     resolved_data_dir = data_dir or Path(defaults.get("data_dir", "."))
     resolved_labels_dir = labels_dir or Path(defaults.get("labels_dir", "."))
+    resolved_stitch_dir = (
+        Path(defaults["stitch_labels_dir"]) if "stitch_labels_dir" in defaults else None
+    )
 
     datasets = cfg["datasets"]
     if dataset:
@@ -217,6 +231,7 @@ def run_batch(
                 labels_dir=resolved_labels_dir,
                 output_dir=output_dir,
                 results_file=results_file,
+                stitch_labels_dir=resolved_stitch_dir,
                 **run_kwargs,
             )
             f1 = result.eval_result.f1
