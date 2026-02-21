@@ -305,6 +305,18 @@ Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, 
 
 ---
 
+## Stitching Review UI
+
+### Low: Show Per-Edge Detail in Stitching Review
+
+**Problem:** The stitching review card only shows per-segment info (R1, R2, T1, T2) but not per-edge info. In an M:N group, some edges may be tiny junction slivers (2-3% overlap) while others are full matches. Without per-edge visibility the user can't see which ref↔target pairings exist, their individual confidences, or overlap fractions.
+
+**Solution:** Add a per-edge section to the expandable details showing each ref↔target pairing with confidence and aligned fraction. E.g., "R2↔T1: 12% conf, 2% overlap" vs "R2↔T2: 99% conf, 99% overlap".
+
+**Location:** `src/matcher/web/templates/stitching/group.html`, `src/matcher/web/routes/stitching.py`
+
+---
+
 ## Other Ideas
 
 ### Adaptive Buffer Distance

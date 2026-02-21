@@ -78,7 +78,7 @@
         }
     });
 
-    // Compute confidence for currently active segments
+    // Compute overlap-weighted confidence for currently active segments
     function updateConfidence() {
         var el = document.getElementById('group-edges');
         var confEl = document.getElementById('group-confidence');
@@ -91,14 +91,18 @@
             var activeTargets = {};
             for (var i = 0; i < refPills.length; i++) activeRefs[refPills[i].title] = true;
             for (var j = 0; j < targetPills.length; j++) activeTargets[targetPills[j].title] = true;
-            var sum = 0, count = 0;
+            var weightedSum = 0, weightTotal = 0;
             for (var k = 0; k < edges.length; k++) {
-                if (activeRefs[edges[k].ref_id] && activeTargets[edges[k].target_id]) {
-                    sum += (edges[k].confidence || 0);
-                    count++;
+                var e = edges[k];
+                if (activeRefs[e.ref_id] && activeTargets[e.target_id]) {
+                    var refFrac = Math.abs((e.gers_end_frac || 1) - (e.gers_start_frac || 0));
+                    var tgtFrac = Math.abs((e.local_end_frac || 1) - (e.local_start_frac || 0));
+                    var w = (refFrac + tgtFrac) / 2;
+                    weightedSum += (e.confidence || 0) * w;
+                    weightTotal += w;
                 }
             }
-            confEl.textContent = count > 0 ? Math.round(sum / count * 100) + '%' : '\u2014';
+            confEl.textContent = weightTotal > 0 ? Math.round(weightedSum / weightTotal * 100) + '%' : '\u2014';
         } catch(e) {}
     }
 

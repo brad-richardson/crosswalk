@@ -1,8 +1,9 @@
 """Batch selection logic for stitching review.
 
 Scores and selects a curated batch of M:N groups for human review,
-prioritizing groups that overlap with existing human labels and
-borderline cases where the optimizer's assignment is uncertain.
+prioritizing groups that overlap with existing human labels,
+borderline cases where the optimizer's assignment is uncertain,
+and low-confidence groups where the best assignment is likely wrong.
 """
 
 from loguru import logger
@@ -14,11 +15,13 @@ LABEL_OVERLAP_WEIGHT = 2.0
 BORDERLINE_WEIGHT = 1.0
 
 # Tier fractions control batch composition.
-# 40% label overlap: groups that overlap with existing human pair labels
-# 40% borderline: groups where top-2 alternatives are close in confidence
-# 20% clear winner: calibration groups where one alternative clearly dominates
-TIER_OVERLAP_FRAC = 0.4
-TIER_BORDERLINE_FRAC = 0.4
+# 30% label overlap: groups that overlap with existing human pair labels
+# 30% borderline: groups where top-2 alternatives are close in confidence
+# 30% low confidence: groups where best alternative has low avg confidence
+# 10% clear winner: calibration groups where one alternative clearly dominates
+TIER_OVERLAP_FRAC = 0.3
+TIER_BORDERLINE_FRAC = 0.3
+TIER_LOW_CONF_FRAC = 0.3
 
 
 def select_stitching_batch(
@@ -31,9 +34,10 @@ def select_stitching_batch(
 
     Scores each unreviewed group by "review value" and selects with
     tier-based balancing:
-    - ~40% (label_overlap): groups whose edges overlap with human pair labels
-    - ~40% (borderline): groups where top-2 alternatives are close in confidence
-    - ~20% (clear_winner): groups where one alternative clearly dominates
+    - ~30% (label_overlap): groups whose edges overlap with human pair labels
+    - ~30% (borderline): groups where top-2 alternatives are close in confidence
+    - ~30% (low_confidence): groups where best alternative has low avg confidence
+    - ~10% (clear_winner): groups where one alternative clearly dominates
 
     Args:
         groups: List of group dicts from the groups sidecar, each must have
@@ -89,6 +93,17 @@ def select_stitching_batch(
         else:
             borderline_score = 0.0
 
+        # Low confidence score: how weak the best alternative is.
+        # Uses average per-edge confidence of the top alternative.
+        # Score is inverted (1.0 = lowest confidence = most worth reviewing).
+        if alternatives:
+            best_alt = max(alternatives, key=lambda a: a["total_confidence"])
+            n_edges = len(best_alt.get("edges", []))
+            avg_edge_conf = best_alt["total_confidence"] / n_edges if n_edges > 0 else 0.0
+            low_conf_score = 1.0 - avg_edge_conf
+        else:
+            low_conf_score = 1.0  # no alternatives at all = very suspect
+
         # Composite review value
         review_value = (
             label_overlap_score * LABEL_OVERLAP_WEIGHT + borderline_score * BORDERLINE_WEIGHT
@@ -99,6 +114,7 @@ def select_stitching_batch(
                 **group,
                 "_label_overlap_score": label_overlap_score,
                 "_borderline_score": borderline_score,
+                "_low_conf_score": low_conf_score,
                 "_review_value": review_value,
             }
         )
@@ -109,12 +125,14 @@ def select_stitching_batch(
     # Tier-based selection (clamp so sizes are non-negative and sum to k)
     n_overlap = max(1, int(k * TIER_OVERLAP_FRAC))
     n_borderline = max(1, int(k * TIER_BORDERLINE_FRAC))
-    n_clear = max(0, k - n_overlap - n_borderline)
+    n_low_conf = max(1, int(k * TIER_LOW_CONF_FRAC))
+    n_clear = max(0, k - n_overlap - n_borderline - n_low_conf)
     # If tier minimums exceed k, scale back to fit
-    total_tiers = n_overlap + n_borderline + n_clear
+    total_tiers = n_overlap + n_borderline + n_low_conf + n_clear
     if total_tiers > k:
-        n_overlap = max(1, k // 2)
-        n_borderline = max(0, k - n_overlap)
+        n_overlap = max(1, k // 3)
+        n_borderline = max(1, k // 3)
+        n_low_conf = max(0, k - n_overlap - n_borderline)
         n_clear = 0
 
     selected: list[dict] = []
@@ -146,7 +164,21 @@ def select_stitching_batch(
             used_ids.add(gid)
             count += 1
 
-    # Tier 3: clear winners (lowest borderline score, for calibration)
+    # Tier 3: highest low-confidence score (from remaining)
+    by_low_conf = sorted(scored_groups, key=lambda g: g["_low_conf_score"], reverse=True)
+    count = 0
+    for g in by_low_conf:
+        if count >= n_low_conf:
+            break
+        gid = g["group_id"]
+        if gid not in used_ids:
+            g["review_tier"] = "low_confidence"
+            g["review_score"] = round(g["_review_value"], 3)
+            selected.append(g)
+            used_ids.add(gid)
+            count += 1
+
+    # Tier 4: clear winners (lowest borderline score, for calibration)
     by_clear = sorted(scored_groups, key=lambda g: g["_borderline_score"])
     count = 0
     for g in by_clear:
@@ -164,11 +196,13 @@ def select_stitching_batch(
     for g in selected:
         g.pop("_label_overlap_score", None)
         g.pop("_borderline_score", None)
+        g.pop("_low_conf_score", None)
         g.pop("_review_value", None)
 
     logger.info(
         f"Selected {len(selected)} groups for review "
-        f"(overlap={n_overlap}, borderline={n_borderline}, clear={n_clear})"
+        f"(overlap={n_overlap}, borderline={n_borderline}, "
+        f"low_conf={n_low_conf}, clear={n_clear})"
     )
 
     return selected

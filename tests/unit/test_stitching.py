@@ -237,7 +237,7 @@ class TestSelectStitchingBatch:
         assert result == []
 
     def test_tier_balancing_with_enough_groups(self):
-        """With 30 groups, k=20 should produce roughly 8+8+4."""
+        """With 30 groups, k=20 should produce all four tiers."""
         groups = []
         for i in range(30):
             conf = 0.5 + i * 0.01
@@ -252,7 +252,7 @@ class TestSelectStitchingBatch:
         assert len(result) == 20
 
         tiers = {g["review_tier"] for g in result}
-        assert tiers == {"label_overlap", "borderline", "clear_winner"}
+        assert tiers == {"label_overlap", "borderline", "low_confidence", "clear_winner"}
 
     @pytest.mark.parametrize("k", [5, 10, 20])
     def test_respects_k(self, k):
@@ -286,7 +286,41 @@ class TestSelectStitchingBatch:
         for g in result:
             assert "_label_overlap_score" not in g
             assert "_borderline_score" not in g
+            assert "_low_conf_score" not in g
             assert "_review_value" not in g
+
+    def test_low_confidence_tier(self):
+        """Groups with low best-alternative confidence should get low_confidence tier."""
+        # Need enough groups so all tier slots get allocated (k=10 gives 3+3+3+1)
+        groups = []
+        for i in range(20):
+            conf = 0.9 + i * 0.005
+            groups.append(
+                _make_group(
+                    f"filler{i}",
+                    [_edge(f"r{i}", f"t{i}", conf)],
+                    [
+                        {"total_confidence": conf, "edges": [{"confidence": conf}], "summary": ""},
+                        {
+                            "total_confidence": conf - 0.01,
+                            "edges": [{"confidence": conf - 0.01}],
+                            "summary": "",
+                        },
+                    ],
+                )
+            )
+        # Add a distinctly low-confidence group
+        groups.append(
+            _make_group(
+                "low",
+                [_edge("rlow", "tlow", 0.2)],
+                [{"total_confidence": 0.2, "edges": [{"confidence": 0.2}], "summary": ""}],
+            )
+        )
+        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=10)
+        low_group = next((g for g in result if g["group_id"] == "low"), None)
+        assert low_group is not None, "Low confidence group should be selected"
+        assert low_group["review_tier"] == "low_confidence"
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +457,17 @@ class TestStitchingLabelIntegrity:
                 assert "ref_id" in edge, f"Row {idx}: edge missing ref_id"
                 assert "target_id" in edge, f"Row {idx}: edge missing target_id"
 
-    def test_num_refs_and_targets_positive(self, label_df):
-        assert (label_df["num_refs"] >= 1).all(), "num_refs must be >= 1"
-        assert (label_df["num_targets"] >= 1).all(), "num_targets must be >= 1"
+    def test_num_refs_and_targets_non_negative(self, label_df):
+        """Labels with edges must have positive counts; rejections (empty edges) may have 0."""
+        has_edges = label_df["selected_edges"].apply(lambda x: len(json.loads(x)) > 0)
+        with_edges = label_df[has_edges]
+        if len(with_edges) > 0:
+            assert (with_edges["num_refs"] >= 1).all(), "num_refs must be >= 1 when edges selected"
+            assert (with_edges["num_targets"] >= 1).all(), (
+                "num_targets must be >= 1 when edges selected"
+            )
+        # Rejections should have 0 refs and 0 targets
+        rejections = label_df[~has_edges]
+        if len(rejections) > 0:
+            assert (rejections["num_refs"] == 0).all(), "num_refs must be 0 for rejections"
+            assert (rejections["num_targets"] == 0).all(), "num_targets must be 0 for rejections"

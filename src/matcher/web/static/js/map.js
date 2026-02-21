@@ -121,7 +121,7 @@
         "bottom-left"
     );
 
-    // --- Custom layer switcher control ---
+    // --- Custom layer switcher control (includes context toggle) ---
     var LayerSwitcher = (function () {
         function LayerSwitcher() {}
         LayerSwitcher.prototype.onAdd = function (map) {
@@ -129,6 +129,16 @@
             this._container = document.createElement("div");
             this._container.className = "maplibregl-ctrl maplibregl-ctrl-group layer-switcher";
 
+            // Context toggle button (top of group)
+            var ctxBtn = document.createElement("button");
+            ctxBtn.type = "button";
+            ctxBtn.textContent = "Context";
+            ctxBtn.className = "context-toggle-btn" + (contextVisible ? " active" : "");
+            ctxBtn.title = "Toggle target dataset context (C)";
+            ctxBtn.addEventListener("click", toggleContextLayer);
+            this._container.appendChild(ctxBtn);
+
+            // Basemap buttons
             var names = Object.keys(STYLES);
             for (var i = 0; i < names.length; i++) {
                 var btn = document.createElement("button");
@@ -263,32 +273,7 @@
         if (btn) btn.classList.toggle("active", contextVisible);
     }
 
-    // --- Custom context toggle control ---
-    var ContextToggle = (function () {
-        function ContextToggle() {}
-        ContextToggle.prototype.onAdd = function (map) {
-            this._map = map;
-            this._container = document.createElement("div");
-            this._container.className = "maplibregl-ctrl maplibregl-ctrl-group";
-
-            var btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = "Context";
-            btn.className = "context-toggle-btn" + (contextVisible ? " active" : "");
-            btn.title = "Toggle target dataset context (C)";
-            btn.addEventListener("click", toggleContextLayer);
-            this._container.appendChild(btn);
-
-            return this._container;
-        };
-        ContextToggle.prototype.onRemove = function () {
-            this._container.parentNode.removeChild(this._container);
-            this._map = undefined;
-        };
-        return ContextToggle;
-    })();
-
-    map.addControl(new ContextToggle(), "bottom-left");
+    // (Context toggle is integrated into LayerSwitcher above)
 
     // --- Shared layer colors ---
     var REF_COLOR = "#2196F3";
