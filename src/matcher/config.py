@@ -453,6 +453,14 @@ class MatcherSettings(BaseSettings):
         description="Working CRS for metric calculations (auto-detected if None)",
     )
 
+    # Bridge output settings
+    bridge_min_confidence: float | None = Field(
+        default=0.5,
+        description="Post-optimization per-edge confidence filter for bridge output. "
+        "Edges below this threshold are excluded from the bridge file. "
+        "None disables filtering (high recall). Default 0.5 balances precision/recall.",
+    )
+
     # Integration settings
     min_segment_length_m: float = Field(
         default=3.0,
@@ -479,3 +487,17 @@ class MatcherSettings(BaseSettings):
 
 # Global settings instance
 settings = MatcherSettings()
+
+# Stitch profiles: named configurations for bridge_min_confidence.
+# Determined by parameter sweep on us_boston_streets (33 labeled stitch groups).
+#
+# | Profile   | bridge_min_confidence | Stitch P | Stitch R | Stitch F1 |
+# |-----------|----------------------|----------|----------|-----------|
+# | recall    | None                 | 0.82     | 0.98     | 0.89      |
+# | balanced  | 0.5                  | 0.95     | 0.91     | 0.93      |
+# | precision | 0.7                  | 0.99     | 0.90     | 0.94      |
+STITCH_PROFILES: dict[str, float | None] = {
+    "recall": None,
+    "balanced": 0.5,
+    "precision": 0.7,
+}
