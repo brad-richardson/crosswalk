@@ -77,10 +77,7 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
         console.print(f"    Precision: {sr.precision:.4f}")
         console.print(f"    Recall:    {sr.recall:.4f}")
         console.print(f"    F1:        [bold]{sr.f1:.4f}[/bold]")
-        console.print(
-            f"    Curated edges: {sr.total_curated_edges}  "
-            f"Extra: {sr.total_extra_edges}"
-        )
+        console.print(f"    Curated edges: {sr.total_curated_edges}  Extra: {sr.total_extra_edges}")
 
 
 def load_datasets_config(config_path: Path) -> dict:

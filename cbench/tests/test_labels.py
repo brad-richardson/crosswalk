@@ -90,9 +90,7 @@ def test_load_stitch_labels(tmp_path):
         {
             "group_id": ["abc123"],
             "dataset_id": ["test_city"],
-            "selected_edges": [
-                json.dumps([{"ref_id": "r1", "target_id": "t1"}])
-            ],
+            "selected_edges": [json.dumps([{"ref_id": "r1", "target_id": "t1"}])],
             "match_type": ["1:1"],
             "num_refs": [1],
             "num_targets": [1],

@@ -62,9 +62,7 @@ def evaluate_stitch_groups(
             total_extra_edges=0,
         )
 
-    bridge_edges = set(
-        zip(bridge["ref_id"].astype(str), bridge["target_id"].astype(str))
-    )
+    bridge_edges = set(zip(bridge["ref_id"].astype(str), bridge["target_id"].astype(str)))
 
     precisions = []
     recalls = []
@@ -84,9 +82,7 @@ def evaluate_stitch_groups(
 
         # Find bridge edges involving any of these IDs
         bridge_for_group = {
-            (r, t)
-            for r, t in bridge_edges
-            if r in group_ref_ids or t in group_target_ids
+            (r, t) for r, t in bridge_edges if r in group_ref_ids or t in group_target_ids
         }
 
         found = curated & bridge_for_group

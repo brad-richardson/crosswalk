@@ -65,9 +65,7 @@ def test_evaluate_stitch_groups_basic(bridge_df, stitch_labels):
 def test_evaluate_stitch_groups_missing_edges(bridge_df, stitch_labels):
     """When bridge is missing curated edges, recall drops."""
     # Remove r2-t1 from bridge
-    bridge_missing = bridge_df[
-        ~((bridge_df["ref_id"] == "r2") & (bridge_df["target_id"] == "t1"))
-    ]
+    bridge_missing = bridge_df[~((bridge_df["ref_id"] == "r2") & (bridge_df["target_id"] == "t1"))]
     result = evaluate_stitch_groups(bridge_missing, stitch_labels)
 
     # Group aaa: curated {r1-t1, r2-t1}, bridge has {r1-t1, r1-t2}
@@ -77,9 +75,7 @@ def test_evaluate_stitch_groups_missing_edges(bridge_df, stitch_labels):
 
 def test_evaluate_stitch_groups_empty_labels():
     """No stitch labels -> zero metrics."""
-    bridge = pd.DataFrame(
-        {"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.9]}
-    )
+    bridge = pd.DataFrame({"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.9]})
     labels = pd.DataFrame(
         columns=[
             "group_id",
