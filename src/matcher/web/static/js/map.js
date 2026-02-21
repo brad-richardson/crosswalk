@@ -185,21 +185,33 @@
 
     var EMPTY_FC = { type: "FeatureCollection", features: [] };
 
-    // --- Context layer (target dataset background) ---
-    var CONTEXT_SOURCE = "context-geojson";
+    // --- Context layer (target dataset via MVT vector tiles) ---
+    var CONTEXT_SOURCE = "context-tiles";
     var CONTEXT_LAYER = "context-features-line";
-    var contextGeojson = null;   // cached GeoJSON for current dataset
-    var contextDataset = null;   // dataset ID for cache invalidation
+    var contextDataset = null;   // dataset ID for source URL tracking
     var contextVisible = true;   // default on
-    var contextLoading = false;
 
-    function addContextLayer() {
-        if (map.getSource(CONTEXT_SOURCE)) return;
-        map.addSource(CONTEXT_SOURCE, { type: "geojson", data: EMPTY_FC });
+    function addContextSource(dataset) {
+        // Remove existing source/layer if dataset changed
+        if (map.getLayer(CONTEXT_LAYER)) {
+            map.removeLayer(CONTEXT_LAYER);
+        }
+        if (map.getSource(CONTEXT_SOURCE)) {
+            map.removeSource(CONTEXT_SOURCE);
+        }
+
+        map.addSource(CONTEXT_SOURCE, {
+            type: "vector",
+            tiles: [window.location.origin + "/context/tiles/" + dataset + "/{z}/{x}/{y}.pbf"],
+            minzoom: 10,
+            maxzoom: 16,
+        });
+
         map.addLayer({
             id: CONTEXT_LAYER,
             type: "line",
             source: CONTEXT_SOURCE,
+            "source-layer": "context",
             paint: {
                 "line-color": "#E57373",
                 "line-width": 1.5,
@@ -210,44 +222,37 @@
                 visibility: contextVisible ? "visible" : "none",
             },
         });
+
+        contextDataset = dataset;
     }
 
-    function showContextOnMap() {
-        if (!contextGeojson) return;
-        addContextLayer();
-        map.getSource(CONTEXT_SOURCE).setData(contextGeojson);
+    function showContextOnMap(dataset) {
+        if (!dataset) return;
+        if (!map.isStyleLoaded()) return;
+
+        // Re-add source if dataset changed or source is missing
+        if (contextDataset !== dataset || !map.getSource(CONTEXT_SOURCE)) {
+            addContextSource(dataset);
+        }
+
         // Ensure context layer renders below pair layers
-        if (map.getLayer("pair-reference-full")) {
+        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("pair-reference-full")) {
             map.moveLayer(CONTEXT_LAYER, "pair-reference-full");
         }
     }
 
     function loadContextLayer(dataset) {
         if (!dataset) return;
-        // Skip if already cached for this dataset
-        if (contextGeojson && contextDataset === dataset) {
-            if (contextVisible) showContextOnMap();
+        if (contextDataset === dataset && map.getSource(CONTEXT_SOURCE)) {
+            // Already loaded for this dataset, just ensure visibility
+            if (contextVisible && map.isStyleLoaded()) {
+                showContextOnMap(dataset);
+            }
             return;
         }
-        if (contextLoading) return;
-        contextLoading = true;
-        fetch("/browser/features?dataset=" + encodeURIComponent(dataset))
-            .then(function (resp) {
-                if (!resp.ok) throw new Error("Context fetch failed: " + resp.status);
-                return resp.json();
-            })
-            .then(function (geojson) {
-                contextGeojson = geojson;
-                contextDataset = dataset;
-                contextLoading = false;
-                if (contextVisible && map.isStyleLoaded()) {
-                    showContextOnMap();
-                }
-            })
-            .catch(function (err) {
-                console.error("Failed to load context layer:", err);
-                contextLoading = false;
-            });
+        if (map.isStyleLoaded()) {
+            showContextOnMap(dataset);
+        }
     }
 
     function toggleContextLayer() {
@@ -260,13 +265,11 @@
                 contextVisible ? "visible" : "none"
             );
         }
-        // If turning on and data not yet loaded, trigger fetch
-        if (contextVisible && !contextGeojson) {
+        // If turning on and source not yet added, trigger load
+        if (contextVisible && !map.getSource(CONTEXT_SOURCE)) {
             var params = new URLSearchParams(window.location.search);
             var dataset = params.get("dataset");
             if (dataset) loadContextLayer(dataset);
-        } else if (contextVisible && contextGeojson && !map.getSource(CONTEXT_SOURCE)) {
-            showContextOnMap();
         }
         // Update button active state
         var btn = document.querySelector(".context-toggle-btn");
@@ -426,8 +429,8 @@
         if (!data) return;
 
         // Ensure context layer exists below pair layers
-        if (contextVisible && contextGeojson) {
-            showContextOnMap();
+        if (contextVisible && contextDataset) {
+            showContextOnMap(contextDataset);
         }
 
         addPairLayers();
@@ -471,8 +474,11 @@
         // Re-create source and layers
         if (map.getSource(PAIR_SOURCE)) return; // already present (initial load)
         // Re-add context layer first (so it's below pair layers)
-        if (contextVisible && contextGeojson) {
-            showContextOnMap();
+        if (contextVisible && contextDataset) {
+            // Source was stripped by style change, force re-add
+            var ds = contextDataset;
+            contextDataset = null;
+            showContextOnMap(ds);
         }
         if (currentGeojson) {
             renderOverlays(currentGeojson);
@@ -681,8 +687,8 @@
         }
 
         // Ensure context layer exists below group layers
-        if (contextVisible && contextGeojson) {
-            showContextOnMap();
+        if (contextVisible && contextDataset) {
+            showContextOnMap(contextDataset);
         }
 
         addGroupLayers();

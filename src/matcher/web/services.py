@@ -16,6 +16,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely
 
 from ..config import FEATURE_COLUMNS, FEATURE_VERSION, settings
 from ..datasets.loader import DatasetLoader
@@ -536,6 +537,68 @@ def get_dataset_detail(dataset_id: str) -> dict | None:
     }
 
 
+# --- Context tile cache ---
+
+CONTEXT_CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "tiles"
+
+
+def _context_cache_path(dataset_id: str) -> Path:
+    """Return path to the lightweight context cache parquet for a dataset."""
+    return CONTEXT_CACHE_DIR / f"{dataset_id}_context.parquet"
+
+
+def build_context_cache(dataset_id: str, target_gdf: gpd.GeoDataFrame) -> Path:
+    """Build a lightweight context cache parquet for MVT tile serving.
+
+    Extracts id, name, class, and simplified geometry from the target GeoDataFrame.
+    Only builds if the cache doesn't already exist.
+
+    Args:
+        dataset_id: Dataset identifier
+        target_gdf: Target GeoDataFrame with full geometries
+
+    Returns:
+        Path to the context cache parquet file
+    """
+    cache_path = _context_cache_path(dataset_id)
+    if cache_path.exists():
+        return cache_path
+
+    logger.info(f"Building context cache for {dataset_id} ({len(target_gdf)} features)")
+
+    # Build lightweight dataframe
+    cols = {}
+    if "id" in target_gdf.columns:
+        cols["id"] = target_gdf["id"].values
+    else:
+        cols["id"] = range(len(target_gdf))
+
+    # Extract primary name from names dict
+    if "names" in target_gdf.columns:
+        cols["name"] = target_gdf["names"].apply(
+            lambda x: x.get("primary") if isinstance(x, dict) else None
+        )
+    elif "name" in target_gdf.columns:
+        cols["name"] = target_gdf["name"].values
+
+    if "class" in target_gdf.columns:
+        cols["class"] = target_gdf["class"].values
+
+    # Simplify geometries (~5m tolerance) and ensure WGS84
+    geom = target_gdf.geometry.values
+    simplified = shapely.simplify(geom, tolerance=0.00005)
+
+    context_gdf = gpd.GeoDataFrame(cols, geometry=simplified, crs=target_gdf.crs)
+    if context_gdf.crs and context_gdf.crs.to_epsg() != 4326:
+        context_gdf = context_gdf.to_crs("EPSG:4326")
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    context_gdf.to_parquet(cache_path)
+
+    logger.info(f"Context cache saved: {cache_path} ({len(context_gdf)} features)")
+    return cache_path
+
+
 # --- Batch Label service functions ---
 
 # Cache for dataset label counts (expires after 30 seconds)
@@ -768,6 +831,9 @@ def generate_batch(
     reference = load_geodataframe(ref_path)
     target_gdf = load_geodataframe(target_path)
 
+    # Build context tile cache if it doesn't exist yet
+    build_context_cache(dataset_id, target_gdf)
+
     views = build_views_from_feature_df(
         feature_df=sampled_feature_df,
         reference=reference,
@@ -839,6 +905,9 @@ def load_batch(dataset_id: str) -> list[CandidatePairView]:
 
     reference = load_geodataframe(ref_path)
     target_gdf = load_geodataframe(target_path)
+
+    # Build context tile cache if it doesn't exist yet
+    build_context_cache(dataset_id, target_gdf)
 
     views = build_views_from_feature_df(
         feature_df=batch_feature_df,
