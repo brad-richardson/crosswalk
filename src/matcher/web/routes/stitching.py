@@ -86,7 +86,11 @@ def _build_group_geojson(group: dict) -> dict:
             {
                 "type": "Feature",
                 "geometry": geom,
-                "properties": {"_role": "target-full", "_id": tid, "_label": target_labels.get(tid, "")},
+                "properties": {
+                    "_role": "target-full",
+                    "_id": tid,
+                    "_label": target_labels.get(tid, ""),
+                },
             }
         )
 
