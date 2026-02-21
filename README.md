@@ -75,7 +75,7 @@ flowchart TB
 
     subgraph Match["2. Stitch Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
-        E --> F[Compute 72 Features<br/>Geometric, semantic, topological]
+        E --> F[Compute 78 Features<br/>Geometric, semantic, topological]
         F --> G[Score with XGBoost]
         G --> H["Graph-Level Resolution<br/>(Planned)"]
         H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
@@ -108,7 +108,7 @@ flowchart TB
 |---------|-------------|
 | **Bridge File** | Links local segment IDs to Overture GERS IDs with confidence scores |
 | **M:N Matching** | Multiple segments on either side can match (different carriageway modeling or segmentation) |
-| **Features** | 72 features across 17 categories: geometric, semantic, topological, alignment, and more |
+| **Features** | 78 features across 17 categories: geometric, semantic, topological, alignment, and more |
 | **Labeling** | Human-in-the-loop training data creation via web UI |
 
 ## Quick Start
@@ -194,7 +194,7 @@ See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instruct
 
 ### Step 2: Stitch (Feature Computation + Matching + Optimization)
 
-The matcher computes 72 features for each candidate pair across 16 categories:
+The matcher computes 78 features for each candidate pair across 17 categories:
 
 | Category | Count | Examples |
 |----------|-------|----------|
@@ -203,7 +203,7 @@ The matcher computes 72 features for each candidate pair across 16 categories:
 | Class | 1 | Road class similarity |
 | Endpoint/Connectivity | 3 | Min/max endpoint proximity, shared endpoint count |
 | Lateral Offset | 3 | Median, IQR, 95th percentile |
-| Topology | 12 | Degree features, dead-end/intersection flags and matches |
+| Topology | 18 | Degree features, dead-end/intersection flags and matches, interior junction count/jaccard/position similarity, shared anchor count |
 | Alignment Coverage | 4 | Ref/target/min coverage, coverage ratio |
 | Graphlet | 2 | Network topology similarity, endpoint degree similarity |
 | Clustering | 3 | Local clustering coefficient (ref/target), delta |
@@ -214,6 +214,7 @@ The matcher computes 72 features for each candidate pair across 16 categories:
 | Shape Complexity | 3 | Ref/target complexity (significant turns), delta |
 | Parallel Sibling | 5 | Parallel sibling detection, fraction, offset ratios, representation mismatch |
 | Crossing Angle | 4 | Min crossing angle (ref/target), transverse neighbor fraction (ref/target) |
+| Intersection Overlap | 2 | Post-node continuation distance, endpoint heading divergence |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
 
@@ -320,7 +321,7 @@ src/matcher/
 ├── pipeline/           # End-to-end pipeline orchestration
 ├── resolution/         # Bridge file generation
 ├── topology/           # Network topology reconstruction
-├── labeling/           # Streamlit labeling UI & label/feature/data stores
+├── labeling/           # Label, feature, and data stores
 ├── datasets/           # Dataset configuration & discovery
 ├── classification/     # Road class prediction
 ├── integration/        # Unmatched segment integration
@@ -329,8 +330,8 @@ src/matcher/
 ├── quality/            # Quality metrics, fingerprinting, reports
 ├── post_integration/   # GPS drift detection, island detection, topology repair
 ├── validation/         # Ground-truth validation experiments
+├── web/                # FastAPI + HTMX web UI (labeling, QA, review, audit, stitching)
 ├── agent_labeling/     # AI agent labeling batch generation
-├── external/           # External tool integration (Hootenanny)
 └── utils/              # Shared utilities
 
 datasets/               # YAML dataset configs (us_boston_streets.yaml, etc.)
@@ -338,7 +339,8 @@ labels/                 # Normalized training labels
 │   ├── human/          #   Human labels (metadata CSV)
 │   ├── agent/          #   Agent labels (metadata CSV)
 │   ├── features/       #   Computed features (Parquet)
-│   └── data/           #   Raw pair data & geometries (Parquet)
+│   ├── data/           #   Raw pair data & geometries (Parquet)
+│   └── stitching/      #   Curated M:N group edge selections (CSV)
 docs/                   # Architecture docs, dataset ingestion guide, benchmarks
 research/               # Point-in-time research documents
 ```

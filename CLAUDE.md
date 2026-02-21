@@ -39,7 +39,18 @@ uv run matcher ui
 uv run matcher ui --reload
 ```
 
-The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Three modes: Labeling (`/labeling`), Integration QA (`/qa`), Label Review (`/review`).
+The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Modes:
+
+| Route | Purpose |
+|-------|---------|
+| `/dashboard` | Overview of datasets, label counts, and status |
+| `/` (Labeling) | Label candidate pairs as match/no_match/unsure |
+| `/review` | Review and correct existing labels |
+| `/qa` | Integration QA for reviewing unmatched segments |
+| `/audit` | Audit model predictions, feature distributions |
+| `/batch` | Agent batch labeling generation and review |
+| `/browser` | Browse features and labeled pairs per dataset |
+| `/stitching-review` | Review and curate M:N group edge selections |
 
 ## Adding a New Feature
 
@@ -71,6 +82,7 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
 - `labels/agent/dataset=*/data.csv` - Agent label metadata (no features)
 - `labels/features/dataset=*/data.parquet` - Computed features (keyed by gers_id, target_id)
 - `labels/data/dataset=*/data.parquet` - Raw pair data (geometries, attributes)
+- `labels/stitching/dataset=*/data.csv` - Curated M:N group edge selections
 
 Features are stored separately from labels via `FeatureStore` (in `labeling/feature_store.py`).
 At training time, `LabelStore.load_all()` joins labels with features automatically.
@@ -111,7 +123,7 @@ See `compute_crossing_angle_features()` in `geometric.py` for a reference implem
 ## Feature Computation Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture including:
-- 72 features across 17 categories (source of truth: `config.py::FEATURE_COLUMNS`)
+- 78 features across 17 categories (source of truth: `config.py::FEATURE_COLUMNS`)
 - Three computation paths (ML inference, labeling UI, training)
 - Pre-computation table (what's pre-computed and why)
 - Imputation consistency (training medians)
@@ -151,12 +163,14 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-uv run matcher stitch data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+    data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-uv run matcher stitch data/raw/overture_segments.parquet data/raw/us_boston_streets.parquet \
+uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+    data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
 
