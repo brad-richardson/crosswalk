@@ -160,10 +160,24 @@ def _build_group_context(group: dict) -> dict:
     target_class_vals = [target_classes.get(tid, "") for tid in target_id_list]
     target_name_vals = [target_names.get(tid, "") for tid in target_id_list]
 
-    # Compute average confidence from all edges
+    # Compute overlap-weighted average confidence from all edges.
+    # Weight each edge by the average of its ref and target aligned fractions
+    # so tiny junction slivers (2-3% overlap) don't drag the score down.
     edges = group.get("edges", [])
     if edges:
-        avg_conf = sum(e.get("confidence", 0) for e in edges) / len(edges)
+        weighted_sum = 0.0
+        weight_total = 0.0
+        for e in edges:
+            ref_frac = abs(
+                e.get("gers_end_frac", 1) - e.get("gers_start_frac", 0)
+            )
+            tgt_frac = abs(
+                e.get("local_end_frac", 1) - e.get("local_start_frac", 0)
+            )
+            w = (ref_frac + tgt_frac) / 2
+            weighted_sum += e.get("confidence", 0) * w
+            weight_total += w
+        avg_conf = weighted_sum / weight_total if weight_total > 0 else 0.0
     else:
         avg_conf = 0.0
 

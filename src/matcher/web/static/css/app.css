@@ -835,14 +835,16 @@ body {
     font-weight: 600;
 }
 
-/* === Context Toggle Control === */
+/* === Context Toggle Control (inside layer-switcher group) === */
 .context-toggle-btn {
     padding: 4px 10px;
     border: none;
+    border-bottom: 1px solid var(--border-primary);
     background: var(--bg-primary);
     color: var(--text-secondary);
     font-size: 0.8rem;
     cursor: pointer;
+    touch-action: manipulation;
     transition: background 0.15s ease, color 0.15s ease;
     text-align: left;
 }
@@ -1166,6 +1168,7 @@ body {
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
+    touch-action: manipulation;
     transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -1606,6 +1609,7 @@ body {
     font-size: 0.7rem;
     font-weight: 600;
     cursor: pointer;
+    touch-action: manipulation;
     transition: background 0.15s ease, opacity 0.15s ease;
 }
 
@@ -1753,6 +1757,7 @@ body {
     font-size: 0.7rem;
     font-weight: 600;
     cursor: pointer;
+    touch-action: manipulation;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 

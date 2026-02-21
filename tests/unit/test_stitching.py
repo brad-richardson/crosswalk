@@ -237,7 +237,7 @@ class TestSelectStitchingBatch:
         assert result == []
 
     def test_tier_balancing_with_enough_groups(self):
-        """With 30 groups, k=20 should produce roughly 8+8+4."""
+        """With 30 groups, k=20 should produce all four tiers."""
         groups = []
         for i in range(30):
             conf = 0.5 + i * 0.01
@@ -252,7 +252,7 @@ class TestSelectStitchingBatch:
         assert len(result) == 20
 
         tiers = {g["review_tier"] for g in result}
-        assert tiers == {"label_overlap", "borderline", "clear_winner"}
+        assert tiers == {"label_overlap", "borderline", "low_confidence", "clear_winner"}
 
     @pytest.mark.parametrize("k", [5, 10, 20])
     def test_respects_k(self, k):
@@ -286,7 +286,37 @@ class TestSelectStitchingBatch:
         for g in result:
             assert "_label_overlap_score" not in g
             assert "_borderline_score" not in g
+            assert "_low_conf_score" not in g
             assert "_review_value" not in g
+
+    def test_low_confidence_tier(self):
+        """Groups with low best-alternative confidence should get low_confidence tier."""
+        # Need enough groups so all tier slots get allocated (k=10 gives 3+3+3+1)
+        groups = []
+        for i in range(20):
+            conf = 0.9 + i * 0.005
+            groups.append(
+                _make_group(
+                    f"filler{i}",
+                    [_edge(f"r{i}", f"t{i}", conf)],
+                    [
+                        {"total_confidence": conf, "edges": [{"confidence": conf}], "summary": ""},
+                        {"total_confidence": conf - 0.01, "edges": [{"confidence": conf - 0.01}], "summary": ""},
+                    ],
+                )
+            )
+        # Add a distinctly low-confidence group
+        groups.append(
+            _make_group(
+                "low",
+                [_edge("rlow", "tlow", 0.2)],
+                [{"total_confidence": 0.2, "edges": [{"confidence": 0.2}], "summary": ""}],
+            )
+        )
+        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=10)
+        low_group = next((g for g in result if g["group_id"] == "low"), None)
+        assert low_group is not None, "Low confidence group should be selected"
+        assert low_group["review_tier"] == "low_confidence"
 
 
 # ---------------------------------------------------------------------------
