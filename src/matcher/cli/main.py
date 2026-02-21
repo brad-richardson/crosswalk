@@ -656,9 +656,7 @@ def register_commands(app: typer.Typer) -> None:
                     None,
                 )
             if profile_label is not None:
-                console.print(
-                    f"  Profile: {profile_label} (bridge_min_confidence={br_conf})"
-                )
+                console.print(f"  Profile: {profile_label} (bridge_min_confidence={br_conf})")
             else:
                 console.print(f"  bridge_min_confidence={br_conf}")
             if workers != -1:
