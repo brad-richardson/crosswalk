@@ -77,6 +77,8 @@ def run_single(
         labels_dir: Path to labels directory.
         output_dir: Output directory for tool artifacts.
         results_file: If set, append result to this JSONL file.
+        stitch_labels_dir: If set, path to stitching labels directory for
+            group-level evaluation.
         **kwargs: Tool-specific options passed to adapter.run().
 
     Returns:
