@@ -41,6 +41,7 @@ def generate_bridge_file(
     output_path: Path,
     pipeline_version: str = "0.1.0",
     match_method: str = "rule",
+    bridge_min_confidence: float | None = None,
 ) -> Path:
     """Generate bridge file from match results.
 
@@ -49,18 +50,28 @@ def generate_bridge_file(
         output_path: Path for output Parquet file
         pipeline_version: Version string for provenance
         match_method: Method used for matching
+        bridge_min_confidence: Per-edge confidence filter. Edges below this
+            threshold are excluded from the bridge. None disables filtering.
 
     Returns:
         Path to generated file
     """
     logger.info(f"Generating bridge file with {len(matches)} matches...")
+    if bridge_min_confidence is not None:
+        logger.info(f"  bridge_min_confidence={bridge_min_confidence}")
 
     now = datetime.now(UTC)
 
     records = []
+    filtered_count = 0
     for match in matches:
         # Only include matches and reviews (not no_match)
         if match.decision == MatchDecision.NO_MATCH:
+            continue
+
+        # Per-edge confidence filter
+        if bridge_min_confidence is not None and match.confidence < bridge_min_confidence:
+            filtered_count += 1
             continue
 
         records.append(
@@ -96,6 +107,8 @@ def generate_bridge_file(
 
     logger.info(f"Saved bridge file to {output_path}")
     logger.info(f"  Total matches: {len(records)}")
+    if filtered_count > 0:
+        logger.info(f"  Filtered by bridge_min_confidence: {filtered_count}")
 
     return output_path
 

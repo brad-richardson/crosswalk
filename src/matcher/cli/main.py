@@ -563,6 +563,15 @@ def register_commands(app: typer.Typer) -> None:
             "-w",
             help="Number of parallel workers (-1 for auto). Reduce for large datasets to save memory.",
         ),
+        stitch_profile: str | None = typer.Option(
+            None,
+            "--stitch-profile",
+            "-p",
+            help="Stitch profile: recall (no filtering, high recall), "
+            "balanced (default, bridge_min_confidence=0.5), "
+            "precision (bridge_min_confidence=0.7). "
+            "Overrides bridge_min_confidence setting.",
+        ),
         profile: bool = typer.Option(
             False,
             "--profile",
@@ -574,11 +583,22 @@ def register_commands(app: typer.Typer) -> None:
         Examples:
             matcher stitch us_boston_streets
             matcher stitch --all
+            matcher stitch us_boston_streets -p recall
             matcher stitch us_boston_streets -o custom_output.parquet
         """
+        from ..config import STITCH_PROFILES, settings
         from ..datasets.loader import DatasetLoader
         from ..filenames import PROJECT_ROOT, bridge_filename
         from ..pipeline import run_pipeline
+
+        if stitch_profile is not None:
+            if stitch_profile not in STITCH_PROFILES:
+                console.print(
+                    f"[red]Unknown stitch profile '{stitch_profile}'. "
+                    f"Available: {', '.join(STITCH_PROFILES)}[/red]"
+                )
+                raise typer.Exit(1)
+            settings.bridge_min_confidence = STITCH_PROFILES[stitch_profile]
 
         if profile:
             os.environ["MATCHER_PROFILE"] = "1"
@@ -626,6 +646,19 @@ def register_commands(app: typer.Typer) -> None:
             console.print(f"  Target: {tgt_path}")
             console.print(f"  Method: {method}")
             console.print(f"  Buffer: {buffer_distance_m}m")
+            br_conf = settings.bridge_min_confidence
+            if stitch_profile is not None:
+                profile_label = stitch_profile
+            else:
+                # Reverse-lookup profile name from current bridge_min_confidence
+                profile_label = next(
+                    (name for name, val in STITCH_PROFILES.items() if val == br_conf),
+                    None,
+                )
+            if profile_label is not None:
+                console.print(f"  Profile: {profile_label} (bridge_min_confidence={br_conf})")
+            else:
+                console.print(f"  bridge_min_confidence={br_conf}")
             if workers != -1:
                 console.print(f"  [yellow]Workers: {workers}[/yellow]")
 

@@ -11,7 +11,7 @@ import pandas as pd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN
+from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
 from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..matching.optimizer import compute_group_id, find_match_components
@@ -621,6 +621,7 @@ def run_pipeline(
         matches=optimized,
         output_path=output_path,
         match_method=method,
+        bridge_min_confidence=settings.bridge_min_confidence,
     )
 
     # Step 5.5: Optional screen tests (placeholder - not yet implemented)
