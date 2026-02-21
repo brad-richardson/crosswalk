@@ -646,9 +646,21 @@ def register_commands(app: typer.Typer) -> None:
             console.print(f"  Target: {tgt_path}")
             console.print(f"  Method: {method}")
             console.print(f"  Buffer: {buffer_distance_m}m")
-            active_profile = stitch_profile or "balanced"
             br_conf = settings.bridge_min_confidence
-            console.print(f"  Profile: {active_profile} (bridge_min_confidence={br_conf})")
+            if stitch_profile is not None:
+                profile_label = stitch_profile
+            else:
+                # Reverse-lookup profile name from current bridge_min_confidence
+                profile_label = next(
+                    (name for name, val in STITCH_PROFILES.items() if val == br_conf),
+                    None,
+                )
+            if profile_label is not None:
+                console.print(
+                    f"  Profile: {profile_label} (bridge_min_confidence={br_conf})"
+                )
+            else:
+                console.print(f"  bridge_min_confidence={br_conf}")
             if workers != -1:
                 console.print(f"  [yellow]Workers: {workers}[/yellow]")
 
