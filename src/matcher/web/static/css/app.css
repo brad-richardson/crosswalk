@@ -1558,3 +1558,159 @@ body {
         flex: 1;
     }
 }
+
+/* === Stitching Review === */
+
+/* Option pills - horizontal row of numbered circles */
+.option-pills {
+    display: flex;
+    gap: 8px;
+    padding: 8px 0;
+    flex-wrap: wrap;
+}
+
+.option-pill {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid var(--border-primary);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.option-pill:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.option-pill.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+/* Match type badge */
+.match-type-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+}
+
+.match-type-1-N {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.match-type-N-1 {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.match-type-M-N {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+@media (prefers-color-scheme: dark) {
+    .match-type-1-N {
+        background: #1e3a5f;
+        color: #90caf9;
+    }
+    .match-type-N-1 {
+        background: #3e2a10;
+        color: #ffb74d;
+    }
+    .match-type-M-N {
+        background: #2e1a3e;
+        color: #ce93d8;
+    }
+}
+
+/* Select button - large green with good tap target */
+.btn-select {
+    width: 100%;
+    min-height: 48px;
+    border: none;
+    border-radius: 8px;
+    background: #4caf50;
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.btn-select:active {
+    transform: scale(0.97);
+}
+
+.btn-select:hover {
+    opacity: 0.9;
+}
+
+/* Skip button - smaller, subdued */
+.btn-skip-stitch {
+    min-height: 48px;
+    padding: 0 20px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.btn-skip-stitch:hover {
+    background: var(--bg-secondary);
+}
+
+/* Group card positioning */
+.group-card {
+    bottom: 24px;
+    right: 12px;
+    max-width: 400px;
+    padding: 16px;
+}
+
+@media (min-width: 769px) {
+    .group-card {
+        width: 400px;
+    }
+}
+
+@media (max-width: 768px) {
+    .group-card {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-width: 100%;
+        border-radius: 16px 16px 0 0;
+        padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    }
+
+    .option-pill {
+        width: 44px;
+        height: 44px;
+        font-size: 1rem;
+    }
+
+    .btn-select {
+        min-height: 52px;
+        font-size: 1.05rem;
+    }
+}

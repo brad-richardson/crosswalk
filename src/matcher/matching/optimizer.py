@@ -13,6 +13,7 @@ Algorithm:
 6. Return group_results + optimized_1to1
 """
 
+import hashlib
 from collections import defaultdict, deque
 from typing import Any
 
@@ -23,7 +24,28 @@ from scipy.spatial import cKDTree
 from shapely import LineString
 
 from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
-from .types import MatchDecision, MatchResult
+from .types import MatchDecision, MatchResult, MatchType
+
+
+def compute_group_id(ref_ids: set, target_ids: set) -> str:
+    """Compute a deterministic short ID for a match group.
+
+    Hashes sorted ref_ids + target_ids into an 8-character hex string.
+    The same set of IDs always produces the same group_id.
+
+    Args:
+        ref_ids: Set of reference segment IDs in the group
+        target_ids: Set of target segment IDs in the group
+
+    Returns:
+        8-character hex string uniquely identifying this group
+    """
+    key = (
+        "|".join(sorted(str(r) for r in ref_ids))
+        + "||"
+        + "|".join(sorted(str(t) for t in target_ids))
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
 
 
 def optimize_matches_greedy(
@@ -77,7 +99,7 @@ def optimize_matches_greedy(
     return optimal_matches
 
 
-def _find_match_components(
+def find_match_components(
     results: list[MatchResult],
     min_confidence: float,
 ) -> list[list[MatchResult]]:
@@ -239,7 +261,7 @@ def _find_contiguous_id_groups(
 
 def _create_group_results(
     results: list[MatchResult],
-    match_type: str,
+    match_type: MatchType,
 ) -> list[MatchResult]:
     """Tag MatchResult objects with group metadata.
 
@@ -251,7 +273,7 @@ def _create_group_results(
 
     Args:
         results: MatchResult objects belonging to this group
-        match_type: One of "1:N", "N:1", "M:N"
+        match_type: MatchType value (ONE_TO_N, N_TO_ONE, M_TO_N)
 
     Returns:
         List of tagged MatchResult objects (same objects, mutated features)
@@ -268,6 +290,7 @@ def _create_group_results(
 
     ref_ids = set(r.ref_id for r in results)
     target_ids = set(r.target_id for r in results)
+    group_id = compute_group_id(ref_ids, target_ids)
 
     tagged: list[MatchResult] = []
     for r in results:
@@ -282,6 +305,7 @@ def _create_group_results(
                 features={
                     **r.features,
                     "match_type": match_type,
+                    "group_id": group_id,
                     "group_size": len(results),
                     "group_ref_count": len(ref_ids),
                     "group_target_count": len(target_ids),
@@ -424,14 +448,14 @@ def _expand_greedy_matches(
         if ref_expanded:
             # This ref got additional targets → tag as 1:N
             all_group = [match] + expanded_by_ref[match.ref_id]
-            tagged = _create_group_results(all_group, "1:N")
+            tagged = _create_group_results(all_group, MatchType.ONE_TO_N)
             result.extend(tagged)
             # Remove from expanded_by_ref so we don't double-count
             del expanded_by_ref[match.ref_id]
         elif target_expanded:
             # This target got additional refs → tag as N:1
             all_group = [match] + expanded_by_target[match.target_id]
-            tagged = _create_group_results(all_group, "N:1")
+            tagged = _create_group_results(all_group, MatchType.N_TO_ONE)
             result.extend(tagged)
             del expanded_by_target[match.target_id]
         else:
@@ -579,7 +603,9 @@ def _classify_and_resolve_component(
             )
 
         if contiguous_group_matches:
-            group_results.extend(_create_group_results(contiguous_group_matches, "1:N"))
+            group_results.extend(
+                _create_group_results(contiguous_group_matches, MatchType.ONE_TO_N)
+            )
         leftover.extend(singleton_matches)
 
         return group_results, leftover
@@ -617,7 +643,9 @@ def _classify_and_resolve_component(
             )
 
         if contiguous_group_matches:
-            group_results.extend(_create_group_results(contiguous_group_matches, "N:1"))
+            group_results.extend(
+                _create_group_results(contiguous_group_matches, MatchType.N_TO_ONE)
+            )
         leftover.extend(singleton_matches)
 
         return group_results, leftover
@@ -632,7 +660,7 @@ def _classify_and_resolve_component(
 
     if refs_fully_contiguous and targets_fully_contiguous:
         # Both sides fully contiguous → M:N group
-        return _create_group_results(component_results, "M:N"), []
+        return _create_group_results(component_results, MatchType.M_TO_N), []
 
     # Decompose into sub-components by matching contiguity groups on each side.
     # For each (ref_group, target_group) pair, collect connecting edges.
@@ -665,13 +693,13 @@ def _classify_and_resolve_component(
                 leftover.extend(sub_edges)
             elif len(sub_ref_ids) == 1 and len(sub_target_ids) > 1:
                 # 1:N sub-component
-                group_results.extend(_create_group_results(sub_edges, "1:N"))
+                group_results.extend(_create_group_results(sub_edges, MatchType.ONE_TO_N))
             elif len(sub_ref_ids) > 1 and len(sub_target_ids) == 1:
                 # N:1 sub-component
-                group_results.extend(_create_group_results(sub_edges, "N:1"))
+                group_results.extend(_create_group_results(sub_edges, MatchType.N_TO_ONE))
             else:
                 # Smaller M:N sub-component
-                group_results.extend(_create_group_results(sub_edges, "M:N"))
+                group_results.extend(_create_group_results(sub_edges, MatchType.M_TO_N))
 
             for e in sub_edges:
                 used_edges.add((e.ref_id, e.target_id))
@@ -826,7 +854,7 @@ def optimize_matches_with_grouping(
         target_geoms = dict(zip(target.index, target.geometry))
 
     # Step 1: Find connected components
-    components = _find_match_components(results, min_confidence)
+    components = find_match_components(results, min_confidence)
     logger.info(f"  Found {len(components)} connected components")
 
     # Step 2: Classify and resolve each component
@@ -877,16 +905,16 @@ def optimize_matches_with_grouping(
     # Log summary — count match types across ALL results
     type_counts = defaultdict(int)
     for r in final:
-        mt = r.features.get("match_type", "1:1")
+        mt = r.features.get("match_type", MatchType.ONE_TO_ONE)
         type_counts[mt] += 1
 
     t1 = time.perf_counter()
     logger.info(
         f"  Optimization complete in {t1 - t0:.2f}s: "
-        f"{type_counts.get('1:1', 0)} 1:1, "
-        f"{type_counts.get('1:N', 0)} 1:N, "
-        f"{type_counts.get('N:1', 0)} N:1, "
-        f"{type_counts.get('M:N', 0)} M:N"
+        f"{type_counts.get(MatchType.ONE_TO_ONE, 0)} 1:1, "
+        f"{type_counts.get(MatchType.ONE_TO_N, 0)} 1:N, "
+        f"{type_counts.get(MatchType.N_TO_ONE, 0)} N:1, "
+        f"{type_counts.get(MatchType.M_TO_N, 0)} M:N"
     )
     logger.info(f"  Total output: {len(final)} matches")
 

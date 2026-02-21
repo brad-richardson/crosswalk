@@ -1928,3 +1928,164 @@ def reclassify(
             "\n[blue]Next step: run 'matcher backfill' to recompute "
             "class_similarity features[/blue]"
         )
+
+
+@data_app.command("stitch-batch")
+def stitch_batch(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID to generate stitch batch for (e.g., us_boston_streets)",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Generate batches for all datasets with groups sidecars",
+    ),
+    batch_size: int = typer.Option(
+        20,
+        "--batch-size",
+        "-n",
+        help="Number of groups per batch (default: 20)",
+    ),
+    k_alternatives: int = typer.Option(
+        5,
+        "--alternatives",
+        "-k",
+        help="Number of top-K alternatives per group (default: 5)",
+    ),
+):
+    """Generate a curated batch of M:N groups for stitching review.
+
+    Reads the groups sidecar JSON from pipeline output, scores groups
+    by review value (label overlap + borderline confidence), and writes
+    a batch file with pre-computed alternatives.
+
+    Examples:
+        matcher data stitch-batch us_boston_streets        # Single dataset
+        matcher data stitch-batch --all                    # All datasets with groups
+        matcher data stitch-batch us_boston_streets -n 30  # Custom batch size
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from ..filenames import (
+        PROJECT_ROOT,
+        groups_sidecar_path,
+        stitch_batch_path,
+    )
+    from ..labeling.label_store import LabelStore
+    from ..labeling.stitching_store import StitchingLabelStore
+    from ..matching.alternatives import generate_top_k_alternatives
+    from ..matching.batch_selection import select_stitching_batch
+
+    if batch_size <= 0:
+        console.print("[red]Error: --batch-size must be positive[/red]")
+        raise typer.Exit(1)
+    if k_alternatives <= 0:
+        console.print("[red]Error: --alternatives must be positive[/red]")
+        raise typer.Exit(1)
+
+    output_dir = PROJECT_ROOT / "data" / "output"
+
+    # Determine which datasets to process
+    if all_datasets:
+        # Find all groups sidecar files
+        datasets_to_process = []
+        if output_dir.exists():
+            for sidecar_file in sorted(output_dir.glob("*_groups.json")):
+                # Extract dataset name from filename: us_boston_streets_groups.json
+                ds_name = sidecar_file.stem.replace("_groups", "")
+                datasets_to_process.append(ds_name)
+        if not datasets_to_process:
+            console.print("[yellow]No groups sidecar files found in data/output/[/yellow]")
+            raise typer.Exit(0)
+        console.print(
+            f"[blue]Found {len(datasets_to_process)} datasets with groups sidecars[/blue]"
+        )
+    elif dataset:
+        datasets_to_process = [dataset]
+    else:
+        console.print("[red]Error: Provide a dataset name or --all[/red]")
+        raise typer.Exit(1)
+
+    for ds_name in datasets_to_process:
+        console.print(f"\n[bold blue]Processing {ds_name}...[/bold blue]")
+
+        # Find groups sidecar
+        from ..filenames import bridge_filename
+
+        bridge_path = output_dir / bridge_filename(ds_name)
+        sidecar_path = groups_sidecar_path(bridge_path)
+
+        if not sidecar_path.exists():
+            console.print(f"  [yellow]No groups sidecar found at {sidecar_path}[/yellow]")
+            continue
+
+        # Load groups sidecar
+        try:
+            sidecar = json.loads(sidecar_path.read_text())
+            groups = sidecar.get("groups", [])
+        except (json.JSONDecodeError, OSError) as e:
+            console.print(f"  [red]Failed to load groups sidecar: {e}[/red]")
+            continue
+
+        console.print(f"  Loaded {len(groups)} groups from sidecar")
+
+        if not groups:
+            console.print("  [yellow]No groups to process[/yellow]")
+            continue
+
+        # Load existing human labels
+        label_store = LabelStore(ds_name)
+        labels_df = label_store.df
+
+        # Load existing stitching labels to skip already-reviewed
+        stitch_store = StitchingLabelStore(ds_name)
+        reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
+        console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
+
+        # Pre-compute alternatives for each group
+        console.print(f"  Computing top-{k_alternatives} alternatives per group...")
+        for group in groups:
+            alternatives = generate_top_k_alternatives(
+                component_edges=group.get("edges", []),
+                ref_geoms=group.get("ref_geometries", {}),
+                target_geoms=group.get("target_geometries", {}),
+                k=k_alternatives,
+            )
+            group["alternatives"] = alternatives
+
+        # Select batch
+        selected = select_stitching_batch(
+            groups=groups,
+            existing_labels_df=labels_df,
+            reviewed_group_ids=reviewed_ids,
+            k=batch_size,
+        )
+
+        if not selected:
+            console.print("  [yellow]No groups selected for batch[/yellow]")
+            continue
+
+        # Write batch file
+        batch = {
+            "dataset_id": ds_name,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "batch_size": len(selected),
+            "groups": selected,
+        }
+
+        batch_path = stitch_batch_path(ds_name)
+        batch_path.parent.mkdir(parents=True, exist_ok=True)
+        batch_path.write_text(json.dumps(batch, indent=2))
+
+        # Count tiers
+        tier_counts = {}
+        for g in selected:
+            tier = g.get("review_tier", "unknown")
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+        console.print(f"  [green]Wrote batch of {len(selected)} groups to {batch_path}[/green]")
+        tier_str = ", ".join(f"{t}={c}" for t, c in sorted(tier_counts.items()))
+        console.print(f"  Tiers: {tier_str}")

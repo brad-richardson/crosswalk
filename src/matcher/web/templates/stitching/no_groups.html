@@ -1,0 +1,22 @@
+<!-- Empty state for stitching review -->
+<div class="info-card map-overlay" style="text-align: center;">
+    {% if all_reviewed is defined and all_reviewed %}
+    <h4>All Done!</h4>
+    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">
+        All groups in this batch have been reviewed.
+        Run <code>matcher data stitch-batch {{ dataset }}</code> to generate a new batch.
+    </p>
+    {% elif dataset %}
+    <h4>No Batch Available</h4>
+    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">
+        No stitching review batch found for <strong>{{ dataset }}</strong>.
+        Generate one with:<br>
+        <code>matcher data stitch-batch {{ dataset }}</code>
+    </p>
+    {% else %}
+    <h4>Select a Dataset</h4>
+    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">
+        Choose a dataset from the menu to start reviewing stitching groups.
+    </p>
+    {% endif %}
+</div>

@@ -520,10 +520,155 @@
         loadPairGeometry();
     });
 
+    // --- Group geometry rendering (stitching review) ---
+    var GROUP_SOURCE = "group-geojson";
+    var currentGroupGeojson = null;
+
+    var GROUP_LAYER_DEFS = [
+        // Tier 1: Full geometries (thin, faded) — show full extent of each segment
+        {
+            id: "group-ref-full",
+            type: "line",
+            filter: ["==", ["get", "_role"], "ref-full"],
+            paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 },
+        },
+        {
+            id: "group-target-full",
+            type: "line",
+            filter: ["==", ["get", "_role"], "target-full"],
+            paint: { "line-color": "#FF5722", "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] },
+        },
+        // Tier 2: Aligned sub-segments (thick, bright, assignment-colored)
+        {
+            id: "group-ref-aligned",
+            type: "line",
+            filter: ["==", ["get", "_role"], "ref-aligned"],
+            paint: {
+                "line-color": ["get", "_assignment_color"],
+                "line-width": 4,
+                "line-opacity": 0.9,
+            },
+        },
+        {
+            id: "group-target-aligned",
+            type: "line",
+            filter: ["==", ["get", "_role"], "target-aligned"],
+            paint: {
+                "line-color": ["get", "_assignment_color"],
+                "line-width": 4,
+                "line-opacity": 0.9,
+            },
+        },
+    ];
+
+    function addGroupLayers() {
+        if (map.getSource(GROUP_SOURCE)) return;
+
+        map.addSource(GROUP_SOURCE, { type: "geojson", data: EMPTY_FC });
+
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            var def = GROUP_LAYER_DEFS[i];
+            map.addLayer({
+                id: def.id,
+                type: def.type,
+                source: GROUP_SOURCE,
+                filter: def.filter,
+                paint: def.paint,
+            });
+        }
+    }
+
+    function removeGroupLayers() {
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            if (map.getLayer(GROUP_LAYER_DEFS[i].id)) {
+                map.removeLayer(GROUP_LAYER_DEFS[i].id);
+            }
+        }
+        if (map.getSource(GROUP_SOURCE)) {
+            map.removeSource(GROUP_SOURCE);
+        }
+    }
+
+    /**
+     * Display group geometries on the map for stitching review.
+     *
+     * Expected: GeoJSON FeatureCollection with two tiers:
+     * - _role "ref-full"/"target-full": full segment geometries (thin, faded)
+     * - _role "ref-aligned"/"target-aligned": aligned sub-segments (thick, bright)
+     *   with _assignment_color for group coloring
+     */
+    function showGroupGeometry(geojsonData) {
+        if (!geojsonData) {
+            currentGroupGeojson = null;
+            if (map.getSource(GROUP_SOURCE)) {
+                map.getSource(GROUP_SOURCE).setData(EMPTY_FC);
+            }
+            return;
+        }
+
+        var data;
+        if (typeof geojsonData === "string") {
+            try {
+                data = JSON.parse(geojsonData);
+            } catch (e) {
+                console.error("Failed to parse group geometry:", e);
+                return;
+            }
+        } else {
+            data = geojsonData;
+        }
+
+        currentGroupGeojson = data;
+
+        if (!map.isStyleLoaded()) return;
+        renderGroupOverlays(data);
+    }
+
+    function renderGroupOverlays(data) {
+        if (!data) return;
+
+        // Remove pair layers if present (different mode)
+        if (map.getSource(PAIR_SOURCE)) {
+            map.getSource(PAIR_SOURCE).setData(EMPTY_FC);
+        }
+
+        // Ensure context layer exists below group layers
+        if (contextVisible && contextGeojson) {
+            showContextOnMap();
+        }
+
+        addGroupLayers();
+
+        // Re-order context below groups
+        if (map.getLayer(CONTEXT_LAYER) && map.getLayer("group-ref-full")) {
+            map.moveLayer(CONTEXT_LAYER, "group-ref-full");
+        }
+
+        map.getSource(GROUP_SOURCE).setData(data);
+
+        // Fit bounds
+        var bbox = geojsonBounds(data);
+        if (bbox) {
+            var isMobile = window.innerWidth < 768;
+            map.fitBounds(bbox, { padding: isMobile ? 150 : 60, animate: false });
+        }
+    }
+
+    // Re-add group overlays after style change
+    map.on("style.load", function () {
+        if (currentGroupGeojson) {
+            // Remove stale source first (style change strips them)
+            if (!map.getSource(GROUP_SOURCE)) {
+                renderGroupOverlays(currentGroupGeojson);
+            }
+        }
+    });
+
     // Expose map and helpers for console debugging and other scripts
     window.matcherMap = map;
     window.matcherPairLayer = PAIR_SOURCE;
     window.matcherShowGeometry = showPairGeometry;
+    window.matcherShowGroupGeometry = showGroupGeometry;
     window.matcherGeojsonBounds = geojsonBounds;
     window.matcherToggleContext = toggleContextLayer;
 })();

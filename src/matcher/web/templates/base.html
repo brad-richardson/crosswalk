@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Matcher - {% if mode == 'labeling' %}Label Creation{% elif mode == 'batch' %}Batch Label{% elif mode == 'review' %}Label Review{% elif mode == 'qa' %}Integration QA{% elif mode == 'browser' %}Browse{% elif mode == 'audit' %}Feature Audit{% else %}Label Creation{% endif %}</title>
+    <title>Matcher - {% if mode == 'labeling' %}Label Creation{% elif mode == 'batch' %}Batch Label{% elif mode == 'review' %}Label Review{% elif mode == 'qa' %}Integration QA{% elif mode == 'browser' %}Browse{% elif mode == 'audit' %}Feature Audit{% elif mode == 'stitching' %}Stitching Review{% else %}Label Creation{% endif %}</title>
 
     <!-- MapLibre GL CSS -->
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
@@ -32,6 +32,7 @@
             <li><a href="/qa" class="{% if mode == 'qa' %}active{% endif %}">Integration QA</a></li>
             <li><a href="/browser" class="{% if mode == 'browser' %}active{% endif %}">Browse</a></li>
             <li><a href="/audit" class="{% if mode == 'audit' %}active{% endif %}">Audit</a></li>
+            <li><a href="/stitching-review" class="{% if mode == 'stitching' %}active{% endif %}">Stitching Review</a></li>
         </ul>
 
         <h3>Dataset</h3>

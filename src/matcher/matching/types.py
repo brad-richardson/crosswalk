@@ -5,7 +5,7 @@ optimizer, and resolution components.
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 
@@ -15,6 +15,15 @@ class MatchDecision(Enum):
     MATCH = "match"
     REVIEW = "review"
     NO_MATCH = "no_match"
+
+
+class MatchType(StrEnum):
+    """Match group cardinality types."""
+
+    ONE_TO_ONE = "1:1"
+    ONE_TO_N = "1:N"
+    N_TO_ONE = "N:1"
+    M_TO_N = "M:N"
 
 
 @dataclass

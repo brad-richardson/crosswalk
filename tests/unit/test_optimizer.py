@@ -9,7 +9,7 @@ from shapely import LineString
 
 from matcher.matching.optimizer import (
     _find_contiguous_id_groups,
-    _find_match_components,
+    find_match_components,
     optimize_matches_greedy,
     optimize_matches_with_grouping,
 )
@@ -116,12 +116,12 @@ class TestFindMatchComponents:
 
     def test_empty_input(self):
         """Empty input should return no components."""
-        assert _find_match_components([], min_confidence=0.5) == []
+        assert find_match_components([], min_confidence=0.5) == []
 
     def test_single_pair(self):
         """A single match pair should be one component."""
         results = [MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {})]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
         assert len(components[0]) == 1
 
@@ -131,7 +131,7 @@ class TestFindMatchComponents:
             MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
             MatchResult("r1", "t2", MatchDecision.MATCH, 0.8, {}, {}),
         ]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
         assert len(components[0]) == 2
 
@@ -141,7 +141,7 @@ class TestFindMatchComponents:
             MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
             MatchResult("r2", "t1", MatchDecision.MATCH, 0.8, {}, {}),
         ]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
         assert len(components[0]) == 2
 
@@ -151,7 +151,7 @@ class TestFindMatchComponents:
             MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
             MatchResult("r2", "t2", MatchDecision.MATCH, 0.8, {}, {}),
         ]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 2
 
     def test_chain_forms_one_component(self):
@@ -161,7 +161,7 @@ class TestFindMatchComponents:
             MatchResult("r2", "t1", MatchDecision.MATCH, 0.8, {}, {}),
             MatchResult("r2", "t2", MatchDecision.MATCH, 0.7, {}, {}),
         ]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
         assert len(components[0]) == 3
 
@@ -171,7 +171,7 @@ class TestFindMatchComponents:
             MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
             MatchResult("r2", "t2", MatchDecision.MATCH, 0.3, {}, {}),  # Below threshold
         ]
-        components = _find_match_components(results, min_confidence=0.5)
+        components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
         assert components[0][0].ref_id == "r1"
 

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block overlay %}
+<!-- Progress indicator (top-left) -->
+<div class="pair-progress map-overlay" id="pair-progress">
+    {% if total_groups > 0 %}
+    <span class="progress-label">Group {{ group_index + 1 }} of {{ total_groups }}</span>
+    {% elif all_reviewed is defined and all_reviewed %}
+    All groups reviewed!
+    {% elif dataset %}
+    No batch generated
+    {% endif %}
+</div>
+
+<!-- Group content area (swapped by HTMX) -->
+<div id="group-content">
+    {% if no_groups is defined and no_groups %}
+        {% include "stitching/no_groups.html" %}
+    {% elif group %}
+        {% include "stitching/group.html" %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if group and group_geojson %}
+<script>
+    (function() {
+        var el = document.getElementById('group-geometry');
+        if (el && window.matcherShowGroupGeometry) {
+            try {
+                var data = JSON.parse(el.textContent);
+                window.matcherShowGroupGeometry(data);
+            } catch(e) {
+                console.error('Failed to parse group geometry:', e);
+            }
+        }
+    })();
+</script>
+{% endif %}
+
+<script>
+    function selectOption(optionIndex) {
+        var params = new URLSearchParams(window.location.search);
+        var dataset = params.get('dataset');
+        var groupIndex = document.getElementById('group-card') ?
+            document.getElementById('group-card').dataset.groupIndex : '0';
+
+        htmx.ajax('GET', '/stitching-review/group?dataset=' + encodeURIComponent(dataset) +
+            '&group_index=' + groupIndex + '&option_index=' + optionIndex, {
+            target: '#group-content',
+            swap: 'innerHTML'
+        });
+    }
+
+    // After HTMX swap, re-render geometry
+    document.addEventListener('htmx:afterSwap', function(evt) {
+        var el = document.getElementById('group-geometry');
+        if (el && window.matcherShowGroupGeometry) {
+            try {
+                var data = JSON.parse(el.textContent);
+                window.matcherShowGroupGeometry(data);
+            } catch(e) {
+                console.error('Failed to parse group geometry:', e);
+            }
+        }
+        // Update progress
+        var progressEl = document.getElementById('group-progress-text');
+        var progressContainer = document.getElementById('pair-progress');
+        if (progressEl && progressContainer) {
+            progressContainer.innerHTML = '<span class="progress-label">' + progressEl.textContent + '</span>';
+        }
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+        var params = new URLSearchParams(window.location.search);
+        var dataset = params.get('dataset');
+        if (!dataset) return;
+
+        // Number keys 1-9 to select option
+        var num = parseInt(e.key);
+        if (num >= 1 && num <= 9) {
+            selectOption(num - 1);
+            return;
+        }
+
+        switch(e.key.toLowerCase()) {
+            case 'c':
+                if (window.matcherToggleContext) window.matcherToggleContext();
+                break;
+        }
+    });
+</script>
+{% endblock %}
