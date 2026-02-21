@@ -529,13 +529,21 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command()
     def stitch(
-        reference: Path = typer.Argument(..., help="Reference edges (Overture)"),
-        target: Path = typer.Argument(..., help="Target edges (local data)"),
-        output: Path = typer.Option(
-            Path("data/output/bridge.parquet"),
+        dataset: str | None = typer.Argument(
+            None,
+            help="Dataset name (e.g. us_boston_streets)",
+        ),
+        all_datasets: bool = typer.Option(
+            False,
+            "--all",
+            "-a",
+            help="Process all available datasets",
+        ),
+        output: Path | None = typer.Option(
+            None,
             "--output",
             "-o",
-            help="Output bridge file path",
+            help="Output bridge file path (default: data/output/{dataset}_bridge.parquet)",
         ),
         method: str = typer.Option(
             "xgboost",
@@ -561,42 +569,88 @@ def register_commands(app: typer.Typer) -> None:
             help="Enable per-feature timing breakdown (sets MATCHER_PROFILE=1)",
         ),
     ):
-        """Run the stitch pipeline (pair matching + M:N optimization)."""
+        """Run the stitch pipeline (pair matching + M:N optimization).
+
+        Examples:
+            matcher stitch us_boston_streets
+            matcher stitch --all
+            matcher stitch us_boston_streets -o custom_output.parquet
+        """
+        from ..datasets.loader import DatasetLoader
+        from ..filenames import PROJECT_ROOT, bridge_filename
         from ..pipeline import run_pipeline
 
         if profile:
             os.environ["MATCHER_PROFILE"] = "1"
 
-        console.print("[blue]Running stitch pipeline...[/blue]")
-        console.print(f"  Reference: {reference}")
-        console.print(f"  Target: {target}")
-        console.print(f"  Method: {method}")
-        console.print(f"  Buffer: {buffer_distance_m}m")
-        if workers != -1:
-            console.print(f"  [yellow]Workers: {workers}[/yellow]")
+        output_dir = PROJECT_ROOT / "data" / "output"
+        loader = DatasetLoader()
 
-        output.parent.mkdir(parents=True, exist_ok=True)
+        # Build list of (dataset_name, ref_path, target_path, output_path)
+        jobs: list[tuple[str, Path, Path, Path]] = []
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Stitching...", total=None)
+        if all_datasets:
+            available = loader.list_available()
+            if not available:
+                console.print("[yellow]No datasets found in data/raw/[/yellow]")
+                raise typer.Exit(0)
+            console.print(f"[blue]Found {len(available)} datasets[/blue]")
+            for ds in available:
+                ref = loader.find_reference_path(ds)
+                tgt = loader.find_target_path(ds)
+                if ref and tgt:
+                    out = output_dir / bridge_filename(ds)
+                    jobs.append((ds, ref, tgt, out))
+                else:
+                    console.print(f"  [yellow]Skipping {ds}: missing files[/yellow]")
+        elif dataset:
+            ref = loader.find_reference_path(dataset)
+            tgt = loader.find_target_path(dataset)
+            if not ref:
+                console.print(
+                    f"[red]Could not find reference (Overture) file for '{dataset}'[/red]"
+                )
+                raise typer.Exit(1)
+            if not tgt:
+                console.print(f"[red]Could not find target file for '{dataset}'[/red]")
+                raise typer.Exit(1)
+            out = output or (output_dir / bridge_filename(dataset))
+            jobs.append((dataset, ref, tgt, out))
+        else:
+            console.print("[red]Provide a dataset name or --all[/red]")
+            raise typer.Exit(1)
 
-            result = run_pipeline(
-                reference_path=reference,
-                target_path=target,
-                output_path=output,
-                method=method,
-                buffer_distance_m=buffer_distance_m,
-                n_jobs=workers,
-            )
+        for ds_name, ref_path, tgt_path, out_path in jobs:
+            console.print(f"\n[bold blue]Stitching {ds_name}...[/bold blue]")
+            console.print(f"  Reference: {ref_path}")
+            console.print(f"  Target: {tgt_path}")
+            console.print(f"  Method: {method}")
+            console.print(f"  Buffer: {buffer_distance_m}m")
+            if workers != -1:
+                console.print(f"  [yellow]Workers: {workers}[/yellow]")
 
-            progress.update(task, completed=True)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        console.print(f"[green]Matched {result.n_matched} / {result.n_target} features[/green]")
-        console.print(f"[green]Bridge file: {output}[/green]")
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Stitching...", total=None)
+
+                result = run_pipeline(
+                    reference_path=ref_path,
+                    target_path=tgt_path,
+                    output_path=out_path,
+                    method=method,
+                    buffer_distance_m=buffer_distance_m,
+                    n_jobs=workers,
+                )
+
+                progress.update(task, completed=True)
+
+            console.print(f"[green]Matched {result.n_matched} / {result.n_target} features[/green]")
+            console.print(f"[green]Bridge file: {out_path}[/green]")
 
     @app.command()
     def train(

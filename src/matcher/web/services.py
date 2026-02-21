@@ -1096,7 +1096,6 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
 def record_stitching_label(
     dataset_id: str,
     group_id: str,
-    selected_option_index: int,
     selected_edges: list[dict],
     match_type: str,
     num_refs: int,
@@ -1107,7 +1106,6 @@ def record_stitching_label(
     Args:
         dataset_id: Dataset identifier
         group_id: Group identifier
-        selected_option_index: Which alternative was selected
         selected_edges: List of {ref_id, target_id} dicts
         match_type: "1:N", "N:1", or "M:N"
         num_refs: Number of ref segments
@@ -1121,7 +1119,6 @@ def record_stitching_label(
 
     store.add(
         group_id=group_id,
-        selected_option_index=selected_option_index,
         selected_edges=selected_edges,
         match_type=match_type,
         num_refs=num_refs,

@@ -182,6 +182,14 @@ def _get_score_numba(
         pb_x, pb_y = b_x, b_y
         has_prev = True
 
+    # When comparison_length is much smaller than buffer_distance, all samples
+    # collapse to essentially the same point, artificially inflating the score.
+    # A zero-length overlap at a shared endpoint scores num_samples/buffer,
+    # which can outscore a legitimate full-length alignment at nonzero offset.
+    # Penalize proportionally when samples aren't spread enough to be independent.
+    sample_spread = comparison_length / buffer_distance
+    if sample_spread < 1.0:
+        return sqsum * sample_spread
     return sqsum
 
 

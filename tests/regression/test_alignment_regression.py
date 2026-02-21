@@ -606,3 +606,79 @@ class TestOveralignment:
             f"expected >0.10. Endpoint seed may have hijacked alignment "
             f"to a worse local optimum."
         )
+
+
+class TestDegenerateEndpointScoring:
+    """Tests for the sample-spread scoring fix.
+
+    A zero-length overlap at a shared endpoint used to outscore a legitimate
+    full-length alignment because all 16 samples collapsed to one point with
+    distance ≈ 0, yielding score = 16/buffer. The fix penalizes scores when
+    comparison_length < buffer_distance (samples aren't spread enough to be
+    independent), so degenerate overlaps get near-zero scores.
+    """
+
+    @pytest.mark.parametrize(
+        "ref_coords, tgt_coords, min_ref_cov, max_ref_cov, min_tgt_cov, max_tgt_cov",
+        [
+            pytest.param(
+                [(0, 0), (354, 0)],
+                [(0, 0.7), (354, 0.7)],
+                0.9,
+                None,
+                0.9,
+                None,
+                id="full-overlap-beats-endpoint-touch",
+            ),
+            pytest.param(
+                [(0, 0), (200, 0)],
+                [(-100, -100), (0, 0)],
+                None,
+                0.15,
+                None,
+                None,
+                id="endpoint-only-diverging-45deg",
+            ),
+            pytest.param(
+                [(0, 0), (200, 0)],
+                [(50, 2), (65, 2)],
+                None,
+                0.15,
+                0.8,
+                None,
+                id="short-intersection-15m-on-200m",
+            ),
+            pytest.param(
+                [(95, 0), (200, 0), (300, 0)],
+                [(0, 3), (50, 3), (100, 3)],
+                0.01,
+                None,
+                0.01,
+                None,
+                id="5m-junction-overlap-nonzero",
+            ),
+        ],
+    )
+    def test_degenerate_scoring_scenarios(
+        self, ref_coords, tgt_coords, min_ref_cov, max_ref_cov, min_tgt_cov, max_tgt_cov
+    ):
+        ref = LineString(ref_coords)
+        target = LineString(tgt_coords)
+        result = linestring_alignment(ref, target)
+
+        if min_ref_cov is not None:
+            assert result.overture_coverage > min_ref_cov, (
+                f"ref_cov={result.overture_coverage:.4f}, expected > {min_ref_cov}"
+            )
+        if max_ref_cov is not None:
+            assert result.overture_coverage < max_ref_cov, (
+                f"ref_cov={result.overture_coverage:.4f}, expected < {max_ref_cov}"
+            )
+        if min_tgt_cov is not None:
+            assert result.dataset_coverage > min_tgt_cov, (
+                f"tgt_cov={result.dataset_coverage:.4f}, expected > {min_tgt_cov}"
+            )
+        if max_tgt_cov is not None:
+            assert result.dataset_coverage < max_tgt_cov, (
+                f"tgt_cov={result.dataset_coverage:.4f}, expected < {max_tgt_cov}"
+            )

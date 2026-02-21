@@ -78,6 +78,9 @@ best_params.json
 # Claude Code
 .claude/
 
+# Playwright MCP artifacts
+.playwright-mcp/
+
 # cbench outputs
 cbench_output/
 cbench_results.jsonl

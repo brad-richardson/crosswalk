@@ -4,18 +4,24 @@
 <!-- Embedded geometry for map rendering -->
 <script type="application/json" id="group-geometry">{{ group_geojson | tojson }}</script>
 
+<!-- Edge confidence data for dynamic updates -->
+<script type="application/json" id="group-edges">{{ group.edges | tojson }}</script>
+
 <!-- Group card (bottom of screen) -->
 <div class="info-card map-overlay group-card" id="group-card"
      data-group-index="{{ group_index }}"
      data-group-id="{{ group.group_id }}">
 
-    <!-- Match type badge + segment counts -->
+    <!-- Header: match type + counts + confidence + tier -->
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
         <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
             {{ group.match_type }}
         </span>
         <span style="font-size: 0.8rem; color: var(--text-muted);">
             {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
+        </span>
+        <span class="pair-confidence" id="group-confidence" style="margin-left: 4px;">
+            {{ "%.0f" | format(avg_confidence * 100) }}%
         </span>
         {% if group.review_tier is defined %}
         <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: auto;">
@@ -24,45 +30,90 @@
         {% endif %}
     </div>
 
-    <!-- Option selector pills -->
-    {% if group.alternatives is defined and group.alternatives | length > 0 %}
-    <div class="option-pills">
-        {% for alt in group.alternatives %}
-        <button class="option-pill{% if loop.index0 == option_index %} active{% endif %}"
-                onclick="selectOption({{ loop.index0 }})">
-            {{ loop.index }}
-        </button>
-        {% endfor %}
+    <!-- Per-segment toggle pills -->
+    {% if ref_details is defined %}
+    <div class="segment-toggles">
+        <div class="segment-toggle-row">
+            <span class="segment-toggle-label" onclick="toggleAllRef()" title="Toggle all ref">Ref</span>
+            <div class="segment-pills">
+                {% for ref in ref_details %}
+                <button class="segment-pill segment-pill-ref active"
+                        onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        title="{{ ref.id }}">R{{ loop.index }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="segment-toggle-row">
+            <span class="segment-toggle-label" onclick="toggleAllTarget()" title="Toggle all target">Trgt</span>
+            <div class="segment-pills">
+                {% for tgt in target_details %}
+                <button class="segment-pill segment-pill-target active"
+                        onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        title="{{ tgt.id }}">T{{ loop.index }}</button>
+                {% endfor %}
+            </div>
+        </div>
     </div>
 
-    <!-- Current option details -->
-    {% set current_option = group.alternatives[option_index] %}
-    <div style="margin: 8px 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="pair-confidence">
-                Confidence: {{ "%.2f" | format(current_option.total_confidence) }}
-            </span>
-            <span style="font-size: 0.75rem; color: var(--text-muted);">
-                Option {{ option_index + 1 }} of {{ group.alternatives | length }}
-            </span>
+    <!-- Three-line summary: ID, Class, Name (tap to expand) -->
+    <div class="group-summary" onclick="toggleGroupDetails()">
+        {% if id_summary is defined %}
+        <div class="summary-line">
+            <span class="summary-label">ID</span>
+            <span class="summary-value">{{ id_summary }}</span>
         </div>
-        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">
-            {{ current_option.summary }}
-        </p>
+        {% endif %}
+        {% if class_summary is defined %}
+        <div class="summary-line">
+            <span class="summary-label">Class</span>
+            <span class="summary-value">{{ class_summary }}</span>
+        </div>
+        {% endif %}
+        {% if name_summary is defined %}
+        <div class="summary-line">
+            <span class="summary-label">Name</span>
+            <span class="summary-value">{{ name_summary }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Expandable details -->
+    <div class="group-details" id="group-details">
+        <div class="details-section">
+            <div class="details-header">Ref</div>
+            {% for ref in ref_details %}
+            <div class="detail-row">
+                <span class="detail-id" title="{{ ref.id }}">{{ ref.id }}</span>
+                <span class="detail-attr">{{ ref.cls or '\u2014' }}</span>
+                <span class="detail-attr">{{ ref.name or '\u2014' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="details-section">
+            <div class="details-header">Target</div>
+            {% for tgt in target_details %}
+            <div class="detail-row">
+                <span class="detail-id" title="{{ tgt.id }}">{{ tgt.id }}</span>
+                <span class="detail-attr">{{ tgt.cls or '\u2014' }}</span>
+                <span class="detail-attr">{{ tgt.name or '\u2014' }}</span>
+            </div>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 
     <!-- Action buttons -->
     <div style="display: flex; gap: 8px; margin-top: 8px;">
-        <form style="flex: 1;"
+        <form style="flex: 1;" id="select-form"
               hx-post="/stitching-review/select"
               hx-target="#group-content"
               hx-swap="innerHTML">
             <input type="hidden" name="dataset" value="{{ dataset }}">
             <input type="hidden" name="group_id" value="{{ group.group_id }}">
             <input type="hidden" name="group_index" value="{{ group_index }}">
-            <input type="hidden" name="option_index" value="{{ option_index }}">
-            <button type="submit" class="btn-select">
+            <input type="hidden" name="included_refs" id="included-refs" value="">
+            <input type="hidden" name="included_targets" id="included-targets" value="">
+            <button type="submit" class="btn-select" onclick="populateSelection()">
                 Select This
             </button>
         </form>

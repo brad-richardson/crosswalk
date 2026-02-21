@@ -19,8 +19,7 @@ DEFAULT_STITCHING_DIR = Path("labels/stitching")
 STITCHING_LABEL_COLUMNS = [
     "group_id",
     "dataset_id",
-    "selected_option_index",
-    "selected_edges",  # JSON: [{ref_id, target_id, gers_start_frac, gers_end_frac, local_start_frac, local_end_frac}, ...]
+    "selected_edges",  # JSON: [{ref_id, target_id}, ...]
     "match_type",
     "num_refs",
     "num_targets",
@@ -111,7 +110,6 @@ class StitchingLabelStore:
     def add(
         self,
         group_id: str,
-        selected_option_index: int,
         selected_edges: list[dict],
         match_type: str,
         num_refs: int,
@@ -127,7 +125,6 @@ class StitchingLabelStore:
 
         Args:
             group_id: Deterministic group identifier
-            selected_option_index: Which alternative was selected
             selected_edges: List of {ref_id, target_id} dicts
             match_type: "1:N", "N:1", or "M:N"
             num_refs: Number of reference segments in the group
@@ -138,7 +135,6 @@ class StitchingLabelStore:
         new_row = {
             "group_id": str(group_id),
             "dataset_id": self.dataset_id,
-            "selected_option_index": selected_option_index,
             "selected_edges": json.dumps(selected_edges),
             "match_type": match_type,
             "num_refs": num_refs,

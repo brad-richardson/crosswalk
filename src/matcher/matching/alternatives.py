@@ -328,7 +328,24 @@ def _build_summary(edges: list[dict], ref_ids: list[str]) -> str:
 
 
 def _shorten_id(id_str: str) -> str:
-    """Shorten an ID for display (last 6 chars if long)."""
-    if len(id_str) > 12:
-        return "..." + id_str[-6:]
-    return id_str
+    """Shorten an ID for display.
+
+    UUIDs (ref IDs): show first 8 chars (e.g., "c6c8d93d...")
+    Target IDs (dataset_numeric_h3): strip dataset prefix, show from first
+    numeric segment (e.g., "4696_882a...")
+    """
+    if len(id_str) <= 12:
+        return id_str
+    # UUID pattern: 8-4-4-4-12 hex with dashes
+    if len(id_str) == 36 and id_str.count("-") == 4:
+        return id_str[:8] + "..."
+    # Target ID: find first segment starting with a digit
+    parts = id_str.split("_")
+    for i, part in enumerate(parts):
+        if part and part[0].isdigit():
+            suffix = "_".join(parts[i:])
+            if len(suffix) > 12:
+                return suffix[:10] + "..."
+            return suffix
+    # Fallback: prefix
+    return id_str[:10] + "..."
