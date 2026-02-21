@@ -603,7 +603,9 @@ def _classify_and_resolve_component(
             )
 
         if contiguous_group_matches:
-            group_results.extend(_create_group_results(contiguous_group_matches, MatchType.ONE_TO_N))
+            group_results.extend(
+                _create_group_results(contiguous_group_matches, MatchType.ONE_TO_N)
+            )
         leftover.extend(singleton_matches)
 
         return group_results, leftover
@@ -641,7 +643,9 @@ def _classify_and_resolve_component(
             )
 
         if contiguous_group_matches:
-            group_results.extend(_create_group_results(contiguous_group_matches, MatchType.N_TO_ONE))
+            group_results.extend(
+                _create_group_results(contiguous_group_matches, MatchType.N_TO_ONE)
+            )
         leftover.extend(singleton_matches)
 
         return group_results, leftover
