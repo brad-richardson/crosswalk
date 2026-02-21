@@ -22,6 +22,7 @@ from .routes.labeling import router as labeling_router
 from .routes.qa import router as qa_router
 from .routes.review import router as review_router
 from .routes.stitching import router as stitching_router
+from .routes.tiles import router as tiles_router
 
 logger = logging.getLogger(__name__)
 
@@ -106,5 +107,6 @@ def create_app() -> FastAPI:
     app.include_router(qa_router)
     app.include_router(review_router)
     app.include_router(stitching_router)
+    app.include_router(tiles_router)
 
     return app
