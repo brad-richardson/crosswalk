@@ -11,8 +11,9 @@ from pathlib import Path
 from loguru import logger
 
 from cbench.adapters.base import ToolAdapter
-from cbench.eval.labels import load_labels
+from cbench.eval.labels import load_labels, load_stitch_labels
 from cbench.eval.metrics import EvalResult, evaluate
+from cbench.eval.stitch_metrics import StitchEvalResult, evaluate_stitch_groups
 from cbench.results.store import BenchmarkResult, create_result, save_result
 
 
@@ -51,6 +52,7 @@ class RunResult:
     eval_result: EvalResult
     bench_result: BenchmarkResult
     resource_stats: ResourceStats | None = None
+    stitch_result: StitchEvalResult | None = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -62,6 +64,7 @@ def run_single(
     labels_dir: Path,
     output_dir: Path,
     results_file: Path | None = None,
+    stitch_labels_dir: Path | None = None,
     **kwargs,
 ) -> RunResult:
     """Run a tool on a single dataset and evaluate against ground truth.
@@ -125,6 +128,19 @@ def run_single(
     metrics = eval_result.to_dict()
     metrics.update(resource_stats.to_dict())
 
+    # Stitch-level evaluation (if labels exist)
+    stitch_result = None
+    if stitch_labels_dir is not None:
+        stitch_labels = load_stitch_labels(stitch_labels_dir, dataset)
+        if stitch_labels is not None:
+            stitch_result = evaluate_stitch_groups(tool_output.matches, stitch_labels)
+            metrics.update(stitch_result.to_dict())
+            logger.info(
+                f"Stitch eval: P={stitch_result.precision:.3f} "
+                f"R={stitch_result.recall:.3f} F1={stitch_result.f1:.3f} "
+                f"({stitch_result.groups_evaluated} groups)"
+            )
+
     bench_result = create_result(
         tool=adapter.name,
         dataset=dataset,
@@ -142,5 +158,6 @@ def run_single(
         eval_result=eval_result,
         bench_result=bench_result,
         resource_stats=resource_stats,
+        stitch_result=stitch_result,
         metadata=tool_output.metadata,
     )

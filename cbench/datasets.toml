@@ -4,6 +4,7 @@
 [defaults]
 data_dir = "../data/raw"
 labels_dir = "../labels/human"
+stitch_labels_dir = "../labels/stitching"
 
 [datasets.us_boston_bike_network]
 reference = "us_boston_bike_network_overture_segments_v1.0.parquet"
