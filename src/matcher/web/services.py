@@ -584,13 +584,15 @@ def build_context_cache(dataset_id: str, target_gdf: gpd.GeoDataFrame) -> Path:
     if "class" in target_gdf.columns:
         cols["class"] = target_gdf["class"].values
 
-    # Simplify geometries (~5m tolerance) and ensure WGS84
-    geom = target_gdf.geometry.values
-    simplified = shapely.simplify(geom, tolerance=0.00005)
+    # Ensure WGS84 before simplifying so tolerance is in degrees (~5m)
+    src_gdf = target_gdf
+    if src_gdf.crs is None:
+        src_gdf = src_gdf.set_crs("EPSG:4326")
+    elif src_gdf.crs.to_epsg() != 4326:
+        src_gdf = src_gdf.to_crs("EPSG:4326")
 
-    context_gdf = gpd.GeoDataFrame(cols, geometry=simplified, crs=target_gdf.crs)
-    if context_gdf.crs and context_gdf.crs.to_epsg() != 4326:
-        context_gdf = context_gdf.to_crs("EPSG:4326")
+    simplified = shapely.simplify(src_gdf.geometry.values, tolerance=0.00005)
+    context_gdf = gpd.GeoDataFrame(cols, geometry=simplified, crs="EPSG:4326")
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     context_gdf.to_parquet(cache_path)

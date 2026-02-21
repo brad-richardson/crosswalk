@@ -50,8 +50,10 @@ def _load_context_gdf(dataset: str) -> gpd.GeoDataFrame | None:
 
     try:
         gdf = gpd.read_parquet(cache_path)
-        # Ensure WGS84
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
+        # Ensure WGS84 (default if missing, matching load_geodataframe behavior)
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:4326")
+        elif gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs("EPSG:4326")
         # Build spatial index eagerly
         gdf.sindex  # noqa: B018
@@ -130,15 +132,12 @@ async def context_tile(dataset: str, z: int, x: int, y: int):
     # Validate dataset against known configs to prevent path traversal
     known_datasets = list_dataset_configs()
     if dataset not in known_datasets:
-        return Response(content=EMPTY_TILE, media_type="application/x-protobuf")
-
-    tile_bytes = _generate_tile(dataset, z, x, y)
+        tile_bytes = EMPTY_TILE
+    else:
+        tile_bytes = _generate_tile(dataset, z, x, y)
 
     return Response(
         content=tile_bytes,
         media_type="application/x-protobuf",
-        headers={
-            "Cache-Control": "public, max-age=3600",
-            "Access-Control-Allow-Origin": "*",
-        },
+        headers={"Cache-Control": "public, max-age=3600"},
     )
