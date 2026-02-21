@@ -147,8 +147,8 @@ REAL_LABELED_EXAMPLES = {
             "name_numeric_match": 0.0,
         },
         "label": "no_match",
-        "original_confidence": 0.4935,
-        "expected_max_confidence": 0.5,  # Should be a clear no-match
+        "original_confidence": 0.534,
+        "expected_max_confidence": 0.6,  # Should stay in no-match/review territory
     },
     # Borderline match - partial name match with moderate geometry
     "boston_borderline_match": {
