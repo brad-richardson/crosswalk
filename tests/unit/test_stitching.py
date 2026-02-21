@@ -301,7 +301,11 @@ class TestSelectStitchingBatch:
                     [_edge(f"r{i}", f"t{i}", conf)],
                     [
                         {"total_confidence": conf, "edges": [{"confidence": conf}], "summary": ""},
-                        {"total_confidence": conf - 0.01, "edges": [{"confidence": conf - 0.01}], "summary": ""},
+                        {
+                            "total_confidence": conf - 0.01,
+                            "edges": [{"confidence": conf - 0.01}],
+                            "summary": "",
+                        },
                     ],
                 )
             )
@@ -453,6 +457,17 @@ class TestStitchingLabelIntegrity:
                 assert "ref_id" in edge, f"Row {idx}: edge missing ref_id"
                 assert "target_id" in edge, f"Row {idx}: edge missing target_id"
 
-    def test_num_refs_and_targets_positive(self, label_df):
-        assert (label_df["num_refs"] >= 1).all(), "num_refs must be >= 1"
-        assert (label_df["num_targets"] >= 1).all(), "num_targets must be >= 1"
+    def test_num_refs_and_targets_non_negative(self, label_df):
+        """Labels with edges must have positive counts; rejections (empty edges) may have 0."""
+        has_edges = label_df["selected_edges"].apply(lambda x: len(json.loads(x)) > 0)
+        with_edges = label_df[has_edges]
+        if len(with_edges) > 0:
+            assert (with_edges["num_refs"] >= 1).all(), "num_refs must be >= 1 when edges selected"
+            assert (with_edges["num_targets"] >= 1).all(), (
+                "num_targets must be >= 1 when edges selected"
+            )
+        # Rejections should have 0 refs and 0 targets
+        rejections = label_df[~has_edges]
+        if len(rejections) > 0:
+            assert (rejections["num_refs"] == 0).all(), "num_refs must be 0 for rejections"
+            assert (rejections["num_targets"] == 0).all(), "num_targets must be 0 for rejections"
