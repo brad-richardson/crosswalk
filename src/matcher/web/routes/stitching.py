@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring
 
+from ...matching.alternatives import _shorten_id
 from ..jinja import templates
 from ..services import (
     get_unreviewed_stitch_groups,
@@ -45,42 +46,30 @@ def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: fl
     return mapping(sub)
 
 
-def _build_group_geojson(group: dict, option_index: int = 0) -> dict:
-    """Build GeoJSON FeatureCollection for a group's current option.
+def _build_group_geojson(group: dict) -> dict:
+    """Build GeoJSON FeatureCollection using ALL edges in the group.
 
-    Emits two tiers of features (matching the labeling UI pattern):
+    Emits two tiers of features:
     - Full geometries: thin, faded — show full extent of each segment
-    - Aligned sub-segments: thick, bright, colored by assignment group
+    - Aligned sub-segments: thick, bright — from all edges (no gaps)
 
     Feature _role values:
     - "ref-full" / "target-full": full segment geometries
     - "ref-aligned" / "target-aligned": aligned sub-segments from edges
     """
-    # Color palette for assignment groups
-    COLORS = ["#2196F3", "#FF9800", "#4CAF50", "#9C27B0", "#00BCD4"]
-
-    alternatives = group.get("alternatives", [])
-    if not alternatives:
-        return {"type": "FeatureCollection", "features": []}
-
-    # Clamp option_index
-    option_index = max(0, min(option_index, len(alternatives) - 1))
-    option = alternatives[option_index]
-
-    # Build ref_id -> color mapping from edges
-    ref_to_color: dict[str, str] = {}
-    for edge in option.get("edges", []):
-        rid = edge["ref_id"]
-        if rid not in ref_to_color:
-            ref_to_color[rid] = COLORS[len(ref_to_color) % len(COLORS)]
-
-    # Build target -> color mapping
-    target_to_color: dict[str, str] = {}
-    for edge in option.get("edges", []):
-        target_to_color[edge["target_id"]] = ref_to_color[edge["ref_id"]]
-
     ref_geoms = group.get("ref_geometries", {})
     target_geoms = group.get("target_geometries", {})
+    edges = group.get("edges", [])
+    ref_id_list = group.get("ref_ids", list(ref_geoms.keys()))
+    target_id_list = group.get("target_ids", list(target_geoms.keys()))
+
+    if not ref_geoms and not target_geoms:
+        return {"type": "FeatureCollection", "features": []}
+
+    # Build label index maps: segment ID -> "R1", "T2", etc.
+    ref_labels = {rid: f"R{i + 1}" for i, rid in enumerate(ref_id_list)}
+    target_labels = {tid: f"T{i + 1}" for i, tid in enumerate(target_id_list)}
+
     features = []
 
     # Tier 1: Full geometries (thin, faded)
@@ -89,7 +78,7 @@ def _build_group_geojson(group: dict, option_index: int = 0) -> dict:
             {
                 "type": "Feature",
                 "geometry": geom,
-                "properties": {"_role": "ref-full", "_id": rid},
+                "properties": {"_role": "ref-full", "_id": rid, "_label": ref_labels.get(rid, "")},
             }
         )
     for tid, geom in target_geoms.items():
@@ -97,15 +86,18 @@ def _build_group_geojson(group: dict, option_index: int = 0) -> dict:
             {
                 "type": "Feature",
                 "geometry": geom,
-                "properties": {"_role": "target-full", "_id": tid},
+                "properties": {
+                    "_role": "target-full",
+                    "_id": tid,
+                    "_label": target_labels.get(tid, ""),
+                },
             }
         )
 
-    # Tier 2: Aligned sub-segments from edges (thick, bright, assignment-colored)
-    for edge in option.get("edges", []):
+    # Tier 2: Aligned sub-segments from ALL edges (thick, bright)
+    for edge in edges:
         rid = edge["ref_id"]
         tid = edge["target_id"]
-        color = ref_to_color.get(rid, "#999999")
 
         # Ref-side aligned sub-segment
         ref_geom = ref_geoms.get(rid)
@@ -115,17 +107,13 @@ def _build_group_geojson(group: dict, option_index: int = 0) -> dict:
             if gers_start is not None and gers_end is not None:
                 aligned = _extract_subline_geojson(ref_geom, gers_start, gers_end)
             else:
-                aligned = ref_geom  # no alignment data → show full
+                aligned = ref_geom
             if aligned:
                 features.append(
                     {
                         "type": "Feature",
                         "geometry": aligned,
-                        "properties": {
-                            "_role": "ref-aligned",
-                            "_id": rid,
-                            "_assignment_color": color,
-                        },
+                        "properties": {"_role": "ref-aligned", "_id": rid},
                     }
                 )
 
@@ -137,21 +125,79 @@ def _build_group_geojson(group: dict, option_index: int = 0) -> dict:
             if local_start is not None and local_end is not None:
                 aligned = _extract_subline_geojson(target_geom, local_start, local_end)
             else:
-                aligned = target_geom  # no alignment data → show full
+                aligned = target_geom
             if aligned:
                 features.append(
                     {
                         "type": "Feature",
                         "geometry": aligned,
-                        "properties": {
-                            "_role": "target-aligned",
-                            "_id": tid,
-                            "_assignment_color": color,
-                        },
+                        "properties": {"_role": "target-aligned", "_id": tid},
                     }
                 )
 
     return {"type": "FeatureCollection", "features": features}
+
+
+def _build_group_context(group: dict) -> dict:
+    """Build extra template context for a group.
+
+    Returns class/name summaries and per-segment detail lists for the
+    expandable detail view.
+    """
+    ref_id_list = group.get("ref_ids", [])
+    target_id_list = group.get("target_ids", [])
+
+    if not ref_id_list and not target_id_list:
+        return {}
+
+    ref_names = group.get("ref_names", {})
+    target_names = group.get("target_names", {})
+    ref_classes = group.get("ref_classes", {})
+    target_classes = group.get("target_classes", {})
+
+    ref_class_vals = [ref_classes.get(rid, "") for rid in ref_id_list]
+    ref_name_vals = [ref_names.get(rid, "") for rid in ref_id_list]
+    target_class_vals = [target_classes.get(tid, "") for tid in target_id_list]
+    target_name_vals = [target_names.get(tid, "") for tid in target_id_list]
+
+    # Compute average confidence from all edges
+    edges = group.get("edges", [])
+    if edges:
+        avg_conf = sum(e.get("confidence", 0) for e in edges) / len(edges)
+    else:
+        avg_conf = 0.0
+
+    def _join(vals: list[str]) -> str:
+        filtered = [v for v in vals if v]
+        return " + ".join(filtered) if filtered else "\u2014"
+
+    class_summary = f"{_join(ref_class_vals)} \u2192 {_join(target_class_vals)}"
+    name_summary = f"{_join(ref_name_vals)} \u2192 {_join(target_name_vals)}"
+
+    # Build details for expanded view
+    ref_details = [
+        {"id": rid, "cls": ref_classes.get(rid, ""), "name": ref_names.get(rid, "")}
+        for rid in ref_id_list
+    ]
+    target_details = [
+        {"id": tid, "cls": target_classes.get(tid, ""), "name": target_names.get(tid, "")}
+        for tid in target_id_list
+    ]
+
+    id_summary = (
+        " + ".join(_shorten_id(r) for r in ref_id_list)
+        + " \u2192 "
+        + " + ".join(_shorten_id(t) for t in target_id_list)
+    )
+
+    return {
+        "id_summary": id_summary,
+        "class_summary": class_summary,
+        "name_summary": name_summary,
+        "avg_confidence": avg_conf,
+        "ref_details": ref_details,
+        "target_details": target_details,
+    }
 
 
 @router.get("/stitching-review", response_class=HTMLResponse)
@@ -198,10 +244,12 @@ async def stitching_review(request: Request, dataset: str = ""):
             },
         )
 
-    groups = get_unreviewed_stitch_groups(dataset, batch.get("groups", []))
-    total = len(groups)
+    all_groups = batch.get("groups", [])
+    batch_total = len(all_groups)
+    groups = get_unreviewed_stitch_groups(dataset, all_groups)
+    reviewed_count = batch_total - len(groups)
 
-    if total == 0:
+    if not groups:
         return templates.TemplateResponse(
             "stitching/page.html",
             {
@@ -211,14 +259,15 @@ async def stitching_review(request: Request, dataset: str = ""):
                 "dataset": dataset,
                 "group": None,
                 "group_index": 0,
-                "total_groups": 0,
+                "total_groups": batch_total,
                 "no_groups": True,
                 "all_reviewed": True,
             },
         )
 
     group = groups[0]
-    geojson = _build_group_geojson(group, 0)
+    geojson = _build_group_geojson(group)
+    group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
         "stitching/page.html",
@@ -229,10 +278,10 @@ async def stitching_review(request: Request, dataset: str = ""):
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": 0,
-            "total_groups": total,
-            "option_index": 0,
+            "group_index": reviewed_count,
+            "total_groups": batch_total,
             "no_groups": False,
+            **group_ctx,
         },
     )
 
@@ -241,10 +290,10 @@ async def stitching_review(request: Request, dataset: str = ""):
 async def stitching_group(
     request: Request,
     dataset: str = "",
+    group_id: str = "",
     group_index: int = 0,
-    option_index: int = 0,
 ):
-    """HTMX fragment: renders group card + map data for a specific option."""
+    """HTMX fragment: renders group card + map data."""
     if not _validate_dataset(dataset):
         return HTMLResponse("Unknown dataset", status_code=404)
     try:
@@ -258,22 +307,26 @@ async def stitching_group(
             {"request": request, "dataset": dataset},
         )
 
-    groups = get_unreviewed_stitch_groups(dataset, batch.get("groups", []))
-    total = len(groups)
+    all_groups = batch.get("groups", [])
 
-    if group_index >= total:
+    # Find group by ID, fall back to index
+    group = None
+    if group_id:
+        for g in all_groups:
+            if g.get("group_id") == group_id:
+                group = g
+                break
+    if not group and 0 <= group_index < len(all_groups):
+        group = all_groups[group_index]
+
+    if not group:
         return templates.TemplateResponse(
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    group = groups[group_index]
-    n_alts = len(group.get("alternatives", []))
-    if n_alts > 0:
-        option_index = max(0, min(option_index, n_alts - 1))
-    else:
-        option_index = 0
-    geojson = _build_group_geojson(group, option_index)
+    geojson = _build_group_geojson(group)
+    group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
         "stitching/group.html",
@@ -283,8 +336,8 @@ async def stitching_group(
             "group": group,
             "group_geojson": geojson,
             "group_index": group_index,
-            "total_groups": total,
-            "option_index": option_index,
+            "total_groups": len(all_groups),
+            **group_ctx,
         },
     )
 
@@ -295,7 +348,8 @@ async def stitching_select(
     dataset: str = Form(...),
     group_id: str = Form(...),
     group_index: int = Form(0),
-    option_index: int = Form(0),
+    included_refs: str = Form(""),
+    included_targets: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap."""
     if not _validate_dataset(dataset):
@@ -317,40 +371,38 @@ async def stitching_select(
             break
 
     if group:
-        alternatives = group.get("alternatives", [])
-        option_index = max(0, min(option_index, len(alternatives) - 1))
-
-        if alternatives:
-            option = alternatives[option_index]
-            selected_edges = [
-                {"ref_id": e["ref_id"], "target_id": e["target_id"]}
-                for e in option.get("edges", [])
-            ]
-        else:
-            selected_edges = []
+        # Build selected edges from the included ref/target IDs
+        ref_set = set(r for r in included_refs.split(",") if r)
+        target_set = set(t for t in included_targets.split(",") if t)
+        selected_edges = [
+            {"ref_id": e["ref_id"], "target_id": e["target_id"]}
+            for e in group.get("edges", [])
+            if e["ref_id"] in ref_set and e["target_id"] in target_set
+        ]
 
         record_stitching_label(
             dataset_id=dataset,
             group_id=group_id,
-            selected_option_index=option_index,
             selected_edges=selected_edges,
             match_type=group.get("match_type", ""),
-            num_refs=len(group.get("ref_ids", [])),
-            num_targets=len(group.get("target_ids", [])),
+            num_refs=len(ref_set),
+            num_targets=len(target_set),
         )
 
     # Load next group
+    batch_total = len(all_groups)
     groups = get_unreviewed_stitch_groups(dataset, all_groups)
-    total = len(groups)
+    reviewed_count = batch_total - len(groups)
 
-    if total == 0:
+    if not groups:
         return templates.TemplateResponse(
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
     group = groups[0]
-    geojson = _build_group_geojson(group, 0)
+    geojson = _build_group_geojson(group)
+    group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
         "stitching/group.html",
@@ -359,9 +411,9 @@ async def stitching_select(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": 0,
-            "total_groups": total,
-            "option_index": 0,
+            "group_index": reviewed_count,
+            "total_groups": batch_total,
+            **group_ctx,
         },
     )
 
@@ -386,10 +438,12 @@ async def stitching_skip(
             {"request": request, "dataset": dataset},
         )
 
-    groups = get_unreviewed_stitch_groups(dataset, batch.get("groups", []))
-    total = len(groups)
+    all_groups = batch.get("groups", [])
+    batch_total = len(all_groups)
+    groups = get_unreviewed_stitch_groups(dataset, all_groups)
+    reviewed_count = batch_total - len(groups)
 
-    if total == 0:
+    if not groups:
         return templates.TemplateResponse(
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
@@ -400,11 +454,12 @@ async def stitching_skip(
     if group_id:
         for i, g in enumerate(groups):
             if g.get("group_id") == group_id:
-                next_index = (i + 1) % total
+                next_index = (i + 1) % len(groups)
                 break
 
     group = groups[next_index]
-    geojson = _build_group_geojson(group, 0)
+    geojson = _build_group_geojson(group)
+    group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
         "stitching/group.html",
@@ -413,8 +468,8 @@ async def stitching_skip(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": next_index,
-            "total_groups": total,
-            "option_index": 0,
+            "group_index": reviewed_count + next_index,
+            "total_groups": batch_total,
+            **group_ctx,
         },
     )

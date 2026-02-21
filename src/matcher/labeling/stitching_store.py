@@ -19,8 +19,7 @@ DEFAULT_STITCHING_DIR = Path("labels/stitching")
 STITCHING_LABEL_COLUMNS = [
     "group_id",
     "dataset_id",
-    "selected_option_index",
-    "selected_edges",  # JSON: [{ref_id, target_id, gers_start_frac, gers_end_frac, local_start_frac, local_end_frac}, ...]
+    "selected_edges",  # JSON: [{ref_id, target_id}, ...]
     "match_type",
     "num_refs",
     "num_targets",
@@ -64,7 +63,9 @@ class StitchingLabelStore:
 
         if self.csv_path.exists():
             try:
-                return pd.read_csv(self.csv_path, dtype={"group_id": str})
+                df = pd.read_csv(self.csv_path, dtype={"group_id": str})
+                # Drop any columns not in the current schema (e.g. removed fields)
+                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
             except Exception as primary_error:
                 logger.warning(
                     f"Failed to load stitching labels from {self.csv_path}: {primary_error}"
@@ -72,7 +73,8 @@ class StitchingLabelStore:
                 if backup_path.exists():
                     try:
                         logger.info(f"Recovering from backup: {backup_path}")
-                        return pd.read_csv(backup_path, dtype={"group_id": str})
+                        df = pd.read_csv(backup_path, dtype={"group_id": str})
+                        return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
                     except Exception as backup_error:
                         raise OSError(
                             f"Both primary and backup stitching label files are corrupted.\n"
@@ -86,7 +88,8 @@ class StitchingLabelStore:
 
         if backup_path.exists():
             try:
-                return pd.read_csv(backup_path, dtype={"group_id": str})
+                df = pd.read_csv(backup_path, dtype={"group_id": str})
+                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
             except Exception as e:
                 raise OSError(
                     f"Backup stitching label file is corrupted: {backup_path}\nError: {e}"
@@ -111,7 +114,6 @@ class StitchingLabelStore:
     def add(
         self,
         group_id: str,
-        selected_option_index: int,
         selected_edges: list[dict],
         match_type: str,
         num_refs: int,
@@ -127,7 +129,6 @@ class StitchingLabelStore:
 
         Args:
             group_id: Deterministic group identifier
-            selected_option_index: Which alternative was selected
             selected_edges: List of {ref_id, target_id} dicts
             match_type: "1:N", "N:1", or "M:N"
             num_refs: Number of reference segments in the group
@@ -138,7 +139,6 @@ class StitchingLabelStore:
         new_row = {
             "group_id": str(group_id),
             "dataset_id": self.dataset_id,
-            "selected_option_index": selected_option_index,
             "selected_edges": json.dumps(selected_edges),
             "match_type": match_type,
             "num_refs": num_refs,
@@ -212,6 +212,7 @@ class StitchingLabelStore:
             if csv_path.exists():
                 try:
                     df = pd.read_csv(csv_path, dtype={"group_id": str})
+                    df = df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
                     dfs.append(df)
                 except Exception as e:
                     logger.warning(f"Failed to load {csv_path}: {e}")

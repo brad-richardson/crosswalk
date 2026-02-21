@@ -2045,7 +2045,7 @@ def stitch_batch(
         reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
         console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
 
-        # Pre-compute alternatives for each group
+        # Pre-compute alternatives for batch selection scoring only
         console.print(f"  Computing top-{k_alternatives} alternatives per group...")
         for group in groups:
             alternatives = generate_top_k_alternatives(
@@ -2067,6 +2067,10 @@ def stitch_batch(
         if not selected:
             console.print("  [yellow]No groups selected for batch[/yellow]")
             continue
+
+        # Strip alternatives from batch (only needed for scoring, not UI)
+        for g in selected:
+            g.pop("alternatives", None)
 
         # Write batch file
         batch = {

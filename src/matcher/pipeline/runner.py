@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 from loguru import logger
 
 from ..blocking import generate_candidates
@@ -184,6 +185,33 @@ GEOJSON_COORD_PRECISION = 7
 ALIGNMENT_FRAC_PRECISION = 7
 
 
+def _is_nan(val) -> bool:
+    """Check if a value is NaN (works for float, numpy, pandas NA)."""
+    try:
+        return bool(pd.isna(val))
+    except (TypeError, ValueError):
+        return False
+
+
+def _extract_name_string(name) -> str:
+    """Extract a human-readable name string from various name formats.
+
+    Handles Overture-style name dicts (with 'primary' key) and plain strings.
+    """
+    if name is None:
+        return ""
+    if isinstance(name, str):
+        return name
+    if isinstance(name, dict):
+        for key in ("primary", "common", "name", "value"):
+            if key in name and name[key] and isinstance(name[key], str):
+                return name[key]
+        for v in name.values():
+            if isinstance(v, str) and v:
+                return v
+    return ""
+
+
 def _export_groups_sidecar(
     results: list,
     optimized: list,
@@ -237,6 +265,30 @@ def _export_groups_sidecar(
     # Build geometry lookups (column must exist; caller passes ref/target_id_column)
     ref_geom_lookup = dict(zip(reference[ref_id_column], reference.geometry))
     tgt_geom_lookup = dict(zip(target[target_id_column], target.geometry))
+
+    # Build name/class lookups for stitching review display
+    from ..config import CLASS_COLUMN, NAMES_COLUMN
+
+    ref_name_lookup = (
+        dict(zip(reference[ref_id_column], reference[NAMES_COLUMN]))
+        if NAMES_COLUMN in reference.columns
+        else {}
+    )
+    tgt_name_lookup = (
+        dict(zip(target[target_id_column], target[NAMES_COLUMN]))
+        if NAMES_COLUMN in target.columns
+        else {}
+    )
+    ref_class_lookup = (
+        dict(zip(reference[ref_id_column], reference[CLASS_COLUMN]))
+        if CLASS_COLUMN in reference.columns
+        else {}
+    )
+    tgt_class_lookup = (
+        dict(zip(target[target_id_column], target[CLASS_COLUMN]))
+        if CLASS_COLUMN in target.columns
+        else {}
+    )
 
     groups = []
     for component in components:
@@ -309,6 +361,27 @@ def _export_groups_sidecar(
                 if gj:
                     target_geometries[str(tid)] = gj
 
+        # Collect names and classes for each segment in the group
+        ref_names = {}
+        ref_classes = {}
+        for rid in sorted(str(r) for r in ref_ids):
+            name = ref_name_lookup.get(rid)
+            if name is not None:
+                ref_names[rid] = _extract_name_string(name)
+            cls = ref_class_lookup.get(rid)
+            if cls is not None:
+                ref_classes[rid] = str(cls) if not _is_nan(cls) else ""
+
+        target_names = {}
+        target_classes = {}
+        for tid in sorted(str(t) for t in target_ids):
+            name = tgt_name_lookup.get(tid)
+            if name is not None:
+                target_names[tid] = _extract_name_string(name)
+            cls = tgt_class_lookup.get(tid)
+            if cls is not None:
+                target_classes[tid] = str(cls) if not _is_nan(cls) else ""
+
         groups.append(
             {
                 "group_id": group_id,
@@ -319,6 +392,10 @@ def _export_groups_sidecar(
                 "optimizer_assignment": optimizer_edges.get(group_id, []),
                 "ref_geometries": ref_geometries,
                 "target_geometries": target_geometries,
+                "ref_names": ref_names,
+                "target_names": target_names,
+                "ref_classes": ref_classes,
+                "target_classes": target_classes,
             }
         )
 

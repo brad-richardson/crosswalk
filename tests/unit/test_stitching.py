@@ -1,7 +1,7 @@
 """Unit tests for stitching review modules.
 
 Tests alternatives generation, batch selection, stitching label store,
-and compute_group_id.
+compute_group_id, and stitching label data integrity.
 """
 
 import json
@@ -9,6 +9,7 @@ import json
 import pandas as pd
 import pytest
 
+from matcher.labeling.stitching_store import DEFAULT_STITCHING_DIR, STITCHING_LABEL_COLUMNS
 from matcher.matching.alternatives import generate_top_k_alternatives
 from matcher.matching.batch_selection import select_stitching_batch
 from matcher.matching.optimizer import compute_group_id
@@ -307,7 +308,6 @@ class TestStitchingLabelStore:
     def test_add_and_load(self, store):
         store.add(
             group_id="abc123",
-            selected_option_index=0,
             selected_edges=[{"ref_id": "r1", "target_id": "t1"}],
             match_type="1:N",
             num_refs=1,
@@ -324,8 +324,7 @@ class TestStitchingLabelStore:
         for i in range(3):
             store.add(
                 group_id="abc123",
-                selected_option_index=i,
-                selected_edges=[],
+                selected_edges=[{"ref_id": f"r{i}", "target_id": "t1"}],
                 match_type="N:1",
                 num_refs=2,
                 num_targets=1,
@@ -333,27 +332,27 @@ class TestStitchingLabelStore:
                 session_id=f"sess{i}",
             )
         assert len(store.df) == 1
-        assert store.df.iloc[0]["selected_option_index"] == 2
+        assert store.df.iloc[0]["session_id"] == "sess2"
 
     def test_get_reviewed_group_ids(self, store):
-        store.add("g1", 0, [], "1:N", 1, 2, "tester", "s1")
-        store.add("g2", 1, [], "N:1", 2, 1, "tester", "s2")
+        store.add("g1", [], "1:N", 1, 2, "tester", "s1")
+        store.add("g2", [], "N:1", 2, 1, "tester", "s2")
         reviewed = store.get_reviewed_group_ids("test_dataset")
         assert reviewed == {"g1", "g2"}
 
     def test_get_reviewed_filters_by_dataset(self, store):
         from matcher.labeling.stitching_store import StitchingLabelStore
 
-        store.add("g1", 0, [], "1:N", 1, 2, "tester", "s1")
+        store.add("g1", [], "1:N", 1, 2, "tester", "s1")
         # Second store for a different dataset
         store2 = StitchingLabelStore("other_dataset", labels_dir=store.labels_dir)
-        store2.add("g2", 0, [], "1:N", 1, 2, "tester", "s2")
+        store2.add("g2", [], "1:N", 1, 2, "tester", "s2")
         assert store.get_reviewed_group_ids("test_dataset") == {"g1"}
         assert store2.get_reviewed_group_ids("other_dataset") == {"g2"}
 
     def test_selected_edges_stored_as_json(self, store):
         edges = [{"ref_id": "r1", "target_id": "t1"}, {"ref_id": "r1", "target_id": "t2"}]
-        store.add("g1", 0, edges, "1:N", 1, 2, "tester", "s1")
+        store.add("g1", edges, "1:N", 1, 2, "tester", "s1")
         raw = store.df.iloc[0]["selected_edges"]
         parsed = json.loads(raw)
         assert len(parsed) == 2
@@ -362,7 +361,7 @@ class TestStitchingLabelStore:
     def test_persistence_across_instances(self, store):
         from matcher.labeling.stitching_store import StitchingLabelStore
 
-        store.add("g1", 0, [], "1:N", 1, 2, "tester", "s1")
+        store.add("g1", [], "1:N", 1, 2, "tester", "s1")
 
         # New instance reads from disk
         store2 = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir)
@@ -370,10 +369,60 @@ class TestStitchingLabelStore:
         assert store2.df.iloc[0]["group_id"] == "g1"
 
     def test_atomic_backup_exists_after_save(self, store):
-        store.add("g1", 0, [], "1:N", 1, 2, "tester", "s1")
+        store.add("g1", [], "1:N", 1, 2, "tester", "s1")
         # First save creates no backup (no prior file)
         assert store.csv_path.exists()
         # Second save creates backup
-        store.add("g2", 0, [], "N:1", 2, 1, "tester", "s2")
+        store.add("g2", [], "N:1", 2, 1, "tester", "s2")
         backup = store.csv_path.with_suffix(".csv.bak")
         assert backup.exists()
+
+
+# ---------------------------------------------------------------------------
+# Stitching label data integrity
+# ---------------------------------------------------------------------------
+
+# Discover all stitching label datasets on disk
+_STITCHING_DATASETS = sorted(
+    p.parent.name.removeprefix("dataset=") for p in DEFAULT_STITCHING_DIR.glob("dataset=*/data.csv")
+)
+
+
+@pytest.mark.skipif(not _STITCHING_DATASETS, reason="no stitching labels on disk")
+class TestStitchingLabelIntegrity:
+    """Ensure committed stitching labels are well-formed and internally consistent."""
+
+    @pytest.fixture(params=_STITCHING_DATASETS)
+    def label_df(self, request):
+        dataset = request.param
+        path = DEFAULT_STITCHING_DIR / f"dataset={dataset}" / "data.csv"
+        return pd.read_csv(path)
+
+    def test_has_required_columns(self, label_df):
+        missing = set(STITCHING_LABEL_COLUMNS) - set(label_df.columns)
+        assert not missing, f"Missing columns: {missing}"
+
+    def test_no_empty_rows(self, label_df):
+        assert len(label_df) > 0, "Label file exists but has no rows"
+
+    def test_group_ids_unique(self, label_df):
+        dupes = label_df["group_id"].duplicated().sum()
+        assert dupes == 0, f"{dupes} duplicate group_ids"
+
+    def test_match_types_valid(self, label_df):
+        valid = {"1:1", "1:N", "N:1", "M:N"}
+        actual = set(label_df["match_type"].unique())
+        invalid = actual - valid
+        assert not invalid, f"Invalid match_type values: {invalid}"
+
+    def test_selected_edges_parseable(self, label_df):
+        for idx, row in label_df.iterrows():
+            edges = json.loads(row["selected_edges"])
+            assert isinstance(edges, list), f"Row {idx}: edges is not a list"
+            for edge in edges:
+                assert "ref_id" in edge, f"Row {idx}: edge missing ref_id"
+                assert "target_id" in edge, f"Row {idx}: edge missing target_id"
+
+    def test_num_refs_and_targets_positive(self, label_df):
+        assert (label_df["num_refs"] >= 1).all(), "num_refs must be >= 1"
+        assert (label_df["num_targets"] >= 1).all(), "num_targets must be >= 1"

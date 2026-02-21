@@ -40,19 +40,6 @@
 {% endif %}
 
 <script>
-    function selectOption(optionIndex) {
-        var params = new URLSearchParams(window.location.search);
-        var dataset = params.get('dataset');
-        var groupIndex = document.getElementById('group-card') ?
-            document.getElementById('group-card').dataset.groupIndex : '0';
-
-        htmx.ajax('GET', '/stitching-review/group?dataset=' + encodeURIComponent(dataset) +
-            '&group_index=' + groupIndex + '&option_index=' + optionIndex, {
-            target: '#group-content',
-            swap: 'innerHTML'
-        });
-    }
-
     // After HTMX swap, re-render geometry
     document.addEventListener('htmx:afterSwap', function(evt) {
         var el = document.getElementById('group-geometry');
@@ -72,6 +59,82 @@
         }
     });
 
+    // Populate hidden fields with currently visible segment IDs before submit
+    function populateSelection() {
+        var refPills = document.querySelectorAll('.segment-pill-ref.active');
+        var targetPills = document.querySelectorAll('.segment-pill-target.active');
+        var refs = [];
+        var targets = [];
+        for (var i = 0; i < refPills.length; i++) refs.push(refPills[i].title);
+        for (var j = 0; j < targetPills.length; j++) targets.push(targetPills[j].title);
+        document.getElementById('included-refs').value = refs.join(',');
+        document.getElementById('included-targets').value = targets.join(',');
+    }
+
+    // Wire populateSelection to form submit (covers keyboard, programmatic, and click)
+    document.addEventListener('htmx:configRequest', function(evt) {
+        if (evt.detail.elt && evt.detail.elt.id === 'select-form') {
+            populateSelection();
+        }
+    });
+
+    // Compute confidence for currently active segments
+    function updateConfidence() {
+        var el = document.getElementById('group-edges');
+        var confEl = document.getElementById('group-confidence');
+        if (!el || !confEl) return;
+        try {
+            var edges = JSON.parse(el.textContent);
+            var refPills = document.querySelectorAll('.segment-pill-ref.active');
+            var targetPills = document.querySelectorAll('.segment-pill-target.active');
+            var activeRefs = {};
+            var activeTargets = {};
+            for (var i = 0; i < refPills.length; i++) activeRefs[refPills[i].title] = true;
+            for (var j = 0; j < targetPills.length; j++) activeTargets[targetPills[j].title] = true;
+            var sum = 0, count = 0;
+            for (var k = 0; k < edges.length; k++) {
+                if (activeRefs[edges[k].ref_id] && activeTargets[edges[k].target_id]) {
+                    sum += (edges[k].confidence || 0);
+                    count++;
+                }
+            }
+            confEl.textContent = count > 0 ? Math.round(sum / count * 100) + '%' : '\u2014';
+        } catch(e) {}
+    }
+
+    // Per-segment visibility toggle
+    function toggleSegment(btn, segmentId, side) {
+        if (!window.matcherToggleSegment) return;
+        var visible = window.matcherToggleSegment(segmentId, side);
+        btn.classList.toggle('active', visible);
+        updateConfidence();
+    }
+
+    function toggleAllRef() {
+        if (!window.matcherToggleAllSegments) return;
+        var visible = window.matcherToggleAllSegments('ref');
+        var pills = document.querySelectorAll('.segment-pill-ref');
+        for (var i = 0; i < pills.length; i++) {
+            pills[i].classList.toggle('active', visible);
+        }
+        updateConfidence();
+    }
+
+    function toggleAllTarget() {
+        if (!window.matcherToggleAllSegments) return;
+        var visible = window.matcherToggleAllSegments('target');
+        var pills = document.querySelectorAll('.segment-pill-target');
+        for (var i = 0; i < pills.length; i++) {
+            pills[i].classList.toggle('active', visible);
+        }
+        updateConfidence();
+    }
+
+    function toggleGroupDetails() {
+        var details = document.getElementById('group-details');
+        if (details) details.classList.toggle('expanded');
+    }
+
     // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -80,18 +143,53 @@
         var dataset = params.get('dataset');
         if (!dataset) return;
 
-        // Number keys 1-9 to select option
-        var num = parseInt(e.key);
-        if (num >= 1 && num <= 9) {
-            selectOption(num - 1);
-            return;
-        }
-
         switch(e.key.toLowerCase()) {
             case 'c':
                 if (window.matcherToggleContext) window.matcherToggleContext();
                 break;
+            case 'd':
+                toggleGroupDetails();
+                break;
+            case 'r':
+                toggleAllRef();
+                break;
+            case 't':
+                toggleAllTarget();
+                break;
         }
     });
+
+    // Push map controls above the card on mobile
+    (function() {
+        var mql = window.matchMedia('(max-width: 768px)');
+        var resizeObs = null;
+
+        function updateOffset() {
+            var card = document.getElementById('group-card');
+            var offset = card ? card.offsetHeight + 8 : 0;
+            document.getElementById('map').style.setProperty('--card-offset', offset + 'px');
+        }
+
+        function observe() {
+            updateOffset();
+            resizeObs = new ResizeObserver(updateOffset);
+            var card = document.getElementById('group-card');
+            if (card) resizeObs.observe(card);
+        }
+
+        function disconnect() {
+            if (resizeObs) { resizeObs.disconnect(); resizeObs = null; }
+            var mapEl = document.getElementById('map');
+            if (mapEl) mapEl.style.removeProperty('--card-offset');
+        }
+
+        mql.addEventListener('change', function(e) { e.matches ? observe() : disconnect(); });
+        if (mql.matches) observe();
+
+        // Re-observe after HTMX swaps in new card content
+        document.addEventListener('htmx:afterSwap', function() {
+            if (mql.matches) { disconnect(); observe(); }
+        });
+    })();
 </script>
 {% endblock %}

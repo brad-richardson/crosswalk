@@ -24,6 +24,7 @@
         Satellite: {
             light: {
                 version: 8,
+                glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
                 sources: {
                     esri: {
                         type: "raster",
@@ -289,15 +290,19 @@
 
     map.addControl(new ContextToggle(), "bottom-left");
 
+    // --- Shared layer colors ---
+    var REF_COLOR = "#2196F3";
+    var TARGET_COLOR = "#FF5722";
+
     // --- Pair geometry rendering ---
     var currentGeojson = null;
     var PAIR_SOURCE = "pair-geojson";
 
     var LAYER_DEFS = [
-        { id: "pair-reference-full", type: "line", filter: ["==", ["get", "_role"], "referenceFull"], paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 } },
-        { id: "pair-target-full", type: "line", filter: ["==", ["get", "_role"], "targetFull"], paint: { "line-color": "#FF5722", "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] } },
-        { id: "pair-reference", type: "line", filter: ["==", ["get", "_role"], "reference"], paint: { "line-color": "#2196F3", "line-width": 4, "line-opacity": 0.9 } },
-        { id: "pair-target", type: "line", filter: ["==", ["get", "_role"], "target"], paint: { "line-color": "#FF5722", "line-width": 4, "line-opacity": 0.9 } },
+        { id: "pair-reference-full", type: "line", filter: ["==", ["get", "_role"], "referenceFull"], paint: { "line-color": REF_COLOR, "line-width": 2, "line-opacity": 0.3 } },
+        { id: "pair-target-full", type: "line", filter: ["==", ["get", "_role"], "targetFull"], paint: { "line-color": TARGET_COLOR, "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] } },
+        { id: "pair-reference", type: "line", filter: ["==", ["get", "_role"], "reference"], paint: { "line-color": REF_COLOR, "line-width": 4, "line-opacity": 0.9 } },
+        { id: "pair-target", type: "line", filter: ["==", ["get", "_role"], "target"], paint: { "line-color": TARGET_COLOR, "line-width": 4, "line-opacity": 0.9 } },
     ];
 
     function addPairLayers() {
@@ -508,6 +513,10 @@
     // --- Initial load ---
     map.on("load", function () {
         loadPairGeometry();
+        // Render any group geometry that arrived before the map was ready
+        if (currentGroupGeojson) {
+            renderGroupOverlays(currentGroupGeojson);
+        }
         // Load context layer for current dataset
         var params = new URLSearchParams(window.location.search);
         var dataset = params.get("dataset");
@@ -526,40 +535,65 @@
 
     var GROUP_LAYER_DEFS = [
         // Tier 1: Full geometries (thin, faded) — show full extent of each segment
-        {
-            id: "group-ref-full",
-            type: "line",
-            filter: ["==", ["get", "_role"], "ref-full"],
-            paint: { "line-color": "#2196F3", "line-width": 2, "line-opacity": 0.3 },
-        },
-        {
-            id: "group-target-full",
-            type: "line",
-            filter: ["==", ["get", "_role"], "target-full"],
-            paint: { "line-color": "#FF5722", "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] },
-        },
-        // Tier 2: Aligned sub-segments (thick, bright, assignment-colored)
-        {
-            id: "group-ref-aligned",
-            type: "line",
-            filter: ["==", ["get", "_role"], "ref-aligned"],
-            paint: {
-                "line-color": ["get", "_assignment_color"],
-                "line-width": 4,
-                "line-opacity": 0.9,
-            },
-        },
-        {
-            id: "group-target-aligned",
-            type: "line",
-            filter: ["==", ["get", "_role"], "target-aligned"],
-            paint: {
-                "line-color": ["get", "_assignment_color"],
-                "line-width": 4,
-                "line-opacity": 0.9,
-            },
-        },
+        { id: "group-ref-full", type: "line", filter: ["==", ["get", "_role"], "ref-full"], paint: { "line-color": REF_COLOR, "line-width": 2, "line-opacity": 0.3 } },
+        { id: "group-target-full", type: "line", filter: ["==", ["get", "_role"], "target-full"], paint: { "line-color": TARGET_COLOR, "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] } },
+        // Tier 2: Aligned sub-segments (thick, bright) — matches labeling pair layer colors
+        { id: "group-ref-aligned", type: "line", filter: ["==", ["get", "_role"], "ref-aligned"], paint: { "line-color": REF_COLOR, "line-width": 4, "line-opacity": 0.9 } },
+        { id: "group-target-aligned", type: "line", filter: ["==", ["get", "_role"], "target-aligned"], paint: { "line-color": TARGET_COLOR, "line-width": 4, "line-opacity": 0.9 } },
     ];
+
+    // Label layers — always visible, not affected by segment toggle filters
+    var GROUP_LABEL_DEFS = [
+        { id: "group-ref-labels", filter: ["==", ["get", "_role"], "ref-full"], color: REF_COLOR },
+        { id: "group-target-labels", filter: ["==", ["get", "_role"], "target-full"], color: TARGET_COLOR },
+    ];
+
+    // Per-segment visibility tracking for stitching review
+    // Keys are segment IDs, values are booleans (true = hidden)
+    var hiddenSegments = {};
+
+    function updateSegmentFilters() {
+        var hiddenIds = Object.keys(hiddenSegments).filter(function(id) { return hiddenSegments[id]; });
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            var def = GROUP_LAYER_DEFS[i];
+            if (!map.getLayer(def.id)) continue;
+            var roleFilter = def.filter; // e.g. ["==", ["get", "_role"], "ref-full"]
+            if (hiddenIds.length > 0) {
+                map.setFilter(def.id, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
+            } else {
+                map.setFilter(def.id, roleFilter);
+            }
+        }
+    }
+
+    function toggleSegment(segmentId) {
+        hiddenSegments[segmentId] = !hiddenSegments[segmentId];
+        updateSegmentFilters();
+        return !hiddenSegments[segmentId]; // return visible state
+    }
+
+    function toggleAllSegments(side) {
+        // Determine current state: if any on this side are visible, hide all; otherwise show all
+        var features = currentGroupGeojson ? currentGroupGeojson.features || [] : [];
+        var sideIds = [];
+        for (var i = 0; i < features.length; i++) {
+            var role = features[i].properties._role || "";
+            var id = features[i].properties._id;
+            if (!id) continue;
+            if (side === "ref" && role.indexOf("ref") === 0 && sideIds.indexOf(id) === -1) sideIds.push(id);
+            if (side === "target" && role.indexOf("target") === 0 && sideIds.indexOf(id) === -1) sideIds.push(id);
+        }
+        // If any are visible, hide all; otherwise show all
+        var anyVisible = false;
+        for (var j = 0; j < sideIds.length; j++) {
+            if (!hiddenSegments[sideIds[j]]) { anyVisible = true; break; }
+        }
+        for (var k = 0; k < sideIds.length; k++) {
+            hiddenSegments[sideIds[k]] = anyVisible; // hide if any were visible
+        }
+        updateSegmentFilters();
+        return !anyVisible; // return new visible state
+    }
 
     function addGroupLayers() {
         if (map.getSource(GROUP_SOURCE)) return;
@@ -576,9 +610,38 @@
                 paint: def.paint,
             });
         }
+
+        // Add always-visible label layers on top
+        for (var j = 0; j < GROUP_LABEL_DEFS.length; j++) {
+            var ldef = GROUP_LABEL_DEFS[j];
+            map.addLayer({
+                id: ldef.id,
+                type: "symbol",
+                source: GROUP_SOURCE,
+                filter: ldef.filter,
+                layout: {
+                    "symbol-placement": "line-center",
+                    "text-field": ["get", "_label"],
+                    "text-size": 13,
+                    "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+                    "text-allow-overlap": true,
+                    "text-ignore-placement": true,
+                },
+                paint: {
+                    "text-color": ldef.color,
+                    "text-halo-color": "#000",
+                    "text-halo-width": 2,
+                },
+            });
+        }
     }
 
     function removeGroupLayers() {
+        for (var i = 0; i < GROUP_LABEL_DEFS.length; i++) {
+            if (map.getLayer(GROUP_LABEL_DEFS[i].id)) {
+                map.removeLayer(GROUP_LABEL_DEFS[i].id);
+            }
+        }
         for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
             if (map.getLayer(GROUP_LAYER_DEFS[i].id)) {
                 map.removeLayer(GROUP_LAYER_DEFS[i].id);
@@ -595,7 +658,6 @@
      * Expected: GeoJSON FeatureCollection with two tiers:
      * - _role "ref-full"/"target-full": full segment geometries (thin, faded)
      * - _role "ref-aligned"/"target-aligned": aligned sub-segments (thick, bright)
-     *   with _assignment_color for group coloring
      */
     function showGroupGeometry(geojsonData) {
         if (!geojsonData) {
@@ -619,6 +681,7 @@
         }
 
         currentGroupGeojson = data;
+        hiddenSegments = {}; // Reset per-segment visibility for new group
 
         if (!map.isStyleLoaded()) return;
         renderGroupOverlays(data);
@@ -671,4 +734,6 @@
     window.matcherShowGroupGeometry = showGroupGeometry;
     window.matcherGeojsonBounds = geojsonBounds;
     window.matcherToggleContext = toggleContextLayer;
+    window.matcherToggleSegment = toggleSegment;
+    window.matcherToggleAllSegments = toggleAllSegments;
 })();
