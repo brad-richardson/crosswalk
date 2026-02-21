@@ -65,6 +65,38 @@ def load_labels(
     return df[["ref_id", "target_id", "label"]]
 
 
+def load_stitch_labels(
+    labels_path: Path,
+    dataset: str,
+) -> pd.DataFrame | None:
+    """Load stitching labels for a dataset, if they exist.
+
+    Reads from {labels_path}/dataset={dataset}/data.csv.
+    Returns None if no stitching labels exist for this dataset.
+
+    Args:
+        labels_path: Root stitching labels directory.
+        dataset: Dataset name.
+
+    Returns:
+        DataFrame with stitching label columns, or None if not found.
+    """
+    csv_path = labels_path / f"dataset={dataset}" / "data.csv"
+    if not csv_path.exists():
+        return None
+
+    df = pd.read_csv(csv_path)
+    logger.info(f"Loaded {len(df)} stitch labels from {csv_path}")
+
+    required = {"group_id", "selected_edges"}
+    missing = required - set(df.columns)
+    if missing:
+        logger.warning(f"Stitch labels missing required columns: {missing}")
+        return None
+
+    return df
+
+
 def list_datasets(labels_path: Path) -> dict[str, int]:
     """List available datasets with their label counts.
 
