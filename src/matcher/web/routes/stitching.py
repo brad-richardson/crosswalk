@@ -168,12 +168,8 @@ def _build_group_context(group: dict) -> dict:
         weighted_sum = 0.0
         weight_total = 0.0
         for e in edges:
-            ref_frac = abs(
-                e.get("gers_end_frac", 1) - e.get("gers_start_frac", 0)
-            )
-            tgt_frac = abs(
-                e.get("local_end_frac", 1) - e.get("local_start_frac", 0)
-            )
+            ref_frac = abs(e.get("gers_end_frac", 1) - e.get("gers_start_frac", 0))
+            tgt_frac = abs(e.get("local_end_frac", 1) - e.get("local_start_frac", 0))
             w = (ref_frac + tgt_frac) / 2
             weighted_sum += e.get("confidence", 0) * w
             weight_total += w
