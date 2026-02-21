@@ -549,7 +549,7 @@
     ];
 
     // Per-segment visibility tracking for stitching review
-    // Keys are segment IDs, values are booleans (true = visible)
+    // Keys are segment IDs, values are booleans (true = hidden)
     var hiddenSegments = {};
 
     function updateSegmentFilters() {
@@ -658,7 +658,6 @@
      * Expected: GeoJSON FeatureCollection with two tiers:
      * - _role "ref-full"/"target-full": full segment geometries (thin, faded)
      * - _role "ref-aligned"/"target-aligned": aligned sub-segments (thick, bright)
-     *   with _assignment_color for group coloring
      */
     function showGroupGeometry(geojsonData) {
         if (!geojsonData) {

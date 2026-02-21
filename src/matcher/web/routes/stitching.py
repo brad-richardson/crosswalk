@@ -309,13 +309,15 @@ async def stitching_group(
 
     all_groups = batch.get("groups", [])
 
-    # Find group by ID
+    # Find group by ID, fall back to index
     group = None
     if group_id:
         for g in all_groups:
             if g.get("group_id") == group_id:
                 group = g
                 break
+    if not group and 0 <= group_index < len(all_groups):
+        group = all_groups[group_index]
 
     if not group:
         return templates.TemplateResponse(

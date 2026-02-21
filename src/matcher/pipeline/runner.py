@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 from loguru import logger
 
 from ..blocking import generate_candidates
@@ -187,7 +188,7 @@ ALIGNMENT_FRAC_PRECISION = 7
 def _is_nan(val) -> bool:
     """Check if a value is NaN (works for float, numpy, pandas NA)."""
     try:
-        return val != val  # NaN != NaN
+        return bool(pd.isna(val))
     except (TypeError, ValueError):
         return False
 

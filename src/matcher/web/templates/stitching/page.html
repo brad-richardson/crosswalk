@@ -71,6 +71,13 @@
         document.getElementById('included-targets').value = targets.join(',');
     }
 
+    // Wire populateSelection to form submit (covers keyboard, programmatic, and click)
+    document.addEventListener('htmx:configRequest', function(evt) {
+        if (evt.detail.elt && evt.detail.elt.id === 'select-form') {
+            populateSelection();
+        }
+    });
+
     // Compute confidence for currently active segments
     function updateConfidence() {
         var el = document.getElementById('group-edges');

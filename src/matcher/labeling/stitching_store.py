@@ -63,7 +63,9 @@ class StitchingLabelStore:
 
         if self.csv_path.exists():
             try:
-                return pd.read_csv(self.csv_path, dtype={"group_id": str})
+                df = pd.read_csv(self.csv_path, dtype={"group_id": str})
+                # Drop any columns not in the current schema (e.g. removed fields)
+                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
             except Exception as primary_error:
                 logger.warning(
                     f"Failed to load stitching labels from {self.csv_path}: {primary_error}"
@@ -71,7 +73,8 @@ class StitchingLabelStore:
                 if backup_path.exists():
                     try:
                         logger.info(f"Recovering from backup: {backup_path}")
-                        return pd.read_csv(backup_path, dtype={"group_id": str})
+                        df = pd.read_csv(backup_path, dtype={"group_id": str})
+                        return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
                     except Exception as backup_error:
                         raise OSError(
                             f"Both primary and backup stitching label files are corrupted.\n"
@@ -85,7 +88,8 @@ class StitchingLabelStore:
 
         if backup_path.exists():
             try:
-                return pd.read_csv(backup_path, dtype={"group_id": str})
+                df = pd.read_csv(backup_path, dtype={"group_id": str})
+                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
             except Exception as e:
                 raise OSError(
                     f"Backup stitching label file is corrupted: {backup_path}\nError: {e}"
@@ -208,6 +212,7 @@ class StitchingLabelStore:
             if csv_path.exists():
                 try:
                     df = pd.read_csv(csv_path, dtype={"group_id": str})
+                    df = df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
                     dfs.append(df)
                 except Exception as e:
                     logger.warning(f"Failed to load {csv_path}: {e}")
