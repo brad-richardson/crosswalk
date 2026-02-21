@@ -128,6 +128,45 @@ A pair can be `match` in `labels/human/` but absent from `labels/stitch/` (becau
 
 **Location:** `src/matcher/labeling/`, `src/matcher/validation/`, `src/matcher/cli/`
 
+### Medium: Precision/Recall Tuning for Balanced Matching
+
+**Status:** Analysis complete, no changes needed yet
+
+The matcher is intentionally tuned for high recall (stitch recall=0.99, precision=0.75 on Boston) to support full topology construction and avoid accidentally omitting edges. Hootenanny is more balanced (P=0.82, R=0.85). For use cases requiring higher precision ("don't add wrong stuff"), these levers are available:
+
+**Easy (config values in `config.py`, no code changes):**
+
+| Lever | Current | Effect |
+|-------|---------|--------|
+| `min_confidence` | 0.1 | Floor for edges entering bipartite graph. Raise to 0.2-0.3 to drop weakest candidates before grouping. Highest single-lever impact. |
+| `optimizer_review_threshold` | 0.5 | Groups with avg confidence below this → REVIEW. Raise to 0.6-0.7 to auto-match fewer borderline groups. |
+| `scoring_match_threshold` | 0.5 | ML confidence cutoff for MATCH vs REVIEW. Blunt but effective. |
+
+**Structural (geometry/topology params):**
+
+| Lever | Current | Effect |
+|-------|---------|--------|
+| `MAX_ALIGNMENT_OVERLAP_M` | 5m | Competing targets on same ref: overlaps above this demote the weaker. Tighten to 3m. |
+| `contiguity_tolerance` | 5m | Max endpoint gap for grouping. Tighten to 3m to split loose groups. |
+| `DIVERGENCE_DISTANCE_MULTIPLIER` | 3.0 | Controls alignment truncation aggressiveness when roads diverge. |
+
+**Architectural (would need design work):**
+
+| Lever | Notes |
+|-------|-------|
+| Per-edge confidence within groups | Currently groups are accepted/rejected as a whole (avg confidence). Per-edge minimum would prune weakest edges while keeping strong ones — most targeted lever for stitch precision specifically. |
+| Model selection override | Force geometry-only model (51 features, more conservative) vs full model (72 features, higher recall). Currently auto-selected based on name coverage. |
+| CLI-exposed profiles | Ship a "balanced" profile with alternative thresholds (higher min_confidence, tighter overlap tolerance) so users can select use-case without code changes. |
+
+**Measured baseline (us_boston_streets, 13 labeled groups):**
+
+| Tool | Stitch P | Stitch R | Stitch F1 | Extra edges |
+|------|----------|----------|-----------|-------------|
+| Matcher | 0.7541 | 0.9923 | 0.8570 | 40 |
+| Hootenanny | 0.8185 | 0.8457 | 0.8319 | 25 |
+
+**Location:** `src/matcher/config.py` (thresholds), `src/matcher/matching/optimizer.py` (group resolution), `src/matcher/matching/ml.py` (model selection)
+
 ---
 
 ## Pipeline Architecture: Stitch → Merge
