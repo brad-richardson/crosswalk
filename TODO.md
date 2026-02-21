@@ -25,7 +25,7 @@ Actionable backlog for the road network matcher.
 3. **20m distance threshold too generous**: `DIVERGENCE_MIN_DISTANCE_M = 20.0` lets winding roads stay "close enough" when they loop back near the target.
 
 **Fix options** (in order of simplicity):
-1. **Target parameter bounds check** (simplest): At line 256, if `t - offset < 0` or `t - offset > target_length`, mark the sample as diverged. This directly truncates where the ref extends beyond the target's extent.
+1. ~~**Target parameter bounds check** (simplest): At line 256, if `t - offset < 0` or `t - offset > target_length`, mark the sample as diverged. This directly truncates where the ref extends beyond the target's extent.~~ **Done** (alignment.py lines 268-275).
 2. **Monotonicity constraint**: Track the projected target parameter and truncate where it stops increasing (the ref is going somewhere the target doesn't).
 3. **Local tangent-based direction**: Compute bearing from each line's own vertex segments instead of inter-sample differences.
 
@@ -92,8 +92,6 @@ R1↔T2 matches full-length (shared approach/departure, different middle). R2 an
 ### Medium: Robustness Issues
 
 - **Overly broad exception handling** in `blocking/spatial_index.py` — `except Exception: return None` silently swallows errors
-- **Race condition in model selection** in `ml.py` — checks file existence but doesn't validate model is loadable
-- **CRS validation gap** in `pipeline/runner.py` — no check for null/invalid geometries after reprojection
 
 ### Low: Datasets with Polygon Geometries
 
@@ -138,7 +136,7 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 
 | Lever | Current | Effect |
 |-------|---------|--------|
-| `min_confidence` | 0.1 | Floor for edges entering bipartite graph. Raise to 0.2-0.3 to drop weakest candidates before grouping. Highest single-lever impact. |
+| `bridge_min_confidence` | 0.5 | Floor for edges entering bipartite graph. Raise to drop weakest candidates before grouping. Highest single-lever impact. |
 | `optimizer_review_threshold` | 0.5 | Groups with avg confidence below this → REVIEW. Raise to 0.6-0.7 to auto-match fewer borderline groups. |
 | `scoring_match_threshold` | 0.5 | ML confidence cutoff for MATCH vs REVIEW. Blunt but effective. |
 
@@ -155,7 +153,7 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 | Lever | Notes |
 |-------|-------|
 | Per-edge confidence within groups | Currently groups are accepted/rejected as a whole (avg confidence). Per-edge minimum would prune weakest edges while keeping strong ones — most targeted lever for stitch precision specifically. |
-| Model selection override | Force geometry-only model (51 features, more conservative) vs full model (72 features, higher recall). Currently auto-selected based on name coverage. |
+| Model selection override | Force geometry-only model (more conservative) vs full model (78 features, higher recall). Currently auto-selected based on name coverage. |
 | CLI-exposed profiles | Ship a "balanced" profile with alternative thresholds (higher min_confidence, tighter overlap tolerance) so users can select use-case without code changes. |
 
 **Measured baseline (us_boston_streets, 13 labeled groups):**
@@ -245,22 +243,6 @@ Relaxing the ≥10m intersection rule means some existing `no_match` labels are 
 
 ---
 
-## Ablation Study
-
-### Add Permutation Importance to Ablation Script
-
-**Problem:** Single-feature ablation systematically underestimates feature importance with tree ensembles due to redundancy masking — XGBoost routes around any one missing feature via correlated alternatives. Feb 2026 ablation classified 64/72 features as "noise", but bulk-removing them causes -2.9% F1. Permutation importance (shuffling feature values) avoids this by breaking correlations without removing the feature entirely.
-
-**Solution:** Add `--permutation` mode (or include alongside existing modes) that:
-1. Trains a single model on the train split
-2. For each feature, shuffles its test-set values N times (e.g., 5 repeats) and measures F1 drop
-3. Reports mean/std importance per feature
-4. Cross-references with ablation classification to flag false negatives (features ablation called "noise" but permutation shows are actively used)
-
-**Validation:** Feb 2026 permutation analysis found 14 false negatives, including `buffer_iou_15m` (2nd most important feature by permutation, classified as noise by ablation).
-
----
-
 ## Feature Ideas
 
 ### Medium: Pre-compute Context to Eliminate Dataset Requirements for Backfill
@@ -280,28 +262,17 @@ The pattern: during candidate generation (when full datasets are loaded), pre-co
 
 **Location:** `src/matcher/features/pipeline.py`, `src/matcher/labeling/data_store.py`
 
-### Medium: Spatially-Grounded Topology Features
+### Low: Spatially-Grounded Topology Features — Remaining Work
 
-**Priority:** Medium
+**Priority:** Low (core idea implemented, remaining items are incremental)
 
-**Problem:** Current topology features are not spatially discriminative for dense networks (footpaths, bike lanes):
+**Implemented (PR #195):** Interior connector features now provide spatially-grounded topology comparison via `interior_connector_jaccard`, `interior_junction_count_ref/target/delta`, and `interior_junction_position_sim` in `spatial_context.py`. These compare Overture connector sets along the aligned portion — the core "Connector set IOU" idea.
 
-- Endpoint features (`min/max_endpoint_proximity_m`, `shared_endpoint_count`) only measure target-to-target connectivity via `target_index` built at `pipeline.py:150`. For dense networks, these are uniformly high and non-discriminative.
-- Topology cross-comparison (`degree_match_score`, `graphlet_similarity`, `endpoint_degree_similarity`) compare topological patterns without spatial co-location. `degree_match_score` at `spatial_context.py:921` just compares degree numbers from different physical locations.
+**Remaining problems:**
+- Endpoint features (`min/max_endpoint_proximity_m`, `shared_endpoint_count`) still only measure target-to-target connectivity. For dense networks, these are uniformly high and non-discriminative.
+- `degree_match_score` at `spatial_context.py:921` still compares degree numbers without spatial co-location.
 
-**Proposed feature: Connector set IOU**
-
-Compute a Jaccard similarity (IOU) over the Overture connector sets that each aligned portion connects to:
-
-- For the ref aligned portion: collect the set of Overture connector node IDs along that portion
-- For the target aligned portion: find which Overture connectors are within tolerance of the target's path/endpoints
-- Compute IOU = |ref_connectors ∩ target_connectors| / |ref_connectors ∪ target_connectors|
-
-This is spatially grounded — a true match should connect to the SAME Overture intersection nodes (high IOU), while a parallel sidewalk 40m away connects to DIFFERENT nodes (IOU ≈ 0).
-
-Could be computed at both 5m and 15m buffer tolerances to align with existing buffer_iou features.
-
-**Also consider:** Cross-network endpoint proximity — measure distance from target aligned endpoints to nearest **reference** connector (not target connector). Currently `min_endpoint_proximity_m` measures target-to-target only.
+**Still open:** Cross-network endpoint proximity — measure distance from target aligned endpoints to nearest **reference** connector (not target connector). Currently `min_endpoint_proximity_m` measures target-to-target only.
 
 **Location:** `src/matcher/features/spatial_context.py`, `src/matcher/features/pipeline.py`
 
@@ -335,7 +306,7 @@ Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, 
 ## Label Data Management
 
 ### Label Archive & History
-- Archive orphaned labels to `labels/archived/` instead of losing them
+- ~~Archive orphaned labels to `labels/archived/` instead of losing them~~ Done (`labels/archived/` exists with data)
 - Provide recovery tooling to re-link archived labels
 
 ### Data Lineage
