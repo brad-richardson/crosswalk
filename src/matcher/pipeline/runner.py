@@ -14,6 +14,7 @@ from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
 from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
+from ..matching.graph_consistency import validate_graph_consistency
 from ..matching.optimizer import compute_group_id, find_match_components
 from ..matching.types import MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report
@@ -596,6 +597,18 @@ def run_pipeline(
         contiguity_tolerance=DEFAULT_SNAP_TOLERANCE_M,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
+    )
+
+    # Step 4b: Graph consistency validation — demote topologically
+    # inconsistent matches from MATCH → REVIEW.
+    logger.info("Step 4b: Validating graph consistency...")
+    optimized = validate_graph_consistency(
+        optimized,
+        reference=reference,
+        target=target,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        snap_tolerance=DEFAULT_SNAP_TOLERANCE_M,
     )
 
     # Export groups sidecar for stitching review (using WGS84 geometries)
