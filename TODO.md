@@ -52,6 +52,43 @@ LINESTRING (-112.23242434877292 46.720523234706526, -112.23247237989453 46.72059
 **Location**: `src/matcher/features/alignment.py:_detect_divergence_endpoints()` (lines 185-325), config thresholds in `src/matcher/config.py:47-49`
 **Related PR**: #81 (original divergence detection), #169 (multi-seed offset fix)
 
+### Low: Mid-Alignment Divergence in M:N Groups (Pond Pattern)
+
+**Problem**: When ref and target segments share start/end points but diverge in the middle (e.g., paths around different sides of a pond), `_detect_divergence_endpoints` doesn't catch the divergence because it only scans inward from the edges. Start is good, end is good → no truncation → full alignment reported for the cross-side pair.
+
+**Example geometry:**
+```
+        ___R1 (long - approach + left side + departure)___
+       /                                                   \
+  ----*                                                     *----
+       \___R2 (short - just right side)___/
+
+        ___T1 (short - just left side)___
+       /                                  \
+  ----*                                    *----
+       \___T2 (long - approach + right side + departure)___/
+```
+
+R1↔T2 matches full-length (shared approach/departure, different middle). R2 and T1 are short stubs on the opposite sides. The 2×2 M:N group needs location-dependent assignment but currently can't disambiguate.
+
+**Frequency**: ~10/5000 labeled pairs, trail/path datasets only.
+
+**Current decision**: Accept as-is. These are informative matches (useful for coverage). Similar class of issue as onramp termination differences and digitization quirks. Not worth over-engineering for the current use case.
+
+**Future options if needed** (lightest → heaviest):
+
+1. **Alignment quality profile features** (~50-100 lines): Sample points along the full aligned region, compute summary stats (`divergent_fraction`, `max_contiguous_good_fraction`, `alignment_quality_variance`). Add as ML features so the model can learn that pairs with good endpoints but bad middles are suspicious. No schema changes.
+
+2. **Multi-segment alignment** (~200-300 lines): Modify `AlignmentResult` to support a list of disjoint aligned segments. For the cross-side pair: segment 1 at frac 0.0–0.2, gap, segment 2 at frac 0.8–1.0. New features: `alignment_segment_count`, `total_gap_fraction`. Touches alignment, features, and bridge schema.
+
+3. **Post-hoc M:N disambiguation in optimizer** (~100-150 lines): After scoring, for M:N groups, sample the middle of each alignment and compute local geometric similarity to re-rank or prune edges. Targeted but heuristic.
+
+4. **Label correctly and accept** (current approach): Label cross-side pairs appropriately, accept residual error. Existing features (hausdorff, lateral offset) may provide weak signal for the model.
+
+**Related**: "Divergence Detection Fails on Winding Roads" (above) addresses edge-divergence; this is about middle-divergence.
+
+**Location**: `src/matcher/features/alignment.py:_detect_divergence_endpoints()`, `src/matcher/matching/optimizer.py`
+
 ### Medium: Robustness Issues
 
 - **Overly broad exception handling** in `blocking/spatial_index.py` — `except Exception: return None` silently swallows errors
