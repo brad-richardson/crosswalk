@@ -136,7 +136,8 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 
 | Lever | Current | Effect |
 |-------|---------|--------|
-| `bridge_min_confidence` | 0.5 | Floor for edges entering bipartite graph. Raise to drop weakest candidates before grouping. Highest single-lever impact. |
+| `min_confidence` | 0.1 | Floor for edges entering bipartite graph. Raise to 0.2-0.3 to drop weakest candidates before grouping. |
+| `bridge_min_confidence` | 0.5 | Post-optimization per-edge confidence floor for bridge output. Raise to drop weakest edges from final bridge file. Highest single-lever impact. |
 | `optimizer_review_threshold` | 0.5 | Groups with avg confidence below this → REVIEW. Raise to 0.6-0.7 to auto-match fewer borderline groups. |
 | `scoring_match_threshold` | 0.5 | ML confidence cutoff for MATCH vs REVIEW. Blunt but effective. |
 
