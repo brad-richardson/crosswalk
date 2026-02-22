@@ -1,11 +1,7 @@
 """Unit tests for post-optimizer graph consistency validation.
 
-Tests the three consistency checks:
-1. Junction contradiction
-2. Neighbourhood coherence
-3. Degree excess
-
-And the public validate_graph_consistency() entry point.
+Tests junction contradiction and the public validate_graph_consistency()
+entry point.
 """
 
 import geopandas as gpd
@@ -13,12 +9,9 @@ import pytest
 from shapely import LineString
 
 from matcher.matching.graph_consistency import (
-    _build_junction_nodes,
     _build_match_maps,
     _build_segment_adjacency_graph,
-    _degree_excess_scores,
     _junction_contradiction_scores,
-    _neighbourhood_coherence_scores,
     validate_graph_consistency,
 )
 from matcher.matching.types import MatchDecision, MatchResult
@@ -187,89 +180,6 @@ class TestJunctionContradiction:
 
 
 # ---------------------------------------------------------------------------
-# Tests for neighbourhood coherence (Check 2)
-# ---------------------------------------------------------------------------
-
-
-class TestNeighbourhoodCoherence:
-    def test_coherent_neighbourhood(self, ref_gdf, target_gdf):
-        """All three refs matched to adjacent targets → coherence should be high
-        (incoherence score low)."""
-        accepted = [
-            MatchResult("ref_A", "target_X", MatchDecision.MATCH, 0.9, {}, {}),
-            MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
-            MatchResult("ref_C", "target_Z", MatchDecision.MATCH, 0.8, {}, {}),
-        ]
-        ref_graph = _build_segment_adjacency_graph(ref_gdf, "id", 2.0)
-        target_graph = _build_segment_adjacency_graph(target_gdf, "id", 2.0)
-        r2t, _ = _build_match_maps(accepted)
-
-        scores = _neighbourhood_coherence_scores(accepted, ref_graph, target_graph, r2t)
-        # ref_A's neighbours are ref_B and ref_C (both matched).
-        # target_X's neighbours are target_Y and target_Z.
-        # ref_B→target_Y is adjacent to target_X → coherent.
-        # ref_C→target_Z is adjacent to target_X → coherent.
-        assert scores[("ref_A", "target_X")] == 0.0
-
-    def test_incoherent_isolated_match(self, ref_gdf, target_gdf):
-        """ref_A→target_W while neighbours match to targets far from target_W
-        should have high incoherence."""
-        accepted = [
-            MatchResult("ref_A", "target_W", MatchDecision.MATCH, 0.9, {}, {}),
-            MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
-            MatchResult("ref_C", "target_Z", MatchDecision.MATCH, 0.8, {}, {}),
-        ]
-        ref_graph = _build_segment_adjacency_graph(ref_gdf, "id", 2.0)
-        target_graph = _build_segment_adjacency_graph(target_gdf, "id", 2.0)
-        r2t, _ = _build_match_maps(accepted)
-
-        scores = _neighbourhood_coherence_scores(accepted, ref_graph, target_graph, r2t)
-        # ref_A's matched neighbours ref_B→target_Y and ref_C→target_Z
-        # are NOT adjacent to target_W → fully incoherent
-        assert scores[("ref_A", "target_W")] == 1.0
-
-
-# ---------------------------------------------------------------------------
-# Tests for degree excess (Check 3)
-# ---------------------------------------------------------------------------
-
-
-class TestDegreeExcess:
-    def test_balanced_junction(self, ref_gdf):
-        """3 refs at junction, 3 targets matched → no excess."""
-        ref_junctions = _build_junction_nodes(ref_gdf, "id", 2.0)
-
-        accepted = [
-            MatchResult("ref_A", "target_X", MatchDecision.MATCH, 0.9, {}, {}),
-            MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
-            MatchResult("ref_C", "target_Z", MatchDecision.MATCH, 0.8, {}, {}),
-        ]
-        r2t, _ = _build_match_maps(accepted)
-
-        scores = _degree_excess_scores(accepted, ref_junctions, r2t)
-        for key in scores:
-            assert scores[key] == 0.0
-
-    def test_excess_junction(self, ref_gdf):
-        """3 refs at junction, but 5 targets matched → excess."""
-        ref_junctions = _build_junction_nodes(ref_gdf, "id", 2.0)
-
-        accepted = [
-            MatchResult("ref_A", "target_X", MatchDecision.MATCH, 0.9, {}, {}),
-            MatchResult("ref_A", "target_W", MatchDecision.MATCH, 0.8, {}, {}),
-            MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
-            MatchResult("ref_B", "target_V", MatchDecision.MATCH, 0.7, {}, {}),
-            MatchResult("ref_C", "target_Z", MatchDecision.MATCH, 0.8, {}, {}),
-        ]
-        r2t, _ = _build_match_maps(accepted)
-
-        scores = _degree_excess_scores(accepted, ref_junctions, r2t)
-        # 3 refs, 5 distinct targets → excess = (5-3)/3 ≈ 0.67
-        for key in scores:
-            assert scores[key] > 0.0
-
-
-# ---------------------------------------------------------------------------
 # Tests for validate_graph_consistency (public API)
 # ---------------------------------------------------------------------------
 
@@ -310,9 +220,10 @@ class TestValidateGraphConsistency:
         decisions = [r.decision for r in validated]
         assert all(d == MatchDecision.MATCH for d in decisions)
 
-    def test_inconsistent_match_demoted(self, ref_gdf, target_gdf):
+    def test_inconsistent_match_penalised(self, ref_gdf, target_gdf):
         """ref_A→target_W is topologically inconsistent: target_W is isolated
-        while ref_A connects to ref_B/ref_C which match to adjacent targets."""
+        while ref_A connects to ref_B/ref_C which match to adjacent targets.
+        Should be demoted to REVIEW with reduced confidence."""
         results = [
             MatchResult("ref_A", "target_W", MatchDecision.MATCH, 0.9, {}, {}),
             MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
@@ -326,21 +237,23 @@ class TestValidateGraphConsistency:
             target_id_column="id",
             snap_tolerance=2.0,
         )
-        # ref_A→target_W should be demoted to REVIEW
+        # ref_A→target_W should be demoted to REVIEW with reduced confidence
         a_result = next(r for r in validated if r.ref_id == "ref_A")
         assert a_result.decision == MatchDecision.REVIEW
+        assert a_result.confidence < 0.9  # confidence reduced
         assert a_result.features.get("graph_consistency_flag") == 1.0
         assert "graph_consistency_reasons" in a_result.features
-        assert len(a_result.features["graph_consistency_reasons"]) > 0
+        assert a_result.features.get("graph_consistency_original_confidence") == 0.9
 
-        # ref_B and ref_C should remain MATCH
+        # ref_B and ref_C should remain MATCH with original confidence
         b_result = next(r for r in validated if r.ref_id == "ref_B")
         c_result = next(r for r in validated if r.ref_id == "ref_C")
         assert b_result.decision == MatchDecision.MATCH
+        assert b_result.confidence == 0.85
         assert c_result.decision == MatchDecision.MATCH
 
-    def test_confidence_preserved_on_demotion(self, ref_gdf, target_gdf):
-        """Demoted matches should preserve their original confidence."""
+    def test_original_confidence_stored_on_demotion(self, ref_gdf, target_gdf):
+        """Demoted matches should store original confidence and preserve features."""
         results = [
             MatchResult("ref_A", "target_W", MatchDecision.MATCH, 0.95, {}, {"feat": 1.0}),
             MatchResult("ref_B", "target_Y", MatchDecision.MATCH, 0.85, {}, {}),
@@ -355,7 +268,8 @@ class TestValidateGraphConsistency:
             snap_tolerance=2.0,
         )
         a_result = next(r for r in validated if r.ref_id == "ref_A")
-        assert a_result.confidence == 0.95
+        assert a_result.confidence < 0.95  # confidence was reduced
+        assert a_result.features.get("graph_consistency_original_confidence") == 0.95
         assert a_result.features.get("feat") == 1.0
 
     def test_result_count_preserved(self, ref_gdf, target_gdf):
@@ -429,21 +343,6 @@ class TestN1MatchHandling:
         r2t, _ = _build_match_maps(accepted)
 
         scores = _junction_contradiction_scores(accepted, ref_graph, target_graph, r2t)
-        assert scores[("ref_A", "target_X")] == 0.0
-        assert scores[("ref_B", "target_X")] == 0.0
-
-    def test_n1_coherence_score_zero(self, ref_gdf, target_gdf):
-        """Adjacent ref segments matched to the same target should have
-        coherence score 0 (fully coherent), not 1."""
-        accepted = [
-            MatchResult("ref_A", "target_X", MatchDecision.MATCH, 0.9, {}, {}),
-            MatchResult("ref_B", "target_X", MatchDecision.MATCH, 0.85, {}, {}),
-        ]
-        ref_graph = _build_segment_adjacency_graph(ref_gdf, "id", 2.0)
-        target_graph = _build_segment_adjacency_graph(target_gdf, "id", 2.0)
-        r2t, _ = _build_match_maps(accepted)
-
-        scores = _neighbourhood_coherence_scores(accepted, ref_graph, target_graph, r2t)
         assert scores[("ref_A", "target_X")] == 0.0
         assert scores[("ref_B", "target_X")] == 0.0
 

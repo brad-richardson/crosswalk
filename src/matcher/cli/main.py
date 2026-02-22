@@ -539,6 +539,18 @@ def register_commands(app: typer.Typer) -> None:
             "-a",
             help="Process all available datasets",
         ),
+        reference: Path | None = typer.Option(
+            None,
+            "--reference",
+            "-r",
+            help="Reference (Overture) parquet file path (bypasses dataset lookup)",
+        ),
+        target: Path | None = typer.Option(
+            None,
+            "--target",
+            "-t",
+            help="Target parquet file path (bypasses dataset lookup)",
+        ),
         output: Path | None = typer.Option(
             None,
             "--output",
@@ -584,7 +596,7 @@ def register_commands(app: typer.Typer) -> None:
             matcher stitch us_boston_streets
             matcher stitch --all
             matcher stitch us_boston_streets -p recall
-            matcher stitch us_boston_streets -o custom_output.parquet
+            matcher stitch -r ref.parquet -t target.parquet -o bridge.parquet
         """
         from ..config import STITCH_PROFILES, settings
         from ..datasets.loader import DatasetLoader
@@ -604,12 +616,17 @@ def register_commands(app: typer.Typer) -> None:
             os.environ["MATCHER_PROFILE"] = "1"
 
         output_dir = PROJECT_ROOT / "data" / "output"
-        loader = DatasetLoader()
 
         # Build list of (dataset_name, ref_path, target_path, output_path)
         jobs: list[tuple[str, Path, Path, Path]] = []
 
-        if all_datasets:
+        if reference and target:
+            # Direct file path mode (used by cbench)
+            ds_name = dataset or reference.stem
+            out = output or (output_dir / f"{ds_name}_bridge.parquet")
+            jobs.append((ds_name, reference, target, out))
+        elif all_datasets:
+            loader = DatasetLoader()
             available = loader.list_available()
             if not available:
                 console.print("[yellow]No datasets found in data/raw/[/yellow]")
@@ -624,6 +641,7 @@ def register_commands(app: typer.Typer) -> None:
                 else:
                     console.print(f"  [yellow]Skipping {ds}: missing files[/yellow]")
         elif dataset:
+            loader = DatasetLoader()
             ref = loader.find_reference_path(dataset)
             tgt = loader.find_target_path(dataset)
             if not ref:
@@ -637,7 +655,7 @@ def register_commands(app: typer.Typer) -> None:
             out = output or (output_dir / bridge_filename(dataset))
             jobs.append((dataset, ref, tgt, out))
         else:
-            console.print("[red]Provide a dataset name or --all[/red]")
+            console.print("[red]Provide a dataset name, --reference/--target, or --all[/red]")
             raise typer.Exit(1)
 
         for ds_name, ref_path, tgt_path, out_path in jobs:

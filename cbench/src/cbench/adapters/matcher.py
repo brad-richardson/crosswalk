@@ -10,6 +10,9 @@ from loguru import logger
 
 from cbench.adapters.base import EvalMode, ToolOutput
 
+# Matcher project root (cbench/src/cbench/adapters/matcher.py → 4 levels up)
+_MATCHER_ROOT = Path(__file__).parents[4]
+
 
 class MatcherAdapter:
     """Adapter for the matcher road conflation tool.
@@ -36,12 +39,21 @@ class MatcherAdapter:
         output_dir.mkdir(parents=True, exist_ok=True)
         bridge_path = output_dir / "bridge.parquet"
 
+        # Resolve to absolute paths so they work regardless of cwd
+        reference = reference.resolve()
+        target = target.resolve()
+        bridge_path = bridge_path.resolve()
+
         model = kwargs.get("model", "xgboost")
 
         cmd = [
+            "uv",
+            "run",
             "matcher",
             "stitch",
+            "-r",
             str(reference),
+            "-t",
             str(target),
             "-m",
             model,
@@ -53,7 +65,10 @@ class MatcherAdapter:
 
         logger.info(f"Running: {' '.join(cmd)}")
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            # Run from matcher project root so relative model path resolves
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, cwd=_MATCHER_ROOT
+            )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"matcher stitch timed out after {timeout}s") from exc
 
