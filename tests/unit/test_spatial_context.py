@@ -1746,8 +1746,8 @@ class TestAlignedEndpointFeaturesWithConnectors:
         # max_endpoint_proximity should be much smaller than the raw version
         assert result_snapped["max_endpoint_proximity_m"] < result_raw["max_endpoint_proximity_m"]
 
-    def test_without_connectors_backward_compatible(self, simple_context):
-        """Without connector data, behavior is unchanged (backward compatible)."""
+    def test_without_connectors_uses_defaults(self, simple_context):
+        """Without connector data, default and explicit None produce same result."""
         geom = LineString([(0, 0), (100, 0)])
 
         result_default = compute_aligned_endpoint_features(
@@ -2170,7 +2170,7 @@ class TestSampleTopologyAlongSegment:
             f"Branch junction at (200,0) should give degree >= 2, got: {degrees}"
         )
 
-    def test_compatible_with_compute_aligned_topology_features(self):
+    def test_output_feeds_into_compute_aligned_topology_features(self):
         """Output format should work with compute_aligned_topology_features()."""
         spatial_index = self._make_intersection_index()
 

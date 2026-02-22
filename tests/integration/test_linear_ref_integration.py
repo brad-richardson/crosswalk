@@ -148,12 +148,11 @@ class TestLRDataFlowIntegration:
         assert attrs2["name"] == "Second Half Name"
 
 
-class TestBackwardsCompatibility:
-    """Test that code works with data lacking LR columns."""
+class TestMissingLRColumns:
+    """Test that extract_lr_attributes handles GeoDataFrames without LR columns."""
 
     def test_missing_lr_columns_handled(self):
-        """Test that GeoDataFrames without LR columns still work."""
-        # Create GeoDataFrame WITHOUT LR columns (old data format)
+        """GeoDataFrames with flat 'name' column (no 'names' dict) should get trivial LR."""
         gdf = gpd.GeoDataFrame(
             {
                 "id": ["seg1"],
@@ -163,40 +162,12 @@ class TestBackwardsCompatibility:
             crs="EPSG:4326",
         )
 
-        # This should not raise - extract_lr_attributes handles missing columns
-        # by creating trivial LR from flat values
         result = extract_lr_attributes(gdf)
 
         assert "names_lr" in result.columns
-        # Should have created trivial LR matching Overture schema
         lr_data = result.iloc[0]["names_lr"]
         assert len(lr_data) == 1
         assert lr_data[0]["between"] == [0.0, 1.0]
-
-    def test_none_lr_data_uses_flat_name(self):
-        """Test that None LR data falls back to flat name."""
-        # When LR data is None, the feature computation should use flat names
-        # This tests the fallback logic pattern used in ml.py
-
-        flat_name = "Oak Street"
-
-        # Simulate the fallback logic used in _extract_lr_attributes_for_pair
-        def get_name_with_fallback(lr_data, flat_name, start_frac, end_frac):
-            """Mimics the fallback pattern in ml.py."""
-            if lr_data is not None:
-                lr = LinearReferencedAttribute.from_dict_list(lr_data)
-                result = extract_aligned_attributes({"name": lr}, start_frac, end_frac)
-                return result["name"]
-            return flat_name
-
-        # Test with None LR data - should return flat name
-        name = get_name_with_fallback(None, flat_name, 0.0, 1.0)
-        assert name == "Oak Street"
-
-        # Test with actual LR data - should use LR extraction
-        lr_data = [{"between": [0.0, 1.0], "value": "LR Name"}]
-        name = get_name_with_fallback(lr_data, flat_name, 0.0, 1.0)
-        assert name == "LR Name"
 
 
 class TestMultipleAttributes:

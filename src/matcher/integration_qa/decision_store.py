@@ -19,7 +19,7 @@ DEFAULT_MERGED_PATH = Path("data/labels/integration_merged.csv")
 ORPHAN_COLUMNS = [
     "edge_id",
     "original_id",
-    "dataset_id",  # Changed from source_dataset for consistency
+    "dataset_id",
     "component_id",
     "decision",  # "correct", "incorrect"
     "reason",  # "legitimate_new", "data_error", "out_of_scope"
@@ -36,7 +36,7 @@ ORPHAN_COLUMNS = [
 MERGED_COLUMNS = [
     "edge_id",
     "original_id",
-    "dataset_id",  # Changed from source_dataset for consistency
+    "dataset_id",
     "source_type",  # "target_matched", "target_new"
     "match_ref_id",
     "decision",  # "correct", "incorrect"
@@ -73,11 +73,7 @@ class OrphanDecisionStore:
         """Load decisions from CSV."""
         if self.path.exists():
             try:
-                df = pd.read_csv(self.path)
-                # Handle source_dataset -> dataset_id rename for backward compatibility
-                if "source_dataset" in df.columns and "dataset_id" not in df.columns:
-                    df = df.rename(columns={"source_dataset": "dataset_id"})
-                return df
+                return pd.read_csv(self.path)
             except Exception as e:
                 logger.warning(f"Failed to load orphan decisions from {self.path}: {e}")
         return pd.DataFrame(columns=ORPHAN_COLUMNS)
@@ -178,11 +174,7 @@ class MergedDecisionStore:
         """Load decisions from CSV."""
         if self.path.exists():
             try:
-                df = pd.read_csv(self.path)
-                # Handle source_dataset -> dataset_id rename for backward compatibility
-                if "source_dataset" in df.columns and "dataset_id" not in df.columns:
-                    df = df.rename(columns={"source_dataset": "dataset_id"})
-                return df
+                return pd.read_csv(self.path)
             except Exception as e:
                 logger.warning(f"Failed to load merged decisions from {self.path}: {e}")
         return pd.DataFrame(columns=MERGED_COLUMNS)

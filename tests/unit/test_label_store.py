@@ -2,9 +2,9 @@
 
 from shapely.geometry import LineString
 
-from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
+from matcher.config import FEATURE_COLUMNS
+from matcher.features.compute import compute_pair_features
 from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import FEATURE_COLUMNS
 from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
 
@@ -16,7 +16,7 @@ class TestFeatureParity:
     """
 
     def test_compute_pair_features_returns_all_declared_features(self):
-        """compute_pair_features() should return all features in ALL_FEATURE_COLUMNS.
+        """compute_pair_features() should return all features in FEATURE_COLUMNS.
 
         This catches bugs where a feature is declared but not actually computed.
         """
@@ -35,43 +35,21 @@ class TestFeatureParity:
             target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
-        declared_features = set(ALL_FEATURE_COLUMNS)
+        declared_features = set(FEATURE_COLUMNS)
         # Filter out internal metadata fields (prefixed with _)
         computed_features = {k for k in features if not k.startswith("_")}
 
         missing_from_output = declared_features - computed_features
         assert not missing_from_output, (
-            f"Features declared in ALL_FEATURE_COLUMNS but not returned by "
+            f"Features declared in FEATURE_COLUMNS but not returned by "
             f"compute_pair_features: {sorted(missing_from_output)}"
         )
 
         extra_in_output = computed_features - declared_features
         assert not extra_in_output, (
             f"Features returned by compute_pair_features but not declared in "
-            f"ALL_FEATURE_COLUMNS: {sorted(extra_in_output)}\n"
-            f"Add these to ALL_FEATURE_COLUMNS in compute.py."
-        )
-
-    def test_ml_feature_columns_match_computed_features(self):
-        """ML FEATURE_COLUMNS must match ALL_FEATURE_COLUMNS.
-
-        This ensures the ML model uses the same features that are computed
-        and saved to labels. A mismatch would cause training failures or
-        incorrect predictions.
-        """
-        ml_features = set(FEATURE_COLUMNS)
-        computed_features = set(ALL_FEATURE_COLUMNS)
-
-        missing_from_ml = computed_features - ml_features
-        assert not missing_from_ml, (
-            f"Features computed but not used by ML model: {sorted(missing_from_ml)}\n"
-            f"Add these to FEATURE_COLUMNS in ml.py."
-        )
-
-        extra_in_ml = ml_features - computed_features
-        assert not extra_in_ml, (
-            f"ML model uses features that are not computed: {sorted(extra_in_ml)}\n"
-            f"Either add these to ALL_FEATURE_COLUMNS in compute.py or remove from ml.py."
+            f"FEATURE_COLUMNS: {sorted(extra_in_output)}\n"
+            f"Add these to FEATURE_COLUMNS in config.py."
         )
 
 
@@ -100,7 +78,7 @@ class TestGeometryPersistence:
             session_id="sess-001",
             original_decision="review",
             original_confidence=0.75,
-            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+            features={col: 0.5 for col in FEATURE_COLUMNS},
             ref_geometry=ref_geom,
             target_geometry=target_geom,
             ref_class_raw="residential",
@@ -152,7 +130,7 @@ class TestGeometryPersistence:
             session_id="sess-001",
             original_decision="review",
             original_confidence=0.75,
-            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+            features={col: 0.5 for col in FEATURE_COLUMNS},
         )
 
         # No error should be raised, label should be saved
@@ -178,7 +156,7 @@ class TestLabelUpdateDelete:
             session_id="sess-001",
             original_decision="review",
             original_confidence=0.75,
-            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+            features={col: 0.5 for col in FEATURE_COLUMNS},
         )
 
         assert store.df.iloc[0]["label"] == "match"
@@ -226,7 +204,7 @@ class TestLabelUpdateDelete:
             session_id="sess-001",
             original_decision="review",
             original_confidence=0.75,
-            features={col: 0.5 for col in ALL_FEATURE_COLUMNS},
+            features={col: 0.5 for col in FEATURE_COLUMNS},
             ref_geometry=ref_geom,
             target_geometry=target_geom,
             ref_names={"primary": "Main St"},

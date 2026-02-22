@@ -1198,7 +1198,7 @@ class TestComputePairFeaturesWithAlignment:
         assert features["target_coverage"] == pytest.approx(1.0)
 
     def test_compute_pair_features_without_alignment(self):
-        """compute_pair_features should work without alignment (backward compatible)."""
+        """compute_pair_features should work when alignment is None."""
         from matcher.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
@@ -1262,8 +1262,9 @@ class TestComputePairFeaturesWithAlignment:
 
     def test_all_feature_columns_present(self):
         """compute_pair_features should return all expected feature columns."""
+        from matcher.config import FEATURE_COLUMNS
         from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import ALL_FEATURE_COLUMNS, compute_pair_features
+        from matcher.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1287,7 +1288,7 @@ class TestComputePairFeaturesWithAlignment:
         )
 
         # All feature columns should be present
-        for col in ALL_FEATURE_COLUMNS:
+        for col in FEATURE_COLUMNS:
             assert col in features, f"Missing feature: {col}"
 
     def test_lateral_offset_uses_aligned_sublines(self):

@@ -164,9 +164,6 @@ from .spatial_context import (
     graphlet_similarity_with_alignment,
 )
 
-# Alias for backward compatibility - the authoritative list is in config.py
-ALL_FEATURE_COLUMNS = FEATURE_COLUMNS
-
 
 def _compute_non_geometric_features(
     ref_geom_aligned,
@@ -1229,7 +1226,7 @@ def _get_error_features(
     error is provided.
     """
     _nan = float("nan")
-    features = {col: _nan for col in ALL_FEATURE_COLUMNS}
+    features = {col: _nan for col in FEATURE_COLUMNS}
 
     # Add error metadata only if error is provided
     if error is not None:

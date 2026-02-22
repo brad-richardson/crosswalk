@@ -539,7 +539,7 @@ class TestSubSegmentSlicing:
         assert full_row.iloc[0].geometry.length == pytest.approx(original_line.length, rel=0.01)
 
     def test_missing_fractions_leave_geometry_unchanged(self, reference_network):
-        """Missing fractions (backward compat) should leave geometry unchanged."""
+        """Missing fractions (None defaults) should leave geometry unchanged."""
         original_line = LineString([(500, 500), (600, 500)])
         target = gpd.GeoDataFrame(
             {

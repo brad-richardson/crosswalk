@@ -18,12 +18,6 @@ def labels_dir() -> Path:
 
 
 @pytest.fixture
-def fixtures_dir() -> Path:
-    """Return the path to the test fixtures directory."""
-    return Path(__file__).parent / "fixtures"
-
-
-@pytest.fixture
 def simple_cross() -> gpd.GeoDataFrame:
     """Two crossing lines forming an X."""
     return gpd.GeoDataFrame(
