@@ -34,19 +34,6 @@ def test_build_id_map_new_format(tmp_path):
     assert id_map == {"-1": "original-id-1", "-2": "original-id-2"}
 
 
-def test_build_id_map_legacy_format(tmp_path):
-    osm = _write_osm(
-        tmp_path / "ref.osm",
-        """<osm version="0.6">
-        <way id="-1" version="1">
-            <tag k="matcher:id" v="legacy-id"/>
-        </way>
-        </osm>""",
-    )
-    id_map = _build_id_map(osm)
-    assert id_map == {"-1": "legacy-id"}
-
-
 def test_get_all_matcher_ids(tmp_path):
     osm = _write_osm(
         tmp_path / "tgt.osm",

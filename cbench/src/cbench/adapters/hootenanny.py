@@ -66,37 +66,37 @@ def ensure_compose_running(hoot_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_id_map(osm_path: Path, source_tag: str | None = None) -> dict[str, str]:
+def _build_id_map(osm_path: Path, source_tag: str) -> dict[str, str]:
     """Build map from OSM way ID to original matcher ID."""
     id_map = {}
     tree = ET.parse(osm_path)
     root = tree.getroot()
-    key_prefix = f"matcher_{source_tag}_" if source_tag else None
+    key_prefix = f"matcher_{source_tag}_"
 
     for way in root.findall(".//way"):
         way_id = way.get("id")
         for tag in way.findall("tag"):
             k = tag.get("k")
             v = tag.get("v")
-            if (key_prefix and k and k.startswith(key_prefix) and v) or (k == "matcher:id" and v):
+            if k and k.startswith(key_prefix) and v:
                 id_map[way_id] = v
                 break
 
     return id_map
 
 
-def _get_all_matcher_ids(osm_path: Path, source_tag: str | None = None) -> set[str]:
+def _get_all_matcher_ids(osm_path: Path, source_tag: str) -> set[str]:
     """Get all matcher ID values from an OSM file."""
     ids: set[str] = set()
     tree = ET.parse(osm_path)
     root = tree.getroot()
-    key_prefix = f"matcher_{source_tag}_" if source_tag else None
+    key_prefix = f"matcher_{source_tag}_"
 
     for way in root.findall(".//way"):
         for tag in way.findall("tag"):
             k = tag.get("k")
             v = tag.get("v")
-            if (key_prefix and k and k.startswith(key_prefix) and v) or (k == "matcher:id" and v):
+            if k and k.startswith(key_prefix) and v:
                 ids.add(v)
 
     return ids

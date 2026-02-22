@@ -20,7 +20,6 @@ from shapely import LineString
 
 from matcher.config import FEATURE_COLUMNS
 from matcher.features.compute import (
-    ALL_FEATURE_COLUMNS,
     MissingContextError,
     _get_error_features,
     compute_pair_features,
@@ -35,17 +34,6 @@ def simple_pair_geoms():
         LineString([(0, 0), (100, 0)]),  # ref
         LineString([(0, 5), (100, 5)]),  # target
     )
-
-
-class TestSingleSourceOfTruth:
-    """Ensure config.py FEATURE_COLUMNS is the single source of truth."""
-
-    def test_all_feature_columns_matches_config(self):
-        """ALL_FEATURE_COLUMNS in compute.py should be imported from config.py."""
-        assert ALL_FEATURE_COLUMNS is FEATURE_COLUMNS, (
-            "ALL_FEATURE_COLUMNS in compute.py should be imported from config.py, "
-            "not a separate list."
-        )
 
 
 class TestErrorFeaturesConsistency:

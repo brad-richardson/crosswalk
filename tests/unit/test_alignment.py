@@ -571,8 +571,8 @@ class TestComputeCoverageFeatures:
         assert features["min_coverage"] == pytest.approx(0.5)
         assert features["coverage_ratio"] == pytest.approx(0.5 / 0.6, rel=0.01)
 
-    def test_none_alignment_backward_compatible(self):
-        """None alignment should return zeros by default (backward compatible)."""
+    def test_none_alignment_returns_zeros(self):
+        """None alignment should return zeros by default."""
         features = compute_coverage_features(None)
 
         assert features["ref_coverage"] == 0.0
