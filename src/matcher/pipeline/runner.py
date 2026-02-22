@@ -13,8 +13,7 @@ from loguru import logger
 from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
 from ..filenames import extract_version_from_filename, groups_sidecar_path
-from ..matching import MatchDecision, optimize_matches_with_grouping
-from ..matching.graph_consistency import validate_graph_consistency
+from ..matching import MatchDecision, optimize_matches_with_grouping, validate_graph_consistency
 from ..matching.optimizer import compute_group_id, find_match_components
 from ..matching.types import MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report

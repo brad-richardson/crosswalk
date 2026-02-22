@@ -143,7 +143,9 @@ def _junction_contradiction_scores(
     For a match (ref_A, target_X), consider every *matched* reference
     neighbour ref_B (i.e. ref_B is adjacent to ref_A in the ref graph and
     ref_B has accepted matches).  If none of ref_B's matched targets are
-    adjacent to target_X in the target graph, that junction is contradicted.
+    adjacent to (or equal to) target_X in the target graph, that junction
+    is contradicted.  Equality handles N:1 groups where multiple ref
+    segments map to the same target.
 
     The score is:  contradicted_junctions / matched_ref_neighbours
     Range [0, 1]; 0 = fully consistent, 1 = every junction contradicted.
@@ -161,11 +163,11 @@ def _junction_contradiction_scores(
             scores[(ref_id, target_id)] = 0.0
             continue
 
-        target_nbrs = set(target_graph.neighbors(target_id))
+        target_nbrs = set(target_graph.neighbors(target_id)) | {target_id}
         contradicted = 0
         for ref_nbr in matched_ref_nbrs:
             nbr_targets = ref_to_targets[ref_nbr]
-            # Is *any* of ref_nbr's matched targets adjacent to target_id?
+            # Is *any* of ref_nbr's matched targets adjacent to (or equal to) target_id?
             if not nbr_targets & target_nbrs:
                 contradicted += 1
 
@@ -184,7 +186,6 @@ def _neighbourhood_coherence_scores(
     ref_graph: SparseGraph,
     target_graph: SparseGraph,
     ref_to_targets: dict[Any, set[Any]],
-    target_to_refs: dict[Any, set[Any]],
 ) -> dict[tuple[Any, Any], float]:
     """Score how isolated a match is within its local neighbourhood.
 
@@ -192,7 +193,8 @@ def _neighbourhood_coherence_scores(
     - Look at ref_A's graph neighbours in the ref graph.
     - Count how many of those neighbours are matched (n_matched_nbrs).
     - Of those, count how many have a matched target that is a neighbour
-      of target_X in the target graph (n_coherent).
+      of (or equal to) target_X in the target graph (n_coherent).
+      Equality handles N:1 groups where multiple ref segments share a target.
 
     coherence = n_coherent / n_matched_nbrs  (1 = all coherent, 0 = isolated)
     Returned score = 1 - coherence  (so higher = worse, matching convention).
@@ -210,7 +212,7 @@ def _neighbourhood_coherence_scores(
             scores[(ref_id, target_id)] = 0.0
             continue
 
-        target_nbrs = set(target_graph.neighbors(target_id))
+        target_nbrs = set(target_graph.neighbors(target_id)) | {target_id}
 
         coherent = 0
         for ref_nbr in matched_ref_nbrs:
@@ -229,7 +231,6 @@ def _neighbourhood_coherence_scores(
 
 
 def _build_junction_nodes(
-    graph: SparseGraph,
     gdf: gpd.GeoDataFrame,
     id_column: str,
     tolerance: float,
@@ -405,9 +406,9 @@ def validate_graph_consistency(
         accepted, ref_graph, target_graph, ref_to_targets
     )
     coherence_scores = _neighbourhood_coherence_scores(
-        accepted, ref_graph, target_graph, ref_to_targets, target_to_refs
+        accepted, ref_graph, target_graph, ref_to_targets
     )
-    ref_junctions = _build_junction_nodes(reference, reference, ref_id_column, snap_tolerance)
+    ref_junctions = _build_junction_nodes(reference, ref_id_column, snap_tolerance)
     degree_scores = _degree_excess_scores(accepted, ref_junctions, ref_to_targets)
 
     # ------------------------------------------------------------------
