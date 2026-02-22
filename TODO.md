@@ -12,9 +12,9 @@ Actionable backlog for the road network matcher.
 ### HIGH: Scalability - Large Dataset Support
 
 - **Problem**: `runner.py` uses `geopandas.read_parquet` which loads entire dataset into memory
-- **Impact**: Will fail on state-sized or larger datasets
+- **Impact**: Will fail on state-sized or larger datasets (target: 300M segments for Overture vs OSM)
 - **Location**: `src/matcher/pipeline/runner.py`
-- **Solution**: Migrate to Spark/Sedona/GraphFrames (see [docs/RESEARCH_IDEAS.md](docs/RESEARCH_IDEAS.md#spark-migration-research-jan-2026))
+- **Solution**: Add PySpark + Sedona distributed backend alongside existing GDF path. Dual-backend architecture with `StitchExecutor` protocol, shared feature math, H3 spatial partitioning with halo for boundary correctness. See [design doc](docs/plans/2026-02-22-spark-dual-backend-design.md) for full stage-by-stage analysis, abstraction approach, risks, and implementation phases.
 
 ### Medium: Divergence Detection Fails on Winding Roads (PR #81 follow-up)
 
