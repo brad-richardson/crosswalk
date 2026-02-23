@@ -699,7 +699,7 @@ def delete_batch_manifest(dataset_id: str) -> bool:
 
 def generate_batch(
     dataset_id: str,
-    n: int = 200,
+    n: int = 100,
     seed: int | None = None,
 ) -> list[CandidatePairView]:
     """Generate a stratified batch of candidates for labeling.
@@ -714,7 +714,7 @@ def generate_batch(
 
     Args:
         dataset_id: Dataset identifier
-        n: Total number of candidates to sample (default 200)
+        n: Total number of candidates to sample (default 100)
         seed: Random seed for reproducibility
 
     Returns:

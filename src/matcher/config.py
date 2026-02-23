@@ -48,7 +48,7 @@ PHYSICAL_OVERLAP_MIN_M = 5.0
 PHYSICAL_OVERLAP_FLOOR_M = 1.0
 
 # Minimum number of labels per dataset before it's considered "done" for labeling
-MIN_LABELS_PER_DATASET = 200
+MIN_LABELS_PER_DATASET = 100
 
 # Tolerance for matching Overture connectors to target segments.
 # How close a target segment must pass to an Overture connector position
