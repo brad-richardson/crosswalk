@@ -960,3 +960,58 @@ class TestDivergenceDetection:
         assert result.overture_coverage < 0.8, (
             f"Winding road loop should truncate coverage, got {result.overture_coverage}"
         )
+
+
+class TestJunctionSegmentAlignment:
+    """Tests for segments that meet at a junction but don't truly overlap."""
+
+    def test_sequential_segments_sharing_junction_have_minimal_overlap(self):
+        """Two sequential segments on the same road sharing a junction point
+        should have near-zero aligned overlap.
+
+        Real-world case: Weston Road in Toronto — the reference segment ends
+        at a junction and the target segment begins there. The aligned portion
+        should be at most ~2m (the junction proximity), not ~7m.
+
+        Coordinates are in projected UTM (EPSG:32617), units in meters.
+        """
+        # Reference: Weston Road segment ending at junction (260m, going north)
+        ref = LineString([
+            (617466.03, 4844691.99),
+            (617463.95, 4844703.05),
+            (617459.56, 4844726.42),
+            (617450.84, 4844772.80),
+            (617446.95, 4844793.49),
+            (617445.04, 4844804.00),
+            (617438.18, 4844844.67),
+            (617434.03, 4844865.00),
+            (617426.45, 4844908.20),
+            (617424.03, 4844922.00),
+            (617420.80, 4844940.86),
+            (617419.39, 4844948.23),
+        ])
+        # Target: Weston Road segment starting at junction (290m, going north)
+        target = LineString([
+            (617419.81, 4844947.81),
+            (617371.86, 4845233.37),
+        ])
+
+        result = linestring_alignment(ref, target)
+
+        # The aligned portion on the reference should be tiny — just the
+        # junction proximity (~0.5m), not 6-7m.
+        ref_aligned_length = (result.overture_end_frac - result.overture_start_frac) * ref.length
+        target_aligned_length = (
+            result.dataset_end_frac - result.dataset_start_frac
+        ) * target.length
+
+        assert ref_aligned_length < 2.0, (
+            f"Sequential junction segments should have < 2m ref overlap, "
+            f"got {ref_aligned_length:.1f}m "
+            f"(fracs {result.overture_start_frac:.4f}-{result.overture_end_frac:.4f})"
+        )
+        assert target_aligned_length < 2.0, (
+            f"Sequential junction segments should have < 2m target overlap, "
+            f"got {target_aligned_length:.1f}m "
+            f"(fracs {result.dataset_start_frac:.4f}-{result.dataset_end_frac:.4f})"
+        )

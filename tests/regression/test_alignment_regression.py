@@ -459,15 +459,15 @@ class TestOveralignment:
         result = linestring_alignment(ref, target)
         assert result.overture_coverage < 0.10
 
-    def test_angled_junction_not_clipped(self):
-        """Lines meeting at 45 degrees should produce a small but non-zero alignment."""
+    def test_angled_junction_collapsed(self):
+        """Lines meeting at 45 degrees at a single point should collapse to zero overlap."""
         ref = LineString([(0, 0), (200, 0)])
         target = LineString([(-70.7, -70.7), (0, 0)])
 
         result = linestring_alignment(ref, target)
 
-        assert result.overture_coverage > 0.01
-        assert result.dataset_coverage > 0.01
+        assert result.overture_coverage == 0.0
+        assert result.dataset_coverage == 0.0
 
     def test_angled_junction_with_parallel_section(self):
         """Road approaching at 45 degrees then running parallel should align the parallel part."""
