@@ -593,7 +593,7 @@ def build_context_cache(dataset_id: str, target_gdf: gpd.GeoDataFrame) -> Path:
     elif src_gdf.crs.to_epsg() != 4326:
         src_gdf = src_gdf.to_crs("EPSG:4326")
 
-    rounded = shapely.set_precision(src_gdf.geometry.values, grid_size=10 ** -UI_GEOM_PRECISION)
+    rounded = shapely.set_precision(src_gdf.geometry.values, grid_size=10**-UI_GEOM_PRECISION)
     context_gdf = gpd.GeoDataFrame(cols, geometry=rounded, crs="EPSG:4326")
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)

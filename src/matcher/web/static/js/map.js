@@ -121,21 +121,21 @@
         "bottom-left"
     );
 
-    // Add scale bar centered at top
+    // Add scale bar centered at top via CSS on the control corner container
     var scaleControl = new maplibregl.ScaleControl({ maxWidth: 150, unit: "metric" });
-    // Add to top-left first, then reposition via CSS
     map.addControl(scaleControl, "top-left");
-    var scaleEl = scaleControl._container;
-    if (scaleEl) {
-        // Move out of top-left container and into the map root for centering
-        var mapContainer = document.getElementById("map");
-        scaleEl.parentNode.removeChild(scaleEl);
-        scaleEl.style.position = "absolute";
-        scaleEl.style.top = "10px";
-        scaleEl.style.left = "50%";
-        scaleEl.style.transform = "translateX(-50%)";
-        scaleEl.style.zIndex = "2";
-        mapContainer.appendChild(scaleEl);
+    var mapContainer = map.getContainer ? map.getContainer() : document.getElementById("map");
+    if (mapContainer) {
+        var scaleEl = mapContainer.querySelector(".maplibregl-ctrl-top-left .maplibregl-ctrl-scale");
+        if (scaleEl && scaleEl.parentElement) {
+            var cornerContainer = scaleEl.parentElement;
+            cornerContainer.style.display = "flex";
+            cornerContainer.style.justifyContent = "center";
+            cornerContainer.style.width = "100%";
+            cornerContainer.style.left = "0";
+            cornerContainer.style.right = "0";
+            scaleEl.style.marginTop = "10px";
+        }
     }
 
     // --- Custom layer switcher control (includes context toggle) ---

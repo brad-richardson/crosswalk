@@ -505,43 +505,6 @@ def _nearest_frac_on_line(
     return best_frac
 
 
-def _extract_subline_coords(
-    coords: np.ndarray,
-    distances: np.ndarray,
-    total_length: float,
-    start_dist: float,
-    end_dist: float,
-) -> np.ndarray | None:
-    """Extract coordinates for a sub-portion of a line defined by distances.
-
-    Returns an array of interpolated coordinates along the line between
-    start_dist and end_dist. Includes interpolated start/end points and
-    any original vertices that fall within the range.
-    """
-    if total_length <= 0 or start_dist >= end_dist:
-        return None
-
-    start_dist = max(0.0, start_dist)
-    end_dist = min(total_length, end_dist)
-
-    result = []
-
-    # Interpolated start point
-    sx, sy = _interpolate_along_line(coords, distances, start_dist)
-    result.append([sx, sy])
-
-    # Original vertices within range
-    for i in range(len(distances)):
-        if distances[i] > start_dist and distances[i] < end_dist:
-            result.append([coords[i, 0], coords[i, 1]])
-
-    # Interpolated end point
-    ex, ey = _interpolate_along_line(coords, distances, end_dist)
-    result.append([ex, ey])
-
-    return np.array(result)
-
-
 def linestring_alignment(
     reference: LineString,
     target: LineString,
@@ -720,8 +683,7 @@ def linestring_alignment(
     # Skip for closed loops (cul-de-sacs, roundabouts) — projections onto
     # loops give misleading fractions since the geometry curves back on itself.
     ref_is_loop = (
-        (ref_coords[0, 0] - ref_coords[-1, 0]) ** 2
-        + (ref_coords[0, 1] - ref_coords[-1, 1]) ** 2
+        (ref_coords[0, 0] - ref_coords[-1, 0]) ** 2 + (ref_coords[0, 1] - ref_coords[-1, 1]) ** 2
     ) < (ref_length * 0.1) ** 2
     tgt_is_loop = (
         (used_target_coords[0, 0] - used_target_coords[-1, 0]) ** 2
@@ -735,12 +697,8 @@ def linestring_alignment(
         and not tgt_is_loop
     ):
         # Get overlap endpoint positions
-        rs_x, rs_y = _interpolate_along_line(
-            ref_coords, ref_distances, ref_start_frac * ref_length
-        )
-        re_x, re_y = _interpolate_along_line(
-            ref_coords, ref_distances, ref_end_frac * ref_length
-        )
+        rs_x, rs_y = _interpolate_along_line(ref_coords, ref_distances, ref_start_frac * ref_length)
+        re_x, re_y = _interpolate_along_line(ref_coords, ref_distances, ref_end_frac * ref_length)
         ts_x, ts_y = _interpolate_along_line(
             used_target_coords, used_target_distances, target_start_frac * target_length
         )
@@ -756,12 +714,8 @@ def linestring_alignment(
             re_x, re_y, used_target_coords, used_target_distances, target_length
         )
         # Project target overlap endpoints onto ref → ref frac range
-        proj_ts_on_ref = _nearest_frac_on_line(
-            ts_x, ts_y, ref_coords, ref_distances, ref_length
-        )
-        proj_te_on_ref = _nearest_frac_on_line(
-            te_x, te_y, ref_coords, ref_distances, ref_length
-        )
+        proj_ts_on_ref = _nearest_frac_on_line(ts_x, ts_y, ref_coords, ref_distances, ref_length)
+        proj_te_on_ref = _nearest_frac_on_line(te_x, te_y, ref_coords, ref_distances, ref_length)
 
         # Intersect projection-based ranges with offset-based ranges
         proj_ref_lo = min(proj_ts_on_ref, proj_te_on_ref)
