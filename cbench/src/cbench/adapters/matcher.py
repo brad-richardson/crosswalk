@@ -41,7 +41,9 @@ class MatcherAdapter:
         cmd = [
             "matcher",
             "stitch",
+            "-r",
             str(reference),
+            "-t",
             str(target),
             "-m",
             model,
