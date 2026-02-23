@@ -1029,9 +1029,7 @@ class TestNearestFracOnLine:
         """Helper to build coords/distances/length arrays from coordinate list."""
         coords = np.array(coords_list, dtype=float)
         distances = np.zeros(len(coords))
-        distances[1:] = np.cumsum(
-            np.sqrt(np.sum(np.diff(coords, axis=0) ** 2, axis=1))
-        )
+        distances[1:] = np.cumsum(np.sqrt(np.sum(np.diff(coords, axis=0) ** 2, axis=1)))
         return coords, distances, distances[-1]
 
     def test_point_on_line_start(self):
