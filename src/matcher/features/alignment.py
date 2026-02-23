@@ -717,10 +717,22 @@ def linestring_alignment(
     # fractions, while junction artifacts collapse to a single point.
     ref_overlap_length = (ref_end_frac - ref_start_frac) * ref_length
     target_overlap_length = (target_end_frac - target_start_frac) * target_length
+    # Skip for closed loops (cul-de-sacs, roundabouts) — projections onto
+    # loops give misleading fractions since the geometry curves back on itself.
+    ref_is_loop = (
+        (ref_coords[0, 0] - ref_coords[-1, 0]) ** 2
+        + (ref_coords[0, 1] - ref_coords[-1, 1]) ** 2
+    ) < (ref_length * 0.1) ** 2
+    tgt_is_loop = (
+        (used_target_coords[0, 0] - used_target_coords[-1, 0]) ** 2
+        + (used_target_coords[0, 1] - used_target_coords[-1, 1]) ** 2
+    ) < (target_length * 0.1) ** 2
     if (
         ref_overlap_length > 0
         and target_overlap_length > 0
         and ref_overlap_length < JUNCTION_MAX_OVERLAP_M
+        and not ref_is_loop
+        and not tgt_is_loop
     ):
         # Get overlap endpoint positions
         rs_x, rs_y = _interpolate_along_line(
