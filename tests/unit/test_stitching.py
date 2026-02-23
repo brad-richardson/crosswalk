@@ -218,7 +218,7 @@ class TestSelectStitchingBatch:
         return {"total_confidence": conf, "edges": [], "summary": ""}
 
     def test_empty_groups(self):
-        result = select_stitching_batch([], pd.DataFrame(), set(), k=10)
+        result = select_stitching_batch([], set(), k=10)
         assert result == []
 
     def test_skips_already_reviewed(self):
@@ -226,65 +226,68 @@ class TestSelectStitchingBatch:
             _make_group("g1", [_edge("r1", "t1", 0.9)], [self._alt(0.9)]),
             _make_group("g2", [_edge("r2", "t2", 0.8)], [self._alt(0.8)]),
         ]
-        result = select_stitching_batch(groups, pd.DataFrame(), {"g1"}, k=10)
+        result = select_stitching_batch(groups, {"g1"}, k=10)
         ids = {g["group_id"] for g in result}
         assert "g1" not in ids
         assert "g2" in ids
 
     def test_all_reviewed_returns_empty(self):
         groups = [_make_group("g1", [], [self._alt(0.9)])]
-        result = select_stitching_batch(groups, pd.DataFrame(), {"g1"}, k=10)
+        result = select_stitching_batch(groups, {"g1"}, k=10)
         assert result == []
 
     def test_tier_balancing_with_enough_groups(self):
-        """With 30 groups, k=20 should produce all four tiers."""
+        """With 30 groups including large ones, k=20 should produce all four tiers."""
         groups = []
         for i in range(30):
             conf = 0.5 + i * 0.01
+            # Give some groups 10+ edges so the large tier can fill
+            n_edges = 12 if i < 10 else 1
+            edges = [_edge(f"r{i}_{j}", f"t{i}_{j}", conf) for j in range(n_edges)]
             groups.append(
                 _make_group(
                     f"g{i}",
-                    [_edge(f"r{i}", f"t{i}", conf)],
+                    edges,
                     [self._alt(conf), self._alt(conf - 0.01)],
                 )
             )
-        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=20)
+        result = select_stitching_batch(groups, set(), k=20)
         assert len(result) == 20
 
         tiers = {g["review_tier"] for g in result}
-        assert tiers == {"label_overlap", "borderline", "low_confidence", "clear_winner"}
+        assert tiers == {"large", "borderline", "low_confidence", "clear_winner"}
 
     @pytest.mark.parametrize("k", [5, 10, 20])
     def test_respects_k(self, k):
         groups = [
             _make_group(f"g{i}", [_edge("r1", "t1", 0.5)], [self._alt(0.5)]) for i in range(50)
         ]
-        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=k)
+        result = select_stitching_batch(groups, set(), k=k)
         assert len(result) == k
 
-    def test_label_overlap_scoring(self):
-        """Groups with labeled edges should score higher on label_overlap tier."""
-        labels_df = pd.DataFrame({"gers_id": ["r1"], "target_id": ["t1"]})
+    def test_largest_group_always_selected(self):
+        """The single largest group should always be selected as 'large' tier."""
+        big_edges = [_edge(f"r_big_{j}", f"t_big_{j}", 0.9) for j in range(15)]
+        small_edges = [_edge("r_small", "t_small", 0.9)]
         groups = [
-            _make_group("overlap", [_edge("r1", "t1", 0.9)], [self._alt(0.9)]),
-            _make_group("no_overlap", [_edge("r2", "t2", 0.9)], [self._alt(0.9)]),
+            _make_group("small", small_edges, [self._alt(0.9)]),
+            _make_group("big", big_edges, [self._alt(0.9)]),
         ]
-        result = select_stitching_batch(groups, labels_df, set(), k=2)
-        # The overlap group should appear as label_overlap tier
-        overlap_group = next(g for g in result if g["group_id"] == "overlap")
-        assert overlap_group["review_tier"] == "label_overlap"
+        result = select_stitching_batch(groups, set(), k=2)
+        big_group = next(g for g in result if g["group_id"] == "big")
+        assert big_group["review_tier"] == "large"
 
     def test_review_tier_and_score_present(self):
         groups = [_make_group("g1", [], [self._alt(0.9)])]
-        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=5)
+        result = select_stitching_batch(groups, set(), k=5)
         assert "review_tier" in result[0]
         assert "review_score" in result[0]
 
     def test_no_internal_keys_leaked(self):
         groups = [_make_group("g1", [], [self._alt(0.9)])]
-        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=5)
+        result = select_stitching_batch(groups, set(), k=5)
         for g in result:
-            assert "_label_overlap_score" not in g
+            assert "_n_edges" not in g
             assert "_borderline_score" not in g
             assert "_low_conf_score" not in g
             assert "_review_value" not in g
@@ -317,7 +320,7 @@ class TestSelectStitchingBatch:
                 [{"total_confidence": 0.2, "edges": [{"confidence": 0.2}], "summary": ""}],
             )
         )
-        result = select_stitching_batch(groups, pd.DataFrame(), set(), k=10)
+        result = select_stitching_batch(groups, set(), k=10)
         low_group = next((g for g in result if g["group_id"] == "low"), None)
         assert low_group is not None, "Low confidence group should be selected"
         assert low_group["review_tier"] == "low_confidence"

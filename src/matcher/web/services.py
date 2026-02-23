@@ -699,15 +699,15 @@ def delete_batch_manifest(dataset_id: str) -> bool:
 
 def generate_batch(
     dataset_id: str,
-    n: int = 100,
+    n: int = 50,
     seed: int | None = None,
 ) -> list[CandidatePairView]:
     """Generate a stratified batch of candidates for labeling.
 
     Samples from three confidence buckets:
-    - likely_match (>0.75): 25% of n
-    - borderline (0.50-0.75): 50% of n
-    - likely_no_match (<0.50): 25% of n
+    - likely_match (>0.75): 20% of n
+    - borderline (0.50-0.75): 60% of n
+    - likely_no_match (<0.50): 20% of n
 
     If a bucket has fewer candidates than requested, redistributes
     remaining slots to other buckets.
@@ -766,9 +766,9 @@ def generate_batch(
     }
 
     target_counts = {
-        "likely_match": n // 4,  # 25%
-        "borderline": n // 2,  # 50%
-        "likely_no_match": n // 4,  # 25%
+        "likely_match": n // 5,  # 20%
+        "borderline": n * 3 // 5,  # 60%
+        "likely_no_match": n // 5,  # 20%
     }
 
     sampled_indices = []

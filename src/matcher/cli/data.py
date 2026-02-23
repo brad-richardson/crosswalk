@@ -1943,10 +1943,10 @@ def stitch_batch(
         help="Generate batches for all datasets with groups sidecars",
     ),
     batch_size: int = typer.Option(
-        20,
+        15,
         "--batch-size",
         "-n",
-        help="Number of groups per batch (default: 20)",
+        help="Number of groups per batch (default: 15)",
     ),
     k_alternatives: int = typer.Option(
         5,
@@ -1974,7 +1974,6 @@ def stitch_batch(
         groups_sidecar_path,
         stitch_batch_path,
     )
-    from ..labeling.label_store import LabelStore
     from ..labeling.stitching_store import StitchingLabelStore
     from ..matching.alternatives import generate_top_k_alternatives
     from ..matching.batch_selection import select_stitching_batch
@@ -2036,10 +2035,6 @@ def stitch_batch(
             console.print("  [yellow]No groups to process[/yellow]")
             continue
 
-        # Load existing human labels
-        label_store = LabelStore(ds_name)
-        labels_df = label_store.df
-
         # Load existing stitching labels to skip already-reviewed
         stitch_store = StitchingLabelStore(ds_name)
         reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
@@ -2059,7 +2054,6 @@ def stitch_batch(
         # Select batch
         selected = select_stitching_batch(
             groups=groups,
-            existing_labels_df=labels_df,
             reviewed_group_ids=reviewed_ids,
             k=batch_size,
         )
