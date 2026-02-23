@@ -505,6 +505,94 @@ def _nearest_frac_on_line(
     return best_frac
 
 
+def _tighten_junction_overlap(
+    ref_coords: np.ndarray,
+    ref_distances: np.ndarray,
+    ref_length: float,
+    target_coords: np.ndarray,
+    target_distances: np.ndarray,
+    target_length: float,
+    ref_start_frac: float,
+    ref_end_frac: float,
+    target_start_frac: float,
+    target_end_frac: float,
+) -> tuple[float, float, float, float]:
+    """Tighten short spurious overlaps at junctions via endpoint projection.
+
+    When two segments meet at a junction (tip-to-tip), the offset search can
+    report a small overlap where corresponding points are on opposite sides
+    of the junction.  This re-derives fractions by projecting each overlap
+    endpoint onto the other line — legitimate parallel overlaps keep their
+    fractions, while junction artifacts collapse to a single point.
+
+    Skips closed-loop geometries (cul-de-sacs, roundabouts) where projections
+    give misleading fractions.
+
+    Returns:
+        Updated (ref_start_frac, ref_end_frac, target_start_frac, target_end_frac).
+    """
+    ref_overlap_length = (ref_end_frac - ref_start_frac) * ref_length
+    target_overlap_length = (target_end_frac - target_start_frac) * target_length
+
+    # Skip for closed loops — projections onto loops give misleading fractions.
+    ref_is_loop = (
+        (ref_coords[0, 0] - ref_coords[-1, 0]) ** 2 + (ref_coords[0, 1] - ref_coords[-1, 1]) ** 2
+    ) < (ref_length * 0.1) ** 2
+    tgt_is_loop = (
+        (target_coords[0, 0] - target_coords[-1, 0]) ** 2
+        + (target_coords[0, 1] - target_coords[-1, 1]) ** 2
+    ) < (target_length * 0.1) ** 2
+
+    if (
+        ref_overlap_length <= 0
+        or target_overlap_length <= 0
+        or ref_overlap_length >= JUNCTION_MAX_OVERLAP_M
+        or ref_is_loop
+        or tgt_is_loop
+    ):
+        return ref_start_frac, ref_end_frac, target_start_frac, target_end_frac
+
+    # Get overlap endpoint positions
+    rs_x, rs_y = _interpolate_along_line(ref_coords, ref_distances, ref_start_frac * ref_length)
+    re_x, re_y = _interpolate_along_line(ref_coords, ref_distances, ref_end_frac * ref_length)
+    ts_x, ts_y = _interpolate_along_line(
+        target_coords, target_distances, target_start_frac * target_length
+    )
+    te_x, te_y = _interpolate_along_line(
+        target_coords, target_distances, target_end_frac * target_length
+    )
+
+    # Project ref overlap endpoints onto target → target frac range
+    proj_rs_on_tgt = _nearest_frac_on_line(
+        rs_x, rs_y, target_coords, target_distances, target_length
+    )
+    proj_re_on_tgt = _nearest_frac_on_line(
+        re_x, re_y, target_coords, target_distances, target_length
+    )
+    # Project target overlap endpoints onto ref → ref frac range
+    proj_ts_on_ref = _nearest_frac_on_line(ts_x, ts_y, ref_coords, ref_distances, ref_length)
+    proj_te_on_ref = _nearest_frac_on_line(te_x, te_y, ref_coords, ref_distances, ref_length)
+
+    # Intersect projection-based ranges with offset-based ranges
+    proj_ref_lo = min(proj_ts_on_ref, proj_te_on_ref)
+    proj_ref_hi = max(proj_ts_on_ref, proj_te_on_ref)
+    proj_tgt_lo = min(proj_rs_on_tgt, proj_re_on_tgt)
+    proj_tgt_hi = max(proj_rs_on_tgt, proj_re_on_tgt)
+
+    new_ref_start = max(ref_start_frac, proj_ref_lo)
+    new_ref_end = min(ref_end_frac, proj_ref_hi)
+    new_tgt_start = max(target_start_frac, proj_tgt_lo)
+    new_tgt_end = min(target_end_frac, proj_tgt_hi)
+
+    if new_ref_start <= new_ref_end and new_tgt_start <= new_tgt_end:
+        return new_ref_start, new_ref_end, new_tgt_start, new_tgt_end
+
+    # Projections don't form a valid range — collapse to closest approach
+    mid_ref = (ref_start_frac + ref_end_frac) / 2.0
+    mid_tgt = (target_start_frac + target_end_frac) / 2.0
+    return mid_ref, mid_ref, mid_tgt, mid_tgt
+
+
 def linestring_alignment(
     reference: LineString,
     target: LineString,
@@ -672,73 +760,19 @@ def linestring_alignment(
     target_start_frac = float(max(-offset, 0) / target_length)
     target_end_frac = float(min(-offset + ref_length, target_length) / target_length)
 
-    # Post-process: tighten short spurious overlaps via endpoint projection.
-    # When two segments meet at a junction (tip-to-tip), the offset search can
-    # report a small overlap where corresponding points are actually on opposite
-    # sides of the junction.  Re-derive fractions by projecting each overlap
-    # endpoint onto the *other* line — legitimate parallel overlaps keep their
-    # fractions, while junction artifacts collapse to a single point.
-    ref_overlap_length = (ref_end_frac - ref_start_frac) * ref_length
-    target_overlap_length = (target_end_frac - target_start_frac) * target_length
-    # Skip for closed loops (cul-de-sacs, roundabouts) — projections onto
-    # loops give misleading fractions since the geometry curves back on itself.
-    ref_is_loop = (
-        (ref_coords[0, 0] - ref_coords[-1, 0]) ** 2 + (ref_coords[0, 1] - ref_coords[-1, 1]) ** 2
-    ) < (ref_length * 0.1) ** 2
-    tgt_is_loop = (
-        (used_target_coords[0, 0] - used_target_coords[-1, 0]) ** 2
-        + (used_target_coords[0, 1] - used_target_coords[-1, 1]) ** 2
-    ) < (target_length * 0.1) ** 2
-    if (
-        ref_overlap_length > 0
-        and target_overlap_length > 0
-        and ref_overlap_length < JUNCTION_MAX_OVERLAP_M
-        and not ref_is_loop
-        and not tgt_is_loop
-    ):
-        # Get overlap endpoint positions
-        rs_x, rs_y = _interpolate_along_line(ref_coords, ref_distances, ref_start_frac * ref_length)
-        re_x, re_y = _interpolate_along_line(ref_coords, ref_distances, ref_end_frac * ref_length)
-        ts_x, ts_y = _interpolate_along_line(
-            used_target_coords, used_target_distances, target_start_frac * target_length
-        )
-        te_x, te_y = _interpolate_along_line(
-            used_target_coords, used_target_distances, target_end_frac * target_length
-        )
-
-        # Project ref overlap endpoints onto target → target frac range
-        proj_rs_on_tgt = _nearest_frac_on_line(
-            rs_x, rs_y, used_target_coords, used_target_distances, target_length
-        )
-        proj_re_on_tgt = _nearest_frac_on_line(
-            re_x, re_y, used_target_coords, used_target_distances, target_length
-        )
-        # Project target overlap endpoints onto ref → ref frac range
-        proj_ts_on_ref = _nearest_frac_on_line(ts_x, ts_y, ref_coords, ref_distances, ref_length)
-        proj_te_on_ref = _nearest_frac_on_line(te_x, te_y, ref_coords, ref_distances, ref_length)
-
-        # Intersect projection-based ranges with offset-based ranges
-        proj_ref_lo = min(proj_ts_on_ref, proj_te_on_ref)
-        proj_ref_hi = max(proj_ts_on_ref, proj_te_on_ref)
-        proj_tgt_lo = min(proj_rs_on_tgt, proj_re_on_tgt)
-        proj_tgt_hi = max(proj_rs_on_tgt, proj_re_on_tgt)
-
-        new_ref_start = max(ref_start_frac, proj_ref_lo)
-        new_ref_end = min(ref_end_frac, proj_ref_hi)
-        new_tgt_start = max(target_start_frac, proj_tgt_lo)
-        new_tgt_end = min(target_end_frac, proj_tgt_hi)
-
-        if new_ref_start <= new_ref_end and new_tgt_start <= new_tgt_end:
-            ref_start_frac = new_ref_start
-            ref_end_frac = new_ref_end
-            target_start_frac = new_tgt_start
-            target_end_frac = new_tgt_end
-        else:
-            # Projections don't form a valid range — collapse to closest approach
-            ref_start_frac = (ref_start_frac + ref_end_frac) / 2.0
-            ref_end_frac = ref_start_frac
-            target_start_frac = (target_start_frac + target_end_frac) / 2.0
-            target_end_frac = target_start_frac
+    # Post-process: tighten short spurious overlaps at junctions.
+    ref_start_frac, ref_end_frac, target_start_frac, target_end_frac = _tighten_junction_overlap(
+        ref_coords,
+        ref_distances,
+        ref_length,
+        used_target_coords,
+        used_target_distances,
+        target_length,
+        ref_start_frac,
+        ref_end_frac,
+        target_start_frac,
+        target_end_frac,
+    )
 
     # Post-process: detect and truncate at divergence points.
     if detect_divergence and (ref_end_frac - ref_start_frac) > 0.1:

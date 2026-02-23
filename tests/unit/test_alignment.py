@@ -10,6 +10,7 @@ from matcher.features.alignment import (
     _create_local_equidistant_crs,
     _interpolate_along_line,
     _is_geographic,
+    _nearest_frac_on_line,
     _prepare_line_data,
     compute_coverage_features,
     create_subline,
@@ -1019,3 +1020,60 @@ class TestJunctionSegmentAlignment:
             f"got {target_aligned_length:.1f}m "
             f"(fracs {result.dataset_start_frac:.4f}-{result.dataset_end_frac:.4f})"
         )
+
+
+class TestNearestFracOnLine:
+    """Tests for _nearest_frac_on_line point-to-polyline projection."""
+
+    def _make_line_data(self, coords_list):
+        """Helper to build coords/distances/length arrays from coordinate list."""
+        coords = np.array(coords_list, dtype=float)
+        distances = np.zeros(len(coords))
+        distances[1:] = np.cumsum(
+            np.sqrt(np.sum(np.diff(coords, axis=0) ** 2, axis=1))
+        )
+        return coords, distances, distances[-1]
+
+    def test_point_on_line_start(self):
+        """Point at the start of the line returns frac 0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(0, 0, coords, dists, length) == pytest.approx(0.0)
+
+    def test_point_on_line_end(self):
+        """Point at the end of the line returns frac 1."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(100, 0, coords, dists, length) == pytest.approx(1.0)
+
+    def test_point_on_line_midpoint(self):
+        """Point at the midpoint of a straight line returns frac 0.5."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(50, 0, coords, dists, length) == pytest.approx(0.5)
+
+    def test_point_offset_perpendicular(self):
+        """Point offset perpendicularly projects to the nearest point on the line."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        # 10m above the line at x=30
+        assert _nearest_frac_on_line(30, 10, coords, dists, length) == pytest.approx(0.3)
+
+    def test_point_beyond_line_end_clamps(self):
+        """Point past the end of the line clamps to frac 1.0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(150, 0, coords, dists, length) == pytest.approx(1.0)
+
+    def test_point_before_line_start_clamps(self):
+        """Point before the start of the line clamps to frac 0.0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(-50, 0, coords, dists, length) == pytest.approx(0.0)
+
+    def test_multi_segment_line(self):
+        """Point projects correctly onto a multi-segment polyline."""
+        # L-shaped line: (0,0)→(100,0)→(100,100), total length 200
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0), (100, 100)])
+        # Point offset from second segment at (110, 50) → projects to (100, 50)
+        # which is at distance 100 + 50 = 150 along the line → frac 0.75
+        assert _nearest_frac_on_line(110, 50, coords, dists, length) == pytest.approx(0.75)
+
+    def test_zero_length_segment_handled(self):
+        """Degenerate zero-length segment doesn't cause division by zero."""
+        coords, dists, length = self._make_line_data([(0, 0), (0, 0), (100, 0)])
+        assert _nearest_frac_on_line(50, 0, coords, dists, length) == pytest.approx(0.5)
