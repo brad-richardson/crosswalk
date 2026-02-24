@@ -10,6 +10,7 @@ from matcher.features.alignment import (
     _create_local_equidistant_crs,
     _interpolate_along_line,
     _is_geographic,
+    _nearest_frac_on_line,
     _prepare_line_data,
     compute_coverage_features,
     create_subline,
@@ -960,3 +961,117 @@ class TestDivergenceDetection:
         assert result.overture_coverage < 0.8, (
             f"Winding road loop should truncate coverage, got {result.overture_coverage}"
         )
+
+
+class TestJunctionSegmentAlignment:
+    """Tests for segments that meet at a junction but don't truly overlap."""
+
+    def test_sequential_segments_sharing_junction_have_minimal_overlap(self):
+        """Two sequential segments on the same road sharing a junction point
+        should have near-zero aligned overlap.
+
+        Real-world case: Weston Road in Toronto — the reference segment ends
+        at a junction and the target segment begins there. The aligned portion
+        should be at most ~2m (the junction proximity), not ~7m.
+
+        Coordinates are in projected UTM (EPSG:32617), units in meters.
+        """
+        # Reference: Weston Road segment ending at junction (260m, going north)
+        ref = LineString(
+            [
+                (617466.03, 4844691.99),
+                (617463.95, 4844703.05),
+                (617459.56, 4844726.42),
+                (617450.84, 4844772.80),
+                (617446.95, 4844793.49),
+                (617445.04, 4844804.00),
+                (617438.18, 4844844.67),
+                (617434.03, 4844865.00),
+                (617426.45, 4844908.20),
+                (617424.03, 4844922.00),
+                (617420.80, 4844940.86),
+                (617419.39, 4844948.23),
+            ]
+        )
+        # Target: Weston Road segment starting at junction (290m, going north)
+        target = LineString(
+            [
+                (617419.81, 4844947.81),
+                (617371.86, 4845233.37),
+            ]
+        )
+
+        result = linestring_alignment(ref, target)
+
+        # The aligned portion on the reference should be tiny — just the
+        # junction proximity (~0.5m), not 6-7m.
+        ref_aligned_length = (result.overture_end_frac - result.overture_start_frac) * ref.length
+        target_aligned_length = (
+            result.dataset_end_frac - result.dataset_start_frac
+        ) * target.length
+
+        assert ref_aligned_length < 2.0, (
+            f"Sequential junction segments should have < 2m ref overlap, "
+            f"got {ref_aligned_length:.1f}m "
+            f"(fracs {result.overture_start_frac:.4f}-{result.overture_end_frac:.4f})"
+        )
+        assert target_aligned_length < 2.0, (
+            f"Sequential junction segments should have < 2m target overlap, "
+            f"got {target_aligned_length:.1f}m "
+            f"(fracs {result.dataset_start_frac:.4f}-{result.dataset_end_frac:.4f})"
+        )
+
+
+class TestNearestFracOnLine:
+    """Tests for _nearest_frac_on_line point-to-polyline projection."""
+
+    def _make_line_data(self, coords_list):
+        """Helper to build coords/distances/length arrays from coordinate list."""
+        coords = np.array(coords_list, dtype=float)
+        distances = np.zeros(len(coords))
+        distances[1:] = np.cumsum(np.sqrt(np.sum(np.diff(coords, axis=0) ** 2, axis=1)))
+        return coords, distances, distances[-1]
+
+    def test_point_on_line_start(self):
+        """Point at the start of the line returns frac 0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(0, 0, coords, dists, length) == pytest.approx(0.0)
+
+    def test_point_on_line_end(self):
+        """Point at the end of the line returns frac 1."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(100, 0, coords, dists, length) == pytest.approx(1.0)
+
+    def test_point_on_line_midpoint(self):
+        """Point at the midpoint of a straight line returns frac 0.5."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(50, 0, coords, dists, length) == pytest.approx(0.5)
+
+    def test_point_offset_perpendicular(self):
+        """Point offset perpendicularly projects to the nearest point on the line."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        # 10m above the line at x=30
+        assert _nearest_frac_on_line(30, 10, coords, dists, length) == pytest.approx(0.3)
+
+    def test_point_beyond_line_end_clamps(self):
+        """Point past the end of the line clamps to frac 1.0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(150, 0, coords, dists, length) == pytest.approx(1.0)
+
+    def test_point_before_line_start_clamps(self):
+        """Point before the start of the line clamps to frac 0.0."""
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0)])
+        assert _nearest_frac_on_line(-50, 0, coords, dists, length) == pytest.approx(0.0)
+
+    def test_multi_segment_line(self):
+        """Point projects correctly onto a multi-segment polyline."""
+        # L-shaped line: (0,0)→(100,0)→(100,100), total length 200
+        coords, dists, length = self._make_line_data([(0, 0), (100, 0), (100, 100)])
+        # Point offset from second segment at (110, 50) → projects to (100, 50)
+        # which is at distance 100 + 50 = 150 along the line → frac 0.75
+        assert _nearest_frac_on_line(110, 50, coords, dists, length) == pytest.approx(0.75)
+
+    def test_zero_length_segment_handled(self):
+        """Degenerate zero-length segment doesn't cause division by zero."""
+        coords, dists, length = self._make_line_data([(0, 0), (0, 0), (100, 0)])
+        assert _nearest_frac_on_line(50, 0, coords, dists, length) == pytest.approx(0.5)

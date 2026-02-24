@@ -1,7 +1,10 @@
 """Shared utilities for the matcher web UI."""
 
+# Coordinate precision for all GeoJSON/geometry output (6 decimals ≈ 11cm)
+UI_GEOM_PRECISION = 6
 
-def round_geom(geom_mapping: dict, precision: int = 6) -> dict:
+
+def round_geom(geom_mapping: dict, precision: int = UI_GEOM_PRECISION) -> dict:
     """Round coordinates in a GeoJSON geometry mapping to reduce payload size."""
 
     def _round(coords):

@@ -62,6 +62,11 @@ DIVERGENCE_DISTANCE_MULTIPLIER = 3.0  # Multiple of buffer_distance for distance
 DIVERGENCE_MIN_DISTANCE_M = 20.0  # Minimum absolute distance threshold (meters)
 DIVERGENCE_PARALLELNESS_THRESHOLD = 0.5  # dot2 < this = diverging (>45 degrees)
 
+# Junction overlap sanity check: when two segments meet at a junction, the
+# alignment can report a small spurious overlap near the shared endpoint.
+# Re-derive fractions via endpoint projection for overlaps shorter than this.
+JUNCTION_MAX_OVERLAP_M = 20.0
+
 # Maximum accepted overlap (meters) for alignment-based grouping and conflict detection.
 # Two matches overlapping by more than this on the shared segment are considered incompatible.
 MAX_ALIGNMENT_OVERLAP_M = 5.0

@@ -17,9 +17,9 @@
             dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         },
         OSM: {
-            // OpenMapTiles styles fetched and patched to use OSM US tile server
+            // OpenMapTiles style fetched and patched to use OSM US tile server
             light: "https://openmaptiles.github.io/osm-bright-gl-style/style-cdn.json",
-            dark: "https://openmaptiles.github.io/dark-matter-gl-style/style-cdn.json",
+            dark: "https://openmaptiles.github.io/osm-bright-gl-style/style-cdn.json",
         },
         Satellite: {
             light: {
@@ -120,6 +120,23 @@
         new maplibregl.NavigationControl({ showCompass: false }),
         "bottom-left"
     );
+
+    // Add scale bar centered at top via CSS on the control corner container
+    var scaleControl = new maplibregl.ScaleControl({ maxWidth: 150, unit: "metric" });
+    map.addControl(scaleControl, "top-left");
+    var mapContainer = map.getContainer ? map.getContainer() : document.getElementById("map");
+    if (mapContainer) {
+        var scaleEl = mapContainer.querySelector(".maplibregl-ctrl-top-left .maplibregl-ctrl-scale");
+        if (scaleEl && scaleEl.parentElement) {
+            var cornerContainer = scaleEl.parentElement;
+            cornerContainer.style.display = "flex";
+            cornerContainer.style.justifyContent = "center";
+            cornerContainer.style.width = "100%";
+            cornerContainer.style.left = "0";
+            cornerContainer.style.right = "0";
+            scaleEl.style.marginTop = "10px";
+        }
+    }
 
     // --- Custom layer switcher control (includes context toggle) ---
     var LayerSwitcher = (function () {

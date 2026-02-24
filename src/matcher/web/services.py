@@ -584,15 +584,17 @@ def build_context_cache(dataset_id: str, target_gdf: gpd.GeoDataFrame) -> Path:
     if "class" in target_gdf.columns:
         cols["class"] = target_gdf["class"].values
 
-    # Ensure WGS84 before simplifying so tolerance is in degrees (~5m)
+    # Ensure WGS84 and round coordinates to match pair GeoJSON precision
+    from .utils import UI_GEOM_PRECISION
+
     src_gdf = target_gdf
     if src_gdf.crs is None:
         src_gdf = src_gdf.set_crs("EPSG:4326")
     elif src_gdf.crs.to_epsg() != 4326:
         src_gdf = src_gdf.to_crs("EPSG:4326")
 
-    simplified = shapely.simplify(src_gdf.geometry.values, tolerance=0.00005)
-    context_gdf = gpd.GeoDataFrame(cols, geometry=simplified, crs="EPSG:4326")
+    rounded = shapely.set_precision(src_gdf.geometry.values, grid_size=10**-UI_GEOM_PRECISION)
+    context_gdf = gpd.GeoDataFrame(cols, geometry=rounded, crs="EPSG:4326")
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     context_gdf.to_parquet(cache_path)
