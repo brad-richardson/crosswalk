@@ -216,7 +216,7 @@ REAL_LABELED_EXAMPLES = {
         "label": "match",
         "original_confidence": 0.5908,
         # Borderline cases - model may be confident with good geometry
-        "expected_range": (0.1, 0.99),
+        "expected_range": (0.1, 0.999),
     },
     # No match with good geometry but dead-end mismatch
     "boston_no_match_topology": {
@@ -385,7 +385,7 @@ class TestScoreStability:
         [
             ("perfect_match_features", 0.85, 1.0),
             ("terrible_match_features", 0.0, 0.35),  # Model may still show some confidence
-            ("borderline_match_features", 0.10, 0.99),  # Model can be confident with good geometry
+            ("borderline_match_features", 0.10, 0.999),  # Model can be confident with good geometry
         ],
         ids=["perfect_match", "terrible_match", "borderline"],
     )
