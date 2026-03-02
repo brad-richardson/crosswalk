@@ -39,7 +39,7 @@
         <select id="dataset-picker" name="dataset" onchange="switchDataset(this.value)">
             <option value="">Select dataset...</option>
             {% for ds in datasets %}
-            <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{% if request.state.dataset_label_counts.get(ds, 0) >= request.state.min_labels_per_dataset %}&#x2705; {% endif %}{{ ds }}</option>
+            <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{% if request.state.dataset_label_counts.get(ds, 0) >= request.state.min_labels_per_dataset %}&#x2705;{% endif %}{% if request.state.dataset_stitching_counts.get(ds, 0) >= request.state.min_stitching_labels %}&#x2705;{% endif %} {{ ds }}</option>
             {% endfor %}
         </select>
 

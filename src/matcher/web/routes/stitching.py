@@ -135,6 +135,47 @@ def _build_group_geojson(group: dict) -> dict:
                     }
                 )
 
+    # Tier 3: Context segments — same role as group segments so they get
+    # identical solid styling when activated.  They start hidden via
+    # hiddenSegments in the JS and appear as normal edges when toggled on.
+    n_ref = len(ref_id_list)
+    for i, (rid, geom) in enumerate(group.get("context_ref_geometries", {}).items()):
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geom,
+                "properties": {
+                    "_role": "ref-full",
+                    "_id": rid,
+                    "_label": f"R{n_ref + i + 1}",
+                },
+            }
+        )
+    n_target = len(target_id_list)
+    for i, (tid, geom) in enumerate(group.get("context_target_geometries", {}).items()):
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geom,
+                "properties": {
+                    "_role": "target-full",
+                    "_id": tid,
+                    "_label": f"T{n_target + i + 1}",
+                },
+            }
+        )
+
+    # Envelope polygon
+    envelope = group.get("envelope")
+    if envelope:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": envelope,
+                "properties": {"_role": "envelope"},
+            }
+        )
+
     return {"type": "FeatureCollection", "features": features}
 
 
@@ -177,12 +218,32 @@ def _build_group_context(group: dict) -> dict:
     else:
         avg_conf = 0.0
 
-    def _join(vals: list[str]) -> str:
+    def _join(vals: list[str], *, max_items: int = 6) -> str:
         filtered = [v for v in vals if v]
-        return " + ".join(filtered) if filtered else "\u2014"
+        if not filtered:
+            return "\u2014"
+        if len(filtered) <= max_items:
+            return " + ".join(filtered)
+        return " + ".join(filtered[:max_items]) + f" + \u2026({len(filtered)} total)"
 
-    class_summary = f"{_join(ref_class_vals)} \u2192 {_join(target_class_vals)}"
-    name_summary = f"{_join(ref_name_vals)} \u2192 {_join(target_name_vals)}"
+    def _join_dedup(vals: list[str]) -> str:
+        """Join with deduplication and counts for repetitive values."""
+        filtered = [v for v in vals if v]
+        if not filtered:
+            return "\u2014"
+        from collections import Counter
+
+        counts = Counter(filtered)
+        if len(counts) == 1:
+            val, n = next(iter(counts.items()))
+            return f"{val} \u00d7{n}" if n > 1 else val
+        parts = [f"{val} \u00d7{n}" if n > 1 else val for val, n in counts.most_common(4)]
+        if len(counts) > 4:
+            parts.append(f"\u2026({len(counts)} unique)")
+        return ", ".join(parts)
+
+    class_summary = f"{_join_dedup(ref_class_vals)} \u2192 {_join_dedup(target_class_vals)}"
+    name_summary = f"{_join_dedup(ref_name_vals)} \u2192 {_join_dedup(target_name_vals)}"
 
     # Build details for expanded view
     ref_details = [
@@ -195,10 +256,29 @@ def _build_group_context(group: dict) -> dict:
     ]
 
     id_summary = (
-        " + ".join(_shorten_id(r) for r in ref_id_list)
+        _join([_shorten_id(r) for r in ref_id_list])
         + " \u2192 "
-        + " + ".join(_shorten_id(t) for t in target_id_list)
+        + _join([_shorten_id(t) for t in target_id_list])
     )
+
+    # Context segment details (from spatial fill-in)
+    context_ref_names = group.get("context_ref_names", {})
+    context_ref_classes = group.get("context_ref_classes", {})
+    context_target_names = group.get("context_target_names", {})
+    context_target_classes = group.get("context_target_classes", {})
+
+    context_ref_details = [
+        {"id": rid, "cls": context_ref_classes.get(rid, ""), "name": context_ref_names.get(rid, "")}
+        for rid in group.get("context_ref_ids", [])
+    ]
+    context_target_details = [
+        {
+            "id": tid,
+            "cls": context_target_classes.get(tid, ""),
+            "name": context_target_names.get(tid, ""),
+        }
+        for tid in group.get("context_target_ids", [])
+    ]
 
     return {
         "id_summary": id_summary,
@@ -207,6 +287,8 @@ def _build_group_context(group: dict) -> dict:
         "avg_confidence": avg_conf,
         "ref_details": ref_details,
         "target_details": target_details,
+        "context_ref_details": context_ref_details,
+        "context_target_details": context_target_details,
     }
 
 

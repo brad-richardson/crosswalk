@@ -1745,6 +1745,8 @@ body {
     display: flex;
     gap: 4px;
     flex-wrap: wrap;
+    max-height: 128px; /* ~4 rows of pills */
+    overflow-y: auto;
 }
 
 .segment-pill {
@@ -1820,6 +1822,8 @@ body {
 
 .group-details.expanded {
     display: block;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 .details-section {
@@ -1867,13 +1871,13 @@ body {
 .group-card {
     bottom: 24px;
     right: 12px;
-    max-width: 400px;
+    max-width: 480px;
     padding: 16px;
 }
 
 @media (min-width: 769px) {
     .group-card {
-        width: 400px;
+        width: 480px;
     }
 }
 
