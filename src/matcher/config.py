@@ -50,6 +50,9 @@ PHYSICAL_OVERLAP_FLOOR_M = 1.0
 # Minimum number of labels per dataset before it's considered "done" for labeling
 MIN_LABELS_PER_DATASET = 50
 
+# Minimum stitching labels per dataset for progress tracking in the UI
+MIN_STITCHING_LABELS_PER_DATASET = 15
+
 # Tolerance for matching Overture connectors to target segments.
 # How close a target segment must pass to an Overture connector position
 # to be considered "at" that junction. 5m matches DEFAULT_SNAP_TOLERANCE_M

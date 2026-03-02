@@ -565,14 +565,16 @@
 
     function updateSegmentFilters() {
         var hiddenIds = Object.keys(hiddenSegments).filter(function(id) { return hiddenSegments[id]; });
-        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
-            var def = GROUP_LAYER_DEFS[i];
-            if (!map.getLayer(def.id)) continue;
+        var allLayers = GROUP_LAYER_DEFS.concat(GROUP_LABEL_DEFS);
+        for (var i = 0; i < allLayers.length; i++) {
+            var def = allLayers[i];
+            var layerId = def.id;
+            if (!map.getLayer(layerId)) continue;
             var roleFilter = def.filter;
             if (hiddenIds.length > 0) {
-                map.setFilter(def.id, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
+                map.setFilter(layerId, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
             } else {
-                map.setFilter(def.id, roleFilter);
+                map.setFilter(layerId, roleFilter);
             }
         }
     }

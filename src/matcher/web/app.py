@@ -49,9 +49,8 @@ class LabelerNameMiddleware(BaseHTTPMiddleware):
     """Inject the configured labeler name into every request's state."""
 
     async def dispatch(self, request, call_next):
-        from ..config import MIN_LABELS_PER_DATASET
+        from ..config import MIN_LABELS_PER_DATASET, MIN_STITCHING_LABELS_PER_DATASET
         from .services import (
-            _MIN_STITCHING_LABELS,
             get_dataset_label_counts,
             get_dataset_stitching_counts,
             get_labeler_name,
@@ -61,7 +60,7 @@ class LabelerNameMiddleware(BaseHTTPMiddleware):
         request.state.dataset_label_counts = get_dataset_label_counts()
         request.state.min_labels_per_dataset = MIN_LABELS_PER_DATASET
         request.state.dataset_stitching_counts = get_dataset_stitching_counts()
-        request.state.min_stitching_labels = _MIN_STITCHING_LABELS
+        request.state.min_stitching_labels = MIN_STITCHING_LABELS_PER_DATASET
         return await call_next(request)
 
 

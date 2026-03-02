@@ -634,8 +634,6 @@ def get_dataset_label_counts() -> dict[str, int]:
     return counts
 
 
-_MIN_STITCHING_LABELS = 15
-
 # Cache for dataset stitching label counts (expires after 30 seconds)
 _stitching_counts_cache: dict[str, int] | None = None
 _stitching_counts_cache_time: float = 0.0

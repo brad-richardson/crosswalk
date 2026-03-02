@@ -1933,7 +1933,7 @@ def reclassify(
 def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
     """Fill in spatial context segments for each group.
 
-    For every group, computes an envelope (capped at 1km x 1km) from all
+    For every group, computes an envelope (capped at ~500m x 500m) from all
     group geometries, spatial-queries the raw parquet files, and adds
     nearby-but-not-in-group segments as context.
     """
@@ -1956,8 +1956,8 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
         console.print("  [yellow]Cannot fill spatial context: missing data files[/yellow]")
         return
 
-    ref_gdf = gpd.read_parquet(ref_path)
-    target_gdf = gpd.read_parquet(target_path)
+    ref_gdf = gpd.read_parquet(ref_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN])
+    target_gdf = gpd.read_parquet(target_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN])
 
     # Ensure spatial index exists
     _ = ref_gdf.sindex
@@ -1997,12 +1997,12 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
             miny = cy - max_half_deg_lat
             maxy = cy + max_half_deg_lat
 
-        # Snap envelope bounds to coord precision so clipped+rounded geoms stay inside
-        precision = 6
-        minx = math.ceil(minx * 10**precision) / 10**precision
-        miny = math.ceil(miny * 10**precision) / 10**precision
-        maxx = math.floor(maxx * 10**precision) / 10**precision
-        maxy = math.floor(maxy * 10**precision) / 10**precision
+        # Snap envelope bounds outward to coord precision so clipped+rounded geoms stay inside
+        scale = 10**6
+        minx = math.floor(minx * scale) / scale
+        miny = math.floor(miny * scale) / scale
+        maxx = math.ceil(maxx * scale) / scale
+        maxy = math.ceil(maxy * scale) / scale
         envelope = box(minx, miny, maxx, maxy)
 
         # Spatial query for ref segments within envelope
