@@ -1957,7 +1957,9 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
         return
 
     ref_gdf = gpd.read_parquet(ref_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN])
-    target_gdf = gpd.read_parquet(target_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN])
+    target_gdf = gpd.read_parquet(
+        target_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN]
+    )
 
     # Ensure spatial index exists
     _ = ref_gdf.sindex
@@ -2079,18 +2081,29 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
         surviving_refs = set(ref_geoms.keys())
         surviving_targets = set(target_geoms.keys())
         group["ref_ids"] = [rid for rid in group.get("ref_ids", []) if rid in surviving_refs]
-        group["target_ids"] = [tid for tid in group.get("target_ids", []) if tid in surviving_targets]
+        group["target_ids"] = [
+            tid for tid in group.get("target_ids", []) if tid in surviving_targets
+        ]
         if "ref_names" in group:
-            group["ref_names"] = {k: v for k, v in group["ref_names"].items() if k in surviving_refs}
+            group["ref_names"] = {
+                k: v for k, v in group["ref_names"].items() if k in surviving_refs
+            }
         if "target_names" in group:
-            group["target_names"] = {k: v for k, v in group["target_names"].items() if k in surviving_targets}
+            group["target_names"] = {
+                k: v for k, v in group["target_names"].items() if k in surviving_targets
+            }
         if "ref_classes" in group:
-            group["ref_classes"] = {k: v for k, v in group["ref_classes"].items() if k in surviving_refs}
+            group["ref_classes"] = {
+                k: v for k, v in group["ref_classes"].items() if k in surviving_refs
+            }
         if "target_classes" in group:
-            group["target_classes"] = {k: v for k, v in group["target_classes"].items() if k in surviving_targets}
+            group["target_classes"] = {
+                k: v for k, v in group["target_classes"].items() if k in surviving_targets
+            }
         if "edges" in group:
             group["edges"] = [
-                e for e in group["edges"]
+                e
+                for e in group["edges"]
                 if e["ref_id"] in surviving_refs and e["target_id"] in surviving_targets
             ]
 
