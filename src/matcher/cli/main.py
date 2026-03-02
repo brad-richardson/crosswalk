@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ..eval_utils import DEFAULT_QUALITY_THRESHOLD
 from .utils import console
 
 
@@ -524,6 +525,280 @@ def _cross_validate(
     console.print("\n[green]Cross-validation complete![/green]")
 
 
+def _loo_type_cross_validate(
+    labels_dir: Path,
+    output_dir: Path,
+    cv_folds: int,
+    seed: int,
+    skip_save: bool,
+    quality_threshold: float,
+) -> None:
+    """Run leave-one-out by type cross-validation.
+
+    Holds out one dataset per type group per fold, trains on the rest,
+    and evaluates on each held-out dataset independently.
+    """
+    import numpy as np
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    from xgboost import XGBClassifier
+
+    from ..config import METRIC_AVERAGE
+    from ..eval_utils import MIN_LOO_LABELS, build_type_groups
+    from ..labeling.label_store import LabelStore
+    from ..matching.ml import DEFAULT_XGB_PARAMS, MLMatcher
+
+    if not labels_dir.exists():
+        console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+        raise typer.Exit(1)
+
+    run_date = datetime.now(UTC)
+
+    # Load and filter labels (same pattern as _cross_validate)
+    console.print("[blue]Loading labels...[/blue]")
+    all_labels = LabelStore.load_all(labels_dir)
+    console.print(f"  Total labels: {len(all_labels)}")
+
+    valid_labels = {"match", "no_match"}
+    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
+
+    # Remove duplicates
+    n_before = len(all_labels)
+    all_labels = all_labels.drop_duplicates(subset=["gers_id", "target_id", "dataset"], keep="last")
+    n_dropped = n_before - len(all_labels)
+    if n_dropped > 0:
+        console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping last)[/yellow]")
+
+    # Filter datasets with too few labels
+    dataset_counts = all_labels.groupby("dataset").size()
+    valid_datasets = dataset_counts[dataset_counts >= MIN_LOO_LABELS].index.tolist()
+    excluded_datasets = dataset_counts[dataset_counts < MIN_LOO_LABELS].index.tolist()
+    if excluded_datasets:
+        console.print(
+            f"  [yellow]Excluded {len(excluded_datasets)} dataset(s) with < "
+            f"{MIN_LOO_LABELS} labels: {', '.join(excluded_datasets)}[/yellow]"
+        )
+
+    all_labels = all_labels[all_labels["dataset"].isin(valid_datasets)].copy()
+    console.print(f"  Datasets with >= {MIN_LOO_LABELS} labels: {len(valid_datasets)}")
+
+    # Build type groups
+    type_groups = build_type_groups(valid_datasets, quality_threshold)
+    console.print(f"\n[blue]Type groups (threshold={quality_threshold}):[/blue]")
+    for group, datasets in sorted(type_groups.items()):
+        console.print(f"  {group}: {', '.join(sorted(datasets))}")
+
+    # Initialize MLMatcher for feature extraction
+    matcher = MLMatcher()
+
+    # Build fold assignments via round-robin over shuffled groups
+    rng = np.random.RandomState(seed)
+    shuffled_groups: dict[str, list[str]] = {}
+    for group, datasets in type_groups.items():
+        shuffled = list(datasets)
+        rng.shuffle(shuffled)
+        shuffled_groups[group] = shuffled
+
+    console.print(f"\n[blue]Running {cv_folds}-fold LOO-by-type CV...[/blue]")
+
+    # Collect per-fold, per-dataset results
+    all_results: list[dict] = []
+
+    for fold_idx in range(cv_folds):
+        console.print(f"\n  Fold {fold_idx + 1}/{cv_folds}:")
+
+        # Select held-out datasets for this fold (round-robin)
+        held_out: list[tuple[str, str]] = []  # (dataset, group)
+        for group, datasets in sorted(shuffled_groups.items()):
+            if fold_idx < len(datasets):
+                held_out.append((datasets[fold_idx], group))
+
+        if not held_out:
+            console.print("    [yellow]No datasets to hold out in this fold, skipping[/yellow]")
+            continue
+
+        held_out_names = {ds for ds, _ in held_out}
+        train_df = all_labels[~all_labels["dataset"].isin(held_out_names)].copy()
+        test_df = all_labels[all_labels["dataset"].isin(held_out_names)].copy()
+
+        if len(train_df) == 0 or len(test_df) == 0:
+            console.print("    [yellow]Empty train or test set, skipping[/yellow]")
+            continue
+
+        # Extract features and train
+        X_train, y_train = matcher._extract_features_and_labels(train_df, binary=True)
+        X_train = matcher._cap_infinities(X_train)
+
+        n_neg = int((y_train == 0).sum())
+        n_pos = int((y_train == 1).sum())
+
+        if n_pos == 0 or n_neg == 0:
+            console.print("    [yellow]Single-class training set, skipping fold[/yellow]")
+            continue
+
+        fold_spw = n_neg / n_pos
+
+        model = XGBClassifier(
+            **DEFAULT_XGB_PARAMS,
+            scale_pos_weight=fold_spw,
+            random_state=seed,
+            n_jobs=-1,
+        )
+        model.fit(X_train, y_train)
+
+        # Evaluate on each held-out dataset independently
+        for ds, group in held_out:
+            ds_df = test_df[test_df["dataset"] == ds]
+            if len(ds_df) == 0:
+                continue
+
+            X_ds, y_ds = matcher._extract_features_and_labels(ds_df, binary=True)
+            X_ds = matcher._cap_infinities(X_ds)
+            y_pred = model.predict(X_ds)
+
+            n_match = int((y_ds == 1).sum())
+            n_no_match = int((y_ds == 0).sum())
+            acc = accuracy_score(y_ds, y_pred)
+            f1 = f1_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
+            prec = precision_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
+            rec = recall_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
+
+            console.print(
+                f"    {ds} ({group}): acc={acc:.3f}, f1={f1:.3f} "
+                f"(n={len(ds_df)}, match={n_match}, no_match={n_no_match})"
+            )
+
+            all_results.append(
+                {
+                    "run_date": run_date.isoformat(),
+                    "fold": fold_idx,
+                    "dataset": ds,
+                    "type_group": group,
+                    "n_train": len(train_df),
+                    "n_test": len(ds_df),
+                    "n_match": n_match,
+                    "n_no_match": n_no_match,
+                    "accuracy": acc,
+                    "f1": f1,
+                    "precision": prec,
+                    "recall": rec,
+                    "seed": seed,
+                    "quality_threshold": quality_threshold,
+                }
+            )
+
+    if not all_results:
+        console.print("[red]No results produced - check dataset labels and type groups[/red]")
+        raise typer.Exit(1)
+
+    # Print per-type summary
+    import pandas as pd
+
+    results_df = pd.DataFrame(all_results)
+
+    console.print(f"\n{'=' * 60}")
+    console.print(f"[bold]LOO-BY-TYPE CV SUMMARY ({cv_folds} folds)[/bold]")
+    console.print("=" * 60)
+
+    for group in sorted(results_df["type_group"].unique()):
+        group_df = results_df[results_df["type_group"] == group]
+        console.print(
+            f"\n  {group}: F1={group_df['f1'].mean():.3f}±{group_df['f1'].std(ddof=0):.3f}, "
+            f"Acc={group_df['accuracy'].mean():.3f}±{group_df['accuracy'].std(ddof=0):.3f} "
+            f"({len(group_df)} evals)"
+        )
+
+    console.print(
+        f"\n  Overall: F1={results_df['f1'].mean():.3f}±{results_df['f1'].std(ddof=0):.3f}, "
+        f"Acc={results_df['accuracy'].mean():.3f}±{results_df['accuracy'].std(ddof=0):.3f}"
+    )
+
+    # Save results to CSV
+    if not skip_save:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results_file = output_dir / "ml_loo_cv_results.csv"
+
+        fieldnames = [
+            "run_date",
+            "fold",
+            "dataset",
+            "type_group",
+            "n_train",
+            "n_test",
+            "n_match",
+            "n_no_match",
+            "accuracy",
+            "f1",
+            "precision",
+            "recall",
+            "seed",
+            "quality_threshold",
+        ]
+
+        write_header = not results_file.exists()
+
+        with open(results_file, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            if write_header:
+                writer.writeheader()
+
+            # Per-fold rows
+            for row in all_results:
+                fmt_row = {**row}
+                fmt_row["accuracy"] = f"{row['accuracy']:.4f}"
+                fmt_row["f1"] = f"{row['f1']:.4f}"
+                fmt_row["precision"] = f"{row['precision']:.4f}"
+                fmt_row["recall"] = f"{row['recall']:.4f}"
+                writer.writerow(fmt_row)
+
+            # Aggregate rows per type group
+            for group in sorted(results_df["type_group"].unique()):
+                group_df = results_df[results_df["type_group"] == group]
+                writer.writerow(
+                    {
+                        "run_date": run_date.isoformat(),
+                        "fold": -1,
+                        "dataset": f"agg:{group}",
+                        "type_group": group,
+                        "n_train": "",
+                        "n_test": int(group_df["n_test"].sum()),
+                        "n_match": int(group_df["n_match"].sum()),
+                        "n_no_match": int(group_df["n_no_match"].sum()),
+                        "accuracy": f"{group_df['accuracy'].mean():.4f}",
+                        "f1": f"{group_df['f1'].mean():.4f}",
+                        "precision": f"{group_df['precision'].mean():.4f}",
+                        "recall": f"{group_df['recall'].mean():.4f}",
+                        "seed": seed,
+                        "quality_threshold": quality_threshold,
+                    }
+                )
+
+            # Overall aggregate
+            writer.writerow(
+                {
+                    "run_date": run_date.isoformat(),
+                    "fold": -1,
+                    "dataset": "agg:overall",
+                    "type_group": "",
+                    "n_train": "",
+                    "n_test": int(results_df["n_test"].sum()),
+                    "n_match": int(results_df["n_match"].sum()),
+                    "n_no_match": int(results_df["n_no_match"].sum()),
+                    "accuracy": f"{results_df['accuracy'].mean():.4f}",
+                    "f1": f"{results_df['f1'].mean():.4f}",
+                    "precision": f"{results_df['precision'].mean():.4f}",
+                    "recall": f"{results_df['recall'].mean():.4f}",
+                    "seed": seed,
+                    "quality_threshold": quality_threshold,
+                }
+            )
+
+        console.print(f"\n[green]Results saved to {results_file}[/green]")
+
+    console.print("\n[green]LOO-by-type cross-validation complete![/green]")
+
+
 def register_commands(app: typer.Typer) -> None:
     """Register top-level commands on the given app."""
 
@@ -874,6 +1149,16 @@ def register_commands(app: typer.Typer) -> None:
             "-d",
             help="Only evaluate on specific dataset(s). Can be repeated.",
         ),
+        loo: bool = typer.Option(
+            False,
+            "--loo",
+            help="Run leave-one-out by type cross-validation (mutually exclusive with --model)",
+        ),
+        quality_threshold: float = typer.Option(
+            DEFAULT_QUALITY_THRESHOLD,
+            "--quality-threshold",
+            help="Quality threshold for road_good/road_poor split (only used with --loo)",
+        ),
     ):
         """Evaluate ML model performance using cross-validation.
 
@@ -881,6 +1166,7 @@ def register_commands(app: typer.Typer) -> None:
         prevent data leakage. Reports mean ± std for all metrics.
 
         Use --model to evaluate an existing trained model on a holdout set instead.
+        Use --loo for leave-one-out by type CV that tests cross-dataset generalization.
 
         Examples:
             # Cross-validation evaluation (default)
@@ -891,8 +1177,29 @@ def register_commands(app: typer.Typer) -> None:
             # Evaluate an existing model (single holdout)
             matcher eval --model data/models/matcher_model.joblib
             matcher eval -m data/models/combined.joblib -d us_frisco_trails
+
+            # Leave-one-out by type cross-validation
+            matcher eval --loo --cv-folds 5 --seed 42
+            matcher eval --loo --quality-threshold 0.3
         """
-        if model is not None:
+        if loo and model is not None:
+            console.print("[red]--loo and --model are mutually exclusive[/red]")
+            raise typer.Exit(1)
+
+        if loo and dataset:
+            console.print("[red]--loo and --dataset are mutually exclusive[/red]")
+            raise typer.Exit(1)
+
+        if loo:
+            _loo_type_cross_validate(
+                labels_dir=labels_dir,
+                output_dir=output_dir,
+                cv_folds=cv_folds,
+                seed=seed,
+                skip_save=skip_save,
+                quality_threshold=quality_threshold,
+            )
+        elif model is not None:
             # Evaluate existing model on holdout
             _eval_existing_model(
                 model=model,
