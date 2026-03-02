@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ..eval_utils import DEFAULT_QUALITY_THRESHOLD
 from .utils import console
 
 
@@ -630,7 +631,12 @@ def _loo_type_cross_validate(
 
         n_neg = int((y_train == 0).sum())
         n_pos = int((y_train == 1).sum())
-        fold_spw = n_neg / n_pos if n_pos > 0 else 1.0
+
+        if n_pos == 0 or n_neg == 0:
+            console.print("    [yellow]Single-class training set, skipping fold[/yellow]")
+            continue
+
+        fold_spw = n_neg / n_pos
 
         model = XGBClassifier(
             **DEFAULT_XGB_PARAMS,
@@ -697,14 +703,14 @@ def _loo_type_cross_validate(
     for group in sorted(results_df["type_group"].unique()):
         group_df = results_df[results_df["type_group"] == group]
         console.print(
-            f"\n  {group}: F1={group_df['f1'].mean():.3f}±{group_df['f1'].std():.3f}, "
-            f"Acc={group_df['accuracy'].mean():.3f}±{group_df['accuracy'].std():.3f} "
+            f"\n  {group}: F1={group_df['f1'].mean():.3f}±{group_df['f1'].std(ddof=0):.3f}, "
+            f"Acc={group_df['accuracy'].mean():.3f}±{group_df['accuracy'].std(ddof=0):.3f} "
             f"({len(group_df)} evals)"
         )
 
     console.print(
-        f"\n  Overall: F1={results_df['f1'].mean():.3f}±{results_df['f1'].std():.3f}, "
-        f"Acc={results_df['accuracy'].mean():.3f}±{results_df['accuracy'].std():.3f}"
+        f"\n  Overall: F1={results_df['f1'].mean():.3f}±{results_df['f1'].std(ddof=0):.3f}, "
+        f"Acc={results_df['accuracy'].mean():.3f}±{results_df['accuracy'].std(ddof=0):.3f}"
     )
 
     # Save results to CSV
@@ -1149,7 +1155,7 @@ def register_commands(app: typer.Typer) -> None:
             help="Run leave-one-out by type cross-validation (mutually exclusive with --model)",
         ),
         quality_threshold: float = typer.Option(
-            0.5,
+            DEFAULT_QUALITY_THRESHOLD,
             "--quality-threshold",
             help="Quality threshold for road_good/road_poor split (only used with --loo)",
         ),
@@ -1178,6 +1184,10 @@ def register_commands(app: typer.Typer) -> None:
         """
         if loo and model is not None:
             console.print("[red]--loo and --model are mutually exclusive[/red]")
+            raise typer.Exit(1)
+
+        if loo and dataset:
+            console.print("[red]--loo and --dataset are mutually exclusive[/red]")
             raise typer.Exit(1)
 
         if loo:

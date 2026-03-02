@@ -42,14 +42,12 @@ def classify_dataset_type_group(
     """
     # Check for manual override first
     effective_type = TYPE_OVERRIDES.get(dataset_name)
+    config = get_dataset_config(dataset_name)
 
     if effective_type is None:
-        config = get_dataset_config(dataset_name)
         if config is None:
             return "other"
         effective_type = config.type
-    else:
-        config = get_dataset_config(dataset_name)
 
     # Non-road types
     if effective_type == "sidewalk":
