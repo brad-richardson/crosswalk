@@ -1930,6 +1930,206 @@ def reclassify(
         )
 
 
+def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
+    """Fill in spatial context segments for each group.
+
+    For every group, computes an envelope (capped at ~500m x 500m) from all
+    group geometries, spatial-queries the raw parquet files, and adds
+    nearby-but-not-in-group segments as context.
+    """
+    import math
+
+    import geopandas as gpd
+    from shapely.geometry import box, mapping, shape
+    from shapely.ops import unary_union
+
+    from ..config import CLASS_COLUMN, NAMES_COLUMN
+    from ..filenames import PROJECT_ROOT, find_overture_segments, find_target_file
+    from ..pipeline.runner import _extract_name_string, _is_nan
+
+    data_dir = PROJECT_ROOT / "data" / "raw"
+
+    ref_path = find_overture_segments(data_dir, dataset_name)
+    target_path = find_target_file(data_dir, dataset_name)
+
+    if not ref_path or not target_path:
+        console.print("  [yellow]Cannot fill spatial context: missing data files[/yellow]")
+        return
+
+    ref_gdf = gpd.read_parquet(ref_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN])
+    target_gdf = gpd.read_parquet(
+        target_path, columns=["id", "geometry", NAMES_COLUMN, CLASS_COLUMN]
+    )
+
+    # Ensure spatial index exists
+    _ = ref_gdf.sindex
+    _ = target_gdf.sindex
+
+    for group in groups:
+        ref_geoms = group.get("ref_geometries", {})
+        target_geoms = group.get("target_geometries", {})
+
+        if not ref_geoms and not target_geoms:
+            continue
+
+        # Collect all geometries and compute envelope
+        all_shapes = []
+        for geom_dict in list(ref_geoms.values()) + list(target_geoms.values()):
+            try:
+                all_shapes.append(shape(geom_dict))
+            except Exception:
+                continue
+
+        if not all_shapes:
+            continue
+
+        envelope = unary_union(all_shapes).envelope
+        minx, miny, maxx, maxy = envelope.bounds
+
+        # Cap at ~500m x 500m using degree approximation
+        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+        km_per_deg_lat = 111.0
+        km_per_deg_lon = 111.0 * math.cos(math.radians(cy))
+        max_half_deg_lat = 0.25 / km_per_deg_lat  # 250m in degrees
+        max_half_deg_lon = 0.25 / km_per_deg_lon if km_per_deg_lon > 0 else 0.00225
+
+        if (maxy - miny) > 2 * max_half_deg_lat or (maxx - minx) > 2 * max_half_deg_lon:
+            minx = cx - max_half_deg_lon
+            maxx = cx + max_half_deg_lon
+            miny = cy - max_half_deg_lat
+            maxy = cy + max_half_deg_lat
+
+        # Snap envelope bounds outward to coord precision so clipped+rounded geoms stay inside
+        scale = 10**6
+        minx = math.floor(minx * scale) / scale
+        miny = math.floor(miny * scale) / scale
+        maxx = math.ceil(maxx * scale) / scale
+        maxy = math.ceil(maxy * scale) / scale
+        envelope = box(minx, miny, maxx, maxy)
+
+        # Spatial query for ref segments within envelope
+        ref_ids_in_group = set(group.get("ref_ids", list(ref_geoms.keys())))
+        ref_hits = ref_gdf.sindex.query(envelope, predicate="intersects")
+        context_ref = {}
+        context_ref_names = {}
+        context_ref_classes = {}
+        for idx in ref_hits:
+            row = ref_gdf.iloc[idx]
+            rid = str(row.get("id", ""))
+            if rid in ref_ids_in_group or not rid:
+                continue
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            clipped = geom.intersection(envelope)
+            if clipped.is_empty:
+                continue
+            context_ref[rid] = _round_geojson_coords(mapping(clipped))
+            name_val = row.get(NAMES_COLUMN)
+            context_ref_names[rid] = _extract_name_string(name_val) if not _is_nan(name_val) else ""
+            cls_val = row.get(CLASS_COLUMN)
+            context_ref_classes[rid] = str(cls_val) if not _is_nan(cls_val) else ""
+
+        # Spatial query for target segments within envelope
+        target_ids_in_group = set(group.get("target_ids", list(target_geoms.keys())))
+        target_hits = target_gdf.sindex.query(envelope, predicate="intersects")
+        context_target = {}
+        context_target_names = {}
+        context_target_classes = {}
+        for idx in target_hits:
+            row = target_gdf.iloc[idx]
+            tid = str(row.get("id", ""))
+            if tid in target_ids_in_group or not tid:
+                continue
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            clipped = geom.intersection(envelope)
+            if clipped.is_empty:
+                continue
+            context_target[tid] = _round_geojson_coords(mapping(clipped))
+            name_val = row.get(NAMES_COLUMN)
+            context_target_names[tid] = (
+                _extract_name_string(name_val) if not _is_nan(name_val) else ""
+            )
+            cls_val = row.get(CLASS_COLUMN)
+            context_target_classes[tid] = str(cls_val) if not _is_nan(cls_val) else ""
+
+        # Clip group's own geometries to envelope (remove if entirely outside)
+        for rid in list(ref_geoms.keys()):
+            try:
+                g_shape = shape(ref_geoms[rid])
+                clipped = g_shape.intersection(envelope)
+                if clipped.is_empty:
+                    del ref_geoms[rid]
+                else:
+                    ref_geoms[rid] = _round_geojson_coords(mapping(clipped))
+            except Exception:
+                pass
+        for tid in list(target_geoms.keys()):
+            try:
+                g_shape = shape(target_geoms[tid])
+                clipped = g_shape.intersection(envelope)
+                if clipped.is_empty:
+                    del target_geoms[tid]
+                else:
+                    target_geoms[tid] = _round_geojson_coords(mapping(clipped))
+            except Exception:
+                pass
+
+        # Sync ID lists, names, classes, and edges with surviving geometries
+        surviving_refs = set(ref_geoms.keys())
+        surviving_targets = set(target_geoms.keys())
+        group["ref_ids"] = [rid for rid in group.get("ref_ids", []) if rid in surviving_refs]
+        group["target_ids"] = [
+            tid for tid in group.get("target_ids", []) if tid in surviving_targets
+        ]
+        if "ref_names" in group:
+            group["ref_names"] = {
+                k: v for k, v in group["ref_names"].items() if k in surviving_refs
+            }
+        if "target_names" in group:
+            group["target_names"] = {
+                k: v for k, v in group["target_names"].items() if k in surviving_targets
+            }
+        if "ref_classes" in group:
+            group["ref_classes"] = {
+                k: v for k, v in group["ref_classes"].items() if k in surviving_refs
+            }
+        if "target_classes" in group:
+            group["target_classes"] = {
+                k: v for k, v in group["target_classes"].items() if k in surviving_targets
+            }
+        if "edges" in group:
+            group["edges"] = [
+                e
+                for e in group["edges"]
+                if e["ref_id"] in surviving_refs and e["target_id"] in surviving_targets
+            ]
+
+        # Store on group dict
+        group["envelope"] = mapping(envelope)
+        group["context_ref_ids"] = list(context_ref.keys())
+        group["context_target_ids"] = list(context_target.keys())
+        group["context_ref_geometries"] = context_ref
+        group["context_target_geometries"] = context_target
+        group["context_ref_names"] = context_ref_names
+        group["context_target_names"] = context_target_names
+        group["context_ref_classes"] = context_ref_classes
+        group["context_target_classes"] = context_target_classes
+
+
+def _round_geojson_coords(geojson: dict, precision: int = 6) -> dict:
+    """Round coordinates in a GeoJSON geometry dict."""
+
+    def _round_coords(coords):
+        if isinstance(coords[0], (int, float)):
+            return [round(v, precision) for v in coords]
+        return [_round_coords(c) for c in coords]
+
+    return {**geojson, "coordinates": _round_coords(geojson["coordinates"])}
+
+
 @data_app.command("stitch-batch")
 def stitch_batch(
     dataset: str = typer.Argument(
@@ -2065,6 +2265,18 @@ def stitch_batch(
         # Strip alternatives from batch (only needed for scoring, not UI)
         for g in selected:
             g.pop("alternatives", None)
+
+        # Fill in spatial context for each group
+        console.print("  Filling spatial context...")
+        _fill_spatial_context(selected, ds_name)
+        ctx_counts = [
+            len(g.get("context_ref_ids", [])) + len(g.get("context_target_ids", []))
+            for g in selected
+        ]
+        console.print(
+            f"  Added context: {sum(ctx_counts)} segments "
+            f"(avg {sum(ctx_counts) / len(ctx_counts):.0f}/group)"
+        )
 
         # Write batch file
         batch = {

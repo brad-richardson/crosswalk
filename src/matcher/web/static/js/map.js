@@ -542,9 +542,12 @@
     var currentGroupGeojson = null;
 
     var GROUP_LAYER_DEFS = [
-        // Tier 1: Full geometries (thin, faded) — show full extent of each segment
-        { id: "group-ref-full", type: "line", filter: ["==", ["get", "_role"], "ref-full"], paint: { "line-color": REF_COLOR, "line-width": 2, "line-opacity": 0.3 } },
-        { id: "group-target-full", type: "line", filter: ["==", ["get", "_role"], "target-full"], paint: { "line-color": TARGET_COLOR, "line-width": 2, "line-opacity": 0.3, "line-dasharray": [8, 6] } },
+        // Tier 0: Envelope polygon (very faint background)
+        { id: "group-envelope", type: "fill", filter: ["==", ["get", "_role"], "envelope"], paint: { "fill-color": "#ffffff", "fill-opacity": 0.05 } },
+        { id: "group-envelope-border", type: "line", filter: ["==", ["get", "_role"], "envelope"], paint: { "line-color": "#888", "line-width": 1, "line-opacity": 0.4, "line-dasharray": [6, 4] } },
+        // Tier 1: Full geometries — solid lines, moderate opacity
+        { id: "group-ref-full", type: "line", filter: ["==", ["get", "_role"], "ref-full"], paint: { "line-color": REF_COLOR, "line-width": 2, "line-opacity": 0.7 } },
+        { id: "group-target-full", type: "line", filter: ["==", ["get", "_role"], "target-full"], paint: { "line-color": TARGET_COLOR, "line-width": 2, "line-opacity": 0.7 } },
         // Tier 2: Aligned sub-segments (thick, bright) — matches labeling pair layer colors
         { id: "group-ref-aligned", type: "line", filter: ["==", ["get", "_role"], "ref-aligned"], paint: { "line-color": REF_COLOR, "line-width": 4, "line-opacity": 0.9 } },
         { id: "group-target-aligned", type: "line", filter: ["==", ["get", "_role"], "target-aligned"], paint: { "line-color": TARGET_COLOR, "line-width": 4, "line-opacity": 0.9 } },
@@ -562,14 +565,16 @@
 
     function updateSegmentFilters() {
         var hiddenIds = Object.keys(hiddenSegments).filter(function(id) { return hiddenSegments[id]; });
-        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
-            var def = GROUP_LAYER_DEFS[i];
-            if (!map.getLayer(def.id)) continue;
-            var roleFilter = def.filter; // e.g. ["==", ["get", "_role"], "ref-full"]
+        var allLayers = GROUP_LAYER_DEFS.concat(GROUP_LABEL_DEFS);
+        for (var i = 0; i < allLayers.length; i++) {
+            var def = allLayers[i];
+            var layerId = def.id;
+            if (!map.getLayer(layerId)) continue;
+            var roleFilter = def.filter;
             if (hiddenIds.length > 0) {
-                map.setFilter(def.id, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
+                map.setFilter(layerId, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
             } else {
-                map.setFilter(def.id, roleFilter);
+                map.setFilter(layerId, roleFilter);
             }
         }
     }
@@ -691,6 +696,17 @@
         currentGroupGeojson = data;
         hiddenSegments = {}; // Reset per-segment visibility for new group
 
+        // Initialize context segments as hidden (user must opt-in via pills)
+        var ctxEl = document.getElementById("group-context-ids");
+        if (ctxEl) {
+            try {
+                var ctxIds = JSON.parse(ctxEl.textContent);
+                for (var i = 0; i < ctxIds.length; i++) {
+                    hiddenSegments[ctxIds[i]] = true;
+                }
+            } catch (e) {}
+        }
+
         if (!map.isStyleLoaded()) return;
         renderGroupOverlays(data);
     }
@@ -717,6 +733,9 @@
 
         map.getSource(GROUP_SOURCE).setData(data);
 
+        // Apply hidden segment filters (context segments start hidden)
+        updateSegmentFilters();
+
         // Fit bounds
         var bbox = geojsonBounds(data);
         if (bbox) {
@@ -731,6 +750,49 @@
             // Remove stale source first (style change strips them)
             if (!map.getSource(GROUP_SOURCE)) {
                 renderGroupOverlays(currentGroupGeojson);
+            }
+        }
+    });
+
+    // --- Click-to-toggle segments on map (stitching review) ---
+    map.on("click", function (e) {
+        if (!currentGroupGeojson) return;
+
+        // Query features in a bbox around click point
+        var radius = 10;
+        var bbox = [
+            [e.point.x - radius, e.point.y - radius],
+            [e.point.x + radius, e.point.y + radius],
+        ];
+
+        // Query group geometry layers + label layers (not envelope)
+        var layerIds = [];
+        for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
+            var lid = GROUP_LAYER_DEFS[i].id;
+            if (map.getLayer(lid) && lid.indexOf("envelope") === -1) {
+                layerIds.push(lid);
+            }
+        }
+        for (var k = 0; k < GROUP_LABEL_DEFS.length; k++) {
+            var llid = GROUP_LABEL_DEFS[k].id;
+            if (map.getLayer(llid)) layerIds.push(llid);
+        }
+        if (layerIds.length === 0) return;
+
+        var features = map.queryRenderedFeatures(bbox, { layers: layerIds });
+        if (features.length === 0) return;
+
+        // Collect unique segment IDs from hits
+        var seen = {};
+        for (var j = 0; j < features.length; j++) {
+            var fid = features[j].properties._id;
+            if (fid && !seen[fid]) {
+                seen[fid] = true;
+                // Find the matching pill button by title attribute and click it
+                var pill = document.querySelector('.segment-pill[title="' + fid + '"]');
+                if (pill) {
+                    pill.click();
+                }
             }
         }
     });

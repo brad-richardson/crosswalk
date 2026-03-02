@@ -634,6 +634,39 @@ def get_dataset_label_counts() -> dict[str, int]:
     return counts
 
 
+# Cache for dataset stitching label counts (expires after 30 seconds)
+_stitching_counts_cache: dict[str, int] | None = None
+_stitching_counts_cache_time: float = 0.0
+
+
+def get_dataset_stitching_counts() -> dict[str, int]:
+    """Get stitching label counts per dataset, cached for 30 seconds.
+
+    Returns:
+        Dict mapping dataset_id to number of stitching labels.
+    """
+    global _stitching_counts_cache, _stitching_counts_cache_time
+
+    now = time.monotonic()
+    if (
+        _stitching_counts_cache is not None
+        and (now - _stitching_counts_cache_time) < _LABEL_COUNTS_TTL
+    ):
+        return _stitching_counts_cache
+
+    from ..labeling.stitching_store import StitchingLabelStore
+
+    datasets = list_datasets()
+    counts = {}
+    for ds in datasets:
+        store = StitchingLabelStore(ds)
+        counts[ds] = len(store.df)
+
+    _stitching_counts_cache = counts
+    _stitching_counts_cache_time = now
+    return counts
+
+
 def _batch_manifest_path(dataset_id: str) -> Path:
     """Get path to batch manifest JSON file."""
     return LABELING_CACHE_DIR / f"{dataset_id}_batch.json"

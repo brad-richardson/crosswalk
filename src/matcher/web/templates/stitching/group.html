@@ -7,6 +7,9 @@
 <!-- Edge confidence data for dynamic updates -->
 <script type="application/json" id="group-edges">{{ group.edges | tojson }}</script>
 
+<!-- Context segment IDs (start hidden on map) -->
+<script type="application/json" id="group-context-ids">{{ (group.get("context_ref_ids", []) + group.get("context_target_ids", [])) | tojson }}</script>
+
 <!-- Group card (bottom of screen) -->
 <div class="info-card map-overlay group-card" id="group-card"
      data-group-index="{{ group_index }}"
@@ -20,6 +23,11 @@
         <span style="font-size: 0.8rem; color: var(--text-muted);">
             {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
         </span>
+        {% if context_ref_details is defined and (context_ref_details or context_target_details) %}
+        <span style="font-size: 0.7rem; color: var(--text-muted);">
+            (+{{ context_ref_details | length }}R / +{{ context_target_details | length }}T nearby)
+        </span>
+        {% endif %}
         <span class="pair-confidence" id="group-confidence" style="margin-left: 4px;">
             {{ "%.0f" | format(avg_confidence * 100) }}%
         </span>
@@ -41,6 +49,13 @@
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
                         title="{{ ref.id }}">R{{ loop.index }}</button>
                 {% endfor %}
+                {% if context_ref_details is defined %}
+                {% for ref in context_ref_details %}
+                <button class="segment-pill segment-pill-ref"
+                        onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        title="{{ ref.id }}">R{{ ref_details|length + loop.index }}</button>
+                {% endfor %}
+                {% endif %}
             </div>
         </div>
         <div class="segment-toggle-row">
@@ -51,6 +66,13 @@
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
                         title="{{ tgt.id }}">T{{ loop.index }}</button>
                 {% endfor %}
+                {% if context_target_details is defined %}
+                {% for tgt in context_target_details %}
+                <button class="segment-pill segment-pill-target"
+                        onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        title="{{ tgt.id }}">T{{ target_details|length + loop.index }}</button>
+                {% endfor %}
+                {% endif %}
             </div>
         </div>
     </div>

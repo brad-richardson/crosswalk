@@ -3,7 +3,7 @@
     {% if error %}
     <p class="error-text">{{ error }}</p>
     {% endif %}
-    <p>Generate a batch of 200 stratified candidates for <strong>{{ dataset }}</strong>.</p>
+    <p>Generate a batch of stratified candidates for <strong>{{ dataset }}</strong>.</p>
     <p style="font-size: 0.85em; color: #888;">Samples from likely matches, borderline cases, and likely no-matches for diverse training signal.</p>
     <button class="btn-match"
             hx-post="/batch/generate"
