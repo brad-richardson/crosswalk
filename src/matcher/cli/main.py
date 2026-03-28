@@ -1101,50 +1101,75 @@ def register_commands(app: typer.Typer) -> None:
         console.print(f"\n[green]Model saved to {output}[/green]")
         console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
 
-    @app.command("export-model")
-    def export_model(
-        model_path: Path = typer.Option(
-            Path("data/models/spark_portable_28feat.joblib"),
-            "--model",
-            "-m",
-            help="Path to trained joblib model",
+    @app.command("export-spark-model")
+    def export_spark_model(
+        labels_dir: Path = typer.Option(
+            Path("labels"),
+            "--labels",
+            "-l",
+            help="Labels directory",
         ),
         output_dir: Path = typer.Option(
             Path("data/models/export"),
             "--output",
             "-o",
-            help="Output directory for exported model files",
+            help="Output directory for model.json + manifest.json",
         ),
     ):
-        """Export a trained model to XGBoost-native JSON format for Spark.
+        """Train and export a Spark-portable XGBoost model for Overture matching.
 
-        Produces two files:
-        - model.json: XGBoost native model (loadable by xgboost.spark)
-        - manifest.json: Feature list, threshold, and metadata
+        Trains on the 28-feature subset computable from aligned geometry pairs
+        (no topology, graph, or spatial-index features required). Exports as
+        XGBoost-native JSON loadable by the Spark MatchLayerToNetworkV2 job.
+
+        Produces:
+        - model.json: XGBoost native model
+        - manifest.json: Feature list, hyperparameters, and metadata
 
         Examples:
-            matcher export-model
-            matcher export-model -m data/models/my_model.joblib -o export/
+            matcher export-spark-model
+            matcher export-spark-model --labels labels -o data/models/export/
         """
         import json
+        import os
 
+        import numpy as np
+        import xgboost as xgb
+
+        from ..config import FEATURE_COLUMNS, SPARK_PORTABLE_FEATURES
         from ..matching.ml import MLMatcher
 
-        if not model_path.exists():
-            console.print(f"[red]Model not found: {model_path}[/red]")
+        if not labels_dir.exists():
+            console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
             raise typer.Exit(1)
 
-        matcher = MLMatcher()
-        matcher.load_model(model_path)
+        # Determine features to exclude (everything not in SPARK_PORTABLE_FEATURES)
+        exclude_features = [f for f in FEATURE_COLUMNS if f not in SPARK_PORTABLE_FEATURES]
 
+        console.print(
+            f"[blue]Training Spark-portable model ({len(SPARK_PORTABLE_FEATURES)} features)...[/blue]"
+        )
+        console.print(
+            f"[dim]Excluding {len(exclude_features)} features requiring topology/graph/spatial-index[/dim]"
+        )
+
+        # Train
+        matcher = MLMatcher()
+        metrics = matcher.train(
+            labels_dir=labels_dir,
+            test_size=0.2,
+            binary=True,
+            exclude_features=exclude_features,
+        )
+
+        # Export
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Export XGBoost native JSON (loadable by xgboost.spark)
         model_out = output_dir / "model.json"
         matcher.model.get_booster().save_model(str(model_out))
-        console.print(f"[green]Exported model to {model_out}[/green]")
+        model_size_kb = os.path.getsize(model_out) / 1024
 
-        # Extract hyperparams from the XGBoost model
+        # Extract hyperparams
         xgb_params = matcher.model.get_params()
         hyperparams = {
             k: v
@@ -1166,7 +1191,6 @@ def register_commands(app: typer.Typer) -> None:
             and v is not None
         }
 
-        # Export feature manifest
         manifest = {
             "features": matcher.feature_names,
             "n_features": len(matcher.feature_names),
@@ -1176,16 +1200,27 @@ def register_commands(app: typer.Typer) -> None:
             "feature_version": matcher.feature_version,
             "label_encoder": matcher.label_encoder,
             "hyperparams": hyperparams,
-            "source_model": str(model_path),
         }
         manifest_out = output_dir / "manifest.json"
         with open(manifest_out, "w") as f:
             json.dump(manifest, f, indent=2)
-        console.print(f"[green]Exported manifest to {manifest_out}[/green]")
 
-        console.print(f"\n[blue]Features ({len(matcher.feature_names)}):[/blue]")
-        for feat in matcher.feature_names:
-            console.print(f"  {feat}")
+        # Verify the exported model loads and predicts
+        console.print("[blue]Verifying exported model...[/blue]")
+        booster = xgb.Booster()
+        booster.load_model(str(model_out))
+        test_data = xgb.DMatrix(
+            np.zeros((1, len(matcher.feature_names)), dtype=np.float32),
+            feature_names=matcher.feature_names,
+        )
+        pred = booster.predict(test_data)
+        assert len(pred) == 1, "Prediction failed"
+
+        console.print(f"\n[green]Exported to {output_dir}/[/green]")
+        console.print(f"  model.json: {model_size_kb:.0f} KB")
+        console.print(f"  manifest.json: {len(matcher.feature_names)} features")
+        console.print(f"  CV F1: {metrics['cv_f1_mean']:.4f} ± {metrics.get('cv_f1_std', 0):.4f}")
+        console.print(f"  Holdout accuracy: {metrics['test_accuracy']:.1%}")
 
     @app.command("eval")
     def eval_model(
