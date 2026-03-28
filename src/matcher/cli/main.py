@@ -1202,8 +1202,8 @@ def register_commands(app: typer.Typer) -> None:
             "hyperparams": hyperparams,
         }
         manifest_out = output_dir / "manifest.json"
-        with open(manifest_out, "w") as f:
-            json.dump(manifest, f, indent=2)
+        with open(manifest_out, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
 
         # Verify the exported model loads and predicts
         console.print("[blue]Verifying exported model...[/blue]")
@@ -1214,7 +1214,11 @@ def register_commands(app: typer.Typer) -> None:
             feature_names=matcher.feature_names,
         )
         pred = booster.predict(test_data)
-        assert len(pred) == 1, "Prediction failed"
+        if len(pred) != 1:
+            console.print(
+                "[red]Model verification failed: prediction returned unexpected shape[/red]"
+            )
+            raise typer.Exit(1)
 
         console.print(f"\n[green]Exported to {output_dir}/[/green]")
         console.print(f"  model.json: {model_size_kb:.0f} KB")

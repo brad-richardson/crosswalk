@@ -83,35 +83,13 @@ with the higher learning rate and stronger regularization).
 ## How to Reproduce
 
 ```bash
-# From the matcher repo root:
-
-# 1. Train the 28-feature model (exclude the 50 Spark-incompatible features)
-uv run matcher train \
-  --exclude-features from_degree_ref to_degree_ref from_degree_target to_degree_target \
-    degree_match_score degree_signature_similarity is_dead_end_ref is_dead_end_target \
-    dead_end_match is_intersection_ref is_intersection_target intersection_match \
-    interior_junction_count_ref interior_junction_count_target interior_junction_count_delta \
-    interior_connector_jaccard interior_junction_position_sim shared_anchor_count \
-    graphlet_similarity endpoint_degree_similarity \
-    clustering_coef_ref clustering_coef_target clustering_coef_delta \
-    min_endpoint_proximity_m max_endpoint_proximity_m shared_endpoint_count \
-    crossing_angle_min_ref transverse_neighbor_fraction_ref \
-    crossing_angle_min_target transverse_neighbor_fraction_target \
-    has_parallel_sibling_ref parallel_fraction_ref \
-    offset_vs_half_corridor_ratio likely_representation_mismatch \
-    name_jaro_winkler name_soundex name_metaphone \
-    has_name_ref has_name_target name_is_generic route_prefix_match \
-    heading_consistency_ref heading_consistency_delta \
-    vertex_density_ref vertex_density_target vertex_density_ratio \
-    shape_complexity_ref shape_complexity_delta \
-    sinuosity_delta angle_histogram_similarity \
-  -o data/models/spark_portable_28feat.joblib
-
-# 2. Export to Spark-native format
-uv run matcher export-model \
-  -m data/models/spark_portable_28feat.joblib \
-  -o data/models/export/
+# Single command: train + export
+uv run matcher export-spark-model
 ```
+
+This uses `SPARK_PORTABLE_FEATURES` from `config.py` (inclusive list of the 28 features)
+to train a model excluding all topology/graph/spatial-index features, then exports as
+XGBoost-native JSON + manifest.
 
 Note: The Optuna hyperparameters above were used for the shipped model. To retune,
 see `scripts/tune_model.py`. The default hyperparams in `ml.py` are for the full 78-feature
