@@ -16,6 +16,9 @@ uv pip install -e ".[dev,ml,web]"
 # Train ML model (required after fresh clone)
 uv run matcher train
 
+# Export model for Spark (XGBoost JSON + manifest)
+uv run matcher export-model
+
 # Run tests
 uv run pytest tests/
 

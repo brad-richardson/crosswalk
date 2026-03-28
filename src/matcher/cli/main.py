@@ -1101,6 +1101,92 @@ def register_commands(app: typer.Typer) -> None:
         console.print(f"\n[green]Model saved to {output}[/green]")
         console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
 
+    @app.command("export-model")
+    def export_model(
+        model_path: Path = typer.Option(
+            Path("data/models/spark_portable_28feat.joblib"),
+            "--model",
+            "-m",
+            help="Path to trained joblib model",
+        ),
+        output_dir: Path = typer.Option(
+            Path("data/models/export"),
+            "--output",
+            "-o",
+            help="Output directory for exported model files",
+        ),
+    ):
+        """Export a trained model to XGBoost-native JSON format for Spark.
+
+        Produces two files:
+        - model.json: XGBoost native model (loadable by xgboost.spark)
+        - manifest.json: Feature list, threshold, and metadata
+
+        Examples:
+            matcher export-model
+            matcher export-model -m data/models/my_model.joblib -o export/
+        """
+        import json
+
+        from ..matching.ml import MLMatcher
+
+        if not model_path.exists():
+            console.print(f"[red]Model not found: {model_path}[/red]")
+            raise typer.Exit(1)
+
+        matcher = MLMatcher()
+        matcher.load_model(model_path)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Export XGBoost native JSON (loadable by xgboost.spark)
+        model_out = output_dir / "model.json"
+        matcher.model.get_booster().save_model(str(model_out))
+        console.print(f"[green]Exported model to {model_out}[/green]")
+
+        # Extract hyperparams from the XGBoost model
+        xgb_params = matcher.model.get_params()
+        hyperparams = {
+            k: v
+            for k, v in xgb_params.items()
+            if k
+            in (
+                "n_estimators",
+                "learning_rate",
+                "max_depth",
+                "min_child_weight",
+                "subsample",
+                "colsample_bytree",
+                "gamma",
+                "reg_alpha",
+                "reg_lambda",
+                "max_bin",
+                "scale_pos_weight",
+            )
+            and v is not None
+        }
+
+        # Export feature manifest
+        manifest = {
+            "features": matcher.feature_names,
+            "n_features": len(matcher.feature_names),
+            "n_estimators": xgb_params.get("n_estimators"),
+            "threshold": 0.5,
+            "is_binary": matcher.is_binary,
+            "feature_version": matcher.feature_version,
+            "label_encoder": matcher.label_encoder,
+            "hyperparams": hyperparams,
+            "source_model": str(model_path),
+        }
+        manifest_out = output_dir / "manifest.json"
+        with open(manifest_out, "w") as f:
+            json.dump(manifest, f, indent=2)
+        console.print(f"[green]Exported manifest to {manifest_out}[/green]")
+
+        console.print(f"\n[blue]Features ({len(matcher.feature_names)}):[/blue]")
+        for feat in matcher.feature_names:
+            console.print(f"  {feat}")
+
     @app.command("eval")
     def eval_model(
         model: Path = typer.Option(
