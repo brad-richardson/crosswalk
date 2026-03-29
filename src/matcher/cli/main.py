@@ -1180,6 +1180,9 @@ def register_commands(app: typer.Typer) -> None:
         for k, v in xgb_params.items():
             if v is None or callable(v):
                 continue
+            # Skip NaN (not valid JSON)
+            if isinstance(v, float) and np.isnan(v):
+                continue
             try:
                 json.dumps(v)
                 hyperparams[k] = v
