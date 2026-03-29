@@ -1136,7 +1136,11 @@ def register_commands(app: typer.Typer) -> None:
         import numpy as np
         import xgboost as xgb
 
-        from ..config import FEATURE_COLUMNS, SPARK_PORTABLE_FEATURES
+        from ..config import (
+            FEATURE_COLUMNS,
+            SPARK_PORTABLE_FEATURES,
+            SPARK_PORTABLE_XGB_PARAMS,
+        )
         from ..matching.ml import MLMatcher
 
         if not labels_dir.exists():
@@ -1153,13 +1157,14 @@ def register_commands(app: typer.Typer) -> None:
             f"[dim]Excluding {len(exclude_features)} features requiring topology/graph/spatial-index[/dim]"
         )
 
-        # Train
+        # Train with Spark-portable hyperparams (tuned for 28-feature subset)
         matcher = MLMatcher()
         metrics = matcher.train(
             labels_dir=labels_dir,
             test_size=0.2,
             binary=True,
             exclude_features=exclude_features,
+            **SPARK_PORTABLE_XGB_PARAMS,
         )
 
         # Export
@@ -1169,27 +1174,17 @@ def register_commands(app: typer.Typer) -> None:
         matcher.model.get_booster().save_model(str(model_out))
         model_size_kb = os.path.getsize(model_out) / 1024
 
-        # Extract hyperparams
+        # Extract all JSON-serializable hyperparams for reproducibility
         xgb_params = matcher.model.get_params()
-        hyperparams = {
-            k: v
-            for k, v in xgb_params.items()
-            if k
-            in (
-                "n_estimators",
-                "learning_rate",
-                "max_depth",
-                "min_child_weight",
-                "subsample",
-                "colsample_bytree",
-                "gamma",
-                "reg_alpha",
-                "reg_lambda",
-                "max_bin",
-                "scale_pos_weight",
-            )
-            and v is not None
-        }
+        hyperparams = {}
+        for k, v in xgb_params.items():
+            if v is None or callable(v):
+                continue
+            try:
+                json.dumps(v)
+                hyperparams[k] = v
+            except (TypeError, ValueError):
+                hyperparams[k] = str(v)
 
         manifest = {
             "features": matcher.feature_names,

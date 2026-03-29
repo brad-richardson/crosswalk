@@ -370,6 +370,22 @@ SPARK_PORTABLE_FEATURES = [
     "endpoint_heading_divergence",
 ]  # fmt: skip
 
+# XGBoost hyperparams tuned for the 28-feature Spark-portable model.
+# Tuned via Optuna (80 trials, slight size penalty for tree count).
+# Higher learning rate + fewer trees than the full 78-feature model.
+SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
+    "n_estimators": 200,
+    "learning_rate": 0.037979773378190335,
+    "max_depth": 8,
+    "min_child_weight": 1,
+    "subsample": 0.7312303857873605,
+    "colsample_bytree": 0.9384017093295245,
+    "gamma": 0.7417263340163897,
+    "reg_alpha": 0.6821030293753112,
+    "reg_lambda": 2.051665570271953,
+    "max_bin": 206,
+}
+
 
 def default_worker_count() -> int:
     """Number of parallel workers, reserving ~10% of cores for other processes."""
