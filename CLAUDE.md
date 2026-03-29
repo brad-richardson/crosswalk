@@ -16,6 +16,9 @@ uv pip install -e ".[dev,ml,web]"
 # Train ML model (required after fresh clone)
 uv run matcher train
 
+# Train + export Spark-portable model for Overture matching
+uv run matcher export-spark-model
+
 # Run tests
 uv run pytest tests/
 

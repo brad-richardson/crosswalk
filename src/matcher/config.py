@@ -324,6 +324,69 @@ SEMANTIC_FEATURES = [
 ]
 
 
+# Features included in Spark-portable models for Overture matching.
+# These are computable from aligned geometry pairs alone — no graph topology,
+# no spatial indexes, no connector data required.
+# Used by `matcher export-spark-model`. Inclusive list (won't break with feature drift).
+SPARK_PORTABLE_FEATURES = [
+    # Geometry (distance/overlap)
+    "hausdorff_distance_m",
+    "mean_hausdorff_distance_m",
+    "hausdorff_p95_m",
+    "buffer_iou_5m",
+    "buffer_iou_15m",
+    "heading_delta",
+    "collinear_gap_ratio",
+    "edge_distance_rmse_m",
+    # Name similarity (top 3 by importance)
+    "name_levenshtein",
+    "name_token_sort",
+    "name_numeric_match",
+    # Class
+    "class_similarity",
+    # Lateral offset
+    "lateral_offset_m",
+    "lateral_offset_iqr_m",
+    "lateral_offset_p95_m",
+    # Coverage
+    "ref_coverage",
+    "target_coverage",
+    "min_coverage",
+    "coverage_ratio",
+    # Sinuosity
+    "sinuosity_ref",
+    "sinuosity_target",
+    # Heading consistency (target-side only)
+    "heading_consistency_target",
+    # Length
+    "min_length_m",
+    "aligned_length_m",
+    # Shape complexity (target-side only)
+    "shape_complexity_target",
+    # Parallel sibling (offset ratio only)
+    "offset_over_expected_halfwidth",
+    # Intersection overlap
+    "post_node_continuation_m",
+    "endpoint_heading_divergence",
+]  # fmt: skip
+
+# XGBoost hyperparams tuned for the 28-feature Spark-portable model.
+# Tuned via Optuna (80 trials, slight size penalty for tree count).
+# Higher learning rate + fewer trees than the full 78-feature model.
+SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
+    "n_estimators": 200,
+    "learning_rate": 0.037979773378190335,
+    "max_depth": 8,
+    "min_child_weight": 1,
+    "subsample": 0.7312303857873605,
+    "colsample_bytree": 0.9384017093295245,
+    "gamma": 0.7417263340163897,
+    "reg_alpha": 0.6821030293753112,
+    "reg_lambda": 2.051665570271953,
+    "max_bin": 206,
+}
+
+
 def default_worker_count() -> int:
     """Number of parallel workers, reserving ~10% of cores for other processes."""
     total = multiprocessing.cpu_count()

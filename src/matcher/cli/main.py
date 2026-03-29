@@ -1101,6 +1101,126 @@ def register_commands(app: typer.Typer) -> None:
         console.print(f"\n[green]Model saved to {output}[/green]")
         console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
 
+    @app.command("export-spark-model")
+    def export_spark_model(
+        labels_dir: Path = typer.Option(
+            Path("labels"),
+            "--labels",
+            "-l",
+            help="Labels directory",
+        ),
+        output_dir: Path = typer.Option(
+            Path("data/models/export"),
+            "--output",
+            "-o",
+            help="Output directory for model.json + manifest.json",
+        ),
+    ):
+        """Train and export a Spark-portable XGBoost model for Overture matching.
+
+        Trains on the 28-feature subset computable from aligned geometry pairs
+        (no topology, graph, or spatial-index features required). Exports as
+        XGBoost-native JSON loadable by the Spark MatchLayerToNetworkV2 job.
+
+        Produces:
+        - model.json: XGBoost native model
+        - manifest.json: Feature list, hyperparameters, and metadata
+
+        Examples:
+            matcher export-spark-model
+            matcher export-spark-model --labels labels -o data/models/export/
+        """
+        import json
+        import os
+
+        import numpy as np
+        import xgboost as xgb
+
+        from ..config import (
+            FEATURE_COLUMNS,
+            SPARK_PORTABLE_FEATURES,
+            SPARK_PORTABLE_XGB_PARAMS,
+        )
+        from ..matching.ml import MLMatcher
+
+        if not labels_dir.exists():
+            console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
+            raise typer.Exit(1)
+
+        # Determine features to exclude (everything not in SPARK_PORTABLE_FEATURES)
+        exclude_features = [f for f in FEATURE_COLUMNS if f not in SPARK_PORTABLE_FEATURES]
+
+        console.print(
+            f"[blue]Training Spark-portable model ({len(SPARK_PORTABLE_FEATURES)} features)...[/blue]"
+        )
+        console.print(
+            f"[dim]Excluding {len(exclude_features)} features requiring topology/graph/spatial-index[/dim]"
+        )
+
+        # Train with Spark-portable hyperparams (tuned for 28-feature subset)
+        matcher = MLMatcher()
+        metrics = matcher.train(
+            labels_dir=labels_dir,
+            test_size=0.2,
+            binary=True,
+            exclude_features=exclude_features,
+            **SPARK_PORTABLE_XGB_PARAMS,
+        )
+
+        # Export
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        model_out = output_dir / "model.json"
+        matcher.model.get_booster().save_model(str(model_out))
+        model_size_kb = os.path.getsize(model_out) / 1024
+
+        # Extract all JSON-serializable hyperparams for reproducibility
+        xgb_params = matcher.model.get_params()
+        hyperparams = {}
+        for k, v in xgb_params.items():
+            if v is None or callable(v):
+                continue
+            try:
+                json.dumps(v)
+                hyperparams[k] = v
+            except (TypeError, ValueError):
+                hyperparams[k] = str(v)
+
+        manifest = {
+            "features": matcher.feature_names,
+            "n_features": len(matcher.feature_names),
+            "n_estimators": xgb_params.get("n_estimators"),
+            "threshold": 0.5,
+            "is_binary": matcher.is_binary,
+            "feature_version": matcher.feature_version,
+            "label_encoder": matcher.label_encoder,
+            "hyperparams": hyperparams,
+        }
+        manifest_out = output_dir / "manifest.json"
+        with open(manifest_out, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+        # Verify the exported model loads and predicts
+        console.print("[blue]Verifying exported model...[/blue]")
+        booster = xgb.Booster()
+        booster.load_model(str(model_out))
+        test_data = xgb.DMatrix(
+            np.zeros((1, len(matcher.feature_names)), dtype=np.float32),
+            feature_names=matcher.feature_names,
+        )
+        pred = booster.predict(test_data)
+        if len(pred) != 1:
+            console.print(
+                "[red]Model verification failed: prediction returned unexpected shape[/red]"
+            )
+            raise typer.Exit(1)
+
+        console.print(f"\n[green]Exported to {output_dir}/[/green]")
+        console.print(f"  model.json: {model_size_kb:.0f} KB")
+        console.print(f"  manifest.json: {len(matcher.feature_names)} features")
+        console.print(f"  CV F1: {metrics['cv_f1_mean']:.4f} ± {metrics.get('cv_f1_std', 0):.4f}")
+        console.print(f"  Holdout accuracy: {metrics['test_accuracy']:.1%}")
+
     @app.command("eval")
     def eval_model(
         model: Path = typer.Option(
