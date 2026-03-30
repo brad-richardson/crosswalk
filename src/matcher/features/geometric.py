@@ -590,17 +590,15 @@ def compute_sinuosity(
     Sinuosity = line_length / straight_distance
     - 1.0 = perfectly straight
     - >1.0 = increasingly curvy
-    - Capped at 10.0 to prevent outliers from distorting XGBoost splits
+    - NaN for degenerate cases (loops where start == end)
 
     Args:
         line: LineString geometry
         coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
-        Sinuosity ratio (1.0 to 10.0)
+        Sinuosity ratio (>= 1.0), or NaN for degenerate loops.
     """
-    MAX_SINUOSITY = 10.0
-
     if line is None or line.is_empty:
         return 1.0
 
@@ -618,13 +616,11 @@ def compute_sinuosity(
     end = coords[-1]
     straight_distance = np.sqrt(np.sum((end - start) ** 2))
 
-    # Handle loop case (start == end) — cap instead of returning extreme outlier.
-    # Previously returned 100.0, which distorted sinuosity_delta for any pair
-    # involving a loop/cul-de-sac.
+    # Loop case (start == end) — sinuosity is undefined, let imputation handle it
     if straight_distance < 1e-9:
-        return MAX_SINUOSITY
+        return float("nan")
 
-    return min(line_length / straight_distance, MAX_SINUOSITY)
+    return line_length / straight_distance
 
 
 def compute_vertex_density(

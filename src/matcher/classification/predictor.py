@@ -228,7 +228,8 @@ class LightweightClassPredictor:
             lambda g: len(g.coords) / max(g.length, 1) if g else 0
         )
 
-        # Fill NaN
+        # Fill NaN (sinuosity defaults to 1.0 = straight line, not 0)
+        features["sinuosity"] = features["sinuosity"].fillna(1.0)
         features = features.fillna(0)
 
         return features
@@ -244,9 +245,9 @@ class LightweightClassPredictor:
 
         straight_dist = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
         if straight_dist < 0.001:  # Nearly circular
-            return 10.0  # High sinuosity cap
+            return float("nan")
 
-        return min(geom.length / straight_dist, 10.0)
+        return geom.length / straight_dist
 
     def _extract_name_string(self, name) -> str:
         """Extract string from name, handling dict format."""

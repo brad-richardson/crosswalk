@@ -252,6 +252,10 @@ class TestBoundsOnRealData:
         "interior_junction_position_sim",
         # Shared anchor count (NaN when alignment/connector data unavailable)
         "shared_anchor_count",
+        # Sinuosity (NaN for degenerate loops where start == end)
+        "sinuosity_ref",
+        "sinuosity_target",
+        "sinuosity_delta",
     }
 
     def test_no_nan_in_real_data(self, labeled_features):
