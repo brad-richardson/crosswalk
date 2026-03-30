@@ -228,7 +228,8 @@ class LightweightClassPredictor:
             lambda g: len(g.coords) / max(g.length, 1) if g else 0
         )
 
-        # Fill NaN
+        # Fill NaN (sinuosity defaults to 1.0 = straight line, not 0)
+        features["sinuosity"] = features["sinuosity"].fillna(1.0)
         features = features.fillna(0)
 
         return features
