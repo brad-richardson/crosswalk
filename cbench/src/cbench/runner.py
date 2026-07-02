@@ -65,6 +65,7 @@ def run_single(
     output_dir: Path,
     results_file: Path | None = None,
     stitch_labels_dir: Path | None = None,
+    match_level: str = "target",
     **kwargs,
 ) -> RunResult:
     """Run a tool on a single dataset and evaluate against ground truth.
@@ -79,6 +80,7 @@ def run_single(
         results_file: If set, append result to this JSONL file.
         stitch_labels_dir: If set, path to stitching labels directory for
             group-level evaluation.
+        match_level: Evaluation level, "target" (default) or "pair".
         **kwargs: Tool-specific options passed to adapter.run().
 
     Returns:
@@ -123,9 +125,9 @@ def run_single(
     tool_output = adapter.parse_output(output_path)
     logger.info(f"Found {len(tool_output.matches)} match predictions")
 
-    logger.info("Evaluating against ground truth...")
+    logger.info(f"Evaluating against ground truth (match_level={match_level})...")
     ground_truth = load_labels(labels_dir, dataset)
-    eval_result = evaluate(tool_output.matches, ground_truth)
+    eval_result = evaluate(tool_output.matches, ground_truth, match_level=match_level)
 
     metrics = eval_result.to_dict()
     metrics.update(resource_stats.to_dict())

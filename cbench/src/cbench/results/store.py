@@ -79,12 +79,15 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
     table = Table(title="Benchmark Comparison")
     table.add_column("Tool", style="cyan")
     table.add_column("Dataset", style="green")
+    table.add_column("Level")
     table.add_column("Precision", justify="right")
     table.add_column("Recall", justify="right")
     table.add_column("F1", justify="right", style="bold")
     table.add_column("TP", justify="right")
     table.add_column("FP", justify="right")
     table.add_column("FN", justify="right")
+    table.add_column("Unlabeled", justify="right")
+    table.add_column("Coverage", justify="right")
     table.add_column("Time", justify="right")
     table.add_column("Peak RSS", justify="right")
     table.add_column("Timestamp")
@@ -95,15 +98,20 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
         time_str = f"{wall:.1f}s" if wall is not None else "-"
         rss = m.get("peak_rss_mb")
         rss_str = f"{rss:.0f} MB" if rss is not None else "-"
+        coverage = m.get("labeled_coverage")
+        coverage_str = f"{coverage:.4f}" if coverage is not None else "-"
         table.add_row(
             r.tool,
             r.dataset,
+            m.get("match_level", "-"),
             f"{m.get('precision', 0):.4f}",
             f"{m.get('recall', 0):.4f}",
             f"{m.get('f1', 0):.4f}",
             str(m.get("true_positives", 0)),
             str(m.get("false_positives", 0)),
             str(m.get("false_negatives", 0)),
+            str(m.get("unlabeled_predictions", 0)),
+            coverage_str,
             time_str,
             rss_str,
             r.timestamp[:19],
