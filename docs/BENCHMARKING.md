@@ -60,12 +60,15 @@ cbench run matcher us_boston_streets --labels ../labels/human ...
 cbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
 ```
 
-Note that precision is computed only over predictions that hit labeled ground
-truth — predictions on unlabeled pairs are reported as `unlabeled_predictions`
-and excluded from FP, so a low `labeled_coverage` (the fraction of predictions
-that were actually evaluated) means precision is measured against a small
-labeled subset and should be read with caution. Labels marked `unsure` are
-skipped and reported as `skipped_unsure`.
+Note that precision only counts errors against labeled ground truth — a
+prediction is a false positive only if it hits an explicitly labeled
+`no_match` pair, and predictions on unlabeled pairs are reported as
+`unlabeled_predictions` and excluded entirely. At target level, TP/FN count
+unique labeled targets rather than individual predictions. A low
+`labeled_coverage` (the fraction of predictions that touched labeled ground
+truth) means the metrics are measured against a small labeled subset and
+should be read with caution. Labels marked `unsure` are skipped and reported
+as `skipped_unsure`.
 
 ## Hootenanny Setup
 

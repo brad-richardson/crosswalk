@@ -80,7 +80,7 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
     )
     console.print(
         f"  Labeled coverage: {er.labeled_coverage:.4f} "
-        f"(precision measured over labeled predictions only)"
+        f"(predictions on unlabeled pairs are excluded from precision)"
     )
     if result.resource_stats:
         rs = result.resource_stats

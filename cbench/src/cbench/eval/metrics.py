@@ -13,11 +13,15 @@ Supports two match levels:
 - "pair": exact (ref_id, target_id) pair matching. A prediction is a TP only
   if the exact pair appears in the ground truth.
 
-Precision is computed only over predictions that hit labeled ground truth;
-predictions on unlabeled pairs are excluded from FP. The `labeled_coverage`
-field reports what fraction of predictions were actually evaluated — a low
-value means precision is measured against a small labeled subset and should
-be read with caution.
+Precision only counts errors against labeled ground truth: FP requires
+hitting an explicitly labeled no_match pair, so predictions on unlabeled
+pairs never count as FP. At pair level, TP also counts predictions (those
+hitting labeled match pairs); at target level, TP/FN count unique labeled
+targets rather than individual predictions, so precision is a ratio of
+labeled-target hits to labeled errors, not a fraction of predictions. The
+`labeled_coverage` field reports what fraction of predictions touched
+labeled ground truth at all — a low value means the metrics are measured
+against a small labeled subset and should be read with caution.
 """
 
 from __future__ import annotations
