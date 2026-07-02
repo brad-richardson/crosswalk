@@ -263,3 +263,46 @@ class TestAgentLabelsNeverInTestSet:
         assert len(df) == 30
         assert results["n_train"] == len(spy_split["train_idx"])
         assert results["n_train"] + results["n_test"] == 30
+
+
+class TestAgentFeatureVersionChecked:
+    """Agent features must pass the same feature_version check as human labels."""
+
+    @staticmethod
+    def _make_stale_agent_features(tmp_path, n_human=30, n_agent=10):
+        """Labels dir where human features are current but agent features are stale."""
+        labels_dir = _make_labels_dir(tmp_path, n_human=n_human, n_agent=n_agent)
+        parquet_path = labels_dir / "features" / "dataset=test_ds" / "data.parquet"
+        features = pd.read_parquet(parquet_path)
+        agent_mask = features["target_id"].str.startswith("AT")
+        features.loc[agent_mask, "feature_version"] = "stale-version"
+        features.to_parquet(parquet_path, index=False)
+        return labels_dir
+
+    def test_stale_agent_features_raise(self, tmp_path):
+        labels_dir = self._make_stale_agent_features(tmp_path)
+
+        matcher = MLMatcher()
+        with pytest.raises(ValueError, match="stale feature_version"):
+            matcher.train(labels_dir=str(labels_dir), test_size=0.3, agent_weight=0.5, **FAST_XGB)
+
+    def test_stale_agent_features_allowed_with_flag(self, tmp_path):
+        labels_dir = self._make_stale_agent_features(tmp_path)
+
+        matcher = MLMatcher()
+        results = matcher.train(
+            labels_dir=str(labels_dir),
+            test_size=0.3,
+            agent_weight=0.5,
+            allow_stale_features=True,
+            **FAST_XGB,
+        )
+        assert results["n_train"] > 0
+
+    def test_stale_agent_features_ignored_at_zero_weight(self, tmp_path):
+        """agent_weight=0.0 never loads agent labels, so stale agent features are moot."""
+        labels_dir = self._make_stale_agent_features(tmp_path)
+
+        matcher = MLMatcher()
+        results = matcher.train(labels_dir=str(labels_dir), test_size=0.3, **FAST_XGB)
+        assert results["n_train"] + results["n_test"] == 30

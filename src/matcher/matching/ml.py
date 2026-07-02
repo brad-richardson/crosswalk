@@ -1089,6 +1089,13 @@ class MLMatcher:
                                     max_hausdorff_m=max_hausdorff_m,
                                 )
 
+                                # Agent features must pass the same
+                                # feature_version check as human labels
+                                self._check_feature_versions(
+                                    agent_with_features,
+                                    allow_stale_features=allow_stale_features,
+                                )
+
                                 agent_df = agent_with_features
                                 logger.info(
                                     f"Loaded {len(agent_df)} agent labels "
