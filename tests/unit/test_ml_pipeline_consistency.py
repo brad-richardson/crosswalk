@@ -2,7 +2,7 @@
 
 These tests ensure feature computation is consistent across training and inference:
 1. Pre-computed features (endpoint, topology) are passed through correctly
-2. Inference imputation uses stored training medians
+2. Missing values: NaN is preserved for XGBoost's native handling, inf is capped
 3. Alignment-aware graphlet computation respects alignment fractions
 
 These catch subtle training/inference skew that would degrade model performance.

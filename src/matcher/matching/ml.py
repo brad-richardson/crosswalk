@@ -1112,7 +1112,7 @@ class MLMatcher:
             else:
                 logger.info("No agent labels found")
 
-        # Extract features (without imputation - we'll do that after split)
+        # Extract features (NaN preserved — XGBoost handles missing values natively)
         X, y = self._extract_features_and_labels(df, binary=binary)
 
         logger.info(f"Feature matrix shape: {X.shape}")
@@ -1128,7 +1128,7 @@ class MLMatcher:
         y_train, y_test = y[train_idx], y[test_idx]
         weights_train = sample_weights[train_idx]
 
-        # Verify labels have all expected features before computing medians
+        # Verify labels have all expected features before training
         # This catches bugs where new features are added to FEATURE_COLUMNS but
         # the labels (created with older code) don't have them
         # Build expected features after all exclusions (semantic + explicit)
@@ -1288,7 +1288,8 @@ class MLMatcher:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract feature matrix and labels from dataframe.
 
-        Does NOT perform imputation - that should be done after train/test split.
+        Does NOT impute missing values — NaN is preserved for XGBoost's native
+        missing-value handling. Infinities are capped later via _cap_infinities().
 
         Args:
             df: Labels dataframe
@@ -1326,7 +1327,7 @@ class MLMatcher:
         self.feature_names = actual_features
         logger.info(f"Using features: {self.feature_names}")
 
-        # Extract feature matrix (without imputation)
+        # Extract feature matrix (NaN preserved for XGBoost's native handling)
         X = df[self.feature_names].values.astype(np.float32)
 
         # Extract labels
