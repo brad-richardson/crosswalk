@@ -41,9 +41,13 @@ cbench list-tools
 cbench supports two evaluation levels via `--match-level`:
 
 - **target** (default): Target-level matching. A labeled match target is a TP if
-  it appears in *any* prediction, regardless of which reference segment was chosen.
+  it appears in *any* prediction, regardless of which reference segment was chosen,
+  and an FN if it appears in no prediction (TP/FN count unique labeled targets).
   Avoids penalizing tools for picking a different reference segment that covers a
-  different subsegment of the same target road.
+  different subsegment of the same target road. False positives remain pair-exact:
+  a `no_match` label asserts that one specific `(ref_id, target_id)` pair is wrong,
+  so only a prediction of that exact pair counts as an FP — predicting a *different*
+  reference for that target is not evidence of error.
 
 - **pair**: Exact `(ref_id, target_id)` pair matching. More strict — a prediction
   is TP only if the exact pair appears in ground truth.
@@ -55,6 +59,13 @@ cbench run matcher us_boston_streets --labels ../labels/human ...
 # Strict pair-level evaluation
 cbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
 ```
+
+Note that precision is computed only over predictions that hit labeled ground
+truth — predictions on unlabeled pairs are reported as `unlabeled_predictions`
+and excluded from FP, so a low `labeled_coverage` (the fraction of predictions
+that were actually evaluated) means precision is measured against a small
+labeled subset and should be read with caution. Labels marked `unsure` are
+skipped and reported as `skipped_unsure`.
 
 ## Hootenanny Setup
 

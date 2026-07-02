@@ -42,6 +42,19 @@ def _coerce_path_opts(kwargs: dict) -> dict:
     return kwargs
 
 
+def _validate_match_level(match_level: str) -> str:
+    """Validate --match-level value, or exit with error."""
+    from cbench.eval.metrics import MATCH_LEVELS
+
+    if match_level not in MATCH_LEVELS:
+        console.print(
+            f"[red]Invalid --match-level: {match_level} "
+            f"(expected one of: {', '.join(MATCH_LEVELS)})[/red]"
+        )
+        raise typer.Exit(1)
+    return match_level
+
+
 def _get_adapter(tool: str):
     """Look up a tool adapter by name, or exit with error."""
     from cbench.adapters import REGISTRY
@@ -56,13 +69,18 @@ def _get_adapter(tool: str):
 def _print_eval_result(tool: str, dataset: str, result) -> None:
     """Print evaluation results for a single run."""
     er = result.eval_result
-    console.print(f"[bold]Results: {tool} on {dataset}[/bold]")
+    console.print(f"[bold]Results: {tool} on {dataset}[/bold] (match_level={er.match_level})")
     console.print(f"  Precision: {er.precision:.4f}")
     console.print(f"  Recall:    {er.recall:.4f}")
     console.print(f"  F1:        [bold]{er.f1:.4f}[/bold]")
     console.print(
         f"  TP={er.true_positives}  FP={er.false_positives}  "
-        f"FN={er.false_negatives}  Unlabeled={er.unlabeled_predictions}"
+        f"FN={er.false_negatives}  Unlabeled={er.unlabeled_predictions}  "
+        f"Unsure skipped={er.skipped_unsure}"
+    )
+    console.print(
+        f"  Labeled coverage: {er.labeled_coverage:.4f} "
+        f"(precision measured over labeled predictions only)"
     )
     if result.resource_stats:
         rs = result.resource_stats
@@ -118,6 +136,9 @@ def run(
     stitch_labels: Path | None = typer.Option(
         None, "--stitch-labels", help="Path to stitching labels directory"
     ),
+    match_level: str = typer.Option(
+        "target", "--match-level", help="Evaluation level: 'target' (default) or 'pair'"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
@@ -127,6 +148,7 @@ def run(
     from cbench.runner import run_single
 
     adapter = _get_adapter(tool)
+    match_level = _validate_match_level(match_level)
     kwargs = _coerce_path_opts(_parse_opts(opt))
 
     try:
@@ -139,6 +161,7 @@ def run(
             output_dir=output_dir,
             results_file=results_file,
             stitch_labels_dir=stitch_labels,
+            match_level=match_level,
             **kwargs,
         )
     except FileNotFoundError as exc:
@@ -174,6 +197,9 @@ def run_batch(
     results_file: Path = typer.Option(
         Path("cbench_results.jsonl"), "--results", help="JSONL results file"
     ),
+    match_level: str = typer.Option(
+        "target", "--match-level", help="Evaluation level: 'target' (default) or 'pair'"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
@@ -183,6 +209,7 @@ def run_batch(
     from cbench.runner import run_single
 
     adapter = _get_adapter(tool)
+    match_level = _validate_match_level(match_level)
     extra_kwargs = _coerce_path_opts(_parse_opts(opt))
 
     try:
@@ -232,6 +259,7 @@ def run_batch(
                 output_dir=output_dir,
                 results_file=results_file,
                 stitch_labels_dir=resolved_stitch_dir,
+                match_level=match_level,
                 **run_kwargs,
             )
             f1 = result.eval_result.f1
