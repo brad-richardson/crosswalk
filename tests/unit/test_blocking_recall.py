@@ -185,6 +185,23 @@ class TestComputeBlockingRecall:
         assert result.unresolvable == [("ref_missing", "t_unknown")]
         assert math.isnan(result.recall)
 
+    def test_explicit_zero_buffer_is_honored(self):
+        """An explicit 0.0 buffer must not be replaced by the settings default."""
+        labels = _make_labels([("ref_a", "t_near", "match")])
+
+        result = compute_blocking_recall(
+            reference_gdf=_make_reference(),
+            target_gdf=_make_target(),
+            labels_df=labels,
+            buffer_distance_m=0.0,
+        )
+
+        # 0.0 is used as-is (settings default would be 50.0), so the 10m-apart
+        # pair is missed rather than blocked
+        assert result.buffer_distance_m == 0.0
+        assert result.blocked == 0
+        assert len(result.missed) == 1
+
     def test_duplicate_labels_counted_once(self):
         """Duplicate (gers_id, target_id) match labels are deduplicated."""
         labels = _make_labels(

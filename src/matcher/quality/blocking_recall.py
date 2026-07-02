@@ -122,7 +122,8 @@ def compute_blocking_recall(
         unresolvable pairs, MultiLineString-dropped pairs, and recall at
         alternative buffers
     """
-    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
+    if buffer_distance_m is None:
+        buffer_distance_m = settings.buffer_distance_m
 
     # Distinct labeled true-match pairs
     matches = labels_df[labels_df["label"] == "match"][["gers_id", "target_id"]]

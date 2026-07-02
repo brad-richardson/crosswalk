@@ -1,10 +1,19 @@
 """CLI command for measuring blocking-stage recall against labeled matches."""
 
+import math
 from pathlib import Path
 
 import typer
 
 from .utils import console
+
+
+def _format_recall(recall: float) -> str:
+    """Render a recall value, showing n/a when undefined (no resolvable match labels)."""
+    if math.isnan(recall):
+        return "[dim]n/a[/dim]"
+    style = "green" if recall >= 0.99 else "yellow" if recall >= 0.95 else "red"
+    return f"[{style}]{recall:.2%}[/{style}]"
 
 
 def register_blocking_recall_commands(app: typer.Typer) -> None:
@@ -101,10 +110,7 @@ def register_blocking_recall_commands(app: typer.Typer) -> None:
         table.add_row("Missed", str(len(result.missed)))
         table.add_row("Unresolvable", str(len(result.unresolvable)))
         table.add_row("MultiLineString-dropped", str(len(result.multilinestring_dropped)))
-        recall_style = (
-            "green" if result.recall >= 0.99 else "yellow" if result.recall >= 0.95 else "red"
-        )
-        table.add_row("Recall", f"[{recall_style}]{result.recall:.2%}[/{recall_style}]")
+        table.add_row("Recall", _format_recall(result.recall))
         console.print(table)
 
         # Recall at alternative buffers
@@ -113,7 +119,7 @@ def register_blocking_recall_commands(app: typer.Typer) -> None:
         buffer_table.add_column("Recall", justify="right")
         for buf, recall in sorted(result.recall_at_buffer.items()):
             marker = " (current)" if buf == result.buffer_distance_m else ""
-            buffer_table.add_row(f"{buf:g}{marker}", f"{recall:.2%}")
+            buffer_table.add_row(f"{buf:g}{marker}", _format_recall(recall))
         console.print(buffer_table)
 
         # Missed pairs with distances
