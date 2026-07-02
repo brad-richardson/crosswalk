@@ -30,9 +30,16 @@ Applied by the ML scorer when classifying each candidate pair:
 
 ### Optimizer/Labeling Thresholds (1:N groups and labeling UI)
 
-1:N group optimization uses the Hungarian algorithm to resolve cases where a single Overture segment corresponds to multiple local segments (e.g., split carriageways).
+Group optimization (`src/matcher/matching/optimizer.py::optimize_matches_with_grouping`) resolves cases where a single Overture segment corresponds to multiple local segments (e.g., split carriageways), and vice versa. There is no assignment solver; the pipeline is:
 
-Applied during 1:N group optimization and to define the labeling UI review band:
+1. **Connected components**: Build bipartite connected components over candidate pairs above `min_confidence` (`find_match_components`)
+2. **Classification**: Classify each component as 1:1, 1:N, N:1, or M:N by counting distinct refs/targets (`_classify_and_resolve_component`)
+3. **Contiguity clustering**: Within 1:N/N:1/M:N components, cluster segments into contiguous subgroups via cKDTree endpoint proximity (within `contiguity_tolerance`); non-contiguous singletons fall back to the 1:1 pool
+4. **Greedy 1:1 assignment**: Assign unclaimed leftover candidates greedily by descending confidence (`optimize_matches_greedy`)
+5. **Post-hoc expansion**: Expand 1:1 matches into 1:N/N:1 groups where contiguous candidates exist (`_expand_greedy_matches`); this only adds matches, never removes assignments
+6. **Coverage-conflict demotion**: When two targets claim overlapping portions of the same reference segment (overlap > `MAX_ALIGNMENT_OVERLAP_M` = 5 m), the lower-confidence match is demoted to REVIEW (`_validate_assignment_coverage`)
+
+Applied during group optimization and to define the labeling UI review band:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
@@ -156,21 +163,11 @@ The ML scorer pre-computes certain features **before** parallelization for effic
 
 **Critical invariant**: Pre-computed features must produce the same values as direct computation. This is tested in `tests/unit/test_ml_pipeline_consistency.py`.
 
-### Imputation Consistency
+### Missing Value Handling
 
-Missing feature values are imputed using medians computed from **training data only**:
+There is **no imputation**. NaN feature values are passed through unchanged to XGBoost, which handles missing values natively (each tree split learns a default direction for missing values). The only sanitization is infinity capping: `ml.py::_cap_infinities` replaces `±inf` with `MAX_DISTANCE_METERS` because XGBoost handles NaN but not inf. This is applied consistently to training data, test data, and inference features (`_features_to_array` also fills missing dict keys with NaN, not 0).
 
-```python
-# During training (ml.py::train)
-for feat in features:
-    median = np.nanmedian(X_train[:, feat_idx])  # Training data only!
-    self.feature_medians[feat] = median
-
-# During inference (ml.py::_impute_missing)
-fill_value = self.feature_medians.get(feat_name, 0.0)  # Uses stored median
-```
-
-**Risk**: If a new feature is added but not in `feature_medians`, inference falls back to 0.0, which may not be appropriate.
+**Risk**: Because NaN is a valid model input, a feature that is systematically NaN at inference but populated during training (or vice versa) fails silently — tree routing changes for those rows instead of raising an error. Guardrails: `train()` raises if labels are missing expected features, `matcher backfill` keeps stored features current, and `tests/unit/test_ml_pipeline_consistency.py` verifies NaN preservation and inf capping.
 
 ## Test Coverage for Consistency
 
@@ -178,4 +175,4 @@ fill_value = self.feature_medians.get(feat_name, 0.0)  # Uses stored median
 |-----------|----------------|
 | `test_label_store.py` | Features computed but not saved to labels |
 | `test_feature_consistency.py` | Error defaults, naming conventions |
-| `test_ml_pipeline_consistency.py` | Pre-computation vs direct computation, imputation consistency |
+| `test_ml_pipeline_consistency.py` | Pre-computation vs direct computation, NaN preservation / inf capping, alignment-aware graphlet computation, label-store round-trip parity |

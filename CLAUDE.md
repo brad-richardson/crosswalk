@@ -129,7 +129,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture inclu
 - 78 features across 17 categories (source of truth: `config.py::FEATURE_COLUMNS`)
 - Three computation paths (ML inference, labeling UI, training)
 - Pre-computation table (what's pre-computed and why)
-- Imputation consistency (training medians)
+- Missing value handling (NaN passthrough to XGBoost, inf capping)
 - Decision thresholds (ML scoring vs optimizer settings)
 - Test coverage matrix for consistency
 

@@ -104,6 +104,8 @@ Note: even category ablation still suffers from cross-category redundancy. For e
 
 **3,595 human labels + 1,051 agent labels across 21 datasets.**
 
+> **Editor's note (2026-07-02):** The figures above reflect the label store as of February 2026, when this analysis was written. Current counts: **5,487 human labels across 34 datasets** (3,291 match / 2,166 no_match / 30 unsure) and **1,051 agent labels across 15 datasets**. The analysis below has not been re-run against the updated label store.
+
 #### US Datasets (19 datasets, ~3,100 labels)
 
 | Dataset | Labels | Match:No Match | Segments |
