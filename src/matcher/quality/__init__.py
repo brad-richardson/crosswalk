@@ -4,6 +4,11 @@ Generates comprehensive quality metrics for road network datasets,
 useful for comparing datasets and tracking quality over time.
 """
 
+from .blocking_recall import (
+    BlockingRecallResult,
+    MissedPair,
+    compute_blocking_recall,
+)
 from .class_analysis import (
     ClassAnalysisReport,
     analyze_class_confusion_from_bridge,
@@ -29,6 +34,10 @@ from .report import (
 )
 
 __all__ = [
+    # Blocking recall
+    "BlockingRecallResult",
+    "MissedPair",
+    "compute_blocking_recall",
     # Fingerprint
     "QualityFingerprint",
     "compute_quality_metrics",

@@ -208,7 +208,8 @@ def generate_candidates(
     Raises:
         ValueError: If CRS is None (buffer calculations require known CRS)
     """
-    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
+    if buffer_distance_m is None:
+        buffer_distance_m = settings.buffer_distance_m
 
     # Require CRS to be set - buffer calculations need known units
     if reference.crs is None:
@@ -338,7 +339,8 @@ def generate_candidates_iter(
     Yields candidate pairs one at a time instead of building full list.
     Only uses spatial proximity for filtering.
     """
-    buffer_distance_m = buffer_distance_m or settings.buffer_distance_m
+    if buffer_distance_m is None:
+        buffer_distance_m = settings.buffer_distance_m
 
     # Build spatial index on reference
     ref_tree = STRtree(reference.geometry.values)

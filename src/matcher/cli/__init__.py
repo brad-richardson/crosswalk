@@ -8,6 +8,7 @@ import typer
 
 from .agent import agent_app
 from .analyze import analyze_app
+from .blocking_recall import register_blocking_recall_commands
 from .classify import class_app
 from .data import data_app
 from .main import register_commands
@@ -21,6 +22,7 @@ app = typer.Typer(
 
 # Register top-level commands (match, train, eval, backfill, ui, version)
 register_commands(app)
+register_blocking_recall_commands(app)
 
 # Add command groups
 app.add_typer(data_app, name="data")
