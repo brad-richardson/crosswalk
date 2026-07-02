@@ -899,9 +899,21 @@ class MLMatcher:
         agent_weight: float = 0.0,
         min_agent_confidence: float = 0.0,
         max_hausdorff_m: float = 1000.0,
+        allow_stale_features: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
+
+        Evaluation integrity notes:
+        - The holdout test set and cross-validation folds are built from HUMAN
+          labels only. Agent labels (when agent_weight > 0) are appended to the
+          training portion only — they never appear in the test set, and any
+          agent pair sharing a segment with a test pair is dropped to prevent
+          segment-level leakage. Agent labels are also excluded from the
+          in-training CV, so ``cv_f1_mean``/``cv_f1_std`` measure generalization
+          on human labels alone.
+        - Cross-validation runs only over the training rows, so ``cv_f1_mean``
+          is independent of the holdout ``test_accuracy``.
 
         Args:
             labels_dir: Path to Hive-partitioned labels directory
@@ -915,15 +927,25 @@ class MLMatcher:
             exclude_features: List of feature names to exclude from training
                              (for feature importance analysis)
             agent_weight: Weight for agent labels in training (0.0 = ignore, 1.0 = equal to human).
-                         When > 0, agent labels are included with this sample weight.
+                         When > 0, agent labels are included with this sample weight
+                         (training portion only — see evaluation integrity notes).
             min_agent_confidence: Minimum confidence threshold for including agent labels.
                                  Only agent labels with confidence >= this value are included.
             max_hausdorff_m: Max Hausdorff distance for valid training pairs (meters).
                             Pairs exceeding this are dropped as corrupted.
+            allow_stale_features: If False (default), raise an error when labels
+                                 have a feature_version that does not match the
+                                 current FEATURE_VERSION (run `matcher backfill`
+                                 to fix). If True, downgrade to a warning and
+                                 train anyway (features may have mixed semantics).
             **kwargs: Additional XGBoost parameters
 
         Returns:
             Dictionary of training metrics
+
+        Raises:
+            ValueError: If labels have stale/missing feature_version and
+                       allow_stale_features is False.
         """
         try:
             import xgboost as xgb
@@ -969,27 +991,6 @@ class MLMatcher:
             f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets"
         )
 
-        # Check feature_version consistency across labels
-        if "feature_version" in df.columns:
-            version_counts = df["feature_version"].value_counts(dropna=False)
-            n_versions = len(version_counts)
-            if n_versions > 1:
-                logger.warning(
-                    f"Labels contain {n_versions} different feature versions: "
-                    f"{version_counts.to_dict()}"
-                )
-            n_current = (df["feature_version"] == FEATURE_VERSION).sum()
-            n_total = len(df)
-            logger.info(
-                f"Label feature versions: {n_current}/{n_total} match current "
-                f"FEATURE_VERSION={FEATURE_VERSION}"
-            )
-        else:
-            logger.warning(
-                "Labels have no feature_version column (pre-versioning labels). "
-                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}."
-            )
-
         # Set feature_version for this trained model
         self.feature_version = FEATURE_VERSION
 
@@ -1010,17 +1011,23 @@ class MLMatcher:
         df = df[df["label"].isin(valid_labels)].copy()
         logger.info(f"After filtering to valid labels: {len(df)} pairs")
 
+        # Check feature_version consistency across the labels actually used for
+        # training. Stale features silently mix feature semantics (features
+        # computed with older code), so this is an error by default.
+        self._check_feature_versions(df, allow_stale_features=allow_stale_features)
+
         # Validate feature plausibility (drop corrupted/stale pairs)
         df = self._validate_training_pairs(
             df,
             max_hausdorff_m=max_hausdorff_m,
         )
 
-        # Initialize sample weights (human labels get weight 1.0)
-        sample_weights = np.ones(len(df), dtype=np.float32)
-        n_human = len(df)
-
-        # Load and merge agent labels if agent_weight > 0
+        # Load agent labels if agent_weight > 0. They are intentionally NOT
+        # merged into the human label DataFrame: the train/test split below is
+        # computed on human labels only, so agent labels can never land in the
+        # holdout test set and be scored as ground truth. Agent labels are
+        # appended to the TRAINING portion only, after the split.
+        agent_df = None
         if agent_weight > 0:
             from ..labeling.feature_store import FeatureStore
 
@@ -1082,18 +1089,10 @@ class MLMatcher:
                                     max_hausdorff_m=max_hausdorff_m,
                                 )
 
-                                # Create agent sample weights
-                                agent_weights = np.full(
-                                    len(agent_with_features), agent_weight, dtype=np.float32
-                                )
-
-                                # Combine human and agent labels
-                                df = pd.concat([df, agent_with_features], ignore_index=True)
-                                sample_weights = np.concatenate([sample_weights, agent_weights])
-
+                                agent_df = agent_with_features
                                 logger.info(
-                                    f"Training data: {n_human} human (weight=1.0) + "
-                                    f"{len(agent_with_features)} agent (weight={agent_weight})"
+                                    f"Loaded {len(agent_df)} agent labels "
+                                    f"(weight={agent_weight}) for training only"
                                 )
                             else:
                                 logger.warning(
@@ -1113,12 +1112,13 @@ class MLMatcher:
                 logger.info("No agent labels found")
 
         # Extract features (NaN preserved — XGBoost handles missing values natively)
+        # Human labels only — agent labels are appended to X_train below.
         X, y = self._extract_features_and_labels(df, binary=binary)
 
         logger.info(f"Feature matrix shape: {X.shape}")
         logger.info(f"Label distribution: {pd.Series(y).value_counts().to_dict()}")
 
-        # Segment-aware train/test split to prevent data leakage
+        # Segment-aware train/test split on HUMAN labels to prevent data leakage
         # Also get groups for reuse in cross-validation
         train_idx, test_idx, groups = segment_aware_split(
             df, test_size=test_size, random_state=42, return_groups=True
@@ -1126,7 +1126,11 @@ class MLMatcher:
 
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
-        weights_train = sample_weights[train_idx]
+        weights_train = np.ones(len(train_idx), dtype=np.float32)
+
+        # Segment groups restricted to training rows — used for in-training CV
+        # so CV folds never contain holdout test rows (train_idx is positional)
+        groups_train = groups.iloc[train_idx]
 
         # Verify labels have all expected features before training
         # This catches bugs where new features are added to FEATURE_COLUMNS but
@@ -1146,6 +1150,41 @@ class MLMatcher:
                 f"This usually means labels were created with an older version. "
                 f"Run backfill to add missing features, or retrain with updated labels."
             )
+
+        # Append agent labels to the TRAINING portion only (never the test set).
+        # Agent pairs sharing a segment with any test pair are dropped so the
+        # model cannot train on segments it is evaluated on.
+        if agent_df is not None and len(agent_df) > 0:
+            if len(test_idx) > 0:
+                test_rows = df.iloc[test_idx]
+                test_segments = set(test_rows["gers_id"]) | set(test_rows["target_id"])
+                overlap_mask = agent_df["gers_id"].isin(test_segments) | agent_df["target_id"].isin(
+                    test_segments
+                )
+                if overlap_mask.any():
+                    logger.info(
+                        f"Dropped {int(overlap_mask.sum())} agent labels sharing "
+                        "segments with the holdout test set (leakage prevention)"
+                    )
+                    agent_df = agent_df[~overlap_mask]
+            if len(agent_df) > 0:
+                # Reindex to the (already finalized) feature columns so missing
+                # columns become NaN and ordering matches the human matrix
+                X_agent = agent_df.reindex(columns=self.feature_names).to_numpy(dtype=np.float32)
+                if binary:
+                    y_agent = (agent_df["label"] == "match").astype(int).to_numpy()
+                else:
+                    y_agent = agent_df["label"].map(self.label_encoder).to_numpy()
+                X_train = np.concatenate([X_train, X_agent], axis=0)
+                y_train = np.concatenate([y_train, y_agent])
+                weights_train = np.concatenate(
+                    [weights_train, np.full(len(agent_df), agent_weight, dtype=np.float32)]
+                )
+                logger.info(
+                    f"Training data: {len(train_idx)} human (weight=1.0) + "
+                    f"{len(agent_df)} agent (weight={agent_weight}); "
+                    "agent labels excluded from test set and CV"
+                )
 
         # Cap infinite values (XGBoost handles NaN natively but not inf)
         X_train = self._cap_infinities(X_train)
@@ -1215,16 +1254,21 @@ class MLMatcher:
         if len(X_test) > 0:
             y_pred = self.model.predict(X_test)
 
-            # Cross-validation score with segment-aware folding.
+            # Cross-validation score with segment-aware folding, restricted to
+            # the TRAINING rows only so CV scores are independent of the
+            # holdout test set (test rows must never appear in any CV fold).
+            # Agent labels are excluded from CV entirely (human labels only).
             # XGBoost handles NaN natively — no imputation needed.
-            n_groups = groups.nunique()
-            if n_groups >= 2:
-                n_splits = min(5, n_groups)
+            X_cv = X[train_idx]
+            y_cv = y[train_idx]
+            n_cv_groups = groups_train.nunique()
+            if n_cv_groups >= 2:
+                n_splits = min(5, n_cv_groups)
                 gkf = GroupKFold(n_splits=n_splits)
                 cv_scores = []
-                for cv_train_idx, cv_test_idx in gkf.split(X, y, groups):
-                    X_cv_train, X_cv_test = X[cv_train_idx], X[cv_test_idx]
-                    y_cv_train, y_cv_test = y[cv_train_idx], y[cv_test_idx]
+                for cv_train_idx, cv_test_idx in gkf.split(X_cv, y_cv, groups_train):
+                    X_cv_train, X_cv_test = X_cv[cv_train_idx], X_cv[cv_test_idx]
+                    y_cv_train, y_cv_test = y_cv[cv_train_idx], y_cv[cv_test_idx]
 
                     # Train and score this fold (n_jobs=1 to avoid thread
                     # oversubscription since folds run sequentially)
@@ -1241,7 +1285,7 @@ class MLMatcher:
                 cv_scores = np.array(cv_scores)
             else:
                 # Cannot do CV with < 2 groups
-                logger.warning("Skipping CV: fewer than 2 segment groups")
+                logger.warning("Skipping CV: fewer than 2 segment groups in training set")
                 cv_scores = np.array([np.nan])
 
             results.update(
@@ -1361,6 +1405,65 @@ class MLMatcher:
             y = df["label"].map(self.label_encoder).values
 
         return X, y
+
+    @staticmethod
+    def _check_feature_versions(df: pd.DataFrame, allow_stale_features: bool = False) -> None:
+        """Verify that label features were computed with the current FEATURE_VERSION.
+
+        Training on features computed with older code silently mixes feature
+        semantics, so stale (or missing) feature versions raise an error by
+        default. Pass allow_stale_features=True to downgrade to a warning.
+
+        Args:
+            df: Labels DataFrame (may or may not have a feature_version column)
+            allow_stale_features: If True, warn instead of raising
+
+        Raises:
+            ValueError: If any labels have stale/missing feature_version and
+                       allow_stale_features is False.
+        """
+        if len(df) == 0:
+            # Nothing to check — downstream code raises a clearer error
+            return
+        if "feature_version" in df.columns:
+            version_counts = df["feature_version"].value_counts(dropna=False)
+            n_versions = len(version_counts)
+            if n_versions > 1:
+                logger.warning(
+                    f"Labels contain {n_versions} different feature versions: "
+                    f"{version_counts.to_dict()}"
+                )
+            # NaN feature_version counts as stale (unknown feature semantics)
+            n_total = len(df)
+            n_current = int((df["feature_version"] == FEATURE_VERSION).sum())
+            n_stale = n_total - n_current
+            logger.info(
+                f"Label feature versions: {n_current}/{n_total} match current "
+                f"FEATURE_VERSION={FEATURE_VERSION}"
+            )
+            if n_stale > 0:
+                msg = (
+                    f"{n_stale}/{n_total} labeled pairs have a stale feature_version "
+                    f"(current FEATURE_VERSION={FEATURE_VERSION}, "
+                    f"found: {version_counts.to_dict()}). Training on stale features "
+                    f"silently mixes feature semantics. Run `matcher backfill` to "
+                    f"recompute features, or pass allow_stale_features=True to override."
+                )
+                if allow_stale_features:
+                    logger.warning(f"allow_stale_features=True: {msg}")
+                else:
+                    raise ValueError(msg)
+        else:
+            msg = (
+                "Labels have no feature_version column (pre-versioning labels). "
+                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}. "
+                "Run `matcher backfill` to recompute features, or pass "
+                "allow_stale_features=True to override."
+            )
+            if allow_stale_features:
+                logger.warning(f"allow_stale_features=True: {msg}")
+            else:
+                raise ValueError(msg)
 
     def _validate_training_pairs(
         self,
