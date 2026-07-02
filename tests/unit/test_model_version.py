@@ -104,17 +104,19 @@ class TestLoadModelVersionWarnings:
 
 
 class TestTrainVersionChecks:
-    def _make_labels(self, labels_dir, feature_versions):
+    def _make_labels(
+        self, labels_dir, feature_versions, include_version_column=True, dataset="test_ds"
+    ):
         """Create label files in normalized format for testing."""
         n_samples = len(feature_versions)
         rng = np.random.default_rng(123)
 
-        # Create human labels in labels/human/dataset=test_ds/data.csv
-        human_dir = labels_dir / "human" / "dataset=test_ds"
+        # Create human labels in labels/human/dataset=<dataset>/data.csv
+        human_dir = labels_dir / "human" / f"dataset={dataset}"
         human_dir.mkdir(parents=True)
         human_data = {
-            "gers_id": [f"ref_{i}" for i in range(n_samples)],
-            "target_id": [f"target_{i}" for i in range(n_samples)],
+            "gers_id": [f"{dataset}_ref_{i}" for i in range(n_samples)],
+            "target_id": [f"{dataset}_target_{i}" for i in range(n_samples)],
             "label": ["match"] * (n_samples // 2) + ["no_match"] * (n_samples - n_samples // 2),
             "labeler": ["test"] * n_samples,
             "labeled_at": ["2026-01-01T00:00:00"] * n_samples,
@@ -122,14 +124,15 @@ class TestTrainVersionChecks:
         }
         pd.DataFrame(human_data).to_csv(human_dir / "data.csv", index=False)
 
-        # Create features in labels/features/dataset=test_ds/data.parquet
-        features_dir = labels_dir / "features" / "dataset=test_ds"
+        # Create features in labels/features/dataset=<dataset>/data.parquet
+        features_dir = labels_dir / "features" / f"dataset={dataset}"
         features_dir.mkdir(parents=True)
         features_data = {
-            "gers_id": [f"ref_{i}" for i in range(n_samples)],
-            "target_id": [f"target_{i}" for i in range(n_samples)],
-            "feature_version": feature_versions,
+            "gers_id": [f"{dataset}_ref_{i}" for i in range(n_samples)],
+            "target_id": [f"{dataset}_target_{i}" for i in range(n_samples)],
         }
+        if include_version_column:
+            features_data["feature_version"] = feature_versions
         for col in FEATURE_COLUMNS:
             features_data[col] = rng.random(n_samples).tolist()
 
@@ -148,17 +151,63 @@ class TestTrainVersionChecks:
 
         assert matcher.feature_version == FEATURE_VERSION
 
-    def test_train_mixed_versions_warns(self, tmp_path, log_capture):
-        """Training on labels with mixed feature_versions should warn."""
+    def test_train_mixed_versions_raises_by_default(self, tmp_path):
+        """Training on labels with stale feature_versions should raise."""
+        pytest.importorskip("xgboost")
         labels_dir = tmp_path / "labels"
         versions = [FEATURE_VERSION] * 10 + ["2020-01-01"] * 10
         self._make_labels(labels_dir, versions)
 
         matcher = MLMatcher()
-        try:
+        with pytest.raises(ValueError, match="matcher backfill"):
             matcher.train(labels_dir=str(labels_dir), test_size=0.0)
-        except ImportError:
-            pytest.skip("XGBoost not installed")
+
+    def test_train_all_stale_versions_raises_by_default(self, tmp_path):
+        """Training on labels that are all stale should raise."""
+        pytest.importorskip("xgboost")
+        labels_dir = tmp_path / "labels"
+        self._make_labels(labels_dir, ["2020-01-01"] * 20)
+
+        matcher = MLMatcher()
+        with pytest.raises(ValueError, match="stale feature_version"):
+            matcher.train(labels_dir=str(labels_dir), test_size=0.0)
+
+    def test_train_stale_versions_allowed_with_flag(self, tmp_path, log_capture):
+        """allow_stale_features=True should downgrade the error to a warning."""
+        pytest.importorskip("xgboost")
+        labels_dir = tmp_path / "labels"
+        versions = [FEATURE_VERSION] * 10 + ["2020-01-01"] * 10
+        self._make_labels(labels_dir, versions)
+
+        matcher = MLMatcher()
+        matcher.train(labels_dir=str(labels_dir), test_size=0.0, allow_stale_features=True)
 
         output = log_capture.getvalue()
         assert "different feature versions" in output
+        assert "stale feature_version" in output
+        assert matcher.model is not None
+
+    def test_train_missing_version_column_raises_by_default(self, tmp_path):
+        """Pre-versioning labels (no feature_version column) should raise."""
+        pytest.importorskip("xgboost")
+        labels_dir = tmp_path / "labels"
+        self._make_labels(labels_dir, [FEATURE_VERSION] * 20, include_version_column=False)
+
+        matcher = MLMatcher()
+        with pytest.raises(ValueError, match="no feature_version column"):
+            matcher.train(labels_dir=str(labels_dir), test_size=0.0)
+
+    def test_train_stale_excluded_dataset_does_not_raise(self, tmp_path):
+        """Stale labels in an excluded dataset must not block training."""
+        pytest.importorskip("xgboost")
+        labels_dir = tmp_path / "labels"
+        self._make_labels(labels_dir, [FEATURE_VERSION] * 20)
+        self._make_labels(labels_dir, ["2020-01-01"] * 20, dataset="stale_ds")
+
+        matcher = MLMatcher()
+        matcher.train(
+            labels_dir=str(labels_dir),
+            test_size=0.0,
+            exclude_datasets=["stale_ds"],
+        )
+        assert matcher.model is not None
