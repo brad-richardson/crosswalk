@@ -45,17 +45,24 @@ from .types import MatchDecision, MatchResult
 
 # Default XGBoost hyperparameters (F1-optimized via Optuna tuning).
 # Updated by scripts/tune_model.py; used by MLMatcher.train() and scripts/ablation_study.py.
+#
+# Produced 2026-07-02 by scripts/tune_model.py (leakage-free protocol):
+# 100 Optuna trials (TPESampler seed=42), objective = mean binary F1 over
+# 5-fold segment-grouped CV run ONLY on the training portion of the
+# seed-42/test_size-0.2 segment-aware split — the holdout test set was
+# discarded before tuning and never seen by the study (best inner-CV
+# F1 = 0.9322). If train()'s split seed or test_size changes, re-run tuning.
 DEFAULT_XGB_PARAMS: dict[str, Any] = {
-    "n_estimators": 834,
-    "max_depth": 9,
-    "learning_rate": 0.022511981234250394,
-    "min_child_weight": 9,
-    "subsample": 0.7392909078558574,
-    "colsample_bytree": 0.9537926227035262,
-    "gamma": 0.38078555476202813,
-    "reg_alpha": 0.19508694558590667,
-    "reg_lambda": 4.990926294038142,
-    "max_bin": 248,
+    "n_estimators": 170,
+    "max_depth": 10,
+    "learning_rate": 0.06951426663618532,
+    "min_child_weight": 2,
+    "subsample": 0.6471565260883014,
+    "colsample_bytree": 0.7686819376859094,
+    "gamma": 0.19709144368240486,
+    "reg_alpha": 2.160752167078912,
+    "reg_lambda": 3.7802746744437803,
+    "max_bin": 500,
     "tree_method": "hist",
 }
 

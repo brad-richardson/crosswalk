@@ -95,6 +95,11 @@ Note: The Optuna hyperparameters above were used for the shipped model. To retun
 see `scripts/tune_model.py`. The default hyperparams in `ml.py` are for the full 78-feature
 model — the 28-feature model benefits from a higher learning rate and fewer trees.
 
+> **Caveat (2026-07-02):** these Spark-model hyperparameters were tuned before
+> `tune_model.py` adopted the leakage-free protocol, so they saw the seed-42
+> holdout and the F1 figures above are mildly optimistic. The 78-feature
+> `DEFAULT_XGB_PARAMS` have been retuned leakage-free; the Spark params have not.
+
 ## Known Limitations
 
 - **class_similarity:** The Spark v1 job computes class similarity using a subtype-tier approach
