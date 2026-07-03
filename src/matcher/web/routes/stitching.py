@@ -202,12 +202,14 @@ def _build_stitch_options(group: dict) -> dict:
     alternatives = group.get("alternatives") or []
 
     def _valid_edges(edges: list[dict]) -> list[dict]:
-        """Keep only edges that exist in the group; strip to id pairs."""
+        """Keep only edges that exist in the group, deduplicated; strip to id pairs."""
         out = []
+        seen = set()
         for e in edges:
             key = (e.get("ref_id"), e.get("target_id"))
-            if key in group_edge_set:
-                out.append({"ref_id": e["ref_id"], "target_id": e["target_id"]})
+            if key in group_edge_set and key not in seen:
+                seen.add(key)
+                out.append({"ref_id": key[0], "target_id": key[1]})
         return out
 
     def _edge_key(edges: list[dict]) -> frozenset:
@@ -633,7 +635,9 @@ async def stitching_select(
         try:
             explicit_edges = _parse_explicit_edges(selected_edges, group)
         except ValueError as e:
-            return HTMLResponse(f"Invalid selected_edges: {e}", status_code=400)
+            # Detail can embed client-supplied ids — log it, never reflect it
+            logger.warning(f"Rejected selected_edges for group {group_id}: {e}")
+            return HTMLResponse("Invalid selected_edges", status_code=400)
 
         if explicit_edges is not None:
             # Exact option edge set — store verbatim.
