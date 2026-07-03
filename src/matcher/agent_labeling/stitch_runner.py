@@ -336,6 +336,29 @@ def _load_group_context(group_dir: Path) -> tuple[list[str], dict, dict]:
     return letters, options_by_letter, meta
 
 
+def _segment_class_maps(meta: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Build per-side {segment_id: class} maps from a pack's metadata.
+
+    Ref and target IDs come from different namespaces, so the maps are kept
+    separate — a shared dict could let an ID collision misclassify edges.
+    """
+    ref_out: dict[str, str] = {}
+    tgt_out: dict[str, str] = {}
+    for side, out in (("reference", ref_out), ("target", tgt_out)):
+        for s in meta.get("segments", {}).get(side, []):
+            out[str(s["id"])] = s.get("class", "") or ""
+    return ref_out, tgt_out
+
+
+def _edge_classes_for(
+    edge_set: frozenset,
+    ref_class: dict[str, str],
+    tgt_class: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Map a chosen (ref_id, target_id) edge set to (ref_class, target_class)."""
+    return [(ref_class.get(str(r), ""), tgt_class.get(str(t), "")) for r, t in edge_set]
+
+
 def run_provider_on_group(
     provider: ProviderSpec,
     group_id: str,
@@ -463,6 +486,84 @@ def run_panel_on_group(
 
 
 # ---------------------------------------------------------------------------
+# Class-consistency gate
+# ---------------------------------------------------------------------------
+#
+# Deterministic mitigation for a specific auto-accept failure mode: a
+# pedestrian-mode reference segment (footway/sidewalk/...) matched to a
+# vehicular-mode target segment (or vice-versa). A sidewalk that runs alongside
+# a road is a DIFFERENT physical feature than the road, so such a cross-mode
+# edge is almost never a true same-traveled-way correspondence — but its
+# geometry is parallel and nearby, which can fool a geometry-only panel.
+#
+# The gate demotes any auto-accept candidate whose CHOSEN edge set contains a
+# cross-mode edge to human review. It only fires when BOTH sides are
+# unambiguously classified: same-mode pairs, and any pair where a class is
+# missing/unknown/ambiguous, pass (we do not over-gate on absent data).
+#
+# Mode-set membership (derived from the OSM `class` values that actually appear
+# in the Boston stitch batches — footway/path/pedestrian/steps for pedestrian,
+# and motorway..living_street for vehicular):
+#
+#   * PEDESTRIAN_CLASSES — foot-only / non-vehicular ways. `sidewalk` and
+#     `crossing` are included for completeness (standard OSM footway subtypes)
+#     even though the current Boston data tags them as `footway`.
+#   * VEHICULAR_CLASSES — the drivable road hierarchy.
+#   * Everything else (cycleway, track, alley, unknown, "", None) is treated as
+#     NEUTRAL and never triggers the gate. cycleway/track are deliberately
+#     neutral: they are genuinely ambiguous (an on-road bike lane vs. a
+#     separated path; a farm/service track drivable or not), and the gate's job
+#     is to catch clear pedestrian-vs-road mismatches, not to adjudicate
+#     ambiguous classes. `alley` does not appear in the data at all.
+
+PEDESTRIAN_CLASSES = frozenset({"footway", "sidewalk", "path", "pedestrian", "steps", "crossing"})
+VEHICULAR_CLASSES = frozenset(
+    {
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "residential",
+        "service",
+        "unclassified",
+        "living_street",
+        "driveway",
+        "road",
+    }
+)
+
+
+def road_class_mode(cls: str | None) -> str:
+    """Classify an OSM road class into a travel mode.
+
+    Returns "pedestrian", "vehicular", or "neutral" (unknown/ambiguous/missing).
+    """
+    c = (cls or "").strip().lower()
+    if c in PEDESTRIAN_CLASSES:
+        return "pedestrian"
+    if c in VEHICULAR_CLASSES:
+        return "vehicular"
+    return "neutral"
+
+
+def is_cross_mode_edge(ref_class: str | None, target_class: str | None) -> bool:
+    """True iff one side is unambiguously pedestrian and the other vehicular.
+
+    Same-mode pairs and any pair involving a neutral/unknown/missing class
+    return False (they pass the gate).
+    """
+    a = road_class_mode(ref_class)
+    b = road_class_mode(target_class)
+    return {a, b} == {"pedestrian", "vehicular"}
+
+
+def has_cross_mode_edge(edge_classes: list[tuple[str | None, str | None]]) -> bool:
+    """True iff any (ref_class, target_class) pair in the set is cross-mode."""
+    return any(is_cross_mode_edge(rc, tc) for rc, tc in edge_classes)
+
+
+# ---------------------------------------------------------------------------
 # Consensus
 # ---------------------------------------------------------------------------
 
@@ -478,13 +579,24 @@ class Consensus:
     n_valid: int
     minority: str  # summary of dissenting votes
     mean_confidence: float
+    route_reason: str = ""  # e.g. "class-mismatch" when the class gate demotes
 
 
-def compute_consensus(votes: list[Vote]) -> Consensus:
+def compute_consensus(
+    votes: list[Vote],
+    edge_classes: list[tuple[str | None, str | None]] | None = None,
+) -> Consensus:
     """Apply the 3/3, 2/3, else routing rule over a group's votes.
 
     Abstentions do not count toward agreement. Only unanimous agreement among
     all (>=3) valid votes auto-accepts; everything else routes to human review.
+
+    Class-consistency gate: when ``edge_classes`` (the (ref_class, target_class)
+    pairs of the *chosen* edge set) is supplied, an otherwise-auto-accept
+    verdict whose chosen edges include a cross-mode pedestrian↔vehicular edge is
+    demoted to ``human_review`` with ``route_reason="class-mismatch"``. Passing
+    no ``edge_classes`` disables the gate (callers without class metadata get
+    the pre-gate behavior).
     """
     group_id = votes[0].group_id if votes else ""
     valid = [v for v in votes if v.choice != "ABSTAIN"]
@@ -518,6 +630,7 @@ def compute_consensus(votes: list[Vote]) -> Consensus:
     edge_set = top_votes[0].edge_set
 
     # Unanimous requires all 3 panelists valid AND agreeing.
+    route_reason = ""
     if agree == len(votes) and agree >= 3 and not minority_votes:
         consensus = "unanimous"
         routing = "auto_accept" if top_choice != "NONE" else "human_review"
@@ -527,6 +640,13 @@ def compute_consensus(votes: list[Vote]) -> Consensus:
     else:
         consensus = "none"
         routing = "human_review"
+
+    # Class-consistency gate: demote an auto-accept whose chosen edge set
+    # contains a cross-mode pedestrian↔vehicular edge. An empty list means
+    # "supplied, nothing to gate on" — only None disables the gate.
+    if routing == "auto_accept" and edge_classes is not None and has_cross_mode_edge(edge_classes):
+        routing = "human_review"
+        route_reason = "class-mismatch"
 
     return Consensus(
         group_id=group_id,
@@ -538,6 +658,7 @@ def compute_consensus(votes: list[Vote]) -> Consensus:
         n_valid=n_valid,
         minority=minority,
         mean_confidence=mean_conf,
+        route_reason=route_reason,
     )
 
 
@@ -567,6 +688,7 @@ CONSENSUS_COLUMNS = [
     "n_valid",
     "minority",
     "mean_confidence",
+    "route_reason",
 ]
 
 
@@ -607,7 +729,13 @@ def run_batch(
         logger.info(f"[{i + 1}/{len(group_dirs)}] panel on group {gid}")
         votes = run_panel_on_group(gid, gdir, panel, timeout)
         all_votes.extend(votes)
-        cons = compute_consensus(votes)
+        # Derive the chosen edge set's classes so the class-consistency gate can
+        # demote cross-mode auto-accepts. compute_consensus is pure, so a first
+        # (gate-less) call gives the chosen edge_set to look up classes for.
+        ref_class, tgt_class = _segment_class_maps(_load_group_context(gdir)[2])
+        base = compute_consensus(votes)
+        edge_classes = _edge_classes_for(base.edge_set, ref_class, tgt_class)
+        cons = compute_consensus(votes, edge_classes=edge_classes)
         consensus_rows.append(cons)
         logger.info(
             f"  -> {cons.consensus} choice={cons.choice} routing={cons.routing} "
@@ -644,6 +772,7 @@ def run_batch(
                 "n_valid": c.n_valid,
                 "minority": c.minority,
                 "mean_confidence": c.mean_confidence,
+                "route_reason": c.route_reason,
             }
             for c in consensus_rows
         ],

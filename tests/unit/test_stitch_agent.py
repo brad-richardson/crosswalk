@@ -301,6 +301,94 @@ def test_consensus_all_abstain():
 
 
 # ---------------------------------------------------------------------------
+# Class-consistency gate
+# ---------------------------------------------------------------------------
+
+
+def test_mode_sets_documented_and_disjoint():
+    # The gate's correctness depends on the two mode sets being disjoint and
+    # non-empty; a class in both would make is_cross_mode_edge ill-defined.
+    assert sr.PEDESTRIAN_CLASSES and sr.VEHICULAR_CLASSES
+    assert sr.PEDESTRIAN_CLASSES.isdisjoint(sr.VEHICULAR_CLASSES)
+    # Spot-check the canonical members of each mode.
+    assert {"footway", "sidewalk", "path"} <= sr.PEDESTRIAN_CLASSES
+    assert {"residential", "primary", "service"} <= sr.VEHICULAR_CLASSES
+
+
+def test_road_class_mode_classification():
+    assert sr.road_class_mode("footway") == "pedestrian"
+    assert sr.road_class_mode("PRIMARY") == "vehicular"  # case-insensitive
+    assert sr.road_class_mode("residential") == "vehicular"
+    # Ambiguous / unknown / missing -> neutral (never gates).
+    assert sr.road_class_mode("cycleway") == "neutral"
+    assert sr.road_class_mode("track") == "neutral"
+    assert sr.road_class_mode("unknown") == "neutral"
+    assert sr.road_class_mode("") == "neutral"
+    assert sr.road_class_mode(None) == "neutral"
+
+
+def test_is_cross_mode_edge():
+    # Pedestrian vs vehicular, either orientation -> cross-mode.
+    assert sr.is_cross_mode_edge("footway", "residential")
+    assert sr.is_cross_mode_edge("primary", "sidewalk")
+    # Same-mode pairs are not cross-mode.
+    assert not sr.is_cross_mode_edge("residential", "primary")
+    assert not sr.is_cross_mode_edge("footway", "path")
+    # Any neutral/missing side passes (do not over-gate on absent data).
+    assert not sr.is_cross_mode_edge("cycleway", "residential")
+    assert not sr.is_cross_mode_edge("footway", "")
+    assert not sr.is_cross_mode_edge("primary", None)
+
+
+def test_class_gate_demotes_cross_mode_auto_accept():
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
+    # footway ref matched to a residential target -> cross-mode -> demoted.
+    c = sr.compute_consensus(votes, edge_classes=[("footway", "residential")])
+    assert c.consensus == "unanimous"  # the panel still agreed
+    assert c.routing == "human_review"
+    assert c.route_reason == "class-mismatch"
+
+
+def test_class_gate_passes_same_mode_auto_accept():
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
+    c = sr.compute_consensus(votes, edge_classes=[("residential", "primary")])
+    assert c.routing == "auto_accept"
+    assert c.route_reason == ""
+
+
+def test_class_gate_passes_missing_or_neutral_class():
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
+    # Missing target class -> pass.
+    c = sr.compute_consensus(votes, edge_classes=[("footway", "")])
+    assert c.routing == "auto_accept"
+    # Neutral (cycleway) vs vehicular -> pass.
+    c2 = sr.compute_consensus(votes, edge_classes=[("cycleway", "residential")])
+    assert c2.routing == "auto_accept"
+
+
+def test_class_gate_only_affects_auto_accept():
+    # A majority (non-auto-accept) verdict with a cross-mode chosen edge is NOT
+    # relabeled "class-mismatch" — it was already routed to human review.
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "B")]
+    c = sr.compute_consensus(votes, edge_classes=[("footway", "residential")])
+    assert c.routing == "human_review"
+    assert c.route_reason == ""  # reason reserved for the class-gate demotion
+
+
+def test_class_gate_disabled_without_edge_classes():
+    # Backward-compat: no edge_classes -> gate is a no-op.
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
+    c = sr.compute_consensus(votes)
+    assert c.routing == "auto_accept"
+    assert c.route_reason == ""
+
+
+# ---------------------------------------------------------------------------
 # Runner: retry-once + abstention (mocked subprocess)
 # ---------------------------------------------------------------------------
 

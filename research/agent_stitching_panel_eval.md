@@ -329,3 +329,116 @@ Full 60-group run: ~65 min wall, claude-bound. All on existing subscriptions.
    as eval truth.
 4. Re-run `stitch-eval` after the human queue is worked to grow the
    option-covered eval set beyond n=2.
+
+---
+
+# Phase 2 audit outcome (2026-07-03) — audit FAILED the 9/10 gate
+
+The human audit of the 10-group auto-accept sample came back **7/10 held /
+3 edited** — below the 9/10 export gate, so **export stays OFF**. The user
+labeled exactly the 10 audit-sample groups (fresh human labels in
+`labels/stitching/dataset=us_boston_streets/data.csv`, `labeler=brad`,
+`labeled_at` 2026-07-03) and did not label beyond them — the "group 15/60" in
+the UI was just the next group the UI advanced to, not a submitted label.
+
+## What the human actually changed (label diff vs. panel consensus)
+
+| Group | Panel pick | Human action | Held? |
+|---|---|---|---|
+| 63bf7e48, 701d491e, 72063362, b2876328, f69a827e | A / A / A / A / A | **exact match** (5) | held |
+| 16947985 | B (2 edges) | added 1 edge (panel under-selected; no wrong edge) | held |
+| 9ac35fb7 | E (6 edges) | added 2 edges (panel under-selected; no wrong edge) | held |
+| **04fc93e5** | B (5 edges) | **reject-all** (removed all 5) | **edited** |
+| **79711407** | A (4 edges) | **reject-all** (removed all 4) | **edited** |
+| **f170979a** | C (6 edges) | **reject-all** (removed all 6) | **edited** |
+
+7 held = 5 exact + 2 where the panel's chosen edges were a correct *subset*
+(human only *added* edges, never removed one). 3 edited = the reject-alls,
+where the human dropped every panel edge.
+
+## Failure-mode table — the reported pedestrian pattern is REFUTED
+
+The reported failure mode was "false-positive pedestrian-class reference
+(footway/sidewalk) paired with road-class targets." The removed-edge class
+pairs across the 3 edited groups do **not** show that pattern — every removed
+edge is vehicular↔vehicular:
+
+| Group | Removed edges | ref_class → target_class | Cross-mode? |
+|---|---|---|---|
+| 04fc93e5 | 5 | residential→residential (4), service→residential (1) | no |
+| 79711407 | 4 | secondary→primary (4) | no |
+| f170979a | 6 | residential→residential (6) | no |
+
+Crucially, `f170979a` **does** contain footway reference segments (3 of them,
+"Bragdon Street" footway) and the batch offered `footway→residential` candidate
+edges — but the panel's chosen option C **already excluded every footway edge**
+and matched only residential↔residential. The human then rejected those
+residential edges too. So the panel did not commit a pedestrian-vs-road false
+positive on any audited group; the 3 failures are same-mode M:N / reject-all
+disagreements (option-coverage or wrong sub-segment assignment), a different
+failure mode than the one reported.
+
+Batch-wide confirmation: **0 of 60 groups** have a cross-mode edge in their
+*chosen* edge set, and **0 of 30 auto-accept candidates** do. Three auto-accept
+candidates (`36726195`, `f170979a`, `f6e71865`) merely *contain* a footway
+group segment; in all three the panel excluded the footway candidate edges.
+
+## Deterministic class-consistency gate (shipped this PR)
+
+Added to the routing step (`stitch_runner.compute_consensus`, gated on
+`edge_classes`): an auto-accept candidate whose *chosen* edge set contains a
+cross-mode edge — an unambiguously pedestrian class on one side and an
+unambiguously vehicular class on the other — is demoted to human review with
+`route_reason="class-mismatch"`. Mode sets are module constants
+(`PEDESTRIAN_CLASSES` = footway/sidewalk/path/pedestrian/steps/crossing;
+`VEHICULAR_CLASSES` = motorway/trunk/primary/secondary/tertiary/residential/
+service/unclassified/living_street/driveway/road). cycleway, track, alley,
+unknown and missing classes are NEUTRAL and never trigger the gate (no
+over-gating on ambiguous/absent data; `alley` never appears, cycleway/track are
+genuinely ambiguous). The prompt rubric was also strengthened to forbid
+matching a footway/sidewalk/path to a road class merely for being parallel.
+
+## Gate validation (recomputed over the recorded votes, no new LLM calls)
+
+Reran `compute_consensus` over the existing `votes.csv` with the gate active
+(size ≤20 gate reapplied identically):
+
+- Sanity: reproduces the original **30/30** auto-accept candidates without the
+  gate — the recompute is faithful.
+- Class gate demotes **0 of 30** candidates → **30 survive**.
+- **The gate catches 0 of the 3 user-corrected groups.** Because those
+  corrections are same-mode vehicular reject-alls, no deterministic
+  pedestrian↔vehicular gate can catch them. **This is the validation that
+  matters, and it fails:** the class gate is sound and safe but does NOT explain
+  or mitigate the 7/10 audit result on this batch. It is retained as
+  forward-looking insurance for future batches where the panel might pick a
+  cross-mode edge, and it correctly does **not** over-gate the two survivors
+  that merely contain footway segments.
+
+## Surviving candidates and export status
+
+All 10 audit-sample groups (including the 3 edited) now carry fresh human
+labels and are **superseded** — excluded from any panel export. That leaves
+**20 surviving auto-accept candidates** (unanimous non-NONE, ≤20 edges,
+class-consistent, not human-labeled) as the *proposed* export set:
+
+`0d8c40ca, 166ce59a, 172050db, 2170ab83, 2802e4db, 36726195, 461ebf00,
+5702414b, 6dde01fe, 6e5f877a, 747a7f1a, 7e218abf, 874eccdf, 8ed3be51,
+99bc755f, be597061, bf0760b1, dde5ebf9, f4984915, f6e71865`
+
+Of these, 11 are trivial 2-edge N:1/clear-winner picks (low risk); the 9
+multi-edge M:N survivors (`0d8c40ca` 8/18, `874eccdf` 11/11, `6dde01fe` 6/10,
+`747a7f1a` 6/10, `dde5ebf9` 6/8, `2802e4db` 4/6, `8ed3be51` 4/5, `f6e71865`
+3/5, `99bc755f` 3/4) are where the 7/10 failure mode (reject-all on
+plausible-looking M:N corridors) would recur.
+
+## Recommendation
+
+Because the audit missed the 9/10 gate **and** the deterministic gate does not
+catch the observed failure mode, **do not enable blanket unanimous auto-accept
+export yet.** The 3/10 reject-alls indicate ~30% of unanimous M:N auto-accepts
+may be reject-worthy for reasons no class gate can detect. Recommended next
+step: a **5-8 group mini-audit of the 9 multi-edge M:N survivors** above; if
+that holds ≥90%, export the survivors (still `labeler=panel_unanimous_v1`), and
+consider auto-accepting only the trivial ≤2-edge N:1 tier without further audit.
+The class gate and rubric change ship regardless as defense-in-depth.
