@@ -19,26 +19,37 @@
      data-group-id="{{ group.group_id }}">
 
     <!-- Header: match type + counts + confidence + tier -->
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <div class="group-card-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
         <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
             {{ group.match_type }}
         </span>
-        <span style="font-size: 0.8rem; color: var(--text-muted);">
+        <span class="group-count-summary" style="font-size: 0.8rem; color: var(--text-muted);">
             {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
         </span>
         {% if context_ref_details is defined and (context_ref_details or context_target_details) %}
-        <span style="font-size: 0.7rem; color: var(--text-muted);">
+        <span class="collapse-hide" style="font-size: 0.7rem; color: var(--text-muted);">
             (+{{ context_ref_details | length }}R / +{{ context_target_details | length }}T nearby)
         </span>
         {% endif %}
         <span class="pair-confidence" id="group-confidence" style="margin-left: 4px;">
             {{ "%.0f" | format(avg_confidence * 100) }}%
         </span>
+        <span class="group-progress-inline" style="font-size: 0.7rem; color: var(--text-muted);">
+            {{ group_index + 1 }}/{{ total_groups }}
+        </span>
         {% if group.review_tier is defined %}
-        <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: auto;">
+        <span class="collapse-hide" style="font-size: 0.7rem; color: var(--text-muted);">
             {{ group.review_tier }}
         </span>
         {% endif %}
+        <button type="button" class="panel-collapse-btn" id="panel-collapse-btn"
+                onclick="togglePanelCollapse()"
+                title="Collapse / expand panel"
+                aria-label="Collapse or expand assignment panel"
+                aria-expanded="true"
+                style="margin-left: auto;">
+            <span class="panel-collapse-icon" aria-hidden="true">&#9662;</span>
+        </button>
     </div>
 
     <!-- Assignment option picker (verify, don't construct) -->
@@ -74,12 +85,14 @@
                 {% for ref in ref_details %}
                 <button class="segment-pill segment-pill-ref{% if preseed_active_refs is not defined or preseed_active_refs is none or ref.id in preseed_active_refs %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
                         title="{{ ref.id }}">R{{ loop.index }}</button>
                 {% endfor %}
                 {% if context_ref_details is defined %}
                 {% for ref in context_ref_details %}
                 <button class="segment-pill segment-pill-ref"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
                         title="{{ ref.id }}">R{{ ref_details|length + loop.index }}</button>
                 {% endfor %}
                 {% endif %}
@@ -91,12 +104,14 @@
                 {% for tgt in target_details %}
                 <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"
                         title="{{ tgt.id }}">T{{ loop.index }}</button>
                 {% endfor %}
                 {% if context_target_details is defined %}
                 {% for tgt in context_target_details %}
                 <button class="segment-pill segment-pill-target"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"
                         title="{{ tgt.id }}">T{{ target_details|length + loop.index }}</button>
                 {% endfor %}
                 {% endif %}
@@ -115,13 +130,13 @@
         {% if class_summary is defined %}
         <div class="summary-line">
             <span class="summary-label">Class</span>
-            <span class="summary-value">{{ class_summary }}</span>
+            <span class="summary-value" id="summary-class-value">{{ class_summary }}</span>
         </div>
         {% endif %}
         {% if name_summary is defined %}
         <div class="summary-line">
             <span class="summary-label">Name</span>
-            <span class="summary-value">{{ name_summary }}</span>
+            <span class="summary-value" id="summary-name-value">{{ name_summary }}</span>
         </div>
         {% endif %}
     </div>
@@ -152,7 +167,7 @@
     {% endif %}
 
     <!-- Action buttons -->
-    <div style="display: flex; gap: 8px; margin-top: 8px;">
+    <div class="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">
         <form style="flex: 1;" id="select-form"
               hx-post="/stitching-review/select"
               hx-target="#group-content"

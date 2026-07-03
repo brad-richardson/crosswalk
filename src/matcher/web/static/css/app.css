@@ -1984,3 +1984,64 @@ body {
         font-size: 1.05rem;
     }
 }
+
+/* === Collapsible assignment panel (issue 3) === */
+.panel-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.panel-collapse-btn:hover {
+    background: var(--hover-bg);
+}
+
+.panel-collapse-icon {
+    font-size: 0.9rem;
+    line-height: 1;
+    transition: transform 0.15s ease;
+}
+
+/* Collapsed: rotate the chevron to point up (expand affordance) */
+.group-card.collapsed .panel-collapse-icon {
+    transform: rotate(180deg);
+}
+
+/* Collapsed: hide everything but the header slim bar so the map gets the screen */
+.group-card.collapsed .assignment-options,
+.group-card.collapsed .segment-toggles,
+.group-card.collapsed .group-summary,
+.group-card.collapsed .group-details,
+.group-card.collapsed .card-actions,
+.group-card.collapsed .collapse-hide {
+    display: none;
+}
+
+.group-card.collapsed .group-card-header {
+    margin-bottom: 0;
+}
+
+@media (min-width: 769px) {
+    /* Larger tap target on touch-capable pointers isn't needed on desktop */
+    .panel-collapse-btn {
+        width: 28px;
+        height: 28px;
+    }
+}
+
+@media (max-width: 768px) {
+    .panel-collapse-btn {
+        width: 40px;
+        height: 40px;
+    }
+}
