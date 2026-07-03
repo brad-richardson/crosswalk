@@ -1027,6 +1027,9 @@ class TestStitchingDeepLink:
             assert "app.css" in resp.text
             assert 'id="map"' in resp.text
             assert "gdeep" in resp.text
+            # Progress reflects the group's actual batch position, not the
+            # reviewed count ("Group 1 of 1", never "Group 2 of 1")
+            assert "Group 1 of 1" in resp.text
         finally:
             self._stop(patches)
 

@@ -355,10 +355,13 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
     if group_id:
         # Deep link: render the requested group (even if already reviewed)
         # inside the full page so styles/map/JS load.
-        deep_group = next((g for g in all_groups if g.get("group_id") == group_id), None)
-        if deep_group is None:
+        deep_index = next(
+            (i for i, g in enumerate(all_groups) if g.get("group_id") == group_id), None
+        )
+        if deep_index is None:
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
             return HTMLResponse("Group not found in batch", status_code=404)
+        deep_group = all_groups[deep_index]
         geojson = _build_group_geojson(deep_group)
         group_ctx = _build_group_context(deep_group)
         return templates.TemplateResponse(
@@ -371,7 +374,7 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
                 "dataset": dataset,
                 "group": deep_group,
                 "group_geojson": geojson,
-                "group_index": reviewed_count,
+                "group_index": deep_index,
                 "total_groups": batch_total,
                 "no_groups": False,
                 **group_ctx,
