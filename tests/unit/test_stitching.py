@@ -209,6 +209,137 @@ class TestGenerateTopKAlternatives:
 
 
 # ---------------------------------------------------------------------------
+# Contiguous multi-ref chains (the "T4 spans R3+R5" gap, panel eval 2026-07-03)
+# ---------------------------------------------------------------------------
+
+
+def _line(coords):
+    """GeoJSON-style LineString mapping (as stored in the groups sidecar)."""
+    return {"type": "LineString", "coordinates": coords}
+
+
+def _targets_to_refs(alt):
+    """Map each target -> frozenset of refs it is assigned to in an alternative."""
+    by_t: dict[str, set[str]] = {}
+    for e in alt["edges"]:
+        by_t.setdefault(e["target_id"], set()).add(e["ref_id"])
+    return {t: frozenset(rs) for t, rs in by_t.items()}
+
+
+class TestMultiRefContiguousChains:
+    """A target that spans multiple CONTIGUOUS refs must be an expressible option."""
+
+    def _spanning_group(self, contiguous: bool):
+        """t1 has edges to two refs (ra, rb); rc serves t2. ra/rb contiguous iff asked."""
+        edges = [
+            _edge("ra", "t1", 0.9),
+            _edge("rb", "t1", 0.8),
+            _edge("rc", "t2", 0.85),
+        ]
+        # Shared exact endpoint [0.001, 0] makes ra/rb contiguous (distance 0,
+        # robust to the lon/lat->meter reprojection inside the generator).
+        rb_coords = [[0.001, 0], [0.002, 0]] if contiguous else [[5, 5], [5.001, 5]]
+        ref_geoms = {
+            "ra": _line([[0, 0], [0.001, 0]]),
+            "rb": _line(rb_coords),
+            "rc": _line([[9, 9], [9.001, 9]]),
+        }
+        return edges, ref_geoms
+
+    def test_multiref_chain_option_generated_and_ranks(self):
+        """The {ra->t1, rb->t1, ...} span is generated AND ranks into the top-K."""
+        edges, ref_geoms = self._spanning_group(contiguous=True)
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=5)
+        # Some option assigns t1 to BOTH ra and rb (the previously inexpressible shape).
+        assert any(_targets_to_refs(a).get("t1") == frozenset({"ra", "rb"}) for a in alts)
+        # It should rank at/near the top: the max-confidence option keeps both
+        # ra->t1 and rb->t1 (0.9 + 0.8) alongside rc->t2.
+        top = alts[0]
+        assert _targets_to_refs(top).get("t1") == frozenset({"ra", "rb"})
+
+    def test_chain_requires_contiguity(self):
+        """Two refs that both touch t1 but are NOT contiguous form no chain."""
+        edges, ref_geoms = self._spanning_group(contiguous=False)
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=10)
+        assert not any(_targets_to_refs(a).get("t1") == frozenset({"ra", "rb"}) for a in alts)
+
+    def test_chain_is_subset_of_existing_edges(self):
+        """A chain is only offered when EVERY constituent edge exists in the group."""
+        # rb is contiguous to ra but only has an edge to t2, not t1.
+        edges = [
+            _edge("ra", "t1", 0.9),
+            _edge("rb", "t2", 0.8),
+        ]
+        ref_geoms = {
+            "ra": _line([[0, 0], [0.001, 0]]),
+            "rb": _line([[0.001, 0], [0.002, 0]]),
+        }
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=10)
+        # t1 never pairs with rb: the (rb, t1) edge does not exist.
+        assert not any("rb" in _targets_to_refs(a).get("t1", frozenset()) for a in alts)
+
+    def test_no_geoms_means_no_multiref(self):
+        """Without geometry, behaviour is unchanged: only single-ref options."""
+        edges, _ = self._spanning_group(contiguous=True)
+        alts = generate_top_k_alternatives(edges, k=10)
+        for a in alts:
+            for refs in _targets_to_refs(a).values():
+                assert len(refs) == 1
+
+    def test_chain_length_bounded(self):
+        """Chains never exceed MAX_REF_CHAIN_LEN refs for a single target."""
+        from matcher.matching.alternatives import MAX_REF_CHAIN_LEN
+
+        # Five refs in a contiguous line, all matched to t1.
+        edges = [_edge(f"r{i}", "t1", 0.9 - i * 0.05) for i in range(5)]
+        # Add a second target so this stays on the M:N (per-target) path.
+        edges.append(_edge("r0", "t2", 0.5))
+        ref_geoms = {f"r{i}": _line([[i * 0.001, 0], [(i + 1) * 0.001, 0]]) for i in range(5)}
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=50)
+        for a in alts:
+            for refs in _targets_to_refs(a).values():
+                assert len(refs) <= MAX_REF_CHAIN_LEN
+
+    def test_dedup_with_chains(self):
+        """Chain-derived options are still deduplicated by edge set."""
+        edges, ref_geoms = self._spanning_group(contiguous=True)
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=50)
+        keys = [frozenset((e["ref_id"], e["target_id"]) for e in a["edges"]) for a in alts]
+        assert len(keys) == len(set(keys))
+
+    def test_large_group_bounded_and_proposes_multiref(self):
+        """Big groups fall back to greedy but can still propose multi-ref edges."""
+        # 8 targets (> MAX_EXHAUSTIVE_TARGETS) each fed by 3 contiguous refs ->
+        # greedy path. Must stay bounded (<= k) and still surface a multi-ref span.
+        edges = []
+        ref_geoms = {}
+        for t in range(8):
+            for j in range(3):
+                rid = f"r{t}_{j}"
+                edges.append(_edge(rid, f"t{t}", 0.9 - j * 0.1))
+                base = t * 10 + j
+                ref_geoms[rid] = _line([[base * 0.001, 0], [(base + 1) * 0.001, 0]])
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=5)
+        assert 0 < len(alts) <= 5
+        assert any(any(len(refs) >= 2 for refs in _targets_to_refs(a).values()) for a in alts)
+
+    def test_n_to_1_ignores_geoms_full_powerset(self):
+        """N:1 mirror: refs already enumerate the full power set; geoms are a no-op."""
+        edges = [
+            _edge("r1", "t1", 0.9),
+            _edge("r2", "t1", 0.8),
+            _edge("r3", "t1", 0.3),
+        ]
+        ref_geoms = {
+            "r1": _line([[0, 0], [0.001, 0]]),
+            "r2": _line([[0.001, 0], [0.002, 0]]),
+            "r3": _line([[0.002, 0], [0.003, 0]]),
+        }
+        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=10)
+        assert len(alts) == 7  # 2^3 - 1 non-empty subsets, unchanged by geoms
+
+
+# ---------------------------------------------------------------------------
 # select_stitching_batch
 # ---------------------------------------------------------------------------
 

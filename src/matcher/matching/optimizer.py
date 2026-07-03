@@ -175,6 +175,63 @@ def find_match_components(
     return components
 
 
+def build_contiguity_adjacency(
+    ids: list[Any],
+    geom_lookup: dict[Any, LineString],
+    tolerance: float,
+) -> dict[Any, set[Any]]:
+    """Build an endpoint-proximity adjacency map over a set of IDs.
+
+    Two geometries are adjacent if one's endpoint is within ``tolerance`` of the
+    other's endpoint. Uses a KD-tree for O(n log n) proximity detection.
+
+    This is the single shared primitive for endpoint-based contiguity: it backs
+    both ``_find_contiguous_id_groups`` (connected components) here in the
+    optimizer and the contiguous ref-chain enumeration in
+    ``matching/alternatives.py`` — so assignment *options* can express the same
+    multi-ref spans the optimizer itself can produce.
+
+    Args:
+        ids: List of IDs to check (duplicates collapse onto the same key).
+        geom_lookup: Dictionary mapping ID to LineString geometry, in the same
+            coordinate units as ``tolerance``.
+        tolerance: Maximum endpoint distance to consider contiguous.
+
+    Returns:
+        Dict mapping each input ID to the set of IDs it is contiguous with.
+        Every input ID is a key (empty set if it has no neighbour or has
+        missing / degenerate geometry).
+    """
+    adjacency: dict[Any, set[Any]] = {id_: set() for id_ in ids}
+
+    all_endpoints: list = []
+    endpoint_to_id: list = []  # which id does each endpoint belong to
+    for id_ in ids:
+        geom = geom_lookup.get(id_)
+        if geom is None or geom.is_empty:
+            continue
+        coords = list(geom.coords)
+        if len(coords) < 2:
+            continue
+        all_endpoints.append(coords[0][:2])
+        all_endpoints.append(coords[-1][:2])
+        endpoint_to_id.append(id_)
+        endpoint_to_id.append(id_)
+
+    if len(all_endpoints) < 2:
+        return adjacency
+
+    tree = cKDTree(np.array(all_endpoints))
+    for ep_i, ep_j in tree.query_pairs(tolerance):
+        a = endpoint_to_id[ep_i]
+        b = endpoint_to_id[ep_j]
+        if a != b:
+            adjacency[a].add(b)
+            adjacency[b].add(a)
+
+    return adjacency
+
+
 def _find_contiguous_id_groups(
     ids: list[Any],
     geom_lookup: dict[Any, LineString],
@@ -197,64 +254,26 @@ def _find_contiguous_id_groups(
     if len(ids) <= 1:
         return [ids] if ids else []
 
-    # Extract endpoints for each ID
-    all_endpoints = []
-    endpoint_to_idx = []  # which id-index does each endpoint belong to
-    valid_id_indices = []
+    adjacency = build_contiguity_adjacency(ids, geom_lookup, tolerance)
 
-    for i, id_ in enumerate(ids):
-        geom = geom_lookup.get(id_)
-        if geom is None or geom.is_empty:
-            continue
-        coords = list(geom.coords)
-        if len(coords) < 2:
-            continue
-
-        valid_id_indices.append(i)
-        all_endpoints.append(coords[0][:2])
-        all_endpoints.append(coords[-1][:2])
-        endpoint_to_idx.append(i)
-        endpoint_to_idx.append(i)
-
-    if len(all_endpoints) < 2:
-        return [[id_] for id_ in ids]
-
-    # Build KD-tree for fast proximity queries
-    endpoints_array = np.array(all_endpoints)
-    tree = cKDTree(endpoints_array)
-    pairs = tree.query_pairs(tolerance)
-
-    # Build adjacency from KD-tree results
-    adjacent: dict[int, set[int]] = defaultdict(set)
-    for ep_i, ep_j in pairs:
-        idx_i = endpoint_to_idx[ep_i]
-        idx_j = endpoint_to_idx[ep_j]
-        if idx_i != idx_j:
-            adjacent[idx_i].add(idx_j)
-            adjacent[idx_j].add(idx_i)
-
-    # Find connected components using BFS
-    visited: set[int] = set()
+    # Find connected components using BFS.
+    visited: set[Any] = set()
     groups: list[list[Any]] = []
-
-    for i in range(len(ids)):
-        if i in visited:
+    for id_ in ids:
+        if id_ in visited:
             continue
-
-        group_indices: list[int] = []
-        queue = deque([i])
-
+        group: list[Any] = []
+        queue = deque([id_])
         while queue:
             node = queue.popleft()
             if node in visited:
                 continue
             visited.add(node)
-            group_indices.append(node)
-            for neighbor in adjacent[node]:
+            group.append(node)
+            for neighbor in adjacency[node]:
                 if neighbor not in visited:
                     queue.append(neighbor)
-
-        groups.append([ids[idx] for idx in group_indices])
+        groups.append(group)
 
     return groups
 
