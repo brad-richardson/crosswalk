@@ -371,23 +371,25 @@ SPARK_PORTABLE_FEATURES = [
 ]  # fmt: skip
 
 # XGBoost hyperparams tuned for the 28-feature Spark-portable model.
-# Tuned via Optuna (80 trials, slight size penalty for tree count).
-# Higher learning rate + fewer trees than the full 78-feature model.
-# WARNING: tuned before scripts/tune_model.py adopted the leakage-free
-# protocol (test set held out prior to tuning) — these params saw the
-# seed-42 test set. Retune with the current script (restricted to
-# SPARK_PORTABLE_FEATURES) before quoting holdout metrics for this model.
+# Tuned 2026-07-03 via `scripts/tune_model.py --feature-set spark` (Optuna,
+# 100 trials, TPESampler seed=42) with the leakage-free protocol: the seed-42
+# holdout was discarded before tuning and the search used inner GroupKFold CV
+# on the training portion only, with a size penalty of 0.00001 F1 per tree
+# above 100 n_estimators. Epsilon-compact selection (inference speed matters
+# for Spark): cheapest trial by n_estimators * max_depth within 0.003 raw
+# CV F1 of the best — selected 224 trees x depth 10 (CV F1 0.9216) over the
+# best-F1 310 x 10 (CV F1 0.9242).
 SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
-    "n_estimators": 200,
-    "learning_rate": 0.037979773378190335,
-    "max_depth": 8,
-    "min_child_weight": 1,
-    "subsample": 0.7312303857873605,
-    "colsample_bytree": 0.9384017093295245,
-    "gamma": 0.7417263340163897,
-    "reg_alpha": 0.6821030293753112,
-    "reg_lambda": 2.051665570271953,
-    "max_bin": 206,
+    "n_estimators": 224,
+    "learning_rate": 0.01275299313255589,
+    "max_depth": 10,
+    "min_child_weight": 2,
+    "subsample": 0.8019037612739637,
+    "colsample_bytree": 0.9661600548038851,
+    "gamma": 0.6021730351738508,
+    "reg_alpha": 1.5439549237262677,
+    "reg_lambda": 2.1882487406505136,
+    "max_bin": 343,
 }
 
 

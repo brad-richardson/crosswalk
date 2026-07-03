@@ -32,8 +32,37 @@ The objective mirrors deployment as closely as possible: no early stopping
 the fold's training labels (``train()`` computes it from its training set),
 and F1 scored with the project's ``METRIC_AVERAGE``.
 
+FEATURE SETS
+============
+``--feature-set full`` (default) tunes the full ``FEATURE_COLUMNS`` model
+(``DEFAULT_XGB_PARAMS`` in ml.py).
+
+``--feature-set spark`` tunes the Spark-portable model
+(``SPARK_PORTABLE_XGB_PARAMS``): the feature matrix is restricted to
+``SPARK_PORTABLE_FEATURES`` exactly the way ``matcher export-spark-model``
+does it (``train(exclude_features=...)`` restricts ``feature_names`` BEFORE
+``_validate_training_pairs()``, so the post-validation row set — and hence the
+seed-42 split — matches the exported model's training run). The objective
+additionally subtracts a size penalty of 0.00001 F1 per tree above 100
+(``n_estimators``) so tuning favors compact models for Spark deployment.
+The leakage-free protocol (split, discard, inner CV) is identical.
+
+EPSILON-COMPACT SELECTION
+=========================
+Inference speed matters for Spark deployment, and the in-objective size
+penalty alone is too weak to prevent expensive winners (it also ignores tree
+depth). Each trial therefore records a traversal-cost proxy
+``cost = n_estimators * max_depth``, and after the study finishes the FINAL
+selected params are the minimum-cost trial among all trials whose raw
+(unpenalized) CV F1 is within ``--epsilon`` of the best raw CV F1. Defaults:
+0.003 for ``--feature-set spark``, 0.0 (selection off — picks the best raw-F1
+trial) for ``full``. Both the best-F1 trial and the selected trial are logged
+and persisted in the results JSON.
+
 Usage:
     uv run python scripts/tune_model.py --trials 100 --output best_params.json
+    uv run python scripts/tune_model.py --feature-set spark --trials 100 \
+        --output spark_params.json
 """
 
 import argparse
@@ -54,8 +83,14 @@ except ImportError as e:
         "uv pip install -e '.[dev,ml]' (plus optuna: uv pip install optuna)"
     ) from e
 
-from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
+from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE, SPARK_PORTABLE_FEATURES
 from matcher.matching.ml import MLMatcher, segment_aware_split
+
+# Size penalty for the spark feature set: 0.00001 F1 per tree above 100.
+# Matches the penalty used for the original Spark-portable tuning so the
+# objective still favors compact models for Spark deployment.
+SPARK_SIZE_PENALTY_PER_TREE = 0.00001
+SPARK_SIZE_PENALTY_FREE_TREES = 100
 
 
 def objective(
@@ -64,8 +99,18 @@ def objective(
     y: np.ndarray,
     groups: np.ndarray,
     n_splits: int = 5,
+    size_penalty_per_tree: float = 0.0,
 ) -> float:
-    """Optuna objective: mean F1 over segment-grouped CV folds (train rows only)."""
+    """Optuna objective: mean F1 over segment-grouped CV folds (train rows only).
+
+    When ``size_penalty_per_tree`` > 0, subtracts
+    ``size_penalty_per_tree * max(0, n_estimators - SPARK_SIZE_PENALTY_FREE_TREES)``
+    from the mean F1 so the search favors compact models (used for the
+    Spark-portable feature set). The unpenalized mean CV F1 is stored on the
+    trial as the ``raw_cv_f1`` user attribute, and a traversal-cost proxy
+    (``n_estimators * max_depth``) as the ``cost`` user attribute for
+    epsilon-compact selection.
+    """
 
     # Define search space
     # Note: scale_pos_weight is computed dynamically (per fold here, on the
@@ -115,7 +160,65 @@ def objective(
         score = f1_score(y_val, preds, average=METRIC_AVERAGE, zero_division=0)
         scores.append(score)
 
-    return float(np.mean(scores))
+    mean_f1 = float(np.mean(scores))
+    trial.set_user_attr("raw_cv_f1", mean_f1)
+    # Traversal-cost proxy for epsilon-compact selection: prediction latency
+    # scales with trees * depth (worst-case node visits per row).
+    trial.set_user_attr("cost", params["n_estimators"] * params["max_depth"])
+    if size_penalty_per_tree > 0:
+        mean_f1 -= size_penalty_per_tree * max(
+            0, params["n_estimators"] - SPARK_SIZE_PENALTY_FREE_TREES
+        )
+    return mean_f1
+
+
+# Default epsilon for epsilon-compact selection with --feature-set spark:
+# the cheapest (n_estimators * max_depth) trial within this raw CV F1 margin
+# of the best raw CV F1 is selected. 0.0 disables selection (best-F1 trial).
+SPARK_DEFAULT_EPSILON = 0.003
+
+
+def _trial_summary(trial: optuna.trial.FrozenTrial) -> dict:
+    """JSON-serializable summary of a trial for logging/persistence."""
+    return {
+        "number": trial.number,
+        "raw_cv_f1": trial.user_attrs.get("raw_cv_f1"),
+        "objective": trial.value,
+        "cost": trial.user_attrs.get("cost"),
+        "n_estimators": trial.params.get("n_estimators"),
+        "max_depth": trial.params.get("max_depth"),
+        "params": trial.params,
+    }
+
+
+def select_epsilon_compact_trial(
+    study: optuna.Study, epsilon: float
+) -> tuple[optuna.trial.FrozenTrial, optuna.trial.FrozenTrial]:
+    """Pick the cheapest trial within ``epsilon`` raw CV F1 of the best.
+
+    Returns ``(best_f1_trial, selected_trial)`` where ``best_f1_trial``
+    maximizes the raw (unpenalized) CV F1 and ``selected_trial`` is the
+    minimum-cost (``n_estimators * max_depth``) trial among all completed
+    trials with ``raw_cv_f1 >= best_raw_cv_f1 - epsilon``. Ties on cost are
+    broken by higher raw CV F1, then earlier trial number (deterministic).
+    """
+    completed = [
+        t
+        for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE and "raw_cv_f1" in t.user_attrs
+    ]
+    if not completed:
+        raise ValueError("No completed trials with raw_cv_f1 — nothing to select from")
+
+    best_f1_trial = max(completed, key=lambda t: (t.user_attrs["raw_cv_f1"], -t.number))
+    best_raw_f1 = best_f1_trial.user_attrs["raw_cv_f1"]
+
+    eligible = [t for t in completed if t.user_attrs["raw_cv_f1"] >= best_raw_f1 - epsilon]
+    selected = min(
+        eligible,
+        key=lambda t: (t.user_attrs["cost"], -t.user_attrs["raw_cv_f1"], t.number),
+    )
+    return best_f1_trial, selected
 
 
 def run_tuning(
@@ -123,6 +226,8 @@ def run_tuning(
     output_path: str,
     n_trials: int = 100,
     allow_stale_features: bool = False,
+    feature_set: str = "full",
+    epsilon: float | None = None,
 ):
     """Run hyperparameter tuning on the training portion of the seed-42 split."""
     from matcher.labeling.label_store import LabelStore
@@ -137,7 +242,24 @@ def run_tuning(
     logger.info(f"Loaded {len(df)} valid labels")
 
     matcher = MLMatcher()
-    matcher.feature_names = FEATURE_COLUMNS.copy()
+    if feature_set == "spark":
+        # Mirror `matcher export-spark-model`: train() restricts feature_names
+        # (FEATURE_COLUMNS order, minus non-portable features) BEFORE
+        # _validate_training_pairs(), so validation's all-NaN check — and thus
+        # the seed-42 split's row set — matches the exported model's run.
+        matcher.feature_names = [f for f in FEATURE_COLUMNS if f in SPARK_PORTABLE_FEATURES]
+        size_penalty_per_tree = SPARK_SIZE_PENALTY_PER_TREE
+        logger.info(
+            f"Feature set 'spark': {len(matcher.feature_names)} Spark-portable features, "
+            f"size penalty {size_penalty_per_tree} F1/tree above "
+            f"{SPARK_SIZE_PENALTY_FREE_TREES} trees"
+        )
+    else:
+        matcher.feature_names = FEATURE_COLUMNS.copy()
+        size_penalty_per_tree = 0.0
+    if epsilon is None:
+        epsilon = SPARK_DEFAULT_EPSILON if feature_set == "spark" else 0.0
+    logger.info(f"Epsilon-compact selection: epsilon={epsilon}")
     # Same feature_version gate as train(): tuning on stale/mixed features
     # would produce params train() then refuses to reproduce.
     matcher._check_feature_versions(df, allow_stale_features=allow_stale_features)
@@ -182,35 +304,70 @@ def run_tuning(
     )
 
     study.optimize(
-        lambda trial: objective(trial, X, y, groups_train, n_splits=n_splits),
+        lambda trial: objective(
+            trial,
+            X,
+            y,
+            groups_train,
+            n_splits=n_splits,
+            size_penalty_per_tree=size_penalty_per_tree,
+        ),
         n_trials=n_trials,
         show_progress_bar=True,
     )
 
-    # Log results
-    logger.info("Best trial:")
-    trial = study.best_trial
-    logger.info(f"  F1 Score: {trial.value:.4f}")
-    logger.info("  Params:")
-    for key, value in trial.params.items():
-        logger.info(f"    {key}: {value}")
+    # Epsilon-compact selection: cheapest trial within epsilon raw CV F1 of
+    # the best raw CV F1 (see module docstring).
+    best_f1_trial, selected_trial = select_epsilon_compact_trial(study, epsilon)
+    best_summary = _trial_summary(best_f1_trial)
+    selected_summary = _trial_summary(selected_trial)
 
-    # Save results
+    logger.info(f"Epsilon-compact selection (epsilon={epsilon}):")
+    logger.info(f"  {'trial':>10} | {'raw CV F1':>9} | {'n_est':>5} | {'depth':>5} | {'cost':>6}")
+    for label, s in [("best-F1", best_summary), ("selected", selected_summary)]:
+        logger.info(
+            f"  {label:>10} | {s['raw_cv_f1']:>9.4f} | {s['n_estimators']:>5} | "
+            f"{s['max_depth']:>5} | {s['cost']:>6}"
+        )
+    if selected_trial.number != best_f1_trial.number:
+        logger.info(
+            f"  Selected trial {selected_trial.number} trades "
+            f"{best_summary['raw_cv_f1'] - selected_summary['raw_cv_f1']:.4f} raw CV F1 for a "
+            f"{best_summary['cost'] / selected_summary['cost']:.2f}x cheaper model"
+        )
+    else:
+        logger.info("  Best-F1 trial is already the cheapest within epsilon")
+
+    # Save results. best_trial maximizes raw (unpenalized) CV F1;
+    # selected_trial is the epsilon-compact pick actually recommended.
+    # best_objective includes the size penalty (if any).
     results = {
-        "best_f1": trial.value,
-        "best_params": trial.params,
+        "best_objective": study.best_trial.value,
+        "best_raw_cv_f1": best_summary["raw_cv_f1"],
+        "best_params": selected_trial.params,
+        "best_trial": best_summary,
+        "selected_trial": selected_summary,
+        "epsilon": epsilon,
         "n_trials": n_trials,
         "n_train_samples": len(df_train),
         "n_test_held_out": len(test_idx),
+        "feature_set": feature_set,
+        "n_features": len(matcher.feature_names),
+        "size_penalty_per_tree": size_penalty_per_tree,
         "protocol": "tuned on seed-42/test_size-0.2 training portion only (test set never seen)",
     }
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
-    logger.info(f"Saved best params to {output_path}")
+    logger.info(f"Saved results (selected params) to {output_path}")
 
-    # Print params in format ready for ml.py
-    logger.info("\nParams for ml.py DEFAULT_XGB_PARAMS:")
-    for key, value in trial.params.items():
+    # Print the SELECTED params in a format ready to paste into the params dict
+    target = (
+        "config.py SPARK_PORTABLE_XGB_PARAMS"
+        if feature_set == "spark"
+        else "ml.py DEFAULT_XGB_PARAMS"
+    )
+    logger.info(f"\nSelected params for {target}:")
+    for key, value in selected_trial.params.items():
         logger.info(f'    "{key}": {value},')
 
 
@@ -220,6 +377,21 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="best_params.json", help="Output path for best params")
     parser.add_argument("--trials", type=int, default=100, help="Number of trials")
     parser.add_argument(
+        "--feature-set",
+        choices=["full", "spark"],
+        default="full",
+        help="Feature view to tune: 'full' (all FEATURE_COLUMNS, default) or "
+        "'spark' (SPARK_PORTABLE_FEATURES subset with tree-count size penalty)",
+    )
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=None,
+        help="Epsilon-compact selection margin: pick the cheapest "
+        "(n_estimators * max_depth) trial within this raw CV F1 of the best. "
+        f"Default: {SPARK_DEFAULT_EPSILON} for --feature-set spark, 0.0 (off) for full",
+    )
+    parser.add_argument(
         "--allow-stale-features",
         action="store_true",
         help="Tune despite stale/mixed feature_version labels (same escape hatch as train())",
@@ -227,4 +399,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    run_tuning(args.labels, args.output, args.trials, args.allow_stale_features)
+    run_tuning(
+        args.labels,
+        args.output,
+        args.trials,
+        args.allow_stale_features,
+        args.feature_set,
+        args.epsilon,
+    )
