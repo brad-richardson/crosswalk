@@ -373,6 +373,10 @@ SPARK_PORTABLE_FEATURES = [
 # XGBoost hyperparams tuned for the 28-feature Spark-portable model.
 # Tuned via Optuna (80 trials, slight size penalty for tree count).
 # Higher learning rate + fewer trees than the full 78-feature model.
+# WARNING: tuned before scripts/tune_model.py adopted the leakage-free
+# protocol (test set held out prior to tuning) — these params saw the
+# seed-42 test set. Retune with the current script (restricted to
+# SPARK_PORTABLE_FEATURES) before quoting holdout metrics for this model.
 SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
     "n_estimators": 200,
     "learning_rate": 0.037979773378190335,
