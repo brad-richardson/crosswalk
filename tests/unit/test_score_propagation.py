@@ -31,11 +31,13 @@ def _gdf(rows):
 
 
 def _mr(ref_id, target_id, conf):
-    # Mirror the scorer's decision bands (match=0.5, review=0.1) so a no-op
-    # propagation leaves the decision unchanged.
-    if conf >= 0.5:
+    # Mirror the scorer's decision bands via settings so a no-op propagation
+    # leaves the decision unchanged even if the thresholds are reconfigured.
+    from matcher.config import settings
+
+    if conf >= settings.scoring_match_threshold:
         dec = MatchDecision.MATCH
-    elif conf >= 0.1:
+    elif conf >= settings.scoring_review_threshold:
         dec = MatchDecision.REVIEW
     else:
         dec = MatchDecision.NO_MATCH
@@ -164,20 +166,58 @@ def test_decision_recomputed_after_boost():
     assert out[0].decision == MatchDecision.MATCH
 
 
-def test_flag_off_pipeline_does_not_import_or_call(monkeypatch):
-    # With the flag off (default), the runner must not invoke propagation.
-    import matcher.matching.score_propagation as sp
+def test_zero_junction_coincidence_rejected():
+    reference = _gdf({"R1": LineString([(0, 0), (100, 0)])})
+    target = _gdf({"T1": LineString([(0, 1), (100, 1)])})
+    r = _mr("R1", "T1", 0.9)
+    with pytest.raises(ValueError, match="junction_coincidence_m"):
+        propagate_scores(
+            [r], reference, target, params=PropagationParams(junction_coincidence_m=0.0)
+        )
+
+
+def test_pipeline_gates_propagation_on_flag(monkeypatch, tmp_path):
+    """run_pipeline must invoke propagate_scores iff the settings flag is on."""
+    from types import SimpleNamespace
+
+    import matcher.pipeline.runner as runner
     from matcher.config import settings
 
-    called = {"n": 0}
-    orig = sp.propagate_scores
+    ref = _gdf({"R1": LineString([(0, 0), (100, 0)])})
+    tgt = _gdf({"T1": LineString([(0, 1), (100, 1)])})
+    ref_path = tmp_path / "ref.parquet"
+    tgt_path = tmp_path / "tgt.parquet"
+    ref.to_parquet(ref_path)
+    tgt.to_parquet(tgt_path)
 
-    def _spy(*a, **k):
-        called["n"] += 1
-        return orig(*a, **k)
+    fake_results = [_mr("R1", "T1", 0.9)]
 
-    monkeypatch.setattr(sp, "propagate_scores", _spy)
+    # run_pipeline reads projection_result.reference/.target after scoring
+    def _fake_score(reference, target, **kwargs):
+        proj = SimpleNamespace(reference=reference, target=target)
+        return list(fake_results), proj
+
+    # Stub the heavy stages around the gating point.
+    monkeypatch.setattr(runner, "score_candidates_from_geodataframes", _fake_score)
+    monkeypatch.setattr(runner, "optimize_matches_with_grouping", lambda results, *a, **k: results)
+    monkeypatch.setattr(runner, "_export_groups_sidecar", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "generate_bridge_file", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "generate_unmatched_report", lambda *a, **k: None)
+
+    calls = {"n": 0}
+
+    def _fake_propagate(results, **kwargs):
+        calls["n"] += 1
+        return results, None
+
+    # The runner lazy-imports propagate_scores inside the flag guard, so
+    # patching the source module attribute intercepts the real call site.
+    monkeypatch.setattr("matcher.matching.score_propagation.propagate_scores", _fake_propagate)
+
     assert settings.enable_score_propagation is False
-    # The default flag is off; the runner guards the call behind it. This test
-    # documents the invariant that nothing calls propagation when off.
-    assert called["n"] == 0
+    runner.run_pipeline(ref_path, tgt_path, tmp_path / "off_bridge.parquet")
+    assert calls["n"] == 0, "flag off must not invoke propagation"
+
+    monkeypatch.setattr(settings, "enable_score_propagation", True)
+    runner.run_pipeline(ref_path, tgt_path, tmp_path / "on_bridge.parquet")
+    assert calls["n"] == 1, "flag on must invoke propagation exactly once"

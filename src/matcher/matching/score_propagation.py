@@ -143,6 +143,8 @@ def propagate_scores(
         return results, PropagationStats(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0)
 
     g = params.junction_coincidence_m
+    if not g > 0:
+        raise ValueError(f"junction_coincidence_m must be > 0, got {g!r}")
 
     # --- Geometry lookups by id ---------------------------------------------
     ref_id_arr = reference[ref_id_column].astype(str).to_numpy()
@@ -222,7 +224,7 @@ def propagate_scores(
     comp_src: list[int] = []
     comp_dst: list[int] = []
 
-    def _add_competitors(groups, cells, is_ref_group: bool):
+    def _add_competitors(groups, is_ref_group: bool):
         for _key, plist in groups.items():
             if len(plist) < 2:
                 continue
@@ -245,8 +247,8 @@ def propagate_scores(
                     comp_dst.append(pi)
 
     if not params.boost_only:
-        _add_competitors(same_ref, pair_ref_cells, is_ref_group=True)
-        _add_competitors(same_target, pair_tgt_cells, is_ref_group=False)
+        _add_competitors(same_ref, is_ref_group=True)
+        _add_competitors(same_target, is_ref_group=False)
 
     edge_src_a = np.asarray(edge_src, dtype=np.int64)
     edge_dst_a = np.asarray(edge_dst, dtype=np.int64)
