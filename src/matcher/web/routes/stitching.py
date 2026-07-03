@@ -9,6 +9,7 @@ from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring
 
 from ...matching.alternatives import _shorten_id
+from ...matching.stitch_options import build_stitch_options as _build_stitch_options
 from ..jinja import templates
 from ..services import (
     get_unreviewed_stitch_groups,
@@ -178,128 +179,6 @@ def _build_group_geojson(group: dict) -> dict:
         )
 
     return {"type": "FeatureCollection", "features": features}
-
-
-def _build_stitch_options(group: dict) -> dict:
-    """Build the assignment option picker + optimizer pre-seed for a group.
-
-    The optimizer's own proposed assignment and the pre-computed top-K
-    alternatives are turned into one-click options ("verify, don't construct").
-
-    Returns a context dict with:
-    - options: list of option dicts (optimizer first, then alternatives,
-      deduplicated by exact edge set). Each option carries its EXACT edge set
-      so the client can submit it verbatim (see the edge-set fidelity note in
-      the submit endpoint).
-    - preseed_active_refs / preseed_active_targets: segment IDs that should be
-      active (pill selected) on load, derived from the optimizer assignment.
-      Both are None when no optimizer assignment is present — the template then
-      falls back to all-active, exactly matching the pre-change behavior.
-    """
-    group_edges = group.get("edges", []) or []
-    group_edge_set = {(e["ref_id"], e["target_id"]) for e in group_edges}
-    optimizer = group.get("optimizer_assignment") or []
-    alternatives = group.get("alternatives") or []
-
-    def _valid_edges(edges: list[dict]) -> list[dict]:
-        """Keep only edges that exist in the group, deduplicated; strip to id pairs."""
-        out = []
-        seen = set()
-        for e in edges:
-            key = (e.get("ref_id"), e.get("target_id"))
-            if key in group_edge_set and key not in seen:
-                seen.add(key)
-                out.append({"ref_id": key[0], "target_id": key[1]})
-        return out
-
-    def _edge_key(edges: list[dict]) -> frozenset:
-        return frozenset((e["ref_id"], e["target_id"]) for e in edges)
-
-    def _confidences(raw_edges: list[dict]) -> tuple[float, float]:
-        confs = [
-            e.get("confidence", 0.0)
-            for e in raw_edges
-            if (e.get("ref_id"), e.get("target_id")) in group_edge_set
-        ]
-        total = round(sum(confs), 4)
-        mean = round(total / len(confs), 4) if confs else 0.0
-        return total, mean
-
-    def _make_option(key: str, label: str, is_optimizer: bool, raw_edges: list[dict]) -> dict:
-        edges = _valid_edges(raw_edges)
-        total, mean = _confidences(raw_edges)
-        return {
-            "key": key,
-            "label": label,
-            "is_optimizer": is_optimizer,
-            "edges": edges,
-            "edge_count": len(edges),
-            "total_confidence": total,
-            "mean_confidence": mean,
-            "active_refs": sorted({e["ref_id"] for e in edges}),
-            "active_targets": sorted({e["target_id"] for e in edges}),
-        }
-
-    options: list[dict] = []
-    seen: set[frozenset] = set()
-
-    # Optimizer's assignment always comes first (when present).
-    if optimizer:
-        opt = _make_option("optimizer", "Optimizer", True, optimizer)
-        if opt["edges"]:
-            options.append(opt)
-            seen.add(_edge_key(opt["edges"]))
-
-    # Alternatives, deduplicated against the optimizer's answer and each other.
-    alt_num = 0
-    for alt in alternatives:
-        edges = _valid_edges(alt.get("edges", []))
-        if not edges:
-            continue
-        key = _edge_key(edges)
-        if key in seen:
-            continue
-        seen.add(key)
-        alt_num += 1
-        opt = _make_option(f"alt{alt_num}", f"Alt {alt_num}", False, alt.get("edges", []))
-        # Prefer the alternative's own precomputed total when available.
-        if "total_confidence" in alt:
-            opt["total_confidence"] = round(alt["total_confidence"], 4)
-            opt["mean_confidence"] = (
-                round(opt["total_confidence"] / opt["edge_count"], 4) if opt["edge_count"] else 0.0
-            )
-        options.append(opt)
-
-    # Pre-seed pill active-state from the optimizer assignment. Only a
-    # non-empty assignment drives the pre-seed; an absent/empty assignment
-    # (old batch format, or a group the optimizer dropped entirely) leaves
-    # preseed as None so the template keeps every group pill active.
-    preseed_refs = None
-    preseed_targets = None
-    preseed_inactive_ids: list[str] = []
-    preseed_valid = _valid_edges(optimizer)
-    if preseed_valid:
-        preseed_refs = sorted({e["ref_id"] for e in preseed_valid})
-        preseed_targets = sorted({e["target_id"] for e in preseed_valid})
-        # Group segments the optimizer left out start hidden on the map so the
-        # map matches the pre-seeded pill state.
-        active_ids = set(preseed_refs) | set(preseed_targets)
-        for sid in group.get("ref_ids", []) + group.get("target_ids", []):
-            if sid not in active_ids:
-                preseed_inactive_ids.append(sid)
-
-    # The client submits this exact edge set verbatim when the pre-seeded
-    # option is chosen without manual edits.
-    preseed_edges = options[0]["edges"] if (options and options[0]["is_optimizer"]) else []
-
-    return {
-        "options": options,
-        "preseed_active_refs": preseed_refs,
-        "preseed_active_targets": preseed_targets,
-        "preseed_inactive_ids": preseed_inactive_ids,
-        "preseed_edges": preseed_edges,
-        "has_preseed": bool(preseed_refs) or bool(preseed_targets),
-    }
 
 
 def _build_group_context(group: dict) -> dict:

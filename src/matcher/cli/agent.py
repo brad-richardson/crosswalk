@@ -868,6 +868,305 @@ def run_agent(
     )
 
 
+@agent_app.command("stitch-batch")
+def generate_stitch_batch(
+    dataset: str = typer.Argument(..., help="Dataset name (e.g. us_boston_streets)"),
+    group_ids: str = typer.Option(
+        None,
+        "--group-ids",
+        help="Comma-separated group_ids to generate (default: use tier-selected batch)",
+    ),
+    group_ids_file: Path = typer.Option(
+        None,
+        "--group-ids-file",
+        help="File with group_ids (JSON list or newline-separated)",
+    ),
+    recover_labeled: bool = typer.Option(
+        False,
+        "--recover-labeled",
+        help="Auto-select sidecar groups that best-correspond to existing human labels",
+    ),
+    output_dir: Path = typer.Option(
+        Path("data/agents/stitching/batches"),
+        "--output",
+        "-o",
+        help="Root output dir for stitching evidence batches",
+    ),
+    batch_name: str = typer.Option(None, "--name", help="Batch name (default: dataset name)"),
+    batch_size: int = typer.Option(
+        15, "--batch-size", "-n", help="Tier-selected batch size (when no explicit group_ids)"
+    ),
+    k_alternatives: int = typer.Option(
+        5, "--alternatives", "-k", help="Top-K alternatives per group"
+    ),
+):
+    """Generate evidence packs for agent stitching-group labeling.
+
+    Reads the groups sidecar, computes top-K alternatives + spatial context per
+    group, and writes one evidence pack per group (overview + per-option images,
+    metadata.yaml, prompt.txt) under {output}/{name}/{group_id}/.
+
+    Examples:
+        # Tier-selected batch (like the web review batch)
+        matcher agent stitch-batch us_boston_streets
+
+        # Specific groups (e.g. for eval against human labels)
+        matcher agent stitch-batch us_boston_streets --group-ids abc123,def456
+
+        # Auto-recover the groups matching existing human labels
+        matcher agent stitch-batch us_boston_streets --recover-labeled
+    """
+    import json
+
+    from ..agent_labeling.stitch_evidence import generate_stitch_evidence
+    from ..filenames import (
+        PROJECT_ROOT,
+        bridge_filename,
+        groups_sidecar_path,
+    )
+    from ..labeling.stitching_store import StitchingLabelStore
+    from ..matching.alternatives import generate_top_k_alternatives
+    from ..matching.batch_selection import select_stitching_batch
+
+    out_root = PROJECT_ROOT / "data" / "output"
+    bridge_path = out_root / bridge_filename(dataset)
+    sidecar_path = groups_sidecar_path(bridge_path)
+    if not sidecar_path.exists():
+        console.print(f"[red]No groups sidecar at {sidecar_path}[/red]")
+        console.print("[yellow]Run `matcher stitch` first.[/yellow]")
+        raise typer.Exit(1)
+
+    sidecar = json.loads(sidecar_path.read_text())
+    groups = sidecar.get("groups", [])
+    console.print(f"[blue]Loaded {len(groups)} groups from sidecar[/blue]")
+
+    # Determine requested group_ids.
+    requested: list[str] | None = None
+    if group_ids:
+        requested = [g.strip() for g in group_ids.split(",") if g.strip()]
+    elif group_ids_file:
+        text = group_ids_file.read_text().strip()
+        try:
+            # Normalize items to stripped strings: JSON numbers (unquoted hex
+            # ids like 21b67ef2 are rare but possible) would otherwise never
+            # match the string group_ids in the sidecar.
+            requested = [str(g).strip() for g in json.loads(text)]
+        except json.JSONDecodeError:
+            requested = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    elif recover_labeled:
+        from ..agent_labeling.stitch_eval import recover_labeled_groups
+
+        stitch_store = StitchingLabelStore(dataset)
+        human_df = stitch_store.load(dataset)
+        rec = recover_labeled_groups(groups, human_df)
+        requested = rec["target_group_ids"]
+        console.print(
+            f"[blue]Label recovery:[/blue] {len(rec['clean'])} clean, "
+            f"{len(rec['split'])} split, {len(rec['empty'])} empty(NONE), "
+            f"{len(rec['lost'])} lost -> {len(requested)} target groups"
+        )
+
+    # Select groups to render.
+    if requested is not None:
+        gmap = {g["group_id"]: g for g in groups}
+        selected = [gmap[gid] for gid in requested if gid in gmap]
+        missing = [gid for gid in requested if gid not in gmap]
+        if missing:
+            console.print(f"[yellow]{len(missing)} requested group_ids not in sidecar[/yellow]")
+    else:
+        for g in groups:
+            g["alternatives"] = generate_top_k_alternatives(g.get("edges", []), k=k_alternatives)
+        reviewed = StitchingLabelStore(dataset).get_reviewed_group_ids(dataset)
+        selected = select_stitching_batch(groups, reviewed, k=batch_size)
+
+    if not selected:
+        console.print("[red]No groups selected[/red]")
+        raise typer.Exit(1)
+
+    # Ensure alternatives present, then fill spatial context.
+    for g in selected:
+        if "alternatives" not in g:
+            g["alternatives"] = generate_top_k_alternatives(g.get("edges", []), k=k_alternatives)
+    console.print(f"[blue]Filling spatial context for {len(selected)} groups...[/blue]")
+    from .data import _fill_spatial_context
+
+    _fill_spatial_context(selected, dataset)
+
+    name = batch_name or dataset
+    batch_dir = output_dir / name
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    batch = {"dataset_id": dataset, "groups": selected}
+    (batch_dir / "batch.json").write_text(json.dumps(batch))
+
+    console.print(f"[blue]Generating evidence packs -> {batch_dir}[/blue]")
+    generated = generate_stitch_evidence(batch, batch_dir)
+    console.print(f"[green]Generated {len(generated)} evidence packs[/green]")
+    console.print(f"  Batch dir: {batch_dir}")
+    console.print("Next: matcher agent stitch-run --batch " + str(batch_dir))
+
+
+@agent_app.command("stitch-run")
+def run_stitch_panel(
+    batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch dir with evidence packs"),
+    group_ids: str = typer.Option(None, "--group-ids", help="Comma-separated subset to run"),
+    timeout: int = typer.Option(240, "--timeout", help="Per-provider timeout (s)"),
+    limit: int = typer.Option(0, "--limit", "-l", help="Max groups (0=all)"),
+    claude_model: str = typer.Option("sonnet", "--claude-model"),
+    codex_model: str = typer.Option("gpt-5.4", "--codex-model"),
+    agy_model: str = typer.Option("Gemini 3.5 Flash (Low)", "--agy-model"),
+):
+    """Run the 3-provider consensus panel (claude + codex + agy) on a batch.
+
+    Writes votes.csv (every raw vote — audit data) and consensus.csv (per-group
+    routing) into the batch dir. Writes NOTHING into labels/.
+
+    Examples:
+        matcher agent stitch-run --batch data/agents/stitching/batches/us_boston_streets
+    """
+    from ..agent_labeling.stitch_runner import ProviderSpec, run_batch
+
+    if not batch_dir.exists():
+        console.print(f"[red]Batch dir not found: {batch_dir}[/red]")
+        raise typer.Exit(1)
+
+    panel = [
+        ProviderSpec(name="claude", model=claude_model),
+        ProviderSpec(name="codex", model=codex_model),
+        ProviderSpec(name="agy", model=agy_model),
+    ]
+    gids = [g.strip() for g in group_ids.split(",") if g.strip()] if group_ids else None
+
+    console.print(f"[blue]Running panel on batch {batch_dir}[/blue]")
+    console.print(f"  Panel: {', '.join(f'{p.name}={p.model}' for p in panel)}")
+    votes_df, consensus_df = run_batch(
+        batch_dir, panel=panel, group_ids=gids, timeout=timeout, limit=limit
+    )
+
+    console.print(f"[green]{len(consensus_df)} groups, {len(votes_df)} votes[/green]")
+    tier_counts = consensus_df["consensus"].value_counts().to_dict()
+    route_counts = consensus_df["routing"].value_counts().to_dict()
+    console.print(f"  Consensus: {tier_counts}")
+    console.print(f"  Routing:   {route_counts}")
+    console.print(f"  Wrote {batch_dir / 'votes.csv'} and {batch_dir / 'consensus.csv'}")
+
+
+@agent_app.command("stitch-eval")
+def eval_stitch_panel(
+    batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch dir with consensus.csv"),
+    dataset: str = typer.Option("us_boston_streets", "--dataset", "-d"),
+    labels_dir: Path = typer.Option(Path("labels/stitching"), "--labels", "-l"),
+    output: Path = typer.Option(
+        None, "--output", "-o", help="Write a markdown report to this path"
+    ),
+):
+    """Validate panel results against human stitching labels.
+
+    Disagreement is NOT treated as agent failure: the report frames panel-vs-
+    human contradictions as label-quality review candidates and reports
+    option-coverage gaps.
+
+    Examples:
+        matcher agent stitch-eval --batch data/agents/stitching/batches/us_boston_streets
+    """
+    import pandas as pd
+
+    from ..agent_labeling.stitch_eval import (
+        disagreement_report,
+        evaluate_batch,
+        summarize,
+    )
+
+    human_path = labels_dir / f"dataset={dataset}" / "data.csv"
+    if not human_path.exists():
+        console.print(f"[red]No human labels at {human_path}[/red]")
+        raise typer.Exit(1)
+    human_df = pd.read_csv(human_path, dtype={"group_id": str})
+
+    results = evaluate_batch(batch_dir, human_df)
+    if not results:
+        console.print("[yellow]No panel groups mapped to human labels[/yellow]")
+        raise typer.Exit(0)
+
+    summary = summarize(results)
+    disagreements = disagreement_report(results)
+
+    console.print(f"[bold]Panel eval: {summary['n_groups']} mapped groups[/bold]")
+    console.print(
+        f"  Panel exact edge-set match: {summary['panel_exact_rate']:.0%}  "
+        f"mean F1: {summary['panel_mean_f1']:.3f}"
+    )
+    console.print("  Per provider:")
+    for prov, s in summary["by_provider"].items():
+        console.print(
+            f"    {prov:<8} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+        )
+    console.print("  Per consensus tier:")
+    for tier, s in summary["by_consensus"].items():
+        console.print(
+            f"    {tier:<10} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+        )
+    oc = summary["option_coverage"]
+    console.print(
+        f"  Option-coverage gap: {oc['gap']}/{summary['n_groups']} ({oc['gap_rate']:.0%})"
+    )
+    console.print(f"  Disagreements (label-quality review candidates): {len(disagreements)}")
+
+    if output:
+        _write_stitch_eval_report(output, summary, results, disagreements, dataset, batch_dir)
+        console.print(f"[green]Wrote report to {output}[/green]")
+
+
+def _write_stitch_eval_report(output, summary, results, disagreements, dataset, batch_dir) -> None:
+    """Write a markdown eval report."""
+
+    def _edges_str(es) -> str:
+        if not es:
+            return "(none)"
+        return ", ".join(f"{r[:8]}..->..{t[-14:]}" for r, t in sorted(es))
+
+    lines = []
+    lines.append("# Agent Stitching Panel Eval\n")
+    lines.append(f"Dataset: `{dataset}`  |  Batch: `{batch_dir}`\n")
+    lines.append(f"Mapped groups: {summary['n_groups']}\n")
+    lines.append("\n## Agreement with human labels\n")
+    lines.append(
+        f"- Panel exact edge-set match: **{summary['panel_exact_rate']:.0%}**, "
+        f"mean edge F1: **{summary['panel_mean_f1']:.3f}**\n"
+    )
+    lines.append("\n### Per provider\n")
+    lines.append("| Provider | Exact | Mean F1 | N |\n|---|---|---|---|\n")
+    for prov, s in summary["by_provider"].items():
+        lines.append(f"| {prov} | {s['exact_rate']:.0%} | {s['mean_f1']:.3f} | {s['n']} |\n")
+    lines.append("\n### Per consensus tier\n")
+    lines.append("| Consensus | Exact | Mean F1 | N |\n|---|---|---|---|\n")
+    for tier, s in summary["by_consensus"].items():
+        lines.append(f"| {tier} | {s['exact_rate']:.0%} | {s['mean_f1']:.3f} | {s['n']} |\n")
+    oc = summary["option_coverage"]
+    lines.append(
+        f"\n### Option-coverage gap\n\n{oc['gap']}/{summary['n_groups']} "
+        f"({oc['gap_rate']:.0%}) human edge sets match NO current option — "
+        f"signal for whether top-K is large enough.\n"
+    )
+    lines.append("\n## Disagreement report (label-quality review candidates)\n")
+    lines.append(
+        "Groups where the panel contradicts the human label. Framed as candidates "
+        "for human re-review, not agent errors.\n\n"
+    )
+    for r in disagreements:
+        lines.append(
+            f"### Group `{r.group_id}` (human `{r.human_group_id}`, {r.match_type}) "
+            f"— {r.consensus}\n"
+        )
+        lines.append(f"- Human edge set: {_edges_str(r.human_edge_set)}\n")
+        lines.append(f"- Panel choice `{r.panel_choice}`: {_edges_str(r.panel_edge_set)}\n")
+        lines.append(f"- Option-covered: {r.option_covered}  |  F1: {r.f1:.2f}\n")
+        for prov, (choice, es) in r.provider_votes.items():
+            lines.append(f"  - {prov}: choice={choice} edges={_edges_str(es)}\n")
+        lines.append("\n")
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    Path(output).write_text("".join(lines))
+
+
 @agent_app.command("import")
 def import_agent_labels(
     batch_dir: Path = typer.Argument(..., help="Batch directory"),
