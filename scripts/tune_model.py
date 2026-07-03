@@ -6,8 +6,10 @@ This script holds out the EXACT same test set that ``MLMatcher.train()`` uses
 BEFORE any tuning happens:
 
 1. Labels are loaded and preprocessed identically to ``train()``:
-   filter to {match, no_match}, then ``_validate_training_pairs()``
-   (same ``max_hausdorff_m`` default). This matters — the split indices are
+   filter to {match, no_match}, the same ``_check_feature_versions()`` gate
+   (override with ``--allow-stale-features``), then
+   ``_validate_training_pairs()`` (same ``max_hausdorff_m`` default). This
+   matters — the split indices are
    computed on the post-validation DataFrame, so any preprocessing drift
    between this script and ``train()`` changes which rows land in the test set.
 2. ``segment_aware_split(df, test_size=0.2, random_state=42)`` is applied and
@@ -39,11 +41,18 @@ import json
 from pathlib import Path
 
 import numpy as np
-import optuna
-import xgboost as xgb
 from loguru import logger
 from sklearn.metrics import f1_score
 from sklearn.model_selection import GroupKFold
+
+try:
+    import optuna
+    import xgboost as xgb
+except ImportError as e:
+    raise SystemExit(
+        f"Missing optional dependency '{e.name}'. Tuning requires the ML extras: "
+        "uv pip install -e '.[dev,ml]' (plus optuna: uv pip install optuna)"
+    ) from e
 
 from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
 from matcher.matching.ml import MLMatcher, segment_aware_split
@@ -54,6 +63,7 @@ def objective(
     X: np.ndarray,
     y: np.ndarray,
     groups: np.ndarray,
+    n_splits: int = 5,
 ) -> float:
     """Optuna objective: mean F1 over segment-grouped CV folds (train rows only)."""
 
@@ -83,7 +93,7 @@ def objective(
     # Cross-validation with segment grouping to prevent within-CV leakage.
     # No early stopping: train() fits the full n_estimators, so the objective
     # must evaluate the same configuration that deployment will use.
-    gkf = GroupKFold(n_splits=5)
+    gkf = GroupKFold(n_splits=n_splits)
     scores = []
 
     for train_idx, val_idx in gkf.split(X, y, groups=groups):
@@ -112,6 +122,7 @@ def run_tuning(
     labels_dir: str,
     output_path: str,
     n_trials: int = 100,
+    allow_stale_features: bool = False,
 ):
     """Run hyperparameter tuning on the training portion of the seed-42 split."""
     from matcher.labeling.label_store import LabelStore
@@ -127,6 +138,9 @@ def run_tuning(
 
     matcher = MLMatcher()
     matcher.feature_names = FEATURE_COLUMNS.copy()
+    # Same feature_version gate as train(): tuning on stale/mixed features
+    # would produce params train() then refuses to reproduce.
+    matcher._check_feature_versions(df, allow_stale_features=allow_stale_features)
     df = matcher._validate_training_pairs(df, max_hausdorff_m=1000.0)
 
     # --- Hold out the seed-42 test set BEFORE tuning (leakage prevention) ---
@@ -149,6 +163,17 @@ def run_tuning(
     n_groups = len(np.unique(groups_train))
     logger.info(f"Using {n_groups} segment groups from {len(df_train)} training samples")
 
+    # Mirror train()'s GroupKFold guard: n_splits can't exceed the group count,
+    # and tuning without at least 2 groups has no validation signal at all.
+    if n_groups < 2:
+        raise SystemExit(
+            f"Only {n_groups} segment group(s) in the training set — cannot "
+            "cross-validate trials. Label more (distinct) segments before tuning."
+        )
+    n_splits = min(5, n_groups)
+    if n_splits < 5:
+        logger.warning(f"Fewer than 5 segment groups; using GroupKFold(n_splits={n_splits})")
+
     # Run optimization
     logger.info(f"Starting optimization with {n_trials} trials...")
     study = optuna.create_study(
@@ -157,7 +182,7 @@ def run_tuning(
     )
 
     study.optimize(
-        lambda trial: objective(trial, X, y, groups_train),
+        lambda trial: objective(trial, X, y, groups_train, n_splits=n_splits),
         n_trials=n_trials,
         show_progress_bar=True,
     )
@@ -194,7 +219,12 @@ if __name__ == "__main__":
     parser.add_argument("--labels", default="labels", help="Path to labels directory")
     parser.add_argument("--output", default="best_params.json", help="Output path for best params")
     parser.add_argument("--trials", type=int, default=100, help="Number of trials")
+    parser.add_argument(
+        "--allow-stale-features",
+        action="store_true",
+        help="Tune despite stale/mixed feature_version labels (same escape hatch as train())",
+    )
 
     args = parser.parse_args()
 
-    run_tuning(args.labels, args.output, args.trials)
+    run_tuning(args.labels, args.output, args.trials, args.allow_stale_features)
