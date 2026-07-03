@@ -41,8 +41,18 @@ def main() -> None:
     args = ap.parse_args()
 
     bridge = PROJECT_ROOT / "data" / "output" / bridge_filename(args.dataset)
-    sidecar = json.loads(groups_sidecar_path(bridge).read_text())
-    groups = sidecar["groups"]
+    sidecar_path = groups_sidecar_path(bridge)
+    if not sidecar_path.exists():
+        raise SystemExit(
+            f"Groups sidecar not found: {sidecar_path}\n"
+            f"Run the pipeline first, e.g.:\n"
+            f"  uv run matcher stitch <reference.parquet> <target.parquet> "
+            f"-m xgboost -o {bridge}"
+        )
+    sidecar = json.loads(sidecar_path.read_text())
+    groups = sidecar.get("groups", [])
+    if not groups:
+        raise SystemExit(f"Sidecar has no groups: {sidecar_path}")
     print(f"Loaded {len(groups)} sidecar groups")
 
     store = StitchingLabelStore(args.dataset)
