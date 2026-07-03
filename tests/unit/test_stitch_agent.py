@@ -115,6 +115,35 @@ def test_build_options_drops_non_group_edges():
             assert (e["ref_id"], e["target_id"]) in {(R1, T1), (R1, T2), (R2, T2)}
 
 
+def test_build_options_multiref_alternative_gets_stable_letter():
+    """A multi-ref span alternative (T2 spans R1+R2) is a distinct, lettered option.
+
+    Guards the UI / evidence-pack contract: letters stay sequential (A, B, C...)
+    and a target-spans-two-refs alternative surfaces as its own option.
+    """
+    g = make_group()
+    # T2 spans both refs R1 and R2 (both edges already exist in the group).
+    g["alternatives"].append(
+        {
+            "edges": [
+                {"ref_id": R1, "target_id": T1},
+                {"ref_id": R1, "target_id": T2},
+                {"ref_id": R2, "target_id": T2},
+            ],
+            "total_confidence": 2.1,
+        }
+    )
+    ctx = build_stitch_options(g)
+    letters = [o["letter"] for o in ctx["options"]]
+    assert letters == list("ABC")[: len(letters)]  # sequential, no gaps
+    edge_sets = {
+        o["letter"]: {(e["ref_id"], e["target_id"]) for e in o["edges"]} for o in ctx["options"]
+    }
+    # The multi-ref span is present as exactly one option.
+    multiref = {(R1, T1), (R1, T2), (R2, T2)}
+    assert sum(1 for s in edge_sets.values() if s == multiref) == 1
+
+
 def test_choice_to_edge_set():
     obl = {"A": [(R1, T1), (R2, T2)], "B": [(R1, T1)]}
     assert sr.choice_to_edge_set("A", obl) == frozenset({(R1, T1), (R2, T2)})

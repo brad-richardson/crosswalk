@@ -975,7 +975,13 @@ def generate_stitch_batch(
             console.print(f"[yellow]{len(missing)} requested group_ids not in sidecar[/yellow]")
     else:
         for g in groups:
-            g["alternatives"] = generate_top_k_alternatives(g.get("edges", []), k=k_alternatives)
+            # Pass ref geometries so multi-ref contiguous chains can be offered.
+            g["alternatives"] = generate_top_k_alternatives(
+                g.get("edges", []),
+                ref_geoms=g.get("ref_geometries", {}),
+                target_geoms=g.get("target_geometries", {}),
+                k=k_alternatives,
+            )
         reviewed = StitchingLabelStore(dataset).get_reviewed_group_ids(dataset)
         selected = select_stitching_batch(groups, reviewed, k=batch_size)
 
@@ -986,7 +992,12 @@ def generate_stitch_batch(
     # Ensure alternatives present, then fill spatial context.
     for g in selected:
         if "alternatives" not in g:
-            g["alternatives"] = generate_top_k_alternatives(g.get("edges", []), k=k_alternatives)
+            g["alternatives"] = generate_top_k_alternatives(
+                g.get("edges", []),
+                ref_geoms=g.get("ref_geometries", {}),
+                target_geoms=g.get("target_geometries", {}),
+                k=k_alternatives,
+            )
     console.print(f"[blue]Filling spatial context for {len(selected)} groups...[/blue]")
     from .data import _fill_spatial_context
 

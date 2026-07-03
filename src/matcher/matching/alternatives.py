@@ -3,10 +3,25 @@
 Enumerates valid assignment combinations for a match group's candidate
 edges, filters by contiguity and overlap constraints, and returns the
 top K alternatives ranked by total confidence.
+
+Each target's choice set is not limited to a *single* reference segment: it
+also includes CONTIGUOUS multi-ref chains (e.g. "T4 spans R3 and R5
+end-to-end"), built from the same endpoint-proximity contiguity the optimizer
+uses (``optimizer.build_contiguity_adjacency``). Without this, a target that
+legitimately covers several reference segments could never appear in any
+option, so the correct answer was structurally inexpressible. Options remain
+strict subsets of the group's EXISTING edges: a chain ``{R3, R5}`` for target
+``T4`` is only offered when both ``(R3, T4)`` and ``(R5, T4)`` edges (each with
+an ML confidence) are present in the group.
 """
 
 import itertools
+import math
 from collections import defaultdict
+
+from shapely import LineString
+
+from ..config import DEFAULT_SNAP_TOLERANCE_M
 
 # Enumeration strategy thresholds: groups below these limits use exhaustive
 # enumeration (all combos via itertools.product); larger groups fall back to
@@ -14,6 +29,38 @@ from collections import defaultdict
 MAX_EXHAUSTIVE_TARGETS = 6  # max target segments for exhaustive 1:N / M:N
 MAX_EXHAUSTIVE_COMBOS = 10_000  # max total combos before switching to greedy
 MAX_EXHAUSTIVE_N_TO_1_REFS = 10  # max ref segments for exhaustive N:1 (2^N subsets)
+
+# Contiguous multi-ref chain bounds.
+#
+# A single local target rarely spans more than a couple of reference segments
+# end-to-end, so contiguous ref-chains are enumerated only up to this length.
+# Keeping the bound small (chains of 2-3 refs) is what keeps the per-target
+# option count — and hence the itertools.product blow-up — bounded.
+MAX_REF_CHAIN_LEN = 3
+# Cap on contiguous multi-ref chains offered per target, keeping the
+# highest-total-confidence chains. Blow-up analysis: each target's option count
+# is at most (#refs-with-an-edge) singletons + MAX_CHAINS_PER_TARGET chains + 1
+# ("unassigned"). The exhaustive product over up to MAX_EXHAUSTIVE_TARGETS
+# targets is still gated by MAX_EXHAUSTIVE_COMBOS (groups that exceed it fall
+# back to greedy), so worst-case enumeration stays bounded even though the
+# per-target choice set grew.
+MAX_CHAINS_PER_TARGET = 6
+
+# Contiguity tolerance for chain building, in meters — matches the optimizer's
+# endpoint-snap tolerance so options can express the spans the optimizer
+# produces. Group geometries arrive as WGS84 (lon/lat) GeoJSON and are
+# projected to a local equirectangular meter frame before the check; the
+# optimizer checks contiguity on properly projected (ensure_projected_crs)
+# geometries, so boundary cases right at the tolerance can differ slightly
+# between the two paths.
+CHAIN_CONTIGUITY_TOLERANCE_M = DEFAULT_SNAP_TOLERANCE_M
+
+# Beam width for chain construction: at each chain size the frontier keeps
+# only the top subsets by total confidence. In dense adjacency graphs (many
+# refs meeting one intersection within tolerance) the number of connected
+# size-3 subsets is O(n^3); the beam keeps construction itself bounded, not
+# just the final per-target option list.
+MAX_CHAIN_FRONTIER = 64
 
 # Alignment fraction keys preserved from sidecar edges through to alternatives
 _ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
@@ -27,19 +74,28 @@ def generate_top_k_alternatives(
 ) -> list[dict]:
     """Generate top-K assignment alternatives for a match group.
 
-    For each target, enumerates which ref it could be assigned to (or
-    unassigned). Ranks by total confidence and returns the top K.
+    For each target, enumerates which ref(s) it could be assigned to: any
+    single ref that has an edge to it, any CONTIGUOUS chain of up to
+    ``MAX_REF_CHAIN_LEN`` such refs, or "unassigned". Ranks by total confidence
+    and returns the top K.
 
-    For groups with <= MAX_EXHAUSTIVE_TARGETS targets, uses exhaustive
-    enumeration via itertools.product. For larger groups, falls back to
-    greedy perturbation.
+    For groups with <= MAX_EXHAUSTIVE_TARGETS targets (and a product under
+    MAX_EXHAUSTIVE_COMBOS), uses exhaustive enumeration via itertools.product.
+    For larger groups, falls back to greedy perturbation (which can also
+    propose contiguous multi-ref edges).
 
     Args:
         component_edges: List of edge dicts with ref_id, target_id, confidence,
             and optional alignment fracs (gers_start_frac, gers_end_frac,
             local_start_frac, local_end_frac)
-        ref_geoms: Reserved for future contiguity filtering (currently unused)
-        target_geoms: Reserved for future contiguity filtering (currently unused)
+        ref_geoms: Optional {ref_id: geometry} used to build contiguous ref
+            chains. Geometry may be a GeoJSON-style mapping ({"coordinates": ...})
+            or a shapely LineString. When absent, only single-ref options are
+            enumerated (multi-ref spans require geometry to establish
+            contiguity).
+        target_geoms: Reserved for symmetry; unused (the M:N path enumerates per
+            target, so only ref-side contiguity is needed, and the N:1 path
+            already enumerates the full ref power set).
         k: Number of top alternatives to return
 
     Returns:
@@ -65,19 +121,28 @@ def generate_top_k_alternatives(
             edge_data[key] = e
 
     # For N:1 groups (multiple refs, 1 target), enumerate per-ref assignment
-    # (each ref independently maps to the target or not). For 1:N and M:N,
-    # enumerate per-target assignment (each target maps to a ref or not).
+    # (each ref independently maps to the target or not — the full ref power
+    # set, so a ref-side multi-span is already expressible). For 1:N and M:N,
+    # enumerate per-target assignment (each target maps to a ref, a contiguous
+    # ref chain, or nothing).
     if len(target_ids) == 1 and len(ref_ids) > 1:
         alternatives = _enumerate_n_to_1(ref_ids, target_ids[0], edge_data, k)
     else:
-        # Build per-target options: which refs can each target be assigned to?
-        target_options: dict[str, list[str | None]] = {}
-        for tid in target_ids:
-            options = [rid for rid in ref_ids if (rid, tid) in edge_data]
-            options.append(None)  # "unassigned" option
-            target_options[tid] = options
+        # Project ref geometries to a metric frame once, for contiguity.
+        ref_metric = _metric_geom_lookup(ref_geoms)
 
-        # Decide enumeration strategy
+        # Build per-target options: each option is a tuple of ref_ids (a single
+        # ref is a 1-tuple; a contiguous chain is a 2- or 3-tuple) or None.
+        target_options: dict[str, list[tuple[str, ...] | None]] = {}
+        for tid in target_ids:
+            refs_for_t = [rid for rid in ref_ids if (rid, tid) in edge_data]
+            subsets = _target_ref_subsets(refs_for_t, tid, edge_data, ref_metric)
+            subsets.append(None)  # "unassigned" option
+            target_options[tid] = subsets
+
+        # Decide enumeration strategy. n_combos reflects the *actual* per-target
+        # option counts (singletons + capped chains + None), so the exhaustive
+        # product stays gated by MAX_EXHAUSTIVE_COMBOS despite the larger sets.
         n_combos = 1
         for tid in target_ids:
             n_combos *= len(target_options[tid])
@@ -109,6 +174,174 @@ def generate_top_k_alternatives(
     return top_k
 
 
+# ---------------------------------------------------------------------------
+# Contiguous ref-chain construction
+# ---------------------------------------------------------------------------
+
+
+def _extract_coords(geom) -> list[tuple[float, float]] | None:
+    """Pull 2D coordinates from a GeoJSON-style mapping or a shapely geometry."""
+    if geom is None:
+        return None
+    coords = None
+    if isinstance(geom, dict):
+        coords = geom.get("coordinates")
+        # Only simple LineStrings participate in contiguity.
+        if geom.get("type") not in (None, "LineString"):
+            return None
+    elif hasattr(geom, "coords"):
+        try:
+            coords = list(geom.coords)
+        except (NotImplementedError, TypeError):
+            return None
+    if not coords or len(coords) < 2:
+        return None
+    try:
+        return [(float(c[0]), float(c[1])) for c in coords]
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _metric_geom_lookup(geoms: dict[str, object] | None) -> dict[str, LineString]:
+    """Convert ref geometries to shapely LineStrings in a metric frame.
+
+    Group geometries are stored as WGS84 (lon/lat degrees); a meter-based
+    contiguity tolerance is meaningless against degrees. Coordinates that fall
+    within geographic bounds are reprojected to a local equirectangular meter
+    frame (scaled at the collection's mean latitude); coordinates already in a
+    projected (meter) frame are used as-is. This keeps the chain-contiguity
+    check unit-consistent with the optimizer's endpoint-snap tolerance.
+    """
+    if not geoms:
+        return {}
+
+    parsed: dict[str, list[tuple[float, float]]] = {}
+    lats: list[float] = []
+    looks_geographic = True
+    for gid, geom in geoms.items():
+        coords = _extract_coords(geom)
+        if coords is None:
+            continue
+        parsed[gid] = coords
+        for x, y in coords:
+            lats.append(y)
+            if abs(x) > 180.0 or abs(y) > 90.0:
+                looks_geographic = False
+
+    if not parsed:
+        return {}
+
+    if looks_geographic and lats:
+        lat0 = sum(lats) / len(lats)
+        kx = 111_320.0 * math.cos(math.radians(lat0))
+        ky = 110_540.0
+    else:
+        kx = ky = 1.0  # already projected — identity
+
+    out: dict[str, LineString] = {}
+    for gid, coords in parsed.items():
+        out[gid] = LineString([(x * kx, y * ky) for x, y in coords])
+    return out
+
+
+def _enumerate_contiguous_chains(
+    refs: list[str],
+    adjacency: dict[str, set[str]],
+    max_len: int,
+    conf: dict[str, float] | None = None,
+    max_frontier: int = MAX_CHAIN_FRONTIER,
+) -> list[frozenset[str]]:
+    """Enumerate connected ref subsets of size 2..max_len (contiguous chains).
+
+    Grows connected subsets one node at a time from singletons, so every
+    returned subset is contiguous under the endpoint-proximity adjacency.
+    The frontier at each size is beam-limited to the top ``max_frontier``
+    subsets by total confidence (deterministic tie-break by member ids), so
+    construction stays bounded in dense adjacency graphs instead of
+    materializing all O(n^max_len) connected subsets.
+    """
+    conf = conf or {}
+
+    def _beam_key(subset: frozenset[str]) -> tuple:
+        return (-sum(conf.get(r, 0.0) for r in subset), tuple(sorted(subset)))
+
+    results: set[frozenset[str]] = set()
+    # Frontier holds the connected subsets of the current size.
+    frontier: list[frozenset[str]] = [frozenset([r]) for r in refs]
+    for _size in range(2, max_len + 1):
+        next_frontier: list[frozenset[str]] = []
+        seen_this_size: set[frozenset[str]] = set()
+        for subset in frontier:
+            for node in subset:
+                for neighbor in adjacency.get(node, ()):
+                    if neighbor in subset:
+                        continue
+                    cand = subset | {neighbor}
+                    if cand in results or cand in seen_this_size:
+                        continue
+                    seen_this_size.add(cand)
+                    next_frontier.append(cand)
+        next_frontier.sort(key=_beam_key)
+        del next_frontier[max_frontier:]
+        results.update(next_frontier)
+        frontier = next_frontier
+        if not frontier:
+            break
+    return list(results)
+
+
+def _target_ref_subsets(
+    refs_for_t: list[str],
+    tid: str,
+    edge_data: dict[tuple[str, str], dict],
+    ref_metric: dict[str, LineString],
+) -> list[tuple[str, ...]]:
+    """Build the ordered choice set of ref subsets for one target.
+
+    Always includes every single ref that has an edge to ``tid``. When ref
+    geometries are available, additionally includes contiguous chains of 2..
+    MAX_REF_CHAIN_LEN refs (keeping the top MAX_CHAINS_PER_TARGET by total
+    confidence). Every returned subset is a subset of the group's existing
+    edges for this target.
+    """
+    # Import here to avoid a module-load cycle (optimizer imports many deps).
+    from .optimizer import build_contiguity_adjacency
+
+    def _conf(rid: str) -> float:
+        return edge_data.get((rid, tid), {}).get("confidence", 0.0)
+
+    # Singletons, highest confidence first for deterministic ordering.
+    singles = sorted(refs_for_t, key=lambda r: (-_conf(r), r))
+    subsets: list[tuple[str, ...]] = [(r,) for r in singles]
+
+    if len(refs_for_t) < 2 or not ref_metric:
+        return subsets
+
+    geom_lookup = {r: ref_metric[r] for r in refs_for_t if r in ref_metric}
+    if len(geom_lookup) < 2:
+        return subsets
+
+    adjacency = build_contiguity_adjacency(
+        list(geom_lookup.keys()), geom_lookup, CHAIN_CONTIGUITY_TOLERANCE_M
+    )
+    chains = _enumerate_contiguous_chains(
+        list(geom_lookup.keys()),
+        adjacency,
+        MAX_REF_CHAIN_LEN,
+        conf={r: _conf(r) for r in geom_lookup},
+    )
+
+    def _chain_conf(chain: frozenset[str]) -> float:
+        return sum(_conf(r) for r in chain)
+
+    # Highest total-confidence chains first, capped to bound the option count.
+    chains.sort(key=lambda c: (-_chain_conf(c), tuple(sorted(c))))
+    for chain in chains[:MAX_CHAINS_PER_TARGET]:
+        subsets.append(tuple(sorted(chain)))
+
+    return subsets
+
+
 def _make_edge(edge_data: dict[tuple[str, str], dict], rid: str, tid: str) -> dict:
     """Build an output edge dict from the source edge data, preserving alignment fracs."""
     source = edge_data.get((rid, tid), {})
@@ -123,26 +356,44 @@ def _make_edge(edge_data: dict[tuple[str, str], dict], rid: str, tid: str) -> di
     return edge
 
 
+def _edges_from_subset(
+    edge_data: dict[tuple[str, str], dict],
+    tid: str,
+    subset: tuple[str, ...] | None,
+) -> tuple[list[dict], float]:
+    """Expand a (target, ref-subset) choice into edges + summed confidence."""
+    if subset is None:
+        return [], 0.0
+    edges = []
+    total = 0.0
+    for rid in subset:
+        edge = _make_edge(edge_data, rid, tid)
+        edges.append(edge)
+        total += edge["confidence"]
+    return edges, total
+
+
 def _exhaustive_enumeration(
     target_ids: list[str],
-    target_options: dict[str, list[str | None]],
+    target_options: dict[str, list[tuple[str, ...] | None]],
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
 ) -> list[dict]:
-    """Enumerate all valid assignment combos via itertools.product."""
+    """Enumerate all valid assignment combos via itertools.product.
+
+    Each combo entry is a ref subset (a 1-tuple for a single ref, or a longer
+    tuple for a contiguous chain) or None ("unassigned").
+    """
     option_lists = [target_options[tid] for tid in target_ids]
     alternatives = []
 
     for combo in itertools.product(*option_lists):
-        # combo[i] = ref_id or None for target_ids[i]
         edges = []
         total_conf = 0.0
-
-        for tid, rid in zip(target_ids, combo):
-            if rid is not None:
-                edge = _make_edge(edge_data, rid, tid)
-                edges.append(edge)
-                total_conf += edge["confidence"]
+        for tid, subset in zip(target_ids, combo):
+            sub_edges, sub_conf = _edges_from_subset(edge_data, tid, subset)
+            edges.extend(sub_edges)
+            total_conf += sub_conf
 
         # Skip empty assignments
         if not edges:
@@ -169,7 +420,9 @@ def _enumerate_n_to_1(
     """Enumerate N:1 alternatives: each ref independently maps to the target or not.
 
     For N refs, there are 2^N - 1 non-empty subsets. Enumerate all for N <= 10,
-    otherwise use greedy + perturbation.
+    otherwise use greedy + perturbation. This path already enumerates the full
+    ref power set, so a ref-side multi-span (the mirror of a target spanning
+    multiple refs) is already expressible — no chain machinery needed here.
     """
     n = len(ref_ids)
     alternatives = []
@@ -216,59 +469,63 @@ def _enumerate_n_to_1(
 
 def _greedy_perturbation(
     target_ids: list[str],
-    target_options: dict[str, list[str | None]],
+    target_options: dict[str, list[tuple[str, ...] | None]],
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
     max_alternatives: int = 30,
 ) -> list[dict]:
     """Generate alternatives via greedy assignment + perturbations.
 
-    Starts with greedy (best confidence per target), then perturbs
-    each target's assignment to generate alternatives.
+    Starts with greedy (best single ref per target), then perturbs each
+    target's assignment across its full option set — which now includes
+    contiguous multi-ref chains — so large groups can also propose multi-ref
+    edges rather than staying single-ref blind.
     """
     alternatives = []
 
-    # Greedy assignment: for each target, pick highest-confidence ref
-    greedy_assignment: dict[str, str | None] = {}
-    for tid in target_ids:
+    def _best_single(tid: str) -> tuple[str, ...] | None:
+        """Highest-confidence single-ref option for a target (or None)."""
         best_rid = None
         best_conf = -1.0
-        for rid in target_options[tid]:
-            if rid is None:
+        for opt in target_options[tid]:
+            if opt is None or len(opt) != 1:
                 continue
-            conf = edge_data.get((rid, tid), {}).get("confidence", 0.0)
+            conf = edge_data.get((opt[0], tid), {}).get("confidence", 0.0)
             if conf > best_conf:
                 best_conf = conf
-                best_rid = rid
-        greedy_assignment[tid] = best_rid
+                best_rid = opt[0]
+        return (best_rid,) if best_rid is not None else None
+
+    # Greedy assignment: for each target, pick highest-confidence single ref.
+    greedy_assignment: dict[str, tuple[str, ...] | None] = {
+        tid: _best_single(tid) for tid in target_ids
+    }
 
     # Add greedy as first alternative
     _add_alternative(greedy_assignment, target_ids, edge_data, ref_ids, alternatives)
 
-    # Perturb: for each target, try each alternative ref
+    # Perturb: for each target, try each alternative option (single ref, a
+    # contiguous chain, or None).
     for tid in target_ids:
-        current_rid = greedy_assignment[tid]
-        for alt_rid in target_options[tid]:
-            if alt_rid == current_rid:
+        current = greedy_assignment[tid]
+        for alt_opt in target_options[tid]:
+            if alt_opt == current:
                 continue
             perturbed = dict(greedy_assignment)
-            perturbed[tid] = alt_rid
+            perturbed[tid] = alt_opt
             _add_alternative(perturbed, target_ids, edge_data, ref_ids, alternatives)
             if len(alternatives) >= max_alternatives:
                 return alternatives
 
-    # Pairwise perturbation: swap two targets' assignments
+    # Pairwise perturbation: swap two targets' assignments (only when every
+    # edge in the swapped subset exists for its new target).
     for i, tid1 in enumerate(target_ids):
         for tid2 in target_ids[i + 1 :]:
             perturbed = dict(greedy_assignment)
             perturbed[tid1], perturbed[tid2] = perturbed[tid2], perturbed[tid1]
-            # Only valid if edges exist
-            valid = True
-            if perturbed[tid1] is not None and (perturbed[tid1], tid1) not in edge_data:
-                valid = False
-            if perturbed[tid2] is not None and (perturbed[tid2], tid2) not in edge_data:
-                valid = False
-            if valid:
+            if _assignment_valid(perturbed[tid1], tid1, edge_data) and _assignment_valid(
+                perturbed[tid2], tid2, edge_data
+            ):
                 _add_alternative(perturbed, target_ids, edge_data, ref_ids, alternatives)
             if len(alternatives) >= max_alternatives:
                 return alternatives
@@ -276,8 +533,19 @@ def _greedy_perturbation(
     return alternatives
 
 
+def _assignment_valid(
+    subset: tuple[str, ...] | None,
+    tid: str,
+    edge_data: dict[tuple[str, str], dict],
+) -> bool:
+    """True if every ref in the subset has an existing edge to the target."""
+    if subset is None:
+        return True
+    return all((rid, tid) in edge_data for rid in subset)
+
+
 def _add_alternative(
-    assignment: dict[str, str | None],
+    assignment: dict[str, tuple[str, ...] | None],
     target_ids: list[str],
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
@@ -288,11 +556,9 @@ def _add_alternative(
     total_conf = 0.0
 
     for tid in target_ids:
-        rid = assignment[tid]
-        if rid is not None:
-            edge = _make_edge(edge_data, rid, tid)
-            edges.append(edge)
-            total_conf += edge["confidence"]
+        sub_edges, sub_conf = _edges_from_subset(edge_data, tid, assignment[tid])
+        edges.extend(sub_edges)
+        total_conf += sub_conf
 
     if not edges:
         return
