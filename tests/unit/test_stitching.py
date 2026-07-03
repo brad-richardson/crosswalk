@@ -1075,6 +1075,33 @@ class TestStitchingSelectRoute:
         finally:
             self._stop(patches)
 
+    def test_explicit_empty_list_treated_as_no_payload(self):
+        """selected_edges='[]' with active pills must not bypass the guard.
+
+        A real option always has >= 1 edge; an explicit empty list falls back
+        to the manual-mode path, where non-empty pill fields resolving to zero
+        edges are rejected as inconsistent.
+        """
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1,r2",
+                    "included_targets": "t1,t2",
+                    "selected_edges": "[]",
+                },
+            )
+            # Cross-product of r1,r2 x t1,t2 covers all 4 group edges -> stored
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert len(kwargs["selected_edges"]) == 4
+        finally:
+            self._stop(patches)
+
 
 class TestStitchingDeepLink:
     """The main page route deep-links a specific group as a FULL page."""

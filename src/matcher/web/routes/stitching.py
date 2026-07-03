@@ -513,6 +513,12 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
         if key not in group_edge_set:
             raise ValueError(f"selected_edges contains a non-group edge: {key}")
         cleaned.append({"ref_id": e["ref_id"], "target_id": e["target_id"]})
+    if not cleaned:
+        # A real option always has >= 1 edge, and manual mode clears the field
+        # entirely. Treat an explicit empty list as "no payload" so the
+        # manual-mode inconsistency guard applies instead of silently storing
+        # an empty label.
+        return None
     return cleaned
 
 
