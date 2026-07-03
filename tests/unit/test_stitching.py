@@ -974,6 +974,134 @@ class TestStitchingSelectRoute:
         finally:
             self._stop(patches)
 
+    def test_manual_toggle_stores_active_pill_edges(self):
+        """A manual pill edit clears selected_edges; the server must record the
+        cross-product of the (non-empty) active pill fields — NOT an empty set.
+
+        This encodes exactly what the fixed client sends after the user picks an
+        option then deselects some pills: included_refs/included_targets carry
+        the still-active pills, selected_edges is blank. Previously the JS wrote
+        those IDs too late (in htmx:configRequest, after form serialization) so
+        they arrived empty and an empty label was stored.
+        """
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    # User kept both refs but only target t2 active.
+                    "included_refs": "r1,r2",
+                    "included_targets": "t2",
+                    "selected_edges": "",
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            assert stored == {("r1", "t2"), ("r2", "t2")}
+            assert kwargs["num_refs"] == 2
+            assert kwargs["num_targets"] == 1
+        finally:
+            self._stop(patches)
+
+    def test_deliberate_full_deselect_stores_empty(self):
+        """Deselecting EVERYTHING (empty pill fields, blank selected_edges) is a
+        legitimate reject-all and must store []."""
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": "",
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert kwargs["num_refs"] == 0
+            assert kwargs["num_targets"] == 0
+        finally:
+            self._stop(patches)
+
+    def test_inconsistent_submission_rejected(self):
+        """Active-pill fields claim segments but none resolve to a group edge —
+        an inconsistent submission that must 400, not silently store []."""
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    # r1 is a real ref but the only claimed target is unknown, so
+                    # the cross-product against group edges is empty.
+                    "included_refs": "r1",
+                    "included_targets": "t_ghost",
+                    "selected_edges": "",
+                },
+            )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)
+
+    def test_refs_active_but_all_targets_deselected_rejected(self):
+        """Refs still active while every target is deselected cannot form an
+        edge — treated as inconsistent (not a deliberate reject-all)."""
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1,r2",
+                    "included_targets": "",
+                    "selected_edges": "",
+                },
+            )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)
+
+    def test_explicit_empty_list_treated_as_no_payload(self):
+        """selected_edges='[]' with active pills must not bypass the guard.
+
+        A real option always has >= 1 edge; an explicit empty list falls back
+        to the manual-mode path, where non-empty pill fields resolving to zero
+        edges are rejected as inconsistent.
+        """
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1,r2",
+                    "included_targets": "t1,t2",
+                    "selected_edges": "[]",
+                },
+            )
+            # Cross-product of r1,r2 x t1,t2 covers all 4 group edges -> stored
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert len(kwargs["selected_edges"]) == 4
+        finally:
+            self._stop(patches)
+
 
 class TestStitchingDeepLink:
     """The main page route deep-links a specific group as a FULL page."""
