@@ -6,9 +6,15 @@ M:N shapes (#231); Phase-2 production run (60 groups, 180 votes) complete —
 [research/agent_stitching_panel_eval.md](../../research/agent_stitching_panel_eval.md)
 (Phase 2 section) and
 [research/panel_phase2_audit_sheet.md](../../research/panel_phase2_audit_sheet.md).
-**Export to labels/ remains OFF pending the human audit of the 10-group
-sample.** Companion to [EVAL_ROADMAP.md](../EVAL_ROADMAP.md)
-step 1 and [2026-02-21-stitch-eval-design.md](2026-02-21-stitch-eval-design.md).
+**Phase-2 audit result: 7/10 held / 3 edited — BELOW the 9/10 export gate, so
+export stays OFF.** A deterministic pedestrian↔vehicular class-consistency gate
+was added (`stitch_runner.compute_consensus`, `route_reason="class-mismatch"`)
+plus a rubric strengthening, but the 3 audited failures are same-mode vehicular
+reject-alls — the gate catches 0/3 and demotes 0/30 candidates on this batch
+(see the "Phase 2 audit outcome" section). Export decision deferred to a
+mini-audit of the multi-edge M:N survivors. Companion to
+[EVAL_ROADMAP.md](../EVAL_ROADMAP.md) step 1 and
+[2026-02-21-stitch-eval-design.md](2026-02-21-stitch-eval-design.md).
 
 ## Problem
 

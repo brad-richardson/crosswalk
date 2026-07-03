@@ -320,6 +320,12 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  physical traveled way (overlapping geometry, same path). Small offsets ok.")
     lines.append("- Parallel-but-separate roads, opposite carriageways, and perpendicular")
     lines.append("  crossings are NOT correct edges even if they touch at a junction.")
+    lines.append("- A pedestrian-class segment (footway/sidewalk/path) is a DIFFERENT physical")
+    lines.append("  feature than a road-class segment (residential/primary/service/...), even")
+    lines.append("  when it runs right alongside one. Never match a footway/sidewalk/path to a")
+    lines.append("  road class just because they are parallel or nearby. If an option's only")
+    lines.append("  advantage is that it adds such a cross-mode edge, prefer the option without")
+    lines.append("  it, or NONE.")
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
