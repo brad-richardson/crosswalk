@@ -775,7 +775,8 @@
         if (!card || !mapEl) return pad;
 
         var cardRect = card.getBoundingClientRect();
-        var isMobile = window.innerWidth < 768;
+        // Match the CSS mobile breakpoint (max-width: 768px is inclusive)
+        var isMobile = window.innerWidth <= 768;
         if (isMobile) {
             // Bottom-sheet panel: reserve its height below the geometry.
             pad.bottom = base + cardRect.height;
