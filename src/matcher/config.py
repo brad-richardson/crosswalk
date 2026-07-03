@@ -538,6 +538,45 @@ class MatcherSettings(BaseSettings):
         "None disables filtering (high recall). Default 0.5 balances precision/recall.",
     )
 
+    # Score propagation settings (EXPERIMENTAL, default off).
+    # Structure-aware post-scoring / pre-optimizer step: boost pairs whose
+    # topological neighbors are confident consistent matches, dampen pairs that
+    # compete with confident non-adjacent alternatives. See
+    # matching/score_propagation.py.
+    enable_score_propagation: bool = Field(
+        default=False,
+        description="Enable experimental structure-aware score propagation "
+        "between per-pair scoring and the optimizer. Default off (byte-identical).",
+    )
+    score_propagation_rounds: int = Field(
+        default=2,
+        description="Number of damped propagation rounds.",
+    )
+    score_propagation_alpha: float = Field(
+        default=0.6,
+        description="Boost strength (logit units at full neighbor agreement).",
+    )
+    score_propagation_beta: float = Field(
+        default=0.6,
+        description="Dampen strength (logit units at full competitor confidence).",
+    )
+    score_propagation_damping: float = Field(
+        default=0.5,
+        description="Per-round contraction applied to the propagated signal.",
+    )
+    score_propagation_delta_cap: float = Field(
+        default=1.5,
+        description="Max absolute logit drift from the original score (bounds adjustment).",
+    )
+    score_propagation_junction_m: float = Field(
+        default=20.0,
+        description="Grid size (meters) for ref/target junction coincidence.",
+    )
+    score_propagation_boost_only: bool = Field(
+        default=False,
+        description="Ablation: apply boost only, disable the dampen term.",
+    )
+
     # Integration settings
     min_segment_length_m: float = Field(
         default=3.0,
