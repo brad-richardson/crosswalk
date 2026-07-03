@@ -1,5 +1,6 @@
 """Stitching Review mode routes for the matcher web UI."""
 
+import json
 import logging
 
 from fastapi import APIRouter, Form, Request
@@ -179,6 +180,126 @@ def _build_group_geojson(group: dict) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
+def _build_stitch_options(group: dict) -> dict:
+    """Build the assignment option picker + optimizer pre-seed for a group.
+
+    The optimizer's own proposed assignment and the pre-computed top-K
+    alternatives are turned into one-click options ("verify, don't construct").
+
+    Returns a context dict with:
+    - options: list of option dicts (optimizer first, then alternatives,
+      deduplicated by exact edge set). Each option carries its EXACT edge set
+      so the client can submit it verbatim (see the edge-set fidelity note in
+      the submit endpoint).
+    - preseed_active_refs / preseed_active_targets: segment IDs that should be
+      active (pill selected) on load, derived from the optimizer assignment.
+      Both are None when no optimizer assignment is present — the template then
+      falls back to all-active, exactly matching the pre-change behavior.
+    """
+    group_edges = group.get("edges", []) or []
+    group_edge_set = {(e["ref_id"], e["target_id"]) for e in group_edges}
+    optimizer = group.get("optimizer_assignment") or []
+    alternatives = group.get("alternatives") or []
+
+    def _valid_edges(edges: list[dict]) -> list[dict]:
+        """Keep only edges that exist in the group; strip to id pairs."""
+        out = []
+        for e in edges:
+            key = (e.get("ref_id"), e.get("target_id"))
+            if key in group_edge_set:
+                out.append({"ref_id": e["ref_id"], "target_id": e["target_id"]})
+        return out
+
+    def _edge_key(edges: list[dict]) -> frozenset:
+        return frozenset((e["ref_id"], e["target_id"]) for e in edges)
+
+    def _confidences(raw_edges: list[dict]) -> tuple[float, float]:
+        confs = [
+            e.get("confidence", 0.0)
+            for e in raw_edges
+            if (e.get("ref_id"), e.get("target_id")) in group_edge_set
+        ]
+        total = round(sum(confs), 4)
+        mean = round(total / len(confs), 4) if confs else 0.0
+        return total, mean
+
+    def _make_option(key: str, label: str, is_optimizer: bool, raw_edges: list[dict]) -> dict:
+        edges = _valid_edges(raw_edges)
+        total, mean = _confidences(raw_edges)
+        return {
+            "key": key,
+            "label": label,
+            "is_optimizer": is_optimizer,
+            "edges": edges,
+            "edge_count": len(edges),
+            "total_confidence": total,
+            "mean_confidence": mean,
+            "active_refs": sorted({e["ref_id"] for e in edges}),
+            "active_targets": sorted({e["target_id"] for e in edges}),
+        }
+
+    options: list[dict] = []
+    seen: set[frozenset] = set()
+
+    # Optimizer's assignment always comes first (when present).
+    if optimizer:
+        opt = _make_option("optimizer", "Optimizer", True, optimizer)
+        if opt["edges"]:
+            options.append(opt)
+            seen.add(_edge_key(opt["edges"]))
+
+    # Alternatives, deduplicated against the optimizer's answer and each other.
+    alt_num = 0
+    for alt in alternatives:
+        edges = _valid_edges(alt.get("edges", []))
+        if not edges:
+            continue
+        key = _edge_key(edges)
+        if key in seen:
+            continue
+        seen.add(key)
+        alt_num += 1
+        opt = _make_option(f"alt{alt_num}", f"Alt {alt_num}", False, alt.get("edges", []))
+        # Prefer the alternative's own precomputed total when available.
+        if "total_confidence" in alt:
+            opt["total_confidence"] = round(alt["total_confidence"], 4)
+            opt["mean_confidence"] = (
+                round(opt["total_confidence"] / opt["edge_count"], 4) if opt["edge_count"] else 0.0
+            )
+        options.append(opt)
+
+    # Pre-seed pill active-state from the optimizer assignment. Only a
+    # non-empty assignment drives the pre-seed; an absent/empty assignment
+    # (old batch format, or a group the optimizer dropped entirely) leaves
+    # preseed as None so the template keeps every group pill active.
+    preseed_refs = None
+    preseed_targets = None
+    preseed_inactive_ids: list[str] = []
+    preseed_valid = _valid_edges(optimizer)
+    if preseed_valid:
+        preseed_refs = sorted({e["ref_id"] for e in preseed_valid})
+        preseed_targets = sorted({e["target_id"] for e in preseed_valid})
+        # Group segments the optimizer left out start hidden on the map so the
+        # map matches the pre-seeded pill state.
+        active_ids = set(preseed_refs) | set(preseed_targets)
+        for sid in group.get("ref_ids", []) + group.get("target_ids", []):
+            if sid not in active_ids:
+                preseed_inactive_ids.append(sid)
+
+    # The client submits this exact edge set verbatim when the pre-seeded
+    # option is chosen without manual edits.
+    preseed_edges = options[0]["edges"] if (options and options[0]["is_optimizer"]) else []
+
+    return {
+        "options": options,
+        "preseed_active_refs": preseed_refs,
+        "preseed_active_targets": preseed_targets,
+        "preseed_inactive_ids": preseed_inactive_ids,
+        "preseed_edges": preseed_edges,
+        "has_preseed": bool(preseed_refs) or bool(preseed_targets),
+    }
+
+
 def _build_group_context(group: dict) -> dict:
     """Build extra template context for a group.
 
@@ -289,6 +410,7 @@ def _build_group_context(group: dict) -> dict:
         "target_details": target_details,
         "context_ref_details": context_ref_details,
         "context_target_details": context_target_details,
+        **_build_stitch_options(group),
     }
 
 
@@ -434,6 +556,43 @@ async def stitching_group(
     )
 
 
+def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
+    """Parse and validate an explicit selected_edges payload.
+
+    An option in the picker IS an exact edge set. For M:N groups the
+    cross-product of an option's endpoints can contain MORE edges than the
+    option itself, so when the client submits an unmodified option it sends the
+    option's exact edge set here and we store it verbatim.
+
+    Returns:
+        - None when no explicit payload was sent (caller uses cross-product).
+        - A validated list of {ref_id, target_id} dicts otherwise.
+
+    Raises:
+        ValueError if the payload is malformed or references an edge that does
+        not exist in the group (guards against a stale/forged client submit).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError) as e:
+        raise ValueError("selected_edges is not valid JSON") from e
+    if not isinstance(parsed, list):
+        raise ValueError("selected_edges must be a list")
+
+    group_edge_set = {(e["ref_id"], e["target_id"]) for e in group.get("edges", [])}
+    cleaned = []
+    for e in parsed:
+        if not isinstance(e, dict) or "ref_id" not in e or "target_id" not in e:
+            raise ValueError("selected_edges contains a malformed edge")
+        key = (e["ref_id"], e["target_id"])
+        if key not in group_edge_set:
+            raise ValueError(f"selected_edges contains a non-group edge: {key}")
+        cleaned.append({"ref_id": e["ref_id"], "target_id": e["target_id"]})
+    return cleaned
+
+
 @router.post("/stitching-review/select", response_class=HTMLResponse)
 async def stitching_select(
     request: Request,
@@ -442,8 +601,16 @@ async def stitching_select(
     group_index: int = Form(0),
     included_refs: str = Form(""),
     included_targets: str = Form(""),
+    selected_edges: str = Form(""),
 ):
-    """Records selection, returns next group via HTMX swap."""
+    """Records selection, returns next group via HTMX swap.
+
+    Edge-set fidelity: when the client submits an unmodified option it includes
+    an explicit ``selected_edges`` payload (the option's exact edge set), which
+    is stored verbatim. Any manual pill toggle after picking an option clears
+    that payload on the client, so we fall back to reconstructing edges as the
+    cross-product of the active ref/target pills — exactly the original path.
+    """
     if not _validate_dataset(dataset):
         return HTMLResponse("Unknown dataset", status_code=404)
     try:
@@ -463,22 +630,35 @@ async def stitching_select(
             break
 
     if group:
-        # Build selected edges from the included ref/target IDs
-        ref_set = set(r for r in included_refs.split(",") if r)
-        target_set = set(t for t in included_targets.split(",") if t)
-        selected_edges = [
-            {"ref_id": e["ref_id"], "target_id": e["target_id"]}
-            for e in group.get("edges", [])
-            if e["ref_id"] in ref_set and e["target_id"] in target_set
-        ]
+        try:
+            explicit_edges = _parse_explicit_edges(selected_edges, group)
+        except ValueError as e:
+            return HTMLResponse(f"Invalid selected_edges: {e}", status_code=400)
+
+        if explicit_edges is not None:
+            # Exact option edge set — store verbatim.
+            final_edges = explicit_edges
+            num_refs = len({e["ref_id"] for e in final_edges})
+            num_targets = len({e["target_id"] for e in final_edges})
+        else:
+            # Manual mode: cross-product of the active ref/target pills.
+            ref_set = set(r for r in included_refs.split(",") if r)
+            target_set = set(t for t in included_targets.split(",") if t)
+            final_edges = [
+                {"ref_id": e["ref_id"], "target_id": e["target_id"]}
+                for e in group.get("edges", [])
+                if e["ref_id"] in ref_set and e["target_id"] in target_set
+            ]
+            num_refs = len(ref_set)
+            num_targets = len(target_set)
 
         record_stitching_label(
             dataset_id=dataset,
             group_id=group_id,
-            selected_edges=selected_edges,
+            selected_edges=final_edges,
             match_type=group.get("match_type", ""),
-            num_refs=len(ref_set),
-            num_targets=len(target_set),
+            num_refs=num_refs,
+            num_targets=num_targets,
         )
 
     # Load next group

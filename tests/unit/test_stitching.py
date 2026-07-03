@@ -474,3 +474,351 @@ class TestStitchingLabelIntegrity:
         if len(rejections) > 0:
             assert (rejections["num_refs"] == 0).all(), "num_refs must be 0 for rejections"
             assert (rejections["num_targets"] == 0).all(), "num_targets must be 0 for rejections"
+
+
+# ---------------------------------------------------------------------------
+# stitch-batch retains alternatives + optimizer_assignment
+# ---------------------------------------------------------------------------
+
+
+class TestStitchBatchRetainsOptionData:
+    """The batch file must carry the data the option-picking UI depends on.
+
+    Mirrors what the `stitch-batch` CLI does (compute alternatives, then select
+    a batch) and asserts both `alternatives` and `optimizer_assignment` survive
+    onto the selected groups — they must NOT be stripped anymore.
+    """
+
+    def _synthetic_sidecar_group(self, gid):
+        edges = [
+            _edge("r1", "t1", 0.9),
+            _edge("r1", "t2", 0.4),
+            _edge("r2", "t1", 0.3),
+            _edge("r2", "t2", 0.85),
+        ]
+        return {
+            "group_id": gid,
+            "match_type": "M:N",
+            "ref_ids": ["r1", "r2"],
+            "target_ids": ["t1", "t2"],
+            "edges": edges,
+            # The optimizer's own proposed assignment (from the runner sidecar)
+            "optimizer_assignment": [
+                {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                {"ref_id": "r2", "target_id": "t2", "confidence": 0.85},
+            ],
+        }
+
+    def test_alternatives_and_optimizer_assignment_retained(self):
+        groups = [self._synthetic_sidecar_group(f"g{i}") for i in range(3)]
+        # Replicate the CLI's compute step
+        for g in groups:
+            g["alternatives"] = generate_top_k_alternatives(
+                component_edges=g["edges"],
+                ref_geoms={},
+                target_geoms={},
+                k=5,
+            )
+        selected = select_stitching_batch(groups, set(), k=5)
+        assert selected
+        for g in selected:
+            assert g.get("alternatives"), "alternatives must be retained on batch groups"
+            assert g.get("optimizer_assignment"), (
+                "optimizer_assignment must be retained on batch groups"
+            )
+
+    def test_alternatives_carry_no_geometries(self):
+        """Serialized alternatives are just ID pairs + confidence (small)."""
+        alts = generate_top_k_alternatives(
+            component_edges=self._synthetic_sidecar_group("g")["edges"], k=5
+        )
+        blob = json.dumps(alts)
+        assert "coordinates" not in blob
+        assert "geometry" not in blob
+
+
+# ---------------------------------------------------------------------------
+# _build_stitch_options — option picker + optimizer pre-seed
+# ---------------------------------------------------------------------------
+
+
+class TestBuildStitchOptions:
+    def _mn_group(self, **overrides):
+        group = {
+            "group_id": "g1",
+            "match_type": "M:N",
+            "ref_ids": ["r1", "r2"],
+            "target_ids": ["t1", "t2"],
+            "edges": [
+                _edge("r1", "t1", 0.9),
+                _edge("r1", "t2", 0.4),
+                _edge("r2", "t1", 0.3),
+                _edge("r2", "t2", 0.85),
+            ],
+            "optimizer_assignment": [
+                {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                {"ref_id": "r2", "target_id": "t2", "confidence": 0.85},
+            ],
+            "alternatives": [],
+        }
+        group.update(overrides)
+        return group
+
+    def test_preseed_from_optimizer_assignment(self):
+        from matcher.web.routes.stitching import _build_stitch_options
+
+        ctx = _build_stitch_options(self._mn_group())
+        assert ctx["has_preseed"] is True
+        assert ctx["preseed_active_refs"] == ["r1", "r2"]
+        assert ctx["preseed_active_targets"] == ["t1", "t2"]
+        # First option is the optimizer's, carrying its exact edge set
+        assert ctx["options"][0]["is_optimizer"] is True
+        opt_edges = {(e["ref_id"], e["target_id"]) for e in ctx["options"][0]["edges"]}
+        assert opt_edges == {("r1", "t1"), ("r2", "t2")}
+        # preseed_edges mirrors the optimizer option so an unmodified pick
+        # submits exactly that edge set
+        assert ctx["preseed_edges"] == ctx["options"][0]["edges"]
+
+    def test_missing_optimizer_assignment_falls_back(self):
+        """Old-format group without optimizer_assignment -> no pre-seed."""
+        from matcher.web.routes.stitching import _build_stitch_options
+
+        group = self._mn_group()
+        del group["optimizer_assignment"]
+        ctx = _build_stitch_options(group)
+        assert ctx["has_preseed"] is False
+        assert ctx["preseed_active_refs"] is None
+        assert ctx["preseed_active_targets"] is None
+        assert ctx["preseed_inactive_ids"] == []
+        # No optimizer option present
+        assert all(not o["is_optimizer"] for o in ctx["options"])
+
+    def test_empty_optimizer_assignment_falls_back(self):
+        """An empty optimizer_assignment (optimizer dropped the group) -> no pre-seed."""
+        from matcher.web.routes.stitching import _build_stitch_options
+
+        ctx = _build_stitch_options(self._mn_group(optimizer_assignment=[]))
+        assert ctx["has_preseed"] is False
+        assert ctx["preseed_active_refs"] is None
+
+    def test_inactive_segment_ids_derived(self):
+        """Group segments the optimizer left out are reported inactive."""
+        from matcher.web.routes.stitching import _build_stitch_options
+
+        group = self._mn_group(
+            ref_ids=["r1", "r2", "r3"],
+            target_ids=["t1"],
+            edges=[
+                _edge("r1", "t1", 0.9),
+                _edge("r2", "t1", 0.8),
+                _edge("r3", "t1", 0.2),
+            ],
+            optimizer_assignment=[
+                {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                {"ref_id": "r2", "target_id": "t1", "confidence": 0.8},
+            ],
+        )
+        ctx = _build_stitch_options(group)
+        assert ctx["preseed_active_refs"] == ["r1", "r2"]
+        assert ctx["preseed_inactive_ids"] == ["r3"]
+
+    def test_options_deduplicated_against_optimizer(self):
+        """An alternative identical to the optimizer's answer is not duplicated."""
+        from matcher.web.routes.stitching import _build_stitch_options
+
+        group = self._mn_group(
+            alternatives=[
+                {
+                    "edges": [
+                        {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                        {"ref_id": "r2", "target_id": "t2", "confidence": 0.85},
+                    ],
+                    "total_confidence": 1.75,
+                },
+                {
+                    "edges": [
+                        {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                    ],
+                    "total_confidence": 0.9,
+                },
+            ]
+        )
+        ctx = _build_stitch_options(group)
+        edge_sets = [
+            frozenset((e["ref_id"], e["target_id"]) for e in o["edges"]) for o in ctx["options"]
+        ]
+        # The optimizer's edge set appears exactly once despite the matching alt
+        assert edge_sets.count(frozenset({("r1", "t1"), ("r2", "t2")})) == 1
+
+
+# ---------------------------------------------------------------------------
+# _parse_explicit_edges — edge-set fidelity validation
+# ---------------------------------------------------------------------------
+
+
+class TestParseExplicitEdges:
+    def _group(self):
+        return {
+            "edges": [
+                _edge("r1", "t1", 0.9),
+                _edge("r2", "t2", 0.85),
+            ]
+        }
+
+    def test_empty_payload_returns_none(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        assert _parse_explicit_edges("", self._group()) is None
+
+    def test_valid_payload_stripped_to_id_pairs(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        raw = json.dumps([{"ref_id": "r1", "target_id": "t1", "confidence": 0.9}])
+        parsed = _parse_explicit_edges(raw, self._group())
+        assert parsed == [{"ref_id": "r1", "target_id": "t1"}]
+
+    def test_non_group_edge_rejected(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        raw = json.dumps([{"ref_id": "r1", "target_id": "t9"}])
+        with pytest.raises(ValueError):
+            _parse_explicit_edges(raw, self._group())
+
+    def test_malformed_json_rejected(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        with pytest.raises(ValueError):
+            _parse_explicit_edges("not json", self._group())
+
+    def test_non_list_rejected(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        with pytest.raises(ValueError):
+            _parse_explicit_edges(json.dumps({"ref_id": "r1"}), self._group())
+
+
+# ---------------------------------------------------------------------------
+# /stitching-review/select — explicit edge set vs. cross-product
+# ---------------------------------------------------------------------------
+
+pytest.importorskip("fastapi", reason="fastapi not installed")
+
+
+class TestStitchingSelectRoute:
+    """Edge-set fidelity of the submit endpoint (M:N group)."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        # Full 2x2 cross-product so an option is a strict subset of the
+        # cross-product of its endpoints.
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gmn",
+                    "match_type": "M:N",
+                    "ref_ids": ["r1", "r2"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [
+                        _edge("r1", "t1", 0.9),
+                        _edge("r1", "t2", 0.4),
+                        _edge("r2", "t1", 0.3),
+                        _edge("r2", "t2", 0.85),
+                    ],
+                }
+            ],
+        }
+
+    def _client_and_recorder(self):
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        recorder = MagicMock()
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+        ]
+        for p in patches:
+            p.start()
+        client = TestClient(create_app())
+        return client, recorder, patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def test_explicit_edges_stored_verbatim(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1,r2",
+                    "included_targets": "t1,t2",
+                    "selected_edges": json.dumps(
+                        [
+                            {"ref_id": "r1", "target_id": "t1"},
+                            {"ref_id": "r2", "target_id": "t2"},
+                        ]
+                    ),
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            # Exactly the option's 2 edges — NOT the 4-edge cross product
+            assert stored == {("r1", "t1"), ("r2", "t2")}
+            assert kwargs["num_refs"] == 2
+            assert kwargs["num_targets"] == 2
+        finally:
+            self._stop(patches)
+
+    def test_cross_product_when_no_explicit_edges(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1,r2",
+                    "included_targets": "t1,t2",
+                    "selected_edges": "",
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            # Unchanged behavior: cross product of active pills = all 4 edges
+            assert stored == {("r1", "t1"), ("r1", "t2"), ("r2", "t1"), ("r2", "t2")}
+        finally:
+            self._stop(patches)
+
+    def test_rejects_non_group_edge(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "r1",
+                    "included_targets": "t1",
+                    "selected_edges": json.dumps([{"ref_id": "r1", "target_id": "t9"}]),
+                },
+            )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)

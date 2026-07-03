@@ -2240,7 +2240,10 @@ def stitch_batch(
         reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
         console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
 
-        # Pre-compute alternatives for batch selection scoring only
+        # Pre-compute alternatives per group. These drive both the batch
+        # selection scoring AND the review UI's one-click option picker, so
+        # they are intentionally retained in the batch file. Alternatives are
+        # just ID pairs + confidence (no geometries), so the size cost is small.
         console.print(f"  Computing top-{k_alternatives} alternatives per group...")
         for group in groups:
             alternatives = generate_top_k_alternatives(
@@ -2262,9 +2265,10 @@ def stitch_batch(
             console.print("  [yellow]No groups selected for batch[/yellow]")
             continue
 
-        # Strip alternatives from batch (only needed for scoring, not UI)
-        for g in selected:
-            g.pop("alternatives", None)
+        # NOTE: alternatives and optimizer_assignment are deliberately kept on
+        # each selected group so the review UI can pre-seed the optimizer's
+        # proposed assignment and offer the top-K alternatives as one-click
+        # options ("verify, don't construct").
 
         # Fill in spatial context for each group
         console.print("  Filling spatial context...")

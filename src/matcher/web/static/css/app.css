@@ -1780,6 +1780,87 @@ body {
     opacity: 0.85;
 }
 
+/* Assignment option picker (verify, don't construct) */
+.assignment-options {
+    margin-bottom: 8px;
+}
+
+.assignment-options-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.manual-mode-note {
+    font-weight: 500;
+    text-transform: none;
+    color: #f0932b;
+}
+
+.assignment-option-list {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-height: 132px;
+    overflow-y: auto;
+}
+
+.assignment-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: 40px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.assignment-option:hover {
+    opacity: 0.9;
+}
+
+.assignment-option.selected {
+    background: #4caf50;
+    border-color: #4caf50;
+    color: white;
+}
+
+.assignment-option .opt-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.assignment-option .opt-badge {
+    font-size: 0.55rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.18);
+    color: inherit;
+}
+
+.assignment-option .opt-meta {
+    font-size: 0.65rem;
+    color: inherit;
+    opacity: 0.85;
+}
+
 /* Group summary lines (ID, Class, Name) */
 .group-summary {
     cursor: pointer;
