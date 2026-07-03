@@ -756,11 +756,52 @@
         // Apply hidden segment filters (context segments start hidden)
         updateSegmentFilters();
 
-        // Fit bounds
-        var bbox = geojsonBounds(data);
+        // Fit bounds with panel-aware padding
+        fitCurrentGroup();
+    }
+
+    /**
+     * Compute fitBounds padding that keeps the geometry clear of the
+     * assignment panel (#group-card). On mobile the panel is a bottom sheet
+     * (reserve its height as bottom padding); on desktop it sits bottom-right
+     * (reserve its width as right padding). Measured at fit time so it reflects
+     * the panel's current height (collapsed vs expanded).
+     */
+    function computeGroupFitPadding() {
+        var base = 40;
+        var pad = { top: base, bottom: base, left: base, right: base };
+        var card = document.getElementById("group-card");
+        var mapEl = document.getElementById("map");
+        if (!card || !mapEl) return pad;
+
+        var cardRect = card.getBoundingClientRect();
+        var isMobile = window.innerWidth < 768;
+        if (isMobile) {
+            // Bottom-sheet panel: reserve its height below the geometry.
+            pad.bottom = base + cardRect.height;
+        } else {
+            // Bottom-right card: reserve its width to the right of the geometry.
+            pad.right = base + cardRect.width;
+        }
+
+        // Clamp: MapLibre throws if padding leaves no room. Keep opposite pads
+        // from summing past ~85% of the map dimension.
+        var mapW = mapEl.clientWidth || window.innerWidth;
+        var mapH = mapEl.clientHeight || window.innerHeight;
+        var maxW = mapW * 0.85;
+        var maxH = mapH * 0.85;
+        if (pad.left + pad.right > maxW) pad.right = Math.max(0, maxW - pad.left);
+        if (pad.top + pad.bottom > maxH) pad.bottom = Math.max(0, maxH - pad.top);
+        return pad;
+    }
+
+    // Re-fit the map to the current group geometry using panel-aware padding.
+    // Exposed so the collapse/expand toggle can re-fit after the panel resizes.
+    function fitCurrentGroup() {
+        if (!currentGroupGeojson) return;
+        var bbox = geojsonBounds(currentGroupGeojson);
         if (bbox) {
-            var isMobile = window.innerWidth < 768;
-            map.fitBounds(bbox, { padding: isMobile ? 150 : 60, animate: false });
+            map.fitBounds(bbox, { padding: computeGroupFitPadding(), animate: false });
         }
     }
 
@@ -827,4 +868,5 @@
     window.matcherToggleSegment = toggleSegment;
     window.matcherSetSegmentVisible = setSegmentVisible;
     window.matcherToggleAllSegments = toggleAllSegments;
+    window.matcherRefitGroup = fitCurrentGroup;
 })();

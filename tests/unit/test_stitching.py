@@ -1043,3 +1043,72 @@ class TestStitchingDeepLink:
             assert "<script>x</script>" not in resp.text
         finally:
             self._stop(patches)
+
+
+class TestStitchingUiHooks:
+    """The group card exposes the DOM hooks the client-side UX JS relies on:
+
+    - per-pill class/name data attributes (client-side summary recompute)
+    - stable summary element ids the JS targets
+    - the collapse/expand toggle button
+    """
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gui",
+                    "match_type": "1:N",
+                    "ref_ids": ["r1"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [_edge("r1", "t1", 0.9), _edge("r1", "t2", 0.8)],
+                    "ref_classes": {"r1": "residential"},
+                    "ref_names": {"r1": "Main St"},
+                    "target_classes": {"t1": "residential", "t2": "footway"},
+                    "target_names": {"t1": "Main St", "t2": "Path"},
+                }
+            ],
+        }
+
+    def _client(self):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def test_group_fragment_exposes_ui_hooks(self):
+        client, patches = self._client()
+        try:
+            resp = client.get(
+                f"/stitching-review/group?dataset={self.DATASET}&group_id=gui&group_index=0"
+            )
+            assert resp.status_code == 200
+            html = resp.text
+            # Collapse toggle (issue 3)
+            assert 'id="panel-collapse-btn"' in html
+            assert "togglePanelCollapse()" in html
+            # Summary element ids the JS recompute targets (issue 1)
+            assert 'id="summary-class-value"' in html
+            assert 'id="summary-name-value"' in html
+            # Per-pill class/name data attributes drive the recompute (issue 1)
+            assert 'data-cls="residential"' in html
+            assert 'data-name="Main St"' in html
+            assert 'data-cls="footway"' in html
+        finally:
+            self._stop(patches)
