@@ -42,6 +42,15 @@ batch was built from those via `stitch-batch --recover-labeled`. 10 of the 11
 mapped back to a human label at eval time (the 52x32 mega-group absorbed two
 old labels; one mapping wins).
 
+Eval-time mapping methodology: a human label maps to a panel group only if at
+least one of its selected edges exists among the group's candidate edges (from
+the batch file), with ties broken by max edge overlap; segment-ID membership is
+only a fallback for packs without a batch file. This prevents a label whose
+specific edges no longer exist from mis-mapping via shared segments and skewing
+the coverage/agreement numbers. (Both mapping rules produce identical results
+on this batch, since the eval groups were selected by edge-overlap recovery in
+the first place.)
+
 Takeaway: the 20 empty-edge-set labels are unusable for option-pick evaluation
 (they record *that* everything was rejected but not *which segments* the group
 contained). Any future labeling should persist the group's candidate edges

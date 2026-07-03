@@ -92,34 +92,71 @@ def _group_segment_ids(meta: dict) -> set[str]:
 
 
 def map_human_labels_to_groups(
-    human_df: pd.DataFrame, group_metas: dict[str, dict]
+    human_df: pd.DataFrame,
+    group_metas: dict[str, dict],
+    group_candidate_edges: dict[str, frozenset] | None = None,
 ) -> dict[str, str]:
     """Map each panel group_id -> best-matching human group_id.
 
-    A human label matches a panel group when its selected edges lie among the
-    group's segments; the group is assigned the human label with the greatest
-    selected-edge overlap. Returns {panel_group_id: human_group_id}.
+    Preferred signal is edge-level overlap: when a group's full candidate edge
+    set is known (from the batch file), a human label only qualifies if at
+    least one of its selected edges exists among the group's candidate edges,
+    and ties break by max edge overlap (then segment overlap). Segment-ID
+    membership alone can mis-map a label whose specific edges no longer exist
+    in the group, skewing option-coverage/agreement metrics — so it is used
+    only as a fallback when candidate edges are unavailable (old packs without
+    a batch.json).
+
+    Returns {panel_group_id: human_group_id}.
     """
     human_records = []
     for _, row in human_df.iterrows():
         es = _human_edge_set(row["selected_edges"])
         human_records.append((str(row["group_id"]), es))
 
+    group_candidate_edges = group_candidate_edges or {}
+
     mapping: dict[str, str] = {}
     for gid, meta in group_metas.items():
         seg_ids = _group_segment_ids(meta)
+        cand_edges = group_candidate_edges.get(gid)
         best_hgid = None
-        best_overlap = 0
+        best_score = (0, 0)  # (edge_overlap, segment_overlap)
         for hgid, hes in human_records:
             if not hes:
                 continue
-            overlap = sum(1 for (r, t) in hes if r in seg_ids and t in seg_ids)
-            if overlap > best_overlap:
-                best_overlap = overlap
+            seg_overlap = sum(1 for (r, t) in hes if r in seg_ids and t in seg_ids)
+            if cand_edges is not None:
+                edge_overlap = len(hes & cand_edges)
+                if edge_overlap == 0:
+                    continue  # require >=1 human edge among the candidate edges
+                score = (edge_overlap, seg_overlap)
+            else:
+                score = (0, seg_overlap)
+                if seg_overlap == 0:
+                    continue
+            if score > best_score:
+                best_score = score
                 best_hgid = hgid
         if best_hgid is not None:
             mapping[gid] = best_hgid
     return mapping
+
+
+def _load_batch_candidate_edges(batch_dir: Path) -> dict[str, frozenset]:
+    """Load each group's full candidate edge set from the batch file, if present."""
+    batch_path = Path(batch_dir) / "batch.json"
+    if not batch_path.exists():
+        return {}
+    try:
+        batch = json.loads(batch_path.read_text())
+    except (ValueError, OSError):
+        return {}
+    out: dict[str, frozenset] = {}
+    for g in batch.get("groups", []):
+        gid = str(g.get("group_id"))
+        out[gid] = frozenset((str(e["ref_id"]), str(e["target_id"])) for e in g.get("edges", []))
+    return out
 
 
 def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
@@ -187,7 +224,8 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
         if (gdir / "metadata.yaml").exists():
             group_metas[gid] = _load_group_metadata(gdir)
 
-    mapping = map_human_labels_to_groups(human_df, group_metas)
+    candidate_edges = _load_batch_candidate_edges(batch_dir)
+    mapping = map_human_labels_to_groups(human_df, group_metas, candidate_edges)
     human_by_gid = {str(r["group_id"]): r for _, r in human_df.iterrows()}
 
     results: list[GroupEval] = []

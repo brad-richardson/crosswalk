@@ -947,7 +947,10 @@ def generate_stitch_batch(
     elif group_ids_file:
         text = group_ids_file.read_text().strip()
         try:
-            requested = list(json.loads(text))
+            # Normalize items to stripped strings: JSON numbers (unquoted hex
+            # ids like 21b67ef2 are rare but possible) would otherwise never
+            # match the string group_ids in the sidecar.
+            requested = [str(g).strip() for g in json.loads(text)]
         except json.JSONDecodeError:
             requested = [ln.strip() for ln in text.splitlines() if ln.strip()]
     elif recover_labeled:

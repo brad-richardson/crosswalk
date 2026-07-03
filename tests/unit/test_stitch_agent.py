@@ -168,6 +168,43 @@ def test_parse_vote_missing_choice():
         sr.parse_vote('{"confidence": 1, "reasoning": "y"}', {"A"})
 
 
+def test_parse_vote_reasoning_containing_braces():
+    # A greedy {.*} regex would over-capture; non-greedy {.*?} would truncate
+    # at the } inside the reasoning string. raw_decode handles both.
+    raw = '{"choice": "A", "confidence": 0.8, "reasoning": "edge set {R1->T1} wins"}'
+    choice, conf, reason = sr.parse_vote(raw, {"A"})
+    assert choice == "A"
+    assert reason == "edge set {R1->T1} wins"
+
+
+def test_parse_vote_two_concatenated_objects_takes_first():
+    raw = (
+        '{"choice": "B", "confidence": 0.6, "reasoning": "first"}'
+        '{"choice": "A", "confidence": 0.9, "reasoning": "second"}'
+    )
+    choice, _conf, reason = sr.parse_vote(raw, {"A", "B"})
+    assert choice == "B"
+    assert reason == "first"
+
+
+def test_parse_vote_fenced_object_in_prose_with_braces():
+    raw = (
+        "Considering the options {A, B}:\n"
+        "```json\n"
+        '{"choice": "B", "confidence": 0.7, "reasoning": "map {x} shows overlap"}\n'
+        "```\n"
+        "Done."
+    )
+    choice, _conf, reason = sr.parse_vote(raw, {"A", "B"})
+    assert choice == "B"
+    assert reason == "map {x} shows overlap"
+
+
+def test_extract_json_skips_unparseable_brace_runs():
+    raw = '{not json} but later {"choice": "A", "confidence": 1, "reasoning": "ok"}'
+    assert sr.parse_vote(raw, {"A"})[0] == "A"
+
+
 # ---------------------------------------------------------------------------
 # Consensus rules
 # ---------------------------------------------------------------------------
@@ -276,6 +313,44 @@ def test_run_provider_abstains_after_retries(monkeypatch):
     )
     assert vote.choice == "ABSTAIN"
     assert vote.error
+
+
+def test_run_provider_cli_failure_records_stderr(monkeypatch):
+    """Non-zero CLI exit is an invocation failure, not a parse error."""
+
+    def failing_invoker(prompt, group_dir, letters, model, timeout):
+        raise RuntimeError("codex exited with code 2: auth expired")
+
+    monkeypatch.setitem(sr._INVOKERS, "codex", failing_invoker)
+    vote = sr.run_provider_on_group(
+        sr.ProviderSpec("codex", "m"),
+        "g",
+        None,
+        "prompt",
+        ["A"],
+        {"A": [(R1, T1)]},
+    )
+    assert vote.choice == "ABSTAIN"
+    assert "invocation error" in vote.error
+    assert "auth expired" in vote.error
+
+
+def test_check_exit_raises_with_truncated_stderr():
+    import subprocess as sp
+
+    result = sp.CompletedProcess(args=["x"], returncode=3, stdout="", stderr="boom " * 200)
+    with pytest.raises(RuntimeError) as exc:
+        sr._check_exit("agy", result)
+    msg = str(exc.value)
+    assert "agy exited with code 3" in msg
+    assert len(msg) < 600  # stderr truncated
+
+
+def test_check_exit_passes_on_zero():
+    import subprocess as sp
+
+    result = sp.CompletedProcess(args=["x"], returncode=0, stdout="ok", stderr="")
+    sr._check_exit("claude", result)  # no raise
 
 
 # ---------------------------------------------------------------------------
@@ -489,3 +564,129 @@ def test_evaluate_batch_disagreement(tmp_path):
     results = evaluate_batch(batch_dir, human_df)
     assert len(results) == 1
     assert results[0].exact_match is False
+
+
+# ---------------------------------------------------------------------------
+# Human-label -> group mapping (edge-level overlap preferred)
+# ---------------------------------------------------------------------------
+
+
+def _mapping_fixtures():
+    from matcher.agent_labeling.stitch_evidence import build_metadata
+
+    g = make_group()
+    ctx = build_stitch_options(g)
+    metas = {g["group_id"]: build_metadata(g, ctx)}
+    cand = {g["group_id"]: frozenset({(R1, T1), (R1, T2), (R2, T2)})}
+    return metas, cand
+
+
+def test_mapping_requires_edge_overlap_when_candidates_known():
+    """A label whose segments are in the group but whose edges never existed
+    as candidate edges must NOT map (would skew coverage/agreement metrics)."""
+    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+
+    metas, cand = _mapping_fixtures()
+    # (R2, T1) uses group segments but is not a candidate edge.
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "h_phantom",
+                "selected_edges": json.dumps([{"ref_id": R2, "target_id": T1}]),
+            }
+        ]
+    )
+    assert map_human_labels_to_groups(human_df, metas, cand) == {}
+
+
+def test_mapping_prefers_max_edge_overlap():
+    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+
+    metas, cand = _mapping_fixtures()
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "h_one_edge",
+                "selected_edges": json.dumps([{"ref_id": R1, "target_id": T1}]),
+            },
+            {
+                "group_id": "h_two_edges",
+                "selected_edges": json.dumps(
+                    [
+                        {"ref_id": R1, "target_id": T1},
+                        {"ref_id": R2, "target_id": T2},
+                    ]
+                ),
+            },
+        ]
+    )
+    mapping = map_human_labels_to_groups(human_df, metas, cand)
+    assert mapping == {"grp001": "h_two_edges"}
+
+
+def test_mapping_falls_back_to_segment_membership_without_candidates():
+    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+
+    metas, _cand = _mapping_fixtures()
+    # Same phantom edge; without candidate edges the segment fallback applies.
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "h_phantom",
+                "selected_edges": json.dumps([{"ref_id": R2, "target_id": T1}]),
+            }
+        ]
+    )
+    mapping = map_human_labels_to_groups(human_df, metas, None)
+    assert mapping == {"grp001": "h_phantom"}
+
+
+def test_evaluate_batch_uses_batch_json_candidate_edges(tmp_path):
+    """With batch.json present, a phantom-edge label must not be mapped."""
+    g = make_group()
+    batch_dir = tmp_path / "batch"
+    generate_group_evidence(g, batch_dir / g["group_id"])
+    (batch_dir / "batch.json").write_text(json.dumps({"groups": [g]}))
+
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "h_phantom",
+                "selected_edges": json.dumps([{"ref_id": R2, "target_id": T1}]),
+            }
+        ]
+    )
+    panel_str = json.dumps(sorted([[R1, T1], [R2, T2]]))
+    pd.DataFrame(
+        [
+            {
+                "group_id": "grp001",
+                "consensus": "unanimous",
+                "choice": "A",
+                "edge_set": panel_str,
+                "routing": "auto_accept",
+                "n_votes": 3,
+                "n_valid": 3,
+                "minority": "",
+                "mean_confidence": 0.9,
+            }
+        ]
+    ).to_csv(batch_dir / "consensus.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "group_id": "grp001",
+                "provider": "claude",
+                "model": "m",
+                "choice": "A",
+                "confidence": 0.9,
+                "reasoning": "",
+                "edge_set": panel_str,
+                "latency_s": 1.0,
+                "timestamp": "",
+                "error": "",
+            }
+        ]
+    ).to_csv(batch_dir / "votes.csv", index=False)
+
+    assert evaluate_batch(batch_dir, human_df) == []

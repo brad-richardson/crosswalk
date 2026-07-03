@@ -68,33 +68,46 @@ class Vote:
 # ---------------------------------------------------------------------------
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
-_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _scan_json_object(text: str) -> dict | None:
+    """Scan text for the first balanced, parseable JSON object.
+
+    Uses ``json.JSONDecoder.raw_decode`` from each ``{`` position instead of a
+    regex: a greedy ``{.*}`` swallows trailing braces / concatenated objects,
+    while a non-greedy ``{.*?}`` truncates when the reasoning string itself
+    contains ``}``. ``raw_decode`` respects string escaping and nesting, so it
+    returns exactly the first complete object.
+    """
+    decoder = json.JSONDecoder()
+    idx = text.find("{")
+    while idx != -1:
+        try:
+            parsed, _end = decoder.raw_decode(text, idx)
+            if isinstance(parsed, dict):
+                return parsed
+        except ValueError:
+            pass
+        idx = text.find("{", idx + 1)
+    return None
 
 
 def _extract_json_object(text: str) -> dict | None:
     """Extract the first JSON object from arbitrary text.
 
-    Handles: raw JSON, ```json fenced blocks, and JSON embedded in prose.
-    Returns None if nothing parseable is found.
+    Handles: raw JSON, ```json fenced blocks, JSON embedded in prose, and
+    reasoning strings that themselves contain braces. Returns None if nothing
+    parseable is found. Fenced content is preferred (a provider that fences
+    its answer means THAT to be the answer).
     """
     if not text:
         return None
-    candidates: list[str] = []
     m = _FENCE_RE.search(text)
     if m:
-        candidates.append(m.group(1).strip())
-    candidates.append(text.strip())
-    obj = _OBJ_RE.search(text)
-    if obj:
-        candidates.append(obj.group(0))
-    for cand in candidates:
-        try:
-            parsed = json.loads(cand)
-            if isinstance(parsed, dict):
-                return parsed
-        except (ValueError, TypeError):
-            continue
-    return None
+        obj = _scan_json_object(m.group(1))
+        if obj is not None:
+            return obj
+    return _scan_json_object(text)
 
 
 def parse_vote(raw_text: str, valid_letters: set[str]) -> tuple[str, float, str]:
@@ -171,6 +184,17 @@ def _image_paths(group_dir: Path, letters: list[str]) -> list[str]:
     return imgs
 
 
+def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
+    """Raise on non-zero CLI exit so failures don't masquerade as parse errors.
+
+    Includes truncated stderr in the message; the runner records it in the
+    abstention error trail.
+    """
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()[:500]
+        raise RuntimeError(f"{provider} exited with code {result.returncode}: {stderr}")
+
+
 def invoke_claude(
     prompt: str, group_dir: Path, letters: list[str], model: str, timeout: int = 240
 ) -> str:
@@ -197,6 +221,7 @@ def invoke_claude(
             timeout=timeout,
             cwd=neutral_cwd,
         )
+    _check_exit("claude", result)
     return result.stdout
 
 
@@ -232,6 +257,7 @@ def invoke_codex(
             text=True,
             timeout=timeout,
         )
+        _check_exit("codex", result)
         if out_path.exists():
             txt = out_path.read_text().strip()
             if txt:
@@ -257,6 +283,7 @@ def invoke_agy(
         text=True,
         timeout=timeout,
     )
+    _check_exit("agy", result)
     return result.stdout
 
 
@@ -312,7 +339,7 @@ def _load_group_context(group_dir: Path) -> tuple[list[str], dict, dict]:
 def run_provider_on_group(
     provider: ProviderSpec,
     group_id: str,
-    group_dir: Path,
+    group_dir: Path | None,
     prompt: str,
     letters: list[str],
     options_by_letter: dict[str, list[tuple[str, str]]],
