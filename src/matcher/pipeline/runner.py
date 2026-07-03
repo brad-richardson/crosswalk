@@ -582,6 +582,24 @@ def run_pipeline(
     if progress_callback:
         progress_callback(70)
 
+    # Step 3.5 (EXPERIMENTAL, opt-in): structure-aware score propagation.
+    # Runs after per-pair scoring and before the optimizer. Adjusts confidences
+    # using network topology so confident, structurally-consistent corridors
+    # reinforce each other and competing non-adjacent alternatives are dampened.
+    # Gated behind settings.enable_score_propagation (default off => no-op, and
+    # the results list is left byte-identical to the pre-propagation pipeline).
+    if settings.enable_score_propagation:
+        from ..matching.score_propagation import propagate_scores
+
+        logger.info("Step 3.5: Applying structure-aware score propagation...")
+        results, _prop_stats = propagate_scores(
+            results,
+            reference=reference,
+            target=target,
+            ref_id_column=ref_id_column,
+            target_id_column=target_id_column,
+        )
+
     # Step 4: Optimize matches with M:N grouping (resolve conflicts)
     # Grouping allows multiple contiguous segments and supports 1:1, 1:N, N:1, and M:N match types
     # This handles different segmentation schemes and overlapping relationships between datasets

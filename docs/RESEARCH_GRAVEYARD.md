@@ -261,6 +261,39 @@ Parked in TODO.md - may revisit if class_similarity proves insufficient for cros
 
 ---
 
+## Structure-Aware Score Propagation (Parked 2026-07-03)
+
+**Commit/Branch:** `experiment/score-propagation`
+
+#### What It Was
+A post-scoring, pre-optimizer step that adjusts per-pair confidences using network
+topology: **boost** a pair when a topologically-consistent neighbor (same physical
+corner, different segments on both sides) is a confident match, **dampen** a pair when
+a non-adjacent competitor (same target/ref, different road) is confident. Bounded,
+damped iteration in logit space. Gated behind `enable_score_propagation` (default off).
+
+#### Why Parked
+- **Net neutral-to-negative on two datasets.** Boston streets: −1 false-positive
+  target (target F1 +0.0018) but pair F1 0.9746→0.9708 and stitch F1 0.9531→0.9429.
+  Seattle sidewalks: target F1 0.8750→0.8627, pair F1 0.7919→0.7832. **No knob setting
+  (rounds 1–3, boost-only, low-beta, gentle) beat the flag-off baseline on the
+  composite.**
+- **No headroom against a calibrated scorer.** The combined XGBoost model is already
+  ~0.99 pair-F1 on Boston; an unsupervised structural prior can only add noise. Where
+  there is headroom (sidewalks), the geometric dampen term is miscalibrated — many
+  "competing" parallel pairs (dual carriageways, both-side sidewalks) are both correct,
+  so dampening destroys true recall.
+
+#### Lessons Learned
+1. Label-free structural priors need real headroom; they don't help a scorer already at
+   0.99 F1 and actively hurt when the "competition" signal isn't validated against labels.
+2. A geometric competitor is not a wrong match — parallel real roads/sidewalks compete
+   geometrically but are both true. Dampening needs learned/validated edge potentials.
+3. Kept flag-gated-off (clean, 1.7 s on 199K pairs, byte-identical when off) as a
+   revisitable dead-end. Full record: `research/score_propagation_experiment.md`.
+
+---
+
 ## Template for Future Entries
 
 ### Feature Name (Removed/Parked YYYY-MM-DD)
