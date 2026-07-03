@@ -32,8 +32,25 @@ The objective mirrors deployment as closely as possible: no early stopping
 the fold's training labels (``train()`` computes it from its training set),
 and F1 scored with the project's ``METRIC_AVERAGE``.
 
+FEATURE SETS
+============
+``--feature-set full`` (default) tunes the full ``FEATURE_COLUMNS`` model
+(``DEFAULT_XGB_PARAMS`` in ml.py).
+
+``--feature-set spark`` tunes the Spark-portable model
+(``SPARK_PORTABLE_XGB_PARAMS``): the feature matrix is restricted to
+``SPARK_PORTABLE_FEATURES`` exactly the way ``matcher export-spark-model``
+does it (``train(exclude_features=...)`` restricts ``feature_names`` BEFORE
+``_validate_training_pairs()``, so the post-validation row set — and hence the
+seed-42 split — matches the exported model's training run). The objective
+additionally subtracts a size penalty of 0.00001 F1 per tree above 100
+(``n_estimators``) so tuning favors compact models for Spark deployment.
+The leakage-free protocol (split, discard, inner CV) is identical.
+
 Usage:
     uv run python scripts/tune_model.py --trials 100 --output best_params.json
+    uv run python scripts/tune_model.py --feature-set spark --trials 100 \
+        --output spark_params.json
 """
 
 import argparse
@@ -54,8 +71,14 @@ except ImportError as e:
         "uv pip install -e '.[dev,ml]' (plus optuna: uv pip install optuna)"
     ) from e
 
-from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
+from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE, SPARK_PORTABLE_FEATURES
 from matcher.matching.ml import MLMatcher, segment_aware_split
+
+# Size penalty for the spark feature set: 0.00001 F1 per tree above 100.
+# Matches the penalty used for the original Spark-portable tuning so the
+# objective still favors compact models for Spark deployment.
+SPARK_SIZE_PENALTY_PER_TREE = 0.00001
+SPARK_SIZE_PENALTY_FREE_TREES = 100
 
 
 def objective(
@@ -64,8 +87,14 @@ def objective(
     y: np.ndarray,
     groups: np.ndarray,
     n_splits: int = 5,
+    size_penalty_per_tree: float = 0.0,
 ) -> float:
-    """Optuna objective: mean F1 over segment-grouped CV folds (train rows only)."""
+    """Optuna objective: mean F1 over segment-grouped CV folds (train rows only).
+
+    When ``size_penalty_per_tree`` > 0, subtracts
+    ``size_penalty_per_tree * max(0, n_estimators - 100)`` from the mean F1 so
+    the search favors compact models (used for the Spark-portable feature set).
+    """
 
     # Define search space
     # Note: scale_pos_weight is computed dynamically (per fold here, on the
@@ -115,7 +144,12 @@ def objective(
         score = f1_score(y_val, preds, average=METRIC_AVERAGE, zero_division=0)
         scores.append(score)
 
-    return float(np.mean(scores))
+    mean_f1 = float(np.mean(scores))
+    if size_penalty_per_tree > 0:
+        mean_f1 -= size_penalty_per_tree * max(
+            0, params["n_estimators"] - SPARK_SIZE_PENALTY_FREE_TREES
+        )
+    return mean_f1
 
 
 def run_tuning(
@@ -123,6 +157,7 @@ def run_tuning(
     output_path: str,
     n_trials: int = 100,
     allow_stale_features: bool = False,
+    feature_set: str = "full",
 ):
     """Run hyperparameter tuning on the training portion of the seed-42 split."""
     from matcher.labeling.label_store import LabelStore
@@ -137,7 +172,21 @@ def run_tuning(
     logger.info(f"Loaded {len(df)} valid labels")
 
     matcher = MLMatcher()
-    matcher.feature_names = FEATURE_COLUMNS.copy()
+    if feature_set == "spark":
+        # Mirror `matcher export-spark-model`: train() restricts feature_names
+        # (FEATURE_COLUMNS order, minus non-portable features) BEFORE
+        # _validate_training_pairs(), so validation's all-NaN check — and thus
+        # the seed-42 split's row set — matches the exported model's run.
+        matcher.feature_names = [f for f in FEATURE_COLUMNS if f in SPARK_PORTABLE_FEATURES]
+        size_penalty_per_tree = SPARK_SIZE_PENALTY_PER_TREE
+        logger.info(
+            f"Feature set 'spark': {len(matcher.feature_names)} Spark-portable features, "
+            f"size penalty {size_penalty_per_tree} F1/tree above "
+            f"{SPARK_SIZE_PENALTY_FREE_TREES} trees"
+        )
+    else:
+        matcher.feature_names = FEATURE_COLUMNS.copy()
+        size_penalty_per_tree = 0.0
     # Same feature_version gate as train(): tuning on stale/mixed features
     # would produce params train() then refuses to reproduce.
     matcher._check_feature_versions(df, allow_stale_features=allow_stale_features)
@@ -182,7 +231,14 @@ def run_tuning(
     )
 
     study.optimize(
-        lambda trial: objective(trial, X, y, groups_train, n_splits=n_splits),
+        lambda trial: objective(
+            trial,
+            X,
+            y,
+            groups_train,
+            n_splits=n_splits,
+            size_penalty_per_tree=size_penalty_per_tree,
+        ),
         n_trials=n_trials,
         show_progress_bar=True,
     )
@@ -202,14 +258,22 @@ def run_tuning(
         "n_trials": n_trials,
         "n_train_samples": len(df_train),
         "n_test_held_out": len(test_idx),
+        "feature_set": feature_set,
+        "n_features": len(matcher.feature_names),
+        "size_penalty_per_tree": size_penalty_per_tree,
         "protocol": "tuned on seed-42/test_size-0.2 training portion only (test set never seen)",
     }
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
     logger.info(f"Saved best params to {output_path}")
 
-    # Print params in format ready for ml.py
-    logger.info("\nParams for ml.py DEFAULT_XGB_PARAMS:")
+    # Print params in a format ready to paste into the params dict
+    target = (
+        "config.py SPARK_PORTABLE_XGB_PARAMS"
+        if feature_set == "spark"
+        else "ml.py DEFAULT_XGB_PARAMS"
+    )
+    logger.info(f"\nParams for {target}:")
     for key, value in trial.params.items():
         logger.info(f'    "{key}": {value},')
 
@@ -220,6 +284,13 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="best_params.json", help="Output path for best params")
     parser.add_argument("--trials", type=int, default=100, help="Number of trials")
     parser.add_argument(
+        "--feature-set",
+        choices=["full", "spark"],
+        default="full",
+        help="Feature view to tune: 'full' (all FEATURE_COLUMNS, default) or "
+        "'spark' (SPARK_PORTABLE_FEATURES subset with tree-count size penalty)",
+    )
+    parser.add_argument(
         "--allow-stale-features",
         action="store_true",
         help="Tune despite stale/mixed feature_version labels (same escape hatch as train())",
@@ -227,4 +298,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    run_tuning(args.labels, args.output, args.trials, args.allow_stale_features)
+    run_tuning(args.labels, args.output, args.trials, args.allow_stale_features, args.feature_set)

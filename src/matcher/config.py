@@ -371,23 +371,22 @@ SPARK_PORTABLE_FEATURES = [
 ]  # fmt: skip
 
 # XGBoost hyperparams tuned for the 28-feature Spark-portable model.
-# Tuned via Optuna (80 trials, slight size penalty for tree count).
-# Higher learning rate + fewer trees than the full 78-feature model.
-# WARNING: tuned before scripts/tune_model.py adopted the leakage-free
-# protocol (test set held out prior to tuning) — these params saw the
-# seed-42 test set. Retune with the current script (restricted to
-# SPARK_PORTABLE_FEATURES) before quoting holdout metrics for this model.
+# Tuned 2026-07-02 via `scripts/tune_model.py --feature-set spark` (Optuna,
+# 100 trials, TPESampler seed=42) with the leakage-free protocol: the seed-42
+# holdout was discarded before tuning and the search used inner GroupKFold CV
+# on the training portion only, with a size penalty of 0.00001 F1 per tree
+# above 100 n_estimators to favor compact models for Spark deployment.
 SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
-    "n_estimators": 200,
-    "learning_rate": 0.037979773378190335,
-    "max_depth": 8,
-    "min_child_weight": 1,
-    "subsample": 0.7312303857873605,
-    "colsample_bytree": 0.9384017093295245,
-    "gamma": 0.7417263340163897,
-    "reg_alpha": 0.6821030293753112,
-    "reg_lambda": 2.051665570271953,
-    "max_bin": 206,
+    "n_estimators": 310,
+    "learning_rate": 0.01067524452141337,
+    "max_depth": 10,
+    "min_child_weight": 3,
+    "subsample": 0.8163675134840604,
+    "colsample_bytree": 0.9428219528295424,
+    "gamma": 0.714069332953539,
+    "reg_alpha": 1.007111505335769,
+    "reg_lambda": 2.0095253448481576,
+    "max_bin": 400,
 }
 
 
