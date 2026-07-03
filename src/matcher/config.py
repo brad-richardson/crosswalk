@@ -371,22 +371,25 @@ SPARK_PORTABLE_FEATURES = [
 ]  # fmt: skip
 
 # XGBoost hyperparams tuned for the 28-feature Spark-portable model.
-# Tuned 2026-07-02 via `scripts/tune_model.py --feature-set spark` (Optuna,
+# Tuned 2026-07-03 via `scripts/tune_model.py --feature-set spark` (Optuna,
 # 100 trials, TPESampler seed=42) with the leakage-free protocol: the seed-42
 # holdout was discarded before tuning and the search used inner GroupKFold CV
 # on the training portion only, with a size penalty of 0.00001 F1 per tree
-# above 100 n_estimators to favor compact models for Spark deployment.
+# above 100 n_estimators. Epsilon-compact selection (inference speed matters
+# for Spark): cheapest trial by n_estimators * max_depth within 0.003 raw
+# CV F1 of the best — selected 224 trees x depth 10 (CV F1 0.9216) over the
+# best-F1 310 x 10 (CV F1 0.9242).
 SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
-    "n_estimators": 310,
-    "learning_rate": 0.01067524452141337,
+    "n_estimators": 224,
+    "learning_rate": 0.01275299313255589,
     "max_depth": 10,
-    "min_child_weight": 3,
-    "subsample": 0.8163675134840604,
-    "colsample_bytree": 0.9428219528295424,
-    "gamma": 0.714069332953539,
-    "reg_alpha": 1.007111505335769,
-    "reg_lambda": 2.0095253448481576,
-    "max_bin": 400,
+    "min_child_weight": 2,
+    "subsample": 0.8019037612739637,
+    "colsample_bytree": 0.9661600548038851,
+    "gamma": 0.6021730351738508,
+    "reg_alpha": 1.5439549237262677,
+    "reg_lambda": 2.1882487406505136,
+    "max_bin": 343,
 }
 
 
