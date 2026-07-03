@@ -47,10 +47,20 @@ MAX_REF_CHAIN_LEN = 3
 MAX_CHAINS_PER_TARGET = 6
 
 # Contiguity tolerance for chain building, in meters — matches the optimizer's
-# endpoint-snap tolerance so options express exactly the spans the optimizer
-# can produce. Group geometries arrive as WGS84 (lon/lat) GeoJSON; they are
-# projected to a local equirectangular meter frame before the check.
+# endpoint-snap tolerance so options can express the spans the optimizer
+# produces. Group geometries arrive as WGS84 (lon/lat) GeoJSON and are
+# projected to a local equirectangular meter frame before the check; the
+# optimizer checks contiguity on properly projected (ensure_projected_crs)
+# geometries, so boundary cases right at the tolerance can differ slightly
+# between the two paths.
 CHAIN_CONTIGUITY_TOLERANCE_M = DEFAULT_SNAP_TOLERANCE_M
+
+# Beam width for chain construction: at each chain size the frontier keeps
+# only the top subsets by total confidence. In dense adjacency graphs (many
+# refs meeting one intersection within tolerance) the number of connected
+# size-3 subsets is O(n^3); the beam keeps construction itself bounded, not
+# just the final per-target option list.
+MAX_CHAIN_FRONTIER = 64
 
 # Alignment fraction keys preserved from sidecar edges through to alternatives
 _ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
@@ -238,12 +248,23 @@ def _enumerate_contiguous_chains(
     refs: list[str],
     adjacency: dict[str, set[str]],
     max_len: int,
+    conf: dict[str, float] | None = None,
+    max_frontier: int = MAX_CHAIN_FRONTIER,
 ) -> list[frozenset[str]]:
     """Enumerate connected ref subsets of size 2..max_len (contiguous chains).
 
     Grows connected subsets one node at a time from singletons, so every
     returned subset is contiguous under the endpoint-proximity adjacency.
+    The frontier at each size is beam-limited to the top ``max_frontier``
+    subsets by total confidence (deterministic tie-break by member ids), so
+    construction stays bounded in dense adjacency graphs instead of
+    materializing all O(n^max_len) connected subsets.
     """
+    conf = conf or {}
+
+    def _beam_key(subset: frozenset[str]) -> tuple:
+        return (-sum(conf.get(r, 0.0) for r in subset), tuple(sorted(subset)))
+
     results: set[frozenset[str]] = set()
     # Frontier holds the connected subsets of the current size.
     frontier: list[frozenset[str]] = [frozenset([r]) for r in refs]
@@ -260,6 +281,8 @@ def _enumerate_contiguous_chains(
                         continue
                     seen_this_size.add(cand)
                     next_frontier.append(cand)
+        next_frontier.sort(key=_beam_key)
+        del next_frontier[max_frontier:]
         results.update(next_frontier)
         frontier = next_frontier
         if not frontier:
@@ -301,7 +324,12 @@ def _target_ref_subsets(
     adjacency = build_contiguity_adjacency(
         list(geom_lookup.keys()), geom_lookup, CHAIN_CONTIGUITY_TOLERANCE_M
     )
-    chains = _enumerate_contiguous_chains(list(geom_lookup.keys()), adjacency, MAX_REF_CHAIN_LEN)
+    chains = _enumerate_contiguous_chains(
+        list(geom_lookup.keys()),
+        adjacency,
+        MAX_REF_CHAIN_LEN,
+        conf={r: _conf(r) for r in geom_lookup},
+    )
 
     def _chain_conf(chain: frozenset[str]) -> float:
         return sum(_conf(r) for r in chain)

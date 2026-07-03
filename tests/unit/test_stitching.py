@@ -307,6 +307,26 @@ class TestMultiRefContiguousChains:
         keys = [frozenset((e["ref_id"], e["target_id"]) for e in a["edges"]) for a in alts]
         assert len(keys) == len(set(keys))
 
+    def test_chain_enumeration_beam_bounded_on_dense_graph(self):
+        """A dense adjacency graph (all refs mutually contiguous) cannot blow up
+        intermediate chain enumeration: the beam caps each frontier."""
+        from matcher.matching.alternatives import (
+            MAX_CHAIN_FRONTIER,
+            _enumerate_contiguous_chains,
+        )
+
+        n = 40  # complete graph: ~C(40,3)=9880 size-3 connected subsets exist
+        refs = [f"r{i}" for i in range(n)]
+        adjacency = {r: set(refs) - {r} for r in refs}
+        conf = {r: 1.0 - i * 0.01 for i, r in enumerate(refs)}
+
+        chains = _enumerate_contiguous_chains(refs, adjacency, 3, conf=conf)
+
+        # Bounded: at most max_frontier per size step (sizes 2 and 3)
+        assert len(chains) <= 2 * MAX_CHAIN_FRONTIER
+        # Beam keeps the best: the top-confidence pair survives
+        assert frozenset({"r0", "r1"}) in chains
+
     def test_large_group_bounded_and_proposes_multiref(self):
         """Big groups fall back to greedy but can still propose multi-ref edges."""
         # 8 targets (> MAX_EXHAUSTIVE_TARGETS) each fed by 3 contiguous refs ->
