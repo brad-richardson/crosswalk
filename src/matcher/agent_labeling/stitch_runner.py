@@ -336,18 +336,27 @@ def _load_group_context(group_dir: Path) -> tuple[list[str], dict, dict]:
     return letters, options_by_letter, meta
 
 
-def _segment_class_map(meta: dict) -> dict[str, str]:
-    """Build a {segment_id: class} map from a pack's metadata."""
-    out: dict[str, str] = {}
-    for side in ("reference", "target"):
+def _segment_class_maps(meta: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Build per-side {segment_id: class} maps from a pack's metadata.
+
+    Ref and target IDs come from different namespaces, so the maps are kept
+    separate — a shared dict could let an ID collision misclassify edges.
+    """
+    ref_out: dict[str, str] = {}
+    tgt_out: dict[str, str] = {}
+    for side, out in (("reference", ref_out), ("target", tgt_out)):
         for s in meta.get("segments", {}).get(side, []):
-            out[s["id"]] = s.get("class", "") or ""
-    return out
+            out[str(s["id"])] = s.get("class", "") or ""
+    return ref_out, tgt_out
 
 
-def _edge_classes_for(edge_set: frozenset, seg_class: dict[str, str]) -> list[tuple[str, str]]:
+def _edge_classes_for(
+    edge_set: frozenset,
+    ref_class: dict[str, str],
+    tgt_class: dict[str, str],
+) -> list[tuple[str, str]]:
     """Map a chosen (ref_id, target_id) edge set to (ref_class, target_class)."""
-    return [(seg_class.get(r, ""), seg_class.get(t, "")) for r, t in edge_set]
+    return [(ref_class.get(str(r), ""), tgt_class.get(str(t), "")) for r, t in edge_set]
 
 
 def run_provider_on_group(
@@ -633,8 +642,9 @@ def compute_consensus(
         routing = "human_review"
 
     # Class-consistency gate: demote an auto-accept whose chosen edge set
-    # contains a cross-mode pedestrian↔vehicular edge.
-    if routing == "auto_accept" and edge_classes and has_cross_mode_edge(edge_classes):
+    # contains a cross-mode pedestrian↔vehicular edge. An empty list means
+    # "supplied, nothing to gate on" — only None disables the gate.
+    if routing == "auto_accept" and edge_classes is not None and has_cross_mode_edge(edge_classes):
         routing = "human_review"
         route_reason = "class-mismatch"
 
@@ -722,9 +732,9 @@ def run_batch(
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
         # (gate-less) call gives the chosen edge_set to look up classes for.
-        seg_class = _segment_class_map(_load_group_context(gdir)[2])
+        ref_class, tgt_class = _segment_class_maps(_load_group_context(gdir)[2])
         base = compute_consensus(votes)
-        edge_classes = _edge_classes_for(base.edge_set, seg_class)
+        edge_classes = _edge_classes_for(base.edge_set, ref_class, tgt_class)
         cons = compute_consensus(votes, edge_classes=edge_classes)
         consensus_rows.append(cons)
         logger.info(
