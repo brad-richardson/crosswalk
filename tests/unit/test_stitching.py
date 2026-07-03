@@ -973,3 +973,70 @@ class TestStitchingSelectRoute:
             recorder.assert_not_called()
         finally:
             self._stop(patches)
+
+
+class TestStitchingDeepLink:
+    """The main page route deep-links a specific group as a FULL page."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gdeep",
+                    "match_type": "1:N",
+                    "ref_ids": ["r1"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [_edge("r1", "t1", 0.9), _edge("r1", "t2", 0.8)],
+                }
+            ],
+        }
+
+    def _client(self, unreviewed):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch(
+                "matcher.web.routes.stitching.get_unreviewed_stitch_groups",
+                return_value=unreviewed,
+            ),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def test_deep_link_renders_full_page_even_when_reviewed(self):
+        # Group already reviewed (unreviewed list empty) — deep link still works
+        client, patches = self._client(unreviewed=[])
+        try:
+            resp = client.get(f"/stitching-review?dataset={self.DATASET}&group_id=gdeep")
+            assert resp.status_code == 200
+            # Full page (styles + map container), not the bare fragment
+            assert "app.css" in resp.text
+            assert 'id="map"' in resp.text
+            assert "gdeep" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_deep_link_unknown_group_404s_without_reflecting_id(self):
+        client, patches = self._client(unreviewed=[])
+        try:
+            resp = client.get(
+                f"/stitching-review?dataset={self.DATASET}&group_id=<script>x</script>"
+            )
+            assert resp.status_code == 404
+            assert "<script>x</script>" not in resp.text
+        finally:
+            self._stop(patches)

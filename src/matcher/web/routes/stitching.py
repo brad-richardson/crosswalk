@@ -296,8 +296,14 @@ def _build_group_context(group: dict) -> dict:
 
 
 @router.get("/stitching-review", response_class=HTMLResponse)
-async def stitching_review(request: Request, dataset: str = ""):
-    """Main stitching review page."""
+async def stitching_review(request: Request, dataset: str = "", group_id: str = ""):
+    """Main stitching review page.
+
+    With ``group_id``, deep-links a specific group (reviewed or not) as a full
+    page — used by audit sheets and shared links. The bare
+    ``/stitching-review/group`` endpoint is an HTMX fragment and renders
+    without styles/map when opened directly.
+    """
     datasets = list_datasets()
 
     if not dataset:
@@ -345,6 +351,32 @@ async def stitching_review(request: Request, dataset: str = ""):
     batch_total = len(all_groups)
     groups = get_unreviewed_stitch_groups(dataset, all_groups)
     reviewed_count = batch_total - len(groups)
+
+    if group_id:
+        # Deep link: render the requested group (even if already reviewed)
+        # inside the full page so styles/map/JS load.
+        deep_group = next((g for g in all_groups if g.get("group_id") == group_id), None)
+        if deep_group is None:
+            logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
+            return HTMLResponse("Group not found in batch", status_code=404)
+        geojson = _build_group_geojson(deep_group)
+        group_ctx = _build_group_context(deep_group)
+        return templates.TemplateResponse(
+            request,
+            "stitching/page.html",
+            {
+                "request": request,
+                "mode": "stitching",
+                "datasets": datasets,
+                "dataset": dataset,
+                "group": deep_group,
+                "group_geojson": geojson,
+                "group_index": reviewed_count,
+                "total_groups": batch_total,
+                "no_groups": False,
+                **group_ctx,
+            },
+        )
 
     if not groups:
         return templates.TemplateResponse(
