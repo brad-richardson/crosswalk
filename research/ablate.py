@@ -52,9 +52,7 @@ def main():
     for name, params in CONFIGS.items():
         res = copy.deepcopy(results)
         if params is not None:
-            res, stats = propagate_scores(
-                res, reference_p, target_p, params=params
-            )
+            res, stats = propagate_scores(res, reference_p, target_p, params=params)
             logger.info(f"[{name}] {stats}")
         optimized = optimize_matches_with_grouping(
             res,
