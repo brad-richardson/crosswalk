@@ -585,6 +585,14 @@
         return !hiddenSegments[segmentId]; // return visible state
     }
 
+    // Set a segment to an explicit visibility (used by the option picker to
+    // pre-seed / apply an assignment without relying on prior toggle state).
+    function setSegmentVisible(segmentId, visible) {
+        hiddenSegments[segmentId] = !visible;
+        updateSegmentFilters();
+        return visible;
+    }
+
     function toggleAllSegments(side) {
         // Determine current state: if any on this side are visible, hide all; otherwise show all
         var features = currentGroupGeojson ? currentGroupGeojson.features || [] : [];
@@ -707,6 +715,18 @@
             } catch (e) {}
         }
 
+        // Initialize group segments the optimizer left out as hidden, so the
+        // map matches the pre-seeded pill state (verify, don't construct).
+        var inactiveEl = document.getElementById("group-inactive-ids");
+        if (inactiveEl) {
+            try {
+                var inactiveIds = JSON.parse(inactiveEl.textContent);
+                for (var m = 0; m < inactiveIds.length; m++) {
+                    hiddenSegments[inactiveIds[m]] = true;
+                }
+            } catch (e) {}
+        }
+
         if (!map.isStyleLoaded()) return;
         renderGroupOverlays(data);
     }
@@ -805,5 +825,6 @@
     window.matcherGeojsonBounds = geojsonBounds;
     window.matcherToggleContext = toggleContextLayer;
     window.matcherToggleSegment = toggleSegment;
+    window.matcherSetSegmentVisible = setSegmentVisible;
     window.matcherToggleAllSegments = toggleAllSegments;
 })();

@@ -10,6 +10,9 @@
 <!-- Context segment IDs (start hidden on map) -->
 <script type="application/json" id="group-context-ids">{{ (group.get("context_ref_ids", []) + group.get("context_target_ids", [])) | tojson }}</script>
 
+<!-- Group segments the optimizer left out (start hidden on map to match pre-seed) -->
+<script type="application/json" id="group-inactive-ids">{{ (preseed_inactive_ids if preseed_inactive_ids is defined else []) | tojson }}</script>
+
 <!-- Group card (bottom of screen) -->
 <div class="info-card map-overlay group-card" id="group-card"
      data-group-index="{{ group_index }}"
@@ -38,6 +41,30 @@
         {% endif %}
     </div>
 
+    <!-- Assignment option picker (verify, don't construct) -->
+    {% if options is defined and options %}
+    <div class="assignment-options" id="assignment-options">
+        <div class="assignment-options-header">
+            <span>Pick an assignment</span>
+            <span class="manual-mode-note" id="manual-mode-note" style="display:none">manual edits active</span>
+        </div>
+        <div class="assignment-option-list">
+            {% for opt in options %}
+            <button type="button"
+                    class="assignment-option{% if opt.is_optimizer %} is-optimizer selected{% endif %}"
+                    data-option-key="{{ opt.key }}"
+                    data-edges='{{ opt.edges | tojson }}'
+                    data-active-refs="{{ opt.active_refs | join(',') }}"
+                    data-active-targets="{{ opt.active_targets | join(',') }}"
+                    onclick="pickOption(this)">
+                <span class="opt-label">{{ opt.label }}{% if opt.is_optimizer %}<span class="opt-badge">auto</span>{% endif %}</span>
+                <span class="opt-meta">{{ opt.edge_count }} edge{{ '' if opt.edge_count == 1 else 's' }} &middot; {{ "%.0f" | format(opt.mean_confidence * 100) }}%</span>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Per-segment toggle pills -->
     {% if ref_details is defined %}
     <div class="segment-toggles">
@@ -45,7 +72,7 @@
             <span class="segment-toggle-label" onclick="toggleAllRef()" title="Toggle all ref">Ref</span>
             <div class="segment-pills">
                 {% for ref in ref_details %}
-                <button class="segment-pill segment-pill-ref active"
+                <button class="segment-pill segment-pill-ref{% if preseed_active_refs is not defined or preseed_active_refs is none or ref.id in preseed_active_refs %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
                         title="{{ ref.id }}">R{{ loop.index }}</button>
                 {% endfor %}
@@ -62,7 +89,7 @@
             <span class="segment-toggle-label" onclick="toggleAllTarget()" title="Toggle all target">Trgt</span>
             <div class="segment-pills">
                 {% for tgt in target_details %}
-                <button class="segment-pill segment-pill-target active"
+                <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
                         title="{{ tgt.id }}">T{{ loop.index }}</button>
                 {% endfor %}
@@ -135,6 +162,9 @@
             <input type="hidden" name="group_index" value="{{ group_index }}">
             <input type="hidden" name="included_refs" id="included-refs" value="">
             <input type="hidden" name="included_targets" id="included-targets" value="">
+            <!-- Exact edge set of an unmodified picked option; cleared on manual edit -->
+            <input type="hidden" name="selected_edges" id="selected-edges"
+                   value='{% if preseed_edges is defined and preseed_edges %}{{ preseed_edges | tojson }}{% endif %}'>
             <button type="submit" class="btn-select">
                 Select This
             </button>
