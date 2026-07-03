@@ -423,6 +423,7 @@ async def stitching_review(request: Request, dataset: str = ""):
 
     if not dataset:
         return templates.TemplateResponse(
+            request,
             "stitching/page.html",
             {
                 "request": request,
@@ -447,6 +448,7 @@ async def stitching_review(request: Request, dataset: str = ""):
 
     if not batch:
         return templates.TemplateResponse(
+            request,
             "stitching/page.html",
             {
                 "request": request,
@@ -467,6 +469,7 @@ async def stitching_review(request: Request, dataset: str = ""):
 
     if not groups:
         return templates.TemplateResponse(
+            request,
             "stitching/page.html",
             {
                 "request": request,
@@ -486,6 +489,7 @@ async def stitching_review(request: Request, dataset: str = ""):
     group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
+        request,
         "stitching/page.html",
         {
             "request": request,
@@ -519,6 +523,7 @@ async def stitching_group(
 
     if not batch:
         return templates.TemplateResponse(
+            request,
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset},
         )
@@ -537,6 +542,7 @@ async def stitching_group(
 
     if not group:
         return templates.TemplateResponse(
+            request,
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
@@ -545,6 +551,7 @@ async def stitching_group(
     group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
+        request,
         "stitching/group.html",
         {
             "request": request,
@@ -672,6 +679,7 @@ async def stitching_select(
 
     if not groups:
         return templates.TemplateResponse(
+            request,
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
@@ -681,6 +689,7 @@ async def stitching_select(
     group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
+        request,
         "stitching/group.html",
         {
             "request": request,
@@ -710,6 +719,7 @@ async def stitching_skip(
 
     if not batch:
         return templates.TemplateResponse(
+            request,
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset},
         )
@@ -721,6 +731,7 @@ async def stitching_skip(
 
     if not groups:
         return templates.TemplateResponse(
+            request,
             "stitching/no_groups.html",
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
@@ -738,6 +749,7 @@ async def stitching_skip(
     group_ctx = _build_group_context(group)
 
     return templates.TemplateResponse(
+        request,
         "stitching/group.html",
         {
             "request": request,
