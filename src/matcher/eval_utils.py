@@ -189,9 +189,11 @@ def run_loo_by_type_cv(
         cv_folds: Number of round-robin folds.
         seed: Random seed for group shuffling and model training.
         quality_threshold: Threshold for the road_good/road_poor split.
-        xgb_params: Optional XGBoost params override. Defaults to
-            ``DEFAULT_XGB_PARAMS``. ``scale_pos_weight`` is always computed
-            per fold from the training-class balance.
+        xgb_params: Optional XGBoost params, merged over
+            ``DEFAULT_XGB_PARAMS`` (only the given keys are overridden).
+            ``scale_pos_weight`` (computed per fold from the training-class
+            balance), ``random_state``, and ``n_jobs`` are always set by
+            this function and ignored if passed.
         log: Optional callable for progress output (e.g. ``console.print``).
             Receives rich-markup strings. No-op if None.
 
@@ -212,7 +214,10 @@ def run_loo_by_type_cv(
         if log is not None:
             log(msg)
 
-    params = dict(DEFAULT_XGB_PARAMS if xgb_params is None else xgb_params)
+    params = {**DEFAULT_XGB_PARAMS, **(xgb_params or {})}
+    # Set explicitly on XGBClassifier below; drop to avoid duplicate-kwarg errors
+    for key in ("scale_pos_weight", "random_state", "n_jobs"):
+        params.pop(key, None)
     run_date = datetime.now(UTC)
 
     if isinstance(labels, (str, Path)):
@@ -229,7 +234,8 @@ def run_loo_by_type_cv(
 
     valid_labels = {"match", "no_match"}
     all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
-    _log(f"  Valid labels (match/no_match): {len(all_labels)}")
+    n_valid = len(all_labels)
+    _log(f"  Valid labels (match/no_match): {n_valid}")
 
     # Remove duplicates
     n_before = len(all_labels)
@@ -361,7 +367,7 @@ def run_loo_by_type_cv(
         type_groups=type_groups,
         excluded_datasets=list(excluded_datasets),
         n_total_labels=n_total,
-        n_valid_labels=len(all_labels),
+        n_valid_labels=n_valid,
         n_duplicates_dropped=n_dropped,
         cv_folds=cv_folds,
         seed=seed,
