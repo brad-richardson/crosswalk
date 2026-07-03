@@ -181,3 +181,151 @@ pack (canonical evidence dirs stay pristine).
    turn on unanimous auto-accept.
 5. The 20 old human labels with empty edge sets cannot participate in this
    eval; treat the panel + human-review queue as the path to replacing them.
+
+---
+
+# Phase 2 — Production-Sized Run with the Fixed Option Generator (2026-07-03)
+
+Re-run of the panel at production scale after #231 (multi-ref M:N option
+enumeration) landed, gating the enablement of unanimous auto-accept export.
+Batch: `data/agents/stitching/batches/us_boston_streets_phase2` (60 groups,
+180 provider calls, same panel: claude sonnet / codex gpt-5.4 low effort /
+agy Gemini 3.5 Flash (Low), 240 s timeout).
+
+## Run-set composition (60 groups)
+
+| Stratum | N | Selection |
+|---|---|---|
+| (a) eval continuity | 11 | `--recover-labeled` edge-overlap recovery of the 13 non-empty human labels (9 clean + 3 split → 11 distinct current groups) |
+| (b) reject-all continuity | 4 | empty-edge human labels whose `group_id` survives verbatim in the fresh sidecar (new `recover_empty_reject_all` / `--recover-empty`) |
+| (c) fresh fill | 45 | standard tier selection: 13 large / 13 borderline / 9 low-confidence / 10 clear-winner |
+
+**16 of the 20 reject-all labels are unrecoverable**: they stored no segment
+IDs (only the group-id hash of the original ref/target sets), and post-#227
+component drift dissolved those exact sets. Only exact-hash survival can
+recover them; 4 survived. This permanently confirms the Phase-1 takeaway —
+labels must persist candidate edges.
+
+The fresh sidecar was regenerated on #231 code (1,993 groups; `matcher stitch`
++ `matcher agent stitch-batch --group-ids-file`). 43/60 packs now contain at
+least one multi-ref option (127/209 options total) — the shape that was
+inexpressible in round 1.
+
+## Results
+
+### Consensus and routing (60 groups, 180 votes)
+
+| Consensus | N |
+|---|---|
+| unanimous | 40 |
+| majority | 14 |
+| none | 6 |
+
+Applying the recommended policy (auto-accept = unanimous non-NONE AND ≤20
+candidate edges):
+
+| Final routing | N | Why |
+|---|---|---|
+| **auto-accept candidate** | **30** | unanimous non-NONE, ≤20 edges (mean panel confidence 0.916; group sizes 1–18 edges) |
+| human review | 30 | majority 14, size-gated unanimous 9 (39–92 edges), no consensus 6, unanimous NONE 1 |
+
+Abstentions: 3 (all claude 240 s timeouts, all on 13+-edge groups, all of
+which routed to human review anyway). No auth/quota failures; agy and codex
+returned 60/60 valid votes each.
+
+31 of the 57 non-NONE consensus picks chose a multi-ref option — the fixed
+generator's new options are not decorative; the panel actively selects them.
+
+### Eval refresh: labeled groups, round 1 vs Phase 2
+
+Same 10 mapped human labels (11 recovered groups, mega-group absorbs two):
+
+| Metric | Round 1 (pre-#231) | Phase 2 (post-#231) |
+|---|---|---|
+| Unanimity on eval groups | 4/11 (36%) | **9/10 (90%)** |
+| NONE consensus verdicts | 1 (+2 NONE minority votes citing the inexpressible multi-ref shape) | 0 |
+| Panel exact edge-set match | 20% | 20% |
+| Panel mean edge F1 | 0.540 | 0.590 |
+| Exact on option-covered groups | 2/2 | 2/2 (same two, F1 = 1.00) |
+| Option-coverage gap | 8/10 | 8/10 |
+
+Reading this correctly: **the generator fix converted disagreement into
+agreement exactly where predicted.** `dde5ebf9` — round 1's poster child,
+where two panelists voted NONE because "T4 needs R3 AND R5" was inexpressible
+— is now a unanimous pick of an option containing exactly R3→T4 + R5→T4.
+`8ed3be51` (none → unanimous) and `9ac35fb7` (majority w/ NONE dissent →
+unanimous) follow the same pattern.
+
+Agreement with the *old human labels* did not move (20% exact), because it is
+capped by the unchanged option-coverage gap: 8/10 human edge sets answer a
+different (smaller, pre-#227) group than the current sidecar poses. The two
+groups where the question is unchanged remain perfect. The old round-1
+"unanimous tier = 67% exact / 0.933 F1" was computed on n=3; the Phase-2
+unanimous tier (n=9) now contains the drift-affected groups that round 1
+routed to majority/none, so the tier numbers are not comparable — the
+option-covered subset (2/2 exact both rounds) is the like-for-like signal.
+
+Remaining NONE/dissent reasoning is now genuinely judgmental (parallel roads,
+end-to-end junctions, wrong geometry) rather than "no option can express the
+true assignment". Residual coverage complaints concentrate in large many-ref
+corridors (e.g. "I Street needs R19+R5+R9+R21") — beyond the per-target chain
+cap, and all in size-gated or no-consensus groups already routed to humans.
+
+### The 20 reject-all human labels: the panel contradicts them
+
+The user's suspicion was that the old empty-selection (reject-all) labels are
+low-quality. The 4 recoverable ones — where the group is *identical* to what
+the human saw — say yes loudly:
+
+| Group | Human said | Panel says |
+|---|---|---|
+| `99bc755f` | reject all | **unanimous B** (claude/codex/agy all B) |
+| `b2876328` | reject all | **unanimous A** |
+| `461ebf00` | reject all | **unanimous A** |
+| `5e8dad61` | reject all | majority A (codex C — dissent over *which* assignment, not whether) |
+
+0/4 panel verdicts lean NONE. All three providers independently propose a
+concrete assignment on every one of these groups. Combined with the round-1
+finding that the reject-all labels stored no segments, these labels should be
+treated as superseded: route their groups through the panel + human-review
+path rather than weighting them in stitch-eval. (Two of the three unanimous
+ones are in the Phase-2 audit sample — `b2876328` directly — so the human
+audit will double-check this conclusion.)
+
+### Latency
+
+| Provider | Mean | Median | Max |
+|---|---|---|---|
+| agy | 11.5 s | 9.7 s | 38.8 s |
+| codex | 21.4 s | 15.9 s | 87.6 s |
+| claude | 56.5 s | 26.1 s | 220.4 s (3 timeouts at 240 s) |
+
+Full 60-group run: ~65 min wall, claude-bound. All on existing subscriptions.
+
+## Gating artifacts
+
+- `data/agents/stitching/batches/us_boston_streets_phase2/consensus.csv` —
+  per-group routing incl. `final_routing`/`route_reason` (size-gated policy).
+- `data/agents/stitching/batches/us_boston_streets_phase2/votes.csv` — all
+  180 raw votes with reasoning (audit trail).
+- [research/panel_phase2_audit_sheet.md](panel_phase2_audit_sheet.md) — the
+  10-group seeded audit sample (seed 20260703) with per-provider reasoning and
+  stitching-review UI links. **Export stays OFF until this audit passes.**
+- Human-review queue: 30 groups (14 majority, 9 size-gated, 6 no-consensus,
+  1 unanimous-NONE) — viewable in the stitching-review UI (the Phase-2 batch
+  was mirrored to `data/cache/stitch/us_boston_streets_batch.json`).
+
+## Recommendation
+
+1. **Audit the 10-group sample.** If ≥9/10 hold up, enable unanimous
+   auto-accept export (`labeler=panel_unanimous_v1`, ≤20-edge gate) and export
+   the 30 candidates — that alone takes Boston from 13 usable labels to 43+.
+2. Keep the ≤20-edge gate permanently: every timeout and all 6 no-consensus
+   verdicts came from 13+-edge groups (4/6 from 36+). Unanimity above the gate
+   (9 groups, 39–92 edges) is partly option-count collapse — 3 of the 9 packs
+   offered only a single expressible option, making unanimity trivial — so
+   those stay human.
+3. Treat the 20 reject-all labels as superseded (see above) — do not use them
+   as eval truth.
+4. Re-run `stitch-eval` after the human queue is worked to grow the
+   option-covered eval set beyond n=2.

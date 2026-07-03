@@ -211,6 +211,31 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     }
 
 
+def recover_empty_reject_all(groups: list[dict], human_df: pd.DataFrame) -> dict:
+    """Recover which reject-all (empty-edge) human labels map to a current group.
+
+    Reject-all labels (empty ``selected_edges``) record *that* a group was
+    rejected but not *which* segments it held, so segment-overlap recovery is
+    impossible — the only stored key is the ``group_id`` hash of the original
+    ref/target id sets. A label therefore survives only if the exact same sets
+    still form a component in the current sidecar (verbatim ``group_id`` match);
+    otherwise it is unrecoverable and can only be judged by re-running the panel
+    on whatever current group now covers that geography.
+
+    Returns:
+        {"recovered": [group_id, ...], "unrecoverable": [group_id, ...]}.
+    """
+    gids = {g["group_id"] for g in groups}
+    recovered: list[str] = []
+    unrecoverable: list[str] = []
+    for _, row in human_df.iterrows():
+        if _human_edge_set(row["selected_edges"]):
+            continue  # has edges -> not a reject-all label
+        hgid = str(row["group_id"])
+        (recovered if hgid in gids else unrecoverable).append(hgid)
+    return {"recovered": recovered, "unrecoverable": unrecoverable}
+
+
 def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
     """Compare panel results in a batch against the human labels."""
     batch_dir = Path(batch_dir)

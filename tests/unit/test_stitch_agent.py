@@ -16,6 +16,7 @@ from matcher.agent_labeling import stitch_runner as sr
 from matcher.agent_labeling.stitch_eval import (
     edge_prf,
     evaluate_batch,
+    recover_empty_reject_all,
     recover_labeled_groups,
     summarize,
 )
@@ -489,6 +490,25 @@ def test_recover_labeled_groups_classifies():
     assert "h_empty" in rec["empty"]
     assert "h_lost" in rec["lost"]
     assert rec["target_group_ids"] == ["gA"]
+
+
+def test_recover_empty_reject_all():
+    # gA survives verbatim; the reject-all label keyed on gA is recoverable,
+    # the one keyed on a vanished group_id is not. Non-empty labels are ignored.
+    groups = [{"group_id": "gA", "edges": [{"ref_id": R1, "target_id": T1}]}]
+    human_df = pd.DataFrame(
+        [
+            {"group_id": "gA", "selected_edges": "[]"},  # reject-all, survives
+            {"group_id": "gone", "selected_edges": "[]"},  # reject-all, lost
+            {
+                "group_id": "gA",  # non-empty label -> not a reject-all
+                "selected_edges": json.dumps([{"ref_id": R1, "target_id": T1}]),
+            },
+        ]
+    )
+    rec = recover_empty_reject_all(groups, human_df)
+    assert rec["recovered"] == ["gA"]
+    assert rec["unrecoverable"] == ["gone"]
 
 
 def test_evaluate_batch_end_to_end(tmp_path):

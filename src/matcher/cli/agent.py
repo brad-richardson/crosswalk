@@ -886,6 +886,12 @@ def generate_stitch_batch(
         "--recover-labeled",
         help="Auto-select sidecar groups that best-correspond to existing human labels",
     ),
+    recover_empty: bool = typer.Option(
+        False,
+        "--recover-empty",
+        help="Also include reject-all (empty-edge) human labels whose group_id "
+        "still exists verbatim in the sidecar (combine with --recover-labeled)",
+    ),
     output_dir: Path = typer.Option(
         Path("data/agents/stitching/batches"),
         "--output",
@@ -953,18 +959,31 @@ def generate_stitch_batch(
             requested = [str(g).strip() for g in json.loads(text)]
         except json.JSONDecodeError:
             requested = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    elif recover_labeled:
-        from ..agent_labeling.stitch_eval import recover_labeled_groups
+    elif recover_labeled or recover_empty:
+        from ..agent_labeling.stitch_eval import (
+            recover_empty_reject_all,
+            recover_labeled_groups,
+        )
 
         stitch_store = StitchingLabelStore(dataset)
         human_df = stitch_store.load(dataset)
-        rec = recover_labeled_groups(groups, human_df)
-        requested = rec["target_group_ids"]
-        console.print(
-            f"[blue]Label recovery:[/blue] {len(rec['clean'])} clean, "
-            f"{len(rec['split'])} split, {len(rec['empty'])} empty(NONE), "
-            f"{len(rec['lost'])} lost -> {len(requested)} target groups"
-        )
+        requested = []
+        if recover_labeled:
+            rec = recover_labeled_groups(groups, human_df)
+            requested = list(rec["target_group_ids"])
+            console.print(
+                f"[blue]Label recovery:[/blue] {len(rec['clean'])} clean, "
+                f"{len(rec['split'])} split, {len(rec['empty'])} empty(NONE), "
+                f"{len(rec['lost'])} lost -> {len(rec['target_group_ids'])} target groups"
+            )
+        if recover_empty:
+            emp = recover_empty_reject_all(groups, human_df)
+            new_empty = [g for g in emp["recovered"] if g not in requested]
+            requested += new_empty
+            console.print(
+                f"[blue]Reject-all recovery:[/blue] {len(emp['recovered'])} recoverable "
+                f"(+{len(new_empty)} new), {len(emp['unrecoverable'])} unrecoverable"
+            )
 
     # Select groups to render.
     if requested is not None:
