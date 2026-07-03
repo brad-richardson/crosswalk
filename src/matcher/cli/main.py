@@ -535,166 +535,32 @@ def _loo_type_cross_validate(
 ) -> None:
     """Run leave-one-out by type cross-validation.
 
-    Holds out one dataset per type group per fold, trains on the rest,
-    and evaluates on each held-out dataset independently.
+    Thin CLI wrapper around :func:`matcher.eval_utils.run_loo_by_type_cv`:
+    delegates the CV loop, then prints the summary and appends results to CSV.
     """
-    import numpy as np
-    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-    from xgboost import XGBClassifier
-
-    from ..config import METRIC_AVERAGE
-    from ..eval_utils import MIN_LOO_LABELS, build_type_groups
-    from ..labeling.label_store import LabelStore
-    from ..matching.ml import DEFAULT_XGB_PARAMS, MLMatcher
+    from ..eval_utils import run_loo_by_type_cv
 
     if not labels_dir.exists():
         console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
         raise typer.Exit(1)
 
-    run_date = datetime.now(UTC)
+    cv_result = run_loo_by_type_cv(
+        labels=labels_dir,
+        cv_folds=cv_folds,
+        seed=seed,
+        quality_threshold=quality_threshold,
+        log=console.print,
+    )
 
-    # Load and filter labels (same pattern as _cross_validate)
-    console.print("[blue]Loading labels...[/blue]")
-    all_labels = LabelStore.load_all(labels_dir)
-    console.print(f"  Total labels: {len(all_labels)}")
-
-    valid_labels = {"match", "no_match"}
-    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
-    console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
-
-    # Remove duplicates
-    n_before = len(all_labels)
-    all_labels = all_labels.drop_duplicates(subset=["gers_id", "target_id", "dataset"], keep="last")
-    n_dropped = n_before - len(all_labels)
-    if n_dropped > 0:
-        console.print(f"  [yellow]Dropped {n_dropped} duplicate pairs (keeping last)[/yellow]")
-
-    # Filter datasets with too few labels
-    dataset_counts = all_labels.groupby("dataset").size()
-    valid_datasets = dataset_counts[dataset_counts >= MIN_LOO_LABELS].index.tolist()
-    excluded_datasets = dataset_counts[dataset_counts < MIN_LOO_LABELS].index.tolist()
-    if excluded_datasets:
-        console.print(
-            f"  [yellow]Excluded {len(excluded_datasets)} dataset(s) with < "
-            f"{MIN_LOO_LABELS} labels: {', '.join(excluded_datasets)}[/yellow]"
-        )
-
-    all_labels = all_labels[all_labels["dataset"].isin(valid_datasets)].copy()
-    console.print(f"  Datasets with >= {MIN_LOO_LABELS} labels: {len(valid_datasets)}")
-
-    # Build type groups
-    type_groups = build_type_groups(valid_datasets, quality_threshold)
-    console.print(f"\n[blue]Type groups (threshold={quality_threshold}):[/blue]")
-    for group, datasets in sorted(type_groups.items()):
-        console.print(f"  {group}: {', '.join(sorted(datasets))}")
-
-    # Initialize MLMatcher for feature extraction
-    matcher = MLMatcher()
-
-    # Build fold assignments via round-robin over shuffled groups
-    rng = np.random.RandomState(seed)
-    shuffled_groups: dict[str, list[str]] = {}
-    for group, datasets in type_groups.items():
-        shuffled = list(datasets)
-        rng.shuffle(shuffled)
-        shuffled_groups[group] = shuffled
-
-    console.print(f"\n[blue]Running {cv_folds}-fold LOO-by-type CV...[/blue]")
-
-    # Collect per-fold, per-dataset results
-    all_results: list[dict] = []
-
-    for fold_idx in range(cv_folds):
-        console.print(f"\n  Fold {fold_idx + 1}/{cv_folds}:")
-
-        # Select held-out datasets for this fold (round-robin)
-        held_out: list[tuple[str, str]] = []  # (dataset, group)
-        for group, datasets in sorted(shuffled_groups.items()):
-            if fold_idx < len(datasets):
-                held_out.append((datasets[fold_idx], group))
-
-        if not held_out:
-            console.print("    [yellow]No datasets to hold out in this fold, skipping[/yellow]")
-            continue
-
-        held_out_names = {ds for ds, _ in held_out}
-        train_df = all_labels[~all_labels["dataset"].isin(held_out_names)].copy()
-        test_df = all_labels[all_labels["dataset"].isin(held_out_names)].copy()
-
-        if len(train_df) == 0 or len(test_df) == 0:
-            console.print("    [yellow]Empty train or test set, skipping[/yellow]")
-            continue
-
-        # Extract features and train
-        X_train, y_train = matcher._extract_features_and_labels(train_df, binary=True)
-        X_train = matcher._cap_infinities(X_train)
-
-        n_neg = int((y_train == 0).sum())
-        n_pos = int((y_train == 1).sum())
-
-        if n_pos == 0 or n_neg == 0:
-            console.print("    [yellow]Single-class training set, skipping fold[/yellow]")
-            continue
-
-        fold_spw = n_neg / n_pos
-
-        model = XGBClassifier(
-            **DEFAULT_XGB_PARAMS,
-            scale_pos_weight=fold_spw,
-            random_state=seed,
-            n_jobs=-1,
-        )
-        model.fit(X_train, y_train)
-
-        # Evaluate on each held-out dataset independently
-        for ds, group in held_out:
-            ds_df = test_df[test_df["dataset"] == ds]
-            if len(ds_df) == 0:
-                continue
-
-            X_ds, y_ds = matcher._extract_features_and_labels(ds_df, binary=True)
-            X_ds = matcher._cap_infinities(X_ds)
-            y_pred = model.predict(X_ds)
-
-            n_match = int((y_ds == 1).sum())
-            n_no_match = int((y_ds == 0).sum())
-            acc = accuracy_score(y_ds, y_pred)
-            f1 = f1_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
-            prec = precision_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
-            rec = recall_score(y_ds, y_pred, average=METRIC_AVERAGE, zero_division=0)
-
-            console.print(
-                f"    {ds} ({group}): acc={acc:.3f}, f1={f1:.3f} "
-                f"(n={len(ds_df)}, match={n_match}, no_match={n_no_match})"
-            )
-
-            all_results.append(
-                {
-                    "run_date": run_date.isoformat(),
-                    "fold": fold_idx,
-                    "dataset": ds,
-                    "type_group": group,
-                    "n_train": len(train_df),
-                    "n_test": len(ds_df),
-                    "n_match": n_match,
-                    "n_no_match": n_no_match,
-                    "accuracy": acc,
-                    "f1": f1,
-                    "precision": prec,
-                    "recall": rec,
-                    "seed": seed,
-                    "quality_threshold": quality_threshold,
-                }
-            )
+    run_date = cv_result.run_date
+    all_results = cv_result.rows
 
     if not all_results:
         console.print("[red]No results produced - check dataset labels and type groups[/red]")
         raise typer.Exit(1)
 
     # Print per-type summary
-    import pandas as pd
-
-    results_df = pd.DataFrame(all_results)
+    results_df = cv_result.to_frame()
 
     console.print(f"\n{'=' * 60}")
     console.print(f"[bold]LOO-BY-TYPE CV SUMMARY ({cv_folds} folds)[/bold]")
