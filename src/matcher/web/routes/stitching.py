@@ -577,6 +577,23 @@ async def stitching_select(
             num_refs = len(ref_set)
             num_targets = len(target_set)
 
+            # Guard against silently recording an empty (label-corrupting)
+            # selection. Distinguish intent by the active-pill fields:
+            #   - Both empty  -> deliberate reject-all; store [] normally.
+            #   - Non-empty but zero group edges matched -> inconsistent
+            #     submission (e.g. a client-side regression that drops the pill
+            #     IDs, or active pills that share no edge). Refuse rather than
+            #     corrupt the label. Logged without reflecting client input.
+            if group.get("edges") and not final_edges and (ref_set or target_set):
+                logger.warning(
+                    "Rejected inconsistent stitching submit for group %s: "
+                    "%d refs / %d targets claimed but 0 group edges matched",
+                    group_id,
+                    len(ref_set),
+                    len(target_set),
+                )
+                return HTMLResponse("Inconsistent selection", status_code=400)
+
         record_stitching_label(
             dataset_id=dataset,
             group_id=group_id,
