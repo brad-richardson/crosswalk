@@ -92,8 +92,10 @@ def objective(
     """Optuna objective: mean F1 over segment-grouped CV folds (train rows only).
 
     When ``size_penalty_per_tree`` > 0, subtracts
-    ``size_penalty_per_tree * max(0, n_estimators - 100)`` from the mean F1 so
-    the search favors compact models (used for the Spark-portable feature set).
+    ``size_penalty_per_tree * max(0, n_estimators - SPARK_SIZE_PENALTY_FREE_TREES)``
+    from the mean F1 so the search favors compact models (used for the
+    Spark-portable feature set). The unpenalized mean CV F1 is stored on the
+    trial as the ``raw_cv_f1`` user attribute.
     """
 
     # Define search space
@@ -145,6 +147,7 @@ def objective(
         scores.append(score)
 
     mean_f1 = float(np.mean(scores))
+    trial.set_user_attr("raw_cv_f1", mean_f1)
     if size_penalty_per_tree > 0:
         mean_f1 -= size_penalty_per_tree * max(
             0, params["n_estimators"] - SPARK_SIZE_PENALTY_FREE_TREES
@@ -246,14 +249,19 @@ def run_tuning(
     # Log results
     logger.info("Best trial:")
     trial = study.best_trial
-    logger.info(f"  F1 Score: {trial.value:.4f}")
+    raw_cv_f1 = trial.user_attrs.get("raw_cv_f1")
+    logger.info(f"  Objective: {trial.value:.4f}")
+    if size_penalty_per_tree > 0 and raw_cv_f1 is not None:
+        logger.info(f"  Raw CV F1 (unpenalized): {raw_cv_f1:.4f}")
     logger.info("  Params:")
     for key, value in trial.params.items():
         logger.info(f"    {key}: {value}")
 
-    # Save results
+    # Save results. best_objective includes the size penalty (if any);
+    # best_raw_cv_f1 is the actual unpenalized mean CV F1.
     results = {
-        "best_f1": trial.value,
+        "best_objective": trial.value,
+        "best_raw_cv_f1": raw_cv_f1,
         "best_params": trial.params,
         "n_trials": n_trials,
         "n_train_samples": len(df_train),
