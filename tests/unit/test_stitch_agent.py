@@ -731,6 +731,109 @@ def test_evaluate_batch_disagreement(tmp_path):
     assert results[0].exact_match is False
 
 
+def test_evaluate_batch_sliver_filtered(tmp_path):
+    """Panel includes a junction sliver the human omitted.
+
+    Raw comparison disagrees; the sliver-filtered comparison (slivers removed
+    from BOTH sides using batch.json geometries) agrees.
+    """
+    import math
+
+    def _line_len(length_m, lat=42.36, lon=-71.06):
+        deg = length_m / (111000.0 * math.cos(math.radians(lat)))
+        return {"type": "LineString", "coordinates": [[lon, lat], [lon + deg, lat]]}
+
+    group = {
+        "group_id": "grp001",
+        "match_type": "M:N",
+        "ref_ids": [R1],
+        "target_ids": [T1, T2],
+        "edges": [
+            {
+                "ref_id": R1,
+                "target_id": T1,
+                "confidence": 0.9,
+                "gers_start_frac": 0.0,
+                "gers_end_frac": 1.0,
+                "local_start_frac": 0.0,
+                "local_end_frac": 1.0,
+            },
+            {  # junction sliver: 1 m of a 50 m ref, 0.5 m of a 10 m target
+                "ref_id": R1,
+                "target_id": T2,
+                "confidence": 0.3,
+                "gers_start_frac": 0.0,
+                "gers_end_frac": 0.02,
+                "local_start_frac": 0.0,
+                "local_end_frac": 0.05,
+            },
+        ],
+        "optimizer_assignment": [
+            {"ref_id": R1, "target_id": T1},
+            {"ref_id": R1, "target_id": T2},
+        ],
+        "alternatives": [],
+        "ref_geometries": {R1: _line_len(50.0)},
+        "target_geometries": {T1: _line_len(50.0), T2: _line_len(10.0)},
+        "ref_names": {R1: "Main St"},
+        "target_names": {T1: "Main", T2: "Side"},
+        "ref_classes": {R1: "residential"},
+        "target_classes": {T1: "residential", T2: "residential"},
+    }
+
+    batch_dir = tmp_path / "batch"
+    generate_group_evidence(group, batch_dir / group["group_id"])
+    (batch_dir / "batch.json").write_text(json.dumps({"groups": [group]}))
+
+    # Human omitted the sliver edge; panel included it.
+    human_es = [{"ref_id": R1, "target_id": T1}]
+    human_df = pd.DataFrame([{"group_id": "hg", "selected_edges": json.dumps(human_es)}])
+    panel_str = json.dumps(sorted([[R1, T1], [R1, T2]]))
+    pd.DataFrame(
+        [
+            {
+                "group_id": "grp001",
+                "consensus": "unanimous",
+                "choice": "A",
+                "edge_set": panel_str,
+                "routing": "auto_accept",
+                "n_votes": 1,
+                "n_valid": 1,
+                "minority": "",
+                "mean_confidence": 0.9,
+            }
+        ]
+    ).to_csv(batch_dir / "consensus.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "group_id": "grp001",
+                "provider": "claude",
+                "model": "m",
+                "choice": "A",
+                "confidence": 0.9,
+                "reasoning": "",
+                "edge_set": panel_str,
+                "latency_s": 1.0,
+                "timestamp": "",
+                "error": "",
+            }
+        ]
+    ).to_csv(batch_dir / "votes.csv", index=False)
+
+    results = evaluate_batch(batch_dir, human_df)
+    assert len(results) == 1
+    r = results[0]
+    assert r.exact_match is False  # raw: panel has the sliver, human doesn't
+    assert r.exact_match_filtered is True  # filtered: sliver removed from both
+    assert r.f1_filtered == 1.0
+
+    summary = summarize(results)
+    assert summary["panel_exact_rate"] == 0.0
+    assert summary["panel_exact_rate_filtered"] == 1.0
+    assert summary["n_groups_sliver_affected"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Human-label -> group mapping (edge-level overlap preferred)
 # ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from ..matching.sliver import annotate_group_sliver_flags
+
 
 def _parse_edge_set(raw: str) -> frozenset:
     """Parse a JSON edge-set string ([[ref,tgt],...]) to a frozenset of tuples."""
@@ -64,6 +66,15 @@ class GroupEval:
     f1: float
     option_covered: bool  # human edge set equals some option's edge set
     provider_votes: dict = field(default_factory=dict)  # provider -> (choice, edge_set)
+    # Sliver-filtered variants: junction-sliver edges (near-zero physical
+    # overlap) are removed from BOTH the panel and human edge sets before
+    # comparison, so agreement is not distorted by whether either side happened
+    # to include an artifact edge. Equal to the raw fields when no group edge is
+    # a sliver (or when batch geometries are unavailable to classify them).
+    human_edge_set_filtered: frozenset = field(default_factory=frozenset)
+    panel_edge_set_filtered: frozenset = field(default_factory=frozenset)
+    exact_match_filtered: bool = False
+    f1_filtered: float = 0.0
 
 
 def _load_group_metadata(group_dir: Path) -> dict:
@@ -159,6 +170,32 @@ def _load_batch_candidate_edges(batch_dir: Path) -> dict[str, frozenset]:
     return out
 
 
+def _load_batch_sliver_edges(batch_dir: Path) -> dict[str, frozenset]:
+    """Load each group's junction-sliver edge set from ``batch.json``.
+
+    Reads the full groups (with geometries + alignment fractions) and classifies
+    each edge with the shared hybrid rule. Returns
+    ``{group_id: frozenset((ref_id, target_id))}`` of edges flagged as slivers.
+    Kept per-group (not batch-wide) so an edge pair is only filtered within the
+    group whose geometries classified it as a sliver. Empty when no
+    ``batch.json`` is present (nothing to filter -> filtered == raw).
+    """
+    batch_path = Path(batch_dir) / "batch.json"
+    if not batch_path.exists():
+        return {}
+    try:
+        batch = json.loads(batch_path.read_text())
+    except (ValueError, OSError):
+        return {}
+    out: dict[str, frozenset] = {}
+    for g in batch.get("groups", []):
+        annotated, _ = annotate_group_sliver_flags(g)
+        out[str(g.get("group_id"))] = frozenset(
+            (str(e["ref_id"]), str(e["target_id"])) for e in annotated if e.get("is_sliver")
+        )
+    return out
+
+
 def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     """Map old human-labeled group_ids to current sidecar groups by edge overlap.
 
@@ -250,6 +287,7 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
             group_metas[gid] = _load_group_metadata(gdir)
 
     candidate_edges = _load_batch_candidate_edges(batch_dir)
+    sliver_edges = _load_batch_sliver_edges(batch_dir)
     mapping = map_human_labels_to_groups(human_df, group_metas, candidate_edges)
     human_by_gid = {str(r["group_id"]): r for _, r in human_df.iterrows()}
 
@@ -268,6 +306,16 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
         exact = panel_es == human_es
         _, _, f1 = edge_prf(panel_es, human_es)
         option_covered = any(human_es == s for s in opt_sets.values())
+
+        # Sliver-filtered comparison: drop THIS group's sliver edges from BOTH
+        # sides so a disagreement that is only about an artifact edge does not
+        # count. Per-group lookup: an edge is only filtered in the group whose
+        # geometries classified it as a sliver.
+        group_slivers = sliver_edges.get(gid, frozenset())
+        panel_es_f = panel_es - group_slivers
+        human_es_f = human_es - group_slivers
+        exact_f = panel_es_f == human_es_f
+        _, _, f1_f = edge_prf(panel_es_f, human_es_f)
 
         # Per-provider votes for this group.
         prov_votes = {}
@@ -291,6 +339,10 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
                 f1=f1,
                 option_covered=option_covered,
                 provider_votes=prov_votes,
+                human_edge_set_filtered=human_es_f,
+                panel_edge_set_filtered=panel_es_f,
+                exact_match_filtered=exact_f,
+                f1_filtered=f1_f,
             )
         )
     return results
@@ -303,9 +355,23 @@ def summarize(results: list[GroupEval]) -> dict:
     if n == 0:
         return summary
 
-    # Panel (consensus) agreement.
+    # Panel (consensus) agreement — raw.
     summary["panel_exact_rate"] = round(sum(r.exact_match for r in results) / n, 3)
     summary["panel_mean_f1"] = round(sum(r.f1 for r in results) / n, 3)
+
+    # Panel agreement with junction slivers removed from both sides. Reported
+    # alongside the raw numbers so sliver artifacts don't silently inflate or
+    # deflate agreement.
+    summary["panel_exact_rate_filtered"] = round(
+        sum(r.exact_match_filtered for r in results) / n, 3
+    )
+    summary["panel_mean_f1_filtered"] = round(sum(r.f1_filtered for r in results) / n, 3)
+    summary["n_groups_sliver_affected"] = sum(
+        1
+        for r in results
+        if (r.panel_edge_set != r.panel_edge_set_filtered)
+        or (r.human_edge_set != r.human_edge_set_filtered)
+    )
 
     # Per consensus tier.
     tiers: dict[str, list[GroupEval]] = {}
