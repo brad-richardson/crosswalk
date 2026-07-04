@@ -40,6 +40,12 @@ def test_round_geometry_collection():
     }
 
 
+def test_coordinateless_geometry_returned_unchanged():
+    """A geometry with no ``coordinates`` key must not crash."""
+    geojson = {"type": "Point"}
+    assert _round_geojson_coords(geojson) == {"type": "Point"}
+
+
 def test_round_nested_geometry_collection():
     """A GeometryCollection nested inside another must recurse."""
     result = _round_geojson_coords(

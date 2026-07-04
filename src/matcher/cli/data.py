@@ -2140,7 +2140,7 @@ def _round_geojson_coords(geojson: dict, precision: int = 6) -> dict:
 
     # GeometryCollection holds sub-geometries under "geometries", not
     # "coordinates" — recurse into each member.
-    if "geometries" in geojson:
+    if geojson.get("type") == "GeometryCollection" and isinstance(geojson.get("geometries"), list):
         return {
             **geojson,
             "geometries": [_round_geojson_coords(g, precision) for g in geojson["geometries"]],
