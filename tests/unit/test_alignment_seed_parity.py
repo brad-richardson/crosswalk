@@ -225,6 +225,7 @@ def _old_linestring_alignment(
             overture_end_frac=unit_clamp(ref_end_frac),
             dataset_start_frac=unit_clamp(1.0 - target_end_frac),
             dataset_end_frac=unit_clamp(1.0 - target_start_frac),
+            is_reversed=True,
         )
 
 
@@ -235,6 +236,9 @@ def _assert_identical(
     assert new.overture_end_frac == pytest.approx(old.overture_end_frac, abs=tol), msg
     assert new.dataset_start_frac == pytest.approx(old.dataset_start_frac, abs=tol), msg
     assert new.dataset_end_frac == pytest.approx(old.dataset_end_frac, abs=tol), msg
+    # The forward/backward decision (is_forward) must also be preserved — it
+    # drives the is_reversed flag consumed by directional topology features.
+    assert new.is_reversed == old.is_reversed, msg
 
 
 # Hand-picked diverse scenarios mirroring the existing alignment fixtures:
@@ -309,6 +313,7 @@ class TestSeedRefactorParity:
                 continue
             old = _old_linestring_alignment(ref, target)
             new = linestring_alignment(ref, target)
+            assert new.is_reversed == old.is_reversed
             max_delta = max(
                 max_delta,
                 abs(new.overture_start_frac - old.overture_start_frac),
@@ -335,6 +340,7 @@ class TestSeedRefactorParity:
                 continue
             old = _old_linestring_alignment(ref, target)
             new = linestring_alignment(ref, target)
+            assert new.is_reversed == old.is_reversed
             max_delta = max(
                 max_delta,
                 abs(new.overture_start_frac - old.overture_start_frac),
