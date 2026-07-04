@@ -459,6 +459,119 @@ class TestPruneGroupOptionsToEdges:
 
 
 # ---------------------------------------------------------------------------
+# _export_groups_sidecar — optimizer_assignment membership join
+# ---------------------------------------------------------------------------
+
+
+class TestExportGroupsSidecarOptimizerAssignment:
+    """The sidecar must carry a non-empty optimizer_assignment for decomposed
+    M:N components.
+
+    Regression: the optimizer decomposes a non-contiguous connected component
+    into smaller sub-groups (and greedy 1:1 leftovers), each with its own
+    ``group_id``. The sidecar keys groups by the *full* raw-component group_id,
+    so a lookup on ``features["group_id"]`` finds nothing and leaves the
+    assignment empty — precisely for the large M:N groups where reviewers most
+    need a pre-seed. The fix maps optimizer edges to their raw component by
+    segment membership instead.
+    """
+
+    def _build_decomposed_mn(self):
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        from matcher.matching.types import MatchDecision, MatchResult
+
+        # Two ref/target pairs that are geographically far apart, so the refs
+        # are NOT contiguous with each other and the targets are NOT contiguous
+        # with each other. A weak cross-edge (r1-t2) links them into ONE raw
+        # connected component, which the optimizer then decomposes.
+        ref = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2"],
+                "geometry": [
+                    LineString([(0, 0), (10, 0)]),
+                    LineString([(1000, 0), (1010, 0)]),
+                ],
+            },
+            crs="EPSG:3857",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "id": ["t1", "t2"],
+                "geometry": [
+                    LineString([(0, 1), (10, 1)]),
+                    LineString([(1000, 1), (1010, 1)]),
+                ],
+            },
+            crs="EPSG:3857",
+        )
+
+        def _mr(rid, tid, conf):
+            return MatchResult(
+                ref_id=rid,
+                target_id=tid,
+                decision=MatchDecision.MATCH,
+                confidence=conf,
+                score_breakdown={},
+                features={},
+            )
+
+        results = [
+            _mr("r1", "t1", 0.9),
+            _mr("r2", "t2", 0.9),
+            _mr("r1", "t2", 0.6),  # weak cross-edge connecting the component
+        ]
+        return results, ref, target
+
+    def test_decomposed_component_gets_optimizer_assignment(self, tmp_path):
+        from matcher.filenames import groups_sidecar_path
+        from matcher.matching.optimizer import optimize_matches_with_grouping
+        from matcher.pipeline.runner import _export_groups_sidecar
+
+        results, ref, target = self._build_decomposed_mn()
+
+        optimized = optimize_matches_with_grouping(
+            results, ref, target, min_confidence=0.5, target_id_column="id"
+        )
+
+        out = tmp_path / "toy_bridge.parquet"
+        sidecar_path = _export_groups_sidecar(
+            results,
+            optimized,
+            out,
+            ref,
+            target,
+            min_confidence=0.5,
+            ref_id_column="id",
+            target_id_column="id",
+        )
+        assert sidecar_path == groups_sidecar_path(out)
+
+        data = json.loads(sidecar_path.read_text())
+        groups = data["groups"]
+        assert len(groups) == 1
+        group = groups[0]
+
+        assignment = group["optimizer_assignment"]
+        # The core regression assertion: a decomposed M:N component must still
+        # receive the optimizer's chosen edges.
+        assert assignment, "optimizer_assignment must not be empty for decomposed group"
+
+        # Every assigned edge must reference segments that belong to this group.
+        group_refs = set(group["ref_ids"])
+        group_targets = set(group["target_ids"])
+        for e in assignment:
+            assert e["ref_id"] in group_refs
+            assert e["target_id"] in group_targets
+
+        # The optimizer greedily selects the two strong, spatially-disjoint
+        # pairs and drops the weak cross-edge.
+        pairs = {(e["ref_id"], e["target_id"]) for e in assignment}
+        assert pairs == {("r1", "t1"), ("r2", "t2")}
+
+
+# ---------------------------------------------------------------------------
 # select_stitching_batch
 # ---------------------------------------------------------------------------
 

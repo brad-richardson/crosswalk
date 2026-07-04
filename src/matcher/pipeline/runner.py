@@ -248,10 +248,36 @@ def _export_groups_sidecar(
     # Re-derive components from raw results
     components = find_match_components(results, min_confidence)
 
-    # Build optimizer assignment lookup from optimized results
+    # Build optimizer assignment lookup from optimized results.
+    #
+    # The optimizer DECOMPOSES a raw connected component into smaller sub-groups
+    # (per-ref 1:N, per-target N:1, smaller M:N, plus greedy 1:1 leftovers) when
+    # it isn't fully contiguous on both sides — see
+    # ``optimizer._classify_and_resolve_component``. Each sub-group gets its own
+    # ``group_id`` computed from the sub-group's ids, which will NOT equal the
+    # full raw-component ``group_id`` this sidecar keys groups by. Keying the
+    # lookup on ``features["group_id"]`` therefore drops the assignment for every
+    # decomposed component — i.e. exactly the large M:N groups where reviewers
+    # most need a pre-seed.
+    #
+    # Instead map each optimizer edge to the raw component it belongs to via
+    # segment membership. Every optimizer edge is a raw candidate pair, so both
+    # endpoints live in exactly one raw component.
+    node_to_component_gid: dict[tuple[str, Any], str] = {}
+    for component in components:
+        c_ref_ids = set(r.ref_id for r in component)
+        c_target_ids = set(r.target_id for r in component)
+        c_gid = compute_group_id(c_ref_ids, c_target_ids)
+        for rid in c_ref_ids:
+            node_to_component_gid[("ref", rid)] = c_gid
+        for tid in c_target_ids:
+            node_to_component_gid[("target", tid)] = c_gid
+
     optimizer_edges: dict[str, list[dict]] = defaultdict(list)
     for r in optimized:
-        gid = r.features.get("group_id")
+        gid = node_to_component_gid.get(("ref", r.ref_id)) or node_to_component_gid.get(
+            ("target", r.target_id)
+        )
         if not gid:
             continue
         optimizer_edges[gid].append(
