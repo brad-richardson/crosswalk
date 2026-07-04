@@ -332,7 +332,10 @@ def prepare_worker_data(
     # collapses to degree 1 when its other spokes aren't candidates) and destroys
     # the triangles/squares/clustering these features are meant to measure. The
     # graph build is a once-per-dataset cost; on near-planar road networks it is
-    # cheap relative to the per-pair feature computation.
+    # cheap relative to the per-pair feature computation. Measured worst case:
+    # us_philadelphia_sidewalks target (204,760 segments, no connectors column,
+    # so it takes the build_inferred_connector_graph STRtree path) builds in
+    # ~16s; its 189K-segment Overture ref (explicit connectors) in ~1.7s.
     logger.info(
         f"Computing graphlet features on full networks ({len(reference)} reference "
         f"and {len(target)} target segments)..."

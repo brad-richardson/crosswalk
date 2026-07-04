@@ -570,7 +570,7 @@ class TestGraphletDistributionSmoke:
 
         graphlet_vals = []
         degree_vals = []
-        # Score a diagonal-ish cross section of pairs (all-pairs would be 576).
+        # Score all 24x24 = 576 ref/target pairs (cheap on this fixture).
         for r_id in ref_gdf["id"]:
             for t_id in target_gdf["id"]:
                 res = graphlet_segment_similarity(
@@ -585,10 +585,26 @@ class TestGraphletDistributionSmoke:
                 degree_vals.append(round(res["endpoint_degree_similarity"], 4))
 
         def modal_fraction(vals):
+            # NaN != NaN, so Counter would treat every NaN as a distinct key and
+            # a mostly-NaN feature could sneak past the modal check. Drop NaNs
+            # first; the NaN fraction is asserted separately below.
             import collections
+            import math
 
-            counts = collections.Counter(vals)
-            return max(counts.values()) / len(vals)
+            finite = [v for v in vals if not math.isnan(v)]
+            if not finite:
+                return 1.0  # all-NaN is as degenerate as single-valued
+            counts = collections.Counter(finite)
+            return max(counts.values()) / len(finite)
+
+        def nan_fraction(vals):
+            import math
+
+            return sum(1 for v in vals if math.isnan(v)) / len(vals)
+
+        # On this fully-connected fixture every lookup should resolve: no NaN.
+        assert nan_fraction(graphlet_vals) == 0.0
+        assert nan_fraction(degree_vals) == 0.0
 
         assert modal_fraction(graphlet_vals) < 0.9, (
             f"graphlet_similarity is >90% single-valued: {modal_fraction(graphlet_vals):.2%}"
