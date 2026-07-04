@@ -526,6 +526,7 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == pytest.approx(1.0)
         assert features["min_coverage"] == pytest.approx(1.0)
         assert features["coverage_ratio"] == pytest.approx(1.0)
+        assert features["max_coverage"] == pytest.approx(1.0)
 
     def test_partial_ref_coverage(self):
         """Partial reference coverage should be computed correctly."""
@@ -541,6 +542,33 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == pytest.approx(1.0)
         assert features["min_coverage"] == pytest.approx(0.5)
         assert features["coverage_ratio"] == pytest.approx(0.5)
+        assert features["max_coverage"] == pytest.approx(1.0)
+
+    def test_asymmetric_segmentation_short_target_in_long_ref(self):
+        """Short target fully inside a much longer ref: max_coverage should be 1.0.
+
+        This is the motivating case from the July 2026 feature audit: a short
+        local segment matched onto a much longer Overture segment gets
+        target_coverage=1.0 but ref_coverage close to 0, which tanks
+        min_coverage/coverage_ratio despite being a genuine match. max_coverage
+        is robust to this asymmetric segmentation.
+        """
+        alignment = AlignmentResult(
+            overture_start_frac=0.49,
+            overture_end_frac=0.51,  # 0.02 coverage of a long reference
+            dataset_start_frac=0.0,
+            dataset_end_frac=1.0,  # fully covered short target
+        )
+        features = compute_coverage_features(alignment)
+
+        assert features["ref_coverage"] == pytest.approx(0.02)
+        assert features["target_coverage"] == pytest.approx(1.0)
+        assert features["max_coverage"] == pytest.approx(1.0)
+        assert features["max_coverage"] == pytest.approx(features["target_coverage"])
+        # min_coverage/coverage_ratio remain low, illustrating why they
+        # under-represent this legitimate match
+        assert features["min_coverage"] == pytest.approx(0.02)
+        assert features["coverage_ratio"] == pytest.approx(0.02)
 
     def test_partial_target_coverage(self):
         """Partial target coverage should be computed correctly."""
@@ -556,6 +584,7 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == pytest.approx(0.8)
         assert features["min_coverage"] == pytest.approx(0.8)
         assert features["coverage_ratio"] == pytest.approx(0.8)
+        assert features["max_coverage"] == pytest.approx(1.0)
 
     def test_both_partial_coverage(self):
         """Both partial coverages should compute min correctly."""
@@ -571,6 +600,7 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == pytest.approx(0.6)
         assert features["min_coverage"] == pytest.approx(0.5)
         assert features["coverage_ratio"] == pytest.approx(0.5 / 0.6, rel=0.01)
+        assert features["max_coverage"] == pytest.approx(0.6)
 
     def test_none_alignment_returns_zeros(self):
         """None alignment should return zeros by default."""
@@ -580,15 +610,23 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == 0.0
         assert features["min_coverage"] == 0.0
         assert features["coverage_ratio"] == 0.0
+        assert features["max_coverage"] == 0.0
 
     def test_none_alignment_explicit_failure(self):
-        """None alignment with return_none_on_failure=True should return Nones."""
+        """None alignment with return_none_on_failure=True should return Nones.
+
+        This is the path compute.py's compute_pair_features uses
+        (return_none_on_failure=True, then dict.fromkeys(..., NaN) when
+        alignment is None) -- a missing alignment is a computation failure,
+        not evidence of zero overlap.
+        """
         features = compute_coverage_features(None, return_none_on_failure=True)
 
         assert features["ref_coverage"] is None
         assert features["target_coverage"] is None
         assert features["min_coverage"] is None
         assert features["coverage_ratio"] is None
+        assert features["max_coverage"] is None
 
     def test_zero_coverage(self):
         """Zero coverage alignment should handle division by zero."""
@@ -604,6 +642,7 @@ class TestComputeCoverageFeatures:
         assert features["target_coverage"] == 0.0
         assert features["min_coverage"] == 0.0
         assert features["coverage_ratio"] == 0.0
+        assert features["max_coverage"] == 0.0
 
 
 class TestAlignedFeatureComputation:

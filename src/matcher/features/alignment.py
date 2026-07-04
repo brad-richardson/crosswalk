@@ -1241,6 +1241,10 @@ def compute_coverage_features(
         - target_coverage: Fraction of target covered (0-1) or None
         - min_coverage: Minimum of the two coverages or None
         - coverage_ratio: Symmetry of coverage (min/max) or None
+        - max_coverage: Maximum of the two coverages or None (robust to
+          asymmetric segmentation, where a short segment matched onto a much
+          longer one yields a low min_coverage/coverage_ratio despite a
+          genuine match)
     """
     if alignment is None:
         if return_none_on_failure:
@@ -1250,6 +1254,7 @@ def compute_coverage_features(
                 "target_coverage": None,
                 "min_coverage": None,
                 "coverage_ratio": None,
+                "max_coverage": None,
             }
         else:
             # Backward compatible - return 0.0 values
@@ -1258,6 +1263,7 @@ def compute_coverage_features(
                 "target_coverage": 0.0,
                 "min_coverage": 0.0,
                 "coverage_ratio": 0.0,
+                "max_coverage": 0.0,
             }
 
     ref_cov = alignment.overture_coverage
@@ -1272,4 +1278,5 @@ def compute_coverage_features(
         "target_coverage": target_cov,
         "min_coverage": min_cov,
         "coverage_ratio": coverage_ratio,
+        "max_coverage": max_cov,
     }

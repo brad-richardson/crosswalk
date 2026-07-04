@@ -349,6 +349,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "target_coverage",
         "min_coverage",
         "coverage_ratio",
+        "max_coverage",
     ],
     "Graphlet": [
         "graphlet_similarity",

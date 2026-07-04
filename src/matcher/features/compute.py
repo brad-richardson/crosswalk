@@ -750,6 +750,7 @@ def _compute_non_geometric_features(
         "target_coverage": coverage_feats["target_coverage"],
         "min_coverage": coverage_feats["min_coverage"],
         "coverage_ratio": coverage_feats["coverage_ratio"],
+        "max_coverage": coverage_feats["max_coverage"],
         # Graphlet features
         "graphlet_similarity": (
             graphlet_features.get("graphlet_similarity", float("nan"))

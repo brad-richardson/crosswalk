@@ -3,7 +3,7 @@
 Each test creates a series of geometry pairs with one variable changing monotonically,
 then asserts the corresponding features respond in the expected direction.
 
-Features NOT covered by sweep tests (26 of 67) — these depend on external context
+Features NOT covered by sweep tests — these depend on external context
 (topology graph, alignment data, graphlet computation, clustering, or spatial queries)
 that cannot be constructed from simple geometry pairs:
 
@@ -11,7 +11,8 @@ that cannot be constructed from simple geometry pairs:
     degree_match_score, degree_signature_similarity, is_dead_end_ref, is_dead_end_target,
     dead_end_match, is_intersection_ref, is_intersection_target, intersection_match
 
-  Alignment Coverage (4): ref_coverage, target_coverage, min_coverage, coverage_ratio
+  Alignment Coverage (5): ref_coverage, target_coverage, min_coverage, coverage_ratio,
+    max_coverage
 
   Graphlet (2): graphlet_similarity, endpoint_degree_similarity
 
