@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 from matcher.features.alignment import (
     AlignmentResult,
@@ -239,6 +239,64 @@ class TestLinestringAlignment:
         # Should find some alignment
         assert result.overture_coverage > 0.3
         assert result.dataset_coverage > 0.3
+
+
+class TestAlignmentOrientation:
+    """Tests for the is_reversed flag and orientation-aware target end helpers.
+
+    Regression coverage for the topology-orientation bug: when the best alignment
+    is backward (target digitized opposite to ref), the target fractions are
+    flipped into the target's own coordinate order, so dataset_start_frac points at
+    the target end PHYSICALLY OPPOSITE the reference's from end.
+    """
+
+    def test_forward_alignment_not_reversed(self):
+        """A forward-aligned control keeps is_reversed False and unswapped helpers."""
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])  # same digitization direction
+        result = linestring_alignment(ref, target)
+
+        assert result.is_reversed is False
+        # Helpers pass through the raw fracs when forward.
+        assert result.target_from_frac == result.dataset_start_frac
+        assert result.target_to_frac == result.dataset_end_frac
+
+        # target_from_frac must sit at the target end nearest ref's from end (0, 0).
+        from_pt = target.interpolate(result.target_from_frac, normalized=True)
+        assert from_pt.distance(Point(0, 0)) < 1.0
+
+    def test_reversed_alignment_flags_and_swaps_physical_ends(self):
+        """Synthetic reversed repro: ref (0,0)->(100,0), target (100,0)->(0,0).
+
+        The raw dataset_start_frac points at the target's coord[0] = (100, 0), the
+        OPPOSITE end from ref's from end (0, 0). target_from_frac must instead
+        resolve to the target end physically nearest (0, 0).
+        """
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(100, 0), (0, 0)])
+        result = linestring_alignment(ref, target)
+
+        assert result.is_reversed is True
+
+        # The raw start frac points at the physically OPPOSITE end (the bug).
+        raw_start_pt = target.interpolate(result.dataset_start_frac, normalized=True)
+        assert raw_start_pt.distance(Point(100, 0)) < 1.0
+
+        # The orientation-aware helper resolves to the physically correct end:
+        # nearest to ref's from end (0, 0), and swaps from/to relative to raw.
+        assert result.target_from_frac == result.dataset_end_frac
+        assert result.target_to_frac == result.dataset_start_frac
+        from_pt = target.interpolate(result.target_from_frac, normalized=True)
+        assert from_pt.distance(Point(0, 0)) < 1.0
+        to_pt = target.interpolate(result.target_to_frac, normalized=True)
+        assert to_pt.distance(Point(100, 0)) < 1.0
+
+    def test_default_is_reversed_false(self):
+        """The dataclass defaults is_reversed to False for old pickles/callers."""
+        result = AlignmentResult(0.0, 1.0, 0.0, 1.0)
+        assert result.is_reversed is False
+        assert result.target_from_frac == 0.0
+        assert result.target_to_frac == 1.0
 
 
 class TestCreateSubline:

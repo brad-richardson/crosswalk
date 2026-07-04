@@ -438,6 +438,20 @@ def _compute_non_geometric_features(
         from_degree_target = target_topo.get("from_degree", float("nan"))
         to_degree_target = target_topo.get("to_degree", float("nan"))
 
+        # Orientation fix: target_topo assigns from_degree to the target's coord[0]
+        # end and to_degree to its coord[-1] end. When the alignment is reversed
+        # (target digitized opposite to ref, ~half of real matches), the target's
+        # coord[0] end physically coincides with the reference's TO end, so pairing
+        # from_degree_target with from_degree_ref compares physically opposite ends.
+        # Swap so from_degree_target is the degree at the target end physically
+        # nearest ref's from end. This applies uniformly to every source of
+        # target_topo (aligned-sampling, graphlet fallback, and the stored full
+        # topology used by `matcher backfill`). is_dead_end / is_intersection /
+        # degree_signature are order-invariant (min / max / sorted), so they are
+        # unaffected; degree_match_score already minimizes over both orderings.
+        if alignment is not None and alignment.is_reversed:
+            from_degree_target, to_degree_target = to_degree_target, from_degree_target
+
     # NaN-propagation guard: if any degree value is NaN, all derived topology
     # features must be NaN too. This avoids truthy/falsy issues with NaN in
     # boolean comparisons (e.g. `if NaN` is truthy in Python).
@@ -650,8 +664,11 @@ def _compute_non_geometric_features(
                 ref_node_features_ic,  # Same node_features — shared Overture ID space
                 alignment.overture_start_frac,
                 alignment.overture_end_frac,
+                # Span (start<end) drives interior selection; the position-similarity
+                # sub-feature mirrors target positions when reversed (target_reversed).
                 alignment.dataset_start_frac,
                 alignment.dataset_end_frac,
+                target_reversed=alignment.is_reversed,
             )
         else:
             interior_feats = {
@@ -684,6 +701,12 @@ def _compute_non_geometric_features(
                 if target_cov > 0
                 else target_geom_aligned.length
             )
+            # Orientation fix: shared_anchor pairs ref's start endpoint with the
+            # target endpoint passed as target_start_frac (and end with end).
+            # For a reversed alignment those physical ends are swapped, so use the
+            # orientation-aware target_from_frac / target_to_frac helpers instead
+            # of the raw dataset_*_frac. The span-based ref_len/target_len above are
+            # orientation-agnostic and stay unchanged.
             shared_anchor_feats = compute_shared_anchor_features(
                 ref_seg_id,
                 target_seg_id,
@@ -691,8 +714,8 @@ def _compute_non_geometric_features(
                 target_conn_sa,
                 alignment.overture_start_frac,
                 alignment.overture_end_frac,
-                alignment.dataset_start_frac,
-                alignment.dataset_end_frac,
+                alignment.target_from_frac,
+                alignment.target_to_frac,
                 ref_len,
                 target_len,
             )
