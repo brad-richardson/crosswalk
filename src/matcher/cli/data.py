@@ -2100,12 +2100,23 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
             group["target_classes"] = {
                 k: v for k, v in group["target_classes"].items() if k in surviving_targets
             }
+        edges_before = len(group.get("edges", []))
         if "edges" in group:
             group["edges"] = [
                 e
                 for e in group["edges"]
                 if e["ref_id"] in surviving_refs and e["target_id"] in surviving_targets
             ]
+
+        # Envelope clipping can drop most of a large group's edges. Any
+        # pre-computed alternatives / optimizer_assignment were derived from the
+        # FULL (pre-clip) edge set, so they may reference edges that no longer
+        # exist in the group. Re-sync them to the surviving edges so the batch
+        # never ships options that are not subsets of the group's own edges.
+        if len(group.get("edges", [])) != edges_before:
+            from ..matching.alternatives import prune_group_options_to_edges
+
+            prune_group_options_to_edges(group, ref_geoms=ref_geoms, target_geoms=target_geoms)
 
         # Store on group dict
         group["envelope"] = mapping(envelope)

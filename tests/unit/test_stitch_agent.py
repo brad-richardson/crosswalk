@@ -145,6 +145,34 @@ def test_build_options_multiref_alternative_gets_stable_letter():
     assert sum(1 for s in edge_sets.values() if s == multiref) == 1
 
 
+def test_build_options_duplicated_raw_edges_do_not_inflate_confidence():
+    """Duplicated / out-of-group raw edges must not inflate the displayed confidence.
+
+    Regression for the option-generation defect: an alternative whose edge list
+    contained many duplicated / cross-group edges (and an inflated stored
+    ``total_confidence``) rendered as a nonsensical mean confidence (e.g.
+    "3242%"). The displayed total/mean must be computed over the validated,
+    deduplicated edge set actually shown.
+    """
+    g = make_group()
+    g["alternatives"] = [
+        {
+            # Same in-group edge repeated 30x plus a phantom edge, with a wildly
+            # inflated stored total_confidence.
+            "edges": [{"ref_id": R1, "target_id": T1}] * 30
+            + [{"ref_id": "phantom", "target_id": "ghost"}],
+            "total_confidence": 227.0,
+        }
+    ]
+    # Drop the optimizer so the alternative is option A.
+    g["optimizer_assignment"] = []
+    ctx = build_stitch_options(g)
+    opt = ctx["options"][0]
+    assert opt["edge_count"] == 1  # only the single distinct in-group edge shows
+    assert opt["total_confidence"] == pytest.approx(0.9)  # R1->T1 confidence, not 227
+    assert opt["mean_confidence"] == pytest.approx(0.9)
+
+
 def test_choice_to_edge_set():
     obl = {"A": [(R1, T1), (R2, T2)], "B": [(R1, T1)]}
     assert sr.choice_to_edge_set("A", obl) == frozenset({(R1, T1), (R2, T2)})

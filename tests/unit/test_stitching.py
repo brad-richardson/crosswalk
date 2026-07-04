@@ -359,6 +359,105 @@ class TestMultiRefContiguousChains:
         assert len(alts) == 7  # 2^3 - 1 non-empty subsets, unchanged by geoms
 
 
+class TestAlternativeOutputInvariant:
+    """Every emitted alternative must be a deduplicated subset of the group edges.
+
+    Regression for the option-generation defect where a large M:N group's
+    alternatives (computed before ``_fill_spatial_context`` clipped the group to
+    a 500m envelope) leaked edges outside the surviving edge set: group
+    ``701d491e`` (9 ref x 7 target, 16 edges) shipped alternatives with 230
+    edges and total_confidence ~227.
+    """
+
+    def _big_mn_group(self):
+        """A 701d491e-shaped M:N group: many targets, each with a few refs."""
+        edges = []
+        ref_geoms = {}
+        target_geoms = {}
+        for t in range(7):
+            target_geoms[f"t{t}"] = _line([[t * 0.001, 0.0001], [(t + 1) * 0.001, 0.0001]])
+            for j in range(3):
+                rid = f"r{t}_{j}"
+                edges.append(_edge(rid, f"t{t}", 0.95 - j * 0.1))
+                base = t * 10 + j
+                ref_geoms[rid] = _line([[base * 0.001, 0], [(base + 1) * 0.001, 0]])
+        return edges, ref_geoms, target_geoms
+
+    def test_all_alternatives_are_valid_dedup_subsets(self):
+        edges, ref_geoms, target_geoms = self._big_mn_group()
+        group_keys = {(e["ref_id"], e["target_id"]) for e in edges}
+        max_conf = sum(e["confidence"] for e in edges)
+        alts = generate_top_k_alternatives(
+            edges, ref_geoms=ref_geoms, target_geoms=target_geoms, k=5
+        )
+        assert alts
+        for a in alts:
+            keys = [(e["ref_id"], e["target_id"]) for e in a["edges"]]
+            # subset of the group's candidate edges
+            assert set(keys) <= group_keys
+            # no duplicate edges within an option
+            assert len(keys) == len(set(keys))
+            # never more edges than the group has
+            assert len(a["edges"]) <= len(group_keys)
+            # total confidence cannot exceed the group's own edge-confidence sum
+            assert a["total_confidence"] <= max_conf + 1e-6
+
+    def test_sanitize_drops_invalid_and_duplicate_edges(self):
+        """A malformed alternative is repaired to a valid dedup subset."""
+        from matcher.matching.alternatives import _sanitize_alternative
+
+        valid_keys = {("r1", "t1"), ("r2", "t2")}
+        alt = {
+            "edges": [
+                _edge("r1", "t1", 0.9),
+                _edge("r1", "t1", 0.9),  # duplicate
+                _edge("r2", "t2", 0.8),
+                _edge("phantom", "ghost", 5.0),  # not in group
+            ],
+        }
+        cleaned = _sanitize_alternative(alt, valid_keys, ["r1", "r2"])
+        keys = [(e["ref_id"], e["target_id"]) for e in cleaned["edges"]]
+        assert set(keys) == valid_keys
+        assert len(keys) == 2  # dedup + phantom dropped
+        assert cleaned["total_confidence"] == pytest.approx(1.7)
+
+
+class TestPruneGroupOptionsToEdges:
+    """After a group's edges are clipped, options must be re-synced to them."""
+
+    def test_prune_resyncs_alternatives_and_optimizer(self):
+        from matcher.matching.alternatives import prune_group_options_to_edges
+
+        # Group originally had (r1,t1),(r2,t2),(r3,t3); clipped to just (r1,t1).
+        group = {
+            "edges": [_edge("r1", "t1", 0.9)],
+            "optimizer_assignment": [
+                {"ref_id": "r1", "target_id": "t1"},
+                {"ref_id": "r2", "target_id": "t2"},  # no longer in group
+            ],
+            "alternatives": [
+                {
+                    "edges": [
+                        {"ref_id": "r1", "target_id": "t1"},
+                        {"ref_id": "r2", "target_id": "t2"},
+                        {"ref_id": "r3", "target_id": "t3"},
+                    ],
+                    "total_confidence": 99.0,
+                }
+            ],
+            "ref_geometries": {},
+            "target_geometries": {},
+        }
+        prune_group_options_to_edges(group)
+        # optimizer pruned to surviving edges only
+        assert group["optimizer_assignment"] == [{"ref_id": "r1", "target_id": "t1"}]
+        # alternatives regenerated as valid subsets of the single surviving edge
+        for a in group["alternatives"]:
+            for e in a["edges"]:
+                assert (e["ref_id"], e["target_id"]) == ("r1", "t1")
+            assert a["total_confidence"] <= 0.9 + 1e-6
+
+
 # ---------------------------------------------------------------------------
 # select_stitching_batch
 # ---------------------------------------------------------------------------

@@ -67,19 +67,18 @@ def build_stitch_options(group: dict) -> dict:
     def _edge_key(edges: list[dict]) -> frozenset:
         return frozenset((e["ref_id"], e["target_id"]) for e in edges)
 
-    def _confidences(raw_edges: list[dict]) -> tuple[float, float]:
-        confs = [
-            e.get("confidence", 0.0)
-            for e in raw_edges
-            if (e.get("ref_id"), e.get("target_id")) in group_edge_set
-        ]
+    def _confidences(valid_edges: list[dict]) -> tuple[float, float]:
+        # Compute over the already-validated, deduplicated edge set (the exact
+        # edges displayed). Summing over raw edges would double-count any
+        # duplicated or out-of-group edge and inflate the displayed confidence.
+        confs = [e.get("confidence", 0.0) for e in valid_edges]
         total = round(sum(confs), 4)
         mean = round(total / len(confs), 4) if confs else 0.0
         return total, mean
 
     def _make_option(key: str, label: str, is_optimizer: bool, raw_edges: list[dict]) -> dict:
         edges = _valid_edges(raw_edges)
-        total, mean = _confidences(raw_edges)
+        total, mean = _confidences(edges)
         return {
             "key": key,
             "label": label,
@@ -111,12 +110,12 @@ def build_stitch_options(group: dict) -> dict:
             continue
         seen.add(key)
         alt_num += 1
+        # total/mean are computed inside _make_option from the validated,
+        # deduplicated edge set. We deliberately do NOT trust a stored
+        # ``alt["total_confidence"]`` here: if an alternative's edge list was
+        # ever built against a different (e.g. pre-clip) group, its stored total
+        # would be inflated relative to the edges actually displayed.
         opt = _make_option(f"alt{alt_num}", f"Alt {alt_num}", False, alt.get("edges", []))
-        if "total_confidence" in alt:
-            opt["total_confidence"] = round(alt["total_confidence"], 4)
-            opt["mean_confidence"] = (
-                round(opt["total_confidence"] / opt["edge_count"], 4) if opt["edge_count"] else 0.0
-            )
         options.append(opt)
 
     # Assign stable letters and record the optimizer's letter.

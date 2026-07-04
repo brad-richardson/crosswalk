@@ -16,12 +16,15 @@ an ML confidence) are present in the group.
 """
 
 import itertools
+import logging
 import math
 from collections import defaultdict
 
 from shapely import LineString
 
 from ..config import DEFAULT_SNAP_TOLERANCE_M
+
+logger = logging.getLogger(__name__)
 
 # Enumeration strategy thresholds: groups below these limits use exhaustive
 # enumeration (all combos via itertools.product); larger groups fall back to
@@ -154,6 +157,15 @@ def generate_top_k_alternatives(
                 target_ids, target_options, edge_data, ref_ids, k * 3
             )
 
+    # Output invariant: every alternative must be a deduplicated subset of the
+    # group's candidate edges. The enumeration paths above already build edges
+    # only from ``edge_data``, but enforce it explicitly here so a future path
+    # bug (or a caller mutating the group after generation) can never ship an
+    # alternative that references edges outside the group.
+    valid_keys = set(edge_data.keys())
+    alternatives = [_sanitize_alternative(a, valid_keys, ref_ids) for a in alternatives]
+    alternatives = [a for a in alternatives if a["edges"]]
+
     # Sort by total confidence descending
     alternatives.sort(key=lambda a: a["total_confidence"], reverse=True)
 
@@ -172,6 +184,40 @@ def generate_top_k_alternatives(
         alt["option_index"] = i
 
     return top_k
+
+
+def prune_group_options_to_edges(
+    group: dict,
+    ref_geoms: dict | None = None,
+    target_geoms: dict | None = None,
+) -> None:
+    """Re-sync a group's precomputed options to its current edge set (in place).
+
+    After a group's ``edges`` are reduced (e.g. clipped to a 500m display
+    envelope by ``_fill_spatial_context``), any previously computed
+    ``alternatives`` or ``optimizer_assignment`` may still reference edges that
+    no longer exist in the group. This filters ``optimizer_assignment`` to the
+    surviving edges and regenerates ``alternatives`` from them, so downstream
+    consumers (review UI, evidence packs) only ever see options that are valid
+    subsets of the group's own edges.
+    """
+    surviving = {(e["ref_id"], e["target_id"]) for e in group.get("edges", [])}
+    if group.get("optimizer_assignment"):
+        group["optimizer_assignment"] = [
+            e
+            for e in group["optimizer_assignment"]
+            if (e.get("ref_id"), e.get("target_id")) in surviving
+        ]
+    if group.get("alternatives"):
+        k = len(group["alternatives"]) or 5
+        group["alternatives"] = generate_top_k_alternatives(
+            group.get("edges", []),
+            ref_geoms=ref_geoms if ref_geoms is not None else group.get("ref_geometries", {}),
+            target_geoms=(
+                target_geoms if target_geoms is not None else group.get("target_geometries", {})
+            ),
+            k=k,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +617,45 @@ def _add_alternative(
             "summary": summary,
         }
     )
+
+
+def _sanitize_alternative(
+    alt: dict,
+    valid_keys: set[tuple[str, str]],
+    ref_ids: list[str],
+) -> dict:
+    """Enforce the output invariant on a single alternative.
+
+    Drops any edge whose (ref_id, target_id) is not one of the group's
+    candidate edges, removes duplicate edges, and recomputes total_confidence
+    and summary from the surviving edge set. A violation (invalid or duplicate
+    edge) is logged so it can never be shipped silently.
+    """
+    clean_edges: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    dropped = 0
+    for e in alt.get("edges", []):
+        key = (e.get("ref_id"), e.get("target_id"))
+        if key not in valid_keys or key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        clean_edges.append(e)
+
+    if dropped:
+        logger.warning(
+            "generate_top_k_alternatives: dropped %d invalid/duplicate edge(s) "
+            "from an alternative (kept %d valid subset edges)",
+            dropped,
+            len(clean_edges),
+        )
+
+    total = round(sum(e.get("confidence", 0.0) for e in clean_edges), 4)
+    return {
+        "edges": clean_edges,
+        "total_confidence": total,
+        "summary": _build_summary(clean_edges, ref_ids) if clean_edges else "",
+    }
 
 
 def _build_summary(edges: list[dict], ref_ids: list[str]) -> str:
