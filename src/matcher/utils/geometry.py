@@ -24,10 +24,11 @@ def geometry_length_meters(geom) -> float:
     try:
         centroid = geom.centroid
         lon, lat = centroid.x, centroid.y
-        utm_zone = int((lon + 180) / 6) + 1
-        hemisphere = "north" if lat >= 0 else "south"
-        utm_crs = f"+proj=utm +zone={utm_zone} +{hemisphere} +datum=WGS84"
-        transformer = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+        # Clamp: lon=180 would otherwise compute zone 61 (valid zones are 1-60).
+        utm_zone = min(60, max(1, int((lon + 180) / 6) + 1))
+        # WGS84 / UTM EPSG codes: 326xx northern hemisphere, 327xx southern.
+        epsg = (32600 if lat >= 0 else 32700) + utm_zone
+        transformer = pyproj.Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
         return transform(transformer.transform, geom).length
     except Exception:
         # Fallback: 1 degree ~= 111 km at the equator.

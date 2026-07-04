@@ -170,28 +170,30 @@ def _load_batch_candidate_edges(batch_dir: Path) -> dict[str, frozenset]:
     return out
 
 
-def _load_batch_sliver_edges(batch_dir: Path) -> frozenset:
-    """Load the set of junction-sliver edges across a batch's groups.
+def _load_batch_sliver_edges(batch_dir: Path) -> dict[str, frozenset]:
+    """Load each group's junction-sliver edge set from ``batch.json``.
 
-    Reads the full groups (with geometries + alignment fractions) from
-    ``batch.json`` and classifies each edge with the shared hybrid rule. Returns
-    a frozenset of ``(ref_id, target_id)`` for edges flagged as slivers; empty
-    when no ``batch.json`` is present (nothing to filter -> filtered == raw).
+    Reads the full groups (with geometries + alignment fractions) and classifies
+    each edge with the shared hybrid rule. Returns
+    ``{group_id: frozenset((ref_id, target_id))}`` of edges flagged as slivers.
+    Kept per-group (not batch-wide) so an edge pair is only filtered within the
+    group whose geometries classified it as a sliver. Empty when no
+    ``batch.json`` is present (nothing to filter -> filtered == raw).
     """
     batch_path = Path(batch_dir) / "batch.json"
     if not batch_path.exists():
-        return frozenset()
+        return {}
     try:
         batch = json.loads(batch_path.read_text())
     except (ValueError, OSError):
-        return frozenset()
-    slivers: set[tuple[str, str]] = set()
+        return {}
+    out: dict[str, frozenset] = {}
     for g in batch.get("groups", []):
         annotated, _ = annotate_group_sliver_flags(g)
-        for e in annotated:
-            if e.get("is_sliver"):
-                slivers.add((str(e["ref_id"]), str(e["target_id"])))
-    return frozenset(slivers)
+        out[str(g.get("group_id"))] = frozenset(
+            (str(e["ref_id"]), str(e["target_id"])) for e in annotated if e.get("is_sliver")
+        )
+    return out
 
 
 def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
@@ -305,10 +307,13 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
         _, _, f1 = edge_prf(panel_es, human_es)
         option_covered = any(human_es == s for s in opt_sets.values())
 
-        # Sliver-filtered comparison: drop sliver edges from BOTH sides so a
-        # disagreement that is only about an artifact edge does not count.
-        panel_es_f = panel_es - sliver_edges
-        human_es_f = human_es - sliver_edges
+        # Sliver-filtered comparison: drop THIS group's sliver edges from BOTH
+        # sides so a disagreement that is only about an artifact edge does not
+        # count. Per-group lookup: an edge is only filtered in the group whose
+        # geometries classified it as a sliver.
+        group_slivers = sliver_edges.get(gid, frozenset())
+        panel_es_f = panel_es - group_slivers
+        human_es_f = human_es - group_slivers
         exact_f = panel_es_f == human_es_f
         _, _, f1_f = edge_prf(panel_es_f, human_es_f)
 
