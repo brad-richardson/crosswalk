@@ -1349,6 +1349,95 @@ class TestComputePairFeaturesWithAlignment:
         )
 
 
+class TestTargetNativeTopology:
+    """Target-native topology features (PR #256 follow-up).
+
+    The *_target_native columns re-expose the target segment's intrinsic
+    endpoint-cluster structure (from target_topology_full), kept separate from
+    the unified alignment-aware comparability features. The #252 unification
+    dropped this independent signal (old is_dead_end_target AUC 0.583).
+    """
+
+    def test_native_topology_passes_through_full_segment_values(self):
+        """Native features mirror the target's full-segment endpoint-cluster topology."""
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+
+        # Target is a dead-end cul-de-sac: one free end (degree 1), one junction.
+        target_topo = {
+            "from_degree": 1,
+            "to_degree": 3,
+            "is_dead_end": True,
+            "is_intersection": True,
+            "degree_signature": (1, 3),
+        }
+
+        features = compute_pair_features(
+            ref_geom_full=ref,
+            target_geom_full=target,
+            ref_class="residential",
+            target_class="residential",
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology={
+                "from_degree": 2,
+                "to_degree": 2,
+                "is_dead_end": False,
+                "is_intersection": False,
+                "degree_signature": (2, 2),
+            },
+            target_topology=target_topo,
+        )
+
+        assert features["from_degree_target_native"] == 1
+        assert features["to_degree_target_native"] == 3
+        assert features["is_dead_end_target_native"] == 1.0
+        assert features["is_intersection_target_native"] == 1.0
+
+    def test_native_topology_nan_when_degrees_missing(self):
+        """NaN degrees must propagate to NaN flags (not truthy-NaN → 1.0)."""
+        import math
+
+        from matcher.features.compute import compute_pair_features
+        from tests.conftest import MOCK_ENDPOINT_FEATURES
+
+        ref = LineString([(0, 0), (100, 0)])
+        target = LineString([(0, 0), (100, 0)])
+
+        # Unknown topology: degrees NaN, is_dead_end defaulted NaN. `if NaN` is
+        # truthy in Python, so the flags must be gated on valid degrees.
+        target_topo = {
+            "from_degree": float("nan"),
+            "to_degree": float("nan"),
+            "is_dead_end": float("nan"),
+            "is_intersection": float("nan"),
+            "degree_signature": (),
+        }
+
+        features = compute_pair_features(
+            ref_geom_full=ref,
+            target_geom_full=target,
+            ref_class="residential",
+            target_class="residential",
+            endpoint_features=MOCK_ENDPOINT_FEATURES,
+            ref_topology={
+                "from_degree": 2,
+                "to_degree": 2,
+                "is_dead_end": False,
+                "is_intersection": False,
+                "degree_signature": (2, 2),
+            },
+            target_topology=target_topo,
+        )
+
+        assert math.isnan(features["from_degree_target_native"])
+        assert math.isnan(features["to_degree_target_native"])
+        assert math.isnan(features["is_dead_end_target_native"])
+        assert math.isnan(features["is_intersection_target_native"])
+
+
 class TestEndpointProximityInfCapping:
     """Regression tests: endpoint proximity must never contain Inf values.
 

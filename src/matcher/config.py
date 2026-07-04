@@ -271,7 +271,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-07-04.1"
+FEATURE_VERSION = "2026-07-04.2"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -342,13 +342,23 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "to_degree_ref",
         "from_degree_target",
         "to_degree_target",
+        # Target-native topology: the target segment's intrinsic endpoint-cluster
+        # structure (full-segment, Union-Find on the target network), kept SEPARATE
+        # from the unified comparability features above (which project Overture
+        # connectors onto the aligned sub-portion for cross-dataset degree parity).
+        # The unification (#252) dropped the target's own structure signal — old
+        # is_dead_end_target scored AUC 0.583. See PR #256 follow-up.
+        "from_degree_target_native",
+        "to_degree_target_native",
         "degree_match_score",
         "degree_signature_similarity",
         "is_dead_end_ref",
         "is_dead_end_target",
+        "is_dead_end_target_native",
         "dead_end_match",
         "is_intersection_ref",
         "is_intersection_target",
+        "is_intersection_target_native",
         "intersection_match",
         "interior_junction_count_ref",
         "interior_junction_count_target",

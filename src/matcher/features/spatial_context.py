@@ -708,6 +708,24 @@ def compute_aligned_endpoint_features(
     return result.get((0, 0), default_result)
 
 
+def _nearest_non_self_distance(knn_idx_row, knn_dist_row, k, n_endpoints, excluded_eps):
+    """Distance to the nearest endpoint that is neither a scipy padding slot nor
+    one of the segment's own two endpoints.
+
+    k-NN rows are sorted ascending, so the first qualifying neighbour is the
+    nearest. Returns inf when every candidate is excluded (e.g. the index holds
+    only this segment's own endpoints).
+    """
+    for kk in range(k):
+        ep_idx = int(knn_idx_row[kk])
+        if ep_idx >= n_endpoints:  # scipy pads missing neighbours with index == n
+            continue
+        if excluded_eps is not None and (ep_idx == excluded_eps[0] or ep_idx == excluded_eps[1]):
+            continue
+        return float(knn_dist_row[kk])
+    return float("inf")
+
+
 def compute_aligned_endpoint_features_batch(
     alignments: dict,
     target_geoms: "np.ndarray",
@@ -807,8 +825,29 @@ def compute_aligned_endpoint_features_batch(
         return {keys[valid_indices[j]]: default.copy() for j in range(len(valid_indices))}
 
     tree = target_index.kdtree
+    n_endpoints = endpoint_coords.shape[0]
 
-    # 5. Batch radius queries (single C call each, replaces 2N individual STRtree queries)
+    # 5a. Unbounded k-NN queries drive endpoint PROXIMITY. The previous design
+    # measured proximity from the bounded query_ball_point(r=2*tolerance) list,
+    # so any segment whose nearest same-dataset endpoint sat beyond ~10 m
+    # collapsed to the MAX_DISTANCE_METERS sentinel — ~87-91% of pairs pinned,
+    # making the feature effectively binary (deferred from #253). A nearest-
+    # neighbour query returns the true distance regardless of radius, so
+    # proximity now varies continuously (a 40 m dangling end vs a 300 m one).
+    # k=3 lets us skip the segment's own two endpoints and still land on a real
+    # neighbour; scipy pads missing neighbours with index == n_endpoints / inf.
+    k = min(3, n_endpoints)
+    start_knn_dist, start_knn_idx = tree.query(start_coords, k=k)
+    end_knn_dist, end_knn_idx = tree.query(end_coords, k=k)
+    if k == 1:
+        start_knn_dist = start_knn_dist.reshape(-1, 1)
+        start_knn_idx = start_knn_idx.reshape(-1, 1)
+        end_knn_dist = end_knn_dist.reshape(-1, 1)
+        end_knn_idx = end_knn_idx.reshape(-1, 1)
+
+    # 5b. Bounded radius queries drive the SHARED-endpoint count only — that is
+    # a tolerance-based connectivity signal, distinct from proximity, so it
+    # keeps the snap radius.
     start_neighbors_list = tree.query_ball_point(start_coords, r=radius)
     end_neighbors_list = tree.query_ball_point(end_coords, r=radius)
 
@@ -823,7 +862,7 @@ def compute_aligned_endpoint_features_batch(
         target_idx = target_indices[i]
         filtered_idx = original_to_filtered.get(int(target_idx))
 
-        # Get excluded endpoints for this segment
+        # Get excluded endpoints for this segment (its own two endpoints)
         excluded_eps = None
         if filtered_idx is not None and filtered_idx in segment_endpoints:
             excluded_eps = segment_endpoints[filtered_idx]
@@ -831,11 +870,19 @@ def compute_aligned_endpoint_features_batch(
         s_x, s_y = start_coords[j, 0], start_coords[j, 1]
         e_x, e_y = end_coords[j, 0], end_coords[j, 1]
 
-        start_min_dist = float("inf")
-        end_min_dist = float("inf")
-        shared_segments = set()
+        # Nearest non-self endpoint distance (k-NN rows are sorted ascending, so
+        # the first neighbour that isn't a padding slot or a self endpoint is the
+        # true nearest).
+        start_min_dist = _nearest_non_self_distance(
+            start_knn_idx[j], start_knn_dist[j], k, n_endpoints, excluded_eps
+        )
+        end_min_dist = _nearest_non_self_distance(
+            end_knn_idx[j], end_knn_dist[j], k, n_endpoints, excluded_eps
+        )
 
-        # Process start-point neighbors
+        # Shared endpoints: other segments whose endpoint coincides within
+        # tolerance (bounded radius list, further filtered to tolerance_m).
+        shared_segments = set()
         for ep_idx in start_neighbors_list[j]:
             if excluded_eps is not None and (
                 ep_idx == excluded_eps[0] or ep_idx == excluded_eps[1]
@@ -843,13 +890,9 @@ def compute_aligned_endpoint_features_batch(
                 continue
             dx = endpoint_coords[ep_idx, 0] - s_x
             dy = endpoint_coords[ep_idx, 1] - s_y
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < start_min_dist:
-                start_min_dist = dist
-            if dist <= tolerance_m and ep_idx in endpoint_to_segment:
+            if (dx * dx + dy * dy) ** 0.5 <= tolerance_m and ep_idx in endpoint_to_segment:
                 shared_segments.update(endpoint_to_segment[ep_idx])
 
-        # Process end-point neighbors
         for ep_idx in end_neighbors_list[j]:
             if excluded_eps is not None and (
                 ep_idx == excluded_eps[0] or ep_idx == excluded_eps[1]
@@ -857,10 +900,7 @@ def compute_aligned_endpoint_features_batch(
                 continue
             dx = endpoint_coords[ep_idx, 0] - e_x
             dy = endpoint_coords[ep_idx, 1] - e_y
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < end_min_dist:
-                end_min_dist = dist
-            if dist <= tolerance_m and ep_idx in endpoint_to_segment:
+            if (dx * dx + dy * dy) ** 0.5 <= tolerance_m and ep_idx in endpoint_to_segment:
                 shared_segments.update(endpoint_to_segment[ep_idx])
 
         if filtered_idx is not None:

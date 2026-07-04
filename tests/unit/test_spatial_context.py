@@ -1687,6 +1687,84 @@ class TestFindNearestConnectorPosition:
         assert result == 0.4
 
 
+class TestEndpointProximityContinuity:
+    """Endpoint proximity must be a continuous distance, not pinned at the sentinel.
+
+    Regression for the #253-deferred degeneracy: the old bounded radius query
+    (query_ball_point at r = 2*tolerance ≈ 10 m) collapsed any endpoint whose
+    nearest neighbour sat beyond that radius to MAX_DISTANCE_METERS, pinning
+    ~87-91% of pairs. The k-NN redesign returns the true nearest distance.
+    """
+
+    def test_proximity_beyond_radius_is_continuous_not_sentinel(self):
+        from matcher.config import MAX_DISTANCE_METERS
+        from matcher.features.spatial_context import (
+            SpatialContextIndex,
+            compute_aligned_endpoint_features,
+        )
+
+        # "iso" end (100,0) is 50 m from "near" start (150,0) — well beyond the
+        # ~10 m bounded radius that used to force the sentinel.
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["iso", "near"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(150, 0), (250, 0)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
+
+        result = compute_aligned_endpoint_features(
+            LineString([(0, 0), (100, 0)]),
+            ctx,
+            start_frac=0.0,
+            end_frac=1.0,
+            exclude_segment_idx=0,  # exclude "iso"'s own two endpoints
+        )
+
+        # Nearest non-self endpoint to (100,0) is (150,0) → 50 m; to (0,0) → 150 m.
+        assert result["min_endpoint_proximity_m"] == pytest.approx(50.0, abs=1e-6)
+        assert result["max_endpoint_proximity_m"] == pytest.approx(150.0, abs=1e-6)
+        # Crucially: no longer pinned at the 10 km sentinel.
+        assert result["min_endpoint_proximity_m"] < MAX_DISTANCE_METERS
+
+    def test_connected_endpoint_reports_near_zero(self):
+        """A shared junction endpoint still reports ~0 proximity (connectivity)."""
+        from matcher.features.spatial_context import (
+            SpatialContextIndex,
+            compute_aligned_endpoint_features,
+        )
+
+        # "a" ends at (100,0) where "b" and "c" also meet → connected.
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": ["a", "b", "c"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (200, 0)]),
+                    LineString([(100, 0), (100, 100)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+        ctx = SpatialContextIndex()
+        ctx.build_from_gdf(gdf, id_column="id", snap_tolerance_m=5.0)
+
+        result = compute_aligned_endpoint_features(
+            LineString([(0, 0), (100, 0)]),
+            ctx,
+            start_frac=0.0,
+            end_frac=1.0,
+            exclude_segment_idx=0,
+        )
+        # End (100,0) coincides with b/c endpoints → ~0 m.
+        assert result["min_endpoint_proximity_m"] == pytest.approx(0.0, abs=1e-6)
+
+
 class TestAlignedEndpointFeaturesWithConnectors:
     """Tests for compute_aligned_endpoint_features with connector snapping."""
 

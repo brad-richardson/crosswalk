@@ -2,6 +2,14 @@
 
 February 2026
 
+> **⚠️ STALE (as of 2026-07-04).** These per-feature/per-category verdicts predate
+> the July 2026 feature-audit series (#248–#256) and the follow-ups in this branch
+> (target-native topology re-added; endpoint-proximity de-degenerated). Topology and
+> sibling features now measure something different than they did in Feb 2026, so
+> their ablation deltas here no longer describe the current model. Re-run per the
+> runbook in [EVAL_ROADMAP.md](EVAL_ROADMAP.md#task-3-re-run-the-category-ablation)
+> after the coordinated backfill + retrain, then supersede this document.
+
 ## Summary
 
 A full ablation study (74 features, 3,580 labels) revealed that the standard single-feature ablation methodology systematically underestimates feature importance when used with tree ensembles like XGBoost. Permutation importance analysis and bulk removal testing confirmed that most features classified as "noise" are actively used by the model. Separately, an audit of dataset coverage identified critical gaps in geographic, structural, and linguistic diversity that limit the model's ability to generalize beyond US-style road networks.

@@ -523,6 +523,35 @@ def _compute_non_geometric_features(
             is_intersection_target = 1.0 if target_topo.get("is_intersection", False) else 0.0
             intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
+    # Target-native topology (PR #256 follow-up). The unified *_target features
+    # above measure the ALIGNED sub-portion via Overture-connector projection for
+    # cross-dataset degree parity — a comparability signal. That derivation (#252)
+    # dropped the target segment's intrinsic endpoint-cluster structure, which was
+    # independently predictive (old is_dead_end_target AUC 0.583). Re-expose it as
+    # SEPARATE columns sourced from the full-segment endpoint-cluster topology
+    # (compute_all_topology → target_topology_full), so both the honest match
+    # features and the native structure signal are available to the model.
+    if target_topology_full is not None:
+        from_degree_target_native = target_topology_full.get("from_degree", float("nan"))
+        to_degree_target_native = target_topology_full.get("to_degree", float("nan"))
+    else:
+        from_degree_target_native = float("nan")
+        to_degree_target_native = float("nan")
+
+    # NaN-guard the derived flags the same way the unified block does: `if NaN`
+    # is truthy in Python, so gate the boolean flags on valid degrees.
+    _native_topo_nan = (
+        isinstance(from_degree_target_native, float) and math.isnan(from_degree_target_native)
+    ) or (isinstance(to_degree_target_native, float) and math.isnan(to_degree_target_native))
+    if _native_topo_nan or target_topology_full is None:
+        is_dead_end_target_native = float("nan")
+        is_intersection_target_native = float("nan")
+    else:
+        is_dead_end_target_native = 1.0 if target_topology_full.get("is_dead_end", True) else 0.0
+        is_intersection_target_native = (
+            1.0 if target_topology_full.get("is_intersection", False) else 0.0
+        )
+
     # Coverage features. A missing alignment is a computation failure, not
     # evidence of zero overlap — encode it as NaN (like the intersection
     # overlap features) instead of coverage=0.0, which reads as a strong
@@ -791,13 +820,17 @@ def _compute_non_geometric_features(
         "to_degree_ref": to_degree_ref,
         "from_degree_target": from_degree_target,
         "to_degree_target": to_degree_target,
+        "from_degree_target_native": from_degree_target_native,
+        "to_degree_target_native": to_degree_target_native,
         "degree_match_score": degree_match,
         "degree_signature_similarity": sig_similarity,
         "is_dead_end_ref": is_dead_end_ref,
         "is_dead_end_target": is_dead_end_target,
+        "is_dead_end_target_native": is_dead_end_target_native,
         "dead_end_match": dead_end_match,
         "is_intersection_ref": is_intersection_ref,
         "is_intersection_target": is_intersection_target,
+        "is_intersection_target_native": is_intersection_target_native,
         "intersection_match": intersection_match,
         # Alignment coverage
         "ref_coverage": coverage_feats["ref_coverage"],
