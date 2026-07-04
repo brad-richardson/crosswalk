@@ -50,6 +50,8 @@ from ..config import (
     EXPECTED_HALF_WIDTH_BY_CLASS_M,
     PARALLEL_SIBLING_MAX_OFFSET_M,
     PARALLEL_SIBLING_MIN_OFFSET_M,
+    PARALLEL_SIBLING_UNNAMED_MIN_LENGTH_RATIO,
+    PARALLEL_SIBLING_UNNAMED_MIN_PARALLEL_FRACTION,
 )
 from ._jit_helpers import (
     compute_endpoint_proximity_numba,
@@ -229,7 +231,11 @@ def compute_perpendicular_offset_batch(
     target_geoms: np.ndarray,
     anchor_geoms: np.ndarray,
     sample_interval: float = 5.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return_percentile: float | None = None,
+) -> (
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+):
     """Batch perpendicular offset for multiple pairs.
 
     Concatenates sample points across all pairs into single vectorized
@@ -240,17 +246,27 @@ def compute_perpendicular_offset_batch(
         target_geoms: Array of target geometries (shape N).
         anchor_geoms: Array of anchor geometries (shape N).
         sample_interval: Distance between sample points (meters).
+        return_percentile: If provided, also return this percentile (e.g., 25
+            for p25) as a 4th array. Mirrors compute_perpendicular_offset's
+            single-pair option, which sibling detection relies on to capture
+            the parallel portion's offset for diverging carriageways.
 
     Returns:
-        Tuple of (mean_offsets, iqr_offsets, p95_offsets), each shape (N,).
+        If return_percentile is None:
+            Tuple of (mean_offsets, iqr_offsets, p95_offsets), each shape (N,).
+        If return_percentile is provided:
+            Tuple of (mean_offsets, iqr_offsets, p95_offsets, pN_offsets).
         Invalid pairs (empty/None geometries) get inf values.
     """
     N = len(target_geoms)
     mean_offsets = np.full(N, float("inf"))
     iqr_offsets = np.full(N, float("inf"))
     p95_offsets = np.full(N, float("inf"))
+    pN_offsets = np.full(N, float("inf"))
 
     if N == 0:
+        if return_percentile is not None:
+            return mean_offsets, iqr_offsets, p95_offsets, pN_offsets
         return mean_offsets, iqr_offsets, p95_offsets
 
     # Determine valid pairs first (before calling Shapely ufuncs that can't handle None)
@@ -262,6 +278,8 @@ def compute_perpendicular_offset_batch(
     )
 
     if not valid_mask.any():
+        if return_percentile is not None:
+            return mean_offsets, iqr_offsets, p95_offsets, pN_offsets
         return mean_offsets, iqr_offsets, p95_offsets
 
     valid_indices = np.where(valid_mask)[0]
@@ -303,7 +321,11 @@ def compute_perpendicular_offset_batch(
         p25, p75 = np.percentile(offsets, [25, 75])
         iqr_offsets[vi] = float(p75 - p25)
         p95_offsets[vi] = float(np.percentile(offsets, 95))
+        if return_percentile is not None:
+            pN_offsets[vi] = float(np.percentile(offsets, return_percentile))
 
+    if return_percentile is not None:
+        return mean_offsets, iqr_offsets, p95_offsets, pN_offsets
     return mean_offsets, iqr_offsets, p95_offsets
 
 
@@ -621,6 +643,26 @@ def get_expected_half_width(road_class: str | None) -> float:
     return EXPECTED_HALF_WIDTH_BY_CLASS_M.get(road_class.lower(), DEFAULT_EXPECTED_HALF_WIDTH_M)
 
 
+def _normalize_road_class(road_class: str | None) -> str | None:
+    """Normalize a road class value for exact-match comparison.
+
+    Treats missing data as missing: pandas/NumPy NaN (a float, and truthy!),
+    None, non-strings, and empty/whitespace strings all normalize to None.
+    This matters because `str(np.nan) == "nan"` would otherwise make two
+    MISSING classes look like an exact class match.
+
+    Args:
+        road_class: Raw class value (may be str, None, NaN, or other types)
+
+    Returns:
+        Lowercased stripped class string, or None if missing/invalid.
+    """
+    if not isinstance(road_class, str):
+        return None
+    normalized = road_class.strip().lower()
+    return normalized if normalized else None
+
+
 def find_parallel_sibling(
     segment: LineString,
     segment_id: str,
@@ -632,11 +674,29 @@ def find_parallel_sibling(
     max_offset: float = PARALLEL_SIBLING_MAX_OFFSET_M,
     min_alignment: float = 0.7,  # Lowered from 0.9 for local alignment
     min_parallel_fraction: float = 0.3,  # At least 30% of segment must be parallel
+    unnamed_min_parallel_fraction: float = PARALLEL_SIBLING_UNNAMED_MIN_PARALLEL_FRACTION,
+    unnamed_min_length_ratio: float = PARALLEL_SIBLING_UNNAMED_MIN_LENGTH_RATIO,
 ) -> ParallelSiblingResult:
-    """Find parallel sibling segment (other half of split highway).
+    """Find parallel sibling segment (other half of split carriageway).
 
-    Detects when a segment has a nearby parallel "twin" with same name/class,
-    indicating it's part of a split carriageway representation.
+    A "sibling" means the *same road* split into two carriageways, not any
+    parallel neighbor. Detecting a sibling therefore requires positive evidence
+    that the twin is the same road:
+
+    - If the two names are compatible, accept (same road can be classified
+      differently across datasets, so class tolerance is fine here).
+    - If the two names conflict, reject.
+    - If name evidence is absent (either segment unnamed — very common for
+      Overture service roads, links, and connectors), fall back to *positive
+      geometric same-road evidence* rather than class tolerance alone:
+        1. Exact road-class match (both present and identical).
+        2. High parallel fraction (a real twin runs parallel along most of the
+           shared stretch, not just briefly).
+        3. Comparable extent (the twin spans roughly the same stretch, so the
+           two lengths must be similar).
+      Requiring all three prevents the detector from firing on any parallel
+      same-class neighbor in the 5-30m offset band (e.g. adjacent grid streets,
+      ramps, service roads), which made the feature anti-signal.
 
     Uses local alignment sampling to handle:
     - Curved segments (local heading differs from overall heading)
@@ -654,6 +714,10 @@ def find_parallel_sibling(
         max_offset: Maximum lateral offset for sibling detection (meters)
         min_alignment: Minimum mean parallel alignment score (0-1), default 0.7
         min_parallel_fraction: Minimum fraction of segment that must be parallel (0-1), default 0.3
+        unnamed_min_parallel_fraction: Minimum parallel fraction required on the
+            unnamed path (positive same-road evidence), default 0.6
+        unnamed_min_length_ratio: Minimum min(len)/max(len) required on the
+            unnamed path (comparable extent), default 0.5
 
     Returns:
         ParallelSiblingResult with has_sibling, sibling_distance, and parallel_fraction.
@@ -665,13 +729,17 @@ def find_parallel_sibling(
     buffer_geom = segment.buffer(max_offset)
     candidate_indices = spatial_index.query(buffer_geom)
 
-    # Get segment coords once for efficiency
+    # Get segment coords/length once for efficiency
     segment_coords = np.array(segment.coords)
+    segment_length = segment.length
 
-    # Track best parallel_fraction across all candidates
-    best_parallel_fraction = 0.0
-    best_offset = float("inf")
-    found_sibling = False
+    # ---- Phase 1: cheap alignment + name pre-filter ----
+    # Collect survivors that pass the parallel-alignment gate and are not name
+    # conflicts. The (more expensive, now batched) perpendicular-offset check
+    # and the same-road gates run only on survivors.
+    survivor_geoms: list[LineString] = []
+    # Each entry: (candidate_class, parallel_fraction, name_match)
+    survivor_info: list[tuple[str | None, float, bool | None]] = []
 
     for candidate_idx in candidate_indices:
         # O(1) lookup using index directly - segment_data is parallel to spatial_index
@@ -686,7 +754,12 @@ def find_parallel_sibling(
         if candidate_geom is None or candidate_geom.is_empty:
             continue
 
-        # 1. Check parallel alignment using LOCAL alignment (handles curves and partial parallelism)
+        # Name compatibility (cheap, no geometry). Reject conflicts immediately.
+        name_match = names_compatible(segment_name, candidate_name)
+        if name_match is False:
+            continue
+
+        # Check parallel alignment using LOCAL alignment (handles curves and partial parallelism)
         candidate_coords = np.array(candidate_geom.coords)
         alignment, parallel_fraction = compute_parallel_alignment(
             segment,
@@ -701,46 +774,63 @@ def find_parallel_sibling(
         if alignment < min_alignment or parallel_fraction < min_parallel_fraction:
             continue
 
-        # 2. Check lateral offset (must be in dual-carriageway range)
-        # Use p10/p25 for diverging cases - captures the parallel portion's offset
-        offset_result = compute_perpendicular_offset(candidate_geom, segment, return_percentile=25)
-        # Use p25 as the sibling distance - represents the parallel portion
-        # Mean would be inflated by diverging sections
-        _, _, _, offset_p25 = offset_result
+        survivor_geoms.append(candidate_geom)
+        survivor_info.append((candidate_class, parallel_fraction, name_match))
+
+    if not survivor_geoms:
+        return ParallelSiblingResult(False, float("inf"), 0.0)
+
+    # ---- Phase 2: batched perpendicular offset for survivors ----
+    # Use p25 for diverging cases - captures the parallel portion's offset
+    # (mean would be inflated by diverging sections). Batching concatenates all
+    # survivors into single vectorized Shapely calls instead of per-candidate.
+    target_arr = np.empty(len(survivor_geoms), dtype=object)
+    target_arr[:] = survivor_geoms
+    anchor_arr = np.empty(len(survivor_geoms), dtype=object)
+    anchor_arr[:] = [segment] * len(survivor_geoms)
+    _, _, _, offsets_p25 = compute_perpendicular_offset_batch(
+        target_arr, anchor_arr, return_percentile=25
+    )
+
+    # ---- Phase 3: offset band + same-road evidence gates ----
+    best_parallel_fraction = 0.0
+    best_offset = float("inf")
+    found_sibling = False
+    seg_class_norm = _normalize_road_class(segment_class)
+
+    for i, (candidate_class, parallel_fraction, name_match) in enumerate(survivor_info):
+        offset_p25 = float(offsets_p25[i])
         if not (min_offset <= offset_p25 <= max_offset):
             continue
 
-        # 3. Check name/class compatibility (same road)
-        # Need at least one of: matching names OR compatible classes
-        # If names positively match, that overrides class differences
-        name_match = names_compatible(segment_name, candidate_name)
-        class_match = classes_compatible(segment_class, candidate_class)
-
-        # If names explicitly conflict, skip
-        if name_match is False:
-            continue
-
-        # If names positively match, accept regardless of class difference
-        # (same road can be classified differently in different datasets)
         if name_match is True:
-            # Track best parallel_fraction but keep searching for better
-            if parallel_fraction > best_parallel_fraction:
-                best_parallel_fraction = parallel_fraction
-                best_offset = offset_p25
-                found_sibling = True
-            continue  # Keep looking for better match
+            # Names positively match -> same road; accept regardless of class.
+            pass
+        else:
+            # Name evidence absent (None) -> require positive geometric
+            # same-road evidence instead of class tolerance alone.
+            # 1. Exact class match (both present and identical). NaN/None/empty
+            #    classes are MISSING data, not evidence — reject. (NaN is a
+            #    truthy float and str(nan)=="nan", so naive comparison would
+            #    treat two missing classes as an exact match.)
+            cand_class_norm = _normalize_road_class(candidate_class)
+            if seg_class_norm is None or cand_class_norm is None:
+                continue
+            if seg_class_norm != cand_class_norm:
+                continue
+            # 2. High parallel fraction (parallel along most of the stretch).
+            if parallel_fraction < unnamed_min_parallel_fraction:
+                continue
+            # 3. Comparable extent (twin spans roughly the same stretch).
+            candidate_length = survivor_geoms[i].length
+            longer = max(segment_length, candidate_length)
+            if longer <= 0.0:
+                continue
+            length_ratio = min(segment_length, candidate_length) / longer
+            if length_ratio < unnamed_min_length_ratio:
+                continue
 
-        # Names are inconclusive (None) - fall back to class check
-        # If classes explicitly conflict, skip
-        if not class_match:
-            continue
-
-        # Need at least one positive signal (compatible classes when names inconclusive)
-        # If names are inconclusive (None) AND classes are missing, skip
-        if name_match is None and (not segment_class or not candidate_class):
-            continue
-
-        # Found a valid sibling - track if it's the best
+        # Valid sibling - track the best by parallel_fraction.
         if parallel_fraction > best_parallel_fraction:
             best_parallel_fraction = parallel_fraction
             best_offset = offset_p25
