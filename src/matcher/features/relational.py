@@ -643,6 +643,26 @@ def get_expected_half_width(road_class: str | None) -> float:
     return EXPECTED_HALF_WIDTH_BY_CLASS_M.get(road_class.lower(), DEFAULT_EXPECTED_HALF_WIDTH_M)
 
 
+def _normalize_road_class(road_class: str | None) -> str | None:
+    """Normalize a road class value for exact-match comparison.
+
+    Treats missing data as missing: pandas/NumPy NaN (a float, and truthy!),
+    None, non-strings, and empty/whitespace strings all normalize to None.
+    This matters because `str(np.nan) == "nan"` would otherwise make two
+    MISSING classes look like an exact class match.
+
+    Args:
+        road_class: Raw class value (may be str, None, NaN, or other types)
+
+    Returns:
+        Lowercased stripped class string, or None if missing/invalid.
+    """
+    if not isinstance(road_class, str):
+        return None
+    normalized = road_class.strip().lower()
+    return normalized if normalized else None
+
+
 def find_parallel_sibling(
     segment: LineString,
     segment_id: str,
@@ -776,6 +796,7 @@ def find_parallel_sibling(
     best_parallel_fraction = 0.0
     best_offset = float("inf")
     found_sibling = False
+    seg_class_norm = _normalize_road_class(segment_class)
 
     for i, (candidate_class, parallel_fraction, name_match) in enumerate(survivor_info):
         offset_p25 = float(offsets_p25[i])
@@ -788,10 +809,14 @@ def find_parallel_sibling(
         else:
             # Name evidence absent (None) -> require positive geometric
             # same-road evidence instead of class tolerance alone.
-            # 1. Exact class match (both present and identical).
-            if not segment_class or not candidate_class:
+            # 1. Exact class match (both present and identical). NaN/None/empty
+            #    classes are MISSING data, not evidence — reject. (NaN is a
+            #    truthy float and str(nan)=="nan", so naive comparison would
+            #    treat two missing classes as an exact match.)
+            cand_class_norm = _normalize_road_class(candidate_class)
+            if seg_class_norm is None or cand_class_norm is None:
                 continue
-            if str(segment_class).strip().lower() != str(candidate_class).strip().lower():
+            if seg_class_norm != cand_class_norm:
                 continue
             # 2. High parallel fraction (parallel along most of the stretch).
             if parallel_fraction < unnamed_min_parallel_fraction:

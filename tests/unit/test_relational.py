@@ -696,6 +696,69 @@ class TestParallelSiblingDetection:
         )
         assert has_sibling is False
 
+    def test_find_parallel_sibling_unnamed_nan_classes_no_fire(self):
+        """Unnamed segments with NaN classes must NOT count as an exact class match.
+
+        pipeline.py builds class lists from GeoDataFrame columns, so missing
+        rows yield float NaN — which is truthy (`bool(nan) is True`) and
+        stringifies to "nan", so a naive comparison would treat two MISSING
+        classes as identical and grant positive same-road evidence from absent
+        data. Missing data is not evidence: with no names AND no classes, even
+        perfect geometric twins must not fire.
+        """
+        import numpy as np
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        # Otherwise-perfect geometric twins: same span, parallel, 15m apart
+        road_a = LineString([(0, 0), (500, 0)])
+        road_b = LineString([(0, 15), (500, 15)])
+
+        geometries = [road_a, road_b]
+        spatial_index = STRtree(geometries)
+        segment_data = [("a", None, np.nan), ("b", None, np.nan)]
+
+        has_sibling, _dist, _pf = find_parallel_sibling(
+            segment=road_a,
+            segment_id="a",
+            segment_name=None,
+            segment_class=np.nan,
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False
+
+    def test_find_parallel_sibling_unnamed_valid_identical_classes_fires(self):
+        """Unnamed twins with valid identical class strings remain eligible.
+
+        Control for the NaN-class rejection: same geometry as the NaN test but
+        with real identical class strings, satisfying all three unnamed-path
+        gates (exact class, high parallel fraction, comparable extent).
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        road_a = LineString([(0, 0), (500, 0)])
+        road_b = LineString([(0, 15), (500, 15)])
+
+        geometries = [road_a, road_b]
+        spatial_index = STRtree(geometries)
+        segment_data = [("a", None, "motorway"), ("b", None, "motorway")]
+
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=road_a,
+            segment_id="a",
+            segment_name=None,
+            segment_class="motorway",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is True
+        assert dist == pytest.approx(15.0, abs=1.0)
+        assert parallel_fraction > 0.8
+
     def test_precompute_parallel_siblings(self):
         """Batch precomputation of sibling info for dataset."""
         from matcher.features.relational import precompute_parallel_siblings
