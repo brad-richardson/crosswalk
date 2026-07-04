@@ -51,6 +51,12 @@ OPTION_LINE_WIDTH = 4
 GROUP_LINE_WIDTH = 3
 CONTEXT_WIDTH = 1
 
+# Stitch groups can span whole chains (1-2km) now that group geometry is never
+# clipped to a 500m box. The generic 512px render cap would squash a long chain
+# to ~4m/px; allow a larger canvas so large groups stay legible. Small groups
+# are unaffected (size scales with extent, clamped to this max).
+STITCH_MAX_IMAGE_SIZE = 1280
+
 
 def _iter_lines(geojson_map: dict) -> list[tuple[str, LineString]]:
     """Convert a {id: geojson} map to a list of (id, LineString)."""
@@ -125,7 +131,7 @@ def render_group_overview(group: dict, size: tuple[int, int] | None = None) -> I
     if bbox is None:
         return Image.new("RGB", (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE), BACKGROUND_COLOR)
     if size is None:
-        size = _calculate_size_from_bbox(bbox)
+        size = _calculate_size_from_bbox(bbox, max_size=STITCH_MAX_IMAGE_SIZE)
 
     ref_labels, target_labels = _seg_labels(group)
     img, draw = _base_image(size)
@@ -168,7 +174,7 @@ def render_option(group: dict, option: dict, size: tuple[int, int] | None = None
     if bbox is None:
         return Image.new("RGB", (MIN_IMAGE_SIZE, MIN_IMAGE_SIZE), BACKGROUND_COLOR)
     if size is None:
-        size = _calculate_size_from_bbox(bbox)
+        size = _calculate_size_from_bbox(bbox, max_size=STITCH_MAX_IMAGE_SIZE)
 
     active_refs = set(option.get("active_refs", []))
     active_targets = set(option.get("active_targets", []))
@@ -276,6 +282,11 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
         "match_type": group.get("match_type"),
         "n_ref_segments": len(ref_ids),
         "n_target_segments": len(target_ids),
+        # Audit: full vs rendered edge counts. Post-fix these are always equal
+        # (group data is never clipped); a divergence flags a clipping regression.
+        "n_edges_full": group.get("n_edges_full", len(group.get("edges", []))),
+        "n_edges_rendered": group.get("n_edges_rendered", len(group.get("edges", []))),
+        "context_clipped": bool(group.get("context_clipped", False)),
         "optimizer_letter": options_ctx.get("optimizer_letter"),
         "segments": {
             "reference": [
