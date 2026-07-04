@@ -225,6 +225,12 @@ class TestBoundsOnRealData:
         "to_degree_ref",
         "from_degree_target",
         "to_degree_target",
+        # Target-native topology (NaN when full-segment endpoint-cluster topology
+        # is unavailable, e.g. pairs whose source could not be re-backfilled)
+        "from_degree_target_native",
+        "to_degree_target_native",
+        "is_dead_end_target_native",
+        "is_intersection_target_native",
         "degree_match_score",
         "degree_signature_similarity",
         "is_dead_end_ref",
