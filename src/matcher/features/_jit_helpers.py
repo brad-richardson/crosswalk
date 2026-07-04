@@ -122,6 +122,28 @@ def collinear_gap_ratio_numba(
 
 
 @njit(cache=True)
+def _dedupe_coords_numba(coords: np.ndarray) -> np.ndarray:
+    """Drop consecutive duplicate vertices (within 1e-9).
+
+    A zero-length segment makes compute_heading_numba return arctan2(0,0)=0°,
+    fabricating a phantom 0°-heading segment that corrupts turn-angle and
+    heading-consistency statistics. Deduping (rather than skipping in the
+    caller) preserves genuine turns at a duplicated vertex.
+    """
+    n = coords.shape[0]
+    if n < 2:
+        return coords
+    out = np.empty_like(coords)
+    out[0] = coords[0]
+    m = 1
+    for i in range(1, n):
+        if abs(coords[i, 0] - out[m - 1, 0]) > 1e-9 or abs(coords[i, 1] - out[m - 1, 1]) > 1e-9:
+            out[m] = coords[i]
+            m += 1
+    return out[:m]
+
+
+@njit(cache=True)
 def compute_shape_complexity_numba(
     coords: np.ndarray,
     angle_threshold: float,
@@ -135,6 +157,7 @@ def compute_shape_complexity_numba(
     Returns:
         Number of significant turns
     """
+    coords = _dedupe_coords_numba(coords)
     n_points = coords.shape[0]
     if n_points < 3:
         return 0
@@ -294,6 +317,7 @@ def compute_heading_consistency_numba(
     Returns:
         Consistency score (0-1) where 1 = perfectly straight
     """
+    points = _dedupe_coords_numba(points)
     n_points = points.shape[0]
     if n_points < 3:
         return 1.0
@@ -340,6 +364,7 @@ def compute_angle_histogram_numba(coords: np.ndarray, n_bins: int = 8) -> np.nda
         Normalized histogram array of shape (n_bins,), sums to 1.0
         Returns zeros if fewer than 3 points.
     """
+    coords = _dedupe_coords_numba(coords)
     n_points = coords.shape[0]
     if n_points < 3:
         return np.zeros(n_bins, dtype=np.float64)

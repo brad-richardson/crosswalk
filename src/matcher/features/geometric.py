@@ -361,9 +361,12 @@ def compute_geometric_features_batch(
     # 4. Buffer IoU 15m - vectorized
     iou_15m = compute_buffer_iou_batch(bufs_a_15m, bufs_b_15m)
 
-    # 5. Buffer IoU 5m with short-circuit: only process pairs where iou_15m > 0.3
+    # 5. Buffer IoU 5m with an exact short-circuit: the 5m buffers intersect
+    # iff the lines come within 10m of each other, so dwithin (cheap, GEOS
+    # short-circuits) skips only pairs whose true iou_5m is 0. Gating on
+    # iou_15m > 0.3 (the previous heuristic) zeroed legitimate small overlaps.
     iou_5m = np.zeros(N, dtype=np.float64)
-    qualifying_mask = iou_15m > 0.3
+    qualifying_mask = shapely_mod.dwithin(lines_a, lines_b, 10.0)
     if qualifying_mask.any():
         bufs_a_5m_q = shapely_mod.buffer(lines_a[qualifying_mask], 5.0, quad_segs=16)
         bufs_b_5m_q = shapely_mod.buffer(lines_b[qualifying_mask], 5.0, quad_segs=16)
@@ -638,7 +641,9 @@ def compute_vertex_density(
         coords: Pre-extracted coordinates (optional, avoids redundant extraction)
 
     Returns:
-        Vertices per meter (>= 0.0)
+        Vertices per meter (>= 0.0), or NaN when the line is shorter than 1m
+        (density on sub-meter alignment slivers is ~1/length noise that can
+        reach 1e7 and drowns the feature's real distribution)
     """
     if line is None or line.is_empty:
         return 0.0
@@ -646,6 +651,8 @@ def compute_vertex_density(
     line_length = line.length
     if line_length <= 0:
         return 0.0
+    if line_length < 1.0:
+        return float("nan")
 
     # Use pre-extracted coords if provided, otherwise extract
     if coords is not None:

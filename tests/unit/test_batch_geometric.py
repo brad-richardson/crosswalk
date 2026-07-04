@@ -142,6 +142,22 @@ class TestBatchGeometricEdgeCases:
         assert result.buffer_iou_15m[0] == pytest.approx(0.0, abs=1e-6)
         assert result.buffer_iou_5m[0] == pytest.approx(0.0, abs=1e-6)
 
+    def test_5m_iou_computed_when_15m_iou_low(self):
+        """iou_5m must be exact even when iou_15m is small.
+
+        Regression: the old short-circuit gated on iou_15m > 0.3, hard-zeroing
+        legitimate small 5m overlaps (e.g. perpendicular crossings) for ~9% of
+        real pairs. The gate must only skip pairs whose true iou_5m is 0
+        (lines farther than 10m apart everywhere).
+        """
+        # Perpendicular crossing: iou_15m ~ 0.14 (below the old 0.3 gate)
+        # but the 5m buffers genuinely overlap around the crossing point.
+        arr_a = np.array([IDENTICAL_LINE], dtype=object)
+        arr_b = np.array([PERPENDICULAR_LINE], dtype=object)
+        result = compute_geometric_features_batch(arr_a, arr_b)
+        assert result.buffer_iou_15m[0] < 0.3
+        assert result.buffer_iou_5m[0] > 0.01
+
     def test_result_shapes(self):
         """All result arrays should have the correct shape."""
         N = 5
