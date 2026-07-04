@@ -1716,6 +1716,64 @@ class TestSemanticAuditRegressions:
         # Non-leading 'St' is still Street
         assert _normalize_street_name("Main St") == "main street"
 
+    def test_normalize_pruned_abbreviations_preserve_behavior(self):
+        """Pruning dot-suffixed abbreviation keys must not change any output.
+
+        `_normalize_street_name` strips "." before the abbreviation-expansion
+        loop, so keys like " st. " can never fire. The hot loop was optimized to
+        iterate only over `_EXPANDABLE_ABBREVIATIONS` (dot-keys removed). This
+        test pins that the pruning is behavior-preserving by re-deriving the
+        normalized value with the FULL abbreviation dict and asserting equality
+        over a representative corpus (including dotted, directional, adjacent,
+        hyphenated, numeric, and non-Latin names).
+        """
+        import unicodedata
+
+        from matcher.features.semantic import (
+            STREET_ABBREVIATIONS,
+            _normalize_street_name,
+        )
+
+        def reference_full_dict(name):
+            """Original implementation using the full (unpruned) abbrev dict."""
+            if not name or not isinstance(name, str):
+                return ""
+            name = unicodedata.normalize("NFKC", name)
+            name = name.lower().strip()
+            name = name.replace(".", "").replace(",", "").replace("-", " ")
+            name = f" {name} "
+            if name.startswith(" st ") and len(name.split()) >= 2:
+                name = " saint " + name[4:]
+            for abbr, full in STREET_ABBREVIATIONS.items():
+                name = name.replace(abbr, full)
+            return " ".join(name.split())
+
+        corpus = [
+            "St Louis Ave",
+            "St. Charles Ave",
+            "Main St",
+            "Main St N",
+            "N Main St",
+            "Mt Vernon Rd",
+            "SR 9 N",
+            "CR 21 S",
+            "NE Blvd",
+            "ne nw se sw",
+            "Karl-Marx-Allee",
+            "A.B.C. Dr.",
+            "Boylston Street",
+            "BOYLSTON STREET",
+            "5th Ave",
+            "1234",
+            "東八道路",
+            "نهج جرجيس",
+            "",
+            "   ",
+            "st st st",
+        ]
+        for name in corpus:
+            assert _normalize_street_name(name) == reference_full_dict(name), name
+
     def test_ordinal_numbers_are_not_route_numbers(self):
         """'5th Avenue' vs '5th Street' must not score numeric_match = 1.0."""
         from matcher.features.semantic import (
