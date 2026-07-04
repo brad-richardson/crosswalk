@@ -36,6 +36,13 @@ class MatchResult:
     confidence: float
     score_breakdown: dict[str, float]
     features: dict[str, float]
+    # Positional indices of the scored edge into the reference/target
+    # GeoDataFrames. These disambiguate rows that share an id (e.g. an Overture
+    # segment split into multiple edges carrying one GERS id) so downstream
+    # geometry lookups resolve the exact scored geometry rather than collapsing
+    # to a single id-keyed row. Optional: None for results built without them.
+    ref_idx: int | None = None
+    target_idx: int | None = None
     # Linear reference fields from alignment (optional)
     # These indicate where on each geometry the match alignment starts/ends
     gers_start_frac: float | None = None

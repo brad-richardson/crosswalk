@@ -262,9 +262,23 @@ def _export_groups_sidecar(
             }
         )
 
-    # Build geometry lookups (column must exist; caller passes ref/target_id_column)
+    # Build id-keyed geometry lookups as a FALLBACK only. dict(zip(...)) silently
+    # keeps the last row when an id repeats, so it cannot distinguish reference
+    # rows that share a GERS id (an Overture segment split into multiple edges).
+    # The primary path below resolves geometry by the scored positional index
+    # (MatchResult.ref_idx / target_idx) so co-id edges keep their real geometry.
     ref_geom_lookup = dict(zip(reference[ref_id_column], reference.geometry))
     tgt_geom_lookup = dict(zip(target[target_id_column], target.geometry))
+    ref_geoms_by_pos = reference.geometry.to_numpy()
+    tgt_geoms_by_pos = target.geometry.to_numpy()
+
+    def _geom_at_pos(geoms_by_pos, idx):
+        """Return the geometry at positional index ``idx``, or None if invalid."""
+        if idx is None:
+            return None
+        if 0 <= idx < len(geoms_by_pos):
+            return geoms_by_pos[idx]
+        return None
 
     # Build name/class lookups for stitching review display
     from ..config import CLASS_COLUMN, NAMES_COLUMN
@@ -300,6 +314,25 @@ def _export_groups_sidecar(
             continue
 
         group_id = compute_group_id(ref_ids, target_ids)
+
+        # Resolve each edge's geometry by its scored positional index so that
+        # reference/target rows sharing an id don't collapse to one geometry.
+        # First edge wins per id (the ref_geometries schema is id-keyed); the
+        # index still comes from an edge actually scored in THIS group, unlike
+        # the global last-row id lookup.
+        ref_geom_by_id: dict[str, object] = {}
+        tgt_geom_by_id: dict[str, object] = {}
+        for r in component:
+            rid = str(r.ref_id)
+            if rid not in ref_geom_by_id:
+                geom = _geom_at_pos(ref_geoms_by_pos, getattr(r, "ref_idx", None))
+                if geom is not None:
+                    ref_geom_by_id[rid] = geom
+            tid = str(r.target_id)
+            if tid not in tgt_geom_by_id:
+                geom = _geom_at_pos(tgt_geoms_by_pos, getattr(r, "target_idx", None))
+                if geom is not None:
+                    tgt_geom_by_id[tid] = geom
 
         # Classify match type
         if len(ref_ids) == 1:
@@ -343,9 +376,11 @@ def _export_groups_sidecar(
 
         ref_geometries = {}
         for rid in sorted(str(r) for r in ref_ids):
-            geom = ref_geom_lookup.get(rid) or ref_geom_lookup.get(
-                int(rid) if rid.isdigit() else rid
-            )
+            geom = ref_geom_by_id.get(rid)
+            if geom is None:
+                geom = ref_geom_lookup.get(rid) or ref_geom_lookup.get(
+                    int(rid) if rid.isdigit() else rid
+                )
             if geom is not None:
                 gj = _geom_to_geojson(geom)
                 if gj:
@@ -353,9 +388,11 @@ def _export_groups_sidecar(
 
         target_geometries = {}
         for tid in sorted(str(t) for t in target_ids):
-            geom = tgt_geom_lookup.get(tid) or tgt_geom_lookup.get(
-                int(tid) if tid.isdigit() else tid
-            )
+            geom = tgt_geom_by_id.get(tid)
+            if geom is None:
+                geom = tgt_geom_lookup.get(tid) or tgt_geom_lookup.get(
+                    int(tid) if tid.isdigit() else tid
+                )
             if geom is not None:
                 gj = _geom_to_geojson(geom)
                 if gj:
