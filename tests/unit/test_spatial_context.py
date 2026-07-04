@@ -2364,3 +2364,119 @@ class TestTargetDegreeSemanticsUnification:
         assert new_topo["is_intersection"] is True
         assert new_topo["is_intersection"] == ref_topo["is_intersection"]
         assert new_topo["is_dead_end"] == ref_topo["is_dead_end"]
+
+    def test_reversed_alignment_with_projected_overture_degrees(self):
+        """Combined test: projected-Overture target degrees + is_reversed swap.
+
+        End-to-end through the real pipeline (prepare_worker_data ->
+        _compute_feature_chunk), so it exercises the actual interaction between
+        the degree-semantics unification (this PR) and the orientation fix
+        (is_reversed swap from PR #251) in compute.py.
+
+        Geometry: ref segment H runs from a 4-way crossroads center (cC,
+        degree 4) to a dead end (cE, degree 1) -> asymmetric (from=4, to=1).
+        The target copy tH is digitized in the REVERSE direction (dead end
+        first). The projected-Overture derivation reads degrees in the
+        target's own coordinate order (1 at coord[0], 4 at coord[-1]); the
+        downstream is_reversed swap must then re-pair them physically so
+        from_degree_target matches the degree at the ref's FROM end (4).
+        """
+        from matcher.blocking.spatial_index import CandidatePair
+        from matcher.features.pipeline import prepare_worker_data
+        from matcher.matching.ml import _compute_feature_chunk, _init_worker
+
+        # Ref: crossroads at (0, 0) with four arms; H is the eastbound arm
+        # ending at a dead end cE. cC is referenced by all four arms -> degree 4.
+        ref_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["H", "N", "S", "W"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),  # center -> dead end
+                    LineString([(0, 0), (0, 100)]),
+                    LineString([(0, 0), (0, -100)]),
+                    LineString([(0, 0), (-100, 0)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cE"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cN"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cS"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cW"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # Target: same physical roads; tH digitized REVERSED (dead end first).
+        # The arms are included so the candidates-only ref connector graph
+        # sees all four segments at cC (degree 4).
+        target_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["tH", "tN", "tS", "tW"],
+                "geometry": [
+                    LineString([(100, 0), (0, 0)]),  # REVERSED vs ref H
+                    LineString([(0, 0), (0, 100)]),
+                    LineString([(0, 0), (0, -100)]),
+                    LineString([(0, 0), (-100, 0)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        candidates = [
+            CandidatePair(
+                ref_id=r,
+                ref_idx=ri,
+                target_id=t,
+                target_idx=ti,
+                distance_estimate=0.0,
+                heading_diff=0.0,
+            )
+            for r, ri, t, ti in [
+                ("H", 0, "tH", 0),
+                ("N", 1, "tN", 1),
+                ("S", 2, "tS", 2),
+                ("W", 3, "tW", 3),
+            ]
+        ]
+
+        result = prepare_worker_data(
+            candidates=candidates,
+            reference=ref_gdf,
+            target=target_gdf,
+            n_jobs=1,
+        )
+
+        # Sanity: the pipeline's alignment must flag tH as reversed.
+        h_alignment = result.worker_data["alignments"].get((0, 0))
+        assert h_alignment is not None and h_alignment.is_reversed is True
+        # Sanity: projected Overture connectors reached the target segment,
+        # so the topology block takes the new projected-Overture branch.
+        assert result.worker_data["target_overture_connectors"].get("tH")
+
+        _init_worker(result.worker_data)
+        features_list, _errors = _compute_feature_chunk([(0, 0)])
+        feats = features_list[0]
+        assert feats is not None and not feats.get("_error")
+
+        # Ref: from end at the crossroads center (degree 4), to end dead (1).
+        assert feats["from_degree_ref"] == 4
+        assert feats["to_degree_ref"] == 1
+        # Target degrees must pair with the SAME physical ends as ref, i.e.
+        # the raw coordinate-order derivation (1, 4) swapped by is_reversed.
+        assert feats["from_degree_target"] == feats["from_degree_ref"] == 4
+        assert feats["to_degree_target"] == feats["to_degree_ref"] == 1
+        # Derived agreement flags follow.
+        assert feats["intersection_match"] == 1.0
+        assert feats["dead_end_match"] == 1.0
