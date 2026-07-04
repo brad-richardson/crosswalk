@@ -182,6 +182,19 @@ PARALLEL_SIBLING_MIN_OFFSET_M = 5.0  # Minimum lateral offset for sibling
 PARALLEL_SIBLING_MAX_OFFSET_M = 30.0  # Maximum lateral offset for sibling
 PARALLEL_SIBLING_MIN_ALIGNMENT = 0.9  # Minimum parallel alignment score (0-1)
 
+# Positive same-road evidence thresholds for the *unnamed* sibling path.
+# A "sibling" means "same road split into carriageways", not "any parallel
+# neighbor". When neither segment is named we cannot rely on name evidence, so
+# we demand positive geometric evidence that the two lines are the same road
+# rather than accepting any parallel same-class neighbor in the offset band:
+#   1. Exact road-class match (not just class tolerance).
+#   2. High parallel fraction: a real twin runs parallel along most of the
+#      shared stretch, whereas incidental neighbors are only briefly parallel.
+#   3. Comparable extent: a twin spans roughly the same stretch, so the two
+#      segment lengths must be similar.
+PARALLEL_SIBLING_UNNAMED_MIN_PARALLEL_FRACTION = 0.6  # Fraction parallel (0-1)
+PARALLEL_SIBLING_UNNAMED_MIN_LENGTH_RATIO = 0.5  # min(len)/max(len) extent match
+
 # Expected half-width by road class (meters)
 # Derived from OSM wiki/taginfo typical paved widths
 # Used to normalize lateral offset by road type

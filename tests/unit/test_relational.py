@@ -596,6 +596,106 @@ class TestParallelSiblingDetection:
         )
         assert has_sibling is False  # Not parallel enough
 
+    def test_find_parallel_sibling_named_twin_still_fires(self):
+        """A genuine dual carriageway (same name, ~15m offset, same span) fires.
+
+        This is the true-positive the gate must preserve: two carriageways of the
+        same named road, running parallel over the same stretch.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        eastbound = LineString([(0, 0), (500, 0)])
+        westbound = LineString([(0, 15), (500, 15)])  # 15m offset, same 500m span
+
+        geometries = [eastbound, westbound]
+        spatial_index = STRtree(geometries)
+        segment_data = [
+            ("eb", "State Route 9", "primary"),
+            ("wb", "State Route 9", "primary"),
+        ]
+
+        has_sibling, dist, parallel_fraction = find_parallel_sibling(
+            segment=eastbound,
+            segment_id="eb",
+            segment_name="State Route 9",
+            segment_class="primary",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is True
+        assert dist == pytest.approx(15.0, abs=1.0)
+        assert parallel_fraction > 0.8
+
+    def test_find_parallel_sibling_unnamed_distinct_roads_no_fire(self):
+        """Two distinct UNNAMED parallel roads must NOT be flagged as siblings.
+
+        Both unnamed and the same class, ~20m apart and parallel, but the
+        neighbor is much shorter (120m vs 500m). The OLD code fired on this
+        (class tolerance + partial parallelism), which is exactly the
+        over-firing the audit flagged. A real carriageway twin spans roughly the
+        same stretch, so the comparable-extent gate rejects this.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        long_road = LineString([(0, 0), (500, 0)])
+        # Distinct short road 20m away, only 120m long (24% of the long road).
+        short_road = LineString([(0, 20), (120, 20)])
+
+        geometries = [long_road, short_road]
+        spatial_index = STRtree(geometries)
+        segment_data = [
+            ("long", None, "residential"),
+            ("short", None, "residential"),
+        ]
+
+        has_sibling, _dist, _pf = find_parallel_sibling(
+            segment=long_road,
+            segment_id="long",
+            segment_name=None,
+            segment_class="residential",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False  # Distinct road: extent not comparable
+
+    def test_find_parallel_sibling_unnamed_vs_named_distinct_no_fire(self):
+        """An unnamed query with a named DISTINCT parallel neighbor must not fire.
+
+        The query is unnamed so names_compatible is None ("no opinion"). The two
+        roads are a full-span parallel pair 20m apart with comparable extent, but
+        their classes differ by one tier (residential vs unclassified). The OLD
+        class-tolerance gate (max_tier_diff=1) accepted a one-tier difference and
+        FIRED here; the new exact-class requirement on the unnamed path rejects
+        it, since without name evidence a class mismatch is not the same road.
+        """
+        from shapely import STRtree
+
+        from matcher.features.relational import find_parallel_sibling
+
+        query = LineString([(0, 0), (500, 0)])
+        neighbor = LineString([(0, 20), (500, 20)])  # parallel, same span, 20m
+
+        geometries = [query, neighbor]
+        spatial_index = STRtree(geometries)
+        segment_data = [
+            ("q", None, "residential"),
+            ("n", "Elm Street", "unclassified"),  # one tier from residential
+        ]
+
+        has_sibling, _dist, _pf = find_parallel_sibling(
+            segment=query,
+            segment_id="q",
+            segment_name=None,
+            segment_class="residential",
+            spatial_index=spatial_index,
+            segment_data=segment_data,
+        )
+        assert has_sibling is False
+
     def test_precompute_parallel_siblings(self):
         """Batch precomputation of sibling info for dataset."""
         from matcher.features.relational import precompute_parallel_siblings

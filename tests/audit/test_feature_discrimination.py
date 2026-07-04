@@ -145,15 +145,46 @@ class TestDegenerateValueDetection:
         )
 
     def test_parallel_sibling_detection_fires(self, labeled_features):
-        """has_parallel_sibling_ref should not be all 0.0."""
+        """has_parallel_sibling_ref must stay alive but not fire on everything.
+
+        A "sibling" means a split carriageway (same road, opposing halves). The
+        same-road-evidence gate (see find_parallel_sibling) requires positive
+        evidence before firing on the unnamed path, so the detector no longer
+        flags any parallel same-class neighbor in the offset band.
+
+        - Lower bound: the feature must fire somewhere, so a gate regression
+          can't silently kill it.
+        - Upper bound: guard against firing on (nearly) everything.
+
+        IMPORTANT — fixture bias and stale features:
+        * This labeled corpus over-represents parallel-road disambiguation cases
+          (divided streets, one-way pairs) — exactly the pairs humans were asked
+          to label — so its fire rate is far higher than the road-network
+          *population*, where split carriageways are a minority. The tight
+          population-level fire rate (and the drop from the pre-gate ~64%) is
+          validated empirically via `matcher backfill` and reported in the PR,
+          not asserted on this biased fixture.
+        * The stored features here may predate the gate (labels are not
+          re-backfilled in the same PR), so the upper bound below is a coarse
+          "not firing on everything" guard that holds both before and after a
+          re-backfill; it is deliberately not the population target.
+        """
         if "has_parallel_sibling_ref" not in labeled_features.columns:
             pytest.skip("has_parallel_sibling_ref not in data")
         series = labeled_features["has_parallel_sibling_ref"].dropna()
-        nonzero = (series > 0).sum()
-        # Expect at least some sibling detection
-        assert nonzero > 0, (
+        if len(series) == 0:
+            pytest.skip("has_parallel_sibling_ref is all NaN (search not run)")
+        # Lower bound: the feature must not silently die.
+        assert (series > 0).any(), (
             f"has_parallel_sibling_ref is all 0.0 across {len(series)} samples. "
             f"Sibling detection may be disabled or broken."
+        )
+        # Upper bound: coarse guard against regressing to firing on ~everything.
+        fire_rate = (series > 0).mean()
+        assert fire_rate < 0.85, (
+            f"has_parallel_sibling_ref fires on {fire_rate:.1%} of labeled pairs. "
+            f"Even on this parallel-road-heavy fixture that is too high — the "
+            f"detector is likely back to flagging any parallel neighbor."
         )
 
     def test_collinear_gap_not_all_one(self, labeled_features):
@@ -229,7 +260,11 @@ class TestErrorDefaultPercentage:
             "shape_complexity_target",
             "shape_complexity_delta",  # Many straight roads
             "likely_representation_mismatch",  # Most pairs aren't mismatched
-            "has_parallel_sibling_ref",  # Most segments don't have siblings
+            # Split carriageways are a minority of segments, so most pairs
+            # correctly have no sibling (0.0). The same-road-evidence gate keeps
+            # the fire rate low; the fire-rate bounds are enforced by
+            # test_parallel_sibling_detection_fires.
+            "has_parallel_sibling_ref",
             "parallel_fraction_ref",  # Related to sibling detection
             # Context-dependent features: require full graph/spatial context
             # that backfill doesn't have, so they stay at defaults
