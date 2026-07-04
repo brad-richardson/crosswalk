@@ -12,10 +12,15 @@ next to ``SLIVER_SPAN_THRESHOLD`` / ``SLIVER_ABS_OVERLAP_M``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from shapely.geometry import shape
 
 from ..config import is_sliver_edge
 from ..utils.geometry import geometry_length_meters
+
+if TYPE_CHECKING:
+    from .types import MatchResult
 
 
 def edge_span_fracs(edge: dict) -> tuple[float, float]:
@@ -105,3 +110,65 @@ def annotate_group_sliver_flags(group: dict) -> tuple[list[dict], int]:
         sliver_count += int(flag)
         out.append(ce)
     return out, sliver_count
+
+
+def sliver_edges_for_match_results(
+    results: list[MatchResult],
+    ref_geoms: dict[Any, Any],
+    target_geoms: dict[Any, Any],
+    metric: bool = True,
+) -> set[tuple[Any, Any]]:
+    """Classify MatchResult candidate edges with the hybrid sliver rule.
+
+    Used by the optimizer's component graph (and the groups-sidecar export) so
+    grouping agrees with the UI/eval definition of a junction sliver.
+
+    Args:
+        results: Candidate MatchResults (alignment fracs read from the result).
+        ref_geoms: id -> shapely geometry lookup for reference segments.
+        target_geoms: id -> shapely geometry lookup for target segments.
+        metric: True when the geometries are in a projected CRS (``.length`` is
+            meters). False for WGS84 lon/lat input, in which case lengths are
+            measured via :func:`geometry_length_meters`.
+
+    Returns:
+        Set of ``(ref_id, target_id)`` pairs classified as junction slivers.
+        Results with missing fracs or missing geometries are never slivers
+        (the config-level defaults apply).
+    """
+
+    def _length(geom) -> float | None:
+        if geom is None or getattr(geom, "is_empty", True):
+            return None
+        return geom.length if metric else geometry_length_meters(geom)
+
+    # Deduplicate to the highest-confidence result per pair, mirroring the
+    # component builder's duplicate handling, so classification is based on the
+    # edge instance the optimizer would actually keep.
+    best_by_pair: dict[tuple[Any, Any], MatchResult] = {}
+    for r in results:
+        key = (r.ref_id, r.target_id)
+        if key not in best_by_pair or r.confidence > best_by_pair[key].confidence:
+            best_by_pair[key] = r
+
+    ref_len_cache: dict[Any, float | None] = {}
+    tgt_len_cache: dict[Any, float | None] = {}
+    slivers: set[tuple[Any, Any]] = set()
+
+    for key, r in best_by_pair.items():
+        ref_span = None
+        if r.gers_start_frac is not None and r.gers_end_frac is not None:
+            ref_span = abs(r.gers_end_frac - r.gers_start_frac)
+        tgt_span = None
+        if r.local_start_frac is not None and r.local_end_frac is not None:
+            tgt_span = abs(r.local_end_frac - r.local_start_frac)
+
+        if r.ref_id not in ref_len_cache:
+            ref_len_cache[r.ref_id] = _length(ref_geoms.get(r.ref_id))
+        if r.target_id not in tgt_len_cache:
+            tgt_len_cache[r.target_id] = _length(target_geoms.get(r.target_id))
+
+        if is_sliver_edge(ref_span, tgt_span, ref_len_cache[r.ref_id], tgt_len_cache[r.target_id]):
+            slivers.add(key)
+
+    return slivers

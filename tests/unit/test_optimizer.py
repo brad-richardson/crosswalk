@@ -494,3 +494,140 @@ class TestOptimizeMatchesWithGrouping:
         t2_match = [r for r in optimized if r.target_id == "t2"][0]
         assert t2_match.gers_start_frac == 0.5
         assert t2_match.gers_end_frac == 1.0
+
+
+class TestSliverFreeComponentGraph:
+    """Junction slivers must not glue independent components together.
+
+    Sliver classification uses the shared hybrid rule from ``matcher.config``
+    (fraction < 0.10 AND absolute overlap < 5 m). Segments here are 100 m long,
+    so a 0.01 alignment span = 1 m of overlap: comfortably a sliver.
+    """
+
+    def _make_gdf(self, id_col, geom_dict):
+        import geopandas as gpd
+
+        return gpd.GeoDataFrame(
+            {id_col: list(geom_dict.keys()), "geometry": list(geom_dict.values())},
+            crs="EPSG:32610",
+        )
+
+    def _full_edge(self, rid, tid, conf):
+        return MatchResult(
+            rid,
+            tid,
+            MatchDecision.MATCH,
+            conf,
+            {},
+            {},
+            gers_start_frac=0.0,
+            gers_end_frac=1.0,
+            local_start_frac=0.0,
+            local_end_frac=1.0,
+        )
+
+    def _sliver_edge(self, rid, tid, conf=0.3):
+        # ~1 m of a 100 m ref, ~0.5 m of a 100 m target: sliver under the
+        # hybrid rule (max span 0.01 < 0.10 AND max abs overlap 1 m < 5 m).
+        return MatchResult(
+            rid,
+            tid,
+            MatchDecision.REVIEW,
+            conf,
+            {},
+            {},
+            gers_start_frac=0.99,
+            gers_end_frac=1.0,
+            local_start_frac=0.0,
+            local_end_frac=0.005,
+        )
+
+    def _two_island_fixture(self):
+        """Two independent 1:N islands joined ONLY by a sliver edge r1->t2a."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (100, 0)]),
+            "r2": LineString([(200, 0), (300, 0)]),
+        }
+        target_geoms = {
+            "t1a": LineString([(0, 5), (50, 5)]),
+            "t1b": LineString([(50, 5), (100, 5)]),
+            "t2a": LineString([(200, 5), (250, 5)]),
+            "t2b": LineString([(250, 5), (300, 5)]),
+        }
+        results = [
+            self._full_edge("r1", "t1a", 0.9),
+            self._full_edge("r1", "t1b", 0.85),
+            self._full_edge("r2", "t2a", 0.88),
+            self._full_edge("r2", "t2b", 0.8),
+            self._sliver_edge("r1", "t2a", 0.6),  # the junction kiss
+        ]
+        return (
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            results,
+        )
+
+    def test_sliver_does_not_glue_components(self):
+        """Two islands joined only by a sliver -> two groups, not one."""
+        ref_gdf, target_gdf, results = self._two_island_fixture()
+
+        optimized = optimize_matches_with_grouping(
+            results, ref_gdf, target_gdf, min_confidence=0.5, contiguity_tolerance=5.0
+        )
+
+        # The sliver edge is never selected into an assignment.
+        pairs = {(r.ref_id, r.target_id) for r in optimized}
+        assert ("r1", "t2a") not in pairs
+        assert pairs == {("r1", "t1a"), ("r1", "t1b"), ("r2", "t2a"), ("r2", "t2b")}
+
+        # Two distinct 1:N groups, not one welded M:N monster.
+        group_ids = {r.features["group_id"] for r in optimized}
+        assert len(group_ids) == 2
+        for r in optimized:
+            assert r.features["match_type"] == "1:N"
+
+    def test_find_components_drops_cross_component_sliver(self):
+        """A sliver whose endpoints land in different components is dropped."""
+        _, _, results = self._two_island_fixture()
+        sliver = {("r1", "t2a")}
+
+        components = find_match_components(results, min_confidence=0.5, sliver_edges=sliver)
+
+        assert len(components) == 2
+        all_pairs = {(r.ref_id, r.target_id) for comp in components for r in comp}
+        assert ("r1", "t2a") not in all_pairs
+
+    def test_same_component_sliver_stays_in_group_edges(self):
+        """A sliver whose endpoints share a component stays as a group edge."""
+        results = [
+            self._full_edge("r1", "t1", 0.9),
+            self._full_edge("r1", "t2", 0.85),
+            self._full_edge("r2", "t2", 0.8),
+            self._sliver_edge("r2", "t1", 0.4),  # both endpoints in the component
+        ]
+        components = find_match_components(results, min_confidence=0.3, sliver_edges={("r2", "t1")})
+        assert len(components) == 1
+        pairs = {(r.ref_id, r.target_id) for r in components[0]}
+        assert ("r2", "t1") in pairs  # attached as an ordinary group member
+
+    def test_sliver_only_pair_never_matched(self):
+        """A pair connected ONLY by a sliver edge produces no match at all."""
+        ref_geoms = {"r1": LineString([(0, 0), (100, 0)])}
+        target_geoms = {"t1": LineString([(99, 5), (199, 5)])}
+        results = [self._sliver_edge("r1", "t1", 0.9)]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+        )
+        assert optimized == []
+
+    def test_no_sliver_param_keeps_old_behavior(self):
+        """find_match_components without sliver_edges is unchanged: the sliver
+        edge glues both islands into one component."""
+        _, _, results = self._two_island_fixture()
+        components = find_match_components(results, min_confidence=0.5)
+        assert len(components) == 1
