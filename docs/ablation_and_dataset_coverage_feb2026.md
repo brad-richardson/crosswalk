@@ -2,13 +2,63 @@
 
 February 2026
 
-> **⚠️ STALE (as of 2026-07-04).** These per-feature/per-category verdicts predate
-> the July 2026 feature-audit series (#248–#256) and the follow-ups in this branch
-> (target-native topology re-added; endpoint-proximity de-degenerated). Topology and
-> sibling features now measure something different than they did in Feb 2026, so
-> their ablation deltas here no longer describe the current model. Re-run per the
-> runbook in [EVAL_ROADMAP.md](EVAL_ROADMAP.md#task-3-re-run-the-category-ablation)
-> after the coordinated backfill + retrain, then supersede this document.
+> **⚠️ SUPERSEDED (2026-07-04) — see "July 2026 re-run" below.** The Feb 2026
+> per-category verdicts predate the July feature-audit series (#248–#256) and the
+> topology/endpoint follow-ups (#257: target-native topology re-added,
+> endpoint-proximity de-degenerated). Topology and sibling features now measure
+> something different than they did in Feb, so the Feb deltas no longer describe the
+> current model. The refreshed category ablation is recorded immediately below; the
+> Feb sections are retained for history.
+
+---
+
+## July 2026 re-run (post-#257, 83 features)
+
+Re-ran `scripts/ablation_study.py --mode category` after the coordinated backfill +
+retrain that landed the target-native topology and continuous k-NN endpoint
+proximity (`benchmarks/ablation_2026_07/`). Baseline: **accuracy 0.9331, F1 0.9434,
+CV F1 0.9284 ± 0.0062**, all 5,487 labeled pairs, 83 features.
+
+`f1_delta` = holdout F1 with the category removed − baseline F1. **Negative = removing
+hurts (category carries signal); positive = removing helps (within-distribution
+noise/harmful).**
+
+| Category | F1 delta | Reading |
+|---|---|---|
+| class | **−0.0184** | Strongest single category; best semantic signal (matches July audit). |
+| alignment_coverage | −0.0112 | Clearly useful (max_coverage from #249 pulling weight). |
+| name_similarity | −0.0106 | Useful despite correlated variants. |
+| **topology** | **−0.0072** | **Flipped from harmful to genuinely useful.** Feb/July-audit had topology *anti-informative* (removing it *improved* F1; degree_match_score AUC 0.419-inverted). After the #252 orientation/degree unification + the #257 target-native re-add, removing it now *hurts* by more than a CV std. This is the headline result. |
+| sinuosity | −0.0068 | Useful. |
+| intersection_overlap | −0.0063 | Useful. |
+| heading_consistency | −0.0062 | Useful. |
+| crossing_angle | −0.0055 | Useful. |
+| length | −0.0050 | Useful. |
+| clustering | −0.0049 | Useful. |
+| **endpoint_connectivity** | **−0.0042** | **Now useful, not noise.** On the US-heavy subset it ablated as noise; on the full set the de-degenerated continuous proximity carries real signal — the redesign paid off exactly where predicted (diverse geographies). |
+| shape_complexity | −0.0041 | Useful. |
+| geometric | −0.0028 | Useful (some redundancy with lateral/coverage). |
+| **parallel_sibling** | **−0.0027** | **No longer "removing helps."** The #254 positive-evidence gate plus the diverse pairs flip it from harmful (Feb: the worst category) to mildly useful. |
+| graphlet | −0.0016 | Marginally useful; known train/serve skew still makes it a drop candidate on cost grounds. |
+| vertex_density | −0.0001 | Neutral. |
+| lateral_offset | +0.0005 | Only category where removing (barely) helps — ρ≈0.98 with the hausdorff family (July audit), so interchangeable rather than free to drop. |
+
+**Takeaways:**
+1. **Topology flipped from harmful to genuinely useful** (−0.0072, beyond one CV std),
+   and **endpoint proximity from noise to useful** (−0.0042). The two #257 follow-ups
+   achieved their goal *within-distribution*, not just in theory.
+2. **The diverse-geography pairs are what reveal the value.** On the US-heavy subset
+   (5,431 pairs, 56 non-US excluded), topology/endpoint/sibling all ablated as
+   within-noise or noise; adding back the 56 Helsinki/Tokyo/Geneva/Tunis pairs flips
+   all three to useful. This is direct evidence for the audit's generalization thesis
+   and validates keeping those labels rather than dropping them.
+3. **Nearly every category now carries signal** (16 of 17 negative deltas) — the
+   anti-informative artifacts the Feb study and July audit flagged are gone. The one
+   ~neutral category, `lateral_offset`, is redundant-not-useless (hausdorff proxy).
+4. `parallel_sibling` and `graphlet` are no longer net-harmful, but `graphlet` stays a
+   drop candidate on train/serve-skew and Spark-speed grounds (see `EVAL_ROADMAP.md`).
+
+---
 
 ## Summary
 
