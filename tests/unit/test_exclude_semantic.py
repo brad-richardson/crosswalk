@@ -165,13 +165,17 @@ class TestExcludeSemanticFlag:
             "to_degree_ref",
             "from_degree_target",
             "to_degree_target",
+            "from_degree_target_native",
+            "to_degree_target_native",
             "degree_match_score",
             "degree_signature_similarity",
             "is_dead_end_ref",
             "is_dead_end_target",
+            "is_dead_end_target_native",
             "dead_end_match",
             "is_intersection_ref",
             "is_intersection_target",
+            "is_intersection_target_native",
             "intersection_match",
             "interior_junction_count_ref",
             "interior_junction_count_target",
@@ -181,7 +185,7 @@ class TestExcludeSemanticFlag:
             "shared_anchor_count",
         ]
         topology_count = sum(1 for f in geom_only_features if f in topology_features)
-        assert topology_count == 18, "Should have 18 topology features"
+        assert topology_count == 22, "Should have 22 topology features"
 
         coverage_count = sum(1 for f in geom_only_features if "coverage" in f)
         assert coverage_count == 5, "Should have 5 coverage features"
@@ -224,10 +228,10 @@ class TestExcludeSemanticFlag:
         assert shape_complexity_count == 3, "Should have 3 shape complexity features"
 
         # Total geometry-only features:
-        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 18 (topology) + 5 (coverage) +
+        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 22 (topology) + 5 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
         # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) + 2 (intersection_overlap) = 68
-        assert len(geom_only_features) == 68, (
-            f"Expected 68 geometry-only features, got {len(geom_only_features)}"
+        # 4 (crossing_angle) + 2 (intersection_overlap) = 72
+        assert len(geom_only_features) == 72, (
+            f"Expected 72 geometry-only features, got {len(geom_only_features)}"
         )
