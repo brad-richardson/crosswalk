@@ -902,6 +902,93 @@ class TestBuildStitchOptions:
 
 
 # ---------------------------------------------------------------------------
+# is_sliver_edge — junction sliver classification
+# ---------------------------------------------------------------------------
+
+
+def _frac_edge(ref, tgt, gs, ge, ls, le, conf=0.5):
+    return {
+        "ref_id": ref,
+        "target_id": tgt,
+        "confidence": conf,
+        "gers_start_frac": gs,
+        "gers_end_frac": ge,
+        "local_start_frac": ls,
+        "local_end_frac": le,
+    }
+
+
+class TestSliverClassification:
+    """The sliver rule: an edge is a sliver iff max(ref_span, tgt_span) < 0.10.
+
+    Real-data calibration: audited slivers had max span <= 0.075 (min <= 0.028);
+    substantive edges had max span >= 0.10. The 0.10 threshold separates them.
+    """
+
+    def test_threshold_value(self):
+        from matcher.web.routes.stitching import SLIVER_SPAN_THRESHOLD
+
+        assert SLIVER_SPAN_THRESHOLD == 0.10
+
+    def test_explicit_null_fracs_never_sliver(self):
+        """An explicit null frac (vs absent key) must not crash or classify as sliver."""
+        from matcher.web.routes.stitching import _edge_spans, is_sliver_edge
+
+        edge = {"gers_end_frac": None, "local_start_frac": None}
+        assert _edge_spans(edge) == (1.0, 1.0)
+        assert not is_sliver_edge(edge)
+
+    def test_tiny_overlap_is_sliver(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # 0.2 m of a 162 m road on one side, small on the other -> sliver
+        assert is_sliver_edge(_frac_edge("r", "t", 0.0, 0.0012, 0.0, 0.067))
+
+    def test_worst_observed_sliver_is_flagged(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # max span 0.075 (<= observed sliver ceiling) -> still a sliver
+        assert is_sliver_edge(_frac_edge("r", "t", 0.0, 0.075, 0.0, 0.028))
+
+    def test_substantive_edge_not_sliver(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # min span tiny (asymmetric segmentation) but max span ~1.0 -> substantive
+        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.01, 0.0, 1.0))
+
+    def test_boundary_010_not_sliver(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # Observed substantive edges start at max span 0.10; strict < excludes them
+        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.10, 0.0, 0.10))
+
+    def test_uses_max_not_min(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # One large span alone keeps it substantive even if the other is tiny
+        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.5, 0.0, 0.001))
+
+    def test_missing_fracs_default_substantive(self):
+        from matcher.web.routes.stitching import is_sliver_edge
+
+        # No alignment fracs -> default span 1.0 -> never dropped as a sliver
+        assert not is_sliver_edge({"ref_id": "r", "target_id": "t", "confidence": 0.5})
+
+    def test_annotate_adds_is_sliver_flag(self):
+        from matcher.web.routes.stitching import _annotate_sliver_flags
+
+        edges = [
+            _frac_edge("r1", "t1", 0.0, 1.0, 0.0, 1.0),  # substantive
+            _frac_edge("r1", "t2", 0.0, 0.02, 0.0, 0.05),  # sliver
+        ]
+        annotated = _annotate_sliver_flags(edges)
+        assert annotated[0]["is_sliver"] is False
+        assert annotated[1]["is_sliver"] is True
+        # Original edges are not mutated
+        assert "is_sliver" not in edges[0]
+
+
+# ---------------------------------------------------------------------------
 # _parse_explicit_edges — edge-set fidelity validation
 # ---------------------------------------------------------------------------
 
@@ -1202,6 +1289,138 @@ class TestStitchingSelectRoute:
             self._stop(patches)
 
 
+class TestStitchingSliverExclusion:
+    """The select endpoint honors ``exclude_slivers`` on the cross-product path."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        # 2x2 group where the diagonal is substantive and the off-diagonal is a
+        # pair of junction slivers (max span 0.04-0.05 << 0.10).
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gsl",
+                    "match_type": "M:N",
+                    "ref_ids": ["r1", "r2"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [
+                        _frac_edge("r1", "t1", 0.0, 1.0, 0.0, 1.0, conf=0.9),  # substantive
+                        _frac_edge("r1", "t2", 0.0, 0.02, 0.0, 0.05, conf=0.3),  # sliver
+                        _frac_edge("r2", "t1", 0.0, 0.03, 0.0, 0.04, conf=0.3),  # sliver
+                        _frac_edge("r2", "t2", 0.0, 1.0, 0.0, 1.0, conf=0.85),  # substantive
+                    ],
+                }
+            ],
+        }
+
+    def _client_and_recorder(self):
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        recorder = MagicMock()
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), recorder, patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def _post(self, client, **extra):
+        data = {
+            "dataset": self.DATASET,
+            "group_id": "gsl",
+            "group_index": 0,
+            "included_refs": "r1,r2",
+            "included_targets": "t1,t2",
+            "selected_edges": "",
+        }
+        data.update(extra)
+        return client.post("/stitching-review/select", data=data)
+
+    def test_exclude_true_drops_sliver_edges(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(client, exclude_slivers="true")
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            # Off-diagonal slivers dropped; only the substantive diagonal remains
+            assert stored == {("r1", "t1"), ("r2", "t2")}
+            # Counts recomputed from the surviving edge set
+            assert kwargs["num_refs"] == 2
+            assert kwargs["num_targets"] == 2
+        finally:
+            self._stop(patches)
+
+    def test_field_absent_keeps_all_edges_backcompat(self):
+        # Old clients / tests that never send the field must be unaffected.
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(client)  # no exclude_slivers field at all
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            assert stored == {("r1", "t1"), ("r1", "t2"), ("r2", "t1"), ("r2", "t2")}
+        finally:
+            self._stop(patches)
+
+    def test_exclude_false_keeps_all_edges(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(client, exclude_slivers="false")
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            assert len(stored) == 4
+        finally:
+            self._stop(patches)
+
+    def test_explicit_option_path_unaffected_by_exclusion(self):
+        # An option is a curated exact edge set: even a sliver edge is stored
+        # verbatim regardless of exclude_slivers.
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(
+                client,
+                exclude_slivers="true",
+                selected_edges=json.dumps([{"ref_id": "r1", "target_id": "t2"}]),
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            assert stored == {("r1", "t2")}  # the sliver survives (verbatim)
+        finally:
+            self._stop(patches)
+
+    def test_all_sliver_selection_stores_empty_not_400(self):
+        # Selecting only a sliver pairing is a valid (empty-after-exclusion)
+        # result, not an inconsistent submission — the guard runs before exclusion.
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(
+                client, exclude_slivers="true", included_refs="r1", included_targets="t2"
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert kwargs["num_refs"] == 0
+            assert kwargs["num_targets"] == 0
+        finally:
+            self._stop(patches)
+
+
 class TestStitchingDeepLink:
     """The main page route deep-links a specific group as a FULL page."""
 
@@ -1337,5 +1556,16 @@ class TestStitchingUiHooks:
             assert 'data-cls="residential"' in html
             assert 'data-name="Main St"' in html
             assert 'data-cls="footway"' in html
+            # Sliver-edge exclusion control (feature 3): default-unchecked
+            # checkbox + hidden field defaulting to exclude ("true") + indicator.
+            assert 'id="include-slivers-toggle"' in html
+            assert "onSliverToggle()" in html
+            assert 'id="exclude-slivers-field"' in html
+            assert 'name="exclude_slivers"' in html
+            assert 'value="true"' in html
+            assert 'id="sliver-indicator"' in html
+            # Per-edge sliver flag is exposed to the client for the live count
+            # and coverage-gap overlay (features 2 & 3).
+            assert "is_sliver" in html
         finally:
             self._stop(patches)
