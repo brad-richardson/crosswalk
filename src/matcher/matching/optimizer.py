@@ -24,7 +24,35 @@ from scipy.spatial import cKDTree
 from shapely import LineString
 
 from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
+from .sliver import sliver_edges_for_match_results
 from .types import MatchDecision, MatchResult, MatchType
+
+
+def _geom_lookup(gdf: gpd.GeoDataFrame, id_column: str) -> dict[Any, LineString]:
+    """Build an id -> geometry lookup, falling back to the index if needed."""
+    if id_column in gdf.columns:
+        return dict(zip(gdf[id_column], gdf.geometry))
+    return dict(zip(gdf.index, gdf.geometry))
+
+
+def compute_sliver_candidate_edges(
+    results: list[MatchResult],
+    reference: gpd.GeoDataFrame,
+    target: gpd.GeoDataFrame,
+    ref_id_column: str = "id",
+    target_id_column: str = "local_id",
+) -> set[tuple[Any, Any]]:
+    """Classify candidate edges as junction slivers (shared hybrid rule).
+
+    Thin wrapper over :func:`matching.sliver.sliver_edges_for_match_results`
+    that builds the geometry lookups and detects whether the GeoDataFrames are
+    in a metric (projected) CRS. Used by both the grouping optimizer and the
+    groups-sidecar export so they agree on the exact same sliver set.
+    """
+    ref_geoms = _geom_lookup(reference, ref_id_column)
+    target_geoms = _geom_lookup(target, target_id_column)
+    metric = not (reference.crs is not None and reference.crs.is_geographic)
+    return sliver_edges_for_match_results(results, ref_geoms, target_geoms, metric=metric)
 
 
 def compute_group_id(ref_ids: set, target_ids: set) -> str:
@@ -102,6 +130,7 @@ def optimize_matches_greedy(
 def find_match_components(
     results: list[MatchResult],
     min_confidence: float,
+    sliver_edges: set[tuple[Any, Any]] | None = None,
 ) -> list[list[MatchResult]]:
     """Find connected components in the bipartite ref-target match graph.
 
@@ -112,6 +141,17 @@ def find_match_components(
     Args:
         results: All match results
         min_confidence: Minimum confidence threshold
+        sliver_edges: Optional set of ``(ref_id, target_id)`` pairs classified
+            as junction slivers (see ``matching.sliver``). Sliver edges
+            contribute NO adjacency when building components, so a junction
+            kiss can never weld two otherwise-independent groups into one
+            monster component. A sliver edge is attached to a component's edge
+            list only when BOTH its endpoints already landed in that same
+            component via non-sliver edges (it remains an ordinary group
+            member there). A sliver whose endpoints end up in different
+            components — or whose endpoints have no non-sliver edge at all —
+            is dropped from grouping entirely: the only evidence tying those
+            segments together is a junction artifact.
 
     Returns:
         List of components, each a list of MatchResult edges
@@ -120,12 +160,26 @@ def find_match_components(
     if not valid:
         return []
 
-    # Build adjacency list with namespaced nodes
+    sliver_edges = sliver_edges or set()
+
+    # Split structural (component-building) edges from sliver edges. Both are
+    # deduplicated to the highest-confidence result per pair.
+    structural: list[MatchResult] = []
+    sliver_best: dict[tuple[Any, Any], MatchResult] = {}
+    for r in valid:
+        pair = (r.ref_id, r.target_id)
+        if pair in sliver_edges:
+            if pair not in sliver_best or r.confidence > sliver_best[pair].confidence:
+                sliver_best[pair] = r
+        else:
+            structural.append(r)
+
+    # Build adjacency list with namespaced nodes (structural edges only)
     adj: dict[tuple[str, Any], set[tuple[str, Any]]] = defaultdict(set)
     # Track which edges (MatchResults) connect each node pair
     edge_lookup: dict[tuple[tuple[str, Any], tuple[str, Any]], MatchResult] = {}
 
-    for r in valid:
+    for r in structural:
         ref_node = ("ref", r.ref_id)
         tgt_node = ("target", r.target_id)
         adj[ref_node].add(tgt_node)
@@ -138,6 +192,7 @@ def find_match_components(
     # BFS to find connected components
     visited: set[tuple[str, Any]] = set()
     components: list[list[MatchResult]] = []
+    node_component: dict[tuple[str, Any], int] = {}
 
     for start_node in adj:
         if start_node in visited:
@@ -170,7 +225,26 @@ def find_match_components(
                         component_edges.append(edge_lookup[key])
 
         if component_edges:
+            for n in component_nodes:
+                node_component[n] = len(components)
             components.append(component_edges)
+
+    # Attach sliver edges whose endpoints both landed in the SAME component via
+    # structural edges. Cross-component (or unattached) slivers are dropped.
+    n_attached = 0
+    n_dropped = 0
+    for (rid, tid), r in sliver_best.items():
+        ci = node_component.get(("ref", rid))
+        if ci is not None and ci == node_component.get(("target", tid)):
+            components[ci].append(r)
+            n_attached += 1
+        else:
+            n_dropped += 1
+    if sliver_best:
+        logger.debug(
+            f"  Sliver edges: {n_attached} kept as in-component candidates, "
+            f"{n_dropped} dropped (would have glued independent components)"
+        )
 
     return components
 
@@ -866,27 +940,35 @@ def optimize_matches_with_grouping(
     logger.info(f"Optimizing {len(results)} results with M:N grouping...")
 
     # Build geometry lookups
-    if ref_id_column in reference.columns:
-        ref_geoms = dict(zip(reference[ref_id_column], reference.geometry))
-    else:
-        ref_geoms = dict(zip(reference.index, reference.geometry))
+    ref_geoms = _geom_lookup(reference, ref_id_column)
+    target_geoms = _geom_lookup(target, target_id_column)
 
-    if target_id_column in target.columns:
-        target_geoms = dict(zip(target[target_id_column], target.geometry))
-    else:
-        target_geoms = dict(zip(target.index, target.geometry))
+    # Step 0: Classify junction-sliver candidate edges (shared hybrid rule).
+    # Slivers never contribute adjacency when building components (a junction
+    # kiss must not weld independent groups together) and are never SELECTED
+    # into assignments — they only remain visible as ordinary in-group
+    # candidates when both endpoints land in the same component anyway.
+    metric = not (reference.crs is not None and reference.crs.is_geographic)
+    sliver_edges = sliver_edges_for_match_results(results, ref_geoms, target_geoms, metric=metric)
+    if sliver_edges:
+        logger.info(f"  Classified {len(sliver_edges)} candidate edges as junction slivers")
 
-    # Step 1: Find connected components
-    components = find_match_components(results, min_confidence)
+    # Step 1: Find connected components (sliver edges excluded from adjacency)
+    components = find_match_components(results, min_confidence, sliver_edges=sliver_edges)
     logger.info(f"  Found {len(components)} connected components")
 
-    # Step 2: Classify and resolve each component
+    # Step 2: Classify and resolve each component. Slivers are filtered from
+    # the resolution input so they can never be selected into an assignment;
+    # they stay in the component itself for group-membership purposes.
     all_group_results: list[MatchResult] = []
     all_leftover: list[MatchResult] = []
 
     for component in components:
+        structural = [r for r in component if (r.ref_id, r.target_id) not in sliver_edges]
+        if not structural:
+            continue
         group_results, leftover = _classify_and_resolve_component(
-            component, ref_geoms, target_geoms, contiguity_tolerance
+            structural, ref_geoms, target_geoms, contiguity_tolerance
         )
         all_group_results.extend(group_results)
         all_leftover.extend(leftover)
@@ -912,10 +994,12 @@ def optimize_matches_with_grouping(
     # contiguous candidates exist. Uses ALL candidates (not just unclaimed
     # leftover) so refs can expand to targets claimed by other refs.
     # This only ADDS matches, never removes existing assignments.
+    # Sliver candidates are excluded so expansion can never select one.
     if optimized_1to1:
+        expandable = [r for r in results if (r.ref_id, r.target_id) not in sliver_edges]
         optimized_1to1 = _expand_greedy_matches(
             optimized_1to1,
-            results,  # All candidates, not just unclaimed
+            expandable,  # All non-sliver candidates, not just unclaimed
             ref_geoms,
             target_geoms,
             contiguity_tolerance,

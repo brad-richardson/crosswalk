@@ -14,7 +14,11 @@ from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
 from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
-from ..matching.optimizer import compute_group_id, find_match_components
+from ..matching.optimizer import (
+    compute_group_id,
+    compute_sliver_candidate_edges,
+    find_match_components,
+)
 from ..matching.types import MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
@@ -221,6 +225,7 @@ def _export_groups_sidecar(
     min_confidence: float,
     ref_id_column: str = "id",
     target_id_column: str = "id",
+    sliver_edges: set[tuple[Any, Any]] | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -237,6 +242,10 @@ def _export_groups_sidecar(
         min_confidence: Minimum confidence used during optimization
         ref_id_column: Reference ID column name
         target_id_column: Target ID column name
+        sliver_edges: Junction-sliver candidate pairs to exclude from
+            component adjacency (must be the SAME set the optimizer used so
+            sidecar groups match optimizer grouping). When None, it is
+            recomputed here from the provided GeoDataFrames.
 
     Returns:
         Path to sidecar file, or None if no groups to export
@@ -245,8 +254,16 @@ def _export_groups_sidecar(
 
     from shapely import to_geojson
 
-    # Re-derive components from raw results
-    components = find_match_components(results, min_confidence)
+    # Re-derive components from raw results, excluding junction slivers from
+    # adjacency exactly like the optimizer does (same sliver set), so the
+    # sidecar's group membership mirrors the optimizer's grouping. Slivers
+    # whose endpoints share a component are still present in the group's edge
+    # list (annotated at display time), but never in optimizer_assignment.
+    if sliver_edges is None:
+        sliver_edges = compute_sliver_candidate_edges(
+            results, reference, target, ref_id_column, target_id_column
+        )
+    components = find_match_components(results, min_confidence, sliver_edges=sliver_edges)
 
     # Build optimizer assignment lookup from optimized results.
     #
@@ -690,7 +707,13 @@ def run_pipeline(
         target_id_column=target_id_column,
     )
 
-    # Export groups sidecar for stitching review (using WGS84 geometries)
+    # Export groups sidecar for stitching review (using WGS84 geometries).
+    # The sliver set is computed from the PROJECTED data (identical to what the
+    # optimizer classified internally) so sidecar grouping matches optimizer
+    # grouping exactly, independent of any WGS84 length re-measurement.
+    sliver_edges = compute_sliver_candidate_edges(
+        results, reference, target, ref_id_column, target_id_column
+    )
     _export_groups_sidecar(
         results=results,
         optimized=optimized,
@@ -700,6 +723,7 @@ def run_pipeline(
         min_confidence=min_confidence,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
+        sliver_edges=sliver_edges,
     )
 
     if progress_callback:
