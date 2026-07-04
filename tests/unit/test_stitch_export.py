@@ -359,6 +359,29 @@ def test_gate_ordering_over_max_beats_class(tmp_path, labels_dir):
     assert g.reason == REASON_OVER_MAX
 
 
+def test_class_gate_runs_without_metadata_yaml(tmp_path, labels_dir):
+    # When metadata.yaml is absent, classes are recovered from batch.json so the
+    # class-consistency gate still fires (no silent degradation).
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "xmode",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "ref_classes": {"r1": "residential"},
+                "target_classes": {"t1": "footway"},
+            }
+        ],
+    )
+    # Remove the per-group metadata.yaml, keeping batch.json.
+    (b / "xmode" / "metadata.yaml").unlink()
+    g = _by_gid(_plan([b], labels_dir))["xmode"]
+    assert not g.exported
+    assert g.reason == REASON_CLASS_MISMATCH
+
+
 def test_idempotent_write(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",

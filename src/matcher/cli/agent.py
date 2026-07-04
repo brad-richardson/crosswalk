@@ -1244,6 +1244,11 @@ def export_stitch_panel(
         if not (bd / "consensus.csv").exists():
             console.print(f"[red]No consensus.csv in {bd}[/red]")
             raise typer.Exit(1)
+        if not (bd / "batch.json").exists():
+            console.print(
+                f"[yellow]Warning: no batch.json in {bd} — sliver canonicalization "
+                "and edge-overlap precedence degrade for its groups[/yellow]"
+            )
 
     report = plan_exports(batch_dirs, dataset, labels_dir, max_edges=max_edges)
 

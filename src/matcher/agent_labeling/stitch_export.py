@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
+from loguru import logger
 
 from ..labeling.stitching_store import StitchingLabelStore
 from ..matching.sliver import annotate_group_sliver_flags
@@ -143,6 +144,37 @@ def _group_sliver_pairs(group: dict) -> set[tuple[str, str]]:
     return {(str(e["ref_id"]), str(e["target_id"])) for e in annotated if e.get("is_sliver")}
 
 
+def _meta_from_group(grp: dict) -> dict | None:
+    """Synthesize a ``metadata.yaml``-shaped dict from a ``batch.json`` group.
+
+    Fallback for packs that carry ``batch.json`` (ids + classes) but no per-group
+    ``metadata.yaml``, so the class-consistency gate and the human edge-overlap
+    mapping can still run instead of silently degrading. Returns ``None`` when the
+    group has no usable segment ids.
+    """
+    if not grp:
+        return None
+    ref_classes = grp.get("ref_classes") or {}
+    tgt_classes = grp.get("target_classes") or {}
+    ref_ids = grp.get("ref_ids") or sorted({str(e["ref_id"]) for e in grp.get("edges", [])})
+    tgt_ids = grp.get("target_ids") or sorted({str(e["target_id"]) for e in grp.get("edges", [])})
+    if not ref_ids and not tgt_ids:
+        return None
+    return {
+        "match_type": grp.get("match_type", ""),
+        "segments": {
+            "reference": [
+                {"label": f"R{i + 1}", "id": str(r), "class": ref_classes.get(str(r), "") or ""}
+                for i, r in enumerate(ref_ids)
+            ],
+            "target": [
+                {"label": f"T{i + 1}", "id": str(t), "class": tgt_classes.get(str(t), "") or ""}
+                for i, t in enumerate(tgt_ids)
+            ],
+        },
+    }
+
+
 def plan_exports(
     batch_dirs: list[Path],
     dataset: str,
@@ -157,8 +189,16 @@ def plan_exports(
     merged = _merge_consensus(batch_dirs)
 
     # Load batch.json groups (geometries/edges) once per distinct batch dir.
+    # batch.json is the ONLY source of geometries (sliver gate) and candidate
+    # edges (overlap precedence); warn loudly if a batch dir lacks it, since
+    # those gates then degrade rather than fail.
     batch_groups: dict[Path, dict[str, dict]] = {}
     for bd in {bd for bd, _ in merged.values()}:
+        if not (bd / "batch.json").exists():
+            logger.warning(
+                f"No batch.json in {bd}: sliver canonicalization and edge-overlap "
+                "precedence cannot run for its groups (gates degrade)."
+            )
         batch_groups[bd] = _load_batch_groups(bd)
 
     # Human labels for precedence. Exclude our own previously-exported panel rows
@@ -176,10 +216,16 @@ def plan_exports(
     for gid, (bd, row) in merged.items():
         if str(row.get("routing")) != "auto_accept":
             continue
+        grp = batch_groups.get(bd, {}).get(gid)
+        # Prefer per-group metadata.yaml; fall back to batch.json (ids + classes)
+        # so the class gate and overlap mapping still run when it is absent.
         gdir = bd / gid
         if (gdir / "metadata.yaml").exists():
             candidate_metas[gid] = _load_group_metadata(gdir)
-        grp = batch_groups.get(bd, {}).get(gid)
+        else:
+            meta = _meta_from_group(grp) if grp is not None else None
+            if meta is not None:
+                candidate_metas[gid] = meta
         if grp is not None:
             candidate_edges[gid] = frozenset(
                 (str(e["ref_id"]), str(e["target_id"])) for e in grp.get("edges", [])
