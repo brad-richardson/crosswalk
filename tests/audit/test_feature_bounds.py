@@ -265,6 +265,13 @@ class TestBoundsOnRealData:
         "interior_junction_position_sim",
         # Shared anchor count (NaN when alignment/connector data unavailable)
         "shared_anchor_count",
+        # Coverage (NaN when alignment computation failed; also pairs whose
+        # source data was missing at backfill keep pre-max_coverage rows)
+        "ref_coverage",
+        "target_coverage",
+        "min_coverage",
+        "max_coverage",
+        "coverage_ratio",
         # Sinuosity (NaN for degenerate loops where start == end)
         "sinuosity_ref",
         "sinuosity_target",
