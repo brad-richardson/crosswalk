@@ -298,6 +298,15 @@
     // --- Shared layer colors ---
     var REF_COLOR = "#2196F3";
     var TARGET_COLOR = "#FF5722";
+    // Stitching-review selection-visibility colors (features 1 & 2):
+    var CHANGE_COLOR = "#7C4DFF";   // glow on segments whose state differs from load
+    var REMOVED_COLOR = "#9E9E9E";  // faint style for deselected (removed) segments
+    var GAP_COLOR = "#FFB300";      // hazard amber for uncovered (gap) portions
+
+    // Build an ["in", _id, [...]] expression (empty list matches nothing).
+    function idIn(ids) {
+        return ["in", ["get", "_id"], ["literal", ids || []]];
+    }
 
     // --- Pair geometry rendering ---
     var currentGeojson = null;
@@ -539,6 +548,8 @@
 
     // --- Group geometry rendering (stitching review) ---
     var GROUP_SOURCE = "group-geojson";
+    var GAP_SOURCE = "group-gaps";
+    var GAP_LAYER = "group-coverage-gaps";
     var currentGroupGeojson = null;
 
     var GROUP_LAYER_DEFS = [
@@ -559,29 +570,94 @@
         { id: "group-target-labels", filter: ["==", ["get", "_role"], "target-full"], color: TARGET_COLOR },
     ];
 
-    // Per-segment visibility tracking for stitching review
-    // Keys are segment IDs, values are booleans (true = hidden)
+    // Per-segment visibility tracking for stitching review.
+    // hiddenSegments: id -> true when the segment is NOT part of the current
+    // selection ("active" === !hidden). A deselected group member stays on the
+    // map in a faint "removed" style; only true context segments (never in the
+    // group) are fully hidden until the user opts them in.
     var hiddenSegments = {};
+    // Snapshot of the active state at group load, so we can flag CHANGES.
+    var initialActiveSegments = {};   // id -> true if active when the group loaded
+    var contextSegmentIds = {};       // id -> true for spatial-context segments
+    var groupMemberIds = {};          // id -> true for real group segments (non-context)
+    var allSegmentIds = [];           // every segment id present in the group geojson
 
-    function updateSegmentFilters() {
-        var hiddenIds = Object.keys(hiddenSegments).filter(function(id) { return hiddenSegments[id]; });
-        var allLayers = GROUP_LAYER_DEFS.concat(GROUP_LABEL_DEFS);
-        for (var i = 0; i < allLayers.length; i++) {
-            var def = allLayers[i];
-            var layerId = def.id;
-            if (!map.getLayer(layerId)) continue;
-            var roleFilter = def.filter;
-            if (hiddenIds.length > 0) {
-                map.setFilter(layerId, ["all", roleFilter, ["!", ["in", ["get", "_id"], ["literal", hiddenIds]]]]);
-            } else {
-                map.setFilter(layerId, roleFilter);
+    // Roles that carry a full segment geometry (used by removed/glow overlays).
+    var FULL_ROLE_FILTER = ["in", ["get", "_role"], ["literal", ["ref-full", "target-full"]]];
+
+    // Apply active/removed/changed styling from the current selection state.
+    // - active group segments   -> normal solid layers
+    // - deselected group members -> faint "removed" overlay (not hidden)
+    // - context segments off     -> fully hidden
+    // - segments whose active-state differs from load -> a persistent glow
+    function updateSegmentStyles() {
+        var activeIds = [], removedIds = [], changedIds = [];
+        for (var i = 0; i < allSegmentIds.length; i++) {
+            var id = allSegmentIds[i];
+            var isActive = !hiddenSegments[id];
+            if (isActive) {
+                activeIds.push(id);
+            } else if (groupMemberIds[id]) {
+                removedIds.push(id); // deselected group member -> removed style
             }
+            if (isActive !== !!initialActiveSegments[id]) changedIds.push(id);
+        }
+
+        // Normal role layers + labels show only ACTIVE segments.
+        var normalLayers = GROUP_LAYER_DEFS.concat(GROUP_LABEL_DEFS);
+        for (var j = 0; j < normalLayers.length; j++) {
+            var def = normalLayers[j];
+            if (!map.getLayer(def.id)) continue;
+            if (def.id.indexOf("envelope") !== -1) continue; // envelope always shown
+            map.setFilter(def.id, ["all", def.filter, idIn(activeIds)]);
+        }
+
+        // Removed overlay: deselected group members, faint.
+        if (map.getLayer("group-ref-removed")) {
+            map.setFilter("group-ref-removed",
+                ["all", ["==", ["get", "_role"], "ref-full"], idIn(removedIds)]);
+        }
+        if (map.getLayer("group-target-removed")) {
+            map.setFilter("group-target-removed",
+                ["all", ["==", ["get", "_role"], "target-full"], idIn(removedIds)]);
+        }
+
+        // Change glow: any segment whose active-state differs from load.
+        if (map.getLayer("group-changed-glow")) {
+            map.setFilter("group-changed-glow", ["all", FULL_ROLE_FILTER, idIn(changedIds)]);
+        }
+        if (changedIds.length > 0) flashChangedGlow();
+    }
+
+    // Backwards-compatible alias (older call sites / console helpers).
+    function updateSegmentFilters() { updateSegmentStyles(); }
+
+    // Briefly pulse the change-glow opacity so a fresh change is noticeable,
+    // then settle to a persistent subtle glow. Fully guarded/defensive.
+    var _flashTimers = [];
+    function flashChangedGlow() {
+        if (!map.getLayer("group-changed-glow")) return;
+        for (var t = 0; t < _flashTimers.length; t++) clearTimeout(_flashTimers[t]);
+        _flashTimers = [];
+        function setOp(op) {
+            try {
+                if (map.getLayer("group-changed-glow")) {
+                    map.setPaintProperty("group-changed-glow", "line-opacity", op);
+                }
+            } catch (e) {}
+        }
+        setOp(0.9);
+        var steps = [[120, 0.4], [260, 0.75], [420, 0.5]];
+        for (var s = 0; s < steps.length; s++) {
+            (function (step) {
+                _flashTimers.push(setTimeout(function () { setOp(step[1]); }, step[0]));
+            })(steps[s]);
         }
     }
 
     function toggleSegment(segmentId) {
         hiddenSegments[segmentId] = !hiddenSegments[segmentId];
-        updateSegmentFilters();
+        updateSegmentStyles();
         return !hiddenSegments[segmentId]; // return visible state
     }
 
@@ -589,7 +665,7 @@
     // pre-seed / apply an assignment without relying on prior toggle state).
     function setSegmentVisible(segmentId, visible) {
         hiddenSegments[segmentId] = !visible;
-        updateSegmentFilters();
+        updateSegmentStyles();
         return visible;
     }
 
@@ -612,7 +688,7 @@
         for (var k = 0; k < sideIds.length; k++) {
             hiddenSegments[sideIds[k]] = anyVisible; // hide if any were visible
         }
-        updateSegmentFilters();
+        updateSegmentStyles();
         return !anyVisible; // return new visible state
     }
 
@@ -631,6 +707,47 @@
                 paint: def.paint,
             });
         }
+
+        // Feature 1 — change glow + removed overlays. Inserted BENEATH the solid
+        // ref-full layer (glow first so it sits lowest, then the removed style).
+        var beforeFull = map.getLayer("group-ref-full") ? "group-ref-full" : undefined;
+        map.addLayer({
+            id: "group-changed-glow",
+            type: "line",
+            source: GROUP_SOURCE,
+            filter: ["all", FULL_ROLE_FILTER, idIn([])],
+            paint: { "line-color": CHANGE_COLOR, "line-width": 9, "line-opacity": 0.5, "line-blur": 3 },
+        }, beforeFull);
+        map.addLayer({
+            id: "group-ref-removed",
+            type: "line",
+            source: GROUP_SOURCE,
+            filter: ["all", ["==", ["get", "_role"], "ref-full"], idIn([])],
+            paint: { "line-color": REMOVED_COLOR, "line-width": 1.5, "line-opacity": 0.35, "line-dasharray": [1, 3] },
+        }, beforeFull);
+        map.addLayer({
+            id: "group-target-removed",
+            type: "line",
+            source: GROUP_SOURCE,
+            filter: ["all", ["==", ["get", "_role"], "target-full"], idIn([])],
+            paint: { "line-color": REMOVED_COLOR, "line-width": 1.5, "line-opacity": 0.35, "line-dasharray": [1, 3] },
+        }, beforeFull);
+
+        // Feature 2 — coverage-gap overlay (separate source; dashed hazard amber).
+        if (!map.getSource(GAP_SOURCE)) {
+            map.addSource(GAP_SOURCE, { type: "geojson", data: EMPTY_FC });
+        }
+        map.addLayer({
+            id: GAP_LAYER,
+            type: "line",
+            source: GAP_SOURCE,
+            paint: {
+                "line-color": GAP_COLOR,
+                "line-width": 4,
+                "line-opacity": 0.95,
+                "line-dasharray": [1.5, 1.5],
+            },
+        });
 
         // Add always-visible label layers on top
         for (var j = 0; j < GROUP_LABEL_DEFS.length; j++) {
@@ -663,10 +780,17 @@
                 map.removeLayer(GROUP_LABEL_DEFS[i].id);
             }
         }
+        var extraLayers = [GAP_LAYER, "group-changed-glow", "group-ref-removed", "group-target-removed"];
+        for (var e = 0; e < extraLayers.length; e++) {
+            if (map.getLayer(extraLayers[e])) map.removeLayer(extraLayers[e]);
+        }
         for (var i = 0; i < GROUP_LAYER_DEFS.length; i++) {
             if (map.getLayer(GROUP_LAYER_DEFS[i].id)) {
                 map.removeLayer(GROUP_LAYER_DEFS[i].id);
             }
+        }
+        if (map.getSource(GAP_SOURCE)) {
+            map.removeSource(GAP_SOURCE);
         }
         if (map.getSource(GROUP_SOURCE)) {
             map.removeSource(GROUP_SOURCE);
@@ -703,6 +827,7 @@
 
         currentGroupGeojson = data;
         hiddenSegments = {}; // Reset per-segment visibility for new group
+        contextSegmentIds = {};
 
         // Initialize context segments as hidden (user must opt-in via pills)
         var ctxEl = document.getElementById("group-context-ids");
@@ -711,6 +836,7 @@
                 var ctxIds = JSON.parse(ctxEl.textContent);
                 for (var i = 0; i < ctxIds.length; i++) {
                     hiddenSegments[ctxIds[i]] = true;
+                    contextSegmentIds[ctxIds[i]] = true;
                 }
             } catch (e) {}
         }
@@ -725,6 +851,23 @@
                     hiddenSegments[inactiveIds[m]] = true;
                 }
             } catch (e) {}
+        }
+
+        // Catalogue every segment id, split into context vs real group members,
+        // and snapshot the active state at load so we can flag CHANGES (feature 1).
+        allSegmentIds = [];
+        groupMemberIds = {};
+        initialActiveSegments = {};
+        var seenIds = {};
+        var feats = data.features || [];
+        for (var f = 0; f < feats.length; f++) {
+            var props = feats[f].properties || {};
+            var sid = props._id;
+            if (!sid || seenIds[sid]) continue;
+            seenIds[sid] = true;
+            allSegmentIds.push(sid);
+            if (!contextSegmentIds[sid]) groupMemberIds[sid] = true;
+            initialActiveSegments[sid] = !hiddenSegments[sid];
         }
 
         if (!map.isStyleLoaded()) return;
@@ -753,11 +896,149 @@
 
         map.getSource(GROUP_SOURCE).setData(data);
 
-        // Apply hidden segment filters (context segments start hidden)
-        updateSegmentFilters();
+        // Apply active/removed/changed styling (context segments start hidden)
+        updateSegmentStyles();
+
+        // Render coverage gaps for the initial (pre-seeded) selection. The page
+        // owns the selection logic; ask it for the included edge set if present.
+        if (typeof window.matcherComputeIncludedEdges === "function") {
+            try { updateCoverageGaps(window.matcherComputeIncludedEdges()); } catch (e) {}
+        }
 
         // Fit bounds with panel-aware padding
         fitCurrentGroup();
+    }
+
+    // ---- Feature 2: coverage-gap computation ----------------------------------
+    // For every ACTIVE segment, render the portions of its geometry NOT covered
+    // by any currently-selected edge's alignment interval as a hazard overlay.
+
+    // Slice a LineString's coordinates between two length-fractions using planar
+    // (coordinate-space) cumulative length — matching the server's shapely
+    // substring so gaps line up with the rendered aligned sub-segments.
+    function sliceLineByFrac(coords, startFrac, endFrac) {
+        if (!coords || coords.length < 2) return null;
+        var segLens = [], total = 0;
+        for (var i = 1; i < coords.length; i++) {
+            var dx = coords[i][0] - coords[i - 1][0];
+            var dy = coords[i][1] - coords[i - 1][1];
+            var d = Math.sqrt(dx * dx + dy * dy);
+            segLens.push(d);
+            total += d;
+        }
+        if (total <= 0) return null;
+        var startD = startFrac * total, endD = endFrac * total;
+        function pointAt(dist) {
+            if (dist <= 0) return coords[0];
+            if (dist >= total) return coords[coords.length - 1];
+            var acc = 0;
+            for (var j = 0; j < segLens.length; j++) {
+                if (acc + segLens[j] >= dist) {
+                    var r = segLens[j] > 0 ? (dist - acc) / segLens[j] : 0;
+                    return [
+                        coords[j][0] + (coords[j + 1][0] - coords[j][0]) * r,
+                        coords[j][1] + (coords[j + 1][1] - coords[j][1]) * r,
+                    ];
+                }
+                acc += segLens[j];
+            }
+            return coords[coords.length - 1];
+        }
+        var out = [pointAt(startD)];
+        var accD = 0;
+        for (var k = 0; k < coords.length; k++) {
+            if (k > 0) accD += segLens[k - 1];
+            if (accD > startD && accD < endD) out.push(coords[k]);
+        }
+        out.push(pointAt(endD));
+        // Drop consecutive duplicate points that can occur at boundaries.
+        var cleaned = [out[0]];
+        for (var m = 1; m < out.length; m++) {
+            var p = out[m], q = cleaned[cleaned.length - 1];
+            if (p[0] !== q[0] || p[1] !== q[1]) cleaned.push(p);
+        }
+        return cleaned.length >= 2 ? cleaned : null;
+    }
+
+    // Merge [start,end] intervals and return the uncovered complement within
+    // [0,1] whose length exceeds minGap.
+    function uncoveredIntervals(intervals, minGap) {
+        if (!intervals.length) return [[0, 1]];
+        var sorted = intervals.slice().sort(function (a, b) { return a[0] - b[0]; });
+        var merged = [sorted[0].slice()];
+        for (var i = 1; i < sorted.length; i++) {
+            var last = merged[merged.length - 1];
+            if (sorted[i][0] <= last[1] + 1e-9) {
+                last[1] = Math.max(last[1], sorted[i][1]);
+            } else {
+                merged.push(sorted[i].slice());
+            }
+        }
+        var gaps = [];
+        var cursor = 0;
+        for (var g = 0; g < merged.length; g++) {
+            if (merged[g][0] - cursor > minGap) gaps.push([cursor, merged[g][0]]);
+            cursor = Math.max(cursor, merged[g][1]);
+        }
+        if (1 - cursor > minGap) gaps.push([cursor, 1]);
+        return gaps;
+    }
+
+    var GAP_MIN_FRAC = 0.03; // ignore gaps under ~3% of segment length
+
+    function buildCoverageGapFC(includedEdges) {
+        var features = [];
+        if (!currentGroupGeojson || !includedEdges || !includedEdges.length) {
+            return { type: "FeatureCollection", features: features };
+        }
+        // Full-geometry coord lookup per side.
+        var refGeom = {}, tgtGeom = {};
+        var feats = currentGroupGeojson.features || [];
+        for (var i = 0; i < feats.length; i++) {
+            var props = feats[i].properties || {};
+            var geom = feats[i].geometry;
+            if (!geom || geom.type !== "LineString" || !props._id) continue;
+            if (props._role === "ref-full" && !refGeom[props._id]) refGeom[props._id] = geom.coordinates;
+            if (props._role === "target-full" && !tgtGeom[props._id]) tgtGeom[props._id] = geom.coordinates;
+        }
+        // Collect covered intervals per active segment.
+        var refIvl = {}, tgtIvl = {};
+        for (var e = 0; e < includedEdges.length; e++) {
+            var ed = includedEdges[e];
+            var rs = ed.gers_start_frac, re = ed.gers_end_frac;
+            if (rs != null && re != null && refGeom[ed.ref_id]) {
+                (refIvl[ed.ref_id] = refIvl[ed.ref_id] || []).push([Math.min(rs, re), Math.max(rs, re)]);
+            }
+            var ls = ed.local_start_frac, le = ed.local_end_frac;
+            if (ls != null && le != null && tgtGeom[ed.target_id]) {
+                (tgtIvl[ed.target_id] = tgtIvl[ed.target_id] || []).push([Math.min(ls, le), Math.max(ls, le)]);
+            }
+        }
+        function emit(ivlMap, geomMap, role) {
+            Object.keys(ivlMap).forEach(function (id) {
+                var gaps = uncoveredIntervals(ivlMap[id], GAP_MIN_FRAC);
+                for (var q = 0; q < gaps.length; q++) {
+                    var coords = sliceLineByFrac(geomMap[id], gaps[q][0], gaps[q][1]);
+                    if (coords) {
+                        features.push({
+                            type: "Feature",
+                            geometry: { type: "LineString", coordinates: coords },
+                            properties: { _role: role, _id: id },
+                        });
+                    }
+                }
+            });
+        }
+        emit(refIvl, refGeom, "ref-gap");
+        emit(tgtIvl, tgtGeom, "target-gap");
+        return { type: "FeatureCollection", features: features };
+    }
+
+    function updateCoverageGaps(includedEdges) {
+        if (!map.getSource(GAP_SOURCE)) return;
+        try {
+            map.getSource(GAP_SOURCE).setData(buildCoverageGapFC(includedEdges));
+        } catch (e) {}
     }
 
     /**
@@ -839,6 +1120,12 @@
             var llid = GROUP_LABEL_DEFS[k].id;
             if (map.getLayer(llid)) layerIds.push(llid);
         }
+        // Include the faint "removed" overlays so a deselected segment can be
+        // clicked to re-add it (it's no longer drawn by the solid full layer).
+        var removedLayers = ["group-ref-removed", "group-target-removed"];
+        for (var r = 0; r < removedLayers.length; r++) {
+            if (map.getLayer(removedLayers[r])) layerIds.push(removedLayers[r]);
+        }
         if (layerIds.length === 0) return;
 
         var features = map.queryRenderedFeatures(bbox, { layers: layerIds });
@@ -870,4 +1157,5 @@
     window.matcherSetSegmentVisible = setSegmentVisible;
     window.matcherToggleAllSegments = toggleAllSegments;
     window.matcherRefitGroup = fitCurrentGroup;
+    window.matcherUpdateCoverageGaps = updateCoverageGaps;
 })();

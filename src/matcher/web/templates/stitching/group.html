@@ -4,8 +4,9 @@
 <!-- Embedded geometry for map rendering -->
 <script type="application/json" id="group-geometry">{{ group_geojson | tojson }}</script>
 
-<!-- Edge confidence data for dynamic updates -->
-<script type="application/json" id="group-edges">{{ group.edges | tojson }}</script>
+<!-- Edge confidence data for dynamic updates (enriched with per-edge is_sliver
+     and alignment fracs so the client can render coverage gaps + sliver counts) -->
+<script type="application/json" id="group-edges">{{ (client_edges if client_edges is defined else group.edges) | tojson }}</script>
 
 <!-- Context segment IDs (start hidden on map) -->
 <script type="application/json" id="group-context-ids">{{ (group.get("context_ref_ids", []) + group.get("context_target_ids", [])) | tojson }}</script>
@@ -119,6 +120,18 @@
         </div>
     </div>
 
+    <!-- Sliver-edge exclusion (default: exclude). The cross-product manual path
+         silently pulls in near-zero-overlap junction edges; excluding them keeps
+         human labels clean. Option picks are exact edge sets and unaffected. -->
+    <div class="sliver-control">
+        <label class="sliver-toggle-label" title="Include near-zero-overlap junction 'sliver' edges in a manual selection">
+            <input type="checkbox" id="include-slivers-toggle" onchange="onSliverToggle()">
+            <span>include sliver edges</span>
+        </label>
+        <span class="sliver-indicator" id="sliver-indicator"
+              data-group-sliver-count="{{ sliver_count if sliver_count is defined else 0 }}"></span>
+    </div>
+
     <!-- Three-line summary: ID, Class, Name (tap to expand) -->
     <div class="group-summary" onclick="toggleGroupDetails()">
         {% if id_summary is defined %}
@@ -180,6 +193,10 @@
             <!-- Exact edge set of an unmodified picked option; cleared on manual edit -->
             <input type="hidden" name="selected_edges" id="selected-edges"
                    value='{% if preseed_edges is defined and preseed_edges %}{{ preseed_edges | tojson }}{% endif %}'>
+            <!-- Whether to drop junction sliver edges from a cross-product manual
+                 submit. Kept in sync with the (default-unchecked) include-slivers
+                 checkbox: unchecked => exclude => "true". Always sent explicitly. -->
+            <input type="hidden" name="exclude_slivers" id="exclude-slivers-field" value="true">
             <button type="submit" class="btn-select">
                 Select This
             </button>

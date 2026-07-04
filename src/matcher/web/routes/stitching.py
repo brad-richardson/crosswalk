@@ -22,6 +22,67 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Sliver-edge classification
+# ---------------------------------------------------------------------------
+#
+# Junction "slivers" are candidate edges where two segments barely overlap —
+# typically where a road end clips the side of another road at an intersection
+# (e.g. 0.2 m of a 162 m road). When a human submits a cross-product manual
+# selection, these slivers get silently reconstructed into the stored label,
+# polluting the training data with near-zero-overlap pairs.
+#
+# Classification rule: an edge is a sliver when its LARGER alignment span — the
+# max of the ref coverage fraction (gers_start_frac..gers_end_frac) and the
+# target coverage fraction (local_start_frac..local_end_frac) — falls below
+# SLIVER_SPAN_THRESHOLD. Using the max (not min) is deliberate: legitimate
+# asymmetric matches (a 10 m local segment against a 1 km ref) have one tiny
+# span but the other near 1.0, so their max stays high. A true sliver fails to
+# substantially cover EITHER segment, so its max span is small.
+#
+# Real-data justification for the 0.10 threshold: audited sliver examples had a
+# max span <= 0.075 (min span <= 0.028), while substantive edges had a max span
+# >= 0.10. The threshold sits in that empty band and, with a strict `<`, never
+# excludes an observed substantive edge (0.10 is not < 0.10) while comfortably
+# catching every observed sliver (0.075 < 0.10). Edges missing alignment fracs
+# default to a span of 1.0 and are therefore treated as substantive (we never
+# drop an edge we cannot measure).
+SLIVER_SPAN_THRESHOLD = 0.10
+
+
+def _edge_spans(edge: dict) -> tuple[float, float]:
+    """Return (ref_span, tgt_span) alignment fractions for an edge.
+
+    Missing fracs default to a full [0, 1] span (1.0) so an unmeasurable edge is
+    never mistaken for a sliver.
+    """
+    ref_span = abs(float(edge.get("gers_end_frac", 1.0)) - float(edge.get("gers_start_frac", 0.0)))
+    tgt_span = abs(
+        float(edge.get("local_end_frac", 1.0)) - float(edge.get("local_start_frac", 0.0))
+    )
+    return ref_span, tgt_span
+
+
+def is_sliver_edge(edge: dict) -> bool:
+    """Classify an edge as a junction sliver (see SLIVER_SPAN_THRESHOLD notes)."""
+    ref_span, tgt_span = _edge_spans(edge)
+    return max(ref_span, tgt_span) < SLIVER_SPAN_THRESHOLD
+
+
+def _annotate_sliver_flags(edges: list[dict]) -> list[dict]:
+    """Return a copy of each edge with an ``is_sliver`` boolean added.
+
+    Used to expose the classification to the client so the review UI can show a
+    live "N slivers excluded" indicator and respect the exclusion in its live
+    confidence/summary computations.
+    """
+    out = []
+    for e in edges or []:
+        ce = dict(e)
+        ce["is_sliver"] = is_sliver_edge(e)
+        out.append(ce)
+    return out
+
 
 def _validate_dataset(dataset: str) -> bool:
     """Check dataset exists in the known dataset list (prevents path traversal)."""
@@ -282,11 +343,18 @@ def _build_group_context(group: dict) -> dict:
         for tid in group.get("context_target_ids", [])
     ]
 
+    # Edges enriched with a per-edge sliver flag for the client-side UI. The map
+    # + panel use these to render coverage gaps and a live sliver-exclusion count.
+    client_edges = _annotate_sliver_flags(edges)
+    sliver_count = sum(1 for e in client_edges if e["is_sliver"])
+
     return {
         "id_summary": id_summary,
         "class_summary": class_summary,
         "name_summary": name_summary,
         "avg_confidence": avg_conf,
+        "client_edges": client_edges,
+        "sliver_count": sliver_count,
         "ref_details": ref_details,
         "target_details": target_details,
         "context_ref_details": context_ref_details,
@@ -531,6 +599,7 @@ async def stitching_select(
     included_refs: str = Form(""),
     included_targets: str = Form(""),
     selected_edges: str = Form(""),
+    exclude_slivers: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap.
 
@@ -539,7 +608,15 @@ async def stitching_select(
     is stored verbatim. Any manual pill toggle after picking an option clears
     that payload on the client, so we fall back to reconstructing edges as the
     cross-product of the active ref/target pills — exactly the original path.
+
+    Sliver exclusion: the cross-product fallback can silently pull in junction
+    "sliver" edges (near-zero overlap). When the ``exclude_slivers`` form field
+    is truthy, those flagged edges are dropped from the reconstructed set. The
+    field defaults to FALSE when absent, preserving behaviour for old clients
+    and existing tests; the current UI always sends it explicitly. The explicit
+    option path is unaffected — an option is a curated exact edge set.
     """
+    exclude_sliver_edges = exclude_slivers.strip().lower() in {"true", "1", "on", "yes"}
     if not _validate_dataset(dataset):
         return HTMLResponse("Unknown dataset", status_code=404)
     try:
@@ -575,13 +652,11 @@ async def stitching_select(
             # Manual mode: cross-product of the active ref/target pills.
             ref_set = set(r for r in included_refs.split(",") if r)
             target_set = set(t for t in included_targets.split(",") if t)
-            final_edges = [
-                {"ref_id": e["ref_id"], "target_id": e["target_id"]}
+            matched = [
+                e
                 for e in group.get("edges", [])
                 if e["ref_id"] in ref_set and e["target_id"] in target_set
             ]
-            num_refs = len(ref_set)
-            num_targets = len(target_set)
 
             # Guard against silently recording an empty (label-corrupting)
             # selection. Distinguish intent by the active-pill fields:
@@ -590,7 +665,11 @@ async def stitching_select(
             #     submission (e.g. a client-side regression that drops the pill
             #     IDs, or active pills that share no edge). Refuse rather than
             #     corrupt the label. Logged without reflecting client input.
-            if group.get("edges") and not final_edges and (ref_set or target_set):
+            #
+            # Checked BEFORE sliver exclusion so an all-sliver selection is not
+            # misread as an inconsistent submit — it is a legitimate (if empty)
+            # result once the slivers are dropped.
+            if group.get("edges") and not matched and (ref_set or target_set):
                 logger.warning(
                     "Rejected inconsistent stitching submit for group %s: "
                     "%d refs / %d targets claimed but 0 group edges matched",
@@ -599,6 +678,15 @@ async def stitching_select(
                     len(target_set),
                 )
                 return HTMLResponse("Inconsistent selection", status_code=400)
+
+            if exclude_sliver_edges:
+                matched = [e for e in matched if not is_sliver_edge(e)]
+
+            final_edges = [{"ref_id": e["ref_id"], "target_id": e["target_id"]} for e in matched]
+            # Recompute counts from the final (post-exclusion) edge set so they
+            # never claim segments that dropped out with their sliver edges.
+            num_refs = len({e["ref_id"] for e in final_edges})
+            num_targets = len({e["target_id"] for e in final_edges})
 
         record_stitching_label(
             dataset_id=dataset,

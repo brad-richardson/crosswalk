@@ -1802,6 +1802,38 @@ body {
     color: #f0932b;
 }
 
+/* Sliver-edge exclusion control (feature 3) */
+.sliver-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 2px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.sliver-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.sliver-toggle-label input {
+    cursor: pointer;
+    margin: 0;
+}
+
+.sliver-indicator {
+    font-weight: 600;
+    color: #f0932b;
+}
+
+.sliver-indicator:empty {
+    display: none;
+}
+
 .assignment-option-list {
     display: flex;
     gap: 6px;
@@ -2020,6 +2052,7 @@ body {
 /* Collapsed: hide everything but the header slim bar so the map gets the screen */
 .group-card.collapsed .assignment-options,
 .group-card.collapsed .segment-toggles,
+.group-card.collapsed .sliver-control,
 .group-card.collapsed .group-summary,
 .group-card.collapsed .group-details,
 .group-card.collapsed .card-actions,
