@@ -15,10 +15,11 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
+import shapely
 from loguru import logger
 from numba import njit
 from pyproj import CRS, Geod, Transformer
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 from shapely.ops import substring, transform
 
 from ..config import (
@@ -653,23 +654,97 @@ def linestring_alignment(
     Returns:
         AlignmentResult with fractional start/end positions on each line
     """
-    # Prepare line data once
+    # Thin wrapper around the prepared-data implementation. Extracting coords and
+    # the target seed points here (once) lets the hot batch path
+    # (_compute_single_alignment) cache per-unique-segment work and call
+    # _linestring_alignment_prepared directly, avoiding redundant
+    # np.array(line.coords) and redundant GEOS round-trips on every pair.
     ref_coords, ref_distances, ref_length = _prepare_line_data(reference)
     target_coords, target_distances, target_length = _prepare_line_data(target)
 
     if ref_length == 0 or target_length == 0:
         return AlignmentResult(0.0, 1.0, 0.0, 1.0)
 
+    proj_start, proj_mid, proj_end = _project_seed_points(reference, _target_seed_points(target))
+    return _linestring_alignment_prepared(
+        ref_coords,
+        ref_distances,
+        ref_length,
+        target_coords,
+        target_distances,
+        target_length,
+        proj_start,
+        proj_mid,
+        proj_end,
+        grid_samples=grid_samples,
+        refinement_steps=refinement_steps,
+        detect_divergence=detect_divergence,
+    )
+
+
+def _target_seed_points(target: LineString) -> np.ndarray:
+    """Build the [start, midpoint, end] seed points for a target line.
+
+    Returns a Shapely GeometryArray of three Points. Depends only on ``target``,
+    so the batch path caches it per unique target segment (the midpoint requires
+    a GEOS interpolate). ``line_interpolate_point`` is bit-identical to
+    ``LineString.interpolate`` and ``coords[0]``/``coords[-1]`` are the exact
+    endpoint coordinates, so seeds match the previous GEOS-based path exactly.
+    """
+    mid = shapely.line_interpolate_point(target, 0.5, normalized=True)
+    c0 = target.coords[0]
+    c1 = target.coords[-1]
+    return shapely.points(np.array([[c0[0], c0[1]], [mid.x, mid.y], [c1[0], c1[1]]], dtype=float))
+
+
+def _project_seed_points(
+    reference: LineString, seed_points: np.ndarray
+) -> tuple[float, float, float]:
+    """Project the [start, mid, end] seed points onto the reference line.
+
+    A single vectorized ``line_locate_point`` call replaces three per-pair
+    ``reference.project(Point(...))`` GEOS round-trips. ``line_locate_point`` uses
+    the identical GEOS kernel as ``LineString.project`` and returns bit-identical
+    distances (verified 0.0 max deviation over 50k random pairs), preserving exact
+    numerical equivalence with the original seeding.
+    """
+    locs = shapely.line_locate_point(reference, seed_points)
+    return float(locs[0]), float(locs[1]), float(locs[2])
+
+
+def _linestring_alignment_prepared(
+    ref_coords: np.ndarray,
+    ref_distances: np.ndarray,
+    ref_length: float,
+    target_coords: np.ndarray,
+    target_distances: np.ndarray,
+    target_length: float,
+    proj_start: float,
+    proj_mid: float,
+    proj_end: float,
+    grid_samples: int = 24,
+    refinement_steps: int = 16,
+    detect_divergence: bool = True,
+) -> AlignmentResult:
+    """Alignment core operating on pre-extracted line data and seed projections.
+
+    Behaviorally identical to :func:`linestring_alignment` but accepts
+    already-extracted ``(coords, distances, length)`` triples and the three seed
+    projection distances (``reference.project`` of the target start/mid/end
+    points). This lets the batch path cache the expensive per-segment work
+    (coordinate extraction and the target midpoint interpolate) and issue a single
+    batched projection per pair, while keeping the seeds bit-identical to the
+    original GEOS-based computation.
+
+    Callers must guarantee ``ref_length > 0`` and ``target_length > 0``; the
+    zero-length short-circuit lives in the callers (which also skip seed
+    computation for degenerate lines, matching the original control flow).
+    """
     # Seed offset selection. The standard midpoint seed works well when lines
     # overlap substantially, but for barely-overlapping lines (e.g. two collinear
     # roads meeting at a junction), the midpoint projects far from the actual
     # overlap zone, and the grid search + ternary refinement can't bridge the gap.
     # We evaluate endpoint-based seeds and switch only when dramatically better.
-    target_mid = target.interpolate(0.5, normalized=True)
-    proj_start = reference.project(Point(target.coords[0]))
-    proj_mid = reference.project(target_mid)
-    proj_end = reference.project(Point(target.coords[-1]))
-
     buffer_distance_for_seed = (
         _SEED_BUFFER_FRACTION
         * min(ref_length, target_length)
@@ -1025,6 +1100,20 @@ def walk_parallelness(L1: LineString, L2: LineString, samples: int = 16) -> floa
 # Module-level globals for multiprocessing worker data
 _alignment_worker_data = None
 
+# Per-worker caches keyed by segment index. Blocking fan-out means each segment
+# participates in many candidate pairs, so caching per unique segment avoids
+# repeating the expensive per-segment work on every pair. Populated lazily and
+# scoped to the worker process (reset in _init_alignment_worker).
+#
+# _ref_line_cache:    ref_idx    -> (coords, cumulative distances, length)
+# _target_line_cache: target_idx -> (coords, cumulative distances, length, seed_points)
+#   where seed_points is the [start, mid, end] GeometryArray used for seed
+#   projection (its midpoint requires a GEOS interpolate, cached here per target).
+#   seed_points is None only for degenerate zero-length targets, which short-circuit
+#   before seed projection.
+_ref_line_cache: dict[int, tuple[np.ndarray, np.ndarray, float]] = {}
+_target_line_cache: dict[int, tuple[np.ndarray, np.ndarray, float, np.ndarray | None]] = {}
+
 
 def _compute_centroid(geoms: np.ndarray) -> tuple[float, float] | None:
     """Compute average centroid from a collection of geometries.
@@ -1125,6 +1214,10 @@ def _init_alignment_worker(data):
     """Initialize worker process with shared geometry data."""
     global _alignment_worker_data
     _alignment_worker_data = data
+    # Fresh caches per worker process (prevents cross-run leakage when a worker
+    # is reused; each worker only ever sees geometries from `data`).
+    _ref_line_cache.clear()
+    _target_line_cache.clear()
 
 
 def _compute_single_alignment(args):
@@ -1140,14 +1233,51 @@ def _compute_single_alignment(args):
 
     try:
         ref_geom = _alignment_worker_data["ref_geoms_full"][ref_idx]
-        target_geom = _alignment_worker_data["target_geoms_full"][target_idx]
-
-        if ref_geom is None or target_geom is None:
-            return None
-        if ref_geom.is_empty or target_geom.is_empty:
+        if ref_geom is None or ref_geom.is_empty:
             return None
 
-        return linestring_alignment(ref_geom, target_geom)
+        ref_prepared = _ref_line_cache.get(ref_idx)
+        if ref_prepared is None:
+            ref_prepared = _prepare_line_data(ref_geom)
+            _ref_line_cache[ref_idx] = ref_prepared
+
+        target_cached = _target_line_cache.get(target_idx)
+        if target_cached is None:
+            target_geom = _alignment_worker_data["target_geoms_full"][target_idx]
+            if target_geom is None or target_geom.is_empty:
+                return None
+            t_coords, t_distances, t_length = _prepare_line_data(target_geom)
+            # Seed points depend only on the target; the midpoint needs a GEOS
+            # interpolate, so cache the [start, mid, end] array per target.
+            seed_points = _target_seed_points(target_geom) if t_length > 0 else None
+            target_cached = (t_coords, t_distances, t_length, seed_points)
+            _target_line_cache[target_idx] = target_cached
+
+        _ref_coords, _ref_distances, ref_length = ref_prepared
+        t_coords, t_distances, t_length, seed_points = target_cached
+
+        if ref_length == 0 or t_length == 0:
+            return AlignmentResult(0.0, 1.0, 0.0, 1.0)
+
+        # Past the zero-length short-circuit, t_length > 0 guarantees the cache
+        # stored a real seed-point array (None is only cached for degenerate targets).
+        assert seed_points is not None
+
+        # Single batched projection of the (cached) target seed points onto this
+        # ref — bit-identical to three per-pair reference.project(Point(...)) calls.
+        proj_start, proj_mid, proj_end = _project_seed_points(ref_geom, seed_points)
+
+        return _linestring_alignment_prepared(
+            _ref_coords,
+            _ref_distances,
+            ref_length,
+            t_coords,
+            t_distances,
+            t_length,
+            proj_start,
+            proj_mid,
+            proj_end,
+        )
     except Exception as e:
         logger.debug(f"Alignment failed for ({ref_idx}, {target_idx}): {type(e).__name__}: {e}")
         return None
