@@ -1,0 +1,138 @@
+{
+ "group_id": "701d491e",
+ "note": "American Legion Highway dual carriageway (Boston). WGS84 GeoJSON. See research/alignment_truncation_investigation.md",
+ "R4_T2": {
+  "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+  "target_id": "us_boston_streets_3833_882a3064c7",
+  "stored_edge": {
+   "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+   "target_id": "us_boston_streets_3833_882a3064c7",
+   "confidence": 0.9949,
+   "gers_start_frac": 0.4173044,
+   "gers_end_frac": 0.9985881,
+   "local_start_frac": 0.0,
+   "local_end_frac": 1.0
+  },
+  "ref_geometry": {
+   "type": "LineString",
+   "coordinates": [
+    [
+     -71.105186,
+     42.288611
+    ],
+    [
+     -71.105309,
+     42.288555
+    ],
+    [
+     -71.105881,
+     42.28825
+    ],
+    [
+     -71.106147,
+     42.288117
+    ],
+    [
+     -71.106598,
+     42.287852
+    ],
+    [
+     -71.106633,
+     42.287832
+    ],
+    [
+     -71.106774,
+     42.287749
+    ]
+   ]
+  },
+  "target_geometry": {
+   "type": "LineString",
+   "coordinates": [
+    [
+     -71.105205,
+     42.288611
+    ],
+    [
+     -71.105309,
+     42.288564
+    ],
+    [
+     -71.105881,
+     42.288259
+    ],
+    [
+     -71.106756,
+     42.28775
+    ]
+   ]
+  }
+ },
+ "R7_T6": {
+  "ref_id": "9203993e-d562-431e-8d11-8276c0698c96",
+  "target_id": "us_boston_streets_7722_882a3064c7",
+  "stored_edge": {
+   "ref_id": "9203993e-d562-431e-8d11-8276c0698c96",
+   "target_id": "us_boston_streets_7722_882a3064c7",
+   "confidence": 0.9949,
+   "gers_start_frac": 0.0012314,
+   "gers_end_frac": 0.7236021,
+   "local_start_frac": 0.0,
+   "local_end_frac": 1.0
+  },
+  "ref_geometry": {
+   "type": "LineString",
+   "coordinates": [
+    [
+     -71.106665,
+     42.287667
+    ],
+    [
+     -71.106533,
+     42.287745
+    ],
+    [
+     -71.10624,
+     42.287918
+    ],
+    [
+     -71.105815,
+     42.288153
+    ],
+    [
+     -71.105113,
+     42.288518
+    ],
+    [
+     -71.104917,
+     42.288611
+    ]
+   ]
+  },
+  "target_geometry": {
+   "type": "LineString",
+   "coordinates": [
+    [
+     -71.106652,
+     42.287672
+    ],
+    [
+     -71.10624,
+     42.287926
+    ],
+    [
+     -71.105816,
+     42.288161
+    ],
+    [
+     -71.105114,
+     42.288526
+    ],
+    [
+     -71.104935,
+     42.288611
+    ]
+   ]
+  }
+ }
+}
