@@ -313,7 +313,9 @@ def _compute_non_geometric_features(
         vertex_density_target = compute_vertex_density(
             target_geom_aligned, coords=coords_aligned_target
         )
-        if vertex_density_ref > 0 and vertex_density_target > 0:
+        if math.isnan(vertex_density_ref) or math.isnan(vertex_density_target):
+            vertex_density_ratio = float("nan")
+        elif vertex_density_ref > 0 and vertex_density_target > 0:
             vertex_density_ratio = min(vertex_density_ref, vertex_density_target) / max(
                 vertex_density_ref, vertex_density_target
             )
@@ -476,9 +478,14 @@ def _compute_non_geometric_features(
             is_intersection_target = 1.0 if target_topo.get("is_intersection", False) else 0.0
             intersection_match = 1.0 if is_intersection_ref == is_intersection_target else 0.0
 
-    # Coverage features
+    # Coverage features. A missing alignment is a computation failure, not
+    # evidence of zero overlap — encode it as NaN (like the intersection
+    # overlap features) instead of coverage=0.0, which reads as a strong
+    # "no match" signal to the model.
     with timed_section("coverage_features"):
-        coverage_feats = compute_coverage_features(alignment)
+        coverage_feats = compute_coverage_features(alignment, return_none_on_failure=True)
+        if alignment is None:
+            coverage_feats = dict.fromkeys(coverage_feats, float("nan"))
 
     # Parallel sibling features (detect split vs centerline representation)
     # Computed per-pair on aligned portions for accuracy with partial alignments
@@ -498,10 +505,12 @@ def _compute_non_geometric_features(
         else:
             if ref_sibling_context_full is None:
                 logger.warning("ref_sibling_context_full is None - sibling detection disabled")
+            # Search not run: encode as missing (None -> NaN below), not as a
+            # false "searched and found no sibling".
             has_sibling_ref, sibling_dist_ref, parallel_fraction_ref = (
-                False,
+                None,
                 MAX_DISTANCE_METERS,
-                0.0,
+                float("nan"),
             )
 
         if precomputed_sibling_target is not None:
@@ -518,19 +527,27 @@ def _compute_non_geometric_features(
         else:
             if target_sibling_context_full is None:
                 logger.warning("target_sibling_context_full is None - sibling detection disabled")
-            has_sibling_target, sibling_dist_target = False, MAX_DISTANCE_METERS
+            has_sibling_target, sibling_dist_target = None, MAX_DISTANCE_METERS
 
-        # Core sibling detection
-        has_parallel_sibling_ref = float(has_sibling_ref)
+        # Core sibling detection (None = search not run -> NaN, distinct from
+        # a genuine "searched, no sibling found" 0.0)
+        sibling_search_ran = has_sibling_ref is not None and has_sibling_target is not None
+        has_parallel_sibling_ref = (
+            float("nan") if has_sibling_ref is None else float(has_sibling_ref)
+        )
 
         # Derived: likely representation mismatch (XOR: one has sibling, other doesn't)
-        likely_representation_mismatch = float(has_sibling_ref != has_sibling_target)
+        likely_representation_mismatch = (
+            float(has_sibling_ref != has_sibling_target) if sibling_search_ran else float("nan")
+        )
 
         # Corridor-aware offset ratio
         # Use sibling distance from whichever side is split (has sibling)
         # FIX: When no sibling detected, set to 0.0 instead of computing with MAX_DISTANCE
         # (which gave meaningless ~0.5 values that added noise to the ML model)
-        if has_sibling_ref and not has_sibling_target:
+        if not sibling_search_ran:
+            offset_vs_half_corridor_ratio = float("nan")
+        elif has_sibling_ref and not has_sibling_target:
             corridor_width = sibling_dist_ref
             half_corridor = corridor_width / 2.0
             offset_vs_half = abs(lateral_offset - half_corridor)

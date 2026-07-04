@@ -97,8 +97,14 @@ class TestInteriorConnectorCounts:
 class TestInteriorConnectorFiltering:
     """Test that dead-end connectors are excluded and alignment range is respected."""
 
-    def test_endpoint_connectors_included(self):
-        """Connectors at alignment endpoints are included (inclusive range)."""
+    def test_endpoint_connectors_excluded(self):
+        """Connectors at the alignment endpoints are NOT interior.
+
+        Ref segments always carry Overture connectors at frac 0.0/1.0; those
+        boundary junctions belong to shared_anchor_count. Counting them as
+        interior inflated ref counts asymmetrically (projected target
+        connectors rarely land exactly on the endpoints).
+        """
         result = compute_interior_connector_features(
             "ref",
             "tgt",
@@ -111,8 +117,9 @@ class TestInteriorConnectorFiltering:
             0.0,
             1.0,
         )
-        # All 5 nodes are junctions (degree >= 2) and within [0.0, 1.0]
-        assert result["interior_junction_count_ref"] == 5
+        # Nodes at exactly 0.0 and 1.0 are boundary anchors, not interior;
+        # 0.005 and 0.995 are strictly inside and still count.
+        assert result["interior_junction_count_ref"] == 3
 
     def test_dead_ends_excluded(self):
         """Nodes with degree < 2 are not counted as junctions."""
@@ -148,9 +155,14 @@ class TestInteriorConnectorFiltering:
         # Only node 20 at 0.5 is inside [0.2, 0.8]
         assert result["interior_junction_count_ref"] == 1
 
-    def test_epsilon_captures_boundary_drift(self):
-        """Connector just outside alignment range (within 1e-4 eps) is included."""
-        # Alignment is 0.2–0.8, connector at 0.19995 (half of eps outside start)
+    def test_boundary_drift_treated_as_anchor(self):
+        """Connectors within eps of the alignment boundary are anchors, not interior.
+
+        A connector at the alignment boundary (within float-drift eps) is a
+        boundary anchor — the shared_anchor_count's territory — regardless of
+        which side of the boundary the drift landed it on.
+        """
+        # Alignment is 0.2–0.8; connectors drifted eps/2 outside both bounds
         result = compute_interior_connector_features(
             "ref",
             "tgt",
@@ -163,8 +175,8 @@ class TestInteriorConnectorFiltering:
             0.0,
             1.0,
         )
-        # All 3 within eps tolerance of [0.2, 0.8]
-        assert result["interior_junction_count_ref"] == 3
+        # Only the clearly-inside connector at 0.5 counts as interior
+        assert result["interior_junction_count_ref"] == 1
 
     def test_epsilon_does_not_overreach(self):
         """Connector well outside alignment range is excluded despite epsilon."""

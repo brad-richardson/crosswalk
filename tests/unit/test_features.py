@@ -116,6 +116,20 @@ class TestGeometricFeatures:
         for i in range(len(lines_a)):
             assert batch[i] == pytest.approx(per_pair[i], abs=1e-10)
 
+    def test_vertex_density_sub_meter_sliver_is_nan(self):
+        """Sub-meter alignment slivers give NaN density, not ~1/length noise.
+
+        Regression: a 0.007m aligned sliver produced densities up to 1.18e7,
+        drowning the feature's real distribution (the reason vertex_density
+        was the worst-scoring ablation category).
+        """
+        from matcher.features.geometric import compute_vertex_density
+
+        sliver = LineString([(0, 0), (0.007, 0)])
+        assert math.isnan(compute_vertex_density(sliver))
+        normal = LineString([(0, 0), (100, 0)])
+        assert compute_vertex_density(normal) == pytest.approx(0.02)
+
 
 class TestSemanticFeatures:
     """Tests for semantic feature extraction."""
@@ -1215,9 +1229,14 @@ class TestComputePairFeaturesWithAlignment:
             target_topology=MOCK_TOPOLOGY_FEATURES.copy(),
         )
 
-        # Should still include coverage features (zeros without alignment)
+        # A missing alignment is a computation failure, not zero overlap:
+        # coverage must be NaN (matching the intersection-overlap features'
+        # convention), not a fake "no overlap" 0.0 signal.
         assert "ref_coverage" in features
-        assert features["ref_coverage"] == 0.0
+        assert math.isnan(features["ref_coverage"])
+        assert math.isnan(features["target_coverage"])
+        assert math.isnan(features["min_coverage"])
+        assert math.isnan(features["coverage_ratio"])
 
     def test_compute_pair_features_uses_sublines_with_alignment(self):
         """With alignment, similarity features should be computed on sublines."""
@@ -1640,6 +1659,76 @@ class TestRoutePrefixMatch:
         assert canonicalize_route_name("Highway 1") == ("highway", 1)
         assert canonicalize_route_name("Main Street") == (None, None)
         assert canonicalize_route_name(None) == (None, None)
+
+
+class TestSemanticAuditRegressions:
+    """Regression tests for bugs found in the July 2026 feature audit."""
+
+    @pytest.mark.parametrize(
+        "name_a,name_b",
+        [
+            ("東京都道", "Tokyo Route"),  # CJK vs romanization
+            ("皇后大道中", "Queen's Road Central"),  # CJK vs Latin
+            ("شارع الملك", "King Street"),  # Arabic vs Latin
+        ],
+        ids=["cjk_romaji", "cjk_latin", "arabic_latin"],
+    )
+    def test_cross_script_string_metrics_return_nan(self, name_a, name_b):
+        """Character-level metrics are meaningless across scripts.
+
+        They used to return ~0.0, feeding a strong false "different name"
+        signal on genuine matches (47% of Tokyo's true matches scored
+        levenshtein == 0.0). Must be NaN so XGBoost treats it as missing.
+        """
+        result = compute_name_similarity(name_a, name_b)
+        assert math.isnan(result["levenshtein_ratio"])
+        assert math.isnan(result["jaro_winkler"])
+        assert math.isnan(result["token_sort_ratio"])
+        assert math.isnan(result["soundex_match"])
+        assert math.isnan(result["metaphone_similarity"])
+        # Names are present — only the comparison is unreliable
+        assert result["has_name_ref"] == 1.0
+        assert result["has_name_target"] == 1.0
+
+    def test_same_script_non_latin_string_metrics_computed(self):
+        """Same-script CJK pairs still get real string similarity values."""
+        result = compute_name_similarity("北京路", "上海路")
+        assert not math.isnan(result["levenshtein_ratio"])
+
+    def test_whitespace_only_name_counts_as_missing(self):
+        """A whitespace-only name must not set has_name_* = 1.0."""
+        result = compute_name_similarity(" ", "Main Street")
+        assert result["has_name_ref"] == 0.0
+        assert result["has_name_target"] == 1.0
+        assert math.isnan(result["levenshtein_ratio"])
+
+    def test_numeric_only_names_metaphone_nan(self):
+        """Names with empty metaphone codes give NaN, not a fabricated 0.5."""
+        result = compute_name_similarity("90", "90")
+        assert math.isnan(result["metaphone_similarity"])
+
+    def test_leading_st_normalizes_to_saint(self):
+        """Leading 'St' means Saint, not Street: 'St Louis' vs 'Saint Louis'."""
+        from matcher.features.semantic import _normalize_street_name
+
+        assert _normalize_street_name("St Louis Ave") == "saint louis avenue"
+        assert _normalize_street_name("St. Charles Ave") == "saint charles avenue"
+        # Non-leading 'St' is still Street
+        assert _normalize_street_name("Main St") == "main street"
+
+    def test_ordinal_numbers_are_not_route_numbers(self):
+        """'5th Avenue' vs '5th Street' must not score numeric_match = 1.0."""
+        from matcher.features.semantic import (
+            compute_name_numeric_match,
+            extract_numeric_suffix,
+        )
+
+        assert extract_numeric_suffix("5th Avenue") is None
+        assert extract_numeric_suffix("42nd Street") is None
+        assert extract_numeric_suffix("I-90") == 90
+        assert extract_numeric_suffix("US Route 101") == 101
+        assert math.isnan(compute_name_numeric_match("5th Avenue", "5th Street"))
+        assert compute_name_numeric_match("Interstate 90", "I-90") == 1.0
 
 
 class TestClusteringCoefficientFeatures:

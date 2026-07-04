@@ -43,6 +43,18 @@ class TestBoundsOnSyntheticPairs:
         "interior_junction_position_sim",
         # No alignment/connector context — shared anchor count is NaN
         "shared_anchor_count",
+        # No alignment — a missing alignment is a computation failure, so
+        # coverage is NaN (not a fake "no overlap" 0.0)
+        "ref_coverage",
+        "target_coverage",
+        "min_coverage",
+        "coverage_ratio",
+        # No sibling search context — "search not run" is NaN, distinct from
+        # a genuine "searched, found no sibling" 0.0
+        "has_parallel_sibling_ref",
+        "parallel_fraction_ref",
+        "likely_representation_mismatch",
+        "offset_vs_half_corridor_ratio",
     }
 
     # Additional features that are NaN when names are None
@@ -256,6 +268,11 @@ class TestBoundsOnRealData:
         "sinuosity_ref",
         "sinuosity_target",
         "sinuosity_delta",
+        # Vertex density (NaN on sub-meter alignment slivers, where density
+        # is ~1/length noise)
+        "vertex_density_ref",
+        "vertex_density_target",
+        "vertex_density_ratio",
     }
 
     def test_no_nan_in_real_data(self, labeled_features):

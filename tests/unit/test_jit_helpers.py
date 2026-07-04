@@ -255,6 +255,27 @@ class TestComputeShapeComplexityNumba:
         coords = np.array([[0.0, 0.0], [100.0, 0.0]])
         assert compute_shape_complexity_numba(coords, 10.0) == 0
 
+    def test_duplicate_vertex_does_not_fabricate_turn(self):
+        """A duplicated vertex on a straight diagonal must not create turns.
+
+        Regression: arctan2(0, 0) = 0° gave the zero-length segment a phantom
+        eastward heading, counting 2 spurious turns on a straight diagonal
+        (masked on axis-aligned lines where 0° coincides with the true
+        heading).
+        """
+        coords = np.array([[0.0, 0.0], [5.0, 5.0], [5.0, 5.0], [10.0, 10.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 0
+
+    def test_duplicate_vertex_preserves_real_turn(self):
+        """A genuine turn at a duplicated vertex must still be counted."""
+        coords = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 0.0], [50.0, 50.0]])
+        assert compute_shape_complexity_numba(coords, 10.0) == 1
+
+    def test_duplicate_vertex_heading_consistency(self):
+        """Duplicated vertex must not degrade heading consistency."""
+        points = np.array([[0.0, 0.0], [5.0, 5.0], [5.0, 5.0], [10.0, 10.0]])
+        assert compute_heading_consistency_numba(points) == pytest.approx(1.0)
+
     def test_wrapper_matches_numba(self):
         """Wrapper function should return same result as JIT function."""
         line = LineString([(0, 0), (50, 0), (50, 50), (100, 50)])

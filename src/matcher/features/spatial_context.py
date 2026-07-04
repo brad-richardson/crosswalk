@@ -3064,11 +3064,18 @@ def compute_interior_connector_features(
         end_frac: float,
         eps: float = 1e-4,
     ) -> list[tuple[float, int]]:
-        """Get junction connectors within the aligned range (inclusive, with epsilon)."""
+        """Get junction connectors strictly inside the aligned range.
+
+        Exclusive bounds per the docstring: boundary junctions (ref segments
+        always carry Overture connectors at frac 0.0/1.0) belong to
+        shared_anchor_count, and including them inflates ref counts
+        asymmetrically because projected target connectors rarely land
+        exactly on the alignment endpoints.
+        """
         connectors = seg_to_connectors.get(seg_id, [])
         aligned = []
         for frac, node_id in connectors:
-            if (start_frac - eps) <= frac <= (end_frac + eps):
+            if (start_frac + eps) < frac < (end_frac - eps):
                 degree = _get_degree(node_features, node_id)
                 if degree >= 2:  # Only count junctions
                     aligned.append((frac, node_id))

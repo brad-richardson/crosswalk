@@ -329,11 +329,11 @@ def compute_name_similarity(
             - name_is_generic: 1.0 if either name matches generic pattern
     """
 
-    # Compute name presence flags
-    has_name_ref = 1.0 if name_a else 0.0
-    has_name_target = 1.0 if name_b else 0.0
+    # Compute name presence flags (whitespace-only names count as missing)
+    has_name_ref = 1.0 if name_a and name_a.strip() else 0.0
+    has_name_target = 1.0 if name_b and name_b.strip() else 0.0
 
-    if not name_a or not name_b:
+    if not has_name_ref or not has_name_target:
         # Return neutral scores when names are missing
         # This prevents penalizing valid geometric matches just because
         # one dataset doesn't have name data for this segment
@@ -355,6 +355,18 @@ def compute_name_similarity(
 
     # Check if either name is generic
     name_is_generic = 1.0 if (_is_generic_name(name_a) or _is_generic_name(name_b)) else 0.0
+
+    # Cross-script pairs (e.g. kanji vs romanization): character-level string
+    # metrics are meaningless and would score ~0.0, feeding a strong false
+    # "different name" signal on genuine matches. Return NaN so XGBoost treats
+    # the comparison as missing rather than mismatched.
+    if _names_are_cross_script(norm_a, norm_b):
+        result = _MISSING_NAMES_RESULT.copy()
+        result["has_name_ref"] = has_name_ref
+        result["has_name_target"] = has_name_target
+        result["names_missing"] = False
+        result["name_is_generic"] = name_is_generic
+        return result
 
     # Compute various similarity metrics
     levenshtein_ratio = fuzz.ratio(norm_a, norm_b) / 100.0
@@ -380,13 +392,17 @@ def compute_name_similarity(
         key_b = _soundex_key_word(norm_b)
         soundex_a = jellyfish.soundex(key_a) if key_a else ""
         soundex_b = jellyfish.soundex(key_b) if key_b else ""
-        soundex_match = 1.0 if soundex_a == soundex_b and soundex_a else 0.0
+        # Un-encodable names (e.g. purely numeric like "90") produce empty
+        # phonetic codes — that's a missing comparison, not a mismatch.
+        soundex_match = (
+            (1.0 if soundex_a == soundex_b else 0.0) if soundex_a and soundex_b else _nan
+        )
 
         # Metaphone on full name for better typo tolerance
         metaphone_a = jellyfish.metaphone(norm_a) if norm_a else ""
         metaphone_b = jellyfish.metaphone(norm_b) if norm_b else ""
         metaphone_similarity = (
-            fuzz.ratio(metaphone_a, metaphone_b) / 100.0 if metaphone_a and metaphone_b else 0.5
+            fuzz.ratio(metaphone_a, metaphone_b) / 100.0 if metaphone_a and metaphone_b else _nan
         )
 
     # Names match if any metric is very high
@@ -609,6 +625,12 @@ def _normalize_street_name(name: str) -> str:
     # Add spaces around name for abbreviation matching
     name = f" {name} "
 
+    # Leading "St" followed by another word is almost always "Saint"
+    # (St Louis, St Charles Ave) — expand it before the abbreviation pass
+    # would clobber it into "street".
+    if name.startswith(" st ") and len(name.split()) >= 2:
+        name = " saint " + name[4:]
+
     # Expand abbreviations (only effective for Latin text, harmless for CJK)
     for abbr, full in STREET_ABBREVIATIONS.items():
         name = name.replace(abbr, full)
@@ -764,8 +786,10 @@ def extract_numeric_suffix(name: str | None) -> int | None:
     if not name:
         return None
 
-    # Find all numbers in the name
-    numbers = re.findall(r"\d+", name)
+    # Find all numbers in the name, excluding ordinals (5th, 42nd): those are
+    # name words ("5th Avenue"), not route numbers, and comparing them across
+    # pairs produces false matches like "5th Avenue" vs "5th Street" -> 1.0.
+    numbers = re.findall(r"\d+(?!\d)(?!(?:st|nd|rd|th)\b)", name, re.IGNORECASE)
 
     if numbers:
         # Return the last number (often the route number)
