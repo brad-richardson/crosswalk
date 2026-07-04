@@ -1,5 +1,6 @@
 """Configuration settings for the matcher pipeline."""
 
+import math
 import multiprocessing
 from pathlib import Path
 
@@ -73,6 +74,107 @@ JUNCTION_MAX_OVERLAP_M = 20.0
 # Maximum accepted overlap (meters) for alignment-based grouping and conflict detection.
 # Two matches overlapping by more than this on the shared segment are considered incompatible.
 MAX_ALIGNMENT_OVERLAP_M = 5.0
+
+# ---------------------------------------------------------------------------
+# Junction "sliver" edge classification (single source of truth)
+# ---------------------------------------------------------------------------
+#
+# A junction "sliver" is a candidate edge where two segments of (usually
+# different) streets barely overlap — typically where a road end clips the side
+# of another road at an intersection (measured examples: 0.2-1.1 m overlap spans,
+# ML confidence 0.11-0.38). Slivers pollute stitching labels and can weld
+# otherwise-independent groups into monster connected components.
+#
+# HYBRID rule (both conditions must hold for an edge to be a sliver):
+#   1. FRACTION test:  max(ref_span_frac, tgt_span_frac) < SLIVER_SPAN_THRESHOLD
+#      Using the max (not min) is deliberate: legitimate asymmetric matches (a
+#      10 m local segment against a 1 km ref) have one tiny span but the other
+#      near 1.0, so their max stays high. A true sliver substantially covers
+#      NEITHER segment, so its max span is small.
+#   2. ABSOLUTE test:  max(ref_span_frac*ref_len_m, tgt_span_frac*tgt_len_m)
+#                        < SLIVER_ABS_OVERLAP_M
+#      The absolute overlap length in meters. This is what a fraction-only test
+#      gets wrong: 9% of a 2 km ref = 180 m of real road that a fraction-only
+#      test would misclassify as a sliver. The absolute gate keeps it real.
+#
+# The two tests are AND-ed. This means the fraction test is a NECESSARY gate, so
+# there is a residual limitation the hybrid rule does NOT catch: a very short
+# stub with a LARGE coverage fraction but tiny absolute overlap (e.g. 0.6 m of a
+# 4 m stub = 15% span) passes the fraction gate (0.15 is not < 0.10) and is
+# therefore classified as NOT a sliver even though only 0.6 m physically
+# overlaps. Catching that case would require an OR / absolute-only rule, which
+# was rejected here because it risks dropping legitimate short-segment matches.
+#
+# Edges with missing/unknown alignment fractions default to a full [0,1] span
+# (1.0) and edges with missing/unknown lengths default to +inf meters, so an
+# unmeasurable edge is NEVER classified as a sliver (we never drop what we
+# cannot measure).
+SLIVER_SPAN_THRESHOLD = 0.10  # fraction of segment length (dimensionless)
+SLIVER_ABS_OVERLAP_M = 5.0  # absolute overlap floor (meters)
+
+
+def _sliver_frac(value: float | None, default: float) -> float:
+    """Normalize an alignment span fraction, defaulting missing/NaN to ``default``."""
+    if value is None:
+        return default
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(v):
+        return default
+    return abs(v)
+
+
+def _sliver_len(value: float | None) -> float:
+    """Normalize a segment length (meters), defaulting missing/NaN/<=0 to +inf.
+
+    An unknown length makes the absolute-overlap product large so the edge fails
+    the sliver test — we never classify an unmeasurable edge as a sliver.
+    """
+    if value is None:
+        return math.inf
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return math.inf
+    if math.isnan(v) or v <= 0:
+        return math.inf
+    return v
+
+
+def is_sliver_edge(
+    ref_span_frac: float | None,
+    tgt_span_frac: float | None,
+    ref_len_m: float | None = None,
+    tgt_len_m: float | None = None,
+) -> bool:
+    """Classify a candidate edge as a junction sliver using the hybrid rule.
+
+    An edge is a sliver iff BOTH:
+      - ``max(ref_span_frac, tgt_span_frac) < SLIVER_SPAN_THRESHOLD`` and
+      - ``max(ref_span_frac*ref_len_m, tgt_span_frac*tgt_len_m) < SLIVER_ABS_OVERLAP_M``.
+
+    Args:
+        ref_span_frac: Ref-side aligned span as a fraction of ref length (0-1).
+        tgt_span_frac: Target-side aligned span as a fraction of target length.
+        ref_len_m: Full ref segment length in meters (optional).
+        tgt_len_m: Full target segment length in meters (optional).
+
+    Missing/NaN fractions default to a full span (1.0) and missing/NaN lengths
+    default to +inf, so an unmeasurable edge is never a sliver. See the module
+    comment above for the residual limitation of the AND rule.
+    """
+    rf = _sliver_frac(ref_span_frac, 1.0)
+    tf = _sliver_frac(tgt_span_frac, 1.0)
+    rl = _sliver_len(ref_len_m)
+    tl = _sliver_len(tgt_len_m)
+
+    frac_test = max(rf, tf) < SLIVER_SPAN_THRESHOLD
+    abs_overlap = max(rf * rl, tf * tl)
+    abs_test = abs_overlap < SLIVER_ABS_OVERLAP_M
+    return frac_test and abs_test
+
 
 # Parallel sibling detection thresholds
 # Used to detect split carriageway representation (dual highways)

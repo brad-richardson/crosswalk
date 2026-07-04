@@ -3,8 +3,35 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyproj
 import shapely
 from loguru import logger
+from shapely.ops import transform
+
+
+def geometry_length_meters(geom) -> float:
+    """Return the length of a WGS84 (lon/lat) geometry in meters.
+
+    Projects the geometry to its local UTM zone (chosen from the centroid) for an
+    accurate metric length. Returns 0.0 for empty/None geometries and falls back
+    to a rough degrees-to-meters approximation if projection fails.
+
+    Args:
+        geom: A shapely geometry in EPSG:4326 (lon/lat degrees).
+    """
+    if geom is None or getattr(geom, "is_empty", True):
+        return 0.0
+    try:
+        centroid = geom.centroid
+        lon, lat = centroid.x, centroid.y
+        utm_zone = int((lon + 180) / 6) + 1
+        hemisphere = "north" if lat >= 0 else "south"
+        utm_crs = f"+proj=utm +zone={utm_zone} +{hemisphere} +datum=WGS84"
+        transformer = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+        return transform(transformer.transform, geom).length
+    except Exception:
+        # Fallback: 1 degree ~= 111 km at the equator.
+        return geom.length * 111000.0
 
 
 def filter_to_linestrings(

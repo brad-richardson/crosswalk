@@ -1015,7 +1015,7 @@ class TestBuildStitchOptions:
 
 
 # ---------------------------------------------------------------------------
-# is_sliver_edge — junction sliver classification
+# Junction sliver classification (hybrid fraction + absolute-meters rule)
 # ---------------------------------------------------------------------------
 
 
@@ -1031,74 +1031,135 @@ def _frac_edge(ref, tgt, gs, ge, ls, le, conf=0.5):
     }
 
 
-class TestSliverClassification:
-    """The sliver rule: an edge is a sliver iff max(ref_span, tgt_span) < 0.10.
+def _line_of_length_m(length_m, lat=42.36, lon=-71.06):
+    """Build a roughly east-west WGS84 LineString of ~``length_m`` meters."""
+    import math
 
-    Real-data calibration: audited slivers had max span <= 0.075 (min <= 0.028);
-    substantive edges had max span >= 0.10. The 0.10 threshold separates them.
+    deg = length_m / (111000.0 * math.cos(math.radians(lat)))
+    return {"type": "LineString", "coordinates": [[lon, lat], [lon + deg, lat]]}
+
+
+class TestSliverConfigRule:
+    """The centralized numeric hybrid rule in ``matcher.config.is_sliver_edge``.
+
+    Sliver iff BOTH: max(ref_span, tgt_span) < 0.10 (fraction gate) AND
+    max(ref_span*ref_len, tgt_span*tgt_len) < 5.0 m (absolute-overlap gate).
     """
 
-    def test_threshold_value(self):
-        from matcher.web.routes.stitching import SLIVER_SPAN_THRESHOLD
+    def test_threshold_values(self):
+        from matcher.config import SLIVER_ABS_OVERLAP_M, SLIVER_SPAN_THRESHOLD
 
         assert SLIVER_SPAN_THRESHOLD == 0.10
+        assert SLIVER_ABS_OVERLAP_M == 5.0
 
-    def test_explicit_null_fracs_never_sliver(self):
-        """An explicit null frac (vs absent key) must not crash or classify as sliver."""
-        from matcher.web.routes.stitching import _edge_spans, is_sliver_edge
+    def test_tiny_overlap_short_segments_is_sliver(self):
+        from matcher.config import is_sliver_edge
 
-        edge = {"gers_end_frac": None, "local_start_frac": None}
-        assert _edge_spans(edge) == (1.0, 1.0)
-        assert not is_sliver_edge(edge)
+        # 0.2 m of a 162 m ref (0.0012*162=0.19 m) and 0.67 m of a 10 m target:
+        # both fraction and absolute gates pass -> sliver.
+        assert is_sliver_edge(0.0012, 0.067, 162.0, 10.0)
 
-    def test_tiny_overlap_is_sliver(self):
-        from matcher.web.routes.stitching import is_sliver_edge
+    def test_long_ref_nine_percent_not_sliver(self):
+        from matcher.config import is_sliver_edge
 
-        # 0.2 m of a 162 m road on one side, small on the other -> sliver
-        assert is_sliver_edge(_frac_edge("r", "t", 0.0, 0.0012, 0.0, 0.067))
+        # 9% of a 2 km ref = 180 m of real road. Passes the fraction gate
+        # (0.09 < 0.10) but the 180 m absolute overlap is far above 5 m, so the
+        # hybrid rule keeps it as a SUBSTANTIVE edge (the key fix over frac-only).
+        assert not is_sliver_edge(0.09, 0.05, 2000.0, 50.0)
 
-    def test_worst_observed_sliver_is_flagged(self):
-        from matcher.web.routes.stitching import is_sliver_edge
+    def test_short_stub_large_fraction_not_sliver_residual_limit(self):
+        from matcher.config import is_sliver_edge
 
-        # max span 0.075 (<= observed sliver ceiling) -> still a sliver
-        assert is_sliver_edge(_frac_edge("r", "t", 0.0, 0.075, 0.0, 0.028))
-
-    def test_substantive_edge_not_sliver(self):
-        from matcher.web.routes.stitching import is_sliver_edge
-
-        # min span tiny (asymmetric segmentation) but max span ~1.0 -> substantive
-        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.01, 0.0, 1.0))
+        # 0.6 m of a 4 m stub = 15% span. Only 0.6 m physically overlaps, yet the
+        # AND rule requires the fraction gate and 0.15 is NOT < 0.10, so this is
+        # (documented) NOT a sliver -- the residual limitation of the AND rule.
+        assert not is_sliver_edge(0.15, 0.15, 4.0, 4.0)
 
     def test_boundary_010_not_sliver(self):
-        from matcher.web.routes.stitching import is_sliver_edge
+        from matcher.config import is_sliver_edge
 
-        # Observed substantive edges start at max span 0.10; strict < excludes them
-        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.10, 0.0, 0.10))
+        # Fraction exactly at threshold: strict < excludes it regardless of length.
+        assert not is_sliver_edge(0.10, 0.10, 1.0, 1.0)
 
-    def test_uses_max_not_min(self):
-        from matcher.web.routes.stitching import is_sliver_edge
+    def test_uses_max_not_min_fraction(self):
+        from matcher.config import is_sliver_edge
 
-        # One large span alone keeps it substantive even if the other is tiny
-        assert not is_sliver_edge(_frac_edge("r", "t", 0.0, 0.5, 0.0, 0.001))
+        # One large span keeps it substantive even if the other is tiny.
+        assert not is_sliver_edge(0.5, 0.001, 100.0, 100.0)
 
     def test_missing_fracs_default_substantive(self):
-        from matcher.web.routes.stitching import is_sliver_edge
+        from matcher.config import is_sliver_edge
 
-        # No alignment fracs -> default span 1.0 -> never dropped as a sliver
-        assert not is_sliver_edge({"ref_id": "r", "target_id": "t", "confidence": 0.5})
+        assert not is_sliver_edge(None, None, 10.0, 10.0)
 
-    def test_annotate_adds_is_sliver_flag(self):
-        from matcher.web.routes.stitching import _annotate_sliver_flags
+    def test_nan_fracs_default_substantive(self):
+        import math
 
-        edges = [
-            _frac_edge("r1", "t1", 0.0, 1.0, 0.0, 1.0),  # substantive
-            _frac_edge("r1", "t2", 0.0, 0.02, 0.0, 0.05),  # sliver
-        ]
-        annotated = _annotate_sliver_flags(edges)
+        from matcher.config import is_sliver_edge
+
+        assert not is_sliver_edge(math.nan, math.nan, 10.0, 10.0)
+
+    def test_missing_lengths_never_sliver(self):
+        from matcher.config import is_sliver_edge
+
+        # Tiny fractions but unknown lengths -> absolute overlap unknown (+inf)
+        # -> never drop what we cannot measure.
+        assert not is_sliver_edge(0.001, 0.001)
+
+
+class TestSliverGroupHelpers:
+    """Group/edge-dict helpers in ``matcher.matching.sliver``."""
+
+    def test_explicit_null_fracs_never_sliver(self):
+        from matcher.matching.sliver import edge_is_sliver, edge_span_fracs
+
+        edge = {"gers_end_frac": None, "local_start_frac": None}
+        assert edge_span_fracs(edge) == (1.0, 1.0)
+        assert not edge_is_sliver(edge)
+
+    def test_edge_is_sliver_with_group_lengths(self):
+        from matcher.matching.sliver import edge_is_sliver, group_segment_lengths_m
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(162.0)},
+            "target_geometries": {"t": _line_of_length_m(10.0)},
+        }
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        edge = _frac_edge("r", "t", 0.0, 0.0012, 0.0, 0.067)
+        assert edge_is_sliver(edge, ref_lens, tgt_lens)
+
+    def test_long_ref_overlap_not_sliver(self):
+        from matcher.matching.sliver import edge_is_sliver, group_segment_lengths_m
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(2000.0)},
+            "target_geometries": {"t": _line_of_length_m(50.0)},
+        }
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        # 9% of a 2 km ref = 180 m real road -> substantive despite small fraction.
+        edge = _frac_edge("r", "t", 0.0, 0.09, 0.0, 0.05)
+        assert not edge_is_sliver(edge, ref_lens, tgt_lens)
+
+    def test_annotate_adds_flag_and_count(self):
+        from matcher.matching.sliver import annotate_group_sliver_flags
+
+        group = {
+            "edges": [
+                _frac_edge("r", "t1", 0.0, 1.0, 0.0, 1.0),  # substantive
+                _frac_edge("r", "t2", 0.0, 0.02, 0.0, 0.05),  # sliver (short segs)
+            ],
+            "ref_geometries": {"r": _line_of_length_m(50.0)},
+            "target_geometries": {
+                "t1": _line_of_length_m(50.0),
+                "t2": _line_of_length_m(10.0),
+            },
+        }
+        annotated, count = annotate_group_sliver_flags(group)
         assert annotated[0]["is_sliver"] is False
         assert annotated[1]["is_sliver"] is True
-        # Original edges are not mutated
-        assert "is_sliver" not in edges[0]
+        assert count == 1
+        # Original edges are not mutated.
+        assert "is_sliver" not in group["edges"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -1409,7 +1470,8 @@ class TestStitchingSliverExclusion:
 
     def _batch(self):
         # 2x2 group where the diagonal is substantive and the off-diagonal is a
-        # pair of junction slivers (max span 0.04-0.05 << 0.10).
+        # pair of junction slivers (max span 0.04-0.05 << 0.10, and with ~50 m
+        # segments the absolute overlap is <5 m so the hybrid rule flags them).
         return {
             "dataset_id": self.DATASET,
             "groups": [
@@ -1424,6 +1486,14 @@ class TestStitchingSliverExclusion:
                         _frac_edge("r2", "t1", 0.0, 0.03, 0.0, 0.04, conf=0.3),  # sliver
                         _frac_edge("r2", "t2", 0.0, 1.0, 0.0, 1.0, conf=0.85),  # substantive
                     ],
+                    "ref_geometries": {
+                        "r1": _line_of_length_m(50.0),
+                        "r2": _line_of_length_m(50.0),
+                    },
+                    "target_geometries": {
+                        "t1": _line_of_length_m(50.0),
+                        "t2": _line_of_length_m(50.0),
+                    },
                 }
             ],
         }

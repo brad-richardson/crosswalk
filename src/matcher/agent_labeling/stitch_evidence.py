@@ -25,6 +25,8 @@ from PIL import Image, ImageDraw
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry import shape as shape_from_geojson
 
+from ..matching.sliver import edge_is_sliver as _edge_is_sliver
+from ..matching.sliver import group_segment_lengths_m
 from ..matching.stitch_options import build_stitch_options
 from .image_renderer import (
     BACKGROUND_COLOR,
@@ -235,16 +237,25 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
     ref_classes = group.get("ref_classes", {})
     target_classes = group.get("target_classes", {})
 
+    # Per-edge junction-sliver flags (hybrid fraction + absolute-meters rule).
+    # Slivers are ANNOTATED here, never silently dropped: an option may legitimately
+    # exclude one, and the agent should be able to see which edges are artifacts.
+    ref_lens, tgt_lens = group_segment_lengths_m(group)
+
     options_meta = []
     for opt in options_ctx["options"]:
         edges_meta = []
+        sliver_edge_count = 0
         for e in opt["edges"]:
             rid, tid = e["ref_id"], e["target_id"]
+            is_sliver = _edge_is_sliver(e, ref_lens, tgt_lens)
+            sliver_edge_count += int(is_sliver)
             row = {
                 "edge": f"{ref_labels.get(rid, rid)}->{target_labels.get(tid, tid)}",
                 "ref": ref_labels.get(rid, rid),
                 "target": target_labels.get(tid, tid),
                 "confidence": round(float(e.get("confidence", 0.0)), 3),
+                "is_sliver": is_sliver,
             }
             row.update(_edge_align_fracs(e))
             edges_meta.append(row)
@@ -253,6 +264,7 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
                 "letter": opt["letter"],
                 "is_optimizer": opt["is_optimizer"],
                 "edge_count": opt["edge_count"],
+                "sliver_edge_count": sliver_edge_count,
                 "total_confidence": round(float(opt["total_confidence"]), 3),
                 "mean_confidence": round(float(opt["mean_confidence"]), 3),
                 "edges": edges_meta,
@@ -320,6 +332,9 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  physical traveled way (overlapping geometry, same path). Small offsets ok.")
     lines.append("- Parallel-but-separate roads, opposite carriageways, and perpendicular")
     lines.append("  crossings are NOT correct edges even if they touch at a junction.")
+    lines.append("- An edge tagged SLIVER below is a junction artifact: the two segments share")
+    lines.append("  almost no physical overlap (a road end merely clips another at a corner).")
+    lines.append("  Prefer an option that excludes it; it is almost never a correct edge.")
     lines.append("- A pedestrian-class segment (footway/sidewalk/path) is a DIFFERENT physical")
     lines.append("  feature than a road-class segment (residential/primary/service/...), even")
     lines.append("  when it runs right alongside one. Never match a footway/sidewalk/path to a")
@@ -355,6 +370,8 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
                 extra.append(f"ref_aln={e['ref_aligned_frac']}")
             if "target_aligned_frac" in e:
                 extra.append(f"tgt_aln={e['target_aligned_frac']}")
+            if e.get("is_sliver"):
+                extra.append("SLIVER(junction artifact, ~0 overlap)")
             extra_s = ("  " + " ".join(extra)) if extra else ""
             lines.append(f"      {e['edge']}  conf={e['confidence']}{extra_s}")
     lines.append("")
