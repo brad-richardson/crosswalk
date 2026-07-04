@@ -49,6 +49,7 @@ class TestBoundsOnSyntheticPairs:
         "target_coverage",
         "min_coverage",
         "coverage_ratio",
+        "max_coverage",
         # No sibling search context — "search not run" is NaN, distinct from
         # a genuine "searched, found no sibling" 0.0
         "has_parallel_sibling_ref",

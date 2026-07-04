@@ -1206,10 +1206,12 @@ class TestComputePairFeaturesWithAlignment:
         assert "target_coverage" in features
         assert "min_coverage" in features
         assert "coverage_ratio" in features
+        assert "max_coverage" in features
 
         # Full alignment should have full coverage
         assert features["ref_coverage"] == pytest.approx(1.0)
         assert features["target_coverage"] == pytest.approx(1.0)
+        assert features["max_coverage"] == pytest.approx(1.0)
 
     def test_compute_pair_features_without_alignment(self):
         """compute_pair_features should work when alignment is None."""
@@ -1237,6 +1239,7 @@ class TestComputePairFeaturesWithAlignment:
         assert math.isnan(features["target_coverage"])
         assert math.isnan(features["min_coverage"])
         assert math.isnan(features["coverage_ratio"])
+        assert math.isnan(features["max_coverage"])
 
     def test_compute_pair_features_uses_sublines_with_alignment(self):
         """With alignment, similarity features should be computed on sublines."""

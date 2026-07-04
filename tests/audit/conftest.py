@@ -70,6 +70,7 @@ FEATURE_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "target_coverage": (0, 1),
     "min_coverage": (0, 1),
     "coverage_ratio": (0, 1),
+    "max_coverage": (0, 1),
     # Graphlet (0-1)
     "graphlet_similarity": (0, 1),
     "endpoint_degree_similarity": (0, 1),

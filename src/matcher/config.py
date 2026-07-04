@@ -349,6 +349,7 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
         "target_coverage",
         "min_coverage",
         "coverage_ratio",
+        "max_coverage",
     ],
     "Graphlet": [
         "graphlet_similarity",
@@ -409,6 +410,15 @@ FEATURE_CATEGORIES: dict[str, list[str]] = {
 FEATURE_COLUMNS: list[str] = [
     feature for features in FEATURE_CATEGORIES.values() for feature in features
 ]
+
+# Features declared in FEATURE_CATEGORIES but not yet present in the stored
+# label feature parquets (labels/features/). Training tolerates these being
+# missing from labels (filled with NaN — XGBoost handles missing values
+# natively) instead of raising. Remove an entry once a coordinated
+# `matcher backfill` has run and the updated parquets are committed.
+PENDING_BACKFILL_FEATURES: set[str] = {
+    "max_coverage",  # Added 2026-07 (feat/max-coverage); backfill planned post-merge.
+}
 
 # Semantic features - excluded when training geometry-only models
 SEMANTIC_FEATURES = [

@@ -7,7 +7,7 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 78 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 79 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
 - **Training**: `matcher train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
@@ -74,7 +74,7 @@ matcher eval --model data/models/matcher_model_combined.joblib -d us_frisco_trai
 
 ## Feature Categories
 
-78 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+79 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
@@ -84,7 +84,7 @@ matcher eval --model data/models/matcher_model_combined.joblib -d us_frisco_trai
 | Endpoint/Connectivity | 3 | min_endpoint_proximity_m, max_endpoint_proximity_m, shared_endpoint_count |
 | Lateral Offset | 3 | lateral_offset_m, lateral_offset_iqr_m, lateral_offset_p95_m |
 | Topology | 18 | from/to_degree_ref/target, degree_match_score, degree_signature_similarity, is_dead_end_ref/target, dead_end_match, is_intersection_ref/target, intersection_match, interior_junction_count_ref/target, interior_junction_count_delta, interior_connector_jaccard, interior_junction_position_sim, shared_anchor_count |
-| Alignment Coverage | 4 | ref_coverage, target_coverage, min_coverage, coverage_ratio |
+| Alignment Coverage | 5 | ref_coverage, target_coverage, min_coverage, coverage_ratio, max_coverage |
 | Graphlet | 2 | graphlet_similarity, endpoint_degree_similarity |
 | Clustering | 3 | clustering_coef_ref, clustering_coef_target, clustering_coef_delta |
 | Sinuosity | 3 | sinuosity_ref, sinuosity_target, sinuosity_delta |
@@ -103,7 +103,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (78 features)
+config.py::FEATURE_COLUMNS (79 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |

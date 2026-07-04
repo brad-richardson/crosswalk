@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from matcher.config import FEATURE_COLUMNS
+from matcher.config import FEATURE_COLUMNS, PENDING_BACKFILL_FEATURES
 from matcher.labeling.data_store import DATA_COLUMNS, DataStore
 from matcher.labeling.feature_store import FEATURE_KEY_COLUMNS, FeatureStore
 from matcher.labeling.label_store import HUMAN_LABEL_COLUMNS, LabelStore
@@ -49,8 +49,10 @@ class TestFeatureStoreSchema:
             assert col in features_df.columns, f"Missing key column: {col}"
 
     def test_all_feature_columns_present(self, features_df):
-        """Feature store has all FEATURE_COLUMNS."""
+        """Feature store has all FEATURE_COLUMNS (except those pending backfill)."""
         for col in FEATURE_COLUMNS:
+            if col in PENDING_BACKFILL_FEATURES:
+                continue
             assert col in features_df.columns, f"Missing feature column: {col}"
 
     def test_key_column_types(self, features_df):

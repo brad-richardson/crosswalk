@@ -184,7 +184,7 @@ class TestExcludeSemanticFlag:
         assert topology_count == 18, "Should have 18 topology features"
 
         coverage_count = sum(1 for f in geom_only_features if "coverage" in f)
-        assert coverage_count == 4, "Should have 4 coverage features"
+        assert coverage_count == 5, "Should have 5 coverage features"
 
         # Graphlet features are now included in real-time scoring pipeline
         graphlet_features = ["graphlet_similarity", "endpoint_degree_similarity"]
@@ -224,10 +224,10 @@ class TestExcludeSemanticFlag:
         assert shape_complexity_count == 3, "Should have 3 shape complexity features"
 
         # Total geometry-only features:
-        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 18 (topology) + 4 (coverage) +
+        # 9 (geometric) + 3 (endpoint) + 3 (lateral) + 18 (topology) + 5 (coverage) +
         # 2 (graphlet) + 3 (clustering) + 3 (sinuosity) + 3 (heading_consistency) +
         # 3 (vertex_density) + 2 (length) + 3 (shape_complexity) + 5 (parallel_sibling) +
-        # 4 (crossing_angle) + 2 (intersection_overlap) = 67
-        assert len(geom_only_features) == 67, (
-            f"Expected 67 geometry-only features, got {len(geom_only_features)}"
+        # 4 (crossing_angle) + 2 (intersection_overlap) = 68
+        assert len(geom_only_features) == 68, (
+            f"Expected 68 geometry-only features, got {len(geom_only_features)}"
         )

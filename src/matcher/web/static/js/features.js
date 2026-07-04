@@ -8,7 +8,7 @@ var HIGHER_BETTER = [
     'name_levenshtein', 'name_jaro_winkler', 'name_token_sort',
     'name_soundex', 'name_metaphone', 'name_numeric_match', 'route_prefix_match',
     'class_similarity', 'buffer_iou_5m', 'buffer_iou_15m',
-    'ref_coverage', 'target_coverage', 'min_coverage', 'coverage_ratio',
+    'ref_coverage', 'target_coverage', 'min_coverage', 'coverage_ratio', 'max_coverage',
     'angle_histogram_similarity', 'degree_match_score', 'degree_signature_similarity',
     'graphlet_similarity', 'endpoint_degree_similarity',
     'shared_endpoint_count', 'dead_end_match', 'intersection_match',
