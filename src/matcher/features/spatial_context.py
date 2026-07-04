@@ -2690,6 +2690,26 @@ def get_alignment_connectors(
     return start_node, end_node
 
 
+def _road_degree_similarity(deg_a: int, deg_b: int) -> float:
+    """Similarity between two node degrees on a road-appropriate scale.
+
+    Road-network node degrees are almost entirely in the range 1-6, so the old
+    ``sim = 1 - |Δdeg| / 10`` mapping compressed all outputs into [0.5, 1.0] and
+    piled ~44% of pairs at exactly 0.8 (AUC ~0.50 — the feature could not move).
+    This discrete mapping spreads the signal across the useful range:
+
+        exact match -> 1.0, off-by-one -> 0.67, off-by-two -> 0.33, larger -> 0.0
+    """
+    delta = abs(deg_a - deg_b)
+    if delta == 0:
+        return 1.0
+    if delta == 1:
+        return 0.67
+    if delta == 2:
+        return 0.33
+    return 0.0
+
+
 def graphlet_similarity_with_alignment(
     ref_seg_id: str,
     target_seg_id: str,
@@ -2740,17 +2760,21 @@ def graphlet_similarity_with_alignment(
         target_seg_id, target_seg_to_connectors, target_start_frac, target_end_frac
     )
 
-    # Helper to extract degree from feature (handles both int and array)
-    def get_degree(features: dict, node: int | None, default: int = 1) -> int:
+    # Helper to extract degree from feature (handles both int and array).
+    # Returns None when the connector lookup MISSES (node is None, or the node is
+    # absent from the graph): an unknown neighborhood must not be scored as a
+    # confident match. Previously this substituted a default degree of 1, which
+    # made two segments with UNKNOWN topology score a perfect similarity of 1.0.
+    def get_degree(features: dict, node: int | None) -> int | None:
         if node is None:
-            return default
+            return None
         feat = features.get(node)
         if feat is None:
-            return default
+            return None
         if isinstance(feat, (int, np.integer)):
             return int(feat)
         # Array format - degree is first element
-        return int(feat[0]) if len(feat) > 0 else default
+        return int(feat[0]) if len(feat) > 0 else None
 
     # Get degrees for all endpoints
     ref_start_deg = get_degree(ref_features, ref_start_node)
@@ -2758,49 +2782,51 @@ def graphlet_similarity_with_alignment(
     target_start_deg = get_degree(target_features, target_start_node)
     target_end_deg = get_degree(target_features, target_end_node)
 
-    # Compute degree similarity (works for both formats)
+    # If the connector lookup missed on EITHER side, the endpoint topology is
+    # unknown, so the comparison is undefined -> NaN (passes through to XGBoost as
+    # a missing value). This replaces the old behavior of fabricating a degree-1
+    # default that scored unknown-vs-unknown as a perfect 1.0.
+    if None in (ref_start_deg, ref_end_deg, target_start_deg, target_end_deg):
+        return {
+            "graphlet_similarity": float("nan"),
+            "endpoint_degree_similarity": float("nan"),
+        }
+
+    # Compute degree similarity using a road-appropriate discrete mapping.
     degree_fwd = (
-        1.0
-        - abs(ref_start_deg - target_start_deg) / 10.0
-        + 1.0
-        - abs(ref_end_deg - target_end_deg) / 10.0
+        _road_degree_similarity(ref_start_deg, target_start_deg)
+        + _road_degree_similarity(ref_end_deg, target_end_deg)
     ) / 2.0
-    degree_fwd = max(0.0, min(1.0, degree_fwd))
     degree_rev = (
-        1.0
-        - abs(ref_start_deg - target_end_deg) / 10.0
-        + 1.0
-        - abs(ref_end_deg - target_start_deg) / 10.0
+        _road_degree_similarity(ref_start_deg, target_end_deg)
+        + _road_degree_similarity(ref_end_deg, target_start_deg)
     ) / 2.0
-    degree_rev = max(0.0, min(1.0, degree_rev))
 
     # Check if we have full feature vectors or just degrees
     sample_feat = next(iter(ref_features.values()), None) if ref_features else None
     if sample_feat is not None and isinstance(sample_feat, np.ndarray):
-        # Full feature mode - compute graphlet_similarity from all features
-        default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-        ref_start_f = (
-            ref_features.get(ref_start_node, default) if ref_start_node is not None else default
-        )
-        ref_end_f = ref_features.get(ref_end_node, default) if ref_end_node is not None else default
-        target_start_f = (
-            target_features.get(target_start_node, default)
-            if target_start_node is not None
-            else default
-        )
-        target_end_f = (
-            target_features.get(target_end_node, default)
-            if target_end_node is not None
-            else default
-        )
+        # Full feature mode - compute graphlet_similarity from all features.
+        # All four endpoint nodes are guaranteed present (the miss-guard above
+        # already returned NaN for any missing lookup), so no default is needed.
+        ref_start_f = ref_features[ref_start_node]
+        ref_end_f = ref_features[ref_end_node]
+        target_start_f = target_features[target_start_node]
+        target_end_f = target_features[target_end_node]
 
         def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
             """Compute normalized similarity between two feature vectors."""
+            # Degree normalized by 4 (not 10): road degrees span ~1-6, so /10
+            # compressed the degree term into a narrow, non-discriminative band.
+            # NaN clustering (index 3, undefined for degree<2) is handled below.
             diff = np.abs(a - b)
-            norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
-            normalized = 1.0 - np.clip(diff / norms, 0, 1)
-            return float(normalized.mean())
+            norms = np.array([4.0, 10.0, 50.0, 1.0, 50.0, 1.0])
+            per_feature = 1.0 - np.clip(diff / norms, 0, 1)
+            # Ignore features that are NaN on either side (e.g. undefined
+            # clustering) rather than letting them poison the mean.
+            valid = ~np.isnan(per_feature)
+            if not valid.any():
+                return float("nan")
+            return float(per_feature[valid].mean())
 
         # Try both orientations
         fwd = (
@@ -2861,15 +2887,19 @@ def graphlet_segment_similarity(
     target_start = target_seg_to_nodes[0].get(target_seg_id)
     target_end = target_seg_to_nodes[1].get(target_seg_id)
 
-    # Default feature vector: [degree=1, triangles=0, squares=0, clustering=0, two_hop=0, is_articulation=0]
-    default = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    # If the endpoint node lookup missed on EITHER side, the topology is unknown,
+    # so the comparison is undefined -> NaN. Previously this substituted a
+    # degree-1 default vector, which scored unknown-vs-unknown as a perfect 1.0.
+    ref_start_f = ref_features.get(ref_start) if ref_start is not None else None
+    ref_end_f = ref_features.get(ref_end) if ref_end is not None else None
+    target_start_f = target_features.get(target_start) if target_start is not None else None
+    target_end_f = target_features.get(target_end) if target_end is not None else None
 
-    ref_start_f = ref_features.get(ref_start, default) if ref_start is not None else default
-    ref_end_f = ref_features.get(ref_end, default) if ref_end is not None else default
-    target_start_f = (
-        target_features.get(target_start, default) if target_start is not None else default
-    )
-    target_end_f = target_features.get(target_end, default) if target_end is not None else default
+    if any(f is None for f in (ref_start_f, ref_end_f, target_start_f, target_end_f)):
+        return {
+            "graphlet_similarity": float("nan"),
+            "endpoint_degree_similarity": float("nan"),
+        }
 
     def feature_similarity(a: np.ndarray, b: np.ndarray) -> float:
         """Compute normalized similarity between two feature vectors."""
@@ -2877,15 +2907,18 @@ def graphlet_segment_similarity(
         # [degree, triangles, squares, clustering, two_hop, is_articulation]
         diff = np.abs(a - b)
         # Normalize each feature to [0, 1] range:
-        # - degree: by 10 (typical road intersections have degree 1-4)
+        # - degree: by 4 (road degrees span ~1-6; /10 was too compressed)
         # - triangles: by 10 (rare in roads, small values significant)
         # - squares: by 50 (more common in grid cities)
-        # - clustering: already 0-1
+        # - clustering: already 0-1 (may be NaN when undefined for degree<2)
         # - two_hop: by 50 (varies by network density)
         # - is_articulation: already 0/1
-        norms = np.array([10.0, 10.0, 50.0, 1.0, 50.0, 1.0])
-        normalized = 1.0 - np.clip(diff / norms, 0, 1)
-        return float(normalized.mean())
+        norms = np.array([4.0, 10.0, 50.0, 1.0, 50.0, 1.0])
+        per_feature = 1.0 - np.clip(diff / norms, 0, 1)
+        valid = ~np.isnan(per_feature)
+        if not valid.any():
+            return float("nan")
+        return float(per_feature[valid].mean())
 
     # Try both orientations
     fwd = (
@@ -2897,22 +2930,15 @@ def graphlet_segment_similarity(
         + feature_similarity(ref_end_f, target_start_f)
     ) / 2
 
-    # Also compare degree specifically (most discriminative for roads)
-    # Average degree match at both endpoints for consistency with graphlet_similarity
+    # Compare degree specifically using the road-appropriate discrete mapping.
     degree_fwd = (
-        1.0
-        - abs(ref_start_f[0] - target_start_f[0]) / 10.0
-        + 1.0
-        - abs(ref_end_f[0] - target_end_f[0]) / 10.0
+        _road_degree_similarity(int(ref_start_f[0]), int(target_start_f[0]))
+        + _road_degree_similarity(int(ref_end_f[0]), int(target_end_f[0]))
     ) / 2.0
-    degree_fwd = max(0.0, min(1.0, degree_fwd))  # Clamp to [0, 1]
     degree_rev = (
-        1.0
-        - abs(ref_start_f[0] - target_end_f[0]) / 10.0
-        + 1.0
-        - abs(ref_end_f[0] - target_start_f[0]) / 10.0
+        _road_degree_similarity(int(ref_start_f[0]), int(target_end_f[0]))
+        + _road_degree_similarity(int(ref_end_f[0]), int(target_start_f[0]))
     ) / 2.0
-    degree_rev = max(0.0, min(1.0, degree_rev))
 
     return {
         "graphlet_similarity": max(fwd, rev),

@@ -325,14 +325,20 @@ def prepare_worker_data(
     }
     logger.debug(f"[TIMING] target_geoms_by_id: {time.perf_counter() - t0:.2f}s")
 
-    # --- Step 5: Filter reference to candidate-only segments ---
-    sorted_ref_indices = sorted(unique_ref_indices)
-    ref_candidates_only = reference.iloc[sorted_ref_indices].reset_index(drop=True)
-
     # --- Step 6: Compute graphlet features ---
+    # IMPORTANT: Build the graphlet/clustering graphs on the FULL ref and target
+    # networks, not the candidate-only subsets. Restricting the graph to segments
+    # that happen to be candidates systematically deflates node degrees (a hub
+    # collapses to degree 1 when its other spokes aren't candidates) and destroys
+    # the triangles/squares/clustering these features are meant to measure. The
+    # graph build is a once-per-dataset cost; on near-planar road networks it is
+    # cheap relative to the per-pair feature computation. Measured worst case:
+    # us_philadelphia_sidewalks target (204,760 segments, no connectors column,
+    # so it takes the build_inferred_connector_graph STRtree path) builds in
+    # ~16s; its 189K-segment Overture ref (explicit connectors) in ~1.7s.
     logger.info(
-        f"Computing graphlet features for {len(ref_candidates_only)} reference "
-        f"and {len(target_candidates_only)} target segments..."
+        f"Computing graphlet features on full networks ({len(reference)} reference "
+        f"and {len(target)} target segments)..."
     )
 
     t0 = time.perf_counter()
@@ -340,14 +346,14 @@ def prepare_worker_data(
     with ThreadPoolExecutor(max_workers=2) as graphlet_pool:
         ref_graphlet_future = graphlet_pool.submit(
             precompute_graphlet_features,
-            ref_candidates_only,
+            reference,
             id_column=ref_id_column,
             tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
             connectors_column="connectors" if ref_has_connectors else None,
         )
         target_graphlet_future = graphlet_pool.submit(
             precompute_graphlet_features,
-            target_candidates_only,
+            target,
             id_column=target_id_column,
             tolerance_m=DEFAULT_SNAP_TOLERANCE_M,
         )

@@ -520,6 +520,13 @@ def _get_numba_triangle_functions():
 
         clustering(v) = triangles(v) / (degree(v) * (degree(v) - 1) / 2)
 
+        For degree < 2 nodes the clustering coefficient is UNDEFINED (there is no
+        pair of neighbors that could be connected), so we return NaN rather than
+        0.0. Road networks are dominated by degree-1/2 nodes; forcing 0.0 makes an
+        "undefined" node indistinguishable from a genuine hub measured at zero,
+        which collapses the clustering feature to a constant. NaN preserves the
+        distinction and passes through to XGBoost as a missing value.
+
         Args:
             n_nodes: Number of nodes
             indptr: CSR row pointers
@@ -527,14 +534,14 @@ def _get_numba_triangle_functions():
             triangles: Triangle counts per node
 
         Returns:
-            Array of clustering coefficients per node
+            Array of clustering coefficients per node (NaN where degree < 2)
         """
         result = np.zeros(n_nodes, dtype=np.float64)
 
         for v in range(n_nodes):
             degree = indptr[v + 1] - indptr[v]
             if degree < 2:
-                result[v] = 0.0
+                result[v] = np.nan
             else:
                 possible = degree * (degree - 1) // 2
                 result[v] = triangles[v] / possible if possible > 0 else 0.0
@@ -629,7 +636,9 @@ def compute_clustering(graph: SparseGraph) -> dict[Any, float]:
         for node in graph.node_ids:
             d = degrees[node]
             if d < 2:
-                clustering[node] = 0.0
+                # Clustering is undefined for degree < 2 (see numba path above).
+                # Return NaN so "undefined" is distinguishable from a measured zero.
+                clustering[node] = float("nan")
             else:
                 possible = d * (d - 1) // 2
                 clustering[node] = triangles[node] / possible if possible > 0 else 0.0
