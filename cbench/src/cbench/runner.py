@@ -43,6 +43,58 @@ def _measure_children() -> tuple[float, float, float]:
     return usage.ru_utime, usage.ru_stime, usage.ru_maxrss / rss_divisor
 
 
+def _resolve_stitch_dir(stitch_labels_dir: Path | None, labels_dir: Path) -> Path | None:
+    """Resolve the stitch labels directory, defaulting when not given.
+
+    Stitch eval is default-on: when ``--stitch-labels`` / a config default is not
+    supplied, fall back to the ``stitching`` directory that sits next to the
+    labels dir (e.g. ``labels/human`` -> ``labels/stitching``). Returns None only
+    when no candidate directory exists.
+    """
+    if stitch_labels_dir is not None:
+        return stitch_labels_dir
+    default = labels_dir.parent / "stitching"
+    return default if default.exists() else None
+
+
+def _maybe_evaluate_stitch(
+    dataset: str,
+    tool_output,
+    stitch_labels_dir: Path | None,
+    labels_dir: Path,
+) -> StitchEvalResult | None:
+    """Run stitch-level eval if labels exist. Never raises (non-blocking)."""
+    try:
+        resolved = _resolve_stitch_dir(stitch_labels_dir, labels_dir)
+        if resolved is None:
+            logger.info("Stitch eval skipped: no stitching labels directory found")
+            return None
+        stitch_labels = load_stitch_labels(resolved, dataset)
+        if stitch_labels is None:
+            logger.info(f"Stitch eval skipped: no stitching labels for '{dataset}'")
+            return None
+        groups = getattr(tool_output, "groups", None)
+        if not groups:
+            logger.info("Stitch eval: no groups sidecar; using legacy segment-id mapping")
+        result = evaluate_stitch_groups(tool_output.matches, stitch_labels, groups=groups)
+        logger.info(
+            f"Stitch eval: P={result.precision:.3f} R={result.recall:.3f} "
+            f"F1={result.f1:.3f} exact={result.exact_match_rate:.3f} "
+            f"({result.groups_evaluated} groups; "
+            f"filtered F1={result.f1_filtered:.3f}, "
+            f"{result.groups_sliver_affected} sliver-affected)"
+        )
+        if result.metrics_by_labeler:
+            for cls, m in result.metrics_by_labeler.items():
+                logger.info(
+                    f"  [{cls}] n={m['n']} F1={m['f1']:.3f} exact={m['exact_match_rate']:.3f}"
+                )
+        return result
+    except Exception as exc:  # non-blocking: never fail a run on stitch eval
+        logger.warning(f"Stitch eval failed (non-blocking, skipping): {exc}")
+        return None
+
+
 @dataclass
 class RunResult:
     """Result from a single benchmark run."""
@@ -132,18 +184,18 @@ def run_single(
     metrics = eval_result.to_dict()
     metrics.update(resource_stats.to_dict())
 
-    # Stitch-level evaluation (if labels exist)
-    stitch_result = None
-    if stitch_labels_dir is not None:
-        stitch_labels = load_stitch_labels(stitch_labels_dir, dataset)
-        if stitch_labels is not None:
-            stitch_result = evaluate_stitch_groups(tool_output.matches, stitch_labels)
-            metrics.update(stitch_result.to_dict())
-            logger.info(
-                f"Stitch eval: P={stitch_result.precision:.3f} "
-                f"R={stitch_result.recall:.3f} F1={stitch_result.f1:.3f} "
-                f"({stitch_result.groups_evaluated} groups)"
-            )
+    # Stitch-level evaluation — NON-BLOCKING and default-on. If stitch labels
+    # exist for this dataset they are computed and reported alongside the pair
+    # metrics; otherwise skipped silently. Any error here is logged and swallowed
+    # so it can never fail a benchmark run.
+    stitch_result = _maybe_evaluate_stitch(
+        dataset=dataset,
+        tool_output=tool_output,
+        stitch_labels_dir=stitch_labels_dir,
+        labels_dir=labels_dir,
+    )
+    if stitch_result is not None:
+        metrics.update(stitch_result.to_dict())
 
     bench_result = create_result(
         tool=adapter.name,

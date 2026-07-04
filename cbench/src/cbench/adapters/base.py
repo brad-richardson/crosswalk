@@ -25,10 +25,14 @@ class ToolOutput:
     Attributes:
         matches: DataFrame with columns [ref_id, target_id, confidence].
         metadata: Tool-specific metadata (version, params, etc.).
+        groups: Optional M:N groups sidecar (list of group dicts with ``edges``
+            and geometries) used for stitch-level evaluation. None when the tool
+            does not emit groups.
     """
 
     matches: pd.DataFrame
     metadata: dict = field(default_factory=dict)
+    groups: list[dict] | None = None
 
     def __post_init__(self):
         required = {"ref_id", "target_id", "confidence"}

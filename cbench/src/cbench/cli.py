@@ -92,10 +92,23 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
     if result.stitch_result is not None:
         sr = result.stitch_result
         console.print(f"  [bold]Stitch-level ({sr.groups_evaluated} groups):[/bold]")
-        console.print(f"    Precision: {sr.precision:.4f}")
-        console.print(f"    Recall:    {sr.recall:.4f}")
-        console.print(f"    F1:        [bold]{sr.f1:.4f}[/bold]")
+        console.print(
+            f"    Raw:      P={sr.precision:.4f} R={sr.recall:.4f} "
+            f"F1=[bold]{sr.f1:.4f}[/bold] exact={sr.exact_match_rate:.4f}"
+        )
+        console.print(
+            f"    Filtered: P={sr.precision_filtered:.4f} R={sr.recall_filtered:.4f} "
+            f"F1=[bold]{sr.f1_filtered:.4f}[/bold] exact={sr.exact_match_rate_filtered:.4f} "
+            f"({sr.groups_sliver_affected} sliver-affected)"
+        )
         console.print(f"    Curated edges: {sr.total_curated_edges}  Extra: {sr.total_extra_edges}")
+        if sr.label_counts_by_labeler:
+            counts = "  ".join(f"{k}={v}" for k, v in sr.label_counts_by_labeler.items())
+            console.print(f"    Labels by labeler: {counts}")
+        for cls, m in sr.metrics_by_labeler.items():
+            console.print(
+                f"      [{cls}] n={m['n']} F1={m['f1']:.4f} exact={m['exact_match_rate']:.4f}"
+            )
 
 
 def load_datasets_config(config_path: Path) -> dict:

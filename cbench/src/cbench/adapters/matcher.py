@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,20 @@ import pandas as pd
 from loguru import logger
 
 from cbench.adapters.base import EvalMode, ToolOutput
+
+
+def _groups_sidecar_path(bridge_path: Path) -> Path:
+    """Locate the groups sidecar JSON alongside a bridge parquet.
+
+    Mirrors ``matcher.filenames.groups_sidecar_path``:
+    ``.../bridge.parquet`` -> ``.../bridge_groups.json``.
+    """
+    stem = bridge_path.stem
+    if stem.endswith("_bridge"):
+        stem = stem[: -len("_bridge")] + "_groups"
+    else:
+        stem = stem + "_groups"
+    return bridge_path.parent / f"{stem}.json"
 
 
 class MatcherAdapter:
@@ -96,9 +111,20 @@ class MatcherAdapter:
         else:
             match_type_counts = {}
 
+        # Load the M:N groups sidecar (for stitch-level eval), if present.
+        groups = None
+        sidecar_path = _groups_sidecar_path(output_path)
+        if sidecar_path.exists():
+            try:
+                groups = json.loads(sidecar_path.read_text()).get("groups")
+                logger.info(f"Loaded groups sidecar with {len(groups or [])} groups")
+            except (ValueError, OSError) as exc:
+                logger.warning(f"Failed to read groups sidecar {sidecar_path}: {exc}")
+
         metadata = {
             "match_type_counts": match_type_counts,
             "total_rows": len(bridge),
+            "has_groups_sidecar": groups is not None,
         }
 
-        return ToolOutput(matches=matches, metadata=metadata)
+        return ToolOutput(matches=matches, metadata=metadata, groups=groups)
