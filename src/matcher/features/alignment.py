@@ -70,6 +70,16 @@ class AlignmentResult:
     overture_end_frac: float  # Where alignment ends on reference (0-1)
     dataset_start_frac: float  # Where alignment starts on target (0-1)
     dataset_end_frac: float  # Where alignment ends on target (0-1)
+    # True when the best alignment was found with the target digitized in the
+    # OPPOSITE direction to the reference (~half of real matches). The target
+    # fractions above are always expressed in the target's own coordinate order
+    # (start < end), so when reversed the target's coord[0] end (dataset_start_frac)
+    # physically coincides with the reference's coord[-1] (overture_end_frac) end,
+    # NOT its coord[0] (overture_start_frac) end. Directional consumers that pair a
+    # reference "from" end with a target "from" end MUST account for this via the
+    # target_from_frac / target_to_frac helpers below. Defaults False so pre-existing
+    # pickles and callers constructing without the flag stay valid.
+    is_reversed: bool = False
 
     @property
     def overture_coverage(self) -> float:
@@ -80,6 +90,26 @@ class AlignmentResult:
     def dataset_coverage(self) -> float:
         """Fraction of target line that is covered by alignment."""
         return self.dataset_end_frac - self.dataset_start_frac
+
+    @property
+    def target_from_frac(self) -> float:
+        """Target fraction physically nearest the reference's 'from' end.
+
+        The reference's 'from' end is ``overture_start_frac`` (its coord[0]).
+        For a forward alignment that is ``dataset_start_frac``; for a reversed
+        alignment the target is digitized the opposite way, so the physically
+        nearest target end is ``dataset_end_frac``.
+        """
+        return self.dataset_end_frac if self.is_reversed else self.dataset_start_frac
+
+    @property
+    def target_to_frac(self) -> float:
+        """Target fraction physically nearest the reference's 'to' end.
+
+        Mirror of :meth:`target_from_frac` for the reference's ``overture_end_frac``
+        (coord[-1]) end.
+        """
+        return self.dataset_start_frac if self.is_reversed else self.dataset_end_frac
 
 
 @njit(cache=True)
@@ -819,11 +849,17 @@ def linestring_alignment(
         )
     else:
         # If the backward alignment was better, the target fractions must be flipped
+        # back into the target's own coordinate order. Because the target was
+        # digitized opposite to the reference, the resulting dataset_start_frac
+        # (target coord[0]) is the physically OPPOSITE end from the reference's
+        # overture_start_frac. Flag is_reversed so directional consumers can pair
+        # the correct physical ends (see AlignmentResult.target_from_frac).
         return AlignmentResult(
             overture_start_frac=unit_clamp(ref_start_frac),
             overture_end_frac=unit_clamp(ref_end_frac),
             dataset_start_frac=unit_clamp(1.0 - target_end_frac),
             dataset_end_frac=unit_clamp(1.0 - target_start_frac),
+            is_reversed=True,
         )
 
 

@@ -3018,6 +3018,7 @@ def compute_interior_connector_features(
     ref_end_frac: float,
     target_start_frac: float,
     target_end_frac: float,
+    target_reversed: bool = False,
 ) -> dict[str, float]:
     """Compare interior connector sequences along the aligned portion.
 
@@ -3041,6 +3042,12 @@ def compute_interior_connector_features(
         ref_end_frac: End of alignment on ref (0-1)
         target_start_frac: Start of alignment on target (0-1)
         target_end_frac: End of alignment on target (0-1)
+        target_reversed: True when the target is digitized opposite to the ref
+            (AlignmentResult.is_reversed). Interior positions are rescaled to
+            [0,1] within the alignment span and matched by position; when reversed,
+            the target span runs opposite to ref's, so target positions are
+            mirrored (1 - p) before sorting so they align with ref's direction.
+            Count/Jaccard outputs are order-free and unaffected.
 
     Returns:
         Dict with interior_junction_count_ref, interior_junction_count_target,
@@ -3117,13 +3124,16 @@ def compute_interior_connector_features(
         ref_span = ref_end_frac - ref_start_frac
         target_span = target_end_frac - target_start_frac
 
+        def _norm_target(frac: float) -> float:
+            p = (frac - target_start_frac) / target_span if target_span > 0 else 0.5
+            # Mirror onto ref's direction when the target is reversed so the two
+            # sorted position multisets describe the same physical ordering.
+            return 1.0 - p if target_reversed else p
+
         ref_positions = sorted(
             (frac - ref_start_frac) / ref_span if ref_span > 0 else 0.5 for frac, _ in ref_interior
         )
-        target_positions = sorted(
-            (frac - target_start_frac) / target_span if target_span > 0 else 0.5
-            for frac, _ in target_interior
-        )
+        target_positions = sorted(_norm_target(frac) for frac, _ in target_interior)
 
         # Greedy nearest matching: pair each position in the shorter list
         # with its nearest in the longer list

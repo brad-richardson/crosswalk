@@ -233,6 +233,43 @@ class TestInteriorPositionSimilarity:
         )
         assert result["interior_junction_position_sim"] == pytest.approx(expected_sim, abs=1e-9)
 
+    def test_reversed_alignment_mirrors_target_positions(self):
+        """A reversed alignment must mirror target interior positions before matching.
+
+        Ref junctions sit at fracs [0.2, 0.6] (asymmetric toward the from-end). For
+        the SAME physical road digitized backward, the target's interior junctions
+        land at the mirrored fracs [0.4, 0.8] in the target's own coordinate order.
+
+        Without the orientation fix these sorted position multisets are compared as
+        [0.2, 0.6] vs [0.4, 0.8] (mean diff 0.2 -> sim 0.8). With target_reversed=True
+        the target positions are mirrored to 1 - p, recovering [0.2, 0.6] and a
+        perfect position match.
+        """
+        nf = {10: 3, 20: 3}
+        ref_conns = [(0.2, 10), (0.6, 20)]
+        tgt_conns_reversed = [(0.4, 10), (0.8, 20)]
+
+        common = dict(
+            ref_seg_id="ref",
+            target_seg_id="tgt",
+            ref_seg_to_connectors={"ref": ref_conns},
+            target_seg_to_connectors={"tgt": tgt_conns_reversed},
+            ref_node_features=nf,
+            target_node_features=nf,
+            ref_start_frac=0.0,
+            ref_end_frac=1.0,
+            target_start_frac=0.0,
+            target_end_frac=1.0,
+        )
+
+        # Buggy pairing (orientation ignored): [0.2,0.6] vs [0.4,0.8]
+        forward = compute_interior_connector_features(**common, target_reversed=False)
+        assert forward["interior_junction_position_sim"] == pytest.approx(0.8, abs=1e-9)
+
+        # Fixed pairing: target positions mirrored -> perfect match
+        reversed_ = compute_interior_connector_features(**common, target_reversed=True)
+        assert reversed_["interior_junction_position_sim"] == pytest.approx(1.0, abs=1e-9)
+
 
 class TestSharedAnchorCount:
     """Test shared_anchor_count for endpoint connector matching."""
