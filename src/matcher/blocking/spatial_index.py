@@ -7,6 +7,7 @@ Also provides DuckDB-based candidate generation for improved performance
 by filtering datasets before loading into memory.
 """
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -449,7 +450,10 @@ def filter_candidates_by_name(
         # If both have names, check similarity
         if ref_name and target_name:
             sim = compute_name_similarity(ref_name, target_name)
-            if sim["token_sort_ratio"] >= min_similarity:
+            token_sort = sim["token_sort_ratio"]
+            # NaN means the comparison is unreliable (e.g. cross-script
+            # names) — keep the candidate, same as missing names.
+            if math.isnan(token_sort) or token_sort >= min_similarity:
                 filtered.append(cand)
         else:
             # Keep candidates where one or both names are missing
