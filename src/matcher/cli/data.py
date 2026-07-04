@@ -1930,22 +1930,192 @@ def reclassify(
         )
 
 
-def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
-    """Fill in spatial context segments for each group.
+# Minimum half-extent (in meters) for the context envelope. Small groups are
+# padded out to at least a 2*CONTEXT_MIN_HALF_M box so they still pull in
+# surrounding roads for orientation. Large groups are NOT capped to this — the
+# envelope always fully contains the group's own geometry (see
+# _compute_context_envelope). Renamed intent from the old destructive 500m cap:
+# the box now bounds only the CONTEXT layer, never the group itself.
+CONTEXT_MIN_HALF_M = 250.0
 
-    For every group, computes an envelope (capped at ~500m x 500m) from all
-    group geometries, spatial-queries the raw parquet files, and adds
-    nearby-but-not-in-group segments as context.
+# Fraction of the group's own extent added as a context margin around it, so a
+# large elongated group still gets a proportional ring of context roads rather
+# than a fixed hairline border.
+CONTEXT_MARGIN_RATIO = 0.15
+
+
+def _compute_context_envelope(all_shapes: list) -> "tuple":
+    """Compute the context envelope box for a group's geometries.
+
+    The returned box is guaranteed to fully contain every group geometry (plus a
+    proportional margin) and to be at least ``2 * CONTEXT_MIN_HALF_M`` across so
+    small groups still gather surrounding context. Unlike the previous
+    implementation this NEVER shrinks below the group's own bounds — group
+    segments are never clipped or deleted.
     """
     import math
 
-    import geopandas as gpd
-    from shapely.geometry import box, mapping, shape
+    from shapely.geometry import box
     from shapely.ops import unary_union
+
+    envelope = unary_union(all_shapes).envelope
+    minx, miny, maxx, maxy = envelope.bounds
+
+    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+    km_per_deg_lat = 111.0
+    km_per_deg_lon = 111.0 * math.cos(math.radians(cy))
+    min_half_deg_lat = (CONTEXT_MIN_HALF_M / 1000.0) / km_per_deg_lat
+    min_half_deg_lon = (
+        (CONTEXT_MIN_HALF_M / 1000.0) / km_per_deg_lon if km_per_deg_lon > 0 else 0.00225
+    )
+
+    # Half-extent = the group's own half-extent plus a proportional margin, but
+    # never below the minimum context radius. max() ensures the box always
+    # contains the full group, however large.
+    half_deg_lat = max(min_half_deg_lat, (maxy - miny) / 2 * (1 + 2 * CONTEXT_MARGIN_RATIO))
+    half_deg_lon = max(min_half_deg_lon, (maxx - minx) / 2 * (1 + 2 * CONTEXT_MARGIN_RATIO))
+
+    minx, maxx = cx - half_deg_lon, cx + half_deg_lon
+    miny, maxy = cy - half_deg_lat, cy + half_deg_lat
+
+    # Snap envelope bounds outward to coord precision so rounded geoms stay inside
+    scale = 10**6
+    minx = math.floor(minx * scale) / scale
+    miny = math.floor(miny * scale) / scale
+    maxx = math.ceil(maxx * scale) / scale
+    maxy = math.ceil(maxy * scale) / scale
+    return box(minx, miny, maxx, maxy)
+
+
+def _add_spatial_context_to_group(
+    group: dict,
+    ref_gdf,
+    target_gdf,
+    *,
+    names_column: str,
+    class_column: str,
+) -> None:
+    """Add nearby-but-not-in-group context segments to a single group.
+
+    Pure with respect to file IO (callers pass already-loaded GeoDataFrames) so
+    the preservation invariant can be unit-tested. The group's OWN segments,
+    edges, optimizer_assignment and alternatives are left completely intact — the
+    context envelope bounds only the added context layer.
+    """
+    from shapely.geometry import mapping, shape
+
+    from ..pipeline.runner import _extract_name_string, _is_nan
+
+    ref_geoms = group.get("ref_geometries", {})
+    target_geoms = group.get("target_geometries", {})
+
+    if not ref_geoms and not target_geoms:
+        return
+
+    all_shapes = []
+    for geom_dict in list(ref_geoms.values()) + list(target_geoms.values()):
+        try:
+            all_shapes.append(shape(geom_dict))
+        except Exception:
+            continue
+
+    if not all_shapes:
+        return
+
+    envelope = _compute_context_envelope(all_shapes)
+
+    # Audit metric: the group's full edge set is never reduced by context
+    # filling. Record it before/after so a regression that reintroduces clipping
+    # is loud (see the assertion below and the stored n_edges_full/rendered).
+    n_edges_full = len(group.get("edges", []))
+
+    # Spatial query for ref segments within envelope (context only — never group)
+    ref_ids_in_group = set(group.get("ref_ids", list(ref_geoms.keys())))
+    ref_hits = ref_gdf.sindex.query(envelope, predicate="intersects")
+    context_ref = {}
+    context_ref_names = {}
+    context_ref_classes = {}
+    for idx in ref_hits:
+        row = ref_gdf.iloc[idx]
+        rid = str(row.get("id", ""))
+        if rid in ref_ids_in_group or not rid:
+            continue
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+        clipped = geom.intersection(envelope)
+        if clipped.is_empty:
+            continue
+        context_ref[rid] = _round_geojson_coords(mapping(clipped))
+        name_val = row.get(names_column)
+        context_ref_names[rid] = _extract_name_string(name_val) if not _is_nan(name_val) else ""
+        cls_val = row.get(class_column)
+        context_ref_classes[rid] = str(cls_val) if not _is_nan(cls_val) else ""
+
+    # Spatial query for target segments within envelope (context only)
+    target_ids_in_group = set(group.get("target_ids", list(target_geoms.keys())))
+    target_hits = target_gdf.sindex.query(envelope, predicate="intersects")
+    context_target = {}
+    context_target_names = {}
+    context_target_classes = {}
+    for idx in target_hits:
+        row = target_gdf.iloc[idx]
+        tid = str(row.get("id", ""))
+        if tid in target_ids_in_group or not tid:
+            continue
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+        clipped = geom.intersection(envelope)
+        if clipped.is_empty:
+            continue
+        context_target[tid] = _round_geojson_coords(mapping(clipped))
+        name_val = row.get(names_column)
+        context_target_names[tid] = _extract_name_string(name_val) if not _is_nan(name_val) else ""
+        cls_val = row.get(class_column)
+        context_target_classes[tid] = str(cls_val) if not _is_nan(cls_val) else ""
+
+    # NOTE: The group's own geometries, ref_ids, target_ids, edges,
+    # optimizer_assignment and alternatives are intentionally left UNTOUCHED.
+    # A previous version clipped these to the envelope and deleted out-of-box
+    # segments/edges, silently truncating large chains before the pack/UI ever
+    # saw them (root cause of the optimizer "under-selection" investigation).
+
+    # Store context + audit metrics on the group dict
+    group["envelope"] = mapping(envelope)
+    group["context_ref_ids"] = list(context_ref.keys())
+    group["context_target_ids"] = list(context_target.keys())
+    group["context_ref_geometries"] = context_ref
+    group["context_target_geometries"] = context_target
+    group["context_ref_names"] = context_ref_names
+    group["context_target_names"] = context_target_names
+    group["context_ref_classes"] = context_ref_classes
+    group["context_target_classes"] = context_target_classes
+
+    n_edges_rendered = len(group.get("edges", []))
+    group["n_edges_full"] = n_edges_full
+    group["n_edges_rendered"] = n_edges_rendered
+    group["context_clipped"] = n_edges_rendered != n_edges_full
+    # Post-fix invariant: context filling must never drop a group edge.
+    assert n_edges_rendered == n_edges_full, (
+        f"context fill dropped {n_edges_full - n_edges_rendered} edges from group "
+        f"{group.get('group_id', '?')} — group data must never be clipped"
+    )
+
+
+def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
+    """Fill in spatial context segments for each group.
+
+    For every group, computes a context envelope (at least ~500m x 500m, and
+    always large enough to fully contain the group), spatial-queries the raw
+    parquet files, and adds nearby-but-not-in-group segments as context. The
+    group's own segments/edges are never clipped or removed — the envelope
+    bounds only the context layer.
+    """
+    import geopandas as gpd
 
     from ..config import CLASS_COLUMN, NAMES_COLUMN
     from ..filenames import PROJECT_ROOT, find_overture_segments, find_target_file
-    from ..pipeline.runner import _extract_name_string, _is_nan
 
     data_dir = PROJECT_ROOT / "data" / "raw"
 
@@ -1965,169 +2135,23 @@ def _fill_spatial_context(groups: list[dict], dataset_name: str) -> None:
     _ = ref_gdf.sindex
     _ = target_gdf.sindex
 
+    n_clipped = 0
     for group in groups:
-        ref_geoms = group.get("ref_geometries", {})
-        target_geoms = group.get("target_geometries", {})
+        _add_spatial_context_to_group(
+            group,
+            ref_gdf,
+            target_gdf,
+            names_column=NAMES_COLUMN,
+            class_column=CLASS_COLUMN,
+        )
+        if group.get("context_clipped"):
+            n_clipped += 1
 
-        if not ref_geoms and not target_geoms:
-            continue
-
-        # Collect all geometries and compute envelope
-        all_shapes = []
-        for geom_dict in list(ref_geoms.values()) + list(target_geoms.values()):
-            try:
-                all_shapes.append(shape(geom_dict))
-            except Exception:
-                continue
-
-        if not all_shapes:
-            continue
-
-        envelope = unary_union(all_shapes).envelope
-        minx, miny, maxx, maxy = envelope.bounds
-
-        # Cap at ~500m x 500m using degree approximation
-        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
-        km_per_deg_lat = 111.0
-        km_per_deg_lon = 111.0 * math.cos(math.radians(cy))
-        max_half_deg_lat = 0.25 / km_per_deg_lat  # 250m in degrees
-        max_half_deg_lon = 0.25 / km_per_deg_lon if km_per_deg_lon > 0 else 0.00225
-
-        if (maxy - miny) > 2 * max_half_deg_lat or (maxx - minx) > 2 * max_half_deg_lon:
-            minx = cx - max_half_deg_lon
-            maxx = cx + max_half_deg_lon
-            miny = cy - max_half_deg_lat
-            maxy = cy + max_half_deg_lat
-
-        # Snap envelope bounds outward to coord precision so clipped+rounded geoms stay inside
-        scale = 10**6
-        minx = math.floor(minx * scale) / scale
-        miny = math.floor(miny * scale) / scale
-        maxx = math.ceil(maxx * scale) / scale
-        maxy = math.ceil(maxy * scale) / scale
-        envelope = box(minx, miny, maxx, maxy)
-
-        # Spatial query for ref segments within envelope
-        ref_ids_in_group = set(group.get("ref_ids", list(ref_geoms.keys())))
-        ref_hits = ref_gdf.sindex.query(envelope, predicate="intersects")
-        context_ref = {}
-        context_ref_names = {}
-        context_ref_classes = {}
-        for idx in ref_hits:
-            row = ref_gdf.iloc[idx]
-            rid = str(row.get("id", ""))
-            if rid in ref_ids_in_group or not rid:
-                continue
-            geom = row.geometry
-            if geom is None or geom.is_empty:
-                continue
-            clipped = geom.intersection(envelope)
-            if clipped.is_empty:
-                continue
-            context_ref[rid] = _round_geojson_coords(mapping(clipped))
-            name_val = row.get(NAMES_COLUMN)
-            context_ref_names[rid] = _extract_name_string(name_val) if not _is_nan(name_val) else ""
-            cls_val = row.get(CLASS_COLUMN)
-            context_ref_classes[rid] = str(cls_val) if not _is_nan(cls_val) else ""
-
-        # Spatial query for target segments within envelope
-        target_ids_in_group = set(group.get("target_ids", list(target_geoms.keys())))
-        target_hits = target_gdf.sindex.query(envelope, predicate="intersects")
-        context_target = {}
-        context_target_names = {}
-        context_target_classes = {}
-        for idx in target_hits:
-            row = target_gdf.iloc[idx]
-            tid = str(row.get("id", ""))
-            if tid in target_ids_in_group or not tid:
-                continue
-            geom = row.geometry
-            if geom is None or geom.is_empty:
-                continue
-            clipped = geom.intersection(envelope)
-            if clipped.is_empty:
-                continue
-            context_target[tid] = _round_geojson_coords(mapping(clipped))
-            name_val = row.get(NAMES_COLUMN)
-            context_target_names[tid] = (
-                _extract_name_string(name_val) if not _is_nan(name_val) else ""
-            )
-            cls_val = row.get(CLASS_COLUMN)
-            context_target_classes[tid] = str(cls_val) if not _is_nan(cls_val) else ""
-
-        # Clip group's own geometries to envelope (remove if entirely outside)
-        for rid in list(ref_geoms.keys()):
-            try:
-                g_shape = shape(ref_geoms[rid])
-                clipped = g_shape.intersection(envelope)
-                if clipped.is_empty:
-                    del ref_geoms[rid]
-                else:
-                    ref_geoms[rid] = _round_geojson_coords(mapping(clipped))
-            except Exception:
-                pass
-        for tid in list(target_geoms.keys()):
-            try:
-                g_shape = shape(target_geoms[tid])
-                clipped = g_shape.intersection(envelope)
-                if clipped.is_empty:
-                    del target_geoms[tid]
-                else:
-                    target_geoms[tid] = _round_geojson_coords(mapping(clipped))
-            except Exception:
-                pass
-
-        # Sync ID lists, names, classes, and edges with surviving geometries
-        surviving_refs = set(ref_geoms.keys())
-        surviving_targets = set(target_geoms.keys())
-        group["ref_ids"] = [rid for rid in group.get("ref_ids", []) if rid in surviving_refs]
-        group["target_ids"] = [
-            tid for tid in group.get("target_ids", []) if tid in surviving_targets
-        ]
-        if "ref_names" in group:
-            group["ref_names"] = {
-                k: v for k, v in group["ref_names"].items() if k in surviving_refs
-            }
-        if "target_names" in group:
-            group["target_names"] = {
-                k: v for k, v in group["target_names"].items() if k in surviving_targets
-            }
-        if "ref_classes" in group:
-            group["ref_classes"] = {
-                k: v for k, v in group["ref_classes"].items() if k in surviving_refs
-            }
-        if "target_classes" in group:
-            group["target_classes"] = {
-                k: v for k, v in group["target_classes"].items() if k in surviving_targets
-            }
-        edges_before = len(group.get("edges", []))
-        if "edges" in group:
-            group["edges"] = [
-                e
-                for e in group["edges"]
-                if e["ref_id"] in surviving_refs and e["target_id"] in surviving_targets
-            ]
-
-        # Envelope clipping can drop most of a large group's edges. Any
-        # pre-computed alternatives / optimizer_assignment were derived from the
-        # FULL (pre-clip) edge set, so they may reference edges that no longer
-        # exist in the group. Re-sync them to the surviving edges so the batch
-        # never ships options that are not subsets of the group's own edges.
-        if len(group.get("edges", [])) != edges_before:
-            from ..matching.alternatives import prune_group_options_to_edges
-
-            prune_group_options_to_edges(group, ref_geoms=ref_geoms, target_geoms=target_geoms)
-
-        # Store on group dict
-        group["envelope"] = mapping(envelope)
-        group["context_ref_ids"] = list(context_ref.keys())
-        group["context_target_ids"] = list(context_target.keys())
-        group["context_ref_geometries"] = context_ref
-        group["context_target_geometries"] = context_target
-        group["context_ref_names"] = context_ref_names
-        group["context_target_names"] = context_target_names
-        group["context_ref_classes"] = context_ref_classes
-        group["context_target_classes"] = context_target_classes
+    if n_clipped:
+        console.print(
+            f"  [red]WARNING: {n_clipped} group(s) lost edges to context filling — "
+            f"group data must never be clipped[/red]"
+        )
 
 
 def _round_geojson_coords(geojson: dict, precision: int = 6) -> dict:
