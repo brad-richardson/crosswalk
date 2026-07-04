@@ -442,3 +442,78 @@ step: a **5-8 group mini-audit of the 9 multi-edge M:N survivors** above; if
 that holds ≥90%, export the survivors (still `labeler=panel_unanimous_v1`), and
 consider auto-accepting only the trivial ≤2-edge N:1 tier without further audit.
 The class gate and rubric change ship regardless as defense-in-depth.
+
+## Option-generation defect (found post-audit)
+
+A data-corruption bug in stitch-batch option generation was found after the
+panel ran. It does **not** invalidate the audit but does qualify some of the
+large-M:N conclusions above.
+
+**Root cause.** `_fill_spatial_context` (`src/matcher/cli/data.py`) caps each
+group's display window at ~500m x 500m and clips the group's geometries, edges,
+`ref_ids`, and `target_ids` to that envelope. For large groups it re-syncs the
+edge list to the survivors but did **not** re-sync the already-computed
+`alternatives` / `optimizer_assignment` (those are generated *before* context
+filling, and also drive batch-selection scoring). So a big group's alternatives,
+computed against the full pre-clip edge set, leaked into the clipped batch group.
+Example: sidecar group `701d491e` is 307 ref x 228 target / 573 edges; after the
+500m clip the batch group is 9 ref x 7 target / 16 edges, but its 5 alternatives
+still carried ~230 edges each with `total_confidence` ~227. The generator itself
+(`generate_top_k_alternatives`) is correct relative to its input — it was fed the
+573-edge group.
+
+**Blast radius (phase-2 canonical batch, 60 groups).**
+
+| Symptom | Count / 60 |
+|---|---|
+| (a) alternatives containing edges outside the (clipped) group | **27** |
+| (a) alternatives with intra-option duplicate edges | 0 |
+| (b) empty `optimizer_assignment` | 35 |
+| (c) prompt showed inflated per-option confidence (`mean_conf` > 1.0) | 24 |
+| affected groups that collapsed to a **single** displayed option | 11 |
+
+The empty `optimizer_assignment` (b) is **not** a phase-2 regression: it is
+empty at the sidecar source for 388/1325 M:N groups (45/50 large groups) — the
+optimizer emits no assignment for most giant M:N groups. Nothing in the phase-2
+CLI path drops it.
+
+**What the panel actually saw.** The evidence-pack option builder
+(`stitch_options.build_stitch_options`) filters every option's edges to the
+group's own edges and dedupes them, so the **option edge sets, `option_*.png`
+renders, and edge_count were all correct** — the panel judged the right
+geometry. The damage was two-fold:
+1. **Inflated confidence annotations.** The old builder overrode each option's
+   `total_confidence` with the stored (pre-clip) value, so `metadata.yaml` and
+   `prompt.txt` showed absurd numbers for 24 groups (e.g. `701d491e`:
+   `total_conf=226.97, mean_conf=32.424`). The prompt asks the panel to judge
+   geometric correctness, and a `mean_conf` of 32 is self-evidently broken, so
+   this is more likely noise than a systematic accept-bias — but it is not
+   nothing.
+2. **Collapsed option diversity.** Because the leaked alternatives filtered down
+   to (nearly) the same in-group edge set, 11 affected groups presented the
+   panel with only **one** real option (plus NONE) instead of a proper A/B/C
+   set. For those groups the panel could accept or reject the displayed
+   assignment but could not choose a better partial subset.
+
+**Overlap with audit conclusions.** Of the 20 proposed auto-accept survivors,
+**4 were affected** (`0d8c40ca`, `36726195`, `6dde01fe`, `874eccdf`), and 3 of
+those are among the 9 multi-edge M:N survivors the audit flagged for a
+mini-audit (`0d8c40ca` 8/18, `6dde01fe` 6/10, `874eccdf` 11/11). Their
+accept/reject votes rest on correct edge geometry, so the recommendation stands,
+but the mini-audit of the multi-edge M:N survivors should treat these 3 as
+**priority** re-checks (the panel saw them with degraded confidence metadata
+and/or reduced option choice). No aggregate audit conclusion is overturned.
+
+**Fixes shipped (branch `fix/alternatives-edge-explosion`).**
+- `_fill_spatial_context` now calls `prune_group_options_to_edges` after
+  clipping: `optimizer_assignment` is filtered to surviving edges and
+  `alternatives` are regenerated from the clipped edge set.
+- `generate_top_k_alternatives` enforces an output invariant
+  (`_sanitize_alternative`): every emitted alternative is a deduplicated subset
+  of the group's candidate edges, with a logged warning on any violation.
+- `stitch_options` computes each option's confidence over the validated,
+  deduplicated edge set and no longer trusts a stored `total_confidence`
+  (defense in depth).
+- A corrected batch was regenerated to `batch_v2.json` (the original `batch.json`
+  is preserved as the record of what the panel saw); the UI mirror was refreshed.
+  The panel was **not** re-run.
