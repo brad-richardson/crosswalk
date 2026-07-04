@@ -32,12 +32,23 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
 ## Remaining gaps (ranked by threat to results)
 
 1. **The shipped output is barely evaluated.** All gated metrics measure the
-   pairwise classifier. The optimizer's final assignments are evaluated by ~13
-   labeled stitching groups (`labels/stitching/`), ungated. A classifier gain
-   that worsens final assignments is invisible. Fix: grow stitching labels to
-   100+, gate on stitch-level precision/recall (design already exists in
-   `docs/plans/2026-02-21-stitch-eval-design.md`), then consider a learned
-   group resolver.
+   pairwise classifier. The optimizer's final assignments are evaluated by the
+   labeled stitching groups (`labels/stitching/`). As of this branch cbench
+   computes a **modernized, non-blocking** stitch-level metric on every run
+   (default-on: the `labels/stitching` dir is auto-resolved; skipped silently
+   when a dataset has none, and any error is swallowed). It reaches parity with
+   the matcher-side `matcher agent stitch-eval`: group mapping robust to
+   group_id churn (exact-id + edge-overlap against the `*_groups.json` sidecar),
+   raw **and** sliver-filtered edge precision/recall/F1, per-group exact-match
+   rate, and a per-labeler breakdown (human vs `panel_*`). The standalone sliver
+   rule in `cbench.eval.sliver` is parity-tested against
+   `matcher.config.is_sliver_edge` (`tests/unit/test_cbench_sliver_parity.py`).
+   Observed on Boston (`us_boston_streets`, 38 labels → 34 groups mapped): raw
+   edge F1 ≈ 0.814, exact 0.53; filtered F1 ≈ 0.815 (1 sliver-affected group).
+   Still ungated. Remaining: grow stitching labels to 100+, then **promote to a
+   CI gate** on stitch-level precision/recall (design in
+   `docs/plans/2026-02-21-stitch-eval-design.md`), then consider a learned group
+   resolver.
 2. **Uncalibrated probabilities under five hand-set thresholds.** XGBoost
    scores are not probabilities; `scoring_match/review_threshold` (0.5/0.1),
    `optimizer_match/review_threshold` (0.75/0.5), and `bridge_min_confidence`
@@ -154,8 +165,9 @@ uv run python scripts/ablation_study.py --mode category \
 
 ## Recommended sequence
 
-1. Scale stitching-group ground truth (agent-assisted; separate plan doc) and
-   gate stitch-level metrics in cbench/CI.
+1. Scale stitching-group ground truth (agent-assisted; separate plan doc), then
+   promote the (now shipped, non-blocking) cbench stitch-level metric to a CI
+   gate once 100+ labels exist.
 2. Isotonic calibration + per-dataset-type thresholds.
 3. Ground-truth trust cascade for pair labels (ensemble-agreement routing,
    provenance-tiered training weights).
