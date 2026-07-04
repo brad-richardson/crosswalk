@@ -1672,15 +1672,13 @@ def register_commands(app: typer.Typer) -> None:
             worker_data = pipeline_result.worker_data
             candidates = pipeline_result.candidates
 
-            # --- Phase 4b: Override ref graphlet data with full-network computation ---
-            # The shared pipeline computes graphlets on candidate-only subsets (efficient
-            # for inference with ~10K candidates). For backfill with ~100-200 labeled pairs,
-            # the candidate-only graph is too sparse for meaningful clustering coefficients.
-            # Recompute ref on full GDF for accurate connector IDs.
-            # Target graphlet is NOT recomputed: the expensive inferred connector graph
-            # (170s for Mumbai) only benefits target-side clustering (#33) and graphlet
-            # similarity (#65) — low-importance features. Target topology uses Overture
-            # connectors projected via rebuild_connector_indices() instead.
+            # --- Phase 4b: Ensure ref graphlet data uses full-network computation ---
+            # The shared pipeline now builds graphlet graphs on the FULL ref/target
+            # networks (not candidate-only subsets), so worker_data["ref_graphlet_data"]
+            # is already full-network. We recompute it here explicitly so that Phase 4c
+            # can rebuild the Overture connector anchoring using the FULL ref geometry
+            # set (backfill has few candidate pairs, so anchoring to candidate-only ref
+            # connectors would be impoverished).
             ref_has_connectors = "connectors" in ref_gdf_proj.columns
             worker_data["ref_graphlet_data"] = precompute_graphlet_features(
                 ref_gdf_proj,

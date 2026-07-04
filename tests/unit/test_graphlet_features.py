@@ -275,12 +275,20 @@ class TestGraphletSegmentSimilarity:
             target_seg_to_nodes,
         )
 
-        # Degree difference of 3 out of max 10 = 0.7 similarity
-        assert result["endpoint_degree_similarity"] < 1.0
-        assert result["endpoint_degree_similarity"] == pytest.approx(0.7, rel=0.01)
+        # Degree difference of 3 maps to 0.0 under the road-appropriate discrete
+        # scale (exact=1.0, ±1=0.67, ±2=0.33, larger=0.0). The old linear
+        # 1 - |Δdeg|/10 mapping compressed this to 0.7 — a value that could barely
+        # move across the whole 1-6 degree range (see _road_degree_similarity).
+        assert result["endpoint_degree_similarity"] == pytest.approx(0.0, abs=1e-9)
 
-    def test_missing_segments_use_defaults(self):
-        """Missing segment IDs use default feature values."""
+    def test_missing_segments_return_nan(self):
+        """Missing segment IDs -> NaN, not a fabricated perfect/default match.
+
+        SEMANTICS CHANGE: previously this returned default (degree-1) feature
+        vectors, which made two segments with UNKNOWN topology score a valid
+        (often perfect) similarity. Unknown topology is now undefined -> NaN so it
+        passes through to XGBoost as a missing value rather than fake signal.
+        """
         from matcher.features.spatial_context import graphlet_segment_similarity
 
         ref_features = {}  # No features
@@ -298,9 +306,8 @@ class TestGraphletSegmentSimilarity:
             target_seg_to_nodes,
         )
 
-        # Should return valid similarity values (defaults)
-        assert 0.0 <= result["graphlet_similarity"] <= 1.0
-        assert 0.0 <= result["endpoint_degree_similarity"] <= 1.0
+        assert np.isnan(result["graphlet_similarity"])
+        assert np.isnan(result["endpoint_degree_similarity"])
 
     @pytest.mark.parametrize(
         "ref_start_degree,ref_end_degree,target_start_degree,target_end_degree,expected_orientation",
@@ -403,3 +410,189 @@ class TestGraphletIntegration:
         # Similar topology should give high similarity
         assert result["graphlet_similarity"] > 0.8
         assert result["endpoint_degree_similarity"] > 0.8
+
+
+class TestRoadDegreeSimilarity:
+    """Tests for the rescaled, road-appropriate degree similarity (defect #4).
+
+    The old mapping was sim = 1 - |Δdeg| / 10. Road-network node degrees are
+    almost all in 1-6, so that compressed every output into [0.5, 1.0] and piled
+    ~44% of pairs at exactly 0.8 (AUC ~0.50). The new discrete mapping spreads the
+    signal: exact = 1.0, ±1 = 0.67, ±2 = 0.33, larger = 0.0.
+    """
+
+    @pytest.mark.parametrize(
+        "a,b,expected",
+        [
+            (3, 3, 1.0),
+            (2, 3, 0.67),
+            (4, 3, 0.67),
+            (1, 3, 0.33),
+            (5, 3, 0.33),
+            (1, 4, 0.0),
+            (2, 6, 0.0),
+        ],
+    )
+    def test_discrete_scale(self, a, b, expected):
+        from matcher.features.spatial_context import _road_degree_similarity
+
+        assert _road_degree_similarity(a, b) == pytest.approx(expected, abs=1e-9)
+
+    def test_endpoint_degree_similarity_uses_new_scale(self):
+        """endpoint_degree_similarity reflects the discrete mapping, not 1-|Δ|/10."""
+        from matcher.features.spatial_context import graphlet_segment_similarity
+
+        # ref degrees (2, 3), target degrees (3, 4): each endpoint is off-by-one.
+        ref_features = {
+            0: np.array([2.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            1: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        }
+        target_features = {
+            2: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            3: np.array([4.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        }
+        result = graphlet_segment_similarity(
+            "r1",
+            "t1",
+            ref_features,
+            target_features,
+            ({"r1": 0}, {"r1": 1}),
+            ({"t1": 2}, {"t1": 3}),
+        )
+        # Both endpoints off-by-one -> 0.67 each -> average 0.67.
+        assert result["endpoint_degree_similarity"] == pytest.approx(0.67, abs=1e-9)
+
+
+class TestUnknownTopologyReturnsNaN:
+    """Unknown endpoint topology -> NaN, not a fabricated match (defect #2)."""
+
+    def test_alignment_missing_connectors_returns_nan(self):
+        """graphlet_similarity_with_alignment returns NaN when a lookup misses."""
+        from matcher.features.spatial_context import graphlet_similarity_with_alignment
+
+        ref_features = {0: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
+        target_features = {1: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
+
+        # Ref has connectors; target's connector map is empty -> target lookup misses.
+        ref_seg_to_connectors = {"r1": [(0.0, 0), (1.0, 0)]}
+        target_seg_to_connectors: dict = {}
+
+        result = graphlet_similarity_with_alignment(
+            "r1",
+            "t1",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+        assert np.isnan(result["graphlet_similarity"])
+        assert np.isnan(result["endpoint_degree_similarity"])
+
+    def test_alignment_both_known_is_finite(self):
+        """When both sides resolve, similarity is a finite value (not NaN)."""
+        from matcher.features.spatial_context import graphlet_similarity_with_alignment
+
+        ref_features = {0: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
+        target_features = {1: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
+        ref_seg_to_connectors = {"r1": [(0.0, 0), (1.0, 0)]}
+        target_seg_to_connectors = {"t1": [(0.0, 1), (1.0, 1)]}
+
+        result = graphlet_similarity_with_alignment(
+            "r1",
+            "t1",
+            ref_features,
+            target_features,
+            ref_seg_to_connectors,
+            target_seg_to_connectors,
+        )
+        assert not np.isnan(result["graphlet_similarity"])
+        assert result["endpoint_degree_similarity"] == pytest.approx(1.0, abs=1e-9)
+
+
+class TestClusteringUndefinedIsNaN:
+    """Clustering coefficient is NaN (not 0.0) for degree < 2 nodes (defect #3)."""
+
+    def test_degree_lt_2_nodes_are_nan(self):
+        from matcher.features.spatial_context import build_inferred_graph
+        from matcher.topology.sparse_graph import compute_clustering
+
+        # A path graph: two dead-ends (degree 1) and one middle node (degree 2).
+        lines = [
+            LineString([(0, 0), (10, 0)]),
+            LineString([(10, 0), (20, 0)]),
+        ]
+        gdf = gpd.GeoDataFrame({"id": ["a", "b"], "geometry": lines}, crs="EPSG:32632")
+        G, _, _ = build_inferred_graph(gdf, "id", tolerance_m=1.0)
+
+        clustering = compute_clustering(G)
+        for node in G.node_ids:
+            if G.degree(node) < 2:
+                assert np.isnan(clustering[node]), (
+                    f"degree-{G.degree(node)} node should be NaN, got {clustering[node]}"
+                )
+            else:
+                # degree-2 node with no triangle -> defined, equals 0.0
+                assert clustering[node] == 0.0
+
+
+class TestGraphletDistributionSmoke:
+    """Guard against re-degeneration: features must not collapse to one value."""
+
+    @staticmethod
+    def _grid(offset: float, id_prefix: str) -> gpd.GeoDataFrame:
+        """Build a 4x4 grid of road segments (24 segments, varied node degrees)."""
+        lines = []
+        ids = []
+        for j in range(4):
+            for i in range(3):
+                lines.append(LineString([(i + offset, j + offset), (i + 1 + offset, j + offset)]))
+                ids.append(f"{id_prefix}_h_{i}_{j}")
+        for i in range(4):
+            for j in range(3):
+                lines.append(LineString([(i + offset, j + offset), (i + offset, j + 1 + offset)]))
+                ids.append(f"{id_prefix}_v_{i}_{j}")
+        return gpd.GeoDataFrame({"id": ids, "geometry": lines}, crs="EPSG:32632")
+
+    def test_similarity_not_single_valued(self):
+        from matcher.features.spatial_context import (
+            build_inferred_graph,
+            compute_road_graphlet_features,
+            graphlet_segment_similarity,
+        )
+
+        ref_gdf = self._grid(0.0, "ref")
+        target_gdf = self._grid(0.05, "tgt")
+
+        ref_G, ref_start, ref_end = build_inferred_graph(ref_gdf, "id", tolerance_m=0.5)
+        tgt_G, tgt_start, tgt_end = build_inferred_graph(target_gdf, "id", tolerance_m=0.5)
+        ref_feats = compute_road_graphlet_features(ref_G)
+        tgt_feats = compute_road_graphlet_features(tgt_G)
+
+        graphlet_vals = []
+        degree_vals = []
+        # Score a diagonal-ish cross section of pairs (all-pairs would be 576).
+        for r_id in ref_gdf["id"]:
+            for t_id in target_gdf["id"]:
+                res = graphlet_segment_similarity(
+                    r_id,
+                    t_id,
+                    ref_feats,
+                    tgt_feats,
+                    (ref_start, ref_end),
+                    (tgt_start, tgt_end),
+                )
+                graphlet_vals.append(round(res["graphlet_similarity"], 4))
+                degree_vals.append(round(res["endpoint_degree_similarity"], 4))
+
+        def modal_fraction(vals):
+            import collections
+
+            counts = collections.Counter(vals)
+            return max(counts.values()) / len(vals)
+
+        assert modal_fraction(graphlet_vals) < 0.9, (
+            f"graphlet_similarity is >90% single-valued: {modal_fraction(graphlet_vals):.2%}"
+        )
+        assert modal_fraction(degree_vals) < 0.9, (
+            f"endpoint_degree_similarity is >90% single-valued: {modal_fraction(degree_vals):.2%}"
+        )
