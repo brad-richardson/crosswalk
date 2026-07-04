@@ -20,10 +20,11 @@ These tests lock in both facts:
    align to near-full coverage. This guards the divergence thresholds against a
    future change that would wrongly truncate near-coincident parallel roads
    (the failure mode originally hypothesized).
-2. ``test_sidecar_geometry_lookup_drops_duplicate_ids`` (XFAIL): documents the
-   actual latent defect -- ``dict(zip(reference[id], reference.geometry))``
-   silently collapses reference rows that share a GERS id, so the geometry
-   serialized into the sidecar can differ from the one that was scored.
+2. ``test_sidecar_uses_scored_geometry_for_duplicate_ids`` (PASSING): locks in
+   the fix -- ``_export_groups_sidecar`` resolves each edge's geometry by its
+   scored positional index (``MatchResult.ref_idx``/``target_idx``) instead of a
+   global ``dict(zip(reference[id], reference.geometry))`` that silently collapses
+   reference rows sharing a GERS id and could serialize the wrong geometry.
 """
 
 import json
@@ -124,42 +125,110 @@ def test_stored_truncation_is_not_reproducible_from_stored_geometry(truncation_f
     assert recomputed_ref_span - stored_ref_span > 0.3
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Latent defect: _export_groups_sidecar builds its geometry lookup with "
-        "dict(zip(reference[id], reference.geometry)), which silently drops all "
-        "but one row when a reference id is duplicated (e.g. an Overture segment "
-        "split into multiple edges that share one GERS id). The scored alignment "
-        "fractions then describe a different geometry than the one serialized. "
-        "Fixing requires threading the scored edge identity/geometry through "
-        "MatchResult into the sidecar rather than re-looking-up by id."
-    ),
-    strict=True,
-)
-def test_sidecar_geometry_lookup_drops_duplicate_ids():
-    """Encodes the failing behavior at the root of the display truncation.
+def test_dict_zip_lookup_collapses_duplicate_ids():
+    """Documents the root-cause mechanism: id-keyed dict-zip drops co-id rows.
 
     Two reference edges share GERS id ``dup`` (as happens when a long Overture
-    segment is split at connectors). A correct lookup must be able to recover
-    the specific edge that was scored; the current dict-zip cannot -- it keeps
-    only the last geometry for the id.
+    segment is split at connectors). ``dict(zip(...))`` keeps only the LAST
+    geometry for the id, so an id-keyed lookup cannot recover the edge that was
+    actually scored. The sidecar fix resolves geometry by positional index
+    instead -- see ``test_sidecar_uses_scored_geometry_for_duplicate_ids``.
     """
     edges = gpd.GeoDataFrame(
         {"id": ["dup", "dup"]},
         geometry=[
-            LineString([(0, 0), (100, 0)]),  # edge A (scored for pair 1)
+            LineString([(0, 0), (100, 0)]),  # edge A (scored, length 100)
             LineString([(100, 0), (162, 0)]),  # edge B (kept by dict-zip)
         ],
         crs="EPSG:4326",
     )
 
-    # Current sidecar geometry-lookup construction.
     ref_geom_lookup = dict(zip(edges["id"], edges.geometry))
+    # dict-zip collapses to the last row: length 62, NOT the scored edge (100).
+    assert ref_geom_lookup["dup"].length == pytest.approx(62.0)
 
-    # A robust lookup must preserve every edge geometry for a duplicated id.
-    # dict-zip collapses them to one, so this assertion fails (xfail=strict).
-    recovered = ref_geom_lookup["dup"]
-    assert recovered.length == pytest.approx(100.0), (
-        "sidecar lookup returned the wrong edge geometry for a duplicated id: "
-        f"got length {recovered.length}"
+
+def test_sidecar_uses_scored_geometry_for_duplicate_ids(tmp_path):
+    """The sidecar serializes the SCORED edge geometry for a duplicated id.
+
+    Reproduces the display-truncation collapse and verifies the fix. Two
+    reference rows share GERS id ``dup``:
+
+    - positional index 0 -> the geometry that was scored (length 100)
+    - positional index 1 -> a decoy that an id-keyed ``dict(zip)`` would keep
+      (length 62), because it is the LAST row for ``dup``.
+
+    The match group scores against index 0, so a correct sidecar must serialize
+    the length-100 geometry. The old id-keyed lookup would emit length 62 (the
+    wrong duplicate) -- the ``bold sub-line stops partway`` symptom.
+    """
+    from matcher.matching.types import MatchDecision, MatchResult
+    from matcher.pipeline.runner import (
+        _export_groups_sidecar,
+        groups_sidecar_path,
     )
+
+    reference = gpd.GeoDataFrame(
+        {"id": ["dup", "dup"]},
+        geometry=[
+            LineString([(0, 0), (100, 0)]),  # idx 0: scored, length 100
+            LineString([(100, 0), (162, 0)]),  # idx 1: decoy, length 62
+        ],
+        crs="EPSG:4326",
+    )
+    target = gpd.GeoDataFrame(
+        {"id": ["t1", "t2"]},
+        geometry=[
+            LineString([(0, 1), (50, 1)]),
+            LineString([(50, 1), (100, 1)]),
+        ],
+        crs="EPSG:4326",
+    )
+
+    # 1:N group: ref "dup" (scored at index 0) matched to two targets.
+    results = [
+        MatchResult(
+            ref_id="dup",
+            target_id="t1",
+            decision=MatchDecision.MATCH,
+            confidence=0.99,
+            score_breakdown={},
+            features={},
+            ref_idx=0,
+            target_idx=0,
+        ),
+        MatchResult(
+            ref_id="dup",
+            target_id="t2",
+            decision=MatchDecision.MATCH,
+            confidence=0.99,
+            score_breakdown={},
+            features={},
+            ref_idx=0,
+            target_idx=1,
+        ),
+    ]
+
+    bridge_path = tmp_path / "bridge.parquet"
+    sidecar_path = _export_groups_sidecar(
+        results=results,
+        optimized=[],
+        output_path=bridge_path,
+        reference=reference,
+        target=target,
+        min_confidence=0.5,
+    )
+
+    assert sidecar_path == groups_sidecar_path(bridge_path)
+    sidecar = json.loads(sidecar_path.read_text())
+    assert sidecar["n_groups"] == 1
+    group = sidecar["groups"][0]
+
+    ref_geom = shape(group["ref_geometries"]["dup"])
+    assert ref_geom.length == pytest.approx(100.0), (
+        "sidecar serialized the wrong duplicate geometry for id 'dup': "
+        f"got length {ref_geom.length}, expected the scored edge (100)"
+    )
+    # Targets resolve by their own positional indices too.
+    assert shape(group["target_geometries"]["t1"]).length == pytest.approx(50.0)
+    assert shape(group["target_geometries"]["t2"]).length == pytest.approx(50.0)

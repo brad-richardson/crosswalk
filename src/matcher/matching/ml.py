@@ -1897,6 +1897,8 @@ class MLMatcher:
                     confidence=prob,
                     score_breakdown={},  # ML doesn't have component scores
                     features=valid_features[i],
+                    ref_idx=int(cand.ref_idx),
+                    target_idx=int(cand.target_idx),
                     gers_start_frac=alignment.overture_start_frac if alignment else None,
                     gers_end_frac=alignment.overture_end_frac if alignment else None,
                     local_start_frac=alignment.dataset_start_frac if alignment else None,
