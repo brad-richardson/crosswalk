@@ -1,0 +1,102 @@
+{
+  "run_date": "2026-07-04T20:25:32.297954+00:00",
+  "baseline": {
+    "accuracy": 0.9330900243309003,
+    "f1": 0.9434156378600823,
+    "cv_f1_mean": 0.9284186250445826,
+    "cv_f1_std": 0.006230507573818905,
+    "n_features": 83
+  },
+  "quality_check": {
+    "meets_accuracy_threshold": true,
+    "meets_cv_f1_threshold": true,
+    "accuracy_threshold": 0.9,
+    "cv_f1_threshold": 0.9
+  },
+  "classification_thresholds": {
+    "noise": ">= 0.0",
+    "redundant": "> -0.005",
+    "useful": "> -0.01",
+    "important": "<= -0.01"
+  },
+  "classification_counts": {},
+  "feature_ranking_by_importance": [],
+  "category_ranking_by_importance": [
+    {
+      "category": "class",
+      "f1_delta": -0.01844133159081196
+    },
+    {
+      "category": "alignment_coverage",
+      "f1_delta": -0.011177444841601769
+    },
+    {
+      "category": "name_similarity",
+      "f1_delta": -0.01062959373488992
+    },
+    {
+      "category": "topology",
+      "f1_delta": -0.007201646090534974
+    },
+    {
+      "category": "sinuosity",
+      "f1_delta": -0.006785035078011203
+    },
+    {
+      "category": "intersection_overlap",
+      "f1_delta": -0.006302235798226641
+    },
+    {
+      "category": "heading_consistency",
+      "f1_delta": -0.006172839506172867
+    },
+    {
+      "category": "crossing_angle",
+      "f1_delta": -0.005527439102318343
+    },
+    {
+      "category": "length",
+      "f1_delta": -0.004954099398543854
+    },
+    {
+      "category": "clustering",
+      "f1_delta": -0.004850846946298115
+    },
+    {
+      "category": "endpoint_connectivity",
+      "f1_delta": -0.004240380128123555
+    },
+    {
+      "category": "shape_complexity",
+      "f1_delta": -0.004052842382178956
+    },
+    {
+      "category": "geometric",
+      "f1_delta": -0.0027810421589564704
+    },
+    {
+      "category": "parallel_sibling",
+      "f1_delta": -0.0026634482670889748
+    },
+    {
+      "category": "graphlet",
+      "f1_delta": -0.0015731262800514623
+    },
+    {
+      "category": "vertex_density",
+      "f1_delta": -5.8274317342843496e-05
+    },
+    {
+      "category": "lateral_offset",
+      "f1_delta": 0.0004855458764077003
+    }
+  ],
+  "noise_candidates": [],
+  "redundant_candidates": [],
+  "important_features": [],
+  "recommendations": {
+    "safe_to_remove": [],
+    "consider_removing": [],
+    "keep": []
+  }
+}
