@@ -36,6 +36,7 @@ from ..config import (
     FEATURE_VERSION,
     MAX_DISTANCE_METERS,
     METRIC_AVERAGE,
+    PENDING_BACKFILL_FEATURES,
     SEMANTIC_FEATURES,
     default_worker_count,
 )
@@ -1158,12 +1159,29 @@ class MLMatcher:
         if exclude_features:
             expected_features = [f for f in expected_features if f not in exclude_features]
         missing_in_labels = set(expected_features) - set(self.feature_names)
+        # Features explicitly marked pending-backfill are tolerated: newly
+        # declared features whose coordinated `matcher backfill` hasn't run
+        # yet. They are filled with NaN below (XGBoost handles NaN natively).
+        pending_missing = sorted(missing_in_labels & PENDING_BACKFILL_FEATURES)
+        missing_in_labels -= PENDING_BACKFILL_FEATURES
         if missing_in_labels:
             raise ValueError(
                 f"Labels are missing {len(missing_in_labels)} expected features: {sorted(missing_in_labels)}. "
                 f"This usually means labels were created with an older version. "
                 f"Run backfill to add missing features, or retrain with updated labels."
             )
+        if pending_missing:
+            logger.warning(
+                f"Labels are missing {len(pending_missing)} features pending backfill: "
+                f"{pending_missing}. Filling with NaN for training (XGBoost handles "
+                f"missing values natively). Run `matcher backfill` to compute real values."
+            )
+            nan_block = np.full((X.shape[0], len(pending_missing)), np.nan, dtype=X.dtype)
+            X = np.concatenate([X, nan_block], axis=1)
+            # Re-slice train/test from the padded matrix (nothing has modified
+            # X_train/X_test between the split and this point)
+            X_train, X_test = X[train_idx], X[test_idx]
+            self.feature_names = list(self.feature_names) + pending_missing
 
         # Append agent labels to the TRAINING portion only (never the test set).
         # Agent pairs sharing a segment with any test pair are dropped so the

@@ -306,3 +306,64 @@ class TestAgentFeatureVersionChecked:
         matcher = MLMatcher()
         results = matcher.train(labels_dir=str(labels_dir), test_size=0.3, **FAST_XGB)
         assert results["n_train"] + results["n_test"] == 30
+
+
+@pytest.fixture
+def log_capture():
+    """Capture loguru output for assertion."""
+    import io
+
+    from loguru import logger
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, format="{message}", level="WARNING")
+    yield sink
+    logger.remove(handler_id)
+
+
+class TestPendingBackfillTolerance:
+    """Features in PENDING_BACKFILL_FEATURES may be missing from stored labels.
+
+    Newly declared features whose coordinated `matcher backfill` hasn't run yet
+    are filled with NaN at train time (XGBoost handles NaN natively) instead of
+    raising. Missing features NOT in the allowlist must still raise — that
+    check guards against real feature-wiring mistakes.
+    """
+
+    # Any non-ID feature works; the allowlist is monkeypatched so this test
+    # stays valid after PENDING_BACKFILL_FEATURES entries are removed post-backfill.
+    DROPPED = "coverage_ratio"
+
+    @staticmethod
+    def _drop_feature_column(labels_dir, column, dataset="test_ds"):
+        """Remove a feature column from the stored features parquet."""
+        parquet_path = labels_dir / "features" / f"dataset={dataset}" / "data.parquet"
+        features = pd.read_parquet(parquet_path)
+        features.drop(columns=[column]).to_parquet(parquet_path, index=False)
+
+    def test_allowlisted_missing_feature_filled_with_nan(self, tmp_path, monkeypatch, log_capture):
+        labels_dir = _make_labels_dir(tmp_path, n_human=40)
+        self._drop_feature_column(labels_dir, self.DROPPED)
+        monkeypatch.setattr(ml_module, "PENDING_BACKFILL_FEATURES", {self.DROPPED})
+
+        matcher = MLMatcher()
+        results = matcher.train(labels_dir=str(labels_dir), test_size=0.3, **FAST_XGB)
+
+        # The pending feature is appended (as an all-NaN column), so the model
+        # is trained on the full declared feature set
+        assert self.DROPPED in matcher.feature_names
+        assert len(matcher.feature_names) == len(FEATURE_COLUMNS)
+        assert matcher.model.n_features_in_ == len(matcher.feature_names)
+        assert self.DROPPED in results["feature_importance"]
+        # An all-NaN column carries no signal, so it gets zero importance
+        assert results["feature_importance"][self.DROPPED] == 0.0
+        assert "pending backfill" in log_capture.getvalue()
+
+    def test_non_allowlisted_missing_feature_still_raises(self, tmp_path, monkeypatch):
+        labels_dir = _make_labels_dir(tmp_path, n_human=40)
+        self._drop_feature_column(labels_dir, self.DROPPED)
+        monkeypatch.setattr(ml_module, "PENDING_BACKFILL_FEATURES", set())
+
+        matcher = MLMatcher()
+        with pytest.raises(ValueError, match="missing 1 expected features"):
+            matcher.train(labels_dir=str(labels_dir), test_size=0.3, **FAST_XGB)

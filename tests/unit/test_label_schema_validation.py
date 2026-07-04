@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from matcher.config import FEATURE_COLUMNS
+from matcher.config import FEATURE_COLUMNS, PENDING_BACKFILL_FEATURES
 from matcher.labeling.data_store import DATA_COLUMNS, DataStore
 from matcher.labeling.feature_store import FEATURE_KEY_COLUMNS, FeatureStore
 from matcher.labeling.label_store import HUMAN_LABEL_COLUMNS, LabelStore
@@ -28,14 +28,6 @@ FEATURES_DIR = LABELS_DIR / "features"
 DATA_DIR = LABELS_DIR / "data"
 HUMAN_DIR = LABELS_DIR / "human"
 AGENT_DIR = LABELS_DIR / "agent"
-
-
-# Features that have been added to FEATURE_COLUMNS but not yet backfilled into
-# stored feature parquets (see `matcher backfill`). Remove an entry here once a
-# coordinated backfill has run and stored data includes the column.
-PENDING_BACKFILL_FEATURES: set[str] = {
-    "max_coverage",  # Added in feat/max-coverage; backfill planned post-merge.
-}
 
 
 class TestFeatureStoreSchema:
