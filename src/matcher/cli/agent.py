@@ -1197,6 +1197,105 @@ def _write_stitch_eval_report(output, summary, results, disagreements, dataset, 
     Path(output).write_text("".join(lines))
 
 
+@agent_app.command("stitch-export")
+def export_stitch_panel(
+    batches: list[str] = typer.Option(
+        ...,
+        "--batch",
+        "-b",
+        help=(
+            "Batch dir(s) with consensus.csv + batch.json. Repeatable and/or "
+            "comma-separated; later batches supersede earlier ones per group_id."
+        ),
+    ),
+    dataset: str = typer.Option("us_boston_streets", "--dataset", "-d"),
+    labels_dir: Path = typer.Option(Path("labels/stitching"), "--labels", "-l"),
+    max_edges: int = typer.Option(20, "--max-edges", help="Skip groups with > this many edges"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; write nothing"),
+):
+    """Export unanimous panel consensus into human-equivalent stitching labels.
+
+    Only unanimous ``auto_accept`` groups are candidates. Gates are applied in
+    order and reported per group: (a) auto_accept, (b) edge count <= max-edges,
+    (c) class-consistency, (d) sliver canonicalization, (e) human precedence.
+    Exported rows use the labeler ``panel_unanimous_v1`` and upsert by group_id
+    (idempotent).
+
+    Examples:
+        matcher agent stitch-export \\
+            -b data/agents/stitching/batches/us_boston_streets_phase2 \\
+            -b data/agents/stitching/batches/us_boston_streets_phase3
+    """
+    from ..agent_labeling.stitch_export import (
+        REASON_HUMAN_PRECEDENCE,
+        plan_exports,
+        write_exports,
+    )
+
+    # Support both repeatable --batch and comma-separated values.
+    batch_dirs: list[Path] = []
+    for raw in batches:
+        for part in str(raw).split(","):
+            part = part.strip()
+            if part:
+                batch_dirs.append(Path(part))
+
+    for bd in batch_dirs:
+        if not (bd / "consensus.csv").exists():
+            console.print(f"[red]No consensus.csv in {bd}[/red]")
+            raise typer.Exit(1)
+        if not (bd / "batch.json").exists():
+            console.print(
+                f"[yellow]Warning: no batch.json in {bd} — sliver canonicalization "
+                "and edge-overlap precedence degrade for its groups[/yellow]"
+            )
+
+    report = plan_exports(batch_dirs, dataset, labels_dir, max_edges=max_edges)
+
+    console.print(
+        f"[bold]Panel export: {report.n_total_groups} merged groups, "
+        f"{report.n_auto_accept} auto_accept candidates[/bold]"
+    )
+    console.print(f"  Batches (in precedence order): {', '.join(b.name for b in batch_dirs)}")
+
+    # Per-group report.
+    for g in report.groups:
+        if g.exported:
+            slivers = f" (-{g.n_slivers_dropped} sliver)" if g.n_slivers_dropped else ""
+            console.print(
+                f"  [green]EXPORT[/green] {g.group_id} [{g.source_batch}] "
+                f"{g.match_type} {g.n_edges_final} edges{slivers} "
+                f"conf={g.mean_confidence:.3f}"
+            )
+        else:
+            extra = ""
+            if g.reason == REASON_HUMAN_PRECEDENCE and g.human_group_id:
+                extra = f" (human {g.human_group_id})"
+            elif g.reason == "over_max_edges":
+                extra = f" ({g.n_edges_raw} > {max_edges})"
+            elif g.reason == "emptied_by_sliver":
+                extra = f" (-{g.n_slivers_dropped} sliver)"
+            console.print(
+                f"  [yellow]SKIP[/yellow]   {g.group_id} [{g.source_batch}] -> {g.reason}{extra}"
+            )
+
+    console.print(
+        f"\n[bold]Summary:[/bold] {len(report.exported)} exported, "
+        f"{len(report.skipped)} skipped, "
+        f"{report.total_slivers_dropped()} sliver edges dropped"
+    )
+    by_reason = report.skipped_by_reason()
+    if by_reason:
+        console.print("  Skips: " + ", ".join(f"{r}={n}" for r, n in sorted(by_reason.items())))
+
+    if dry_run:
+        console.print("[cyan]Dry run — no labels written.[/cyan]")
+        return
+
+    written = write_exports(report, dataset, labels_dir)
+    console.print(f"[green]Wrote {written} panel labels to {labels_dir}/dataset={dataset}[/green]")
+
+
 @agent_app.command("import")
 def import_agent_labels(
     batch_dir: Path = typer.Argument(..., help="Batch directory"),
