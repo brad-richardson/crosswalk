@@ -1230,25 +1230,33 @@ def compute_coverage_features(
     thresholds rather than applying hard filters.
 
     Args:
-        alignment: AlignmentResult from linestring_alignment, or None
+        alignment: AlignmentResult from linestring_alignment, or None if the
+                   alignment computation failed or is missing
         return_none_on_failure: If True, return None values when alignment is None
                                 (for explicit failure handling). If False (default),
                                 return 0.0 values for backward compatibility.
 
     Returns:
         Dict with coverage features:
-        - ref_coverage: Fraction of reference covered (0-1) or None
-        - target_coverage: Fraction of target covered (0-1) or None
-        - min_coverage: Minimum of the two coverages or None
-        - coverage_ratio: Symmetry of coverage (min/max) or None
-        - max_coverage: Maximum of the two coverages or None (robust to
-          asymmetric segmentation, where a short segment matched onto a much
-          longer one yields a low min_coverage/coverage_ratio despite a
-          genuine match)
+        - ref_coverage: Fraction of reference covered (0-1)
+        - target_coverage: Fraction of target covered (0-1)
+        - min_coverage: Minimum of the two coverages
+        - coverage_ratio: Symmetry of coverage (min/max)
+        - max_coverage: Maximum of the two coverages (robust to asymmetric
+          segmentation, where a short segment matched onto a much longer one
+          yields a low min_coverage/coverage_ratio despite a genuine match)
+
+        None values are not a normal feature output: they signal that the
+        alignment computation failed or is missing (alignment=None with
+        return_none_on_failure=True). Callers in the ML pipeline convert them
+        to NaN — see compute_pair_features() in compute.py — which XGBoost
+        routes natively as missing values (no imputation). This keeps a
+        computation failure distinct from a genuine "no overlap" 0.0 signal.
     """
     if alignment is None:
         if return_none_on_failure:
-            # Explicit failure - return None values for ML pipeline (handled by imputation)
+            # Explicit failure - callers convert these Nones to NaN for
+            # XGBoost's native missing-value handling (no imputation)
             return {
                 "ref_coverage": None,
                 "target_coverage": None,
