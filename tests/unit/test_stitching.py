@@ -831,6 +831,14 @@ class TestSliverClassification:
 
         assert SLIVER_SPAN_THRESHOLD == 0.10
 
+    def test_explicit_null_fracs_never_sliver(self):
+        """An explicit null frac (vs absent key) must not crash or classify as sliver."""
+        from matcher.web.routes.stitching import _edge_spans, is_sliver_edge
+
+        edge = {"gers_end_frac": None, "local_start_frac": None}
+        assert _edge_spans(edge) == (1.0, 1.0)
+        assert not is_sliver_edge(edge)
+
     def test_tiny_overlap_is_sliver(self):
         from matcher.web.routes.stitching import is_sliver_edge
 

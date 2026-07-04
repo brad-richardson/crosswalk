@@ -902,7 +902,12 @@
         // Render coverage gaps for the initial (pre-seeded) selection. The page
         // owns the selection logic; ask it for the included edge set if present.
         if (typeof window.matcherComputeIncludedEdges === "function") {
-            try { updateCoverageGaps(window.matcherComputeIncludedEdges()); } catch (e) {}
+            try {
+                var initialSel = window.matcherComputeSelection
+                    ? window.matcherComputeSelection()
+                    : window.matcherComputeIncludedEdges();
+                updateCoverageGaps(initialSel);
+            } catch (e) {}
         }
 
         // Fit bounds with panel-aware padding
@@ -986,9 +991,19 @@
 
     var GAP_MIN_FRAC = 0.03; // ignore gaps under ~3% of segment length
 
-    function buildCoverageGapFC(includedEdges) {
+    function buildCoverageGapFC(selection) {
+        // selection: {includedEdges, activeRefs, activeTargets} (see
+        // computeEffectiveSegments in page.html). A legacy bare edge array is
+        // upgraded by deriving actives from edge endpoints.
         var features = [];
-        if (!currentGroupGeojson || !includedEdges || !includedEdges.length) {
+        if (Array.isArray(selection)) {
+            var derivedR = {}, derivedT = {};
+            selection.forEach(function (e) { derivedR[e.ref_id] = true; derivedT[e.target_id] = true; });
+            selection = { includedEdges: selection, activeRefs: derivedR, activeTargets: derivedT };
+        }
+        selection = selection || {};
+        var includedEdges = selection.includedEdges || [];
+        if (!currentGroupGeojson) {
             return { type: "FeatureCollection", features: features };
         }
         // Full-geometry coord lookup per side.
@@ -1014,9 +1029,13 @@
                 (tgtIvl[ed.target_id] = tgtIvl[ed.target_id] || []).push([Math.min(ls, le), Math.max(ls, le)]);
             }
         }
-        function emit(ivlMap, geomMap, role) {
-            Object.keys(ivlMap).forEach(function (id) {
-                var gaps = uncoveredIntervals(ivlMap[id], GAP_MIN_FRAC);
+        function emit(ivlMap, geomMap, role, activeIds) {
+            // Every ACTIVE segment gets gap analysis — a segment with zero
+            // selected intervals is 100% uncovered (full-length hazard),
+            // e.g. after sliver exclusion drops all its edges.
+            Object.keys(activeIds || {}).forEach(function (id) {
+                if (!geomMap[id]) return;
+                var gaps = uncoveredIntervals(ivlMap[id] || [], GAP_MIN_FRAC);
                 for (var q = 0; q < gaps.length; q++) {
                     var coords = sliceLineByFrac(geomMap[id], gaps[q][0], gaps[q][1]);
                     if (coords) {
@@ -1029,15 +1048,15 @@
                 }
             });
         }
-        emit(refIvl, refGeom, "ref-gap");
-        emit(tgtIvl, tgtGeom, "target-gap");
+        emit(refIvl, refGeom, "ref-gap", selection.activeRefs);
+        emit(tgtIvl, tgtGeom, "target-gap", selection.activeTargets);
         return { type: "FeatureCollection", features: features };
     }
 
-    function updateCoverageGaps(includedEdges) {
+    function updateCoverageGaps(selection) {
         if (!map.getSource(GAP_SOURCE)) return;
         try {
-            map.getSource(GAP_SOURCE).setData(buildCoverageGapFC(includedEdges));
+            map.getSource(GAP_SOURCE).setData(buildCoverageGapFC(selection));
         } catch (e) {}
     }
 

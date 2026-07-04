@@ -56,10 +56,13 @@ def _edge_spans(edge: dict) -> tuple[float, float]:
     Missing fracs default to a full [0, 1] span (1.0) so an unmeasurable edge is
     never mistaken for a sliver.
     """
-    ref_span = abs(float(edge.get("gers_end_frac", 1.0)) - float(edge.get("gers_start_frac", 0.0)))
-    tgt_span = abs(
-        float(edge.get("local_end_frac", 1.0)) - float(edge.get("local_start_frac", 0.0))
-    )
+
+    def _frac(key: str, default: float) -> float:
+        v = edge.get(key)
+        return default if v is None else float(v)
+
+    ref_span = abs(_frac("gers_end_frac", 1.0) - _frac("gers_start_frac", 0.0))
+    tgt_span = abs(_frac("local_end_frac", 1.0) - _frac("local_start_frac", 0.0))
     return ref_span, tgt_span
 
 
