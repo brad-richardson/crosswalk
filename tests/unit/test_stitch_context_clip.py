@@ -9,6 +9,8 @@ optimizer_assignment and alternatives must always survive intact.
 
 from __future__ import annotations
 
+import copy
+
 import geopandas as gpd
 from shapely.geometry import LineString, mapping
 
@@ -82,9 +84,9 @@ class TestGroupPreservation:
         group = _large_group()
         before_refs = list(group["ref_ids"])
         before_targets = list(group["target_ids"])
-        before_edges = [dict(e) for e in group["edges"]]
-        before_ref_geoms = {k: v for k, v in group["ref_geometries"].items()}
-        before_target_geoms = {k: v for k, v in group["target_geometries"].items()}
+        before_edges = copy.deepcopy(group["edges"])
+        before_ref_geoms = copy.deepcopy(group["ref_geometries"])
+        before_target_geoms = copy.deepcopy(group["target_geometries"])
 
         _run(group)
 
@@ -105,8 +107,8 @@ class TestGroupPreservation:
         """The #238 regression class: options must reference only surviving edges
         and must be untouched when nothing is clipped."""
         group = _large_group()
-        before_opt = [dict(e) for e in group["optimizer_assignment"]]
-        before_alts = [dict(a) for a in group["alternatives"]]
+        before_opt = copy.deepcopy(group["optimizer_assignment"])
+        before_alts = copy.deepcopy(group["alternatives"])
 
         _run(group)
 

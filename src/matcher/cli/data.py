@@ -2,11 +2,15 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.markup import escape
 
 from .utils import console
+
+if TYPE_CHECKING:
+    from shapely.geometry import Polygon
 
 # Create data group
 data_app = typer.Typer(
@@ -1944,7 +1948,7 @@ CONTEXT_MIN_HALF_M = 250.0
 CONTEXT_MARGIN_RATIO = 0.15
 
 
-def _compute_context_envelope(all_shapes: list) -> "tuple":
+def _compute_context_envelope(all_shapes: list) -> "Polygon":
     """Compute the context envelope box for a group's geometries.
 
     The returned box is guaranteed to fully contain every group geometry (plus a
