@@ -317,22 +317,33 @@ def _export_groups_sidecar(
 
         # Resolve each edge's geometry by its scored positional index so that
         # reference/target rows sharing an id don't collapse to one geometry.
-        # First edge wins per id (the ref_geometries schema is id-keyed); the
-        # index still comes from an edge actually scored in THIS group, unlike
-        # the global last-row id lookup.
-        ref_geom_by_id: dict[str, object] = {}
-        tgt_geom_by_id: dict[str, object] = {}
+        # The ref_geometries schema is id-keyed, so if a single group somehow
+        # contains multiple edges for the same id at different indices we pick
+        # the smallest index deterministically -- `component` is built from
+        # unordered sets, so relying on iteration order would give unstable
+        # sidecar output. The index still comes from an edge scored in THIS
+        # group, unlike the global last-row id lookup.
+        ref_idx_by_id: dict[str, int] = {}
+        tgt_idx_by_id: dict[str, int] = {}
         for r in component:
             rid = str(r.ref_id)
-            if rid not in ref_geom_by_id:
-                geom = _geom_at_pos(ref_geoms_by_pos, getattr(r, "ref_idx", None))
-                if geom is not None:
-                    ref_geom_by_id[rid] = geom
+            ridx = getattr(r, "ref_idx", None)
+            if ridx is not None and ridx < ref_idx_by_id.get(rid, ridx + 1):
+                ref_idx_by_id[rid] = ridx
             tid = str(r.target_id)
-            if tid not in tgt_geom_by_id:
-                geom = _geom_at_pos(tgt_geoms_by_pos, getattr(r, "target_idx", None))
-                if geom is not None:
-                    tgt_geom_by_id[tid] = geom
+            tidx = getattr(r, "target_idx", None)
+            if tidx is not None and tidx < tgt_idx_by_id.get(tid, tidx + 1):
+                tgt_idx_by_id[tid] = tidx
+        ref_geom_by_id = {
+            rid: geom
+            for rid, idx in ref_idx_by_id.items()
+            if (geom := _geom_at_pos(ref_geoms_by_pos, idx)) is not None
+        }
+        tgt_geom_by_id = {
+            tid: geom
+            for tid, idx in tgt_idx_by_id.items()
+            if (geom := _geom_at_pos(tgt_geoms_by_pos, idx)) is not None
+        }
 
         # Classify match type
         if len(ref_ids) == 1:
