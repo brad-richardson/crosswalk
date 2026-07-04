@@ -51,15 +51,16 @@ def _project_pair(ref_gj, tgt_gj):
     """Project a WGS84 GeoJSON ref/target pair to a shared local AEQD CRS.
 
     Mirrors ``compute_alignment_batch``: a local azimuthal-equidistant CRS
-    centered on the geometries so that lengths and distances are in meters.
+    centered on the REFERENCE geometry's centroid (production centers on the
+    reference geometries only — see alignment.py `_compute_centroid(ref_geoms)`),
+    so that lengths and distances are in meters.
     """
     from pyproj import CRS, Transformer
 
     ref = shape(ref_gj)
     tgt = shape(tgt_gj)
-    coords = list(ref.coords) + list(tgt.coords)
-    clon = sum(c[0] for c in coords) / len(coords)
-    clat = sum(c[1] for c in coords) / len(coords)
+    c = ref.centroid
+    clon, clat = c.x, c.y
     local_crs = _create_local_equidistant_crs(clon, clat)
     tr = Transformer.from_crs(CRS.from_epsg(4326), local_crs, always_xy=True)
     return (
