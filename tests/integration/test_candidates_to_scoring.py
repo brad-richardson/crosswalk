@@ -4,6 +4,8 @@ Tests that candidates are correctly generated and that scoring
 preserves the expected data flow through the pipeline.
 """
 
+import math
+
 import geopandas as gpd
 import pytest
 from shapely import LineString
@@ -229,9 +231,10 @@ class TestAlignmentIntegration:
             features_aligned["hausdorff_distance_m"] <= features_unaligned["hausdorff_distance_m"]
         )
 
-        # Coverage features should only be present with alignment
+        # Coverage features should only be present with alignment; without
+        # one, coverage is NaN (a computation failure, not zero overlap)
         assert features_aligned["ref_coverage"] > 0
-        assert features_unaligned["ref_coverage"] == 0
+        assert math.isnan(features_unaligned["ref_coverage"])
 
 
 class TestFeatureComputation:
