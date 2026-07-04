@@ -271,7 +271,7 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Version string for feature computation. Bump this when feature computation
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
-FEATURE_VERSION = "2026-02-16.1"
+FEATURE_VERSION = "2026-07-04.1"
 
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
@@ -429,9 +429,7 @@ FEATURE_COLUMNS: list[str] = [
 # missing from labels (filled with NaN — XGBoost handles missing values
 # natively) instead of raising. Remove an entry once a coordinated
 # `matcher backfill` has run and the updated parquets are committed.
-PENDING_BACKFILL_FEATURES: set[str] = {
-    "max_coverage",  # Added 2026-07 (feat/max-coverage); backfill planned post-merge.
-}
+PENDING_BACKFILL_FEATURES: set[str] = set()
 
 # Semantic features - excluded when training geometry-only models
 SEMANTIC_FEATURES = [
