@@ -1109,8 +1109,10 @@ _alignment_worker_data = None
 # _target_line_cache: target_idx -> (coords, cumulative distances, length, seed_points)
 #   where seed_points is the [start, mid, end] GeometryArray used for seed
 #   projection (its midpoint requires a GEOS interpolate, cached here per target).
+#   seed_points is None only for degenerate zero-length targets, which short-circuit
+#   before seed projection.
 _ref_line_cache: dict[int, tuple[np.ndarray, np.ndarray, float]] = {}
-_target_line_cache: dict[int, tuple[np.ndarray, np.ndarray, float, np.ndarray]] = {}
+_target_line_cache: dict[int, tuple[np.ndarray, np.ndarray, float, np.ndarray | None]] = {}
 
 
 def _compute_centroid(geoms: np.ndarray) -> tuple[float, float] | None:
@@ -1256,6 +1258,10 @@ def _compute_single_alignment(args):
 
         if ref_length == 0 or t_length == 0:
             return AlignmentResult(0.0, 1.0, 0.0, 1.0)
+
+        # Past the zero-length short-circuit, t_length > 0 guarantees the cache
+        # stored a real seed-point array (None is only cached for degenerate targets).
+        assert seed_points is not None
 
         # Single batched projection of the (cached) target seed points onto this
         # ref — bit-identical to three per-pair reference.project(Point(...)) calls.

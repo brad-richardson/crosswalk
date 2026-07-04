@@ -1,7 +1,9 @@
 """Parity tests for the alignment seed-projection performance refactor.
 
-The perf change (branch ``perf/alignment-hot-path``) keeps the seeds bit-identical
-to the original GEOS computation while removing per-pair overhead:
+The refactor (linestring_alignment split into a thin wrapper over
+``_linestring_alignment_prepared`` with per-segment caching in the batch workers)
+keeps the seeds bit-identical to the original GEOS computation while removing
+per-pair overhead:
 
 * Coordinate extraction (``_prepare_line_data``) is cached per unique segment in
   the batch workers.
