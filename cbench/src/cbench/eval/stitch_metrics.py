@@ -134,6 +134,13 @@ def map_labels_to_groups(
     a verbatim group_id match preferred when that group still exists and shares an
     edge. Labels whose edges no longer survive in any group are dropped.
 
+    Reject-all labels (empty ``selected_edges``, i.e. "no edges should be
+    selected") carry no edges to recover by overlap, so they survive ONLY when
+    their original ``group_id`` still exists verbatim in the current sidecar
+    (mirrors matcher's ``recover_empty_reject_all``). Keeping the recoverable
+    ones matters: they are real "no edges" ground truth and should influence
+    exact-match / F1.
+
     Returns ``{row_index: group_id}``.
     """
     edge_groups: dict[Edge, set[str]] = defaultdict(set)
@@ -144,8 +151,12 @@ def map_labels_to_groups(
     mapping: dict[int, str] = {}
     for idx, row in stitch_labels.iterrows():
         hes = _curated_edge_set(row.get("selected_edges"))
+        hgid = str(row.get("group_id"))
         if not hes:
-            continue  # reject-all labels carry no edges to recover by overlap
+            # Reject-all label: recoverable only by verbatim group_id match.
+            if hgid in group_candidate_edges:
+                mapping[idx] = hgid
+            continue
         counts: dict[str, int] = defaultdict(int)
         for e in hes:
             for gid in edge_groups.get(e, ()):
@@ -153,7 +164,6 @@ def map_labels_to_groups(
         if not counts:
             continue  # edges no longer survive in any current group
         best = max(counts, key=counts.get)
-        hgid = str(row.get("group_id"))
         # Prefer a verbatim group_id match when it still overlaps this label.
         target = hgid if counts.get(hgid, 0) > 0 else best
         mapping[idx] = target

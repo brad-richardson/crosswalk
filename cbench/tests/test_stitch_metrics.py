@@ -225,3 +225,40 @@ def test_label_lost_when_edges_absent(groups_sidecar):
     )
     result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
     assert result.groups_evaluated == 0
+
+
+def test_reject_all_label_retained_on_group_id_match(groups_sidecar):
+    """Empty-edge (reject-all) labels survive via verbatim group_id match.
+
+    They cannot be recovered by edge-overlap (no edges), so they map only when
+    the original group_id still exists in the sidecar, and they contribute a real
+    'no edges' ground-truth case to exact-match / F1.
+    """
+    # Bridge selected NOTHING for g_current -> matches the reject-all label.
+    bridge = pd.DataFrame({"ref_id": ["rX"], "target_id": ["tX"], "confidence": [0.9]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["g_current"],
+            "selected_edges": [json.dumps([])],
+            "labeler": ["brad"],
+        }
+    )
+    result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
+    assert result.groups_evaluated == 1
+    # pred empty, curated empty -> perfect exact match.
+    assert result.exact_match_rate == pytest.approx(1.0)
+    assert result.f1 == pytest.approx(1.0)
+
+
+def test_reject_all_label_dropped_when_group_id_gone(groups_sidecar):
+    """A reject-all label whose group_id no longer exists is unrecoverable."""
+    bridge = pd.DataFrame({"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.9]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["stale_hash"],
+            "selected_edges": [json.dumps([])],
+            "labeler": ["brad"],
+        }
+    )
+    result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
+    assert result.groups_evaluated == 0
