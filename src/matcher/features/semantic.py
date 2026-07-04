@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from functools import lru_cache
 
 import jellyfish
 from rapidfuzz import fuzz
@@ -199,6 +200,15 @@ STREET_ABBREVIATIONS = {
     # Route prefixes
     " sr ": " state route ",
     " cr ": " county road ",
+}
+
+# Abbreviation entries whose keys contain a "." (e.g. " st. ") can never match
+# during expansion: `_normalize_street_name` strips "." before the expansion pass,
+# so those keys are dead weight in the per-name replace loop. Pre-filter them once
+# at import so the hot loop only iterates over keys that can actually fire. This is
+# behavior-preserving (dropped keys are unreachable) and roughly halves the loop.
+_EXPANDABLE_ABBREVIATIONS = {
+    abbr: full for abbr, full in STREET_ABBREVIATIONS.items() if "." not in abbr
 }
 
 
@@ -527,14 +537,17 @@ def resolve_best_name_variant(
         best_ref = ref_name
         best_target = target_name
 
+        # Normalize each target variant once, up front, instead of re-normalizing
+        # it on every iteration of the ref-variant loop (O(n+m) instead of O(n*m)).
+        norm_targets = [
+            (tv, norm_tv) for tv in target_variants if (norm_tv := _normalize_street_name(tv))
+        ]
+
         for rv in ref_variants:
             norm_rv = _normalize_street_name(rv)
             if not norm_rv:
                 continue
-            for tv in target_variants:
-                norm_tv = _normalize_street_name(tv)
-                if not norm_tv:
-                    continue
+            for tv, norm_tv in norm_targets:
                 score = fuzz.ratio(norm_rv, norm_tv) / 100.0
                 if score > best_score:
                     best_score = score
@@ -599,6 +612,7 @@ def resolve_best_name_variant(
     return ref_name, best_target
 
 
+@lru_cache(maxsize=100_000)
 def _normalize_street_name(name: str) -> str:
     """Normalize street name for comparison.
 
@@ -607,6 +621,10 @@ def _normalize_street_name(name: str) -> str:
     - Expand abbreviations (Latin text only)
     - Remove extra whitespace
     - Remove common punctuation
+
+    Memoized: street names repeat heavily across candidate pairs (both within a
+    dataset and across ref/target variants of the same pair), so caching avoids
+    recomputing the NFKC + abbreviation-expansion pass for names already seen.
     """
     if not name or not isinstance(name, str):
         return ""
@@ -631,8 +649,9 @@ def _normalize_street_name(name: str) -> str:
     if name.startswith(" st ") and len(name.split()) >= 2:
         name = " saint " + name[4:]
 
-    # Expand abbreviations (only effective for Latin text, harmless for CJK)
-    for abbr, full in STREET_ABBREVIATIONS.items():
+    # Expand abbreviations (only effective for Latin text, harmless for CJK).
+    # Iterate only over keys that can actually match (dots already stripped above).
+    for abbr, full in _EXPANDABLE_ABBREVIATIONS.items():
         name = name.replace(abbr, full)
 
     # Clean up extra whitespace
