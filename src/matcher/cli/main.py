@@ -1255,6 +1255,13 @@ def register_commands(app: typer.Typer) -> None:
             "--require-stored-data",
             help="Reject pairs without stored geometries (no fallback to raw data)",
         ),
+        only_datasets: list[str] = typer.Option(
+            None,
+            "--dataset",
+            "-D",
+            help="Only backfill these datasets (repeatable). Useful when some "
+            "datasets need a slow/unavailable Overture auto-fetch.",
+        ),
     ):
         """Recompute features for human labels using current feature computation code.
 
@@ -1274,6 +1281,7 @@ def register_commands(app: typer.Typer) -> None:
             matcher backfill                 # Recompute all human label features
             matcher backfill --include-agent # Also include agent labels
             matcher backfill --missing-only  # Only compute for labels without features
+            matcher backfill -D us_boston_streets -D us_seattle_sidewalks
         """
 
         from ..labeling.feature_store import FeatureStore
@@ -1342,6 +1350,19 @@ def register_commands(app: typer.Typer) -> None:
         if len(all_label_keys) == 0:
             console.print("[yellow]No labels found to process.[/yellow]")
             raise typer.Exit(0)
+
+        if only_datasets:
+            wanted = set(only_datasets)
+            available = {d for _, _, d in all_label_keys}
+            unknown = wanted - available
+            if unknown:
+                console.print(
+                    f"  [yellow]No labels found for: {', '.join(sorted(unknown))}[/yellow]"
+                )
+            all_label_keys = {k for k in all_label_keys if k[2] in wanted}
+            console.print(
+                f"  Filtered to {len(all_label_keys)} labels in {len(wanted & available)} datasets"
+            )
 
         # Determine which labels to process
         if missing_only:
