@@ -2211,3 +2211,272 @@ class TestSampleTopologyAlongSegment:
 
         fracs = [c[0] for c in connectors]
         assert fracs == [0.0, 1.0]
+
+
+class TestTargetDegreeSemanticsUnification:
+    """Degree-semantics unification: target topology derived from Overture
+    connectors (projected onto the target segment) must agree with the ref side.
+
+    Regression for the bug where target degrees came from endpoint-only
+    Union-Find clustering: a road passing THROUGH a junction contributes no
+    endpoint there, so the junction degree is undercounted and through-junctions
+    are missed entirely — making intersection_match / dead_end_match /
+    degree_match_score anti-informative on true matches.
+
+    Repro geometry (a '+' crossroads):
+        - Horizontal road H runs straight THROUGH the center as one segment.
+        - Two vertical stubs (N, S) each END at the center.
+    On the ref (Overture) side the center is one connector referenced by all
+    three segments -> high degree, is_intersection True. On the target side the
+    endpoint-cluster at the center sees only the two stub endpoints (H passes
+    through) -> undercounted degree, is_intersection False.
+    """
+
+    @staticmethod
+    def _build_plus_crossroads():
+        """Build ref (Overture w/ connectors) + target (spaghetti) '+' crossroads.
+
+        Returns a dict with everything needed to exercise the ref path, the old
+        endpoint-cluster target path, and the new Overture-projected target path.
+        """
+        from matcher.features.compute import precompute_graphlet_features
+        from matcher.features.spatial_context import (
+            build_overture_connector_spatial_index,
+            find_overture_connectors_for_targets,
+            sample_topology_batch,
+        )
+
+        # Ref: Overture segments with explicit connectors.
+        # Connector ids: cW, cE (H endpoints), cN, cS (stub tips), cC (center).
+        ref_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["H", "N", "S"],
+                "geometry": [
+                    LineString([(-100, 0), (100, 0)]),  # through road
+                    LineString([(0, 0), (0, 100)]),  # north stub (starts at center)
+                    LineString([(0, 0), (0, -100)]),  # south stub (starts at center)
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "cW"},
+                        {"at": 0.5, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cE"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cN"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cS"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # Target: same physical geometry but no explicit connectors. The
+        # horizontal road is a single unsplit THROUGH segment.
+        target_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["tH", "tN", "tS"],
+                "geometry": [
+                    LineString([(-100, 0), (100, 0)]),
+                    LineString([(0, 0), (0, 100)]),
+                    LineString([(0, 0), (0, -100)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # Ref graphlet data (connector-based) -> node degrees in the Overture
+        # connector id space.
+        _, ref_s2c, ref_node_features, _ = precompute_graphlet_features(
+            ref_gdf, connectors_column="connectors"
+        )
+
+        # Old target path: endpoint-cluster spatial index -> synthetic connectors.
+        _, target_topo_index = compute_all_topology(
+            target_gdf, id_column="id", return_spatial_index=True
+        )
+        target_geoms_by_id = {
+            str(target_gdf["id"].iloc[i]): target_gdf.geometry.iloc[i]
+            for i in range(len(target_gdf))
+        }
+        old_connectors, old_node_features = sample_topology_batch(
+            list(target_geoms_by_id.values()),
+            list(target_geoms_by_id.keys()),
+            target_topo_index,
+        )
+
+        # New target path: Overture connectors projected onto target segments,
+        # scored against the SAME ref node degrees.
+        ref_geoms_by_id = {
+            str(ref_gdf["id"].iloc[i]): ref_gdf.geometry.iloc[i] for i in range(len(ref_gdf))
+        }
+        conn_index = build_overture_connector_spatial_index(ref_s2c, ref_geoms_by_id)
+        overture_connectors = find_overture_connectors_for_targets(target_geoms_by_id, conn_index)
+
+        return {
+            "ref_s2c": ref_s2c,
+            "ref_node_features": ref_node_features,
+            "old_connectors": old_connectors,
+            "old_node_features": old_node_features,
+            "overture_connectors": overture_connectors,
+        }
+
+    def test_center_connector_high_degree_on_ref(self):
+        """Sanity: the shared center connector has degree 4 in the ref graph."""
+        ctx = self._build_plus_crossroads()
+        # The north stub starts (frac 0.0) at the center connector.
+        ref_topo = compute_aligned_topology_features(
+            "N", ctx["ref_s2c"], ctx["ref_node_features"], 0.0, 1.0
+        )
+        # Center touches W, E, N, S -> degree 4; north tip is a dead end.
+        assert ref_topo["from_degree"] == 4
+        assert ref_topo["is_intersection"] is True
+
+    def test_old_endpoint_cluster_path_undercounts(self):
+        """Documents the bug: endpoint clustering misses the through-junction."""
+        ctx = self._build_plus_crossroads()
+        old_topo = compute_aligned_topology_features(
+            "tN", ctx["old_connectors"], ctx["old_node_features"], 0.0, 1.0
+        )
+        # Only the two stub endpoints cluster at the center (H passes through),
+        # so the center reads as degree 2 and the stub is NOT an intersection.
+        assert old_topo["from_degree"] == 2
+        assert old_topo["is_intersection"] is False
+
+    def test_overture_projected_target_agrees_with_ref(self):
+        """The fix: target topology from projected Overture connectors matches ref."""
+        ctx = self._build_plus_crossroads()
+
+        ref_topo = compute_aligned_topology_features(
+            "N", ctx["ref_s2c"], ctx["ref_node_features"], 0.0, 1.0
+        )
+        new_topo = compute_aligned_topology_features(
+            "tN", ctx["overture_connectors"], ctx["ref_node_features"], 0.0, 1.0
+        )
+
+        # Degree at the shared center now matches the ref side exactly.
+        assert new_topo["from_degree"] == ref_topo["from_degree"] == 4
+        # Both sides agree the stub touches an intersection.
+        assert new_topo["is_intersection"] is True
+        assert new_topo["is_intersection"] == ref_topo["is_intersection"]
+        assert new_topo["is_dead_end"] == ref_topo["is_dead_end"]
+
+    def test_reversed_alignment_with_projected_overture_degrees(self):
+        """Combined test: projected-Overture target degrees + is_reversed swap.
+
+        End-to-end through the real pipeline (prepare_worker_data ->
+        _compute_feature_chunk), so it exercises the actual interaction between
+        the degree-semantics unification (this PR) and the orientation fix
+        (is_reversed swap from PR #251) in compute.py.
+
+        Geometry: ref segment H runs from a 4-way crossroads center (cC,
+        degree 4) to a dead end (cE, degree 1) -> asymmetric (from=4, to=1).
+        The target copy tH is digitized in the REVERSE direction (dead end
+        first). The projected-Overture derivation reads degrees in the
+        target's own coordinate order (1 at coord[0], 4 at coord[-1]); the
+        downstream is_reversed swap must then re-pair them physically so
+        from_degree_target matches the degree at the ref's FROM end (4).
+        """
+        from matcher.blocking.spatial_index import CandidatePair
+        from matcher.features.pipeline import prepare_worker_data
+        from matcher.matching.ml import _compute_feature_chunk, _init_worker
+
+        # Ref: crossroads at (0, 0) with four arms; H is the eastbound arm
+        # ending at a dead end cE. cC is referenced by all four arms -> degree 4.
+        ref_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["H", "N", "S", "W"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),  # center -> dead end
+                    LineString([(0, 0), (0, 100)]),
+                    LineString([(0, 0), (0, -100)]),
+                    LineString([(0, 0), (-100, 0)]),
+                ],
+                "connectors": [
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cE"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cN"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cS"},
+                    ],
+                    [
+                        {"at": 0.0, "connector_id": "cC"},
+                        {"at": 1.0, "connector_id": "cW"},
+                    ],
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        # Target: same physical roads; tH digitized REVERSED (dead end first).
+        # The arms are included so the candidates-only ref connector graph
+        # sees all four segments at cC (degree 4).
+        target_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["tH", "tN", "tS", "tW"],
+                "geometry": [
+                    LineString([(100, 0), (0, 0)]),  # REVERSED vs ref H
+                    LineString([(0, 0), (0, 100)]),
+                    LineString([(0, 0), (0, -100)]),
+                    LineString([(0, 0), (-100, 0)]),
+                ],
+            },
+            crs="EPSG:32610",
+        )
+
+        candidates = [
+            CandidatePair(
+                ref_id=r,
+                ref_idx=ri,
+                target_id=t,
+                target_idx=ti,
+                distance_estimate=0.0,
+                heading_diff=0.0,
+            )
+            for r, ri, t, ti in [
+                ("H", 0, "tH", 0),
+                ("N", 1, "tN", 1),
+                ("S", 2, "tS", 2),
+                ("W", 3, "tW", 3),
+            ]
+        ]
+
+        result = prepare_worker_data(
+            candidates=candidates,
+            reference=ref_gdf,
+            target=target_gdf,
+            n_jobs=1,
+        )
+
+        # Sanity: the pipeline's alignment must flag tH as reversed.
+        h_alignment = result.worker_data["alignments"].get((0, 0))
+        assert h_alignment is not None and h_alignment.is_reversed is True
+        # Sanity: projected Overture connectors reached the target segment,
+        # so the topology block takes the new projected-Overture branch.
+        assert result.worker_data["target_overture_connectors"].get("tH")
+
+        _init_worker(result.worker_data)
+        features_list, _errors = _compute_feature_chunk([(0, 0)])
+        feats = features_list[0]
+        assert feats is not None and not feats.get("_error")
+
+        # Ref: from end at the crossroads center (degree 4), to end dead (1).
+        assert feats["from_degree_ref"] == 4
+        assert feats["to_degree_ref"] == 1
+        # Target degrees must pair with the SAME physical ends as ref, i.e.
+        # the raw coordinate-order derivation (1, 4) swapped by is_reversed.
+        assert feats["from_degree_target"] == feats["from_degree_ref"] == 4
+        assert feats["to_degree_target"] == feats["to_degree_ref"] == 1
+        # Derived agreement flags follow.
+        assert feats["intersection_match"] == 1.0
+        assert feats["dead_end_match"] == 1.0

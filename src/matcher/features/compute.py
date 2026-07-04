@@ -396,7 +396,26 @@ def _compute_non_geometric_features(
             )
 
         # --- Target side topology ---
-        # Prefer synthetic connectors (sampled from full network spatial index)
+        # DEGREE-SEMANTICS UNIFICATION: prefer Overture connectors projected onto
+        # the target segment (target_overture_connectors), scored against the SAME
+        # ref graphlet node degrees the ref side uses. This puts both sides in one
+        # connector universe, so target degrees count through-junctions (a road
+        # passing through a node) instead of only endpoint clusters — the latter
+        # systematically undercounts degree and misses through-roads entirely,
+        # which made intersection_match/dead_end_match/degree_match_score
+        # anti-informative (see PR: topology degree-semantics unification).
+        target_overture_conns = (
+            target_overture_connectors.get(target_seg_id)
+            if (target_overture_connectors is not None and target_seg_id is not None)
+            else None
+        )
+        target_has_overture = (
+            alignment is not None
+            and target_overture_conns  # non-empty projected connector list
+            and ref_graphlet_data is not None
+        )
+        # Fallback (sparse/rural, no projected Overture connectors): synthetic
+        # connectors sampled from the full-network endpoint-cluster spatial index.
         target_has_synthetic = (
             alignment is not None
             and target_topo_connectors is not None
@@ -408,7 +427,19 @@ def _compute_non_geometric_features(
             alignment is not None and target_graphlet_data is not None and target_seg_id is not None
         )
 
-        if target_has_synthetic:
+        if target_has_overture:
+            # ref_graphlet_data[2] maps Overture connector node_id -> degree (or
+            # feature vector); target_overture_connectors reuses those same node
+            # ids, so degrees are directly comparable to the ref side.
+            _, _, ref_node_features_topo, _ = ref_graphlet_data
+            target_topo = compute_aligned_topology_features(
+                target_seg_id,
+                target_overture_connectors,
+                ref_node_features_topo,
+                alignment.dataset_start_frac,
+                alignment.dataset_end_frac,
+            )
+        elif target_has_synthetic:
             target_topo = compute_aligned_topology_features(
                 target_seg_id,
                 target_topo_connectors,
