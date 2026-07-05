@@ -1214,6 +1214,32 @@ class TestParseExplicitEdges:
         with pytest.raises(ValueError):
             _parse_explicit_edges(json.dumps({"ref_id": "r1"}), self._group())
 
+    def _group_with_rejected(self):
+        # A rejected candidate over the group's own segments (same structural
+        # layer as selected edges). The submit-time pair-confirmation panel can
+        # present such a pair for the reviewer to tick, so an explicit payload
+        # referencing it must be accepted (validated against the candidate union).
+        return {
+            "edges": [_edge("r1", "t1", 0.9)],
+            "rejected_edges": [_edge("r2", "t2", 0.42)],
+        }
+
+    def test_rejected_candidate_pair_accepted(self):
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        raw = json.dumps([{"ref_id": "r2", "target_id": "t2"}])
+        parsed = _parse_explicit_edges(raw, self._group_with_rejected())
+        assert parsed == [{"ref_id": "r2", "target_id": "t2"}]
+
+    def test_true_non_candidate_still_rejected(self):
+        # Not a selected edge nor a rejected candidate → still refused (#270:
+        # context/forged pairs must never be recordable).
+        from matcher.web.routes.stitching import _parse_explicit_edges
+
+        raw = json.dumps([{"ref_id": "r1", "target_id": "t9"}])
+        with pytest.raises(ValueError):
+            _parse_explicit_edges(raw, self._group_with_rejected())
+
 
 # ---------------------------------------------------------------------------
 # /stitching-review/select — explicit edge set vs. cross-product
@@ -2216,6 +2242,110 @@ class TestRejectedPairSubmit:
             assert stored == {("r1", "t1"), ("r2", "t2")}
         finally:
             self._stop(patches)
+
+    def test_explicit_confirmed_rejected_pair_stored_verbatim(self):
+        # The submit-time pair-confirmation panel resubmits the ticked pairs as
+        # an explicit selected_edges list. A ticked pair whose only edge was
+        # REJECTED by the optimizer must survive the explicit path (candidate
+        # union validation), stored verbatim without cross-product inflation.
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "grej",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": json.dumps([{"ref_id": "r2", "target_id": "t2"}]),
+                },
+            )
+            assert resp.status_code == 200
+            stored = {
+                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
+            }
+            assert stored == {("r2", "t2")}
+        finally:
+            self._stop(patches)
+
+
+class TestStaleProposalUI:
+    """A queue entry flagged ``stale_grouping`` (its group no longer exists in
+    the current sidecar, so its proposal could not be refreshed) renders a
+    visible stale-proposal notice and marks the card so the submit JS forces the
+    pair-confirmation panel. A fresh entry does not."""
+
+    DATASET = "test_ds"
+
+    def _batch(self, stale):
+        group = {
+            "group_id": "gstale",
+            "match_type": "1:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+        }
+        if stale:
+            group["stale_grouping"] = True
+        return {"dataset_id": self.DATASET, "groups": [group]}
+
+    def _client(self, stale):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch(
+                "matcher.web.routes.stitching.load_stitch_batch",
+                return_value=self._batch(stale),
+            ),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), patches
+
+    def _fragment(self, client):
+        return client.get(
+            f"/stitching-review/group?dataset={self.DATASET}&group_id=gstale&group_index=0"
+        ).text
+
+    def test_stale_group_shows_notice_and_marks_card(self):
+        client, patches = self._client(stale=True)
+        try:
+            html = self._fragment(client)
+            assert 'data-stale="1"' in html
+            assert "stale-proposal-notice" in html
+            assert "Stale proposal" in html
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_fresh_group_not_marked_stale(self):
+        client, patches = self._client(stale=False)
+        try:
+            html = self._fragment(client)
+            assert 'data-stale="0"' in html
+            assert "stale-proposal-notice" not in html
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_pair_confirm_panel_present_in_fragment(self):
+        client, patches = self._client(stale=False)
+        try:
+            html = self._fragment(client)
+            # The inline confirmation panel + its confirm/cancel hooks always
+            # render (shown by JS for manual/de-anchored and stale-option submits).
+            assert 'id="pair-confirm-panel"' in html
+            assert "confirmPairSubmit()" in html
+            assert "cancelPairConfirm()" in html
+        finally:
+            for p in patches:
+                p.stop()
 
 
 class TestDeAnchoredMode:
