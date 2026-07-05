@@ -65,6 +65,7 @@ class Vote:
     timestamp: str = ""
     raw: str = ""
     error: str = ""
+    pack_feedback: str = ""  # diagnostic self-report JSON (wave-local; usually "")
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +153,56 @@ def parse_vote(raw_text: str, valid_letters: set[str]) -> tuple[str, float, str]
     return choice, confidence, reasoning
 
 
+# ---------------------------------------------------------------------------
+# Diagnostic pack-feedback instrumentation (wave-local; default OFF).
+#
+# When enabled via the --pack-feedback flag, each panelist is asked to append a
+# structured self-report to its JSON answer so we can mine WHAT EVIDENCE the
+# pack failed to provide. This is a diagnostic-only augmentation: the default
+# production prompt is untouched unless the flag is passed.
+# ---------------------------------------------------------------------------
+
+PACK_FEEDBACK_INSTRUCTION = (
+    "\n\nADDITIONALLY (diagnostic — does not change your choice): include a "
+    'fourth key "pack_feedback" in the SAME JSON object. It is an object with '
+    "three keys:\n"
+    '  "missing_info": list of short strings — information you needed to decide '
+    "but the pack did not provide (e.g. a needed zoom level, a name, a class, an "
+    "angle, connectivity).\n"
+    '  "ambiguities": list of short strings — what was genuinely ambiguous or '
+    "hard to disambiguate from the evidence shown.\n"
+    '  "confidence_basis": short string — what your confidence chiefly rests on '
+    "(or what would raise it).\n"
+    "Use empty lists / empty string if nothing applies. Example: "
+    '{"choice": "A", "confidence": 0.8, "reasoning": "...", "pack_feedback": '
+    '{"missing_info": ["no street name on T1"], "ambiguities": ["R2/T1 overlap '
+    'unclear at this zoom"], "confidence_basis": "clear parallel geometry"}}'
+)
+
+
+def augment_prompt_with_feedback(prompt: str) -> str:
+    """Append the diagnostic pack-feedback request to a group prompt."""
+    return prompt + PACK_FEEDBACK_INSTRUCTION
+
+
+def _extract_pack_feedback(raw_text: str) -> str:
+    """Pull the optional ``pack_feedback`` object from a provider's raw output.
+
+    Returns a compact JSON string, or "" when absent/unparseable. Never raises —
+    a missing self-report must not invalidate an otherwise-good vote.
+    """
+    obj = _extract_json_object(raw_text)
+    if not obj or "pack_feedback" not in obj:
+        return ""
+    fb = obj.get("pack_feedback")
+    if fb in (None, "", [], {}):
+        return ""
+    try:
+        return json.dumps(fb, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(fb)
+
+
 def choice_to_edge_set(
     choice: str, options_by_letter: dict[str, list[tuple[str, str]]]
 ) -> frozenset:
@@ -172,6 +223,10 @@ _JSON_SCHEMA = json.dumps(
             "choice": {"type": "string"},
             "confidence": {"type": "number"},
             "reasoning": {"type": "string"},
+            # Optional diagnostic self-report (only requested when the
+            # --pack-feedback flag augments the prompt). Declared here so a
+            # schema-enforcing provider (claude) may emit it; omitted otherwise.
+            "pack_feedback": {"type": "object", "additionalProperties": True},
         },
         "required": ["choice", "confidence", "reasoning"],
         "additionalProperties": False,
@@ -393,6 +448,7 @@ def run_provider_on_group(
     options_by_letter: dict[str, list[tuple[str, str]]],
     timeout: int = 240,
     retries: int = 1,
+    collect_feedback: bool = False,
 ) -> Vote:
     """Run one provider on one group, validate, retry once on invalid output.
 
@@ -421,6 +477,7 @@ def run_provider_on_group(
             invoker,
             timeout,
             retries,
+            collect_feedback,
         )
     finally:
         if tmp_ctx is not None:
@@ -438,6 +495,7 @@ def _attempt_provider(
     invoker,
     timeout,
     retries,
+    collect_feedback=False,
 ) -> Vote:
     last_err = ""
     last_raw = ""
@@ -469,6 +527,7 @@ def _attempt_provider(
                 latency_s=round(latency, 2),
                 timestamp=datetime.now(UTC).isoformat(),
                 raw=raw[:2000],
+                pack_feedback=_extract_pack_feedback(raw) if collect_feedback else "",
             )
         except ValueError as e:
             last_err = f"parse/validation: {e}"
@@ -495,14 +554,24 @@ def run_panel_on_group(
     group_dir: Path,
     panel: list[ProviderSpec],
     timeout: int = 240,
+    collect_feedback: bool = False,
 ) -> list[Vote]:
     """Run the full panel on one group in parallel (one thread per provider)."""
     letters, options_by_letter, _meta = _load_group_context(group_dir)
     prompt = (group_dir / "prompt.txt").read_text()
+    if collect_feedback:
+        prompt = augment_prompt_with_feedback(prompt)
 
     def _run(p: ProviderSpec) -> Vote:
         return run_provider_on_group(
-            p, group_id, group_dir, prompt, letters, options_by_letter, timeout
+            p,
+            group_id,
+            group_dir,
+            prompt,
+            letters,
+            options_by_letter,
+            timeout,
+            collect_feedback=collect_feedback,
         )
 
     with ThreadPoolExecutor(max_workers=len(panel)) as ex:
@@ -702,6 +771,7 @@ VOTES_COLUMNS = [
     "latency_s",
     "timestamp",
     "error",
+    "pack_feedback",
 ]
 CONSENSUS_COLUMNS = [
     "group_id",
@@ -727,6 +797,7 @@ def run_batch(
     group_ids: list[str] | None = None,
     timeout: int = 240,
     limit: int = 0,
+    collect_feedback: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the panel over every generated group in a batch dir.
 
@@ -752,7 +823,7 @@ def run_batch(
     for i, gdir in enumerate(group_dirs):
         gid = gdir.name
         logger.info(f"[{i + 1}/{len(group_dirs)}] panel on group {gid}")
-        votes = run_panel_on_group(gid, gdir, panel, timeout)
+        votes = run_panel_on_group(gid, gdir, panel, timeout, collect_feedback=collect_feedback)
         all_votes.extend(votes)
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
@@ -780,6 +851,7 @@ def run_batch(
                 "latency_s": v.latency_s,
                 "timestamp": v.timestamp,
                 "error": v.error,
+                "pack_feedback": v.pack_feedback,
             }
             for v in all_votes
         ],
