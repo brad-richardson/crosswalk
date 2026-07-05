@@ -87,6 +87,10 @@ resolves it per run: the dataset name is derived from the bridge output filename
 and looked up in `resolver_prune_overrides`; datasets without an override use the
 global `resolver_prune_enabled` (default **True**) / `resolver_prune_min_confidence`
 (default **0.96**); an override value ≤ 0 disables the prune for that dataset.
+Because every validated floor was tuned on **calibrated** confidence and no raw
+operating point exists, `_effective_prune_threshold` also skips the prune (returns
+0.0) when the active model applies no calibration — so an uncalibrated model does
+not silently over-prune raw scores (mirrors the glue prune's raw/calibrated guard).
 Validated under the #271 stitch gate at the coordinated-retrain deploy (calibrated
 model, `PYTHONHASHSEED=0`):
 

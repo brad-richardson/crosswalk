@@ -846,6 +846,121 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         )
 
 
+class TestEffectivePruneThresholdCalibrationGuard:
+    """The resolver confidence-drop prune (#282/#284) was validated ONLY on
+    CALIBRATED confidence. Its operating points must NOT be applied to raw
+    XGBoost scores — mirroring the glue prune, the prune is skipped when the
+    active model applies no calibration (else it silently over-prunes).
+    """
+
+    def _patch_calibration(self, monkeypatch, active: bool):
+        import matcher.matching.ml as ml_mod
+
+        class _FakeMatcher:
+            def __init__(self, *a, **k):
+                pass
+
+            @property
+            def calibration_active(self):
+                return active
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: _FakeMatcher())
+
+    def test_global_default_applies_when_calibrated(self, monkeypatch):
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_min_confidence", 0.96)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_seattle_sidewalks": 0.90})
+        self._patch_calibration(monkeypatch, active=True)
+
+        assert runner._effective_prune_threshold(
+            Path("data/output/de_berlin_streets_bridge.parquet")
+        ) == pytest.approx(0.96)
+
+    def test_per_dataset_override_applies_when_calibrated(self, monkeypatch):
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_seattle_sidewalks": 0.90})
+        self._patch_calibration(monkeypatch, active=True)
+
+        assert runner._effective_prune_threshold(
+            Path("data/output/us_seattle_sidewalks_bridge.parquet")
+        ) == pytest.approx(0.90)
+
+    def test_override_le_zero_disables_regardless(self, monkeypatch):
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"ds": 0.0})
+        self._patch_calibration(monkeypatch, active=True)
+
+        assert runner._effective_prune_threshold(Path("data/output/ds_bridge.parquet")) == 0.0
+
+    def test_prune_skipped_when_calibration_globally_disabled(self, monkeypatch):
+        """enable_calibration=False must skip the prune WITHOUT loading a model:
+        the calibrated-tuned floor is invalid on raw scores."""
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", False)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_min_confidence", 0.96)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {})
+
+        import matcher.matching.ml as ml_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
+        assert (
+            runner._effective_prune_threshold(Path("data/output/us_boston_streets_bridge.parquet"))
+            == 0.0
+        )
+
+    def test_prune_skipped_when_model_not_calibrated(self, monkeypatch):
+        """Calibration enabled globally but the loaded model carries no
+        calibrator (calibration_active False) -> prune must be skipped."""
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_min_confidence", 0.96)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_seattle_sidewalks": 0.90})
+        self._patch_calibration(monkeypatch, active=False)
+
+        # both the global-default dataset and an overridden one are skipped
+        assert (
+            runner._effective_prune_threshold(Path("data/output/de_berlin_streets_bridge.parquet"))
+            == 0.0
+        )
+        assert (
+            runner._effective_prune_threshold(
+                Path("data/output/us_seattle_sidewalks_bridge.parquet")
+            )
+            == 0.0
+        )
+
+
 class TestStructuralGate:
     def test_single_corridor_always_simple_within_backstop(self):
         assert group_is_structurally_simple(1, 1, 30, 2, 30, 40)

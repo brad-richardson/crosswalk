@@ -28,6 +28,27 @@ class PipelineError(Exception):
     pass
 
 
+def _calibration_active() -> bool:
+    """Whether the pipeline's active model applies isotonic calibration.
+
+    ``run_pipeline`` always scores with ``settings.model_path``, so that is the
+    model inspected. Short-circuits without loading the model when calibration is
+    globally disabled (``MLMatcher.calibration_active`` can never be True then).
+    """
+    # Short-circuit when calibration is globally disabled: skip the model load
+    # (and its I/O) entirely — the answer is unconditionally False.
+    if not settings.enable_calibration:
+        return False
+
+    from ..matching.ml import MLMatcher
+
+    try:
+        return MLMatcher(model_path=str(settings.model_path)).calibration_active
+    except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
+        logger.warning(f"Could not determine calibration state: {exc}")
+        return False
+
+
 def _effective_glue_min_confidence() -> float:
     """Select the grouping-only glue prune for the pipeline's active model.
 
@@ -40,23 +61,9 @@ def _effective_glue_min_confidence() -> float:
     so it never silently over-prunes. ``run_pipeline`` always scores with
     ``settings.model_path``, so that is the model inspected here.
     """
-    # Short-circuit when calibration is globally disabled: calibration_active
-    # can never be True, so skip the model load (and its I/O) entirely.
-    if not settings.enable_calibration:
-        return settings.optimizer_glue_min_confidence_raw
-
-    from ..matching.ml import MLMatcher
-
-    try:
-        active = MLMatcher(model_path=str(settings.model_path)).calibration_active
-    except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
-        logger.warning(f"Could not determine calibration state for glue prune: {exc}")
-        active = False
-    return (
-        settings.optimizer_glue_min_confidence
-        if active
-        else settings.optimizer_glue_min_confidence_raw
-    )
+    if _calibration_active():
+        return settings.optimizer_glue_min_confidence
+    return settings.optimizer_glue_min_confidence_raw
 
 
 def _effective_prune_threshold(output_path: Path) -> float:
@@ -71,16 +78,36 @@ def _effective_prune_threshold(output_path: Path) -> float:
     for that dataset; datasets without an override inherit the global default.
     Returns 0.0 when the prune is off, which ``apply_confidence_drop_prune``
     treats as a no-op (selections byte-identical to the pre-prune pipeline).
+
+    Calibration guard: the prune's operating points (0.96 global / the per-dataset
+    overrides) were tuned and validated ONLY on CALIBRATED ``MatchResult.confidence``
+    (#272/#284). Unlike the glue prune, NO raw-score operating point was validated.
+    Applying the calibrated floor to raw XGBoost scores would silently over-prune —
+    raw match scores seldom clear 0.96, so nearly every non-top M:N/1:N/N:1 edge
+    would be dropped, collapsing multi-edge groups to their single best edge. So,
+    mirroring the glue-prune guarantee, the prune is skipped when the active model
+    applies no calibration.
     """
     name = output_path.name
     suffix = "_bridge.parquet"
     dataset = name[: -len(suffix)] if name.endswith(suffix) else output_path.stem
     overrides = settings.resolver_prune_overrides or {}
     if dataset in overrides:
-        return max(0.0, float(overrides[dataset]))
-    if settings.resolver_prune_enabled:
-        return settings.resolver_prune_min_confidence
-    return 0.0
+        threshold = max(0.0, float(overrides[dataset]))
+    elif settings.resolver_prune_enabled:
+        threshold = settings.resolver_prune_min_confidence
+    else:
+        threshold = 0.0
+
+    if threshold > 0 and not _calibration_active():
+        logger.warning(
+            "Resolver confidence-drop prune skipped: its operating points are "
+            "calibrated-only, but the active model applies no calibration "
+            f"(enable_calibration={settings.enable_calibration}). No raw-score "
+            "floor is validated, so pruning here would silently over-prune."
+        )
+        return 0.0
+    return threshold
 
 
 def score_candidates_from_geodataframes(

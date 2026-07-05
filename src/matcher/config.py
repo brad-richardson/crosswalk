@@ -740,6 +740,13 @@ class MatcherSettings(BaseSettings):
     # 0.40 -> 0.50 on the 27-label slice). Set an override <= 0 to disable the
     # prune for a specific dataset. When the effective threshold is 0 the
     # optimizer selections are byte-identical to the pre-prune pipeline.
+    #
+    # CALIBRATED-ONLY OPERATING POINTS. Every validated floor (0.96 global and
+    # the overrides) was tuned on CALIBRATED ``MatchResult.confidence``; unlike
+    # the glue prune there is NO validated raw-score point. So the prune is
+    # applied only when the active model actually calibrates — ``runner.py::
+    # _effective_prune_threshold`` skips it (returns 0.0) when calibration is
+    # inactive, so an uncalibrated model does not silently over-prune raw scores.
     resolver_prune_enabled: bool = Field(
         default=True,
         description="Enable the post-optimizer confidence-drop prune of group edges "
