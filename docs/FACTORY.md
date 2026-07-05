@@ -44,19 +44,25 @@ dataset failed.
 
 | Option | Default | Notes |
 |---|---|---|
-| `--workers, -w` | `min(4, cores/4)` | Concurrent dataset processes. **Use `12` on the box** (see runbook). |
-| `--jobs-per-dataset, -j` | `1` | Internal scoring parallelism *within* each dataset process. |
+| `--workers, -w` | `min(4, cores/4)` | Concurrent dataset processes. **Keep at `1` on the box** and put the cores into `-j` — see the runbook: `--workers > 1` nests fork-based process pools and crashes on large sweeps. |
+| `--jobs-per-dataset, -j` | `1` | Internal scoring parallelism *within* each dataset process. **Use `12` on the box.** |
 | `--release` | derived | Override the Overture release (else read from the segments `.meta.yaml`). |
 | `--buffer-m, -b` | `75.0` | Candidate search radius (m). Part of `score_key`. |
 | `--force, -f` | off | Rerun even if the manifest is current. |
 | `--raw-dir` | `data/raw` | Input directory of dataset triples. |
 | `--output-dir` | `data/factory` | Factory root. Never `data/output` (that is the live review area). |
 
-Total core budget ≈ `workers × jobs-per-dataset`. With the full ~24-dataset
-inventory, `--workers 12 --jobs-per-dataset 1` saturates 12 cores (one dataset per
-core, scoring single-threaded) — the recommended box setting. For a small number
-of *large* datasets, prefer fewer workers with `-j > 1` so each still scores in
-parallel.
+Total core budget ≈ `workers × jobs-per-dataset`. **On the box, use `--workers 1
+--jobs-per-dataset 12`** (one dataset at a time, scoring across 12 cores) — NOT
+`--workers 12 --jobs-per-dataset 1`. The latter reads intuitively (one dataset per
+core), but the outer dataset pool is a fork-based `ProcessPoolExecutor` and each
+dataset's feature scoring (`features/pipeline.py::compute_features_parallel`) forks
+its *own* inner pool. Nested fork pools die with `BrokenProcessPool` at ≥6
+concurrent datasets — see the runbook. Datasets then run sequentially, but a single
+large dataset still scores in parallel across all 12 cores, so wall time is
+comparable while staying stable. Restructuring the multiprocessing so an outer
+worker pool is safe (e.g. spawn context, or a single shared pool) is a deferred
+follow-up (see "Not yet in the factory").
 
 ### `matcher factory reoptimize [DATASETS...] [--all]`
 
@@ -199,27 +205,50 @@ uv pip install -e ".[dev,ml,web]"
 # 2. Ensure the model exists (fresh clone) — required before scoring
 uv run matcher train                 # or copy data/models/matcher_model_combined.joblib
 
-# 3. Full overnight sweep of all stitchable datasets, 12 cores, resumable.
-#    Run detached so an SSH drop doesn't kill it; logs stream to factory.out
-#    and each dataset also gets data/factory/.../run.log.
-nohup uv run matcher factory run --all --workers 12 --jobs-per-dataset 1 \
+# 3. Cap native BLAS/OpenMP thread pools to 1 BEFORE launching. Scoring already
+#    parallelizes at the process level (-j 12), so per-process native threads only
+#    oversubscribe the 12 cores and fight the scoring pool. Export these in the
+#    same shell that launches the sweep:
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+       NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+# 4. Full overnight sweep of all stitchable datasets, resumable. Run detached so an
+#    SSH drop doesn't kill it; logs stream to factory.out and each dataset also gets
+#    data/factory/.../run.log.
+#
+#    USE --workers 1 --jobs-per-dataset 12 (NOT --workers 12 --jobs-per-dataset 1).
+#    --workers > 1 forks an OUTER dataset pool while each dataset's feature scoring
+#    forks its OWN inner pool; the nested fork pools die with BrokenProcessPool
+#    ~8-50s in at >=6 concurrent datasets (reproduced on this box; NOT OOM / cgroup
+#    / segfault / native-thread oversubscription — it is the nested fork itself).
+#    So run datasets sequentially and put all 12 cores into intra-dataset scoring.
+nohup uv run matcher factory run --all --workers 1 --jobs-per-dataset 12 \
     > factory.out 2>&1 &
 
-# 4. If it dies / you kill it, just re-run the same command — finished datasets
+# 5. If it dies / you kill it, just re-run the same command — finished datasets
 #    are skipped via full_key; only unfinished ones re-run.
-uv run matcher factory run --all --workers 12       # resumes
+uv run matcher factory run --all --workers 1 --jobs-per-dataset 12   # resumes
 
-# 5. Iterate on grouping/optimizer settings without re-scoring (~2 s/dataset)
-uv run matcher factory reoptimize --all --workers 12
+# 6. Iterate on grouping/optimizer settings without re-scoring (~2 s/dataset).
+#    reoptimize does no feature scoring (reads the cache), so it never spawns the
+#    inner pool — but keep --workers 1 for consistency / to avoid the outer pool.
+uv run matcher factory reoptimize --all --workers 1
 ```
 
 Sizing: the full ~24-dataset inventory is roughly one overnight run. Feature
-scoring is ~84% of wall time (~600 scored pairs/s/process). Memory is the first
-hard wall for the largest reference sets — Berlin peaked at 7.2 GB; `jp_tokyo`
-(~1.26M ref segments) is projected 15–20 GB, which fits 64 GB but means you may
-want to lower `--workers` (or raise `-j` and lower `-w`) when the biggest datasets
-run concurrently. Spatial tiling stays deferred (unnecessary below ~1M ref
-segments per dataset on this box).
+scoring is ~84% of wall time (~600 scored pairs/s/process). Because datasets run
+sequentially (`--workers 1`), only one reference set is resident at a time, so
+memory is bounded by the single largest dataset rather than 12 concurrent ones —
+Berlin peaked at 7.2 GB; `jp_tokyo` (~1.26M ref segments) is projected 15–20 GB,
+which fits 64 GB comfortably one-at-a-time. Spatial tiling stays deferred
+(unnecessary below ~1M ref segments per dataset on this box).
+
+> **Why not parallelize across datasets?** `--workers > 1` is the intuitive way to
+> fill 12 cores, but it nests fork-based process pools (outer dataset pool × inner
+> per-dataset feature-scoring pool) and reliably crashes with `BrokenProcessPool`
+> on large sweeps. Making an outer worker pool safe (spawn context / single shared
+> pool) is a deliberate deferred follow-up — see "Not yet in the factory". Until
+> then the CLI emits a startup warning when `--workers > 1`.
 
 ## Not yet in the factory (deliberately)
 
@@ -232,3 +261,10 @@ segments per dataset on this box).
 - **Inventory repair (M4 remainder)**: the 10 labeled datasets missing a local
   target parquet, and the bogota bike class-vocab fix, are prerequisites for
   running those datasets through the factory.
+- **Safe cross-dataset parallelism (`--workers > 1`)**: today the outer dataset
+  pool nests inside each dataset's fork-based feature-scoring pool and crashes with
+  `BrokenProcessPool` on large sweeps, so the box runs `--workers 1
+  --jobs-per-dataset 12` (sequential datasets, parallel scoring). Reworking the
+  multiprocessing — a `spawn` start method for the outer pool, or a single shared
+  pool that both layers draw from — to make `--workers > 1` safe is a deferred
+  follow-up. Until then the CLI warns when `--workers > 1`.

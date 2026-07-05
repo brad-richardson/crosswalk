@@ -1065,6 +1065,80 @@ class TestEffectivePruneThresholdCalibrationGuard:
             Path("data/output/us_boston_streets_bridge.parquet")
         ) == pytest.approx(0.96)
 
+    def test_factory_layout_path_resolves_via_dataset_key(self, monkeypatch):
+        """The bridge-table factory writes ``…/dataset=<name>/bridge.parquet`` —
+        the filename ("bridge") carries no dataset identity, so the factory passes
+        ``dataset_key=<name>``. That override must resolve the allowlist exactly as
+        ``matcher stitch``'s ``<name>_bridge.parquet`` filename does. Without it, the
+        factory layout falls back to filename parsing and (correctly) resolves to
+        nothing — which is why the override must reach this call.
+        """
+        from pathlib import Path
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(
+            settings,
+            "resolver_prune_overrides",
+            {"us_boston_streets": 0.96, "us_seattle_sidewalks": 0.90},
+        )
+        self._patch_calibration(monkeypatch, active=True)
+
+        factory_path = Path(
+            "data/factory/release=2026-01-21.0/dataset=us_boston_streets/bridge.parquet"
+        )
+        # With the dataset_key override the factory path resolves to the floor.
+        assert runner._effective_prune_threshold(
+            factory_path, dataset_key="us_boston_streets"
+        ) == pytest.approx(0.96)
+        assert runner._effective_prune_threshold(
+            Path("data/factory/release=2026-01-21.0/dataset=us_seattle_sidewalks/bridge.parquet"),
+            dataset_key="us_seattle_sidewalks",
+        ) == pytest.approx(0.90)
+        # Guard rail: WITHOUT the override the "bridge.parquet" filename resolves to
+        # nothing, so the prune would be silently OFF for an allowlisted dataset.
+        # This is the regression the override closes.
+        assert runner._effective_prune_threshold(factory_path) == 0.0
+
+    def test_non_allowlisted_factory_dataset_logs_true_name(self, monkeypatch):
+        """A non-allowlisted factory dataset stays OFF (correct) but the skip log
+        must name the true dataset — not the dataset-blind ``"bridge.parquet"``
+        filename, which is indistinguishable across a multi-dataset sweep."""
+        import io
+        from pathlib import Path
+
+        from loguru import logger
+
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
+        self._patch_calibration(monkeypatch, active=True)
+
+        factory_path = Path(
+            "data/factory/release=2026-01-21.0/dataset=co_bogota_bike_network/bridge.parquet"
+        )
+        sink = io.StringIO()
+        handler_id = logger.add(sink, format="{message}", level="INFO")
+        try:
+            assert (
+                runner._effective_prune_threshold(
+                    factory_path, dataset_key="co_bogota_bike_network"
+                )
+                == 0.0
+            )
+        finally:
+            logger.remove(handler_id)
+
+        log_text = sink.getvalue()
+        assert "co_bogota_bike_network" in log_text
+        assert "bridge.parquet" not in log_text
+
 
 class TestStructuralGate:
     def test_single_corridor_always_simple_within_backstop(self):
