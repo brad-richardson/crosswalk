@@ -608,6 +608,62 @@ def test_recover_labeled_groups_classifies():
     assert rec["target_group_ids"] == ["gA"]
 
 
+def test_recover_labeled_groups_set_label_not_misread_as_empty():
+    """A SET label (empty selected_edges but membership in ref_ids/target_ids)
+    is a MATCH assertion: it must recover by membership overlap into the 'set'
+    bucket and contribute its group to target_group_ids — never land in
+    'empty' (reject-all/NONE)."""
+    groups = [
+        {
+            "group_id": "gA",
+            "edges": [{"ref_id": R1, "target_id": T1}, {"ref_id": R2, "target_id": T2}],
+        },
+    ]
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "h_set",
+                "selected_edges": "[]",
+                "label_semantics": "set",
+                "ref_ids": json.dumps([R1, R2]),
+                "target_ids": json.dumps([T1]),
+            },
+            {
+                "group_id": "h_set_lost",
+                "selected_edges": "[]",
+                "label_semantics": "set",
+                "ref_ids": json.dumps(["vanished_ref"]),
+                "target_ids": json.dumps(["vanished_tgt"]),
+            },
+        ]
+    )
+    rec = recover_labeled_groups(groups, human_df)
+    assert rec["empty"] == []  # neither set row is a reject-all
+    assert ("h_set", "gA") in rec["set"]
+    assert rec["set_lost"] == ["h_set_lost"]
+    assert rec["target_group_ids"] == ["gA"]
+
+
+def test_recover_empty_reject_all_skips_set_labels():
+    """A SET label with a verbatim-surviving group_id must NOT be recovered as
+    a reject-all — it asserts a match, not 'no edges'."""
+    groups = [{"group_id": "gA", "edges": [{"ref_id": R1, "target_id": T1}]}]
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": "gA",
+                "selected_edges": "[]",
+                "label_semantics": "set",
+                "ref_ids": json.dumps([R1]),
+                "target_ids": json.dumps([T1]),
+            },
+        ]
+    )
+    rec = recover_empty_reject_all(groups, human_df)
+    assert rec["recovered"] == []
+    assert rec["unrecoverable"] == []
+
+
 def test_recover_empty_reject_all():
     # gA survives verbatim; the reject-all label keyed on gA is recoverable,
     # the one keyed on a vanished group_id is not. Non-empty labels are ignored.

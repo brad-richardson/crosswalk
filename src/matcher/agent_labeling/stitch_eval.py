@@ -254,23 +254,50 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     human label to the current sidecar group containing the most of its
     selected edges.
 
+    SET-semantics labels carry no edges, so they are recovered by MEMBERSHIP
+    overlap (ref_ids/target_ids vs each group's segment ids) into their own
+    buckets — they must never be misread as reject-all/NONE.
+
     Returns a dict with:
     - target_group_ids: sorted distinct sidecar group_ids to build the eval batch
+      (includes groups recovered for set labels)
     - clean: [(human_gid, sidecar_gid)] where ALL selected edges are in one group
     - split: [(human_gid, sidecar_gid, n_matched, n_total)] edges span groups
-    - empty: [human_gid] human labels with no selected edges (NONE / reject-all)
-    - lost:  [human_gid] non-empty labels whose edges no longer survive
+    - empty: [human_gid] PAIR labels with no selected edges (NONE / reject-all)
+    - lost:  [human_gid] non-empty pair labels whose edges no longer survive
+    - set:   [(human_gid, sidecar_gid)] set labels recovered by membership overlap
+    - set_lost: [human_gid] set labels whose members appear in no current group
     """
     from collections import defaultdict
 
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+    seg_groups: dict[str, set[str]] = defaultdict(set)
     for g in groups:
         for e in g.get("edges", []):
             edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
+            seg_groups[str(e["ref_id"])].add(g["group_id"])
+            seg_groups[str(e["target_id"])].add(g["group_id"])
 
     clean, split, empty, lost = [], [], [], []
+    set_recovered: list[tuple[str, str]] = []
+    set_lost: list[str] = []
     for _, row in human_df.iterrows():
         hgid = str(row["group_id"])
+        # SET labels carry no edges (selected_edges == "[]") but are MATCH
+        # membership assertions, NOT reject-all — classifying them as ``empty``
+        # would both miscount them as NONE and exclude their groups from the
+        # eval batch. Recover them by MEMBERSHIP overlap instead.
+        if _is_set_label(row):
+            members = _parse_id_list(row.get("ref_ids")) | _parse_id_list(row.get("target_ids"))
+            cnt_s: dict[str, int] = defaultdict(int)
+            for s in members:
+                for gid in seg_groups.get(s, ()):
+                    cnt_s[gid] += 1
+            if cnt_s:
+                set_recovered.append((hgid, max(cnt_s, key=cnt_s.get)))
+            else:
+                set_lost.append(hgid)
+            continue
         hes = _human_edge_set(row["selected_edges"])
         if not hes:
             empty.append(hgid)
@@ -288,13 +315,17 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
         else:
             split.append((hgid, best_gid, cnt[best_gid], len(hes)))
 
-    targets = sorted({bg for _, bg in clean} | {bg for _, bg, _, _ in split})
+    targets = sorted(
+        {bg for _, bg in clean} | {bg for _, bg, _, _ in split} | {bg for _, bg in set_recovered}
+    )
     return {
         "target_group_ids": targets,
         "clean": clean,
         "split": split,
         "empty": empty,
         "lost": lost,
+        "set": set_recovered,
+        "set_lost": set_lost,
     }
 
 
@@ -316,6 +347,8 @@ def recover_empty_reject_all(groups: list[dict], human_df: pd.DataFrame) -> dict
     recovered: list[str] = []
     unrecoverable: list[str] = []
     for _, row in human_df.iterrows():
+        if _is_set_label(row):
+            continue  # SET label: a MATCH membership assertion, not a reject-all
         if _human_edge_set(row["selected_edges"]):
             continue  # has edges -> not a reject-all label
         hgid = str(row["group_id"])

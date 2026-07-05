@@ -85,3 +85,21 @@ def test_partial_grid_not_flagged():
     cache = _cache_group(_GRID, _OPT)
     partial = [("r1", "t1"), ("r1", "t2"), ("r2", "t1")]  # missing (r2,t2)
     assert reinterpret_row_to_set(_row(partial), cache, None) is None
+
+
+def test_nan_and_malformed_selected_edges_do_not_crash():
+    """A blank CSV cell reads back as float NaN (truthy!) and a hand-edited cell
+    may not parse — one bad row must not abort a whole reinterpretation run."""
+    from matcher.agent_labeling.xprod import parse_selected_edges
+
+    assert parse_selected_edges(float("nan")) == set()
+    assert parse_selected_edges(None) == set()
+    assert parse_selected_edges("") == set()
+    assert parse_selected_edges("   ") == set()
+    assert parse_selected_edges("not-a-list") == set()
+    assert parse_selected_edges("{'ref_id': 'r1'}") == set()  # not a list
+
+    cache = _cache_group(_GRID, _OPT)
+    row = _row(_GRID)
+    row["selected_edges"] = float("nan")
+    assert reinterpret_row_to_set(row, cache, None) is None  # empty -> no artifact

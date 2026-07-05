@@ -974,7 +974,9 @@ def generate_stitch_batch(
             console.print(
                 f"[blue]Label recovery:[/blue] {len(rec['clean'])} clean, "
                 f"{len(rec['split'])} split, {len(rec['empty'])} empty(NONE), "
-                f"{len(rec['lost'])} lost -> {len(rec['target_group_ids'])} target groups"
+                f"{len(rec['lost'])} lost, {len(rec.get('set', []))} set, "
+                f"{len(rec.get('set_lost', []))} set-lost "
+                f"-> {len(rec['target_group_ids'])} target groups"
             )
         if recover_empty:
             emp = recover_empty_reject_all(groups, human_df)

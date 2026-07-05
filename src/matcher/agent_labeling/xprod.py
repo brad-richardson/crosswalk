@@ -25,10 +25,20 @@ def parse_selected_edges(raw: str | None) -> set[Pair]:
 
     The cell is a JSON/py-literal list of ``{"ref_id":..,"target_id":..}`` dicts.
     ``ast.literal_eval`` handles both single- and double-quoted encodings.
+
+    NaN-safe and malformed-safe: a blank CSV cell reads back as a float NaN
+    (which is truthy), and a hand-edited cell may not parse at all — both return
+    an empty set rather than aborting a whole reinterpretation/render run on one
+    bad row.
     """
-    if not raw:
+    if raw is None or isinstance(raw, float) or not str(raw).strip():
         return set()
-    parsed = ast.literal_eval(raw)
+    try:
+        parsed = ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return set()
+    if not isinstance(parsed, list):
+        return set()
     return {(e["ref_id"], e["target_id"]) for e in parsed}
 
 
