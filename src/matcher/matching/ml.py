@@ -1328,7 +1328,10 @@ class MLMatcher:
                     cv_model = xgb.XGBClassifier(**{**params, "n_jobs": 1})
                     cv_model.fit(X_cv_train, y_cv_train)
                     y_cv_pred = cv_model.predict(X_cv_test)
-                    oof_probs[cv_test_idx] = cv_model.predict_proba(X_cv_test)[:, 1]
+                    # OOF P(match) is only meaningful for the binary classifier;
+                    # calibration is skipped for multiclass models (see below).
+                    if binary:
+                        oof_probs[cv_test_idx] = cv_model.predict_proba(X_cv_test)[:, 1]
                     fold_f1 = f1_score(
                         y_cv_test,
                         y_cv_pred,
@@ -1348,21 +1351,28 @@ class MLMatcher:
             # used: per-dataset-type calibration was measured (road_good/
             # road_poor/sidewalk/other) and rejected — it overfits the small
             # sidewalk/other groups and did not beat global overall. See the PR
-            # for reliability numbers.
-            self.calibrator = fit_isotonic_oof(oof_probs, y_cv)
-            raw_test_probs = self.model.predict_proba(X_test)[:, 1]
-            results["ece_raw"] = expected_calibration_error(raw_test_probs, y_test)
-            results["brier_raw"] = brier_score(raw_test_probs, y_test)
-            if self.calibrator is not None:
-                cal_test_probs = self.calibrator.transform(raw_test_probs)
-                results["calibrated"] = True
-                results["ece_calibrated"] = expected_calibration_error(cal_test_probs, y_test)
-                results["brier_calibrated"] = brier_score(cal_test_probs, y_test)
+            # for reliability numbers. Calibration is binary-only: P(match)
+            # calibration is undefined for a multiclass model, so it is skipped
+            # (predict() then returns raw scores).
+            if binary:
+                self.calibrator = fit_isotonic_oof(oof_probs, y_cv)
+                raw_test_probs = self.model.predict_proba(X_test)[:, 1]
+                results["ece_raw"] = expected_calibration_error(raw_test_probs, y_test)
+                results["brier_raw"] = brier_score(raw_test_probs, y_test)
+                if self.calibrator is not None:
+                    cal_test_probs = self.calibrator.transform(raw_test_probs)
+                    results["calibrated"] = True
+                    results["ece_calibrated"] = expected_calibration_error(cal_test_probs, y_test)
+                    results["brier_calibrated"] = brier_score(cal_test_probs, y_test)
+                else:
+                    results["calibrated"] = False
+                    logger.warning(
+                        "Calibrator not fit (insufficient OOF data); predict() returns raw scores"
+                    )
             else:
+                self.calibrator = None
                 results["calibrated"] = False
-                logger.warning(
-                    "Calibrator not fit (insufficient OOF data); predict() returns raw scores"
-                )
+                logger.info("Multiclass model: probability calibration skipped")
 
             results.update(
                 {
