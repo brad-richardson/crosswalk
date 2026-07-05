@@ -16,6 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 hootenanny = ["geopandas>=1.0", "shapely>=2.0"]
+# Valhalla Meili map-matching baseline. Needs geopandas/shapely for geometry,
+# pyosmium (PyPI package name: "osmium") to write the Overture->OSM-PBF graph,
+# and pyvalhalla (native-ARM Valhalla binaries + Actor binding) for the in-process
+# tile build + trace_attributes matching. pyvalhalla requires Python >= 3.12.
+meili = ["geopandas>=1.0", "shapely>=2.0", "osmium>=3.6", "pyvalhalla>=3.7; python_version>='3.12'"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]

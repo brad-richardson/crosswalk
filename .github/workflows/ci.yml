@@ -41,7 +41,7 @@ jobs:
         working-directory: cbench
         run: >
           uv run --with pandas --with pyarrow --with typer --with rich
-          --with loguru --with geopandas --with shapely --with pytest
+          --with loguru --with geopandas --with shapely --with osmium --with pytest
           pytest -q
 
   test:

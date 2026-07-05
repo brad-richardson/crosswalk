@@ -248,6 +248,68 @@ cbench handles GeoParquet to OSM conversion automatically when running the Hoote
 
 When connectors are provided (via `--opt connectors=path/to/connectors.parquet`), segments sharing the same `connector_id` will reference the same OSM node, preserving network topology.
 
+## Valhalla Meili (map-matching)
+
+[Valhalla](https://github.com/valhalla/valhalla) **Meili** is the modern,
+actively-maintained match-stage baseline (adapter name `meili`). It treats each
+local segment as a synthetic GPS trace and snaps it onto an Overture-derived
+routable graph; the matched edge sequence *is* the segment↔GERS correspondence
+set. This handles segmentation mismatch natively (a long local segment snaps
+across many short Overture segments). Results + analysis:
+`docs/BENCHMARK_RESULTS.md` and `research/meili_baseline.md`.
+
+### Pipeline (all handled by the adapter)
+
+1. **Overture → OSM PBF** (`cbench/convert/pbf.py`): each Overture segment becomes
+   a way carrying its **GERS id as the OSM `way_id`** (via a JSON sidecar), with
+   vertices collapsed by rounded coordinate (≈1 cm) so shared connectors become
+   shared nodes → a routable graph. Every way gets a routable `highway=*` tag.
+2. **Build tiles + match** with Valhalla's own engine, in-process via the
+   `pyvalhalla` wheel: `valhalla_build_tiles` then `valhalla.Actor.trace_attributes`
+   with `shape_match=map_snap`. Matched `edges[].way_id` map straight back to GERS
+   ids; per target, edges are aggregated with an overlap-length filter to drop
+   spuriously-touched edges.
+
+### Install & run
+
+`pyvalhalla` ships **native-ARM** Valhalla binaries (no Docker, no emulation → valid
+timing) but requires **Python ≥ 3.12**, so run cbench from a 3.12 env:
+
+```bash
+uv pip install -e "cbench[meili]" --python 3.12   # geopandas + pyosmium + pyvalhalla
+uv run --python 3.12 cbench run meili us_boston_streets -c cbench/datasets.toml
+# sidewalks (Fort Collins / Seattle): pedestrian costing (the default) covers footways
+uv run --python 3.12 cbench run meili us_fort_collins_sidewalks -c cbench/datasets.toml
+```
+
+Key `--opt`s (defaults in parentheses): `costing` (`pedestrian` — bidirectional,
+traverses all local road classes, so it handles roads *and* sidewalks and sidesteps
+one-way as the documented Meili failure mode; use `auto` for directional roads-only),
+`densify_m` (10), `search_radius` (25), `min_match_frac`/`min_match_m` (0.10 / 8 m,
+the overlap threshold that stands in for a no-match abstention), `workers` (8, one
+`valhalla.Actor` per thread), `graph_cache_dir` (built tiles are cached per reference
+file — keep this OUTSIDE `data/output`), `rebuild` (force a graph rebuild).
+
+### Docker route (design target; blocked on Apple Silicon here)
+
+The intended runtime was the maintained multi-arch Valhalla Docker image. On this
+machine both Docker routes were dead ends, hence the in-process `pyvalhalla`
+implementation:
+
+- `ghcr.io/gis-ops/docker-valhalla/valhalla` (ARM-native, multi-arch) — the ghcr.io
+  blob CDN **stalls at 0 bytes/s** here; the image never finishes pulling.
+- `valhalla/valhalla:run-3.3.0` (Docker Hub, amd64-only) — pulls fine but
+  **segfaults under qemu emulation** in `valhalla_build_tiles`, even on a 2-way
+  graph. This is the amd64-on-arm64 emulation incompatibility, the same class of
+  problem that makes Hootenanny's emulated wall time invalid.
+
+`pyvalhalla` is the identical Valhalla engine (v3.7.0) run in-process, so the match
+quality is representative and the ARM-native timing is valid. On a machine with a
+working multi-arch pull (or native x86 Linux), the Docker recipe is:
+`docker run -d -p 8002:8002 -v $PWD/custom_files:/custom_files -e use_tiles_ignore_pbf=False ghcr.io/gis-ops/docker-valhalla/valhalla:latest`
+(place the PBF from `convert/pbf.py` in `custom_files/`), then POST each densified
+trace to `/trace_attributes`.
+
 ## Baseline landscape
 
 Verification of the open-source conflation / map-matching landscape as a source
