@@ -23,3 +23,11 @@ try:
     REGISTRY["naive"] = NaiveAdapter
 except ImportError:
     pass
+
+# Valhalla Meili map-matching baseline requires geopandas + pyosmium (optional).
+try:
+    from cbench.adapters.meili import MeiliAdapter
+
+    REGISTRY["meili"] = MeiliAdapter
+except ImportError:
+    pass
