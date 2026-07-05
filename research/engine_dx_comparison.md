@@ -49,16 +49,16 @@ target = local roads) — the same starting point `cbench` gives every adapter.
 - **Config:** three knobs (`buffer_m=15`, `min_overlap=0.30`, `angle_tol_deg=35`), all with sane defaults; zero required.
 - **Time:** ~4 s.
 - **What breaks:** nothing operationally. It just *collapses on quality*: recall 0.24 / F1 0.365 on dense parallel sidewalks (one target buffer swallows many parallel Overture edges; end-to-end bearing can't separate them). On roads it is honest (F1 0.839).
-- **Maint:** none — it lives in this repo (`cbench/adapters/naive.py`), no external anything.
+- **Maint:** none — it lives in this repo (`cbench/src/cbench/adapters/naive.py`), no external anything.
 
 #### Valhalla Meili — `Σ 21` (the bar to beat)
 
 - **Deps:** `cbench[meili]` = `geopandas` + `shapely` + `osmium` + **`pyvalhalla`**. The `pyvalhalla` wheel **bundles native-ARM Valhalla 3.7.0 binaries**, so there is *no Docker, no service, no emulation*. The only catch: it needs **Python ≥ 3.12** (abi3 wheel), so cbench must run from a 3.12 env (`uv run --python 3.12 cbench …`).
 - **Steps:** one — `cbench run meili us_boston_streets`. **No training, no labels, no model.**
-- **Data prep (the key DX win):** the adapter does the Overture→routable-graph conversion *itself and automatically* — `convert/pbf.py` turns the reference parquet into an OSM PBF (GERS id carried as the OSM `way_id`, connector coords collapsed to shared nodes), then `valhalla_build_tiles` builds the tileset. **Tiles are cached per reference file** (keyed by name+size+mtime), so the dominant cost is paid once; repeat runs reuse them. The user supplies nothing but the two parquets `cbench` already resolves.
+- **Data prep (the key DX win):** the adapter does the Overture→routable-graph conversion *itself and automatically* — `cbench/src/cbench/convert/pbf.py` turns the reference parquet into an OSM PBF (GERS id carried as the OSM `way_id`, connector coords collapsed to shared nodes), then `valhalla_build_tiles` builds the tileset. **Tiles are cached per reference file** (keyed by name+size+mtime), so the dominant cost is paid once; repeat runs reuse them. The user supplies nothing but the two parquets `cbench` already resolves.
 - **Config:** all defaulted (`costing=pedestrian` covers roads *and* sidewalks, `densify_m=10`, `search_radius=25`, overlap filter `0.10`/`8 m`). Zero knobs required.
 - **Time:** **12.0 s** Boston cold (7 s of which is the one-time tile build), **5.0 s** match-only with cached tiles; 15 s FC, 29 s Seattle. ~6–17× faster than matcher.
-- **What breaks (real, from `research/meili_baseline.md` + `BENCHMARKING.md`):**
+- **What breaks (operational routes from `docs/BENCHMARKING.md`; quality analysis in `research/meili_baseline.md`):**
   - Both **Docker** routes are dead ends on Apple Silicon — the ghcr.io ARM image **stalls at 0 bytes/s** on blob download, and the Docker Hub amd64 image **segfaults under qemu** in `valhalla_build_tiles`. The in-process `pyvalhalla` wheel is the *only* working path (and the reason it scores 4 not 5 on deps).
   - Py 3.11 can't install `pyvalhalla`, so the adapter is unavailable on the 3.11 cbench CI env — its pure logic is unit-tested there instead.
   - **Quality ceiling, not an operational break:** no first-class no-match (map-matching snaps every trace onto *something*), so precision is lost to parallel-geometry snaps (sidewalk → adjacent road centerline 2.4–3.0 m away). Perfect recall, precision tax.
@@ -69,7 +69,7 @@ target = local roads) — the same starting point `cbench` gives every adapter.
 The **re-enacted** fresh-clone path to a Boston bridge:
 
 1. `uv pip install -e ".[dev,ml]"` — the `ml` extra adds `lightgbm` + `pygeoops` on top of an already-heavy core (`xgboost`, `numba`, `optuna`, `duckdb`, `geopandas`, `overturemaps`, `osmium`, `scikit-learn`). **~2 s with a warm uv cache; minutes on a truly cold machine** (numba/xgboost/geopandas wheels are large).
-2. `matcher train` — **required after every fresh clone: `data/models/` is gitignored, so a fresh clone has no model and cannot stitch at all.** The good news the reenactment surfaced: **labels *are* committed** (`labels/human/dataset=*`, 34 datasets, 640 Boston pair labels), so training works offline with zero setup. Measured: **~35 s**, emits a **465 KB** `matcher_model_combined.joblib` (the task estimated ~5 MB — it is an order of magnitude smaller, which matters for Part 2).
+2. `matcher train` — **required after every fresh clone: `data/models/` is gitignored, so a fresh clone has no model and cannot stitch at all.** The good news the reenactment surfaced: **labels *are* committed** (`labels/human/dataset=*`, 34 datasets, 639 Boston pair labels), so training works offline with zero setup. Measured: **~35 s**, emits a **465 KB** `matcher_model_combined.joblib` (the task estimated ~5 MB — it is an order of magnitude smaller, which matters for Part 2).
 3. `matcher data fetch all us_boston_streets` — **also required: `data/` is gitignored, so `data/raw/` is empty on a fresh clone.** For a *configured* dataset this is one automatic command (bbox + ArcGIS URL live in `datasets/us_boston_streets.yaml`); it pulls the target from a Boston ArcGIS FeatureServer and the reference from Overture (via the `overturemaps` lib over S3 — both are *core* deps, so no extra install). But it needs **network**, and for an *arbitrary* dataset the user must first author a YAML (source URL + bbox) or skip fetch entirely and bring their own two parquets via `-r/-t`.
 4. `matcher stitch us_boston_streets -o bridge.parquet` — **~85 s** (2965 MB peak), or `matcher stitch -r ref.parquet -t target.parquet -o bridge.parquet` if you brought your own parquets (skips step 3).
 
@@ -191,7 +191,7 @@ default (or auto-scaling workers to available RAM) so the happy path doesn't OOM
 small laptop. Medium effort, medium payoff.
 
 **#6 `--no-ml` degraded mode — measure the honesty cost.** The naive adapter's logic
-(`cbench/adapters/naive.py`) is a zero-training buffer-overlap matcher; exposing it
+(`cbench/src/cbench/adapters/naive.py`) is a zero-training buffer-overlap matcher; exposing it
 in `matcher` proper would give an instant, model-free first result. **But the
 honesty cost is steep:** F1 **0.839 on roads** and **0.365 on sidewalks** (recall
 0.24 — it collapses on dense parallel footways). That is a *floor*, not a product; a
@@ -230,7 +230,7 @@ checkout), recording each stumble as data:
 1. **Install** `uv pip install -e ".[dev,ml]"` — **~2 s (warm uv cache)**; would be
    minutes cold (large numba/xgboost/geopandas/optuna wheels). No failures.
 2. **`matcher train`** — **succeeded in ~35 s** offline. Surprise (good): **labels
-   are committed** (34 datasets, 640 Boston labels), so training needs no data fetch.
+   are committed** (34 datasets, 639 Boston labels), so training needs no data fetch.
    Emitted `data/models/matcher_model_combined.joblib` at **465 KB** (Test acc 0.907,
    CV F1 0.929).
 3. **`matcher stitch us_boston_streets`** (before fetch) — **failed**: `Could not
