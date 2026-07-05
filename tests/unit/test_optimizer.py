@@ -1066,12 +1066,16 @@ class TestEffectivePruneThresholdCalibrationGuard:
         ) == pytest.approx(0.96)
 
     def test_factory_layout_path_resolves_via_dataset_key(self, monkeypatch):
-        """The bridge-table factory writes ``…/dataset=<name>/bridge.parquet`` —
-        the filename ("bridge") carries no dataset identity, so the factory passes
+        """Guard the factory's prune-allowlist wiring against future regression.
+
+        The bridge-table factory writes ``…/dataset=<name>/bridge.parquet`` — the
+        filename ("bridge") carries no dataset identity, so the factory passes
         ``dataset_key=<name>``. That override must resolve the allowlist exactly as
-        ``matcher stitch``'s ``<name>_bridge.parquet`` filename does. Without it, the
-        factory layout falls back to filename parsing and (correctly) resolves to
-        nothing — which is why the override must reach this call.
+        ``matcher stitch``'s ``<name>_bridge.parquet`` filename does. This behavior
+        already works (the ``dataset_key`` path predates this change); the test
+        exists so a later refactor cannot silently drop the override and fall back
+        to filename parsing — which (correctly) resolves the bare "bridge.parquet"
+        to nothing, leaving an allowlisted dataset unpruned.
         """
         from pathlib import Path
 
@@ -1099,8 +1103,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
             dataset_key="us_seattle_sidewalks",
         ) == pytest.approx(0.90)
         # Guard rail: WITHOUT the override the "bridge.parquet" filename resolves to
-        # nothing, so the prune would be silently OFF for an allowlisted dataset.
-        # This is the regression the override closes.
+        # nothing, so the prune would be silently OFF for an allowlisted dataset —
+        # exactly why the factory must pass dataset_key (and must keep doing so).
         assert runner._effective_prune_threshold(factory_path) == 0.0
 
     def test_non_allowlisted_factory_dataset_logs_true_name(self, monkeypatch):
