@@ -19,6 +19,23 @@ The trained model is not committed to git. After cloning, run `matcher train` be
 
 All thresholds are configurable in `config.py`.
 
+### Probability Calibration
+
+`MLMatcher.train` fits an isotonic-regression calibrator on the out-of-fold
+predictions from the in-training GroupKFold CV (training rows only — the seed-42
+holdout never participates, so calibration is leakage-free). The calibrator is
+stored in the model artifact as portable piecewise-linear knots
+(`calibration.py::IsotonicCalibrator`) and applied by `MLMatcher.predict` when
+`enable_calibration` is True (default). **All five confidence thresholds below
+therefore operate on calibrated `P(match)`, not raw XGBoost scores.** Set
+`enable_calibration=False` (or `predict(..., calibrated=False)`) to fall back to
+raw scores for A/B comparison. A single global calibrator is used: per-dataset-
+type calibration (road_good/road_poor/sidewalk/other) was measured and rejected
+— it overfit the small sidewalk/other groups without beating global overall.
+The Spark-portable export emits the knots into `manifest.json`
+(`calibration.applied=false`); wiring the Spark job to consume them is a
+tf-data-platform follow-up.
+
 ### Scoring Thresholds (per-candidate, bridge file output)
 
 Applied by the ML scorer when classifying each candidate pair:

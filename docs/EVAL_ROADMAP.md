@@ -49,12 +49,29 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
    CI gate** on stitch-level precision/recall (design in
    `docs/plans/2026-02-21-stitch-eval-design.md`), then consider a learned group
    resolver.
-2. **Uncalibrated probabilities under five hand-set thresholds.** XGBoost
-   scores are not probabilities; `scoring_match/review_threshold` (0.5/0.1),
+2. **~~Uncalibrated probabilities under five hand-set thresholds.~~ (largely
+   addressed — isotonic calibration shipped.)** XGBoost scores are not
+   guaranteed to be probabilities; `scoring_match/review_threshold` (0.5/0.1),
    `optimizer_match/review_threshold` (0.75/0.5), and `bridge_min_confidence`
-   (0.5) are static config defaults applied uniformly across very different
-   dataset types. Fix: isotonic calibration on a held-out fold, then fit
-   thresholds per dataset-type group from the calibrated PR curve.
+   (0.5) are static config defaults. **Fixed:** `MLMatcher.train` now fits an
+   isotonic calibrator on out-of-fold training predictions (leakage-free — the
+   seed-42 holdout never participates), stored in the artifact as portable
+   knots and applied at inference (`enable_calibration`, default on), so all
+   five thresholds now gate on calibrated `P(match)`. On the seed-42 holdout,
+   holdout ECE dropped 0.0131 -> 0.0096 and Brier held (0.0619 -> 0.0617);
+   accuracy/F1 held-or-improved (0.9116/0.9248 -> 0.9144/0.9283). The model was
+   already close to calibrated (`scale_pos_weight` ~= 0.64), so gains are
+   modest; the main win is that the thresholds are now semantically meaningful.
+   **Measured and rejected:** per-dataset-type calibration (road_good/road_poor/
+   sidewalk/other) overfits the small sidewalk/other groups and did not beat a
+   single global calibrator overall, so a global calibrator is used and the
+   thresholds are left unchanged. **Deferred follow-ups:** (a) fitting the
+   thresholds themselves per type from the calibrated PR curve (data-thin, not
+   yet justified); (b) feeding calibrated confidence into the optimizer group
+   gates was left to the corridor-aware grouping owner to avoid conflicts;
+   (c) the Spark export emits calibration knots into `manifest.json`
+   (`applied=false`) but the Spark job does not yet consume them
+   (tf-data-platform work).
 3. **The headline F1 is not "fraction of roads matched correctly."** Labels are
    deliberately oversampled near the decision boundary (human batch: 60%
    borderline; agent: 100% in [0.1, 0.9]), so pairwise F1 on this set
