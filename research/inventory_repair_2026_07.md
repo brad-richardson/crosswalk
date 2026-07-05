@@ -25,8 +25,8 @@ all 10). Model: `data/models/matcher_model_combined.joblib`.
 | us_utah_slc_roads | road | ArcGIS Utah SGID UtahRoads FeatureServer/0 | 74,718 | **yes** |
 | us_montana_missoula | road | ArcGIS `gisservicemt.gov` MontanaTransportation/0 | 9,421 | **yes** |
 | us_usfs_flathead | road | ArcGIS `apps.fs.usda.gov` EDW_RoadBasic_01/0 | 414 | **yes** |
-| sg_singapore_roads | road | LTA DataMall `RoadSectionLine.zip` (API-key) | — | **blocked** |
-| sg_singapore_footpaths | sidewalk | LTA DataMall `Footpath.zip` (API-key) | — | **blocked** |
+| sg_singapore_roads | road | LTA DataMall `RoadSectionLine.zip` (API-key) | 15,319 | **yes** (see below) |
+| sg_singapore_footpaths | sidewalk | LTA DataMall `Footpath.zip` (API-key) | 110,811 | **yes** (see below) |
 
 ### Correction to the audit's fetchability read
 
@@ -36,20 +36,37 @@ verify HEAD probe** — a real `GET` (the fetch path) returns 200, and both Keny
 datasets fetched cleanly. Do not treat a `verify` 403 as terminal for
 download-type sources; try the actual fetch.
 
-### Still blocked (2) — and why
+### Singapore (2) — recovered in a follow-up with the LTA key
 
 Both Singapore datasets come from **LTA DataMall**, which requires an account
-API key passed as the `AccountKey` header (`api_key_env_var: LTA_API_KEY`). No
-`LTA_API_KEY` is present in the environment, so neither can be fetched here. This
-is a **credential gap, not a dead source** (the DataMall endpoints are up). To
-unblock: obtain an LTA DataMall account key, `export LTA_API_KEY=…`, then
-`matcher data fetch target sg_singapore_footpaths` / `sg_singapore_roads`.
+API key passed as the `AccountKey` header (`api_key_env_var: LTA_API_KEY`).
+They were initially blocked on the missing credential (not a dead source); once
+an `LTA_API_KEY` was supplied via the environment, both fetched cleanly. **The
+key is never stored in the repo** — it must be exported in the environment for
+any re-fetch (`export LTA_API_KEY=…`, then `matcher data fetch target sg_…`).
 
-Additional caveat for **sg_singapore_roads** specifically: even with a key, its
-configured `id_column: RD_CD` ships **completely empty** in the current LTA
-release (documented in the dataset YAML `notes`), so it has no stable upstream ID
-for label linkage. It needs an ID-column revisit (or LTA restoring `RD_CD`)
-before it is truly stitchable, independent of the key.
+**sg_singapore_footpaths** needed nothing else: 110,811 features (OBJECTID ids,
+Mar 2026 release).
+
+**sg_singapore_roads — the empty-RD_CD resolution.** The configured
+`id_column: RD_CD` ships **100% null** (verified on the Mar 2026 release, same
+as Aug 2025). With an empty upstream id component, every generated id collapsed
+to `sg_road_None_{h3}` and fetch-time dedup silently dropped ~95% of segments
+(15,319 → 664, one survivor per H3 cell) — the stored labels' target_ids
+(`sg_road_None_…`) show the original Feb fetch had the identical defect, so the
+existing 199 labels were built on the same collapsed universe and resolve via
+stored geometry regardless. No other column is a unique id (`RD_CD_DESC` is the
+road name, ~3.8k unique over ~15k segments). Fix: switch `id_column` to the
+repo's established **synthetic geometry-hash id** `_geom_hash`
+(md5 of WKT rounded to 7 dp, first 12 hex — the same mechanism already used by
+`jp_tokyo_emergency_roads` and `tn_tunis_ml_roads`). Properties: deterministic
+and collision-checked (15,319/15,319 unique), stable across releases while a
+geometry is unchanged, and geometry edits surface as id churn — which the
+stored-geometry fallback (PR #273) already absorbs. The old 664-segment
+`quality_fingerprint` (an artifact of the collapse) was refreshed to the honest
+15,319-segment fingerprint; the intended 664 → 15,319 jump trips the quality
+regression gate, hence the one-time `--force --skip-quality-check` on this
+re-fetch. Revisit if LTA ever restores `RD_CD`.
 
 ## bogota bike class-vocab fix
 
@@ -100,19 +117,30 @@ datasets, all `done`:
 | us_usfs_flathead | 17.2 s | 316 (76%) | 28 | 70 | 131 | 0 |
 | us_montana_missoula | 94.2 s | 9,002 (95%) | 316 | 103 | 1,897 | 3 |
 | co_bogota_bike_network | 79.0 s | 4,712 (76%) | 577 | 902 | 1,349 | 3 |
+| sg_singapore_roads | 104.5 s | 13,899 (90.7%) | 451 | 969 | 6,121 | 0 |
+| sg_singapore_footpaths | 222.9 s | 53,229 (48.0%) | 5,379 | 52,203 | 14,567 | 62 |
+
+(The footpaths match rate is data reality, not a pipeline failure: Overture's
+pedestrian coverage of Singapore is partial, so ~half the LTA footpath network
+has no Overture counterpart — a rich honest-negative source, like Tunis.)
 
 Factory discovery (`matcher.factory.discovery.discover_pairs`, the routine
-behind `factory run --all`) now resolves **32 stitchable pairs** (was 24) — the
-8 restored datasets are all discovered with `release=2026-01-21.0`.
+behind `factory run --all`) now resolves **34 stitchable pairs** (was 24) — the
+8 restored datasets plus both Singapore datasets, all discovered with
+`release=2026-01-21.0`.
 
 ## `factory run --all` viability for the overnight box sweep
 
-With this repair, `matcher factory run --all` covers **32 datasets** (24 prior +
-8 restored), up from the 24 the audit measured. It skips only the 2 Singapore
-datasets (missing until an LTA key is supplied) and the two locals-without-Overture
-(`ch_grand_geneva_cycle_schema`, `fr_france_winter_hiking_traces`). The audit's
-cost model (≈3.5–5 h serial on the 10-core dev machine; well within one overnight
-run at `--workers 12` on the 20-core box) holds; the incremental additions are
-mostly small-to-mid datasets, with `us_utah_slc_roads` (74.7 k local) and
-`nl_amsterdam_roads` (55.7 k local) the largest new entries — both far below the
-`jp_tokyo` memory canary. Overnight `--all` is viable.
+With this repair, `matcher factory run --all` covers **34 datasets** (24 prior +
+8 restored + 2 Singapore), up from the 24 the audit measured. It skips only the
+two locals-without-Overture (`ch_grand_geneva_cycle_schema`,
+`fr_france_winter_hiking_traces`). The audit's cost model (≈3.5–5 h serial on the
+10-core dev machine; well within one overnight run at `--workers 12` on the
+20-core box) holds; the incremental additions are mostly small-to-mid datasets,
+with `sg_singapore_footpaths` (110.8 k local, 223 s measured),
+`us_utah_slc_roads` (74.7 k local) and `nl_amsterdam_roads` (55.7 k local) the
+largest new entries — all far below the `jp_tokyo` memory canary. Overnight
+`--all` is viable. Note the Singapore locals in `data/raw` were fetched with a
+private `LTA_API_KEY` that lives only in the operator's environment; a re-fetch
+on another machine (e.g. the box) needs that env var set, or the two parquets
+copied over.
