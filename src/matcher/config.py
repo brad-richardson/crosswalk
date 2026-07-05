@@ -730,43 +730,56 @@ class MatcherSettings(BaseSettings):
     # ``baseline_conf`` — an absolute confidence threshold, NOT group-relative —
     # beat both keep-all and the learned per-edge model on the clean slice).
     #
-    # ENABLED BY DEFAULT since the coordinated retrain deploy. Validated on the
-    # 117-label Boston clean slice under the #271 stitch gate at the F1-maximizing
-    # operating point t=0.96 (filtered edge-F1 0.8671 -> 0.8790, group exact
-    # 0.5093 -> 0.5833; gate PASS). The optimal floor is dataset-dependent — a
-    # lower-confidence dataset over-prunes at 0.96 — so per-dataset thresholds
-    # live in ``resolver_prune_overrides`` (Seattle sidewalks: 0.96 regresses F1
-    # below keep-all, 0.90 is the F1/exact-maximizing point: 0.8665 -> 0.8913 /
-    # 0.40 -> 0.50 on the 27-label slice). Set an override <= 0 to disable the
-    # prune for a specific dataset. When the effective threshold is 0 the
-    # optimizer selections are byte-identical to the pre-prune pipeline.
+    # PER-DATASET OPT-IN (ALLOWLIST). The optimal floor is dataset-dependent and a
+    # dataset over-prunes at the wrong floor (#284's own sweep showed the
+    # Boston-tuned 0.96 regresses sidewalk-like sets below keep-all). So the prune
+    # applies ONLY to datasets with an explicit, validated threshold in
+    # ``resolver_prune_overrides`` — the allowlist. A dataset NOT in the map is
+    # NOT pruned (effective threshold 0.0, a no-op byte-identical to the pre-prune
+    # pipeline); ``runner.py::_effective_prune_threshold`` emits a one-line info
+    # log so the skip is visible. This replaces the previous "global default 0.96
+    # for every dataset" behaviour, which silently over-pruned the ~30 never-tuned
+    # datasets. Tune a new dataset via the #284 sweep recipe (see SCALING_ROADMAP
+    # M2) BEFORE adding its floor to the allowlist.
     #
-    # CALIBRATED-ONLY OPERATING POINTS. Every validated floor (0.96 global and
-    # the overrides) was tuned on CALIBRATED ``MatchResult.confidence``; unlike
-    # the glue prune there is NO validated raw-score point. So the prune is
-    # applied only when the active model actually calibrates — ``runner.py::
-    # _effective_prune_threshold`` skips it (returns 0.0) when calibration is
-    # inactive, so an uncalibrated model does not silently over-prune raw scores.
+    # Shipped allowlist (validated under the #271 stitch gate):
+    #   us_boston_streets    0.96  (117-label clean slice: filtered edge-F1
+    #                               0.8671 -> 0.8790, group exact 0.5093 -> 0.5833)
+    #   us_seattle_sidewalks 0.90  (27-label slice: 0.8665 -> 0.8913, 0.40 -> 0.50;
+    #                               0.96 regresses this set below keep-all)
+    # Set an allowlist value <= 0 to keep a dataset explicitly disabled.
+    #
+    # CALIBRATED-ONLY OPERATING POINTS. Every validated floor was tuned on
+    # CALIBRATED ``MatchResult.confidence``; unlike the glue prune there is NO
+    # validated raw-score point. So the prune is applied only when the active model
+    # actually calibrates — ``_effective_prune_threshold`` skips it (returns 0.0)
+    # when calibration is inactive, so an uncalibrated model does not silently
+    # over-prune raw scores.
+    #
+    # CONFIG MIGRATION (allowlist cutover): the former global floor field
+    # ``resolver_prune_min_confidence`` (0.96, applied to every dataset without an
+    # override) has been REMOVED. Its behaviour is now expressed per dataset in
+    # ``resolver_prune_overrides``; there is no global fallback floor. Any external
+    # config still setting ``resolver_prune_min_confidence`` is silently ignored by
+    # pydantic-settings (extra field) — move the value into ``resolver_prune_overrides``
+    # keyed by the specific dataset(s) it was validated for.
     resolver_prune_enabled: bool = Field(
         default=True,
-        description="Enable the post-optimizer confidence-drop prune of group edges "
-        "for datasets without an entry in ``resolver_prune_overrides``. Validated "
-        "under the stitch gate; retune the threshold per dataset as labels accrue.",
-    )
-    resolver_prune_min_confidence: float = Field(
-        default=0.96,
-        description="Global absolute (calibrated) confidence floor for a SELECTED "
-        "group edge when ``resolver_prune_enabled`` and the dataset has no override. "
-        "Edges below it are dropped, except each group always retains its single "
-        "highest-confidence edge (never emptied). Boston-tuned #272 operating point.",
+        description="Master switch for the post-optimizer confidence-drop prune of "
+        "group edges. When True, the prune applies to datasets present in "
+        "``resolver_prune_overrides`` (the validated allowlist); datasets absent "
+        "there are never pruned. When False, the prune is off for every dataset.",
     )
     resolver_prune_overrides: dict[str, float] = Field(
-        default_factory=lambda: {"us_seattle_sidewalks": 0.90},
-        description="Per-dataset confidence-drop prune threshold override, keyed by "
-        "dataset name (the bridge output stem minus ``_bridge``). Takes precedence "
-        "over ``resolver_prune_enabled`` / ``resolver_prune_min_confidence``. A value "
-        "<= 0 disables the prune for that dataset; a positive value both enables the "
-        "prune and sets its floor. Datasets absent here inherit the global default.",
+        default_factory=lambda: {"us_boston_streets": 0.96, "us_seattle_sidewalks": 0.90},
+        description="Allowlist of per-dataset confidence-drop prune thresholds, keyed "
+        "by dataset name (the bridge output stem minus ``_bridge``). ONLY datasets "
+        "listed here are pruned (and only when ``resolver_prune_enabled``); a dataset "
+        "absent from the map is never pruned. The value is the absolute (calibrated) "
+        "confidence floor for a SELECTED group edge — edges below it are dropped, "
+        "except each group always retains its single highest-confidence edge (never "
+        "emptied). A value <= 0 keeps a listed dataset explicitly disabled. Tune a "
+        "new dataset (see SCALING_ROADMAP M2) before adding it here.",
     )
 
     # Training data validation thresholds

@@ -48,7 +48,7 @@ when `enable_calibration` is True. There is no consumer left on raw scores:
 | ML scorer decision (`predict_batch`) | `scoring_match_threshold` 0.5, `scoring_review_threshold` 0.1 | `predict()` | Calibrated |
 | Optimizer candidate floor (`find_match_components`) | `min_confidence` (0.1 from runner) | `MatchResult.confidence` | Calibrated |
 | Optimizer grouping glue prune | `optimizer_glue_min_confidence` **0.575** (calibrated) / `optimizer_glue_min_confidence_raw` 0.5 (uncalibrated) | `MatchResult.confidence` | Calibrated |
-| Resolver confidence-drop prune (post-optimizer, group edges) | `resolver_prune_min_confidence` **0.96** global / per-dataset `resolver_prune_overrides` (Seattle sidewalks 0.90); enabled by default | `MatchResult.confidence` | Calibrated |
+| Resolver confidence-drop prune (post-optimizer, group edges) | per-dataset **allowlist** `resolver_prune_overrides` (Boston streets 0.96, Seattle sidewalks 0.90); `resolver_prune_enabled` master switch; datasets absent from the map are NOT pruned | `MatchResult.confidence` | Calibrated |
 | Optimizer 1:N group decision | `optimizer_review_threshold` 0.5 (avg conf) | `MatchResult.confidence` | Calibrated |
 | Labeling UI review band | `optimizer_match_threshold` 0.75 / `optimizer_review_threshold` 0.5 | `predict()` | Calibrated |
 | Bridge output filter (`generate_bridge_file`) | `bridge_min_confidence` 0.5 | `MatchResult.confidence` | Calibrated |
@@ -74,37 +74,55 @@ Measured with a calibrated model, keeping the prune at 0.5-calibrated regrouped
 candidate-floor effect, not the glue prune) while leaving all monster (>20-edge)
 groups identical (Boston 6, Seattle 2).
 
-**Resolver confidence-drop prune (enabled by default).** After the optimizer
-assigns group edges, a second prune (`apply_confidence_drop_prune`, M2 / resolver
-Phase 1) drops any *selected* M:N/1:N/N:1 group edge whose calibrated confidence
-is below an absolute floor — the one-parameter filter the #272 resolver eval
-validated (it beat both keep-all and the learned per-edge model on the clean
+**Resolver confidence-drop prune (per-dataset opt-in / allowlist).** After the
+optimizer assigns group edges, a second prune (`apply_confidence_drop_prune`, M2 /
+resolver Phase 1) drops any *selected* M:N/1:N/N:1 group edge whose calibrated
+confidence is below an absolute floor — the one-parameter filter the #272 resolver
+eval validated (it beat both keep-all and the learned per-edge model on the clean
 slice). It never touches 1:1 matches and always keeps each group's single
 highest-confidence edge (a group is never emptied). Pruned pairs are recorded in
-the sidecar (`pruned` per edge, `n_pruned` per group) so the effect is auditable.
-The optimal floor is **dataset-dependent**, so `runner.py::_effective_prune_threshold`
-resolves it per run: the dataset name is derived from the bridge output filename
-and looked up in `resolver_prune_overrides`; datasets without an override use the
-global `resolver_prune_enabled` (default **True**) / `resolver_prune_min_confidence`
-(default **0.96**); an override value ≤ 0 disables the prune for that dataset.
+the sidecar (`pruned` per edge, `n_pruned` per group) so the effect is auditable —
+`n_pruned` is exact: each pruned pair is attributed to its pre-prune `group_id` and
+counted in exactly that owner group — pruned edges are exempt from the per-group
+rejected-edge cap, a pruned *pendant* edge (both endpoints leave the owner group) is
+recovered and recorded there, and the same pair appearing as an incident alternative
+in a *foreign* corridor sub-group (where a surviving endpoint lives) is not
+re-counted. With attribution present the count is authoritative (independent of
+`stitch_persist_rejected_edges`); `sum(n_pruned)` equals the number of dropped edges.
+The optimal floor is **dataset-dependent**, so the prune is **per-dataset opt-in**:
+`runner.py::_effective_prune_threshold` applies it ONLY to datasets present in the
+`resolver_prune_overrides` **allowlist** (keyed by the dataset name derived from the
+bridge output filename), and only while the `resolver_prune_enabled` master switch
+(default **True**) is set. A dataset absent from the allowlist is **not pruned** (a
+one-line info log records the skip); an allowlist value ≤ 0 keeps a listed dataset
+explicitly disabled. There is **no global default floor** — the previous
+`resolver_prune_min_confidence` (0.96 applied to every dataset without an override)
+has been removed, because #284's own sweep showed that Boston-tuned 0.96 over-prunes
+never-tuned / sidewalk-like sets. Filename resolution is robust to the documented
+before/after comparison workflow: `before_<dataset>_bridge.parquet` /
+`after_<dataset>_bridge.parquet` resolve to `<dataset>` by exact match after
+stripping a known prefix (overlapping names like `us_boston_streets_2` never
+collide — only exact post-strip matches count).
 Because every validated floor was tuned on **calibrated** confidence and no raw
 operating point exists, `_effective_prune_threshold` also skips the prune (returns
 0.0) when the active model applies no calibration — so an uncalibrated model does
 not silently over-prune raw scores (mirrors the glue prune's raw/calibrated guard).
-Validated under the #271 stitch gate at the coordinated-retrain deploy (calibrated
-model, `PYTHONHASHSEED=0`):
+Shipped allowlist, validated under the #271 stitch gate at the coordinated-retrain
+deploy (calibrated model, `PYTHONHASHSEED=0`):
 
 | Dataset | Threshold | filtered edge-F1 | group exact | gate |
 |---------|-----------|------------------|-------------|------|
 | us_boston_streets (117 labels) | prune OFF | 0.8671 | 0.5093 | PASS |
-| us_boston_streets | **0.96** (global) | **0.8790** | **0.5833** | PASS |
+| us_boston_streets | **0.96** (allowlisted) | **0.8790** | **0.5833** | PASS |
 | us_seattle_sidewalks (27 labels) | prune OFF | 0.8665 | 0.40 | unarmed |
-| us_seattle_sidewalks | **0.90** (override) | **0.8913** | **0.50** | unarmed |
+| us_seattle_sidewalks | **0.90** (allowlisted) | **0.8913** | **0.50** | unarmed |
 
 Seattle's lower-confidence sidewalks over-prune at 0.96 (filtered F1 regresses to
 0.848, below keep-all); 0.90 is its F1/exact-maximizing point, which is why it
-carries a per-dataset override. Other datasets inherit the Boston-tuned 0.96
-default and should be retuned as their label bases accrue.
+carries its own allowlist floor. Both shipped datasets were tuned via the #284
+sweep recipe. Adding a new dataset to the allowlist requires the same per-dataset
+tuning first (see SCALING_ROADMAP M2) — datasets are never pruned on an untuned
+inherited default.
 
 ### Scoring Thresholds (per-candidate, bridge file output)
 
