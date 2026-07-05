@@ -692,6 +692,38 @@ def test_generate_evidence_renders_junction_zoom_and_prompt(tmp_path):
     assert str(d.resolve() / "zoom_R1_T2.png") in prompt
 
 
+def test_no_zoom_crop_for_edge_absent_from_all_options(tmp_path):
+    """A flagged group edge that no option displays gets no crop (no orphan files)."""
+    g = make_struct_group()
+    # A second junction-kiss edge, present in the group's candidate edges but in
+    # NO option (not in the optimizer assignment nor any alternative).
+    t3 = "tgt_3_88c"
+    g["target_ids"].append(t3)
+    g["target_geometries"][t3] = _line_len(50.0)
+    g["target_names"][t3] = "Orphan"
+    g["target_classes"][t3] = "residential"
+    g["edges"].append(
+        {
+            "ref_id": R1,
+            "target_id": t3,
+            "confidence": 0.5,
+            "gers_start_frac": 0.0,
+            "gers_end_frac": 0.029,
+            "local_start_frac": 0.0,
+            "local_end_frac": 0.025,
+        }
+    )
+    d = tmp_path / g["group_id"]
+    meta = generate_group_evidence(g, d)
+    # Only the in-option BORDERLINE edge (R1->T2) gets a crop; the orphan does not.
+    assert meta["zoom_crops"] == ["zoom_R1_T2.png"]
+    assert not (d / "zoom_R1_T3.png").exists()
+    # Every crop file on disk is referenced by the prompt.
+    prompt = (d / "prompt.txt").read_text()
+    for z in d.glob("zoom_*.png"):
+        assert str(z.resolve()) in prompt
+
+
 def test_pack_size_and_zoom_crop_cap_bounded(tmp_path):
     """Pack stays in the measured order of magnitude and zoom crops are capped."""
     from matcher.agent_labeling import stitch_evidence as se

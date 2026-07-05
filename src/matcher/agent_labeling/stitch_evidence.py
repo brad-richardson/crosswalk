@@ -500,11 +500,16 @@ def render_junction_zoom(
     return img
 
 
-def _render_junction_zooms(group: dict, group_dir: Path) -> dict[str, str]:
+def _render_junction_zooms(
+    group: dict, group_dir: Path, allowed_keys: set[tuple] | None = None
+) -> dict[str, str]:
     """Render junction crops for SLIVER/BORDERLINE edges; return {edge_label: file}.
 
     Dedupes to one crop per (ref, target) pair, prioritizes SLIVER over BORDERLINE
     then smallest overlap, and caps at ``MAX_ZOOM_CROPS`` to bound pack size.
+    When ``allowed_keys`` is given, only edges in that set are considered — the
+    caller passes the union of option edge sets, so crops are never rendered for
+    edges no option displays (which would be unreferenced files in the pack).
     """
     ref_lens, tgt_lens = group_segment_lengths_m(group)
     ref_labels, target_labels = _seg_labels(group)
@@ -518,6 +523,8 @@ def _render_junction_zooms(group: dict, group_dir: Path) -> dict[str, str]:
         if key in seen:
             continue
         seen.add(key)
+        if allowed_keys is not None and key not in allowed_keys:
+            continue
         tag = edge_sliver_tag(e, ref_lens, tgt_lens)
         if tag is None:
             continue
@@ -580,10 +587,11 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("- 'overlap~Xm' on an edge is the absolute length the two segments physically")
     lines.append("  share (aligned span x segment length). It is the same measurement the SLIVER")
     lines.append("  rule uses; a small overlap means the segments only touch near a junction.")
-    lines.append("- An edge tagged BORDERLINE shares only a small fraction of at least one of its")
-    lines.append("  segments, but more than the SLIVER floor. It is the contested junction-kiss")
-    lines.append("  case: it may be a real short connector OR an artifact. There is no default —")
-    lines.append("  judge it from the geometry, the junction zoom, and the structural context.")
+    lines.append("- An edge tagged BORDERLINE covers only a small fraction of BOTH its segments")
+    lines.append("  — near the SLIVER threshold but not below it. It is the contested")
+    lines.append("  junction-kiss case: it may be a real short connector OR an artifact. There is")
+    lines.append("  no default — judge it from the geometry, the junction zoom, the overlap~Xm")
+    lines.append("  value, and the structural context.")
     lines.append("- Edges may carry neutral structural context from the road graph (these are")
     lines.append("  facts, not verdicts, and favor neither including nor excluding an edge):")
     lines.append("  'deg R#/T#' is how many road segments meet at that edge's ref/target endpoint")
@@ -636,7 +644,9 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
             if etag == "SLIVER":
                 extra.append("SLIVER(junction artifact, ~0 overlap)")
             elif etag == "BORDERLINE":
-                extra.append("BORDERLINE(junction-kiss, small overlap)")
+                # Fraction-based band: don't claim "small overlap" — on long
+                # segments the absolute overlap~Xm printed alongside can be large.
+                extra.append("BORDERLINE(junction-kiss, low span fraction)")
             extra_s = ("  " + " ".join(extra)) if extra else ""
             lines.append(f"      {e['edge']}  conf={e['confidence']}{extra_s}")
             struct_s = _edge_struct_str(e)
@@ -681,8 +691,12 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
 
     # Junction zoom crops for SLIVER/BORDERLINE edges, and annotate the metadata
     # edge rows (all options that contain the edge) with their crop filename so
-    # both the prompt and metadata.yaml reference them.
-    zoom_files = _render_junction_zooms(group, group_dir)
+    # both the prompt and metadata.yaml reference them. Restricted to edges that
+    # appear in at least one option so every crop is actually referenced.
+    option_keys = {
+        (e["ref_id"], e["target_id"]) for opt in options_ctx["options"] for e in opt["edges"]
+    }
+    zoom_files = _render_junction_zooms(group, group_dir, allowed_keys=option_keys)
     if zoom_files:
         metadata["zoom_crops"] = sorted(zoom_files.values())
         for opt_meta in metadata["options"]:
