@@ -43,7 +43,12 @@ from ..config import settings
 from ..labeling.stitching_store import StitchingLabelStore
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
-from .stitch_eval import _load_group_metadata, map_human_labels_to_groups
+from .stitch_eval import (
+    _is_set_label,
+    _load_group_metadata,
+    _map_set_labels_to_groups,
+    map_human_labels_to_groups,
+)
 from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mode_edge
 
 # Bumped v1 -> v2 when the panel composition changed (Opus 4.8 / gpt-5.5 /
@@ -267,6 +272,24 @@ def plan_exports(
     overlap_map: dict[str, str] = {}
     if not human_df.empty:
         overlap_map = map_human_labels_to_groups(human_df, candidate_metas, candidate_edges)
+
+    # SET-semantics human labels carry no edges, so the edge-overlap mapping above
+    # cannot see them. A set label still means "a human reviewed this group", so
+    # it MUST confer precedence: map set rows to candidate groups by MEMBERSHIP
+    # overlap and merge the result (an edge-overlap match wins on a clash — it is
+    # the stronger signal). Precedence is about the human having reviewed the
+    # group, not about pair-level detail.
+    if not human_df.empty and "label_semantics" in human_df.columns:
+        set_rows = human_df[human_df.apply(_is_set_label, axis=1)]
+        if not set_rows.empty:
+            group_members = {
+                gid: frozenset(r for r, _ in edges) | frozenset(t for _, t in edges)
+                for gid, edges in candidate_edges.items()
+            }
+            # {human_gid: panel_gid} -> invert to {panel_gid: human_gid}, not
+            # clobbering an existing (edge-overlap) mapping for that panel group.
+            for hgid, pgid in _map_set_labels_to_groups(set_rows, group_members).items():
+                overlap_map.setdefault(pgid, hgid)
 
     groups: list[GroupExport] = []
     n_auto = 0

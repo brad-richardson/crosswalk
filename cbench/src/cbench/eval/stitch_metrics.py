@@ -62,6 +62,15 @@ class StitchEvalResult:
     # Provenance breakdown.
     label_counts_by_labeler: dict = field(default_factory=dict)
     metrics_by_labeler: dict = field(default_factory=dict)
+    # SET-semantics metrics. Set labels (label_semantics == "set") assert only
+    # group membership, so they are EXCLUDED from the edge-F1 pools above and
+    # scored on membership/boundary/coverage instead. ``set_groups_evaluated`` is
+    # the count of set labels mapped to a current group.
+    set_groups_evaluated: int = 0
+    set_membership_exact_rate: float = 0.0
+    set_boundary_precision: float = 0.0
+    set_coverage: float = 0.0
+    set_metrics_by_labeler: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -79,6 +88,11 @@ class StitchEvalResult:
             "stitch_groups_sliver_affected": self.groups_sliver_affected,
             "stitch_label_counts_by_labeler": self.label_counts_by_labeler,
             "stitch_metrics_by_labeler": self.metrics_by_labeler,
+            "stitch_set_groups_evaluated": self.set_groups_evaluated,
+            "stitch_set_membership_exact_rate": self.set_membership_exact_rate,
+            "stitch_set_boundary_precision": self.set_boundary_precision,
+            "stitch_set_coverage": self.set_coverage,
+            "stitch_set_metrics_by_labeler": self.set_metrics_by_labeler,
         }
 
 
@@ -109,6 +123,74 @@ def _labeler_class(labeler: object) -> str:
     """Bucket a labeler value into 'panel' (agent auto-accept) or 'human'."""
     s = "" if labeler is None else str(labeler)
     return "panel" if s.startswith("panel") else "human"
+
+
+def _is_set_label(row) -> bool:
+    """True when a curated row uses SET semantics (membership, not pairs)."""
+    return str(row.get("label_semantics") or "pair") == "set"
+
+
+def _parse_id_list(raw) -> frozenset[str]:
+    """Parse a JSON id array (``ref_ids`` / ``target_ids``) into a string set."""
+    if raw is None or isinstance(raw, float) or not str(raw).strip():
+        return frozenset()
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return frozenset()
+    return frozenset(str(x) for x in data)
+
+
+def set_label_metrics(
+    pred_edges: EdgeSet,
+    ref_members: frozenset[str],
+    target_members: frozenset[str],
+) -> tuple[bool, float, float]:
+    """Score a predicted edge set against a SET label's membership.
+
+    THE PARITY-CRITICAL CORE. Replicated verbatim in
+    ``matcher.agent_labeling.stitch_eval.set_label_metrics`` and guarded by
+    ``tests/unit/test_cbench_set_metric_parity.py`` — keep the two in lockstep.
+
+    Args:
+        pred_edges: the predicted (optimizer/panel) SELECTED edges within the
+            group mapped to this label.
+        ref_members / target_members: the labeler's asserted group membership.
+
+    Returns ``(membership_exact, boundary_precision, coverage)``:
+      * membership_exact - the segments incident to the predicted edges are
+        EXACTLY this membership (both sides).
+      * boundary_precision - fraction of predicted edges whose BOTH endpoints are
+        members (no edge crosses into a non-member); 1.0 when nothing is
+        predicted (vacuously, no boundary is crossed).
+      * coverage - fraction of members with >= 1 incident predicted edge; 1.0
+        when the membership is empty.
+    """
+    pred_ref = frozenset(r for r, _ in pred_edges)
+    pred_tgt = frozenset(t for _, t in pred_edges)
+    membership_exact = (pred_ref == ref_members) and (pred_tgt == target_members)
+
+    n_edges = len(pred_edges)
+    within = sum(1 for (r, t) in pred_edges if r in ref_members and t in target_members)
+    boundary_precision = within / n_edges if n_edges else 1.0
+
+    n_members = len(ref_members) + len(target_members)
+    covered = len(ref_members & pred_ref) + len(target_members & pred_tgt)
+    coverage = covered / n_members if n_members else 1.0
+    return membership_exact, boundary_precision, coverage
+
+
+def _aggregate_set(
+    records: list[tuple[bool, float, float]],
+) -> tuple[float, float, float]:
+    """Mean (membership_exact_rate, boundary_precision, coverage)."""
+    n = len(records)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    exact = sum(1 for m, _, _ in records if m) / n
+    boundary = sum(b for _, b, _ in records) / n
+    coverage = sum(c for _, _, c in records) / n
+    return exact, boundary, coverage
 
 
 def _edge_prf(pred: EdgeSet, truth: EdgeSet) -> tuple[float, float, float]:
@@ -167,6 +249,46 @@ def map_labels_to_groups(
         # Prefer a verbatim group_id match when it still overlaps this label.
         target = hgid if counts.get(hgid, 0) > 0 else best
         mapping[idx] = target
+    return mapping
+
+
+def map_set_labels_to_groups(
+    set_labels: pd.DataFrame,
+    group_members: dict[str, frozenset[str]],
+) -> dict[int, str]:
+    """Map each SET-semantics row to a current group by MEMBERSHIP overlap.
+
+    Set labels carry no edges (``selected_edges`` empty), so edge-overlap
+    recovery is impossible. Instead a set label maps to the current group whose
+    segment membership overlaps its ref_ids ∪ target_ids the most, preferring a
+    verbatim ``group_id`` match when that group still shares a segment. Labels
+    whose segments no longer appear in any current group are dropped (mirrors the
+    pair mapper's "edges no longer survive" case).
+
+    Returns ``{row_index: group_id}``.
+    """
+    seg_groups: dict[str, set[str]] = defaultdict(set)
+    for gid, members in group_members.items():
+        for s in members:
+            seg_groups[s].add(gid)
+
+    mapping: dict[int, str] = {}
+    for idx, row in set_labels.iterrows():
+        members = _parse_id_list(row.get("ref_ids")) | _parse_id_list(row.get("target_ids"))
+        hgid = str(row.get("group_id"))
+        if not members:
+            # Empty-membership set row (degenerate reject-all): verbatim only.
+            if hgid in group_members:
+                mapping[idx] = hgid
+            continue
+        counts: dict[str, int] = defaultdict(int)
+        for s in members:
+            for gid in seg_groups.get(s, ()):
+                counts[gid] += 1
+        if not counts:
+            continue
+        best = max(counts, key=counts.get)
+        mapping[idx] = hgid if counts.get(hgid, 0) > 0 else best
     return mapping
 
 
@@ -267,14 +389,25 @@ def evaluate_stitch_groups(
 
     group_candidate_edges: dict[str, EdgeSet] = {}
     group_slivers: dict[str, EdgeSet] = {}
+    group_members: dict[str, frozenset[str]] = {}
     for g in groups:
         gid = str(g.get("group_id"))
-        group_candidate_edges[gid] = frozenset(
-            (str(e["ref_id"]), str(e["target_id"])) for e in g.get("edges", [])
-        )
+        edges = frozenset((str(e["ref_id"]), str(e["target_id"])) for e in g.get("edges", []))
+        group_candidate_edges[gid] = edges
         group_slivers[gid] = group_sliver_edges(g)
+        group_members[gid] = frozenset(r for r, _ in edges) | frozenset(t for _, t in edges)
 
-    mapping = map_labels_to_groups(stitch_labels, group_candidate_edges)
+    # Split by semantics: SET labels are scored on membership/boundary/coverage
+    # and MUST NOT enter the edge-F1 pools (they assert no pair-level truth).
+    if "label_semantics" in stitch_labels.columns:
+        is_set = stitch_labels.apply(_is_set_label, axis=1)
+        pair_labels = stitch_labels[~is_set]
+        set_labels = stitch_labels[is_set]
+    else:
+        pair_labels = stitch_labels
+        set_labels = stitch_labels.iloc[0:0]
+
+    mapping = map_labels_to_groups(pair_labels, group_candidate_edges)
 
     raw_records: list[tuple[EdgeSet, EdgeSet]] = []
     filt_records: list[tuple[EdgeSet, EdgeSet]] = []
@@ -317,6 +450,31 @@ def evaluate_stitch_groups(
             "exact_match_rate": round(ex, 4),
         }
 
+    # --- SET-semantics metrics (membership / boundary / coverage) ---
+    set_mapping = map_set_labels_to_groups(set_labels, group_members)
+    set_records: list[tuple[bool, float, float]] = []
+    set_by_labeler: dict[str, list[tuple[bool, float, float]]] = defaultdict(list)
+    for idx, gid in set_mapping.items():
+        row = set_labels.loc[idx]
+        ref_members = _parse_id_list(row.get("ref_ids"))
+        tgt_members = _parse_id_list(row.get("target_ids"))
+        candidate = group_candidate_edges[gid]
+        pred = frozenset(e for e in candidate if e in bridge_edges)
+        rec = set_label_metrics(pred, ref_members, tgt_members)
+        set_records.append(rec)
+        set_by_labeler[_labeler_class(row.get("labeler"))].append(rec)
+
+    set_exact, set_boundary, set_coverage = _aggregate_set(set_records)
+    set_metrics_by_labeler: dict[str, dict] = {}
+    for cls, recs in sorted(set_by_labeler.items()):
+        ex, bd, cov = _aggregate_set(recs)
+        set_metrics_by_labeler[cls] = {
+            "n": len(recs),
+            "membership_exact_rate": round(ex, 4),
+            "boundary_precision": round(bd, 4),
+            "coverage": round(cov, 4),
+        }
+
     return StitchEvalResult(
         groups_evaluated=len(raw_records),
         precision=avg_p,
@@ -332,4 +490,9 @@ def evaluate_stitch_groups(
         groups_sliver_affected=n_sliver_affected,
         label_counts_by_labeler=_label_counts(stitch_labels),
         metrics_by_labeler=metrics_by_labeler,
+        set_groups_evaluated=len(set_records),
+        set_membership_exact_rate=set_exact,
+        set_boundary_precision=set_boundary,
+        set_coverage=set_coverage,
+        set_metrics_by_labeler=set_metrics_by_labeler,
     )

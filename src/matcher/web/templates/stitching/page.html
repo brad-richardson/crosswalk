@@ -77,13 +77,17 @@
     // recording an EMPTY edge set: enterManualMode() clears #selected-edges, so
     // the server fell back to included_refs/included_targets which arrived empty.
     function populateSelection(parameters) {
-        // A panel-confirmed submit drives the stored set entirely via the
-        // explicit #selected-edges list (the reviewer ticked exactly which pairs
-        // to keep). Blank the cross-product pill fields so an EMPTY confirmed set
-        // records a true reject-all instead of the server re-deriving pairs from
-        // the still-active pills. A non-empty confirmed set goes through the
-        // explicit path, which ignores these fields anyway.
-        if (window.__stitchConfirmedSubmit) {
+        // An OPTION-ratification confirmed submit drives the stored set entirely
+        // via the explicit #selected-edges list (the reviewer ticked exactly
+        // which pairs to keep). Blank the cross-product pill fields so an EMPTY
+        // confirmed set records a true reject-all instead of the server
+        // re-deriving pairs from the still-active pills. A non-empty confirmed
+        // set goes through the explicit path, which ignores these fields anyway.
+        //
+        // The SET-membership path (manual / de-anchored, __pairConfirmIsOption
+        // false) is the OPPOSITE: it MUST carry the active pill membership so the
+        // server records the set, so it falls through to the normal branch below.
+        if (window.__stitchConfirmedSubmit && window.__pairConfirmIsOption) {
             document.getElementById('included-refs').value = '';
             document.getElementById('included-targets').value = '';
             if (parameters) {
@@ -239,7 +243,9 @@
     function renderPairConfirm(pairs) {
         var list = document.getElementById('pair-confirm-list');
         var emptyNote = document.getElementById('pair-confirm-empty');
+        var header = document.getElementById('pair-confirm-header');
         if (!list) return;
+        if (header) header.textContent = 'Confirm pairs to record';
         list.innerHTML = '';
         for (var i = 0; i < pairs.length; i++) {
             var pr = pairs[i];
@@ -278,9 +284,90 @@
         if (emptyNote) emptyNote.style.display = pairs.length === 0 ? '' : 'none';
     }
 
+    // Zero-support fat-finger catch: an active pill on one side that shares NO
+    // candidate edge with ANY active pill on the other side. Returned as
+    // {refs:[{id,name}], targets:[{id,name}]}. Only meaningful when BOTH sides
+    // have active pills (a one-sided membership has nothing to connect to).
+    function computeZeroSupportPills() {
+        var edges = parseGroupEdges();
+        var activeRefs = pillIdSet('.segment-pill-ref.active');
+        var activeTargets = pillIdSet('.segment-pill-target.active');
+        var refIds = Object.keys(activeRefs), tgtIds = Object.keys(activeTargets);
+        var out = { refs: [], targets: [] };
+        if (refIds.length === 0 || tgtIds.length === 0) return out;
+        var refHasSupport = {}, tgtHasSupport = {};
+        for (var i = 0; i < edges.length; i++) {
+            var e = edges[i];
+            if (activeRefs[e.ref_id] && activeTargets[e.target_id]) {
+                refHasSupport[e.ref_id] = true;
+                tgtHasSupport[e.target_id] = true;
+            }
+        }
+        var refNames = {}, tgtNames = {};
+        document.querySelectorAll('.segment-pill-ref').forEach(function (p) {
+            refNames[p.title] = p.getAttribute('data-name') || '';
+        });
+        document.querySelectorAll('.segment-pill-target').forEach(function (p) {
+            tgtNames[p.title] = p.getAttribute('data-name') || '';
+        });
+        refIds.forEach(function (id) {
+            if (!refHasSupport[id]) out.refs.push({ id: id, name: refNames[id] || '' });
+        });
+        tgtIds.forEach(function (id) {
+            if (!tgtHasSupport[id]) out.targets.push({ id: id, name: tgtNames[id] || '' });
+        });
+        return out;
+    }
+
+    // Set-membership confirmation: one-line summary + a fat-finger warning listing
+    // any pill with zero geometric support against the other side. The whole set
+    // is recorded together (no per-pair adjudication), so there are no checkboxes.
+    function renderSetConfirm() {
+        var list = document.getElementById('pair-confirm-list');
+        var emptyNote = document.getElementById('pair-confirm-empty');
+        var header = document.getElementById('pair-confirm-header');
+        if (!list) return;
+        if (header) header.textContent = 'Confirm group membership';
+        list.innerHTML = '';
+        var nRefs = document.querySelectorAll('.segment-pill-ref.active').length;
+        var nTgts = document.querySelectorAll('.segment-pill-target.active').length;
+
+        if (nRefs === 0 && nTgts === 0) {
+            if (emptyNote) emptyNote.style.display = '';
+            return;
+        }
+        if (emptyNote) emptyNote.style.display = 'none';
+
+        var summary = document.createElement('div');
+        summary.style.cssText = 'font-size:0.78rem; padding:4px 0;';
+        summary.textContent = 'Records ' + nRefs + ' ref' + (nRefs === 1 ? '' : 's') +
+            ' ↔ ' + nTgts + ' target' + (nTgts === 1 ? '' : 's') + ' as one matched group.';
+        list.appendChild(summary);
+
+        var zs = computeZeroSupportPills();
+        var flagged = zs.refs.concat(zs.targets);
+        if (flagged.length) {
+            var warn = document.createElement('div');
+            warn.style.cssText = 'font-size:0.72rem; margin-top:6px; padding:6px; border-radius:4px; ' +
+                'background:rgba(220,140,0,0.15); color:var(--text-muted);';
+            var names = flagged.map(function (p) {
+                return (p.name || '(unnamed)') + ' ' + shortConfirmId(p.id);
+            });
+            warn.innerHTML = '⚠ ' + flagged.length + ' selected segment(s) share no candidate ' +
+                'edge with the other side — double-check for a mis-tap: ' +
+                '<br>' + names.join('<br>');
+            list.appendChild(warn);
+        }
+    }
+
     // Open the inline confirmation panel; hide the primary action row while it's up.
     function openPairConfirm(isOption) {
-        renderPairConfirm(collectConfirmPairs(isOption));
+        window.__pairConfirmIsOption = isOption;
+        if (isOption) {
+            renderPairConfirm(collectConfirmPairs(isOption));
+        } else {
+            renderSetConfirm();
+        }
         var panel = document.getElementById('pair-confirm-panel');
         var actions = document.getElementById('card-actions');
         if (panel) panel.style.display = '';
@@ -297,26 +384,42 @@
         window.__pendingIssueRequest = null;
     }
 
-    // Confirm: submit exactly the ticked pairs through the explicit edge path.
+    // Confirm & record. Two paths:
+    //   - OPTION ratification: submit exactly the ticked pairs through the
+    //     explicit #selected-edges path (PAIR semantics, unchanged).
+    //   - SET membership (manual / de-anchored): leave #selected-edges EMPTY so
+    //     the server records a SET label from included_refs/included_targets.
     function confirmPairSubmit() {
-        var checks = document.querySelectorAll('#pair-confirm-list .pair-confirm-check');
-        var ticked = [];
-        for (var i = 0; i < checks.length; i++) {
-            if (checks[i].checked) {
-                ticked.push({
-                    ref_id: checks[i].getAttribute('data-ref'),
-                    target_id: checks[i].getAttribute('data-target')
-                });
-            }
-        }
         var sel = document.getElementById('selected-edges');
-        if (sel) sel.value = ticked.length ? JSON.stringify(ticked) : '';
-        // Empty confirmed set in de-anchored mode is a deliberate reject-all;
-        // set the server-required flag so it is not refused as an unconfirmed
-        // blank-slate submit.
         var modeField = document.querySelector('#select-form input[name="deanchored"]');
         var flag = document.getElementById('confirm-reject-all');
-        if (flag) flag.value = (ticked.length === 0 && modeField && modeField.value === '1') ? '1' : '';
+
+        if (window.__pairConfirmIsOption) {
+            var checks = document.querySelectorAll('#pair-confirm-list .pair-confirm-check');
+            var ticked = [];
+            for (var i = 0; i < checks.length; i++) {
+                if (checks[i].checked) {
+                    ticked.push({
+                        ref_id: checks[i].getAttribute('data-ref'),
+                        target_id: checks[i].getAttribute('data-target')
+                    });
+                }
+            }
+            if (sel) sel.value = ticked.length ? JSON.stringify(ticked) : '';
+            if (flag) {
+                flag.value = (ticked.length === 0 && modeField && modeField.value === '1') ? '1' : '';
+            }
+        } else {
+            // Set path: no explicit edges; membership rides in included_refs /
+            // included_targets (populated by populateSelection). An empty
+            // membership in de-anchored mode is a deliberate reject-all.
+            if (sel) sel.value = '';
+            var nActive = document.querySelectorAll('.segment-pill-ref.active').length +
+                document.querySelectorAll('.segment-pill-target.active').length;
+            if (flag) {
+                flag.value = (nActive === 0 && modeField && modeField.value === '1') ? '1' : '';
+            }
+        }
 
         window.__stitchConfirmedSubmit = true;
         var panel = document.getElementById('pair-confirm-panel');

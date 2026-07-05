@@ -129,6 +129,20 @@ exact-match against the per-dataset floors in `cbench/datasets.toml`
 (`[gate.<dataset>]`) and **exits nonzero** if any *armed* dataset falls below.
 Without `--gate` the stitch metrics are still computed and printed (non-blocking).
 
+**Pair vs set labels.** Stitching labels carry a `label_semantics` column
+(`pair` or `set`; see ARCHITECTURE.md "Stitching labels"). Only **pair** labels
+enter the edge-F1 / exact-match pools the gate enforces — a `set` label asserts
+only group membership, so scoring it per-pair would punish the optimizer against
+pairs no human endorsed. Set labels are reported separately on three components:
+**membership exact-match**, **boundary precision** (no selected edge connects a
+member to a non-member), and **coverage** (every member has ≥1 selected incident
+edge). These set metrics are computed and printed alongside the pair metrics
+(and replicated matcher-free in cbench, parity-guarded by
+`tests/unit/test_cbench_set_metric_parity.py`); they are **not** yet gated —
+`[gate.<dataset>]` only floors the pair edge-F1 / exact-match. A set-metric floor
+can be armed later with no code change once the mapped set-label base is large
+enough (same auto-arm mechanism).
+
 **Why benchmark-time, not CI:** the gate needs live pipeline outputs (a bridge
 parquet + its `*_groups.json` sidecar), which don't exist in GitHub Actions
 (`data/raw` / `data/output` are untracked). So the gate is part of the

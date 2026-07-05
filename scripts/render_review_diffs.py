@@ -37,7 +37,6 @@ Example::
 from __future__ import annotations
 
 import argparse
-import ast
 import csv
 import json
 import math
@@ -101,45 +100,16 @@ def geom_midpoint(geom: dict | None) -> list[float] | None:
 # ---------------------------------------------------------------------------
 # Pure diff / lookup logic
 # ---------------------------------------------------------------------------
-def parse_selected_edges(raw: str | None) -> set[tuple[str, str]]:
-    """Parse the ``selected_edges`` CSV cell into a set of (ref_id, target_id)."""
-    if not raw:
-        return set()
-    parsed = ast.literal_eval(raw)
-    return {(e["ref_id"], e["target_id"]) for e in parsed}
-
-
-def edge_pairs(edges: list[dict] | None, selected_only: bool = False) -> set[tuple[str, str]]:
-    """Collect (ref_id, target_id) tuples from an edge list."""
-    out: set[tuple[str, str]] = set()
-    for e in edges or []:
-        if selected_only and not e.get("selected"):
-            continue
-        out.add((e["ref_id"], e["target_id"]))
-    return out
-
-
-def resolve_optimizer(
-    cache_group: dict | None, sidecar_group: dict | None
-) -> tuple[set[tuple[str, str]], bool]:
-    """Return the optimizer's selected pairs and whether they came from the sidecar.
-
-    Prefers the sidecar group's ``edges[selected]``; falls back to the cache
-    group's ``optimizer_assignment`` (old-grouping queue item). The bool is
-    ``True`` when the sidecar supplied the set.
-    """
-    if sidecar_group is not None:
-        return edge_pairs(sidecar_group.get("edges"), selected_only=True), True
-    if cache_group is not None:
-        return edge_pairs(cache_group.get("optimizer_assignment")), False
-    return set(), False
-
-
-def compute_diff(
-    label_pairs: set[tuple[str, str]], opt_pairs: set[tuple[str, str]]
-) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
-    """Return (added, removed): pairs the label adds vs / drops from the optimizer."""
-    return label_pairs - opt_pairs, opt_pairs - label_pairs
+# The cross-product artifact detector and its edge/universe helpers are shared
+# with `matcher data stitch-reinterpret-sets` via matcher.agent_labeling.xprod,
+# so the render flag and the reinterpretation both key off the SAME signature.
+from matcher.agent_labeling.xprod import (  # noqa: E402
+    candidate_universe,
+    compute_diff,
+    is_crossproduct_artifact,
+    parse_selected_edges,
+    resolve_optimizer,
+)
 
 
 def build_confidence_lookup(
@@ -165,62 +135,6 @@ def build_confidence_lookup(
             if key not in m and conf is not None:
                 m[key] = conf
     return m
-
-
-def candidate_universe(
-    cache_group: dict | None, sidecar_group: dict | None
-) -> set[tuple[str, str]]:
-    """All (ref_id, target_id) pairs the reviewer could have chosen from.
-
-    Union of cache ``edges``, sidecar ``edges`` and sidecar ``rejected_edges`` —
-    every candidate pair surfaced in the group, selected or not.
-    """
-    return (
-        edge_pairs((cache_group or {}).get("edges"))
-        | edge_pairs((sidecar_group or {}).get("edges"))
-        | edge_pairs((sidecar_group or {}).get("rejected_edges"))
-    )
-
-
-def crossproduct_within_universe(
-    label_pairs: set[tuple[str, str]], universe: set[tuple[str, str]]
-) -> set[tuple[str, str]]:
-    """The (label refs × label targets) grid, restricted to candidate pairs.
-
-    In manual / de-anchored labelling the submit records the full cross-product
-    of the active ref-pills and target-pills intersected with the candidate
-    universe — so this is what a "select-all-pills" submit would have stored.
-    """
-    refs = {a for a, _ in label_pairs}
-    tgts = {b for _, b in label_pairs}
-    return {(r, t) for r in refs for t in tgts if (r, t) in universe}
-
-
-def is_crossproduct_artifact(
-    label_pairs: set[tuple[str, str]],
-    opt_pairs: set[tuple[str, str]],
-    universe: set[tuple[str, str]],
-) -> bool:
-    """Flag labels whose extra pairs are likely cross-product artifacts.
-
-    True when the stored pair set is *exactly* the ref×target cross-product
-    within the candidate universe AND it adds pairs beyond the optimizer — i.e.
-    the reviewer's pill selection over-expanded into pairs they may never have
-    consciously chosen. Pure exclusions (added set empty) never flag.
-
-    Requires a genuine grid — at least two refs *and* two targets. A 1:1 or
-    1:N (single ref or single target) selection has no meaningful cross-product,
-    so a deliberately-added single pair or a legitimate fan is never flagged.
-    """
-    if not label_pairs:
-        return False
-    refs = {a for a, _ in label_pairs}
-    tgts = {b for _, b in label_pairs}
-    if len(refs) < 2 or len(tgts) < 2:  # no ref×target grid to over-expand into
-        return False
-    if not (label_pairs - opt_pairs):  # no pairs beyond the optimizer
-        return False
-    return label_pairs == crossproduct_within_universe(label_pairs, universe)
 
 
 # ---------------------------------------------------------------------------

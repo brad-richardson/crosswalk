@@ -262,3 +262,102 @@ def test_reject_all_label_dropped_when_group_id_gone(groups_sidecar):
     )
     result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
     assert result.groups_evaluated == 0
+
+
+# ---------------------------------------------------------------------------
+# SET-semantics metrics (membership / boundary / coverage)
+# ---------------------------------------------------------------------------
+def _set_group():
+    """An M:N group with three candidate edges over {r1,r2} x {t1,t2}."""
+    return [
+        {
+            "group_id": "gset",
+            "match_type": "M:N",
+            "edges": [
+                {"ref_id": "r1", "target_id": "t1"},
+                {"ref_id": "r2", "target_id": "t2"},
+                {"ref_id": "r1", "target_id": "t2"},
+            ],
+            "ref_geometries": {},
+            "target_geometries": {},
+        }
+    ]
+
+
+def _set_label(ref_ids, target_ids, group_id="gset", labeler="brad"):
+    return {
+        "group_id": group_id,
+        "selected_edges": "[]",
+        "label_semantics": "set",
+        "ref_ids": json.dumps(ref_ids),
+        "target_ids": json.dumps(target_ids),
+        "labeler": labeler,
+    }
+
+
+def test_set_label_excluded_from_edge_pool_and_scored_separately():
+    bridge = pd.DataFrame(
+        {"ref_id": ["r1", "r2"], "target_id": ["t1", "t2"], "confidence": [0.9, 0.9]}
+    )
+    labels = pd.DataFrame([_set_label(["r1", "r2"], ["t1", "t2"])])
+    result = evaluate_stitch_groups(bridge, labels, groups=_set_group())
+    # Set label does NOT enter the edge-F1 pool.
+    assert result.groups_evaluated == 0
+    # Scored on set components: optimizer connects exactly the membership.
+    assert result.set_groups_evaluated == 1
+    assert result.set_membership_exact_rate == pytest.approx(1.0)
+    assert result.set_boundary_precision == pytest.approx(1.0)
+    assert result.set_coverage == pytest.approx(1.0)
+    assert result.set_metrics_by_labeler["human"]["n"] == 1
+
+
+def test_set_coverage_penalizes_uncovered_member():
+    # Optimizer only connects r1-t1; membership claims r2/t2 too.
+    bridge = pd.DataFrame({"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.9]})
+    labels = pd.DataFrame([_set_label(["r1", "r2"], ["t1", "t2"])])
+    result = evaluate_stitch_groups(bridge, labels, groups=_set_group())
+    assert result.set_groups_evaluated == 1
+    assert result.set_membership_exact_rate == pytest.approx(0.0)  # r2/t2 not predicted
+    assert result.set_boundary_precision == pytest.approx(1.0)  # the one edge is within
+    # 2 of 4 members covered (r1, t1).
+    assert result.set_coverage == pytest.approx(0.5)
+
+
+def test_set_boundary_precision_penalizes_cross_edge():
+    # Membership is only {r1}/{t1} but the optimizer also keeps r1-t2 (t2 not a
+    # member) -> a boundary-crossing edge.
+    bridge = pd.DataFrame(
+        {"ref_id": ["r1", "r1"], "target_id": ["t1", "t2"], "confidence": [0.9, 0.9]}
+    )
+    labels = pd.DataFrame([_set_label(["r1"], ["t1"])])
+    result = evaluate_stitch_groups(bridge, labels, groups=_set_group())
+    assert result.set_groups_evaluated == 1
+    assert result.set_membership_exact_rate == pytest.approx(0.0)  # t2 leaked in
+    assert result.set_boundary_precision == pytest.approx(0.5)  # 1 of 2 edges within
+    assert result.set_coverage == pytest.approx(1.0)
+
+
+def test_mixed_pair_and_set_labels_split_pools():
+    bridge = pd.DataFrame(
+        {"ref_id": ["r1", "r2"], "target_id": ["t1", "t2"], "confidence": [0.9, 0.9]}
+    )
+    labels = pd.DataFrame(
+        [
+            {
+                "group_id": "gset",
+                "selected_edges": json.dumps([{"ref_id": "r1", "target_id": "t1"}]),
+                "label_semantics": "pair",
+                "ref_ids": "",
+                "target_ids": "",
+                "labeler": "panel_unanimous_v2",
+            },
+            _set_label(["r1", "r2"], ["t1", "t2"]),
+        ]
+    )
+    result = evaluate_stitch_groups(bridge, labels, groups=_set_group())
+    assert result.groups_evaluated == 1  # only the pair label
+    assert result.set_groups_evaluated == 1  # only the set label
+    # to_dict surfaces both metric families.
+    d = result.to_dict()
+    assert "stitch_set_membership_exact_rate" in d
+    assert d["stitch_set_groups_evaluated"] == 1
