@@ -180,6 +180,48 @@ def _cap_context_ids(group: dict, cap: int = CONTEXT_DISPLAY_CAP) -> dict:
     }
 
 
+def _group_candidate_edges(group: dict) -> list[dict]:
+    """Union of a group's selected ``edges`` and its ``rejected_edges``.
+
+    Deduplicated by (ref_id, target_id), selected edges taking precedence on a
+    clash. Both lists live in the post-#282/#284 sidecar; ``rejected_edges`` are
+    the non-selected candidates over the group's own segments (the same
+    structural layer, carrying ``is_sliver``). Order-stable: selected first.
+
+    This is the candidate set a reviewer can legitimately construct a pair from
+    — a pair whose only shared edge was REJECTED by the optimizer must still be
+    recordable rather than silently dropped (same bug class as the #270
+    context-pill trap).
+    """
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for e in (group.get("edges") or []) + (group.get("rejected_edges") or []):
+        key = (e.get("ref_id"), e.get("target_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
+def _annotate_candidate_edges(group: dict) -> list[dict]:
+    """Candidate-edge union annotated with a per-edge ``is_sliver`` flag.
+
+    Used as the client ``#group-edges`` payload in de-anchored mode so the live
+    confidence / coverage-gap overlay can reason about rejected candidates the
+    reviewer may pair up. Sliver classification uses the group's own segment
+    lengths (hybrid rule), so it is computed fresh rather than trusting any
+    baked-in flag.
+    """
+    ref_lens, tgt_lens = group_segment_lengths_m(group)
+    out: list[dict] = []
+    for e in _group_candidate_edges(group):
+        ce = dict(e)
+        ce["is_sliver"] = edge_is_sliver(e, ref_lens, tgt_lens)
+        out.append(ce)
+    return out
+
+
 def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: float) -> dict | None:
     """Extract an aligned sub-segment from a GeoJSON geometry using alignment fracs."""
     try:
@@ -198,7 +240,7 @@ def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: fl
     return mapping(sub)
 
 
-def _build_group_geojson(group: dict) -> dict:
+def _build_group_geojson(group: dict, deanchored: bool = False) -> dict:
     """Build GeoJSON FeatureCollection using ALL edges in the group.
 
     Emits two tiers of features:
@@ -208,10 +250,17 @@ def _build_group_geojson(group: dict) -> dict:
     Feature _role values:
     - "ref-full" / "target-full": full segment geometries
     - "ref-aligned" / "target-aligned": aligned sub-segments from edges
+
+    In de-anchored mode the aligned tier is built from the FULL candidate set
+    (selected + rejected) so that activating any candidate pair reveals its
+    overlap identically — the map must never signal which edges the optimizer
+    chose. The aligned features are still filtered client-side by the active
+    segments, so a blank-slate group shows no aligned overlays until the
+    reviewer starts selecting.
     """
     ref_geoms = group.get("ref_geometries", {})
     target_geoms = group.get("target_geometries", {})
-    edges = group.get("edges", [])
+    edges = _group_candidate_edges(group) if deanchored else group.get("edges", [])
     ref_id_list = group.get("ref_ids", list(ref_geoms.keys()))
     target_id_list = group.get("target_ids", list(target_geoms.keys()))
 
@@ -503,8 +552,38 @@ def _build_group_context(group: dict, dataset: str = "") -> dict:
     }
 
 
+def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, dict]:
+    """Build the (geojson, template-context) pair for a group render.
+
+    Centralizes the de-anchored overrides so every render path (initial page,
+    deep link, HTMX fragment, post-submit/skip next-group) behaves identically:
+
+    - ``deanchored`` is threaded into the template for the mode switch, the
+      collapsed proposals, and the blank confidence readout.
+    - In de-anchored mode the optimizer pre-seed is stripped to a blank slate
+      (no active pills, no pre-picked option, every group segment starts hidden
+      so nothing signals the proposal) and the client edge payload is widened to
+      the full candidate union so live confidence can reason about rejected
+      candidates the reviewer pairs up.
+    """
+    geojson = _build_group_geojson(group, deanchored=deanchored)
+    ctx = _build_group_context(group, dataset=dataset)
+    ctx["deanchored"] = deanchored
+    if deanchored:
+        ctx["client_edges"] = _annotate_candidate_edges(group)
+        ctx["preseed_active_refs"] = []
+        ctx["preseed_active_targets"] = []
+        ctx["preseed_edges"] = []
+        ctx["preseed_inactive_ids"] = list(group.get("ref_ids", [])) + list(
+            group.get("target_ids", [])
+        )
+    return geojson, ctx
+
+
 @router.get("/stitching-review", response_class=HTMLResponse)
-async def stitching_review(request: Request, dataset: str = "", group_id: str = ""):
+async def stitching_review(
+    request: Request, dataset: str = "", group_id: str = "", deanchored: bool = False
+):
     """Main stitching review page.
 
     With ``group_id``, deep-links a specific group (reviewed or not) as a full
@@ -570,8 +649,7 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
             return HTMLResponse("Group not found in batch", status_code=404)
         deep_group = all_groups[deep_index]
-        geojson = _build_group_geojson(deep_group)
-        group_ctx = _build_group_context(deep_group, dataset=dataset)
+        geojson, group_ctx = _render_group(deep_group, dataset, deanchored)
         return templates.TemplateResponse(
             request,
             "stitching/page.html",
@@ -607,8 +685,7 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
         )
 
     group = groups[0]
-    geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group, dataset=dataset)
+    geojson, group_ctx = _render_group(group, dataset, deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -634,6 +711,7 @@ async def stitching_group(
     dataset: str = "",
     group_id: str = "",
     group_index: int = 0,
+    deanchored: bool = False,
 ):
     """HTMX fragment: renders group card + map data."""
     if not _validate_dataset(dataset):
@@ -669,8 +747,7 @@ async def stitching_group(
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group, dataset=dataset)
+    geojson, group_ctx = _render_group(group, dataset, deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -740,6 +817,7 @@ async def stitching_select(
     included_targets: str = Form(""),
     selected_edges: str = Form(""),
     exclude_slivers: str = Form(""),
+    deanchored: bool = Form(False),
 ):
     """Records selection, returns next group via HTMX swap.
 
@@ -789,27 +867,36 @@ async def stitching_select(
             num_refs = len({e["ref_id"] for e in final_edges})
             num_targets = len({e["target_id"] for e in final_edges})
         else:
-            # Manual mode: cross-product of the active ref/target pills.
+            # Manual mode: cross-product of the active ref/target pills against
+            # the FULL candidate set (selected edges UNION rejected candidates).
+            # A reviewer who pairs two segments whose only shared edge was
+            # REJECTED by the optimizer must have that pair recorded, not
+            # silently dropped (same silent-drop bug class as the #270 context
+            # pills). rejected_edges carry alignment fracs so sliver exclusion
+            # applies to them identically.
+            candidate_edges = _group_candidate_edges(group)
             ref_set = set(r for r in included_refs.split(",") if r)
             target_set = set(t for t in included_targets.split(",") if t)
             matched = [
                 e
-                for e in group.get("edges", [])
+                for e in candidate_edges
                 if e["ref_id"] in ref_set and e["target_id"] in target_set
             ]
 
             # Guard against silently recording an empty (label-corrupting)
             # selection. Distinguish intent by the active-pill fields:
             #   - Both empty  -> deliberate reject-all; store [] normally.
-            #   - Non-empty but zero group edges matched -> inconsistent
+            #   - Non-empty but zero candidate edges matched -> inconsistent
             #     submission (e.g. a client-side regression that drops the pill
             #     IDs, or active pills that share no edge). Refuse rather than
             #     corrupt the label. Logged without reflecting client input.
+            #     The union is counted here too, so a pair whose only edge is
+            #     rejected is treated as a real match, not an inconsistency.
             #
             # Checked BEFORE sliver exclusion so an all-sliver selection is not
             # misread as an inconsistent submit — it is a legitimate (if empty)
             # result once the slivers are dropped.
-            if group.get("edges") and not matched and (ref_set or target_set):
+            if candidate_edges and not matched and (ref_set or target_set):
                 logger.warning(
                     "Rejected inconsistent stitching submit for group %s: "
                     "%d refs / %d targets claimed but 0 group edges matched",
@@ -836,6 +923,10 @@ async def stitching_select(
             match_type=group.get("match_type", ""),
             num_refs=num_refs,
             num_targets=num_targets,
+            # Stamp de-anchored reviews so the eval can slice an unbiased set of
+            # labels elicited without the optimizer's pre-seeded proposal. No new
+            # CSV column — reuses the existing session_id provenance field.
+            session_id="deanchored_v1" if deanchored else None,
         )
 
     # Load next group
@@ -851,8 +942,7 @@ async def stitching_select(
         )
 
     group = groups[0]
-    geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group, dataset=dataset)
+    geojson, group_ctx = _render_group(group, dataset, deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -874,6 +964,7 @@ async def stitching_skip(
     request: Request,
     dataset: str = Form(...),
     group_id: str = Form(""),
+    deanchored: bool = Form(False),
 ):
     """Skips current group, loads next unreviewed group after it."""
     if not _validate_dataset(dataset):
@@ -911,8 +1002,7 @@ async def stitching_skip(
                 break
 
     group = groups[next_index]
-    geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group, dataset=dataset)
+    geojson, group_ctx = _render_group(group, dataset, deanchored)
 
     return templates.TemplateResponse(
         request,

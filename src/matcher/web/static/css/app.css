@@ -1850,6 +1850,36 @@ body {
     color: #f0932b;
 }
 
+/* De-anchored review mode: mode switch + collapsed proposals */
+.deanchor-toggle {
+    color: var(--text-muted);
+    border: 1px solid var(--border, #444);
+    border-radius: 10px;
+    padding: 1px 8px;
+    white-space: nowrap;
+}
+.deanchor-toggle.active {
+    color: #fff;
+    background: #6c5ce7;
+    border-color: #6c5ce7;
+}
+.deanchored-proposals {
+    margin-bottom: 8px;
+}
+.deanchored-proposals > summary {
+    cursor: pointer;
+    list-style: none;
+}
+.deanchored-proposals > summary::-webkit-details-marker {
+    display: none;
+}
+.deanchored-proposals .peek-note {
+    font-weight: 500;
+    text-transform: none;
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
 /* Sliver-edge exclusion control (feature 3) */
 .sliver-control {
     display: flex;
