@@ -382,6 +382,41 @@ def test_human_precedence_by_edge_overlap(tmp_path, labels_dir):
     assert g.human_group_id == "old_hash"
 
 
+def test_panel_v1_rows_do_not_confer_human_precedence(tmp_path, labels_dir):
+    # A prior-generation panel label (v1) covers the group, but it is NOT human,
+    # so it must not block a v2 export (prefix match, not exact-tag match).
+    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
+    store.add("g1", [{"ref_id": "r1", "target_id": "t1"}], "1:N", 1, 1, "panel_unanimous_v1", "s1")
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g1", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    g = _by_gid(_plan([b], labels_dir))["g1"]
+    assert g.exported
+
+
+def test_missing_labeler_does_not_crash_precedence(tmp_path, labels_dir):
+    # A hand-edited/legacy row with an empty labeler must be kept as human
+    # (na=False) rather than crashing the prefix filter with ~NaN.
+    import pandas as pd
+
+    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
+    store.add("g1", [{"ref_id": "r1", "target_id": "t1"}], "1:N", 1, 1, "brad", "s1")
+    csv_path = store.csv_path
+    df = pd.read_csv(csv_path)
+    df.loc[df["group_id"] == "g1", "labeler"] = None
+    df.to_csv(csv_path, index=False)
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g1", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    g = _by_gid(_plan([b], labels_dir))["g1"]
+    assert not g.exported
+    assert g.reason == REASON_HUMAN_PRECEDENCE
+
+
 def test_phase3_supersedes_phase2(tmp_path, labels_dir):
     b2 = make_batch(
         tmp_path / "phase2",

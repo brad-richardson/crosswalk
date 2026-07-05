@@ -235,8 +235,11 @@ def plan_exports(
     if not human_df.empty and "labeler" in human_df.columns:
         # Exclude ALL panel labelers (v1, v2, ...) — none are human, so they must
         # not confer human precedence. Matching the prefix keeps re-runs idempotent
-        # across a labeler-tag bump.
-        human_df = human_df[~human_df["labeler"].str.startswith(PANEL_LABELER_PREFIX)]
+        # across a labeler-tag bump. astype("string") + na=False: a missing
+        # labeler (hand-edited/legacy CSV, possibly an all-NaN float column) is
+        # not a panel label — keep the row instead of raising.
+        labeler = human_df["labeler"].astype("string")
+        human_df = human_df[~labeler.str.startswith(PANEL_LABELER_PREFIX, na=False)]
     human_gids = set(human_df["group_id"].astype(str)) if not human_df.empty else set()
 
     # Metadata + candidate edges for auto-accept groups (for the class gate and
