@@ -126,3 +126,77 @@ abstentions. Wall time per group is set by the slowest provider (parallel).
   full-candidate option would close the artifact gaps seen here.
 - Consider recording per-provider effort in `votes.csv` for future audits (model
   string is recorded; effort currently is not).
+
+## Appendix: raw panel outputs (batch dirs are gitignored)
+
+### `us_boston_streets_panelv2check/votes.csv`
+
+```csv
+group_id,provider,model,choice,confidence,latency_s
+07632e1f,claude,claude-opus-4-8,A,0.85,29.5
+07632e1f,codex,gpt-5.5,A,0.93,9.37
+07632e1f,agy,Gemini 3.5 Flash (Medium),A,1.0,16.72
+0b3a4f7d,claude,claude-opus-4-8,A,0.72,39.04
+0b3a4f7d,codex,gpt-5.5,A,0.93,9.46
+0b3a4f7d,agy,Gemini 3.5 Flash (Medium),A,1.0,42.22
+0e3e10ad,claude,claude-opus-4-8,A,0.78,42.42
+0e3e10ad,codex,gpt-5.5,B,0.89,12.88
+0e3e10ad,agy,Gemini 3.5 Flash (Medium),A,1.0,15.87
+166ce59a,claude,claude-opus-4-8,A,0.96,26.34
+166ce59a,codex,gpt-5.5,A,0.98,7.21
+166ce59a,agy,Gemini 3.5 Flash (Medium),A,1.0,8.82
+37a546e3,claude,claude-opus-4-8,A,0.95,19.34
+37a546e3,codex,gpt-5.5,A,0.96,8.42
+37a546e3,agy,Gemini 3.5 Flash (Medium),A,1.0,6.55
+461ebf00,claude,claude-opus-4-8,A,0.95,20.66
+461ebf00,codex,gpt-5.5,A,0.97,6.47
+461ebf00,agy,Gemini 3.5 Flash (Medium),A,0.95,8.67
+4bcea059,claude,claude-opus-4-8,A,0.78,26.88
+4bcea059,codex,gpt-5.5,A,0.94,22.33
+4bcea059,agy,Gemini 3.5 Flash (Medium),A,0.95,13.65
+c3a963e9,claude,claude-opus-4-8,A,0.82,30.28
+c3a963e9,codex,gpt-5.5,A,0.93,9.8
+c3a963e9,agy,Gemini 3.5 Flash (Medium),A,1.0,17.18
+```
+
+### `us_boston_streets_panelv2check/consensus.csv`
+
+```csv
+group_id,consensus,choice,edge_set,routing,n_votes,n_valid,minority,mean_confidence,route_reason
+07632e1f,unanimous,A,"[[""128ec53e-1759-49d8-ac75-3a38643764f4"", ""us_boston_streets_6733_882a30663b""], [""128ec53e-1759-49d8-ac75-3a38643764f4"", ""us_boston_streets_769_882a30663b""], [""7f7d085e-0445-420b-aa22-4755d8e8c3c0"", ""us_boston_streets_6733_882a30663b""], [""7f7d085e-0445-420b-aa22-4755d8e8c3c0"", ""us_boston_streets_9537_882a30663b""]]",auto_accept,3,3,,0.927,
+0b3a4f7d,unanimous,A,"[[""043fcb81-b9cf-45e0-b3dc-ead383ecff38"", ""us_boston_streets_8911_882a30646b""], [""15a3921b-30b7-4320-951e-558b77ad8218"", ""us_boston_streets_5934_882a30646b""], [""3835dc1f-309e-48d4-8b81-3798ebc3524c"", ""us_boston_streets_8911_882a30646b""], [""3abcd6d7-9136-413e-ba2c-1ad53edf7c82"", ""us_boston_streets_5934_882a30646b""], [""45a8369e-f2e4-4374-adbb-091489e80b90"", ""us_boston_streets_5934_882a30646b""], [""5608c3e8-97e4-4195-8757-29366968a0d2"", ""us_boston_streets_5934_882a30646b""], [""d4a070e0-3ea8-4548-a27c-73f99f1eae63"", ""us_boston_streets_8911_882a30646b""], [""f42aa536-6c74-4e47-961e-8062362cc52c"", ""us_boston_streets_5934_882a30646b""], [""f42aa536-6c74-4e47-961e-8062362cc52c"", ""us_boston_streets_8911_882a30646b""]]",auto_accept,3,3,,0.883,
+0e3e10ad,majority,A,"[[""01bb3500-1d0a-4dda-b3d9-8308808ac925"", ""us_boston_streets_2069_882a30660b""], [""01bb3500-1d0a-4dda-b3d9-8308808ac925"", ""us_boston_streets_4581_882a30660b""], [""8f66a63b-cc18-4230-85fd-ae766c95add9"", ""us_boston_streets_2069_882a30660b""]]",human_review,3,3,codex=B,0.89,
+166ce59a,unanimous,A,"[[""08538ac7-6af4-465b-bdc4-15793af199ac"", ""us_boston_streets_2460_882a306685""], [""23eaa6bc-1826-4a35-8bad-a3fb6f49f631"", ""us_boston_streets_2460_882a306685""]]",auto_accept,3,3,,0.98,
+37a546e3,unanimous,A,"[[""22fddb24-f47a-4e55-a4fe-a89f71d86109"", ""us_boston_streets_5103_882a3066e7""], [""3359a76b-37bb-4139-84b2-3f5287794bf7"", ""us_boston_streets_5103_882a3066e7""], [""41a6300f-5712-4536-859f-6b10fb37630a"", ""us_boston_streets_5103_882a3066e7""], [""6adb5b10-abca-4184-b277-c011b1b4645f"", ""us_boston_streets_5103_882a3066e7""], [""8dce4768-ab4f-48a1-867f-c6c06e4b649f"", ""us_boston_streets_5103_882a3066e7""], [""ac8e1bc0-f6ff-4f11-bfd5-979f101516a4"", ""us_boston_streets_5103_882a3066e7""], [""b2ad422a-448d-46b6-83ea-bb12bb7c2df3"", ""us_boston_streets_5103_882a3066e7""], [""b69ef9b3-d9bf-4b07-b2be-630c86f082da"", ""us_boston_streets_5103_882a3066e7""], [""bb246ff8-90d2-42a0-8d60-91ca28cd7f38"", ""us_boston_streets_7620_882a3066e3""], [""f5d0c3d3-0e85-4bca-ab50-102f37548d3a"", ""us_boston_streets_5103_882a3066e7""]]",auto_accept,3,3,,0.97,
+461ebf00,unanimous,A,"[[""8ef981cb-fc24-4506-ad9b-f5d5d4196d79"", ""us_boston_streets_1936_882a30660d""], [""8ef981cb-fc24-4506-ad9b-f5d5d4196d79"", ""us_boston_streets_7735_882a30660d""]]",auto_accept,3,3,,0.957,
+4bcea059,unanimous,A,"[[""07630b8d-4c0b-400a-a00f-a2e66dacb8b2"", ""us_boston_streets_3794_882a3064b5""], [""07630b8d-4c0b-400a-a00f-a2e66dacb8b2"", ""us_boston_streets_4557_882a339a49""], [""a2dfc6db-5ac1-4a34-9e70-69cb058e8e7e"", ""us_boston_streets_6818_882a3064b5""], [""a4d90467-8467-4182-aec6-5028a2fd2662"", ""us_boston_streets_3324_882a3064b5""], [""a4d90467-8467-4182-aec6-5028a2fd2662"", ""us_boston_streets_3794_882a3064b5""], [""a4d90467-8467-4182-aec6-5028a2fd2662"", ""us_boston_streets_9091_882a3064b5""], [""bc9e42cf-e9c9-4fdb-aa12-fd14dfdb8f92"", ""us_boston_streets_10036_882a339a4b""], [""bc9e42cf-e9c9-4fdb-aa12-fd14dfdb8f92"", ""us_boston_streets_3324_882a3064b5""]]",auto_accept,3,3,,0.89,
+c3a963e9,unanimous,A,"[[""0e76ac7f-2ae8-4144-9449-f114f797ddcd"", ""us_boston_streets_1013_882a3066ab""], [""0e76ac7f-2ae8-4144-9449-f114f797ddcd"", ""us_boston_streets_2562_882a3066ab""], [""296938c6-db35-4ac8-b2dd-e43c8c7fff4b"", ""us_boston_streets_2562_882a3066ab""], [""c2a1ad97-1797-4ff0-8f8d-a01524e644cc"", ""us_boston_streets_2562_882a3066ab""], [""ca6210b6-9649-4e8a-b656-bf9531a3d529"", ""us_boston_streets_2562_882a3066ab""]]",auto_accept,3,3,,0.917,
+```
+
+### `us_seattle_sidewalks_panelv2check/votes.csv`
+
+```csv
+group_id,provider,model,choice,confidence,latency_s
+2b99c180,claude,claude-opus-4-8,C,0.4,44.82
+2b99c180,codex,gpt-5.5,B,0.78,21.47
+2b99c180,agy,Gemini 3.5 Flash (Medium),C,0.95,52.23
+46e57794,claude,claude-opus-4-8,E,0.62,38.88
+46e57794,codex,gpt-5.5,E,0.86,10.34
+46e57794,agy,Gemini 3.5 Flash (Medium),A,0.95,87.47
+670e939f,claude,claude-opus-4-8,D,0.72,50.07
+670e939f,codex,gpt-5.5,D,0.88,15.16
+670e939f,agy,Gemini 3.5 Flash (Medium),A,0.95,43.82
+e919f4ab,claude,claude-opus-4-8,A,0.9,21.67
+e919f4ab,codex,gpt-5.5,A,0.93,10.19
+e919f4ab,agy,Gemini 3.5 Flash (Medium),A,1.0,14.1
+```
+
+### `us_seattle_sidewalks_panelv2check/consensus.csv`
+
+```csv
+group_id,consensus,choice,edge_set,routing,n_votes,n_valid,minority,mean_confidence,route_reason
+2b99c180,majority,C,"[[""44e23abe-d2b2-4ccb-9479-56c0fdbf81f7"", ""sea_sidewalk_27160066_8828d542cb""], [""58cd2f6a-eadd-4e0c-b214-e85226c41f68"", ""sea_sidewalk_27161003_8828d542cb""], [""58cd2f6a-eadd-4e0c-b214-e85226c41f68"", ""sea_sidewalk_27161005_8828d542cb""], [""77aa46c9-9488-45dd-adba-0c692d91d287"", ""sea_sidewalk_27150607_8828d542cb""], [""ad5c228f-1191-4711-ae0f-629c73af1777"", ""sea_sidewalk_27150023_8828d542cb""], [""ad5c228f-1191-4711-ae0f-629c73af1777"", ""sea_sidewalk_27150607_8828d542cb""], [""bca8b1ed-761d-4535-8f94-f81768215275"", ""sea_sidewalk_27150607_8828d542cb""], [""d9352aab-f9e6-4945-b373-c7b4d78982ab"", ""sea_sidewalk_27149904_8828d542cb""], [""d9352aab-f9e6-4945-b373-c7b4d78982ab"", ""sea_sidewalk_27161007_8828d542cb""]]",human_review,3,3,codex=B,0.675,
+46e57794,majority,E,"[[""4fd1049a-0fe5-498c-891c-3cb0e38ded76"", ""sea_sidewalk_27160036_8828d542cb""], [""4fd1049a-0fe5-498c-891c-3cb0e38ded76"", ""sea_sidewalk_27160057_8828d55535""], [""4fd1049a-0fe5-498c-891c-3cb0e38ded76"", ""sea_sidewalk_27194369_8828d55535""], [""4fd1049a-0fe5-498c-891c-3cb0e38ded76"", ""sea_sidewalk_27194405_8828d55535""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27149785_8828d55523""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27149962_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27150518_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27150773_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27160275_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27160276_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27160277_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27160278_8828d542c9""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27160279_8828d55523""], [""99f74ea8-3f62-4594-b5bb-2b56635d82a9"", ""sea_sidewalk_27194371_8828d542c9""], [""e06aa740-40a6-400f-989b-75764f868f69"", ""sea_sidewalk_27160249_8828d55535""]]",human_review,3,3,agy=A,0.74,
+670e939f,majority,D,"[[""007a7358-ce55-4643-bb4f-4d46d70bc40f"", ""sea_sidewalk_27159882_8828d542dd""], [""0fada7b9-a294-4f48-bf31-fcb0aa8be06a"", ""sea_sidewalk_27159882_8828d542dd""], [""e385d178-4004-4655-bf3c-7be0ec69028b"", ""sea_sidewalk_27159882_8828d542dd""], [""e7ee91c5-baa3-43c3-a78b-9a7d74f0cbb3"", ""sea_sidewalk_27159880_8828d542dd""]]",human_review,3,3,agy=A,0.8,
+e919f4ab,unanimous,A,"[[""44d2b95c-a45b-4f08-818f-119c872afae2"", ""sea_sidewalk_27151163_8828d54295""], [""44d2b95c-a45b-4f08-818f-119c872afae2"", ""sea_sidewalk_27169203_8828d54295""]]",auto_accept,3,3,,0.943,
+```
