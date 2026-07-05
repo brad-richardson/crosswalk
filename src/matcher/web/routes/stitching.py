@@ -9,6 +9,7 @@ from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring, unary_union
 
 from ...filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
+from ...labeling.stitching_store import LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET
 from ...matching.alternatives import _shorten_id
 from ...matching.sliver import (
     annotate_group_sliver_flags,
@@ -835,20 +836,21 @@ async def stitching_select(
 ):
     """Records selection, returns next group via HTMX swap.
 
-    Edge-set fidelity: when the client submits an unmodified option it includes
-    an explicit ``selected_edges`` payload (the option's exact edge set), which
-    is stored verbatim. Any manual pill toggle after picking an option clears
-    that payload on the client, so we fall back to reconstructing edges as the
-    cross-product of the active ref/target pills — exactly the original path.
+    Two storage paths by intent (see docs/ARCHITECTURE.md "Stitching labels"):
 
-    Sliver exclusion: the cross-product fallback can silently pull in junction
-    "sliver" edges (near-zero overlap). When the ``exclude_slivers`` form field
-    is truthy, those flagged edges are dropped from the reconstructed set. The
-    field defaults to FALSE when absent, preserving behaviour for old clients
-    and existing tests; the current UI always sends it explicitly. The explicit
-    option path is unaffected — an option is a curated exact edge set.
+    * EXPLICIT option ratification — the client submits an unmodified option's
+      exact edge set as ``selected_edges``. This endorses a specific listed edge
+      set, so it is stored verbatim with PAIR semantics.
+    * MANUAL / de-anchored membership — no ``selected_edges`` payload. The active
+      ref/target pills are the reviewer's asserted group MEMBERSHIP, not a
+      pair-level adjudication, so a SET label is recorded (membership in
+      ref_ids/target_ids, empty selected_edges). Reject-all (both pill sets
+      empty) keeps the historical empty-edge PAIR encoding.
+
+    ``exclude_slivers`` is retained for client compatibility but no longer
+    affects storage (set labels store no edges); it still drives the client-side
+    confidence display and confirm-panel sliver badges.
     """
-    exclude_sliver_edges = exclude_slivers.strip().lower() in {"true", "1", "on", "yes"}
     if not _validate_dataset(dataset):
         return HTMLResponse("Unknown dataset", status_code=404)
     try:
@@ -875,19 +877,25 @@ async def stitching_select(
             logger.warning(f"Rejected selected_edges for group {group_id}: {e}")
             return HTMLResponse("Invalid selected_edges", status_code=400)
 
+        # Storage variables resolved by the two paths below.
+        label_semantics = LABEL_SEMANTICS_PAIR
+        ref_members: list[str] | None = None
+        target_members: list[str] | None = None
         if explicit_edges is not None:
-            # Exact option edge set — store verbatim.
+            # Exact option edge set (option-card ratification, incl. stale) —
+            # this endorses a SPECIFIC listed edge set, so it keeps PAIR
+            # semantics and is stored verbatim.
             final_edges = explicit_edges
             num_refs = len({e["ref_id"] for e in final_edges})
             num_targets = len({e["target_id"] for e in final_edges})
         else:
-            # Manual mode: cross-product of the active ref/target pills against
-            # the FULL candidate set (selected edges UNION rejected candidates).
-            # A reviewer who pairs two segments whose only shared edge was
-            # REJECTED by the optimizer must have that pair recorded, not
-            # silently dropped (same silent-drop bug class as the #270 context
-            # pills). rejected_edges carry alignment fracs so sliver exclusion
-            # applies to them identically.
+            # Manual / de-anchored mode: the reviewer asserted only group
+            # MEMBERSHIP (these refs and these targets form one matched group)
+            # via the active pills — he never adjudicated individual pairings.
+            # So this records a SET label (membership in ref_ids/target_ids,
+            # empty selected_edges), NOT the ref×target cross-product. The
+            # candidate union is still computed to run the inconsistency guard
+            # (and drives the client's zero-support warning).
             candidate_edges = _group_candidate_edges(group)
             ref_set = set(r for r in included_refs.split(",") if r)
             target_set = set(t for t in included_targets.split(",") if t)
@@ -941,15 +949,22 @@ async def stitching_select(
                     "Empty de-anchored selection requires confirmation", status_code=400
                 )
 
-            if exclude_sliver_edges:
-                ref_lens, tgt_lens = group_segment_lengths_m(group)
-                matched = [e for e in matched if not edge_is_sliver(e, ref_lens, tgt_lens)]
-
-            final_edges = [{"ref_id": e["ref_id"], "target_id": e["target_id"]} for e in matched]
-            # Recompute counts from the final (post-exclusion) edge set so they
-            # never claim segments that dropped out with their sliver edges.
-            num_refs = len({e["ref_id"] for e in final_edges})
-            num_targets = len({e["target_id"] for e in final_edges})
+            if ref_set or target_set:
+                # SET label: store membership only. selected_edges stays empty;
+                # sliver exclusion no longer applies (no pairs are stored). The
+                # membership is exactly the active pills the reviewer chose.
+                label_semantics = LABEL_SEMANTICS_SET
+                ref_members = sorted(ref_set)
+                target_members = sorted(target_set)
+                final_edges = []
+                num_refs = len(ref_set)
+                num_targets = len(target_set)
+            else:
+                # Reject-all (both pill sets empty): no membership to overstate,
+                # so keep the historical PAIR reject-all encoding (empty edges).
+                final_edges = []
+                num_refs = 0
+                num_targets = 0
 
         record_stitching_label(
             dataset_id=dataset,
@@ -958,6 +973,9 @@ async def stitching_select(
             match_type=group.get("match_type", ""),
             num_refs=num_refs,
             num_targets=num_targets,
+            label_semantics=label_semantics,
+            ref_ids=ref_members,
+            target_ids=target_members,
             # Stamp de-anchored reviews so the eval can slice an unbiased set of
             # labels elicited without the optimizer's pre-seeded proposal. No new
             # CSV column — reuses the existing session_id provenance field.

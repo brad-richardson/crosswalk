@@ -38,6 +38,56 @@ def _human_edge_set(selected_edges_raw: str) -> frozenset:
     return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
 
 
+def _is_set_label(row) -> bool:
+    """True when a human row uses SET semantics (membership, not pairs)."""
+    val = row.get("label_semantics") if hasattr(row, "get") else row["label_semantics"]
+    return str(val or "pair") == "set"
+
+
+def _parse_id_list(raw) -> frozenset:
+    """Parse a JSON id array (``ref_ids`` / ``target_ids``) into a string set."""
+    if raw is None or isinstance(raw, float) or not str(raw).strip():
+        return frozenset()
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return frozenset()
+    return frozenset(str(x) for x in data)
+
+
+def set_label_metrics(
+    pred_edges: frozenset,
+    ref_members: frozenset,
+    target_members: frozenset,
+) -> tuple[bool, float, float]:
+    """Score a predicted edge set against a SET label's membership.
+
+    THE PARITY-CRITICAL CORE. Replicated verbatim in
+    ``cbench.eval.stitch_metrics.set_label_metrics`` and guarded by
+    ``tests/unit/test_cbench_set_metric_parity.py`` — keep the two in lockstep.
+
+    Returns ``(membership_exact, boundary_precision, coverage)``:
+      * membership_exact - the segments incident to the predicted edges are
+        EXACTLY this membership (both sides).
+      * boundary_precision - fraction of predicted edges whose BOTH endpoints are
+        members; 1.0 when nothing is predicted.
+      * coverage - fraction of members with >= 1 incident predicted edge; 1.0
+        when the membership is empty.
+    """
+    pred_ref = frozenset(r for r, _ in pred_edges)
+    pred_tgt = frozenset(t for _, t in pred_edges)
+    membership_exact = (pred_ref == ref_members) and (pred_tgt == target_members)
+
+    n_edges = len(pred_edges)
+    within = sum(1 for (r, t) in pred_edges if r in ref_members and t in target_members)
+    boundary_precision = within / n_edges if n_edges else 1.0
+
+    n_members = len(ref_members) + len(target_members)
+    covered = len(ref_members & pred_ref) + len(target_members & pred_tgt)
+    coverage = covered / n_members if n_members else 1.0
+    return membership_exact, boundary_precision, coverage
+
+
 def edge_prf(pred: frozenset, truth: frozenset) -> tuple[float, float, float]:
     """Edge-level precision / recall / F1 between two edge sets.
 
@@ -204,23 +254,50 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     human label to the current sidecar group containing the most of its
     selected edges.
 
+    SET-semantics labels carry no edges, so they are recovered by MEMBERSHIP
+    overlap (ref_ids/target_ids vs each group's segment ids) into their own
+    buckets — they must never be misread as reject-all/NONE.
+
     Returns a dict with:
     - target_group_ids: sorted distinct sidecar group_ids to build the eval batch
+      (includes groups recovered for set labels)
     - clean: [(human_gid, sidecar_gid)] where ALL selected edges are in one group
     - split: [(human_gid, sidecar_gid, n_matched, n_total)] edges span groups
-    - empty: [human_gid] human labels with no selected edges (NONE / reject-all)
-    - lost:  [human_gid] non-empty labels whose edges no longer survive
+    - empty: [human_gid] PAIR labels with no selected edges (NONE / reject-all)
+    - lost:  [human_gid] non-empty pair labels whose edges no longer survive
+    - set:   [(human_gid, sidecar_gid)] set labels recovered by membership overlap
+    - set_lost: [human_gid] set labels whose members appear in no current group
     """
     from collections import defaultdict
 
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+    seg_groups: dict[str, set[str]] = defaultdict(set)
     for g in groups:
         for e in g.get("edges", []):
             edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
+            seg_groups[str(e["ref_id"])].add(g["group_id"])
+            seg_groups[str(e["target_id"])].add(g["group_id"])
 
     clean, split, empty, lost = [], [], [], []
+    set_recovered: list[tuple[str, str]] = []
+    set_lost: list[str] = []
     for _, row in human_df.iterrows():
         hgid = str(row["group_id"])
+        # SET labels carry no edges (selected_edges == "[]") but are MATCH
+        # membership assertions, NOT reject-all — classifying them as ``empty``
+        # would both miscount them as NONE and exclude their groups from the
+        # eval batch. Recover them by MEMBERSHIP overlap instead.
+        if _is_set_label(row):
+            members = _parse_id_list(row.get("ref_ids")) | _parse_id_list(row.get("target_ids"))
+            cnt_s: dict[str, int] = defaultdict(int)
+            for s in members:
+                for gid in seg_groups.get(s, ()):
+                    cnt_s[gid] += 1
+            if cnt_s:
+                set_recovered.append((hgid, max(cnt_s, key=cnt_s.get)))
+            else:
+                set_lost.append(hgid)
+            continue
         hes = _human_edge_set(row["selected_edges"])
         if not hes:
             empty.append(hgid)
@@ -238,13 +315,17 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
         else:
             split.append((hgid, best_gid, cnt[best_gid], len(hes)))
 
-    targets = sorted({bg for _, bg in clean} | {bg for _, bg, _, _ in split})
+    targets = sorted(
+        {bg for _, bg in clean} | {bg for _, bg, _, _ in split} | {bg for _, bg in set_recovered}
+    )
     return {
         "target_group_ids": targets,
         "clean": clean,
         "split": split,
         "empty": empty,
         "lost": lost,
+        "set": set_recovered,
+        "set_lost": set_lost,
     }
 
 
@@ -266,6 +347,8 @@ def recover_empty_reject_all(groups: list[dict], human_df: pd.DataFrame) -> dict
     recovered: list[str] = []
     unrecoverable: list[str] = []
     for _, row in human_df.iterrows():
+        if _is_set_label(row):
+            continue  # SET label: a MATCH membership assertion, not a reject-all
         if _human_edge_set(row["selected_edges"]):
             continue  # has edges -> not a reject-all label
         hgid = str(row["group_id"])
@@ -415,3 +498,118 @@ def summarize(results: list[GroupEval]) -> dict:
 def disagreement_report(results: list[GroupEval]) -> list[GroupEval]:
     """Groups where the panel contradicts the human label (label-quality review)."""
     return [r for r in results if not r.exact_match]
+
+
+@dataclass
+class SetGroupEval:
+    """Set-semantics evaluation of the panel choice for one human set label."""
+
+    group_id: str
+    human_group_id: str
+    match_type: str
+    ref_members: frozenset
+    target_members: frozenset
+    panel_edge_set: frozenset
+    membership_exact: bool
+    boundary_precision: float
+    coverage: float
+
+
+def _map_set_labels_to_groups(
+    set_df: pd.DataFrame,
+    group_members: dict[str, frozenset],
+) -> dict[str, str]:
+    """Map each SET human row's group_id -> best panel group by membership overlap.
+
+    Mirrors :func:`cbench.eval.stitch_metrics.map_set_labels_to_groups`. Set rows
+    carry no edges, so they map by ref_ids ∪ target_ids segment overlap, with a
+    verbatim group_id preferred when it still shares a segment.
+    """
+    from collections import defaultdict
+
+    seg_groups: dict[str, set[str]] = defaultdict(set)
+    for gid, members in group_members.items():
+        for s in members:
+            seg_groups[s].add(gid)
+
+    mapping: dict[str, str] = {}
+    for _, row in set_df.iterrows():
+        members = _parse_id_list(row.get("ref_ids")) | _parse_id_list(row.get("target_ids"))
+        hgid = str(row["group_id"])
+        if not members:
+            if hgid in group_members:
+                mapping[hgid] = hgid
+            continue
+        counts: dict[str, int] = defaultdict(int)
+        for s in members:
+            for gid in seg_groups.get(s, ()):
+                counts[gid] += 1
+        if not counts:
+            continue
+        best = max(counts, key=counts.get)
+        mapping[hgid] = hgid if counts.get(hgid, 0) > 0 else best
+    return mapping
+
+
+def evaluate_set_labels(batch_dir: Path, human_df: pd.DataFrame) -> list[SetGroupEval]:
+    """Score panel choices against SET-semantics human labels (membership/boundary/coverage).
+
+    Set labels are excluded from the edge-F1 panel eval (they carry no edges) and
+    scored here instead: the panel's consensus edge set is compared against the
+    human membership. Empty (no set labels) when the CSV has none.
+    """
+    batch_dir = Path(batch_dir)
+    if "label_semantics" not in human_df.columns:
+        return []
+    set_df = human_df[human_df.apply(_is_set_label, axis=1)]
+    if set_df.empty:
+        return []
+
+    consensus_df = pd.read_csv(batch_dir / "consensus.csv", dtype={"group_id": str})
+    candidate_edges = _load_batch_candidate_edges(batch_dir)
+    group_members = {
+        gid: frozenset(r for r, _ in edges) | frozenset(t for _, t in edges)
+        for gid, edges in candidate_edges.items()
+    }
+    panel_es_by_gid = {
+        str(row["group_id"]): _parse_edge_set(row["edge_set"]) for _, row in consensus_df.iterrows()
+    }
+
+    mapping = _map_set_labels_to_groups(set_df, group_members)
+    set_by_hgid = {str(r["group_id"]): r for _, r in set_df.iterrows()}
+
+    results: list[SetGroupEval] = []
+    for hgid, gid in mapping.items():
+        row = set_by_hgid[hgid]
+        ref_members = _parse_id_list(row.get("ref_ids"))
+        tgt_members = _parse_id_list(row.get("target_ids"))
+        # Panel prediction restricted to this group's candidate edges.
+        panel_es = panel_es_by_gid.get(gid, frozenset()) & candidate_edges.get(gid, frozenset())
+        exact, boundary, coverage = set_label_metrics(panel_es, ref_members, tgt_members)
+        results.append(
+            SetGroupEval(
+                group_id=gid,
+                human_group_id=hgid,
+                match_type=str(row.get("match_type") or ""),
+                ref_members=ref_members,
+                target_members=tgt_members,
+                panel_edge_set=panel_es,
+                membership_exact=exact,
+                boundary_precision=boundary,
+                coverage=coverage,
+            )
+        )
+    return results
+
+
+def summarize_set(results: list[SetGroupEval]) -> dict:
+    """Aggregate set-label panel metrics (membership exact / boundary / coverage)."""
+    n = len(results)
+    if n == 0:
+        return {"n_set_groups": 0}
+    return {
+        "n_set_groups": n,
+        "membership_exact_rate": round(sum(r.membership_exact for r in results) / n, 3),
+        "boundary_precision": round(sum(r.boundary_precision for r in results) / n, 3),
+        "coverage": round(sum(r.coverage for r in results) / n, 3),
+    }

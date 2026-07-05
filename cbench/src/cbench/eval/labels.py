@@ -85,7 +85,10 @@ def load_stitch_labels(
     if not csv_path.exists():
         return None
 
-    df = pd.read_csv(csv_path)
+    # group_id is an 8-char hex hash; without dtype=str an all-digit id with a
+    # leading zero would be coerced to int and break verbatim group_id matching
+    # (the reject-all and set-label mapping paths key on it).
+    df = pd.read_csv(csv_path, dtype={"group_id": str})
     logger.info(f"Loaded {len(df)} stitch labels from {csv_path}")
 
     required = {"group_id", "selected_edges"}

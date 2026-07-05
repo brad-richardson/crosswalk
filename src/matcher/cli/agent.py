@@ -978,7 +978,9 @@ def generate_stitch_batch(
             console.print(
                 f"[blue]Label recovery:[/blue] {len(rec['clean'])} clean, "
                 f"{len(rec['split'])} split, {len(rec['empty'])} empty(NONE), "
-                f"{len(rec['lost'])} lost -> {len(rec['target_group_ids'])} target groups"
+                f"{len(rec['lost'])} lost, {len(rec.get('set', []))} set, "
+                f"{len(rec.get('set_lost', []))} set-lost "
+                f"-> {len(rec['target_group_ids'])} target groups"
             )
         if recover_empty:
             emp = recover_empty_reject_all(groups, human_df)
@@ -1109,7 +1111,9 @@ def eval_stitch_panel(
     from ..agent_labeling.stitch_eval import (
         disagreement_report,
         evaluate_batch,
+        evaluate_set_labels,
         summarize,
+        summarize_set,
     )
 
     human_path = labels_dir / f"dataset={dataset}" / "data.csv"
@@ -1119,37 +1123,52 @@ def eval_stitch_panel(
     human_df = pd.read_csv(human_path, dtype={"group_id": str})
 
     results = evaluate_batch(batch_dir, human_df)
-    if not results:
+    set_results = evaluate_set_labels(batch_dir, human_df)
+    if not results and not set_results:
         console.print("[yellow]No panel groups mapped to human labels[/yellow]")
         raise typer.Exit(0)
 
     summary = summarize(results)
     disagreements = disagreement_report(results)
 
-    console.print(f"[bold]Panel eval: {summary['n_groups']} mapped groups[/bold]")
-    console.print(
-        f"  Panel exact edge-set match: {summary['panel_exact_rate']:.0%}  "
-        f"mean F1: {summary['panel_mean_f1']:.3f}"
-    )
-    console.print("  Per provider:")
-    for prov, s in summary["by_provider"].items():
+    if results:
+        console.print(f"[bold]Panel eval: {summary['n_groups']} mapped groups (pair labels)[/bold]")
         console.print(
-            f"    {prov:<8} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+            f"  Panel exact edge-set match: {summary['panel_exact_rate']:.0%}  "
+            f"mean F1: {summary['panel_mean_f1']:.3f}"
         )
-    console.print("  Per consensus tier:")
-    for tier, s in summary["by_consensus"].items():
+        console.print("  Per provider:")
+        for prov, s in summary["by_provider"].items():
+            console.print(
+                f"    {prov:<8} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+            )
+        console.print("  Per consensus tier:")
+        for tier, s in summary["by_consensus"].items():
+            console.print(
+                f"    {tier:<10} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+            )
+        oc = summary["option_coverage"]
         console.print(
-            f"    {tier:<10} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
+            f"  Option-coverage gap: {oc['gap']}/{summary['n_groups']} ({oc['gap_rate']:.0%})"
         )
-    oc = summary["option_coverage"]
-    console.print(
-        f"  Option-coverage gap: {oc['gap']}/{summary['n_groups']} ({oc['gap_rate']:.0%})"
-    )
-    console.print(f"  Disagreements (label-quality review candidates): {len(disagreements)}")
+        console.print(f"  Disagreements (label-quality review candidates): {len(disagreements)}")
+    else:
+        console.print("[bold]Panel eval: 0 pair-label groups mapped[/bold]")
 
-    if output:
+    if set_results:
+        ss = summarize_set(set_results)
+        console.print(f"[bold]Set-label eval: {ss['n_set_groups']} mapped set labels[/bold]")
+        console.print(
+            f"  Membership exact: {ss['membership_exact_rate']:.0%}  "
+            f"boundary precision: {ss['boundary_precision']:.3f}  "
+            f"coverage: {ss['coverage']:.3f}"
+        )
+
+    if output and results:
         _write_stitch_eval_report(output, summary, results, disagreements, dataset, batch_dir)
         console.print(f"[green]Wrote report to {output}[/green]")
+    elif output:
+        console.print("[yellow]No pair-label report written (set labels only)[/yellow]")
 
 
 def _write_stitch_eval_report(output, summary, results, disagreements, dataset, batch_dir) -> None:

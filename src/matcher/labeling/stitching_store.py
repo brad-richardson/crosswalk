@@ -16,17 +16,68 @@ from loguru import logger
 
 DEFAULT_STITCHING_DIR = Path("labels/stitching")
 
+# Label semantics (see docs/ARCHITECTURE.md "Stitching labels"):
+#   "pair" (default) - selected_edges is the authoritative pair set the labeler
+#       endorsed (explicit option ratifications; historical cross-product rows).
+#   "set"            - the labeler asserted only group MEMBERSHIP: these refs and
+#       these targets form one matched group. He did NOT adjudicate individual
+#       pairings, so selected_edges is empty ("[]") and the membership lives in
+#       ref_ids / target_ids. Eval scores these on membership/boundary/coverage,
+#       not per-pair edge-F1.
+LABEL_SEMANTICS_PAIR = "pair"
+LABEL_SEMANTICS_SET = "set"
+
 STITCHING_LABEL_COLUMNS = [
     "group_id",
     "dataset_id",
-    "selected_edges",  # JSON: [{ref_id, target_id}, ...]
+    "selected_edges",  # JSON: [{ref_id, target_id}, ...]  (empty for set rows)
     "match_type",
     "num_refs",
     "num_targets",
     "labeler",
     "labeled_at",
     "session_id",
+    # Set-semantics columns (backwards-compatible: default to a pair label with
+    # empty membership when absent). ref_ids / target_ids are JSON arrays of
+    # segment ids, encoded like selected_edges for consistency.
+    "label_semantics",
+    "ref_ids",
+    "target_ids",
 ]
+
+# Columns added after the original schema; older CSVs lack them. Loaders fill
+# these defaults so missing columns read as a normal pair label (NaN-safe).
+_SCHEMA_DEFAULTS = {
+    "label_semantics": LABEL_SEMANTICS_PAIR,
+    "ref_ids": "",
+    "target_ids": "",
+}
+
+
+def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Project a loaded frame onto the current schema, filling new columns.
+
+    - Drops columns not in the current schema (e.g. removed fields).
+    - Adds any missing column with its default, so a CSV written before the
+      set-semantics columns existed reads as a pair label with empty membership.
+    - Backfills NaN/empty ``label_semantics`` to ``pair`` (a hand-edited or
+      partially-migrated CSV must never leave the semantics undefined).
+    """
+    keep = [c for c in STITCHING_LABEL_COLUMNS if c in df.columns]
+    df = df[keep].copy()
+    for col, default in _SCHEMA_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
+    # NaN-safe: an all-empty float column (pandas reads a blank column as NaN)
+    # or a per-row blank must resolve to the pair default.
+    sem = df["label_semantics"].astype("string")
+    df["label_semantics"] = sem.where(
+        sem.isin([LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET]), LABEL_SEMANTICS_PAIR
+    ).astype(str)
+    for col in ("ref_ids", "target_ids"):
+        df[col] = df[col].astype("string").fillna("").astype(str)
+    # Preserve column order.
+    return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
 
 
 @dataclass
@@ -65,7 +116,7 @@ class StitchingLabelStore:
             try:
                 df = pd.read_csv(self.csv_path, dtype={"group_id": str})
                 # Drop any columns not in the current schema (e.g. removed fields)
-                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
+                return _ensure_schema(df)
             except Exception as primary_error:
                 logger.warning(
                     f"Failed to load stitching labels from {self.csv_path}: {primary_error}"
@@ -74,7 +125,7 @@ class StitchingLabelStore:
                     try:
                         logger.info(f"Recovering from backup: {backup_path}")
                         df = pd.read_csv(backup_path, dtype={"group_id": str})
-                        return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
+                        return _ensure_schema(df)
                     except Exception as backup_error:
                         raise OSError(
                             f"Both primary and backup stitching label files are corrupted.\n"
@@ -89,7 +140,7 @@ class StitchingLabelStore:
         if backup_path.exists():
             try:
                 df = pd.read_csv(backup_path, dtype={"group_id": str})
-                return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
+                return _ensure_schema(df)
             except Exception as e:
                 raise OSError(
                     f"Backup stitching label file is corrupted: {backup_path}\nError: {e}"
@@ -120,6 +171,9 @@ class StitchingLabelStore:
         num_targets: int,
         labeler: str,
         session_id: str,
+        label_semantics: str = LABEL_SEMANTICS_PAIR,
+        ref_ids: list[str] | None = None,
+        target_ids: list[str] | None = None,
     ) -> None:
         """Add a stitching review label.
 
@@ -129,12 +183,18 @@ class StitchingLabelStore:
 
         Args:
             group_id: Deterministic group identifier
-            selected_edges: List of {ref_id, target_id} dicts
+            selected_edges: List of {ref_id, target_id} dicts (empty for set rows)
             match_type: "1:N", "N:1", or "M:N"
             num_refs: Number of reference segments in the group
             num_targets: Number of target segments in the group
             labeler: Name of the reviewer
             session_id: Session identifier
+            label_semantics: "pair" (default) or "set". A set label stores only
+                group membership (ref_ids / target_ids) and leaves selected_edges
+                empty, because the labeler asserted membership, not per-pair
+                matches (see module docstring).
+            ref_ids: Set-label reference membership (ignored for pair rows).
+            target_ids: Set-label target membership (ignored for pair rows).
         """
         new_row = {
             "group_id": str(group_id),
@@ -146,6 +206,9 @@ class StitchingLabelStore:
             "labeler": labeler,
             "labeled_at": datetime.now(UTC).isoformat(),
             "session_id": session_id,
+            "label_semantics": label_semantics,
+            "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",
+            "target_ids": json.dumps(sorted(target_ids)) if target_ids else "",
         }
 
         # Remove existing label for this group (re-review replaces)
@@ -212,7 +275,7 @@ class StitchingLabelStore:
             if csv_path.exists():
                 try:
                     df = pd.read_csv(csv_path, dtype={"group_id": str})
-                    df = df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
+                    df = _ensure_schema(df)
                     dfs.append(df)
                 except Exception as e:
                     logger.warning(f"Failed to load {csv_path}: {e}")

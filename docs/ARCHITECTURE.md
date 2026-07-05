@@ -281,3 +281,44 @@ There is **no imputation**. NaN feature values are passed through unchanged to X
 | `test_label_store.py` | Features computed but not saved to labels |
 | `test_feature_consistency.py` | Error defaults, naming conventions |
 | `test_ml_pipeline_consistency.py` | Pre-computation vs direct computation, NaN preservation / inf capping, alignment-aware graphlet computation, label-store round-trip parity |
+
+## Stitching labels
+
+`/stitching-review` curates M:N group edge selections into
+`labels/stitching/dataset=*/data.csv` (see `labeling/stitching_store.py`). Schema:
+
+| Column | Meaning |
+|--------|---------|
+| `group_id` | Deterministic group hash (ref/target id sets) |
+| `dataset_id` | Dataset partition |
+| `selected_edges` | JSON `[{ref_id, target_id}, ...]` — the endorsed pair set (empty for set rows) |
+| `match_type` | `1:1` / `1:N` / `N:1` / `M:N` |
+| `num_refs`, `num_targets` | Segment counts (membership sizes for set rows) |
+| `labeler` | Reviewer id; `panel_*` = LLM-panel auto-accept (non-human) |
+| `labeled_at`, `session_id` | Provenance (`session_id = deanchored_v1` marks de-anchored reviews) |
+| `label_semantics` | `pair` (default) or `set` |
+| `ref_ids`, `target_ids` | Set-label membership as JSON id arrays (empty for pair rows) |
+
+**Pair vs set semantics.** A **pair** label's `selected_edges` is the authoritative
+per-pair truth the reviewer endorsed — used for explicit option-card
+ratifications and for the LLM panel's exported consensus. A **set** label records
+only that *these refs and these targets form one matched group*: the reviewer
+asserted MEMBERSHIP, not individual pairings (the mobile UI makes per-pair
+adjudication impractical). Manual and de-anchored submits therefore record a set
+label — membership in `ref_ids`/`target_ids`, `selected_edges` empty — rather
+than expanding the active pill cross-product into pairs the reviewer never
+adjudicated.
+
+Loaders default a missing/blank `label_semantics` to `pair` (NaN-safe), so CSVs
+predating these columns read as ordinary pair labels; the columns migrate lazily
+on the next save. Historical cross-product manual labels are converted to set
+semantics with `matcher data stitch-reinterpret-sets` (uses the shared
+`agent_labeling.xprod` cross-product detector; panel rows and non-artifact
+ratifications are left untouched; idempotent, with a `.csv.bak` backup).
+
+**Eval.** Pair labels are scored on edge-level precision/recall/F1 and exact
+match (the stitch gate's enforced metrics). Set labels are excluded from those
+pools and scored on membership exact-match / boundary precision / coverage — see
+BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
+`matcher.agent_labeling.stitch_eval` and the matcher-free `cbench.eval.stitch_metrics`,
+parity-guarded by `tests/unit/test_cbench_set_metric_parity.py`.

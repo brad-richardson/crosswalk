@@ -2563,3 +2563,153 @@ def stitch_refresh_queue(
         )
         batch_path.write_text(json.dumps(cache, indent=2))
         console.print(f"  [green]Wrote refreshed queue to {batch_path}[/green]")
+
+
+@data_app.command("stitch-reinterpret-sets")
+def stitch_reinterpret_sets(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID to reinterpret (e.g., us_boston_streets). Omit with --all.",
+    ),
+    all_datasets: bool = typer.Option(
+        False, "--all", "-a", help="Reinterpret every dataset with a stitching label CSV"
+    ),
+    labeler: str = typer.Option(
+        "", "--labeler", help="Only convert rows from this labeler (default: all non-panel)"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would change without writing the CSV"
+    ),
+):
+    """Reinterpret historical cross-product manual labels as SET-semantics labels.
+
+    Manual / de-anchored stitching submits used to record the full ref×target
+    cross-product of the active pills as individual pair assertions, even though
+    the reviewer only asserted group MEMBERSHIP. This converts those artifacts to
+    ``label_semantics=set`` (membership in ref_ids/target_ids, empty
+    selected_edges) using the SAME cross-product signature the review renderer
+    flags (``matcher.agent_labeling.xprod.is_crossproduct_artifact``): a
+    non-panel row whose stored pairs are EXACTLY the ref×target grid within the
+    candidate universe (>=2 refs and >=2 targets) AND add pairs beyond the
+    optimizer.
+
+    Safe by construction:
+      * panel_* rows and rows already ``label_semantics=set`` are never touched
+        (idempotent — re-running converts nothing new);
+      * explicit option-ratification rows (not a cross-product signature) are
+        left as pair labels;
+      * a ``.csv.bak`` backup is written before any change.
+
+    Examples:
+        matcher data stitch-reinterpret-sets us_boston_streets --dry-run
+        matcher data stitch-reinterpret-sets --all
+    """
+    import json
+
+    from ..agent_labeling.xprod import parse_selected_edges, reinterpret_row_to_set
+    from ..filenames import PROJECT_ROOT, STITCH_CACHE_DIR
+    from ..labeling.stitching_store import (
+        DEFAULT_STITCHING_DIR,
+        LABEL_SEMANTICS_SET,
+        StitchingLabelStore,
+    )
+
+    def _gid_key(gid: str) -> str:
+        return str(gid)[:8]
+
+    def _index_groups(groups: list[dict]) -> dict[str, dict]:
+        idx: dict[str, dict] = {}
+        for g in groups:
+            idx.setdefault(_gid_key(g.get("group_id", "")), g)
+        return idx
+
+    def _load_groups(path: Path) -> dict[str, dict]:
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text())
+        except (ValueError, OSError):
+            return {}
+        groups = data["groups"] if isinstance(data, dict) else data
+        return _index_groups(groups or [])
+
+    stitch_root = DEFAULT_STITCHING_DIR
+    if all_datasets:
+        datasets = sorted(
+            p.name.replace("dataset=", "")
+            for p in stitch_root.glob("dataset=*")
+            if (p / "data.csv").exists()
+        )
+    elif dataset:
+        datasets = [dataset]
+    else:
+        console.print("[red]Provide a dataset argument or --all[/red]")
+        raise typer.Exit(1)
+
+    grand_total = 0
+    for ds in datasets:
+        store = StitchingLabelStore(ds)
+        df = store.df
+        if df.empty:
+            console.print(f"[yellow]{ds}: no stitching labels[/yellow]")
+            continue
+
+        cache_groups = _load_groups(STITCH_CACHE_DIR / f"{ds}_batch.json")
+        sidecar_groups = _load_groups(PROJECT_ROOT / "data" / "output" / f"{ds}_groups.json")
+        if not cache_groups:
+            console.print(
+                f"[yellow]{ds}: no stitch cache ({STITCH_CACHE_DIR}/{ds}_batch.json); "
+                "cannot determine candidate universe — skipping[/yellow]"
+            )
+            continue
+
+        converted: list[tuple[str, int, int, int]] = []
+        skipped_no_geom = 0
+        for idx, row in df.iterrows():
+            lab = str(row.get("labeler") or "")
+            if labeler and lab != labeler:
+                continue
+            key = _gid_key(row["group_id"])
+            cache_group = cache_groups.get(key)
+            sidecar_group = sidecar_groups.get(key)
+            # Count a missing-geometry skip only for rows that were otherwise
+            # eligible (non-panel, still pair) so the report is meaningful.
+            if (
+                cache_group is None
+                and not lab.startswith("panel")
+                and str(row.get("label_semantics") or "pair") != LABEL_SEMANTICS_SET
+            ):
+                skipped_no_geom += 1
+                continue
+            decision = reinterpret_row_to_set(row, cache_group, sidecar_group)
+            if decision is None:
+                continue
+            refs, tgts = decision
+            npairs = len(parse_selected_edges(row.get("selected_edges")))
+            converted.append((str(row["group_id"]), npairs, len(refs), len(tgts)))
+            if not dry_run:
+                df.at[idx, "label_semantics"] = LABEL_SEMANTICS_SET
+                df.at[idx, "selected_edges"] = "[]"
+                df.at[idx, "ref_ids"] = json.dumps(refs)
+                df.at[idx, "target_ids"] = json.dumps(tgts)
+                df.at[idx, "num_refs"] = len(refs)
+                df.at[idx, "num_targets"] = len(tgts)
+
+        verb = "Would convert" if dry_run else "Converted"
+        console.print(
+            f"[bold]{ds}[/bold]: {verb} {len(converted)} cross-product label(s) to set "
+            f"({skipped_no_geom} skipped: no cache geometry)"
+        )
+        for gid, npairs, nrefs, ntgts in converted:
+            console.print(f"  {gid[:8]}  {npairs} pairs -> set(refs={nrefs}, targets={ntgts})")
+        grand_total += len(converted)
+
+        if converted and not dry_run:
+            store._df = df
+            store.save()  # writes .csv.bak backup then atomic replace
+            console.print(f"  [green]Wrote {ds} (backup at {store.csv_path}.bak)[/green]")
+
+    if dry_run:
+        console.print(f"\n[cyan]Dry run: {grand_total} label(s) would be reinterpreted.[/cyan]")
+    else:
+        console.print(f"\n[green]Reinterpreted {grand_total} label(s) total.[/green]")

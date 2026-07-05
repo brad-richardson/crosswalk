@@ -1207,13 +1207,16 @@ def record_stitching_label(
     num_refs: int,
     num_targets: int,
     session_id: str | None = None,
+    label_semantics: str = "pair",
+    ref_ids: list[str] | None = None,
+    target_ids: list[str] | None = None,
 ) -> None:
     """Record a stitching review label.
 
     Args:
         dataset_id: Dataset identifier
         group_id: Group identifier
-        selected_edges: List of {ref_id, target_id} dicts
+        selected_edges: List of {ref_id, target_id} dicts (empty for set rows)
         match_type: "1:N", "N:1", or "M:N"
         num_refs: Number of ref segments
         num_targets: Number of target segments
@@ -1221,6 +1224,10 @@ def record_stitching_label(
             None, a fresh random per-review id is generated (normal reviews).
             The de-anchored review mode passes a fixed sentinel (``deanchored_v1``)
             so the unbiased eval slice can be selected without adding a new column.
+        label_semantics: "pair" (default) or "set". A set label stores only the
+            group membership (ref_ids/target_ids) with empty selected_edges.
+        ref_ids: Set-label reference membership (ignored for pair rows).
+        target_ids: Set-label target membership (ignored for pair rows).
     """
     from ..labeling.stitching_store import StitchingLabelStore
 
@@ -1237,4 +1244,7 @@ def record_stitching_label(
         num_targets=num_targets,
         labeler=labeler,
         session_id=session_id,
+        label_semantics=label_semantics,
+        ref_ids=ref_ids,
+        target_ids=target_ids,
     )

@@ -879,6 +879,68 @@ class TestStitchingLabelStore:
         assert store.df.iloc[0]["match_type"] == "1:N"
         assert store.df.iloc[0]["dataset_id"] == "test_dataset"
 
+    def test_pair_label_defaults_semantics(self, store):
+        """A normal add() defaults to pair semantics with empty membership cols."""
+        store.add(
+            group_id="abc123",
+            selected_edges=[{"ref_id": "r1", "target_id": "t1"}],
+            match_type="1:N",
+            num_refs=1,
+            num_targets=1,
+            labeler="tester",
+            session_id="sess1",
+        )
+        row = store.df.iloc[0]
+        assert row["label_semantics"] == "pair"
+        assert row["ref_ids"] == ""
+        assert row["target_ids"] == ""
+
+    def test_set_label_round_trip(self, store):
+        """A set label persists membership (sorted JSON) with empty selected_edges."""
+        store.add(
+            group_id="gset",
+            selected_edges=[],
+            match_type="M:N",
+            num_refs=2,
+            num_targets=3,
+            labeler="brad",
+            session_id="sess2",
+            label_semantics="set",
+            ref_ids=["rB", "rA"],
+            target_ids=["t3", "t1", "t2"],
+        )
+        # Reload from a fresh instance to exercise CSV persistence + _ensure_schema.
+        from matcher.labeling.stitching_store import StitchingLabelStore
+
+        reloaded = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir)
+        row = reloaded.df.iloc[0]
+        assert row["label_semantics"] == "set"
+        assert row["selected_edges"] == "[]"
+        assert json.loads(row["ref_ids"]) == ["rA", "rB"]  # sorted
+        assert json.loads(row["target_ids"]) == ["t1", "t2", "t3"]
+
+    def test_legacy_csv_missing_columns_defaults_to_pair(self, store):
+        """A CSV written before the set-semantics columns loads as a pair label."""
+        store.partition_path.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                {
+                    "group_id": "gold",
+                    "dataset_id": "test_dataset",
+                    "selected_edges": "[]",
+                    "match_type": "1:N",
+                    "num_refs": 1,
+                    "num_targets": 1,
+                    "labeler": "brad",
+                    "labeled_at": "2026-01-01T00:00:00+00:00",
+                    "session_id": "s",
+                }
+            ]
+        ).to_csv(store.csv_path, index=False)
+        row = store.df.iloc[0]
+        assert row["label_semantics"] == "pair"
+        assert row["ref_ids"] == ""
+
     def test_dedup_replaces_on_same_group_id(self, store):
         for i in range(3):
             store.add(
@@ -953,9 +1015,13 @@ class TestStitchingLabelIntegrity:
 
     @pytest.fixture(params=_STITCHING_DATASETS)
     def label_df(self, request):
+        # Load through the store so the effective (schema-ensured) frame is
+        # tested: committed CSVs predating the set-semantics columns are filled
+        # with defaults on load, and the set columns migrate lazily on next save.
+        from matcher.labeling.stitching_store import StitchingLabelStore
+
         dataset = request.param
-        path = DEFAULT_STITCHING_DIR / f"dataset={dataset}" / "data.csv"
-        return pd.read_csv(path)
+        return StitchingLabelStore(dataset).load(dataset)
 
     def test_has_required_columns(self, label_df):
         missing = set(STITCHING_LABEL_COLUMNS) - set(label_df.columns)
@@ -983,19 +1049,27 @@ class TestStitchingLabelIntegrity:
                 assert "target_id" in edge, f"Row {idx}: edge missing target_id"
 
     def test_num_refs_and_targets_non_negative(self, label_df):
-        """Labels with edges must have positive counts; rejections (empty edges) may have 0."""
-        has_edges = label_df["selected_edges"].apply(lambda x: len(json.loads(x)) > 0)
-        with_edges = label_df[has_edges]
+        """Pair labels with edges must have positive counts; pair rejections
+        (empty edges) have 0. SET labels store no edges but carry the membership
+        counts, which must match ref_ids/target_ids."""
+        is_set = label_df.get("label_semantics", "pair").astype(str) == "set"
+        pair_df = label_df[~is_set]
+        has_edges = pair_df["selected_edges"].apply(lambda x: len(json.loads(x)) > 0)
+        with_edges = pair_df[has_edges]
         if len(with_edges) > 0:
             assert (with_edges["num_refs"] >= 1).all(), "num_refs must be >= 1 when edges selected"
             assert (with_edges["num_targets"] >= 1).all(), (
                 "num_targets must be >= 1 when edges selected"
             )
-        # Rejections should have 0 refs and 0 targets
-        rejections = label_df[~has_edges]
+        # Pair rejections should have 0 refs and 0 targets.
+        rejections = pair_df[~has_edges]
         if len(rejections) > 0:
             assert (rejections["num_refs"] == 0).all(), "num_refs must be 0 for rejections"
             assert (rejections["num_targets"] == 0).all(), "num_targets must be 0 for rejections"
+        # Set labels: counts equal the stored membership sizes.
+        for _, row in label_df[is_set].iterrows():
+            assert row["num_refs"] == len(json.loads(row["ref_ids"] or "[]"))
+            assert row["num_targets"] == len(json.loads(row["target_ids"] or "[]"))
 
 
 # ---------------------------------------------------------------------------
@@ -1478,7 +1552,9 @@ class TestStitchingSelectRoute:
         finally:
             self._stop(patches)
 
-    def test_cross_product_when_no_explicit_edges(self):
+    def test_manual_records_set_membership_not_cross_product(self):
+        """Manual mode (no explicit edges) records a SET label: membership only,
+        empty selected_edges — NOT the ref×target cross-product it used to."""
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = client.post(
@@ -1494,9 +1570,12 @@ class TestStitchingSelectRoute:
             )
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            # Unchanged behavior: cross product of active pills = all 4 edges
-            assert stored == {("r1", "t1"), ("r1", "t2"), ("r2", "t1"), ("r2", "t2")}
+            assert kwargs["selected_edges"] == []  # no expanded pairs
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
+            assert kwargs["num_refs"] == 2
+            assert kwargs["num_targets"] == 2
         finally:
             self._stop(patches)
 
@@ -1519,15 +1598,13 @@ class TestStitchingSelectRoute:
         finally:
             self._stop(patches)
 
-    def test_manual_toggle_stores_active_pill_edges(self):
-        """A manual pill edit clears selected_edges; the server must record the
-        cross-product of the (non-empty) active pill fields — NOT an empty set.
+    def test_manual_toggle_records_active_pill_membership(self):
+        """A manual pill edit clears selected_edges; the server records the SET
+        membership of the (non-empty) active pill fields — not an empty set and
+        not the expanded cross-product.
 
-        This encodes exactly what the fixed client sends after the user picks an
-        option then deselects some pills: included_refs/included_targets carry
-        the still-active pills, selected_edges is blank. Previously the JS wrote
-        those IDs too late (in htmx:configRequest, after form serialization) so
-        they arrived empty and an empty label was stored.
+        included_refs/included_targets carry the still-active pills; selected_edges
+        is blank. The membership is exactly those pills.
         """
         client, recorder, patches = self._client_and_recorder()
         try:
@@ -1545,8 +1622,10 @@ class TestStitchingSelectRoute:
             )
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            assert stored == {("r1", "t2"), ("r2", "t2")}
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t2"}
             assert kwargs["num_refs"] == 2
             assert kwargs["num_targets"] == 1
         finally:
@@ -1573,6 +1652,8 @@ class TestStitchingSelectRoute:
             assert kwargs["selected_edges"] == []
             assert kwargs["num_refs"] == 0
             assert kwargs["num_targets"] == 0
+            # Reject-all has no membership to overstate -> stays PAIR semantics.
+            assert kwargs["label_semantics"] == "pair"
         finally:
             self._stop(patches)
 
@@ -1640,16 +1721,23 @@ class TestStitchingSelectRoute:
                     "selected_edges": "[]",
                 },
             )
-            # Cross-product of r1,r2 x t1,t2 covers all 4 group edges -> stored
+            # '[]' is treated as no payload -> manual set path over the active
+            # pills (membership, empty edges), not 4 expanded pairs.
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            assert len(kwargs["selected_edges"]) == 4
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
 
 class TestStitchingSliverExclusion:
-    """The select endpoint honors ``exclude_slivers`` on the cross-product path."""
+    """Set-semantics submits record MEMBERSHIP, so ``exclude_slivers`` no longer
+    changes what is stored (there are no per-pair edges to drop). It still rides
+    along for the client's confidence display. The explicit OPTION path is a
+    curated exact edge set and is unaffected either way."""
 
     DATASET = "test_ds"
 
@@ -1717,41 +1805,43 @@ class TestStitchingSliverExclusion:
         data.update(extra)
         return client.post("/stitching-review/select", data=data)
 
-    def test_exclude_true_drops_sliver_edges(self):
+    def test_exclude_true_is_storage_noop_for_set(self):
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(client, exclude_slivers="true")
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            # Off-diagonal slivers dropped; only the substantive diagonal remains
-            assert stored == {("r1", "t1"), ("r2", "t2")}
-            # Counts recomputed from the surviving edge set
-            assert kwargs["num_refs"] == 2
-            assert kwargs["num_targets"] == 2
+            # Set label: membership is all active pills; no edges stored, and the
+            # sliver flag does not prune membership.
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
-    def test_field_absent_keeps_all_edges_backcompat(self):
+    def test_field_absent_records_full_membership(self):
         # Old clients / tests that never send the field must be unaffected.
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(client)  # no exclude_slivers field at all
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            assert stored == {("r1", "t1"), ("r1", "t2"), ("r2", "t1"), ("r2", "t2")}
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
-    def test_exclude_false_keeps_all_edges(self):
+    def test_exclude_false_records_full_membership(self):
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(client, exclude_slivers="false")
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            assert len(stored) == 4
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
@@ -1772,9 +1862,10 @@ class TestStitchingSliverExclusion:
         finally:
             self._stop(patches)
 
-    def test_all_sliver_selection_stores_empty_not_400(self):
-        # Selecting only a sliver pairing is a valid (empty-after-exclusion)
-        # result, not an inconsistent submission — the guard runs before exclusion.
+    def test_sliver_only_selection_records_membership_not_400(self):
+        # Selecting a pairing whose only edge is a sliver is a valid membership
+        # (r1 ↔ t2 share candidate edge (r1,t2)); it is recorded as a set label,
+        # not rejected and not emptied by sliver exclusion.
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(
@@ -1783,8 +1874,9 @@ class TestStitchingSliverExclusion:
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
             assert kwargs["selected_edges"] == []
-            assert kwargs["num_refs"] == 0
-            assert kwargs["num_targets"] == 0
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1"}
+            assert set(kwargs["target_ids"]) == {"t2"}
         finally:
             self._stop(patches)
 
@@ -2298,10 +2390,11 @@ class TestContextPillDistinction:
 
 
 class TestRejectedPairSubmit:
-    """Fix #1: the manual cross-product must draw from selected edges UNION the
+    """The manual-path inconsistency guard draws from selected edges UNION the
     rejected candidates, so a reviewer who pairs two segments whose only shared
-    edge was rejected by the optimizer has that pair recorded (not silently
-    dropped), and the #237 inconsistency guard counts the union too."""
+    edge was rejected by the optimizer has that segment recorded in the SET
+    membership (not silently dropped), while a true non-candidate pair is still
+    rejected. Manual submits now record membership, not expanded pairs."""
 
     DATASET = "test_ds"
 
@@ -2360,12 +2453,15 @@ class TestRejectedPairSubmit:
     def test_rejected_only_pair_is_recorded_not_dropped(self):
         client, recorder, patches = self._client_and_recorder()
         try:
-            # Reviewer pairs r2+t2 whose only shared edge is REJECTED.
+            # Reviewer pairs r2+t2 whose only shared edge is REJECTED. The union
+            # guard passes, so the membership is recorded (not dropped).
             resp = self._post(client, "r2", "t2")
             assert resp.status_code == 200
             kwargs = recorder.call_args.kwargs
-            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
-            assert stored == {("r2", "t2")}
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r2"}
+            assert set(kwargs["target_ids"]) == {"t2"}
             assert kwargs["num_refs"] == 1
             assert kwargs["num_targets"] == 1
         finally:
@@ -2381,17 +2477,18 @@ class TestRejectedPairSubmit:
         finally:
             self._stop(patches)
 
-    def test_union_records_selected_and_rejected_together(self):
+    def test_union_records_full_membership(self):
         client, recorder, patches = self._client_and_recorder()
         try:
-            # Activate all pills: cross-product over the union yields both the
-            # selected (r1,t1) and rejected (r2,t2) candidate edges.
+            # Activate all pills: membership spans both segments of the selected
+            # (r1,t1) and rejected (r2,t2) candidate edges.
             resp = self._post(client, "r1,r2", "t1,t2")
             assert resp.status_code == 200
-            stored = {
-                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
-            }
-            assert stored == {("r1", "t1"), ("r2", "t2")}
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
@@ -2809,9 +2906,10 @@ class TestDeAnchoredMode:
 
 
 class TestRejectedSliverExclusion:
-    """Sliver exclusion applies to rejected candidates identically: a rejected
-    edge with near-zero overlap is dropped from a manual submit when
-    exclude_slivers is on, and kept when it is off."""
+    """Under set semantics, sliver exclusion is a storage no-op: a manual submit
+    records the full active-pill MEMBERSHIP whether exclude_slivers is on or off
+    (there are no per-pair edges to drop). The flag still drives the client's
+    confidence display only."""
 
     DATASET = "test_ds"
 
@@ -2876,26 +2974,27 @@ class TestRejectedSliverExclusion:
             },
         )
 
-    def test_rejected_sliver_dropped_when_excluding(self):
+    def test_membership_unaffected_when_excluding(self):
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(client, "true")
             assert resp.status_code == 200
-            stored = {
-                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
-            }
-            assert stored == {("r1", "t1")}
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert kwargs["label_semantics"] == "set"
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
 
-    def test_rejected_sliver_kept_when_including(self):
+    def test_membership_unaffected_when_including(self):
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = self._post(client, "false")
             assert resp.status_code == 200
-            stored = {
-                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
-            }
-            assert stored == {("r1", "t1"), ("r2", "t2")}
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert set(kwargs["ref_ids"]) == {"r1", "r2"}
+            assert set(kwargs["target_ids"]) == {"t1", "t2"}
         finally:
             self._stop(patches)
