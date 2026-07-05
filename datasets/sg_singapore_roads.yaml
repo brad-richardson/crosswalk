@@ -11,7 +11,16 @@ source:
   api_key_header: AccountKey
 fetch:
   id_prefix: sg_road
-  id_column: RD_CD
+  # LTA ships RD_CD (road code) completely empty (verified again on the Mar 2026
+  # release: 100% null), which collapsed every id to `sg_road_None_{h3}` and
+  # dropped ~95% of segments as same-cell "duplicates" at fetch time. No other
+  # column is a unique id (RD_CD_DESC is the road name, ~3.8k unique across
+  # ~15k segments). Use the established synthetic geometry-hash id instead
+  # (md5(WKT@7dp)[:12], same pattern as jp_tokyo_emergency_roads and
+  # tn_tunis_ml_roads): stable across releases while geometry is unchanged;
+  # geometry edits read as id churn, which the stored-geometry fallback
+  # (PR #273) already handles. Revisit if LTA restores RD_CD.
+  id_column: _geom_hash
   name_column: RD_CD_DESC
   class_column: RD_CATG__1
   class_mapping:
@@ -49,12 +58,37 @@ classification:
   source_classification:
     column: RD_CATG__1
 quality_fingerprint:
-  computed_at: '2026-02-16T15:53:29.856033+00:00'
-  total_segments: 664
+  computed_at: '2026-07-05T19:44:02.857584+00:00'
+  total_segments: 15319
+  total_length_km: 2881.62
+  length_min_m: 0.9847115527872838
+  length_max_m: 6872.357414785765
+  length_median_m: 138.00951002593456
+  length_p5_m: 45.131351306901706
+  length_p95_m: 457.13335275049565
+  vertex_density_mean: 0.10470331495314432
+  invalid_geometry_count: 0
+  sharp_angle_ratio: 0.0010444545988641555
+  mean_sinuosity: 1.0198327324890302
+  high_sinuosity_ratio: 0.0035250342711665252
+  drift_affected_ratio: 0.48221163261309485
+  near_duplicate_ratio: 0.0
+  island_count: 1734
+  dead_end_ratio: 0.20654089692538677
+  connected_components: 1735
+  largest_component_ratio: 0.8094523141197206
   name_coverage_ratio: 1.0
-  class_coverage_ratio: 0.9232
-notes: LTA ships RD_CD (road code) column completely empty as of Aug 2025 quarterly
-  release. No stable unique ID column available - only RD_CD_DESC (road name, 3818
-  unique across 15326 segments) and RD_CATG__1 (6 classification categories). Revisit
-  if LTA restores RD_CD in a future release. LTA API works (GeospatialWholeIsland?ID=RoadSectionLine)
-  but data lacks usable IDs.
+  class_coverage_ratio: 1.0
+  class_distribution:
+    residential: 6585
+    tertiary: 3191
+    unclassified: 2507
+    primary: 1524
+    secondary: 1204
+    motorway: 308
+notes: LTA ships RD_CD (road code) column completely empty (Aug 2025 through Mar 2026
+  quarterly releases; verified 100% null). No stable unique ID column available -
+  only RD_CD_DESC (road name, 3818 unique across 15326 segments) and RD_CATG__1 (6
+  classification categories). Resolved 2026-07 by switching id_column to the synthetic
+  _geom_hash id (see fetch comment). Revisit if LTA restores RD_CD in a future release.
+  Requires LTA_API_KEY env var (DataMall AccountKey header) - never commit the key.
