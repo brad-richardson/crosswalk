@@ -16,7 +16,8 @@ reported):
   b. candidate edge count <= ``max_edges`` (default 20) -- huge groups stay for
      human review.
   c. class-consistency gate -- reuses the panel runner's cross-mode rule
-     (:func:`stitch_runner.has_cross_mode_edge`) on the chosen edge set.
+     (:func:`stitch_runner.has_cross_mode_edge`) on the chosen edge set
+     (pedestrian / vehicular / bike; any two different modes are cross-mode).
   d. sliver canonicalization -- drops junction-sliver edges (shared definition in
      :func:`matcher.matching.sliver`); if that empties the set the group is
      skipped.
@@ -388,7 +389,7 @@ def _gate_group(
     elif n_raw > max_edges:
         return _mk(REASON_OVER_MAX, n_edges_final=n_raw)
 
-    # Gate (c): class-consistency (cross-mode pedestrian<->vehicular).
+    # Gate (c): class-consistency (any cross-mode pair: pedestrian/vehicular/bike).
     if meta is not None:
         ref_c, tgt_c = _segment_class_maps(meta)
         edge_classes = _edge_classes_for(frozenset(edges_pairs), ref_c, tgt_c)
