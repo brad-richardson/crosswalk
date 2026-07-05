@@ -167,15 +167,40 @@ box deployment, and the inventory repair below.
 
 Goal: the public artifact that makes the project useful to others.
 
-- Versioned layout: `r2://…/release=<overture-release>/dataset=<name>/bridge.parquet`
-  plus a unified long table (`gers_id → [dataset, local_id, confidence,
-  match_type, group_id, review_status]`) and a manifest. Queryable directly via
-  DuckDB/HTTP range reads; no serving infrastructure.
-- Quality metadata per row is the differentiator: calibrated P(match) (#266
-  means the number is honest), match type, stitching-group membership, review
-  provenance — consumers pick their own precision/recall operating point.
-- The credibility page: benchmark table (M6), per-dataset stitch-gate status,
-  label provenance stats.
+**Status: publish tooling SHIPPED** (`matcher factory publish`; see
+[PUBLISHING.md](PUBLISHING.md)). Landed: the pipeline-free publisher that
+license-gates factory outputs and assembles a deterministic staging tree
+(`bridges/release=<X>/dataset=<name>/{bridge.parquet, manifest.json}` copied
+verbatim, a per-release unified `all_bridges.parquet` sorted by `gers_id` for
+reverse lookups, SHA-256 `checksums.txt`, a machine-readable `index.json` with a
+`latest_release` pointer, and a self-contained credibility `index.html`); the
+license registry `datasets/licenses.toml` (the dataset YAMLs carry no license
+field) with an approved/pending-review gate that **never guesses**; immutable
+release paths (`--force` to overwrite); `--dry-run` (default) + `--target-dir`
+(local, no creds) + the S3-compatible `aws s3 sync` R2 path (creds from `R2_*`
+env vars). Validated end-to-end with `--target-dir` against the Mac's `data/factory`
+(2 published: `us_usfs_flathead`, `us_montana_missoula`; 3 excluded pending license
+review: 2× Singapore + Bogotá bike).
+
+**Awaits the user (credentials):** create the R2 bucket + API token, set the
+`R2_*` env vars, run the first `--no-dry-run` R2 upload. Also awaits human license
+review to approve more datasets. Recommended to **publish from the always-on box**
+(co-located with the full factory sweep) rather than sync `data/factory` back to
+the Mac — see PUBLISHING.md "Open operational question".
+
+Design decisions banked in PUBLISHING.md:
+- Layout mirrors the factory partitioning; `release=` paths immutable; "latest" is
+  a pointer field in `index.json`, not a mutable copy.
+- Both per-dataset `bridge.parquet` (primary) and a per-release unified
+  `all_bridges.parquet` (reverse lookup; sizes justify it at 34 datasets × 1–50 MB).
+- Quality metadata per row is the differentiator: calibrated P(match) (#266),
+  match type, review decision, fractional overlap — consumers pick their operating
+  point.
+
+Still open under M5:
+- The credibility page's stitch-gate column is partial: only `us_boston_streets`
+  is armed, and Boston/Seattle are not yet in the factory (legacy `data/output/`),
+  so factory datasets show "no stitching labels" until they are adopted.
 - Optional layer: opinionated merged attributes (best-of names/class keyed by
   GERS) — post-process join, only after the factory runs clean.
 

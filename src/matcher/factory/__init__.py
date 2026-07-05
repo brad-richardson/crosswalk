@@ -10,7 +10,9 @@ See ``docs/FACTORY.md`` for usage and the box-deployment runbook.
 """
 
 from .discovery import DatasetPair, discover_pairs, resolve_release
+from .licenses import LicenseDecision, LicenseRegistry
 from .manifest import Manifest
+from .publish import PublishReport, assemble_staging, build_index
 from .runner import FactoryPaths, reoptimize_dataset, run_dataset
 
 __all__ = [
@@ -21,4 +23,9 @@ __all__ = [
     "FactoryPaths",
     "run_dataset",
     "reoptimize_dataset",
+    "LicenseRegistry",
+    "LicenseDecision",
+    "PublishReport",
+    "assemble_staging",
+    "build_index",
 ]

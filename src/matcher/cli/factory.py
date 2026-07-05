@@ -272,6 +272,206 @@ def delta(
         console.print(content)
 
 
+def _render_publish_summary(report, target_desc: str) -> None:
+    """Render the publish staging summary (published + excluded per release)."""
+    table = Table(title=f"Publish staging ({report.staging_dir})", show_lines=False)
+    table.add_column("release")
+    table.add_column("dataset", style="cyan", no_wrap=True)
+    table.add_column("status")
+    table.add_column("matched", justify="right")
+    table.add_column("match%", justify="right")
+    table.add_column("license / reason")
+    for rel in sorted(report.releases, key=lambda r: r.release):
+        for d in sorted(rel.datasets, key=lambda x: x.dataset):
+            if d.published:
+                s = d.stats
+                mr = s.get("match_rate")
+                lic = (d.license or {}).get("license") or "-"
+                table.add_row(
+                    rel.release,
+                    d.dataset,
+                    "[green]published[/green]",
+                    str(s.get("n_matched", "")),
+                    f"{100 * mr:.1f}%" if isinstance(mr, (int, float)) else "-",
+                    str(lic),
+                )
+            else:
+                table.add_row(
+                    rel.release,
+                    d.dataset,
+                    "[yellow]excluded[/yellow]",
+                    "",
+                    "",
+                    str(d.reason or "excluded"),
+                )
+    console.print(table)
+    console.print(
+        f"[blue]{report.n_published} published, {report.n_excluded} excluded "
+        f"(pending review); latest_release={report.latest_release}; target={target_desc}[/blue]"
+    )
+
+
+@factory_app.command()
+def publish(
+    datasets: list[str] = typer.Argument(
+        None, help="Dataset names to publish (default: all cleared)."
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Publish all discovered datasets (explicit alias of the default; "
+        "overrides any positional/-D names).",
+    ),
+    dataset_opt: list[str] = typer.Option(
+        None, "--dataset", "-D", help="Dataset name (repeatable)."
+    ),
+    release: list[str] = typer.Option(
+        None, "--release", help="Restrict to these release(s) (repeatable; default: all present)."
+    ),
+    target_dir: Path = typer.Option(
+        None, "--target-dir", help="Publish to a LOCAL directory (no credentials). Omit for R2."
+    ),
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--no-dry-run",
+        help="Build the staging tree + report what WOULD upload, without syncing (default: on).",
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite an already-published (immutable) release."
+    ),
+    site_url: str = typer.Option(
+        None, "--site-url", help="Public base URL used in the credibility page query examples."
+    ),
+    staging_dir: Path = typer.Option(
+        None,
+        "--staging-dir",
+        help="Where to build the staging tree (default: data/publish_staging).",
+    ),
+    factory_root: Path = typer.Option(
+        None, "--factory-root", help="Factory output root to publish from (default: data/factory)."
+    ),
+):
+    """Assemble the public R2 publication tree from factory outputs and sync it.
+
+    Always builds a deterministic staging tree (bridge + manifest per cleared
+    dataset, a per-release unified ``all_bridges.parquet``, checksums, machine-
+    readable ``index.json``, and the credibility ``index.html``). License-unverified
+    datasets are excluded. Then, unless ``--dry-run`` (the default), syncs to a local
+    directory (``--target-dir``) or to Cloudflare R2 (S3-compatible ``aws`` CLI,
+    credentials from ``R2_*`` env vars). Immutable release paths: an already-
+    published release is skipped (never overwritten) unless ``--force``.
+    """
+    from ..factory.licenses import LicenseRegistry
+    from ..factory.publish import (
+        DEFAULT_SITE_URL,
+        assemble_staging,
+        load_gate_floors,
+    )
+    from ..factory.publish_sync import (
+        R2_ENV_VARS,
+        build_aws_sync_argv,
+        missing_r2_env,
+        r2_env,
+        staged_files,
+        sync_local,
+        sync_r2,
+    )
+    from ..filenames import PROJECT_ROOT
+
+    root = factory_root or (PROJECT_ROOT / "data" / "factory")
+    staging = staging_dir or (PROJECT_ROOT / "data" / "publish_staging")
+    if not root.exists():
+        console.print(f"[red]No factory output at {root} — run 'matcher factory run' first.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        registry = LicenseRegistry.load()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    # Default (no names) = all cleared datasets; --all is the explicit alias and
+    # overrides any names passed alongside it.
+    merged = list(datasets or []) + list(dataset_opt or [])
+    ds_filter = None if all_datasets else (merged or None)
+
+    gate_floors = load_gate_floors(PROJECT_ROOT / "cbench" / "datasets.toml")
+    report = assemble_staging(
+        factory_root=root,
+        staging_dir=staging,
+        registry=registry,
+        releases=list(release) if release else None,
+        datasets=ds_filter,
+        gate_floors=gate_floors,
+        site_url=site_url or DEFAULT_SITE_URL,
+    )
+
+    # Decide the sync target for the summary + execution.
+    if target_dir is not None:
+        target_desc = f"local:{target_dir}"
+    else:
+        target_desc = "r2"
+    _render_publish_summary(report, target_desc)
+
+    if report.n_published == 0:
+        console.print(
+            "[yellow]Nothing cleared to publish — staging tree built for review only.[/yellow]"
+        )
+
+    # --- Sync ---
+    if target_dir is not None:
+        if dry_run:
+            files = staged_files(staging)
+            console.print(
+                f"[blue]DRY RUN: would copy {len(files)} file(s) from {staging} "
+                f"to {target_dir}. Re-run with --no-dry-run to write.[/blue]"
+            )
+            raise typer.Exit(0)
+        written, plan = sync_local(staging, target_dir, force=force)
+        if plan.skipped_releases:
+            console.print(
+                f"[yellow]Skipped already-published (immutable) release(s): "
+                f"{', '.join(plan.skipped_releases)} — use --force to replace.[/yellow]"
+            )
+        console.print(f"[green]Published {len(written)} file(s) to {target_dir}[/green]")
+        raise typer.Exit(0)
+
+    # R2 target.
+    cfg = r2_env()
+    if cfg is None:
+        missing = ", ".join(missing_r2_env())
+        console.print(
+            f"[yellow]R2 credentials absent (missing: {missing}). Forcing dry run.[/yellow]"
+        )
+        files = staged_files(staging)
+        console.print(
+            f"[blue]DRY RUN: staging tree built at {staging} ({len(files)} file(s)). "
+            f"To publish to R2, set {', '.join(R2_ENV_VARS.values())} and re-run "
+            "with --no-dry-run.[/blue]"
+        )
+        raise typer.Exit(0)
+    if dry_run:
+        argv = build_aws_sync_argv(staging, cfg)
+        console.print(
+            f"[blue]DRY RUN: would run: {' '.join(argv)}\n"
+            "(already-published releases are excluded at upload time — immutable). "
+            "Re-run with --no-dry-run to upload.[/blue]"
+        )
+        raise typer.Exit(0)
+    try:
+        _, plan = sync_r2(staging, cfg, force=force)
+    except Exception as exc:  # aws CLI failure or a failed-closed existence check
+        console.print(f"[red]R2 sync failed: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    if plan.skipped_releases:
+        console.print(
+            f"[yellow]Skipped already-published (immutable) release(s): "
+            f"{', '.join(plan.skipped_releases)} — use --force to replace.[/yellow]"
+        )
+    console.print(f"[green]Published staging tree to R2 bucket '{cfg.bucket}'.[/green]")
+
+
 @factory_app.command()
 def status(
     output_dir: Path = typer.Option(

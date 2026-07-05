@@ -1,0 +1,339 @@
+# Publication license registry for the R2 bridge tables (Milestone M5).
+#
+# The publisher (`matcher factory publish`) reads this file to decide which
+# datasets may be published. It NEVER guesses a license:
+#
+#   status = "approved"        -> dataset is published; requires `license` +
+#                                 `attribution`.
+#   status = "pending_review"  -> dataset is EXCLUDED (excluded-pending-review)
+#                                 until a human verifies the source terms and
+#                                 flips it to "approved".
+#   (no entry)                 -> treated as pending_review (excluded).
+#
+# Published bridge tables are derived works of BOTH the local source dataset
+# and Overture; every published artifact carries the [overture] attribution
+# below plus the per-dataset attribution.
+
+[overture]
+name = "Overture Maps transportation theme"
+license = "ODbL-1.0"
+attribution = "Contains data from the Overture Maps Foundation (overturemaps.org). Overture transportation is derived from OpenStreetMap; © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0."
+url = "https://overturemaps.org/"
+note = "Confirm the ODbL/attribution requirement against the specific Overture release notes at publish time."
+
+[datasets.ae_abudhabi_roads]
+display_name = "Abu Dhabi Roads"
+status = "pending_review"
+likely_license = "unverified"
+note = "Excluded pending review: manually sourced — provenance/license unknown, must document."
+
+[datasets.au_melbourne_roads]
+display_name = "VicRoads Declared Roads (Melbourne)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services2.arcgis.com/18ajPSI0b3ppsmMt/arcgis/rest/services/VicRoads_Declared_Roads/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.au_sydney_roads]
+display_name = "NSW Road Segments (Sydney)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://portal.spatial.nsw.gov.au/server/rest/services/NSW_Transport_Theme/FeatureServer/5"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.br_sao_paulo_roads]
+display_name = "São Paulo Road Classification"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "http://wfs.geosampa.prefeitura.sp.gov.br/geoserver/wfs"
+note = "Excluded pending review: public-sector WFS service — verify the publisher's terms of use."
+
+[datasets.ca_toronto_roads]
+display_name = "Toronto Road Centreline"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://gis.toronto.ca/arcgis/rest/services/cot_geospatial/FeatureServer/2"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.ch_geneva_hiking_routes]
+display_name = "Geneva Pedestrian Hiking Routes"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/FFP_ITINERAIRES_RANDO_PEDESTRE/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.ch_geneva_pedestrian_network]
+display_name = "Geneva Pedestrian Network (SPD)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.ch_grand_geneva_cycle_schema]
+display_name = "Grand Geneva Cycle Schema"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/AGGLO_SCHEMA_CYCLABLE/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.co_bogota_bike_network]
+display_name = "IDECA Bogotá Ciclorutas"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/18"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.co_bogota_roads]
+display_name = "IDECA Bogotá Malla Vial"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/13"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.co_bogota_sidewalks]
+display_name = "IDECA Bogotá Andenes"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/16"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.de_berlin_roads]
+display_name = "Berlin Detailnetz"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Stra%C3%9Fennetz_Berlin/FeatureServer/2"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.fi_helsinki_roads]
+display_name = "Digiroad Finland (Helsinki + Southern Uusimaa)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1/collections/dr_tielinkki_toim_lk/items"
+note = "Excluded pending review: public-sector OGC API service — verify the publisher's terms of use."
+
+[datasets.fr_france_winter_hiking_traces]
+display_name = "France Winter Hiking Traces (IGN GeoPlateforme)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://data.geopf.fr/wfs/wfs"
+note = "Excluded pending review: public-sector WFS service — verify the publisher's terms of use."
+
+[datasets.gb_london_roads]
+display_name = "OS Open Roads (London)"
+status = "pending_review"
+likely_license = "unverified"
+note = "Excluded pending review: Ordnance Survey — likely OS OpenData (OGL) but VERIFY (some products restricted)."
+
+[datasets.hk_hongkong_roads]
+display_name = "Hong Kong Transport Dept Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://static.data.gov.hk/td/road-network-v2/RdNet_IRNP.gdb.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.in_mumbai_streets]
+display_name = "Mumbai BMC Streets"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services8.arcgis.com/r6MmJtuWAzMawmJ8/ArcGIS/rest/services/Streets/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.jp_tokyo_emergency_roads]
+display_name = "Japan MLIT Tokyo Emergency Transport Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://nlftp.mlit.go.jp/ksj/gml/data/N10/N10-24/N10-24_13_GML.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.ke_kisumu_roads]
+display_name = "Kenya Roads (Kisumu Region)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.ke_mombasa_roads]
+display_name = "Kenya Roads (Mombasa Region)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.ke_nairobi_roads]
+display_name = "Kenya Roads (Nairobi Region)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.kr_seoul_roads]
+display_name = "Seoul Road Network"
+status = "pending_review"
+likely_license = "unverified"
+note = "Excluded pending review: manually sourced — provenance/license unknown, must document."
+
+[datasets.nl_amsterdam_roads]
+display_name = "PDOK NWB Wegen"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.sg_singapore_footpaths]
+display_name = "LTA Singapore Footpaths"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/Footpath.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.sg_singapore_roads]
+display_name = "LTA Singapore Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.tn_tunis_ml_roads]
+display_name = "Tunis ML-Extracted Roads (Microsoft)"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://usaminedroads.z19.web.core.windows.net/drops/2025.04.28/Northern_Africa.zip"
+note = "Excluded pending review: bulk download — verify the source portal's license."
+
+[datasets.us_ada_county_roads]
+display_name = "Ada County Road Centerlines"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://maps.achdidaho.org/server/rest/services/Assessor/roadcenterline/MapServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_austin_sidewalks]
+display_name = "Austin Sidewalks"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services.arcgis.com/0L95CJ0VTaxqcmED/ArcGIS/rest/services/Completed_Sidewalks/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_boston_bike_network]
+display_name = "Boston Bicycle Network 2024"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/Boston_Bicycle_Network_2024/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_boston_sidewalks]
+display_name = "Boston Sidewalks"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_boston_streets]
+display_name = "Boston Streets"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_fort_collins_sidewalks]
+display_name = "Fort Collins Sidewalks"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Sidewalks/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_fort_collins_streets]
+display_name = "Fort Collins Streets"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services1.arcgis.com/dLpFH5mwVvxSN4OE/arcgis/rest/services/Street_Centerlines/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_fresno_roads]
+display_name = "Fresno County Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_frisco_roads]
+display_name = "Frisco Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/8"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_frisco_trails]
+display_name = "Frisco Trails"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://maps.friscotexas.gov/gis/rest/services/Public/FriscoCommunityMaps/FeatureServer/10"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_gwinnett_roads]
+display_name = "Gwinnett County Street Centerlines"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services3.arcgis.com/RfpmnkSAQleRbndX/arcgis/rest/services/GwinnettTransportation/FeatureServer/2"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_montana_bozeman]
+display_name = "Montana Roads (Bozeman)"
+status = "approved"
+license = "US-PD"
+attribution = "Montana State Library (MSDI Transportation Framework)"
+source_url = "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0"
+note = "Montana State Library MSDI framework data is published in the public domain."
+
+[datasets.us_montana_helena]
+display_name = "Montana Roads (Helena)"
+status = "approved"
+license = "US-PD"
+attribution = "Montana State Library (MSDI Transportation Framework)"
+source_url = "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0"
+note = "Montana State Library MSDI framework data is published in the public domain."
+
+[datasets.us_montana_missoula]
+display_name = "Montana Roads (Missoula)"
+status = "approved"
+license = "US-PD"
+attribution = "Montana State Library (MSDI Transportation Framework)"
+source_url = "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaTransportation/MapServer/0"
+note = "Montana State Library MSDI framework data is published in the public domain."
+
+[datasets.us_philadelphia_sidewalks]
+display_name = "Philadelphia Sidewalks"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedestriannetwork_lines/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_seattle_sidewalks]
+display_name = "Seattle Sidewalks"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Sidewalks_(Active)/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
+
+[datasets.us_usfs_flathead]
+display_name = "USFS Roads (Flathead NF)"
+status = "approved"
+license = "US-PD"
+attribution = "U.S. Forest Service (EDW RoadBasic)"
+source_url = "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_RoadBasic_01/MapServer/0"
+note = "US federal government work — public domain under 17 U.S.C. § 105."
+
+[datasets.us_usfs_lolo]
+display_name = "USFS Roads (Lolo NF)"
+status = "approved"
+license = "US-PD"
+attribution = "U.S. Forest Service (EDW RoadBasic)"
+source_url = "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_RoadBasic_01/MapServer/0"
+note = "US federal government work — public domain under 17 U.S.C. § 105."
+
+[datasets.us_utah_slc_roads]
+display_name = "Utah Salt Lake County Roads"
+status = "pending_review"
+likely_license = "unverified"
+source_url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0"
+note = "Excluded pending review: public-sector ArcGIS service — verify the publisher's terms of use."
