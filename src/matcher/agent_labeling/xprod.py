@@ -60,9 +60,20 @@ def resolve_optimizer(
     Prefers the sidecar group's ``edges[selected]``; falls back to the cache
     group's ``optimizer_assignment`` (old-grouping queue item). The bool is
     ``True`` when the sidecar supplied the set.
+
+    Pre-flag sidecars: mirrors ``stitch_queue_refresh.selected_pair_set`` — when
+    the sidecar's edges carry NO ``selected`` key at all (a pack predating the
+    flag), the sidecar cannot express the optimizer set, so fall back to the
+    cache rather than returning an empty set (which would make every full-grid
+    label look like it "adds pairs beyond the optimizer" and over-flag
+    ratifications as artifacts). Edges that DO carry the flag but select nothing
+    are a genuine reject-all and are returned as empty.
     """
     if sidecar_group is not None:
-        return edge_pairs(sidecar_group.get("edges"), selected_only=True), True
+        edges = sidecar_group.get("edges") or []
+        selected = edge_pairs(edges, selected_only=True)
+        if selected or any("selected" in e for e in edges):
+            return selected, True
     if cache_group is not None:
         return edge_pairs(cache_group.get("optimizer_assignment")), False
     return set(), False
@@ -145,6 +156,8 @@ def reinterpret_row_to_set(
         sidecar ``rejected_edges``, and the optimizer selection prefers the
         sidecar — geometries (cache-only) are not needed here, unlike in the
         render script,
+      * sidecar-only rows whose group has a truncated ``rejected_edges`` list
+        (incomplete universe — conservative skip),
       * rows that do not match the cross-product signature (explicit
         ratifications, deliberate single/fan picks, pure exclusions).
 
@@ -157,6 +170,18 @@ def reinterpret_row_to_set(
     if str(row.get("label_semantics") or "pair") == "set":
         return None
     if cache_group is None and sidecar_group is None:
+        return None
+    # Sidecar-only universe with a TRUNCATED rejected_edges list: the candidate
+    # universe is provably incomplete (pairs past the per-group cap are absent),
+    # so ``label_pairs == grid ∩ universe`` could hold spuriously and convert a
+    # deliberate partial-grid label. The cache (review-queue) universe carries
+    # the label-time edges, so it anchors the check; without it, be conservative
+    # and leave the row untouched.
+    if (
+        cache_group is None
+        and sidecar_group is not None
+        and bool(sidecar_group.get("rejected_truncated"))
+    ):
         return None
     label_pairs = parse_selected_edges(row.get("selected_edges"))
     opt_pairs, _ = resolve_optimizer(cache_group, sidecar_group)

@@ -121,3 +121,58 @@ def test_nan_and_malformed_selected_edges_do_not_crash():
     row = _row(_GRID)
     row["selected_edges"] = float("nan")
     assert reinterpret_row_to_set(row, cache, None) is None  # empty -> no artifact
+
+
+def test_preflag_sidecar_falls_back_to_cache_optimizer():
+    """A sidecar whose edges carry NO 'selected' key (pre-flag pack) must not
+    yield an empty optimizer set — that would make a ratified full grid look
+    like it adds pairs beyond the optimizer and wrongly convert it. The
+    optimizer set falls back to the cache's optimizer_assignment (mirrors
+    stitch_queue_refresh.selected_pair_set)."""
+    from matcher.agent_labeling.xprod import resolve_optimizer
+
+    preflag_sidecar = {
+        "group_id": "g1234567abcd",
+        # Full grid as candidates, no 'selected' key anywhere.
+        "edges": [{"ref_id": r, "target_id": t} for r, t in _GRID],
+    }
+    cache = _cache_group(_GRID, _GRID)  # optimizer ratified the full grid
+    opt, from_sidecar = resolve_optimizer(cache, preflag_sidecar)
+    assert opt == set(_GRID)
+    assert not from_sidecar
+    # End-to-end: the ratified full grid adds nothing beyond the optimizer.
+    assert reinterpret_row_to_set(_row(_GRID), cache, preflag_sidecar) is None
+
+
+def test_preflag_sidecar_alone_yields_empty_not_conversion():
+    """Pre-flag sidecar with NO cache: the optimizer set is unknowable (empty),
+    but a genuine artifact grid still converts only via the signature; a
+    reject-all-flagged sidecar (flags present, none selected) stays authoritative."""
+    from matcher.agent_labeling.xprod import resolve_optimizer
+
+    reject_all_sidecar = {
+        "group_id": "g1234567abcd",
+        "edges": [{"ref_id": r, "target_id": t, "selected": False} for r, t in _GRID],
+    }
+    opt, from_sidecar = resolve_optimizer(None, reject_all_sidecar)
+    assert opt == set()
+    assert from_sidecar  # flags present -> sidecar authoritative (reject-all)
+
+
+def test_sidecar_truncated_rejected_list_skips_conversion():
+    """Sidecar-only universe with rejected_truncated=True is provably
+    incomplete — conversion must be skipped (conservative)."""
+    sidecar_group = {
+        "group_id": "g1234567abcd",
+        "rejected_truncated": True,
+        "edges": [
+            {"ref_id": "r1", "target_id": "t1", "selected": True},
+            {"ref_id": "r2", "target_id": "t2", "selected": True},
+            {"ref_id": "r1", "target_id": "t2", "selected": False},
+        ],
+        "rejected_edges": [{"ref_id": "r2", "target_id": "t1"}],
+    }
+    assert reinterpret_row_to_set(_row(_GRID), None, sidecar_group) is None
+    # With the cache present the label-time universe is anchored -> converts.
+    cache = _cache_group(_GRID, _OPT)
+    assert reinterpret_row_to_set(_row(_GRID), cache, sidecar_group) is not None
