@@ -29,10 +29,16 @@ for single-node operation.
 ## Where things stand (measured, 2026-07-05)
 
 - **Match quality vs the field** (`docs/BENCHMARK_RESULTS.md`): target-level
-  match F1 on Boston streets — naive 0.637 / Hootenanny-0.2.41 0.973 / Valhalla
-  Meili 0.994 / **matcher 0.996**; Fort Collins sidewalks — 0.311 / 0.927 /
-  0.962 / **0.976**. Matcher leads every row; the naive baseline's sidewalk
-  collapse (recall 0.19) is the one-number justification for the ML approach.
+  match F1 on Boston streets — naive 0.839 / Hootenanny-0.2.41 0.973 / Valhalla
+  Meili 0.994 / **matcher 0.996**; Fort Collins sidewalks — 0.365 / 0.927 /
+  0.962 / **0.976**. Matcher leads every row. (Naive rows re-measured 2026-07-05
+  after fixing a symmetric-Hausdorff guard bug that had halved its road recall.)
+  The naive baseline's **sidewalk collapse (recall 0.24, F1 0.365)** remains the
+  one-number justification for the learned approach: after the fix the naive
+  floor is respectable on roads (recall 0.95, geometry alone finds the
+  correspondences — the road gap to matcher is now precision, not recall), so
+  the case for ML rests on dense parallel geometry where buffer+bearing can't
+  separate near-parallel candidates and recall stays near 0.2.
 - **Stitch quality is gated**: cbench `--gate` enforces sliver-filtered edge-F1
   ≥ 0.78 / exact ≥ 0.45 on Boston (baseline 0.8345 / 0.537, 67 mapped labels,
   armed). Seattle arms automatically at 30 mapped labels (currently 27).

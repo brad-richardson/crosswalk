@@ -11,9 +11,16 @@ with **`us_seattle_sidewalks`** added for the Meili row.
 
 | Dataset | naive F1 | Hootenanny 0.2.41 F1 | Meili (Valhalla) F1 | matcher F1 |
 |---------|----------|----------------------|---------------------|------------|
-| us_boston_streets (roads) | 0.637 | 0.973 | 0.994 | **0.996** |
-| us_fort_collins_sidewalks | 0.311 | 0.927 | 0.962 | **0.976** |
+| us_boston_streets (roads) | 0.839 | 0.973 | 0.994 | **0.996** |
+| us_fort_collins_sidewalks | 0.365 | 0.927 | 0.962 | **0.976** |
 | us_seattle_sidewalks | — | — | 0.944 | — |
+
+> **Naive rows re-measured 2026-07-05** after fixing a shape-sanity guard bug in
+> the naive adapter (PR #275 shipped a symmetric-Hausdorff guard that rejected
+> legitimate short-reference/long-target pairs — the coverage-asymmetry trap;
+> guard removed). Old values (Boston F1 ~~0.637~~, FC F1 ~~0.311~~) are kept
+> struck-through in the tables below for provenance. The fix roughly doubled
+> naive road recall (0.54 → 0.95); sidewalks still collapse (see below).
 
 matcher wins on both shared datasets (target-level F1). Meili is the strongest
 external baseline — it beats Hootenanny on both, with **perfect recall (1.000) on
@@ -58,7 +65,8 @@ Target = 10,844 local road segments; reference = 125,769 Overture segments.
 
 | Tool | Precision | Recall | F1 | TP | FP | FN | Preds | Wall time | Notes |
 |------|-----------|--------|----|----|----|----|-------|-----------|-------|
-| naive (geometric floor) | 0.7754 | 0.5410 | 0.6374 | 145 | 42 | 123 | 11,520 | 4.4s | buffer=15m, min_overlap=0.30, angle_tol=35° |
+| naive (geometric floor) | 0.7500 | 0.9515 | 0.8388 | 255 | 85 | 13 | 28,664 | 4.0s | buffer=15m, min_overlap=0.30, angle_tol=35°; guard fix 2026-07-05 |
+| ~~naive (pre-fix, PR #275 bug)~~ | ~~0.7754~~ | ~~0.5410~~ | ~~0.6374~~ | ~~145~~ | ~~42~~ | ~~123~~ | ~~11,520~~ | ~~4.4s~~ | superseded — symmetric-Hausdorff guard bug |
 | Hootenanny 0.2.41 | 0.9470 | 1.0000 | 0.9728 | 268 | 15 | 0 | 20,408 | n/a (emulated)* | HighwayMatchCreator/HighwaySnapMergerCreator |
 | Meili (Valhalla 3.7.0) | 0.9889 | 1.0000 | 0.9944 | 268 | 3 | 0 | 15,591 | 12.0s (5.0s match-only; 838 MB) | pedestrian costing, densify 10m, search_radius 25m, min_overlap 0.10/8m |
 | **matcher (xgboost)** | **0.9963** | **0.9963** | **0.9963** | 267 | 1 | 1 | 15,549 | 85.3s (2965 MB) | full ML stitch pipeline |
@@ -67,14 +75,19 @@ Target = 10,844 local road segments; reference = 125,769 Overture segments.
 
 | Tool | Precision | Recall | F1 | Exact-match | Groups | Basis |
 |------|-----------|--------|----|-------------|--------|-------|
-| naive | 0.393 | 0.299 | 0.340 | 0.055 | 73 | legacy id-map |
+| naive (guard fix, 2026-07-05) | 0.499 | 0.816 | 0.619 | 0.168 | 113 | legacy id-map |
+| ~~naive (pre-fix)~~ | ~~0.393~~ | ~~0.299~~ | ~~0.340~~ | ~~0.055~~ | ~~73~~ | legacy id-map |
 | Hootenanny 0.2.41 | 0.771 | 0.879 | 0.821 | 0.384 | 73 | legacy id-map |
 | Meili (Valhalla 3.7.0) | 0.873 | 0.931 | 0.901 | 0.521 | 73 | legacy id-map |
 | **matcher (xgboost)** | **0.871** | **0.793** | **0.830** | **0.537** | 67 | groups sidecar |
 
 Note: only matcher emits a groups sidecar, so its stitch eval is group-based (67
 groups); naive/Hootenanny/Meili have no sidecar and fall back to legacy segment-id
-mapping (73 groups). Target-level (above) is the clean apples-to-apples metric.
+mapping (73 groups). **Caveat on the naive stitch row:** it was re-measured after
+the guard fix against the *current* stitching-label base, which has since grown
+(73 → 113 mapped legacy groups), so its group basis differs from the frozen
+Hootenanny/Meili rows — cross-tool stitch numbers are only strictly comparable at
+the same label epoch. Target-level (above) is the clean apples-to-apples metric.
 Meili's high stitch-edge F1 (0.901) reflects its perfect recall + one-to-many
 edge coverage; its exact-group-match (0.521) trails matcher (0.537), i.e. it
 recovers the edges but groups them slightly less precisely — consistent with its
@@ -88,7 +101,8 @@ dataset, so target-level only.
 
 | Tool | Precision | Recall | F1 | TP | FP | FN | Preds | Wall time |
 |------|-----------|--------|----|----|----|----|-------|-----------|
-| naive (geometric floor) | 0.7885 | 0.1934 | 0.3106 | 41 | 11 | 171 | 9,525 | 4.6s |
+| naive (geometric floor) | 0.8065 | 0.2358 | 0.3650 | 50 | 12 | 162 | 14,036 | 4.2s |
+| ~~naive (pre-fix, PR #275 bug)~~ | ~~0.7885~~ | ~~0.1934~~ | ~~0.3106~~ | ~~41~~ | ~~11~~ | ~~171~~ | ~~9,525~~ | ~~4.6s~~ |
 | Hootenanny 0.2.41 | 0.9289 | 0.9245 | 0.9267 | 196 | 15 | 16 | 33,038 | n/a (emulated)* |
 | Meili (Valhalla 3.7.0) | 0.9258 | 1.0000 | 0.9615 | 212 | 17 | 0 | 41,221 | 15.2s (build+match; 852 MB) |
 | **matcher (xgboost)** | **1.0000** | **0.9528** | **0.9758** | 202 | 0 | 10 | 19,981 | 68.0s (1825 MB) |
@@ -96,9 +110,11 @@ dataset, so target-level only.
 Sidewalks verdict: **Hootenanny CAN match footways** — `HighwayMatchCreator`
 handles `highway=footway` about as well as roads (F1 0.927 vs 0.973 on roads), no
 special footway match creator needed. The naive baseline, by contrast, **collapses
-on sidewalks** (recall 0.19): dense parallel sidewalks on both sides of every
-street defeat pure buffer overlap, since one target sidewalk buffer catches many
-near-parallel Overture segments. matcher stays robust (F1 0.976, zero false
+on sidewalks** (recall 0.24, F1 0.365 — even after the guard fix that lifted its
+road recall to 0.95): dense parallel sidewalks on both sides of every street
+defeat pure buffer overlap, since one target sidewalk buffer catches many
+near-parallel Overture segments and end-to-end bearing can't separate them.
+matcher stays robust (F1 0.976, zero false
 positives). **Meili** lands between Hootenanny and matcher (F1 0.962): perfect
 recall, but 17 false positives — sidewalks snapped onto the adjacent parallel
 *road* centerline (the map-matching precision tax; see path-based section).
@@ -129,13 +145,17 @@ F1 0.973 / exact 0.714.
   target-level recall (1.000) and 0.947 precision. It finds essentially every
   correspondence but over-predicts (20,408 pairs) and its M:N grouping is
   coarser. This is exactly the credible classical bar to clear.
-- **Both crush the naive floor** (F1 0.637 target / 0.340 stitch on roads),
-  confirming the benchmark floor is honest but non-trivial: pure buffer overlap
-  already recovers ~54% of road matches at 78% precision.
+- **All three beat the naive floor, but the floor is honest and non-trivial on
+  roads** (naive F1 0.839 target / 0.619 stitch): pure buffer overlap + bearing
+  already recovers ~95% of road matches at 75% precision. The gap to matcher on
+  roads is now a *precision* gap (0.75 → 0.996), not a recall one — geometry
+  alone finds the road correspondences; it just can't reject the near-misses.
 - **Sidewalks separate the robust from the fragile.** On dense parallel footways
-  the naive floor collapses (F1 0.311, recall 0.19) while both Hootenanny (0.927)
+  the naive floor collapses (F1 0.365, recall 0.24) while both Hootenanny (0.927)
   and matcher (0.976) stay strong — matcher again on top with zero false
-  positives. Hootenanny needs no special footway creator; `HighwayMatchCreator`
+  positives. This is where the naive floor stays genuinely weak even after the
+  guard fix, and it is the clearest one-number justification for a learned
+  approach. Hootenanny needs no special footway creator; `HighwayMatchCreator`
   covers `highway=footway`.
 - **Meili is the strongest external baseline, and validates the map-matching
   approach as a real contender.** It beats Hootenanny on every dataset and comes

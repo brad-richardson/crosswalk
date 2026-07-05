@@ -18,10 +18,19 @@ Algorithm (per target segment ``t``):
    - Compute the absolute bearing difference between the two segments'
      end-to-end orientation. Reject if it exceeds ``angle_tol_deg`` (treating
      opposing directions as aligned — roads are undirected here).
-   - Reject if the directed Hausdorff distance from the clipped reference to
-     the target exceeds ``buffer_m`` (a shape-sanity guard against a reference
-     that only clips the buffer at a corner).
    - Score = ``overlap_fraction * cos(angle_diff)``.
+
+   The overlap-within-buffer test and the bearing test carry all the
+   discrimination here. An earlier version added a Hausdorff "shape sanity"
+   guard, but it was removed: the intended directed check (clipped ref -> target)
+   is a mathematical no-op — the clipped reference is by construction the part of
+   the reference inside ``target.buffer(buffer_m)``, so its directed Hausdorff to
+   the target never exceeds ``buffer_m`` — while shapely's ``hausdorff_distance``
+   is *symmetric*, so the guard as shipped instead rejected any pair whose target
+   extended more than ``buffer_m`` beyond the clipped reference. That is the
+   coverage-asymmetry trap (a short reference legitimately covering part of a long
+   local segment), and it silently cut naive recall by nearly half on roads
+   (0.95 -> 0.54) and worsened the sidewalk collapse — so no shape guard is used.
 4. Greedy assignment: sort all surviving (ref, target, score) triples by score
    descending and assign each *reference* to at most one target — its single
    best. Because Overture references are typically segmented much finer than
@@ -142,14 +151,6 @@ def compute_naive_matches(
                 if angle_diff > angle_tol_deg:
                     continue
                 angle_factor = math.cos(math.radians(angle_diff))
-
-            # Shape sanity: the clipped reference should sit close to the target.
-            try:
-                hd = clipped.hausdorff_distance(tgt_geom)
-            except Exception:
-                hd = 0.0
-            if hd > buffer_m:
-                continue
 
             score = overlap_frac * angle_factor
             candidates.append((score, ref_ids[ri], tgt_id))
