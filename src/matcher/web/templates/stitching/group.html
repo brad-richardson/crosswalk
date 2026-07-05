@@ -91,15 +91,18 @@
                 {% for ref in ref_details %}
                 <button class="segment-pill segment-pill-ref{% if preseed_active_refs is not defined or preseed_active_refs is none or ref.id in preseed_active_refs %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        data-seg-id="{{ ref.id }}"
                         data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
                         title="{{ ref.id }}">R{{ loop.index }}</button>
                 {% endfor %}
                 {% if context_ref_details is defined %}
                 {% for ref in context_ref_details %}
-                <button class="segment-pill segment-pill-ref"
+                <button class="segment-pill segment-pill-context segment-pill-context-ref"
+                        data-context="true"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
+                        data-seg-id="{{ ref.id }}"
                         data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
-                        title="{{ ref.id }}">R{{ ref_details|length + loop.index }}</button>
+                        title="Nearby context (not part of this group; toggles map only, won't be saved){% if ref.member_group %} — belongs to group {{ ref.member_group }}{% endif %}">R{{ ref_details|length + loop.index }}<span class="pill-ctx-affix">ctx</span></button>
                 {% endfor %}
                 {% endif %}
             </div>
@@ -110,15 +113,18 @@
                 {% for tgt in target_details %}
                 <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        data-seg-id="{{ tgt.id }}"
                         data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"
                         title="{{ tgt.id }}">T{{ loop.index }}</button>
                 {% endfor %}
                 {% if context_target_details is defined %}
                 {% for tgt in context_target_details %}
-                <button class="segment-pill segment-pill-target"
+                <button class="segment-pill segment-pill-context segment-pill-context-target"
+                        data-context="true"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
+                        data-seg-id="{{ tgt.id }}"
                         data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"
-                        title="{{ tgt.id }}">T{{ target_details|length + loop.index }}</button>
+                        title="Nearby context (not part of this group; toggles map only, won't be saved){% if tgt.member_group %} — belongs to group {{ tgt.member_group }}{% endif %}">T{{ target_details|length + loop.index }}<span class="pill-ctx-affix">ctx</span></button>
                 {% endfor %}
                 {% endif %}
             </div>
@@ -183,6 +189,14 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- Non-blocking notice surfaced when context pills are toggled on. Context
+         segments are NOT part of this group; toggling them controls map
+         visibility only and they are never written to the stored label. This
+         notice makes that explicit at submit time (previously it happened
+         silently) without hard-blocking the legitimate map-visibility toggle.
+         Populated by updateContextNotice(). -->
+    <div class="context-notice" id="context-notice" style="display:none" role="status"></div>
 
     <!-- Action buttons -->
     <div class="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">

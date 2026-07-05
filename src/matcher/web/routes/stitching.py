@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring, unary_union
 
+from ...filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
 from ...matching.alternatives import _shorten_id
 from ...matching.sliver import (
     annotate_group_sliver_flags,
@@ -55,6 +56,58 @@ def _validate_dataset(dataset: str) -> bool:
 # map visibility. Median per-group context_ref is ~91 (< cap), so typical groups
 # render unchanged; only oversized groups get bounded.
 CONTEXT_DISPLAY_CAP = 150
+
+
+# Module-level cache of the segment-id -> owning-group_id map built from a
+# dataset's groups sidecar. Spatial-context pills in the review UI can belong to
+# a NEIGHBORING group (post corridor-decomposition), and reviewers need to know
+# which group a continuation will be reviewed in. The sidecar is large (tens of
+# MB), so it is loaded at most once per (dataset, sidecar-mtime) and reused
+# across requests. Never a per-pill file read. Keyed by dataset; the stored
+# mtime invalidates the entry when the sidecar is regenerated.
+_MEMBERSHIP_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+
+
+def _load_group_membership(dataset: str) -> dict[str, str]:
+    """Map each ref/target segment id to its owning ``group_id``.
+
+    Built from the dataset's groups sidecar JSON (alongside the bridge file) and
+    module-cached per (dataset, sidecar-mtime). Used only to annotate context
+    pills with the neighboring group a segment belongs to. Best-effort: any
+    missing/unreadable/malformed sidecar yields an empty map (no hint), never an
+    error — the hint is purely informational.
+    """
+    if not dataset:
+        return {}
+    try:
+        bridge_path = PROJECT_ROOT / "data" / "output" / bridge_filename(dataset)
+        sidecar = groups_sidecar_path(bridge_path)
+        mtime = sidecar.stat().st_mtime
+    except OSError:
+        return {}
+
+    cached = _MEMBERSHIP_CACHE.get(dataset)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    try:
+        with open(sidecar) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+    membership: dict[str, str] = {}
+    for g in data.get("groups", []):
+        gid = g.get("group_id")
+        if not gid:
+            continue
+        for sid in g.get("ref_ids", []):
+            membership.setdefault(sid, gid)
+        for sid in g.get("target_ids", []):
+            membership.setdefault(sid, gid)
+
+    _MEMBERSHIP_CACHE[dataset] = (mtime, membership)
+    return membership
 
 
 def _cap_context_ids(group: dict, cap: int = CONTEXT_DISPLAY_CAP) -> dict:
@@ -290,11 +343,15 @@ def _build_group_geojson(group: dict) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
-def _build_group_context(group: dict) -> dict:
+def _build_group_context(group: dict, dataset: str = "") -> dict:
     """Build extra template context for a group.
 
     Returns class/name summaries and per-segment detail lists for the
-    expandable detail view.
+    expandable detail view. ``dataset`` (optional) enables the context-segment
+    membership hint: each context detail is annotated with the neighboring
+    group it belongs to (from the groups sidecar), so reviewers know where a
+    corridor continuation will be reviewed rather than assuming a context pill
+    is part of this group.
     """
     ref_id_list = group.get("ref_ids", [])
     target_id_list = group.get("target_ids", [])
@@ -386,8 +443,24 @@ def _build_group_context(group: dict) -> dict:
     capped_ref_ids = capped["ref_ids"]
     capped_target_ids = capped["target_ids"]
 
+    # Membership hint: which neighboring group each context segment belongs to.
+    # Best-effort, cached; skip self-references (a context id should never point
+    # back at the current group, but guard anyway). Only touch the (potentially
+    # tens-of-MB) sidecar when this group actually has context pills to annotate.
+    membership = _load_group_membership(dataset) if (capped_ref_ids or capped_target_ids) else {}
+    current_gid = group.get("group_id")
+
+    def _member_group(sid: str) -> str | None:
+        gid = membership.get(sid)
+        return gid if gid and gid != current_gid else None
+
     context_ref_details = [
-        {"id": rid, "cls": context_ref_classes.get(rid, ""), "name": context_ref_names.get(rid, "")}
+        {
+            "id": rid,
+            "cls": context_ref_classes.get(rid, ""),
+            "name": context_ref_names.get(rid, ""),
+            "member_group": _member_group(rid),
+        }
         for rid in capped_ref_ids
     ]
     context_target_details = [
@@ -395,6 +468,7 @@ def _build_group_context(group: dict) -> dict:
             "id": tid,
             "cls": context_target_classes.get(tid, ""),
             "name": context_target_names.get(tid, ""),
+            "member_group": _member_group(tid),
         }
         for tid in capped_target_ids
     ]
@@ -497,7 +571,7 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
             return HTMLResponse("Group not found in batch", status_code=404)
         deep_group = all_groups[deep_index]
         geojson = _build_group_geojson(deep_group)
-        group_ctx = _build_group_context(deep_group)
+        group_ctx = _build_group_context(deep_group, dataset=dataset)
         return templates.TemplateResponse(
             request,
             "stitching/page.html",
@@ -534,7 +608,7 @@ async def stitching_review(request: Request, dataset: str = "", group_id: str = 
 
     group = groups[0]
     geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group)
+    group_ctx = _build_group_context(group, dataset=dataset)
 
     return templates.TemplateResponse(
         request,
@@ -596,7 +670,7 @@ async def stitching_group(
         )
 
     geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group)
+    group_ctx = _build_group_context(group, dataset=dataset)
 
     return templates.TemplateResponse(
         request,
@@ -778,7 +852,7 @@ async def stitching_select(
 
     group = groups[0]
     geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group)
+    group_ctx = _build_group_context(group, dataset=dataset)
 
     return templates.TemplateResponse(
         request,
@@ -838,7 +912,7 @@ async def stitching_skip(
 
     group = groups[next_index]
     geojson = _build_group_geojson(group)
-    group_ctx = _build_group_context(group)
+    group_ctx = _build_group_context(group, dataset=dataset)
 
     return templates.TemplateResponse(
         request,
