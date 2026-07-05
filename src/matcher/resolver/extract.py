@@ -70,6 +70,7 @@ def build_edge_table(
     human_df: pd.DataFrame,
     dataset_id: str,
     include_split: bool = True,
+    include_rejected: bool = True,
 ) -> pd.DataFrame:
     """Build a per-edge training table for one dataset.
 
@@ -86,6 +87,14 @@ def build_edge_table(
             one group) are emitted; ``split`` labels (human edge set spans
             multiple groups, so the within-group keep set is partial and the
             drop label is noisy) are dropped.
+        include_rejected: if True (default) and the sidecar carries the M2
+            ``rejected_edges`` list, those non-selected candidates are emitted as
+            additional rows (``selected=False``). This is what makes
+            UNDER-selection learnable: a rejected edge that the human DID select
+            (``keep=1``) is a true positive the optimizer missed — impossible to
+            observe from the selected-only sidecar. Older sidecars without the
+            list simply yield no extra rows. Ignored per-edge sliver rejects and
+            duplicates are de-duplicated against ``edges`` by (ref_id, target_id).
 
     Returns:
         DataFrame with one row per (group, edge). Empty if no labels map.
@@ -105,7 +114,12 @@ def build_edge_table(
             continue
         hrow = human_by[hgid]
         human_es = _human_edge_set(hrow["selected_edges"])
-        edges = group.get("edges", [])
+        edges = list(group.get("edges", []))
+        if include_rejected:
+            seen = {_edge_key(e) for e in edges}
+            for rej in group.get("rejected_edges", []):
+                if _edge_key(rej) not in seen:
+                    edges.append(rej)
         for edge in edges:
             key = _edge_key(edge)
             rows.append(

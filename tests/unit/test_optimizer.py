@@ -12,6 +12,7 @@ from shapely import LineString
 from matcher.matching.optimizer import (
     _endpoints_are_collinear,
     _find_contiguous_id_groups,
+    apply_confidence_drop_prune,
     build_contiguity_adjacency,
     find_match_components,
     group_is_structurally_simple,
@@ -857,3 +858,66 @@ class TestStructuralGate:
         assert group_is_structurally_simple(2, 2, 25, 2, 30, 40)
         assert not group_is_structurally_simple(3, 3, 10, 2, 30, 40)  # tangle
         assert not group_is_structurally_simple(2, 2, 31, 2, 30, 40)  # over soft budget
+
+
+def _grp(rid, tid, conf, gid):
+    """MatchResult helper: a group edge carries a group_id in features."""
+    return MatchResult(rid, tid, MatchDecision.MATCH, conf, {}, {"group_id": gid} if gid else {})
+
+
+class TestConfidenceDropPrune:
+    """Tests for the M2 / resolver Phase-1 confidence-drop prune."""
+
+    def test_disabled_is_identity_object(self):
+        """threshold <= 0 returns the SAME list object and empty pruned set."""
+        rs = [_grp("r1", "t1", 0.9, "g1"), _grp("r1", "t2", 0.2, "g1")]
+        kept, pruned = apply_confidence_drop_prune(rs, 0.0)
+        assert kept is rs
+        assert pruned == set()
+
+    def test_no_op_when_nothing_below_threshold(self):
+        """When all group edges clear the floor, the input is returned unchanged."""
+        rs = [_grp("r1", "t1", 0.99, "g1"), _grp("r2", "t2", 0.98, "g1")]
+        kept, pruned = apply_confidence_drop_prune(rs, 0.5)
+        assert kept is rs
+        assert pruned == set()
+
+    def test_drops_below_threshold(self):
+        rs = [
+            _grp("r1", "t1", 0.99, "g1"),
+            _grp("r1", "t2", 0.40, "g1"),
+            _grp("r2", "t3", 0.20, "g1"),
+        ]
+        kept, pruned = apply_confidence_drop_prune(rs, 0.5)
+        assert pruned == {("r1", "t2"), ("r2", "t3")}
+        assert {(r.ref_id, r.target_id) for r in kept} == {("r1", "t1")}
+
+    def test_retains_group_top_even_if_below_threshold(self):
+        """A group is never emptied: its highest-confidence edge always survives."""
+        rs = [_grp("r1", "t1", 0.30, "g1"), _grp("r1", "t2", 0.10, "g1")]
+        kept, pruned = apply_confidence_drop_prune(rs, 0.9)
+        # top (0.30) kept despite being < 0.9; only the 0.10 edge dropped
+        assert {(r.ref_id, r.target_id) for r in kept} == {("r1", "t1")}
+        assert pruned == {("r1", "t2")}
+
+    def test_never_touches_1to1_matches(self):
+        """1:1 matches (no group_id) are outside the prune's scope."""
+        rs = [
+            _grp("rA", "tA", 0.10, None),  # 1:1, very low conf
+            _grp("r1", "t1", 0.99, "g1"),
+            _grp("r1", "t2", 0.20, "g1"),
+        ]
+        kept, pruned = apply_confidence_drop_prune(rs, 0.5)
+        assert ("rA", "tA") not in pruned
+        assert any(r.ref_id == "rA" for r in kept)
+        assert pruned == {("r1", "t2")}
+
+    def test_threshold_applied_per_group_independently(self):
+        rs = [
+            _grp("r1", "t1", 0.99, "g1"),
+            _grp("r1", "t2", 0.40, "g1"),
+            _grp("r3", "t4", 0.95, "g2"),
+            _grp("r3", "t5", 0.30, "g2"),
+        ]
+        _, pruned = apply_confidence_drop_prune(rs, 0.5)
+        assert pruned == {("r1", "t2"), ("r3", "t5")}
