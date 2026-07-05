@@ -180,7 +180,7 @@ is. Contents:
   + per-dataset source license; note that unverified-license datasets are excluded
   rather than published under a guess.
 
-Stitch-gate metrics on the page come from `cbench/datasets.toml` `[gate.*]`
+Stitch-gate metrics on the page come from `mbench/datasets.toml` `[gate.*]`
 floors (the human-curated quality bar), not a live measurement. Today only
 `us_boston_streets` is armed (F1 ≥ 0.83 / exact ≥ 0.50), and Boston/Seattle are
 **not yet in the factory** (they stay on the legacy `data/output/` review path —

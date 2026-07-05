@@ -396,7 +396,7 @@ def publish(
     merged = list(datasets or []) + list(dataset_opt or [])
     ds_filter = None if all_datasets else (merged or None)
 
-    gate_floors = load_gate_floors(PROJECT_ROOT / "cbench" / "datasets.toml")
+    gate_floors = load_gate_floors(PROJECT_ROOT / "mbench" / "datasets.toml")
     report = assemble_staging(
         factory_root=root,
         staging_dir=staging,
