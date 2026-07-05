@@ -204,6 +204,6 @@ def test_committed_toml_has_boston_gate():
     floors = load_gate_config(cfg)
     assert "us_boston_streets" in floors
     # Re-derived 2026-07-05 post set-semantics reinterpretation (#295/#298):
-    # baseline F1 0.8840 / exact 0.5946 over 111 mapped pair groups.
+    # baseline F1 0.8858 / exact 0.5946 over 111 mapped pair groups.
     assert floors["us_boston_streets"].f1_filtered_floor == pytest.approx(0.83)
     assert floors["us_boston_streets"].exact_filtered_floor == pytest.approx(0.50)

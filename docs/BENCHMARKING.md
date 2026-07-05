@@ -158,7 +158,7 @@ that the dataset reports `skip_unarmed` (non-blocking). This means the gate goes
 live automatically as the label base grows — no code change or second PR. As of
 2026-07-05 (post-#295/#298 set-semantics reinterpretation), `us_boston_streets`
 is armed (111 mapped pair groups, floors F1 0.83 / exact 0.50, baseline
-F1 0.8840 / exact 0.5946; its 3 set labels are reported separately and not
+F1 0.8858 / exact 0.5946; its 3 set labels are reported separately and not
 gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 
