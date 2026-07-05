@@ -570,7 +570,11 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
     ctx = _build_group_context(group, dataset=dataset)
     ctx["deanchored"] = deanchored
     if deanchored:
-        ctx["client_edges"] = _annotate_candidate_edges(group)
+        annotated = _annotate_candidate_edges(group)
+        ctx["client_edges"] = annotated
+        # Keep the server-rendered sliver count consistent with the widened
+        # candidate payload (the live indicator recomputes client-side anyway).
+        ctx["sliver_count"] = sum(1 for e in annotated if e["is_sliver"])
         ctx["preseed_active_refs"] = []
         ctx["preseed_active_targets"] = []
         ctx["preseed_edges"] = []
@@ -818,6 +822,7 @@ async def stitching_select(
     selected_edges: str = Form(""),
     exclude_slivers: str = Form(""),
     deanchored: bool = Form(False),
+    confirm_reject_all: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap.
 
@@ -899,12 +904,33 @@ async def stitching_select(
             if candidate_edges and not matched and (ref_set or target_set):
                 logger.warning(
                     "Rejected inconsistent stitching submit for group %s: "
-                    "%d refs / %d targets claimed but 0 group edges matched",
+                    "%d refs / %d targets claimed but 0 candidate edges matched",
                     group_id,
                     len(ref_set),
                     len(target_set),
                 )
                 return HTMLResponse("Inconsistent selection", status_code=400)
+
+            # De-anchored empty-submit guard: in normal mode "both pill fields
+            # empty" is a deliberate deselection of the pre-seed, but in
+            # de-anchored mode it is the UNTOUCHED default (blank slate), so a
+            # misclick on "Select This" would silently record a reject-all label
+            # into the exact eval slice this mode exists to keep clean. Require
+            # an explicit confirmation flag (the client shows a confirm dialog
+            # and sets it) before storing an empty de-anchored selection.
+            if (
+                deanchored
+                and not ref_set
+                and not target_set
+                and confirm_reject_all.strip().lower() not in {"true", "1", "on", "yes"}
+            ):
+                logger.warning(
+                    "Refused unconfirmed empty de-anchored submit for group %s",
+                    group_id,
+                )
+                return HTMLResponse(
+                    "Empty de-anchored selection requires confirmation", status_code=400
+                )
 
             if exclude_sliver_edges:
                 ref_lens, tgt_lens = group_segment_lengths_m(group)

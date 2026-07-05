@@ -263,6 +263,11 @@
             <!-- Carries the review mode across the HTMX swap chain so the next
                  group stays de-anchored and its label is stamped accordingly. -->
             <input type="hidden" name="deanchored" value="{{ 1 if deanchored else 0 }}">
+            <!-- Set to 1 by the client's confirm dialog when the reviewer
+                 explicitly confirms an EMPTY de-anchored submit (reject-all).
+                 The server refuses unconfirmed empty de-anchored submits so a
+                 blank-slate misclick can't record a false reject-all label. -->
+            <input type="hidden" name="confirm_reject_all" id="confirm-reject-all" value="">
             <button type="submit" class="btn-select">
                 Select This
             </button>
