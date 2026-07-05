@@ -1,5 +1,7 @@
 # Hootenanny native x86 baseline (hoot 0.2.87)
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench`._
+
 This note records the one-shot **native x86 Linux** run of Hootenanny that closes
 the "wall time is n/a — emulated" caveat on the frozen Hootenanny rows in
 [`docs/BENCHMARK_RESULTS.md`](../docs/BENCHMARK_RESULTS.md). It documents the

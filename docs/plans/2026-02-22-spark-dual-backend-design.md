@@ -1,5 +1,7 @@
 # Scaling the Stitch Pipeline: GDF + Spark Dual Backend
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). The "cbench" mentions below are historical; the harness is now invoked as `mbench`._
+
 ## Context
 
 The matcher stitch pipeline currently runs single-node using GeoDataFrames, ProcessPoolExecutor, and Shapely STRtree. This works well for city/region-scale datasets but cannot handle the target scale: Overture (300M segments) vs OSM globally, processed per-dataset. This document explores what needs to change to add a PySpark + Sedona distributed backend while keeping the existing offline path for smaller datasets.

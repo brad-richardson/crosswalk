@@ -8,7 +8,7 @@ update it as items land.
 
 A full architectural review of the eval methodology found that reported metrics
 systematically overstated model quality (hyperparameter tuning leakage, CV/test
-overlap, no cross-dataset holdout in CI, structurally inflated cbench precision)
+overlap, no cross-dataset holdout in CI, structurally inflated mbench precision)
 and that the end product — the optimizer's final assignments — was almost
 entirely unmeasured. The first three rounds of fixes landed 2026-07-02/03.
 
@@ -16,8 +16,8 @@ entirely unmeasured. The first three rounds of fixes landed 2026-07-02/03.
 
 | Finding | Fix | PR |
 |---|---|---|
-| Docs described mechanisms the code never had (Hungarian optimizer, median imputation, cbench target-level eval) | Docs corrected to match implementation | #222 |
-| cbench `--match-level target` documented but unimplemented; precision inflation invisible | Target-level eval implemented (now the default); `labeled_coverage` / `unlabeled_predictions` / `skipped_unsure` surfaced | #223 |
+| Docs described mechanisms the code never had (Hungarian optimizer, median imputation, mbench target-level eval) | Docs corrected to match implementation | #222 |
+| mbench `--match-level target` documented but unimplemented; precision inflation invisible | Target-level eval implemented (now the default); `labeled_coverage` / `unlabeled_predictions` / `skipped_unsure` surfaced | #223 |
 | Blocking recall unmeasured (matches lost at candidate generation invisible to all metrics) | `matcher blocking-recall` command; replays the real `generate_candidates` path; also fixed falsy-zero buffer bug | #224 |
 | In-training CV included the test rows; agent labels concatenated before the split; stale `feature_version` only warned | CV runs on train rows only; agent labels appended post-split (and segment-overlap-excluded); stale features now error (`allow_stale_features` escape hatch) | #225 |
 | Only segment-level splits enforced — no cross-dataset generalization gate | LOO-by-type CV promoted to CI gate (`tests/regression/test_loo_cv.py`; per-type-group macro-F1 floors = baseline − 0.05) | #226 |
@@ -61,7 +61,7 @@ prune operates at the 0.575 calibrated point (#269).
 
 1. **The shipped output is barely evaluated.** All gated metrics measure the
    pairwise classifier. The optimizer's final assignments are evaluated by the
-   labeled stitching groups (`labels/stitching/`). Shipped in #258, cbench
+   labeled stitching groups (`labels/stitching/`). Shipped in #258, mbench
    computes a **modernized, non-blocking** stitch-level metric on every run
    (default-on: the `labels/stitching` dir is auto-resolved; skipped silently
    when a dataset has none, and any error is swallowed). It reaches parity with
@@ -69,20 +69,20 @@ prune operates at the 0.575 calibrated point (#269).
    group_id churn (exact-id + edge-overlap against the `*_groups.json` sidecar),
    raw **and** sliver-filtered edge precision/recall/F1, per-group exact-match
    rate, and a per-labeler breakdown (human vs `panel_*`). The standalone sliver
-   rule in `cbench.eval.sliver` is parity-tested against
-   `matcher.config.is_sliver_edge` (`tests/unit/test_cbench_sliver_parity.py`).
+   rule in `mbench.eval.sliver` is parity-tested against
+   `matcher.config.is_sliver_edge` (`tests/unit/test_mbench_sliver_parity.py`).
    **Now gated (2026-07-05).** The metric was promoted from non-blocking to an
-   enforced, auto-arming gate. `cbench run[-batch] --gate` exits nonzero when an
+   enforced, auto-arming gate. `mbench run[-batch] --gate` exits nonzero when an
    *armed* dataset's sliver-filtered edge-F1 or exact-match falls below a
-   per-dataset floor in `cbench/datasets.toml` (`[gate.<dataset>]`). Because the
+   per-dataset floor in `mbench/datasets.toml` (`[gate.<dataset>]`). Because the
    gate needs live pipeline outputs (a bridge parquet + its `*_groups.json`
    sidecar) that don't exist in GitHub Actions (`data/output` is untracked), it
    is enforced at **benchmark time** in the pre-merge checklist for
    matching-logic PRs (see `docs/BENCHMARKING.md` and CLAUDE.md Change Tracking),
    not in unit CI. The gate *machinery* (edge-overlap mapping, sliver filtering,
    arming, floor logic) is regression-tested in CI on a committed miniature
-   fixture of real Boston groups (`cbench/tests/test_gate.py`,
-   `cbench/tests/fixtures/mini_*`), so the code cannot rot even though the
+   fixture of real Boston groups (`mbench/tests/test_gate.py`,
+   `mbench/tests/fixtures/mini_*`), so the code cannot rot even though the
    live-quality check runs out-of-band.
 
    **Auto-arming.** A dataset's floor is enforced only once ≥ `min_mapped_groups`
@@ -265,9 +265,9 @@ uv run python scripts/ablation_study.py --mode category \
 
 ## Recommended sequence
 
-1. ~~Scale stitching-group ground truth, then promote the cbench stitch-level
+1. ~~Scale stitching-group ground truth, then promote the mbench stitch-level
    metric to a gate.~~ **Done (2026-07-05):** promoted to an auto-arming,
-   benchmark-time gate (`cbench run --gate`, per-dataset floors in
+   benchmark-time gate (`mbench run --gate`, per-dataset floors in
    `datasets.toml`, CI fixture test of the machinery). Boston is armed (67 mapped
    groups); the gate engages on further datasets automatically as labels grow.
    Continue scaling stitching labels (agent-assisted; separate plan doc) to arm

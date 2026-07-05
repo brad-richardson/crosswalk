@@ -160,17 +160,17 @@ class PublishReport:
 # --------------------------------------------------------------------------
 # Gate floors + display metadata (best-effort context for the credibility page)
 # --------------------------------------------------------------------------
-def load_gate_floors(cbench_toml: Path) -> dict[str, dict[str, Any]]:
-    """Parse ``[gate.<dataset>]`` floor blocks from ``cbench/datasets.toml``.
+def load_gate_floors(mbench_toml: Path) -> dict[str, dict[str, Any]]:
+    """Parse ``[gate.<dataset>]`` floor blocks from ``mbench/datasets.toml``.
 
     Returns ``{dataset: {min_mapped_groups, f1_filtered_floor, exact_filtered_floor}}``.
     These are the *configured* stitch-gate floors (the honest, human-curated
     quality bar), not a live measurement — the credibility page cites them as the
     validation bar where stitching labels exist.
     """
-    if not cbench_toml.exists():
+    if not mbench_toml.exists():
         return {}
-    data = tomllib.load(cbench_toml.open("rb"))
+    data = tomllib.load(mbench_toml.open("rb"))
     return dict(data.get("gate", {}) or {})
 
 

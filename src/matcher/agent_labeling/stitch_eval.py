@@ -63,8 +63,8 @@ def set_label_metrics(
     """Score a predicted edge set against a SET label's membership.
 
     THE PARITY-CRITICAL CORE. Replicated verbatim in
-    ``cbench.eval.stitch_metrics.set_label_metrics`` and guarded by
-    ``tests/unit/test_cbench_set_metric_parity.py`` — keep the two in lockstep.
+    ``mbench.eval.stitch_metrics.set_label_metrics`` and guarded by
+    ``tests/unit/test_mbench_set_metric_parity.py`` — keep the two in lockstep.
 
     Returns ``(membership_exact, boundary_precision, coverage)``:
       * membership_exact - the segments incident to the predicted edges are
@@ -521,7 +521,7 @@ def _map_set_labels_to_groups(
 ) -> dict[str, str]:
     """Map each SET human row's group_id -> best panel group by membership overlap.
 
-    Mirrors :func:`cbench.eval.stitch_metrics.map_set_labels_to_groups`. Set rows
+    Mirrors :func:`mbench.eval.stitch_metrics.map_set_labels_to_groups`. Set rows
     carry no edges, so they map by ref_ids ∪ target_ids segment overlap, with a
     verbatim group_id preferred when it still shares a segment.
     """

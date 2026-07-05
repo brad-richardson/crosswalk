@@ -81,9 +81,9 @@ best_params.json
 # Playwright MCP artifacts
 .playwright-mcp/
 
-# cbench outputs
-cbench_output/
-cbench_results.jsonl
+# mbench outputs (harness renamed cbench->mbench 2026-07-05)
+mbench_output/
+mbench_results.jsonl
 
 # Claude-mem auto-generated files (keep root CLAUDE.md)
 **/CLAUDE.md

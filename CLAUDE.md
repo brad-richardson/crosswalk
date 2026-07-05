@@ -215,12 +215,12 @@ vs `labels/stitching/`), which pair-level F1 does not measure:
 uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
-uv run cbench run matcher us_boston_streets -c cbench/datasets.toml --gate
+uv run mbench run matcher us_boston_streets -c mbench/datasets.toml --gate
 ```
 
 The gate lives at benchmark time (not unit CI) because it needs `data/output`,
-which CI doesn't have; its machinery is CI-tested via `cbench/tests/test_gate.py`.
-Floors live in `cbench/datasets.toml` (`[gate.*]`) and auto-arm as the stitching
+which CI doesn't have; its machinery is CI-tested via `mbench/tests/test_gate.py`.
+Floors live in `mbench/datasets.toml` (`[gate.*]`) and auto-arm as the stitching
 label base grows. See `docs/BENCHMARKING.md` "Stitch-level quality gate".
 
 ## Default Development Workflow

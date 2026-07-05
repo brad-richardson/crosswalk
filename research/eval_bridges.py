@@ -1,8 +1,8 @@
-"""Evaluate already-computed bridges against labels using cbench eval functions.
+"""Evaluate already-computed bridges against labels using mbench eval functions.
 
 Avoids re-running matcher for each (off/on) x (pair/target) combination.
 
-Usage (from cbench/ venv):
+Usage (from mbench/ venv):
     python <this> <dataset> <labels_human> <labels_stitch> <bridge1> [<bridge2> ...]
 """
 
@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from cbench.adapters.matcher import MatcherAdapter
-from cbench.eval.labels import load_labels, load_stitch_labels
-from cbench.eval.metrics import evaluate
-from cbench.eval.stitch_metrics import evaluate_stitch_groups
+from mbench.adapters.matcher import MatcherAdapter
+from mbench.eval.labels import load_labels, load_stitch_labels
+from mbench.eval.metrics import evaluate
+from mbench.eval.stitch_metrics import evaluate_stitch_groups
 
 
 def main():

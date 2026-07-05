@@ -1,5 +1,7 @@
 # Learned Stitcher Round 2: data fixed, architecture tested, verdict quantified
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). The "cbench" mention below is historical; the harness is now invoked as `mbench`._
+
 **Date:** 2026-07-05 · **Runner:** `scripts/run_stitcher_round2.py` (PYTHONHASHSEED=0)
 **Round 1:** `research/learned_group_resolver_prototype.md` (PR #272)
 

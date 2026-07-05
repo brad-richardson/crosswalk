@@ -1,5 +1,7 @@
 # Engine developer-experience comparison — what it costs to run each matcher
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench` (a deprecated `cbench` alias still forwards)._
+
 **Trigger:** the head-to-head in [`docs/BENCHMARK_RESULTS.md`](../docs/BENCHMARK_RESULTS.md)
 showed Valhalla **Meili** reaching **F1 0.994** on Boston roads from *one pip
 dependency, no training, no labels, ~12 s* — while `matcher` needs a clone, a heavy
