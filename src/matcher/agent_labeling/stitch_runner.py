@@ -49,6 +49,29 @@ DEFAULT_PANEL = [
     ProviderSpec(name="agy", model="Gemini 3.5 Flash (Medium)"),
 ]
 
+# A candidate FOURTH voter (default OFF): opencode driving an OpenRouter-hosted
+# Qwen3-VL model. Deliberately a distinct model family from the three incumbents
+# (Claude / GPT / Gemini) so its vote is decorrelated, adding real signal to the
+# quorum rather than echoing an existing voice. opencode carries all knobs
+# (reasoning etc.) in the model string, so ``effort`` is unused for it — like agy.
+OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-235b-a22b-instruct")
+
+# Named panel configurations. DEFAULT_PANEL (the 3-voter production panel) is the
+# default; the 4th voter ships behind the opt-in ``v3-candidate`` panel only, so
+# production waves are unaffected until the export rule is validated and flipped.
+PANELS: dict[str, list[ProviderSpec]] = {
+    "default": DEFAULT_PANEL,
+    "v2": DEFAULT_PANEL,
+    "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
+}
+
+
+def get_panel(name: str | None) -> list[ProviderSpec]:
+    """Resolve a named panel config; unknown/empty names fall back to DEFAULT_PANEL."""
+    if not name:
+        return DEFAULT_PANEL
+    return PANELS.get(name, DEFAULT_PANEL)
+
 
 @dataclass
 class Vote:
@@ -367,10 +390,46 @@ def invoke_agy(
     return result.stdout
 
 
+def invoke_opencode(
+    prompt: str,
+    group_dir: Path,
+    letters: list[str],
+    model: str,
+    timeout: int = 240,
+    effort: str = "",
+) -> str:
+    """Invoke the opencode CLI (OpenRouter-backed). Reads images by path via -f.
+
+    CRITICAL ordering: the prompt MUST be the positional argument immediately
+    after ``run`` and BEFORE any ``-f`` flags. ``-f`` takes an array of file
+    paths, so a prompt placed after it is swallowed as another filename and the
+    model receives no instruction. Multiple ``-f`` flags attach multiple images.
+
+    The model string carries everything opencode needs (provider/model/knobs),
+    so ``effort`` is accepted for a uniform invoker signature but unused. opencode
+    prints the assistant's answer to stdout (TUI framing goes to stderr), so the
+    raw stdout is returned for JSON extraction.
+    """
+    imgs = _image_paths(group_dir, letters)
+    cmd = ["opencode", "run", prompt, "-m", model]
+    for img in imgs:
+        cmd += ["-f", img]
+    result = subprocess.run(
+        cmd,
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    _check_exit("opencode", result)
+    return result.stdout
+
+
 _INVOKERS = {
     "claude": invoke_claude,
     "codex": invoke_codex,
     "agy": invoke_agy,
+    "opencode": invoke_opencode,
 }
 
 
@@ -791,6 +850,37 @@ def _edge_set_str(es: frozenset) -> str:
     return json.dumps(sorted([list(e) for e in es]))
 
 
+def _vote_row(v: Vote) -> dict:
+    return {
+        "group_id": v.group_id,
+        "provider": v.provider,
+        "model": v.model,
+        "choice": v.choice,
+        "confidence": v.confidence,
+        "reasoning": v.reasoning,
+        "edge_set": _edge_set_str(v.edge_set),
+        "latency_s": v.latency_s,
+        "timestamp": v.timestamp,
+        "error": v.error,
+        "pack_feedback": v.pack_feedback,
+    }
+
+
+def _consensus_row(c: Consensus) -> dict:
+    return {
+        "group_id": c.group_id,
+        "consensus": c.consensus,
+        "choice": c.choice,
+        "edge_set": _edge_set_str(c.edge_set),
+        "routing": c.routing,
+        "n_votes": c.n_votes,
+        "n_valid": c.n_valid,
+        "minority": c.minority,
+        "mean_confidence": c.mean_confidence,
+        "route_reason": c.route_reason,
+    }
+
+
 def run_batch(
     batch_dir: Path,
     panel: list[ProviderSpec] | None = None,
@@ -798,15 +888,25 @@ def run_batch(
     timeout: int = 240,
     limit: int = 0,
     collect_feedback: bool = False,
+    resume: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the panel over every generated group in a batch dir.
 
     Expects evidence packs under ``batch_dir/{group_id}/``. Writes
     ``batch_dir/votes.csv`` and ``batch_dir/consensus.csv``. Returns the two
     DataFrames.
+
+    Resumable per-group driver: rows are flushed to ``votes.partial.csv`` /
+    ``consensus.partial.csv`` after EACH group so an interrupted run (timeout,
+    provider cap, crash) loses at most the in-flight group. With ``resume=True``
+    the driver reloads those partials and skips any group already recorded,
+    resuming from where it stopped. This is panel-size agnostic — it works
+    identically for the 3-voter default and the 4-voter ``v3-candidate`` panel.
     """
     batch_dir = Path(batch_dir)
     panel = panel or DEFAULT_PANEL
+    votes_partial = batch_dir / "votes.partial.csv"
+    consensus_partial = batch_dir / "consensus.partial.csv"
 
     group_dirs = sorted(
         d for d in batch_dir.iterdir() if d.is_dir() and (d / "prompt.txt").exists()
@@ -817,14 +917,32 @@ def run_batch(
     if limit > 0:
         group_dirs = group_dirs[:limit]
 
-    all_votes: list[Vote] = []
-    consensus_rows: list[Consensus] = []
+    # Resume: carry forward already-completed groups from the partial files and
+    # skip re-running them. Only groups present in BOTH partials count as done.
+    done_ids: set[str] = set()
+    vote_rows: list[dict] = []
+    consensus_out: list[dict] = []
+    if resume and votes_partial.exists() and consensus_partial.exists():
+        prev_votes = pd.read_csv(votes_partial, dtype={"group_id": str})
+        prev_cons = pd.read_csv(consensus_partial, dtype={"group_id": str})
+        done_ids = set(prev_votes["group_id"]) & set(prev_cons["group_id"])
+        vote_rows = prev_votes[prev_votes["group_id"].isin(done_ids)].to_dict("records")
+        consensus_out = prev_cons[prev_cons["group_id"].isin(done_ids)].to_dict("records")
+        if done_ids:
+            logger.info(f"resume: skipping {len(done_ids)} already-completed groups")
 
-    for i, gdir in enumerate(group_dirs):
+    def _flush() -> None:
+        pd.DataFrame(vote_rows, columns=VOTES_COLUMNS).to_csv(votes_partial, index=False)
+        pd.DataFrame(consensus_out, columns=CONSENSUS_COLUMNS).to_csv(
+            consensus_partial, index=False
+        )
+
+    pending = [d for d in group_dirs if d.name not in done_ids]
+    for i, gdir in enumerate(pending):
         gid = gdir.name
-        logger.info(f"[{i + 1}/{len(group_dirs)}] panel on group {gid}")
+        logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
         votes = run_panel_on_group(gid, gdir, panel, timeout, collect_feedback=collect_feedback)
-        all_votes.extend(votes)
+        vote_rows.extend(_vote_row(v) for v in votes)
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
         # (gate-less) call gives the chosen edge_set to look up classes for.
@@ -832,49 +950,15 @@ def run_batch(
         base = compute_consensus(votes)
         edge_classes = _edge_classes_for(base.edge_set, ref_class, tgt_class)
         cons = compute_consensus(votes, edge_classes=edge_classes)
-        consensus_rows.append(cons)
+        consensus_out.append(_consensus_row(cons))
         logger.info(
             f"  -> {cons.consensus} choice={cons.choice} routing={cons.routing} "
             f"({'/'.join(v.provider + ':' + v.choice for v in votes)})"
         )
+        _flush()  # persist after each group so an interrupted run is resumable
 
-    votes_df = pd.DataFrame(
-        [
-            {
-                "group_id": v.group_id,
-                "provider": v.provider,
-                "model": v.model,
-                "choice": v.choice,
-                "confidence": v.confidence,
-                "reasoning": v.reasoning,
-                "edge_set": _edge_set_str(v.edge_set),
-                "latency_s": v.latency_s,
-                "timestamp": v.timestamp,
-                "error": v.error,
-                "pack_feedback": v.pack_feedback,
-            }
-            for v in all_votes
-        ],
-        columns=VOTES_COLUMNS,
-    )
-    consensus_df = pd.DataFrame(
-        [
-            {
-                "group_id": c.group_id,
-                "consensus": c.consensus,
-                "choice": c.choice,
-                "edge_set": _edge_set_str(c.edge_set),
-                "routing": c.routing,
-                "n_votes": c.n_votes,
-                "n_valid": c.n_valid,
-                "minority": c.minority,
-                "mean_confidence": c.mean_confidence,
-                "route_reason": c.route_reason,
-            }
-            for c in consensus_rows
-        ],
-        columns=CONSENSUS_COLUMNS,
-    )
+    votes_df = pd.DataFrame(vote_rows, columns=VOTES_COLUMNS)
+    consensus_df = pd.DataFrame(consensus_out, columns=CONSENSUS_COLUMNS)
 
     votes_df.to_csv(batch_dir / "votes.csv", index=False)
     consensus_df.to_csv(batch_dir / "consensus.csv", index=False)
