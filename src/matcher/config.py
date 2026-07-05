@@ -626,6 +626,51 @@ class MatcherSettings(BaseSettings):
         description="Memory limit for sparse match optimization in GB. "
         "If estimated memory exceeds this, greedy algorithm is used instead.",
     )
+
+    # Corridor-aware M:N grouping (group-splitting design).
+    # When enabled, the M:N branch's endpoint-proximity contiguity only chains
+    # segments that are collinear continuations (turn angle <= max_turn_deg) OR
+    # share a normalized name. This stops perpendicular junction kisses from
+    # welding whole neighbourhoods into one "monster" group; the existing
+    # per-(ref_group x target_group) re-matching then decomposes the corridor
+    # over-merge into per-corridor subgroups.
+    optimizer_corridor_aware: bool = Field(
+        default=True,
+        description="Gate M:N contiguity on collinear continuation or same name.",
+    )
+    optimizer_corridor_max_turn_deg: float = Field(
+        default=40.0,
+        description="Max deflection (deg) from straight at a shared endpoint for two "
+        "segments to count as a collinear corridor continuation.",
+    )
+    # Grouping-only confidence prune (secondary): candidate edges below this
+    # confidence do not GLUE components together (so low-confidence tangles do
+    # not weld into monsters), but they remain scored candidates and stay in a
+    # group's edge list when their endpoints already co-land there via stronger
+    # edges. They are still eligible for 1:1 greedy assignment, so coverage is
+    # unaffected. Distinct from ``min_confidence`` (the candidate floor).
+    optimizer_glue_min_confidence: float = Field(
+        default=0.5,
+        description="Minimum confidence for a candidate edge to weld components "
+        "together during M:N grouping (grouping-only prune).",
+    )
+    # Structural export gate (replaces the flat max_edges cap in stitch_export).
+    # A group is auto-exportable when it is a single corridor-pair OR has few
+    # assignment-components and stays within a soft edge budget; a hard backstop
+    # ceiling blocks anything larger regardless (defence against a
+    # structure-detection bug auto-exporting a monster).
+    stitch_export_max_assignment_components: int = Field(
+        default=2,
+        description="Max assignment-components for a structurally-simple exportable group.",
+    )
+    stitch_export_soft_max_edges: int = Field(
+        default=30,
+        description="Soft edge budget for a structurally-simple exportable group.",
+    )
+    stitch_export_backstop_max_edges: int = Field(
+        default=40,
+        description="Hard backstop edge ceiling; no group above this auto-exports.",
+    )
     auto_select_model: bool = Field(
         default=True,
         description="Automatically select between full and geometry-only models based on "

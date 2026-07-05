@@ -4,12 +4,17 @@ Tests the greedy optimizer, bipartite component detection,
 contiguous ID grouping, and the M:N grouping entry point.
 """
 
+import math
+
 import pytest
 from shapely import LineString
 
 from matcher.matching.optimizer import (
+    _endpoints_are_collinear,
     _find_contiguous_id_groups,
+    build_contiguity_adjacency,
     find_match_components,
+    group_is_structurally_simple,
     optimize_matches_greedy,
     optimize_matches_with_grouping,
 )
@@ -631,3 +636,125 @@ class TestSliverFreeComponentGraph:
         _, _, results = self._two_island_fixture()
         components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
+
+
+class TestCollinearityGate:
+    """Corridor-aware contiguity: only collinear continuations / same-name
+    segments chain together at a shared endpoint."""
+
+    def _turned(self, deg: float) -> LineString:
+        """Segment starting at the shared point (10,0), turned `deg` from straight."""
+        # A collinear continuation would leave (10,0) in the +x direction.
+        rad = math.radians(deg)
+        return LineString([(10.0, 0.0), (10.0 + 10 * math.cos(rad), 10 * math.sin(rad))])
+
+    def test_straight_continuation_is_collinear(self):
+        a = LineString([(0, 0), (10, 0)])
+        adj = build_contiguity_adjacency(
+            ["a", "b"], {"a": a, "b": self._turned(0)}, 1.0, require_collinear=True, max_turn_deg=40
+        )
+        assert adj["a"] == {"b"}
+
+    def test_perpendicular_junction_not_collinear(self):
+        a = LineString([(0, 0), (10, 0)])
+        adj = build_contiguity_adjacency(
+            ["a", "b"],
+            {"a": a, "b": self._turned(90)},
+            1.0,
+            require_collinear=True,
+            max_turn_deg=40,
+        )
+        assert adj["a"] == set()
+
+    def test_angle_boundary_inclusive(self):
+        a = LineString([(0, 0), (10, 0)])
+        # turn == 40 is within the gate (<=), turn == 41 is outside.
+        geoms = {"a": a, "b40": self._turned(40), "b41": self._turned(41)}
+        adj = build_contiguity_adjacency(
+            ["a", "b40", "b41"], geoms, 1.0, require_collinear=True, max_turn_deg=40
+        )
+        assert "b40" in adj["a"]
+        assert "b41" not in adj["a"]
+
+    def test_same_name_rescues_sharp_turn(self):
+        a = LineString([(0, 0), (10, 0)])
+        geoms = {"a": a, "b": self._turned(90)}
+        names = {"a": "Beacon St", "b": "beacon st"}  # normalized-equal
+        adj = build_contiguity_adjacency(
+            ["a", "b"], geoms, 1.0, require_collinear=True, max_turn_deg=40, name_lookup=names
+        )
+        assert adj["a"] == {"b"}
+
+    def test_unnamed_sharp_turn_not_rescued(self):
+        a = LineString([(0, 0), (10, 0)])
+        geoms = {"a": a, "b": self._turned(90)}
+        names = {"a": "", "b": ""}  # empty names must not match
+        adj = build_contiguity_adjacency(
+            ["a", "b"], geoms, 1.0, require_collinear=True, max_turn_deg=40, name_lookup=names
+        )
+        assert adj["a"] == set()
+
+    def test_endpoints_are_collinear_helper(self):
+        # straight through the shared point (10,0)
+        assert _endpoints_are_collinear((10, 0), (0, 0), (10, 0), (20, 0), 40)
+        # right-angle turn
+        assert not _endpoints_are_collinear((10, 0), (0, 0), (10, 0), (10, 10), 40)
+
+
+class TestGroupingOnlyConfidencePrune:
+    """Weak edges below glue_min_confidence do not weld components, but stay as
+    scored candidates when their endpoints co-land via stronger edges."""
+
+    def _mr(self, rid, tid, conf):
+        return MatchResult(rid, tid, MatchDecision.MATCH, conf, {}, {})
+
+    def test_weak_edge_does_not_glue_independent_components(self):
+        # Two strong 1:1 pairs; only a weak edge links them.
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.3),  # weak cross-link
+        ]
+        comps = find_match_components(results, min_confidence=0.1, glue_min_confidence=0.5)
+        assert len(comps) == 2  # weak edge did NOT glue them
+        # The weak edge, being cross-component, is dropped from grouping.
+        all_pairs = {(r.ref_id, r.target_id) for c in comps for r in c}
+        assert ("r1", "t2") not in all_pairs
+
+    def test_weak_edge_retained_when_endpoints_coland(self):
+        # Strong edges already put r1, r2, t1, t2 in one component; the weak
+        # r1-t2 edge then stays as an in-component candidate.
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.3),  # weak, but endpoints co-land
+        ]
+        comps = find_match_components(results, min_confidence=0.1, glue_min_confidence=0.5)
+        assert len(comps) == 1
+        pairs = {(r.ref_id, r.target_id) for r in comps[0]}
+        assert ("r1", "t2") in pairs  # retained as scored candidate
+
+    def test_default_no_prune_matches_legacy(self):
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.3),
+        ]
+        # Without glue_min_confidence, the weak edge glues into one component.
+        comps = find_match_components(results, min_confidence=0.1)
+        assert len(comps) == 1
+
+
+class TestStructuralGate:
+    def test_single_corridor_always_simple_within_backstop(self):
+        assert group_is_structurally_simple(1, 1, 30, 2, 30, 40)
+        assert group_is_structurally_simple(1, 5, 35, 2, 30, 40)  # single corridor, long
+
+    def test_backstop_blocks_everything(self):
+        assert not group_is_structurally_simple(1, 1, 41, 2, 30, 40)
+
+    def test_multi_corridor_needs_few_components_and_soft_budget(self):
+        assert group_is_structurally_simple(2, 2, 25, 2, 30, 40)
+        assert not group_is_structurally_simple(3, 3, 10, 2, 30, 40)  # tangle
+        assert not group_is_structurally_simple(2, 2, 31, 2, 30, 40)  # over soft budget

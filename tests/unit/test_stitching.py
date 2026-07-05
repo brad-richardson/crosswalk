@@ -464,16 +464,13 @@ class TestPruneGroupOptionsToEdges:
 
 
 class TestExportGroupsSidecarOptimizerAssignment:
-    """The sidecar must carry a non-empty optimizer_assignment for decomposed
-    M:N components.
+    """The sidecar must mirror the optimizer's DECOMPOSED grouping.
 
-    Regression: the optimizer decomposes a non-contiguous connected component
-    into smaller sub-groups (and greedy 1:1 leftovers), each with its own
-    ``group_id``. The sidecar keys groups by the *full* raw-component group_id,
-    so a lookup on ``features["group_id"]`` finds nothing and leaves the
-    assignment empty — precisely for the large M:N groups where reviewers most
-    need a pre-seed. The fix maps optimizer edges to their raw component by
-    segment membership instead.
+    A raw connected component that is not one coherent corridor is decomposed
+    into per-corridor sub-groups (plus greedy 1:1 leftovers). The sidecar emits
+    one group per genuine multi-edge sub-group, each carrying its own
+    ``optimizer_assignment``; a residue that resolves to pure 1:1 matches does
+    NOT create a stitching group (there is nothing to review).
     """
 
     def _build_decomposed_mn(self):
@@ -482,15 +479,16 @@ class TestExportGroupsSidecarOptimizerAssignment:
 
         from matcher.matching.types import MatchDecision, MatchResult
 
-        # Two ref/target pairs that are geographically far apart, so the refs
-        # are NOT contiguous with each other and the targets are NOT contiguous
-        # with each other. A weak cross-edge (r1-t2) links them into ONE raw
-        # connected component, which the optimizer then decomposes.
+        # A genuine 1:N corridor (r1 -> t1,t1b, two collinear contiguous
+        # targets) plus a far-away independent pair (r2-t2). A weak cross-edge
+        # (r1-t2) links everything into ONE raw connected component, which the
+        # corridor-aware optimizer decomposes: the 1:N corridor survives as a
+        # group, the far pair falls out as a 1:1 (no group).
         ref = gpd.GeoDataFrame(
             {
                 "id": ["r1", "r2"],
                 "geometry": [
-                    LineString([(0, 0), (10, 0)]),
+                    LineString([(0, 0), (20, 0)]),
                     LineString([(1000, 0), (1010, 0)]),
                 ],
             },
@@ -498,9 +496,10 @@ class TestExportGroupsSidecarOptimizerAssignment:
         )
         target = gpd.GeoDataFrame(
             {
-                "id": ["t1", "t2"],
+                "id": ["t1", "t1b", "t2"],
                 "geometry": [
                     LineString([(0, 1), (10, 1)]),
+                    LineString([(10, 1), (20, 1)]),  # collinear continuation of t1
                     LineString([(1000, 1), (1010, 1)]),
                 ],
             },
@@ -519,6 +518,7 @@ class TestExportGroupsSidecarOptimizerAssignment:
 
         results = [
             _mr("r1", "t1", 0.9),
+            _mr("r1", "t1b", 0.85),  # real 1:N corridor with t1
             _mr("r2", "t2", 0.9),
             _mr("r1", "t2", 0.6),  # weak cross-edge connecting the component
         ]
@@ -550,25 +550,32 @@ class TestExportGroupsSidecarOptimizerAssignment:
 
         data = json.loads(sidecar_path.read_text())
         groups = data["groups"]
+        # Exactly the genuine 1:N corridor survives as a group; the far r2-t2
+        # pair resolves to a 1:1 match and produces no stitching group.
         assert len(groups) == 1
         group = groups[0]
+        assert group["match_type"] == "1:N"
 
         assignment = group["optimizer_assignment"]
-        # The core regression assertion: a decomposed M:N component must still
-        # receive the optimizer's chosen edges.
         assert assignment, "optimizer_assignment must not be empty for decomposed group"
 
-        # Every assigned edge must reference segments that belong to this group.
         group_refs = set(group["ref_ids"])
         group_targets = set(group["target_ids"])
         for e in assignment:
             assert e["ref_id"] in group_refs
             assert e["target_id"] in group_targets
 
-        # The optimizer greedily selects the two strong, spatially-disjoint
-        # pairs and drops the weak cross-edge.
         pairs = {(e["ref_id"], e["target_id"]) for e in assignment}
-        assert pairs == {("r1", "t1"), ("r2", "t2")}
+        assert pairs == {("r1", "t1"), ("r1", "t1b")}
+
+        # Structure fields are persisted for the resolver.
+        assert "n_edges" in group
+        assert "n_corridors" in group
+        assert "oversized_group" in group
+        for e in group["edges"]:
+            assert "is_bridge" in e
+            assert "corridor_ref" in e
+            assert "selected" in e
 
 
 # ---------------------------------------------------------------------------
