@@ -18,7 +18,7 @@ zero votes were invalidated by the augmentation.
 
 | Batch | Dataset | Groups | Character |
 |---|---|---|---|
-| diag_wave1_de_berlin_roads | de_berlin_roads | 5 | dense urban, high quality (2 large M:N 8×8, 1 M:N 8×5, 2 N:1) |
+| diag_wave1_de_berlin_roads | de_berlin_roads | 5 | dense urban, high quality (M:N 8×8, 8×7, 8×5; 2 N:1) |
 | diag_wave1_tn_tunis | tn_tunis_ml_roads | 5 | ZERO street names — geometry-only stress (3 M:N ≤8×8, 2 1:N) |
 | diag_wave1_co_bogota_bike | co_bogota_bike_network | 5 | modality probe; #293 class-vocab fix merged pre-wave; factory sidecar |
 | diag_wave1_us_usfs_flathead | us_usfs_flathead | 5 | rural/sparse forest roads (3 M:N, 2 small) |
@@ -45,7 +45,8 @@ same rural/sparse intent. Bogota WAS included (#293 merged before the wave start
 | **Total** | **32** | **20 (62%)** | **8** | **4** | **20** | **2** | **0** | — |
 
 Dissenter distribution: **agy 8, codex 6, claude 2** (16 dissenting votes across the 12
-non-unanimous groups). Zero abstentions, zero invalid votes, zero timeouts — parser and CLI
+non-unanimous groups, per the pipeline's claude-anchored `minority` convention — in the 4
+fully-split groups claude's choice is recorded as the reference). Zero abstentions, zero invalid votes, zero timeouts — parser and CLI
 plumbing were robust across all three providers with the feedback augmentation on.
 
 ### Seattle control (settled-label agreement)
@@ -56,7 +57,7 @@ plumbing were robust across all three providers with the feedback augmentation o
 | e919f4ab | unanimous A | **exact** (IoU 1.0) | |
 | 72699b72 | unanimous A | exact on expressible intersection (IoU 0.67) | settled label has 1 edge outside the current group (classified "split" by recovery) |
 | 2b99c180 | unanimous G | IoU 0.60 | settled 8-edge set **still inexpressible** at k=8 (the one remaining Seattle expressibility miss) |
-| 670e939f | none (claude:D / codex:A / agy:J) | miss (best vote IoU 0.80) | 3 providers picked 3 different junction-sliver treatments; settled B chosen by nobody |
+| 670e939f | none (claude:D / codex:A / agy:J) | miss (best vote IoU 0.83 = agy's J; claude's D is 0.80) | 3 providers picked 3 different junction-sliver treatments; settled B chosen by nobody |
 
 **Control read: the panel has NOT drifted.** Wherever the settled set is cleanly on the menu, the
 panel is unanimous-exact (3/3). The two misses are menu coverage (2b99c180) and the
@@ -82,10 +83,12 @@ Re-vote outcome:
   Historically (phase4 → clipfix1 → panelv2check) this group was also unanimous A — the panel is
   *stable*; it *disagrees with the settled label* on one dual-target boundary edge, and keeps
   disagreeing now that the settled set is finally on the menu.
-- **46e57794 — no convergence: claude:G (= exact settled set) / codex:C (subset, "excluding the
-  weakest near-sliver alternatives") / agy:J (whole-group superset, "single continuous path").**
-  agy's documented v2 superset tendency on sidewalks persists even with the exact settled set on
-  the menu; codex under-selects on the same edges. Routing correctly sends it to human review.
+- **46e57794 — no convergence: claude:G (= exact settled set) / codex:C (settled + one extra
+  edge R1→T15; its "excluding the weakest near-sliver alternatives" describes exclusions
+  relative to the whole-group option J) / agy:J (19-edge whole-group superset, "single
+  continuous path").** Both dissenters over-select relative to the settled set — agy's
+  documented v2 superset tendency on sidewalks persists even with the exact settled set on the
+  menu. Routing correctly sends it to human review.
 
 **Verdict: menu coverage is no longer the binding constraint. The binding constraint is a
 genuine, provider-stable disagreement about junction-sliver edge inclusion (dual-target boundary
@@ -97,10 +100,10 @@ must not be equated with settled-label agreement on sliver-adjacent groups.
 
 | Regime | Dataset(s) | Signal | Failure mode |
 |---|---|---|---|
-| Dense urban, named | de_berlin_roads | 3/5 unanimous; unanimous picks on both 8×8 groups were **non-optimizer** options pruning 3–5 optimizer edges each | Not a panel failure — a systematic **optimizer over-selection** signal at junction boundaries. Dropped edges are either near-zero-overlap (conf 0.17–0.24) or high-conf but boundary-crossing (R7→T7 conf 0.947 dropped). Panel confident and consistent (0.80 mean conf). |
-| No names at all | tn_tunis_ml_roads | 2/5 full 3-way splits, confidence collapsed to 0.5; both splits are **dual-carriageway** groups | **Geometry-only dual-carriageway ambiguity is THE no-name failure mode.** Without names or oneway/directionality attributes, "consolidated centerline vs one of two carriageways" is unresolvable from the rendered evidence; each provider picks a different lane assignment. Simple no-name 1:N chains were still unanimous at 0.82–0.95. |
+| Dense urban, named | de_berlin_roads | 3/5 unanimous; on all three M:N groups (8×8, 8×7, 8×5) the consensus pick was a **non-optimizer** option pruning 4–6 optimizer edges (unanimous on the 8×8 and 8×5; majority on the 8×7) | Not a panel failure — a systematic **optimizer over-selection** signal at junction boundaries. Dropped edges range from near-zero-overlap (conf 0.17–0.24) through mid-conf (0.73–0.89) to high-conf boundary-crossing (R7→T7 conf 0.947). Panel confident and consistent (0.80 mean conf on unanimous picks). |
+| No names at all | tn_tunis_ml_roads | 2/5 full 3-way splits (claude's confidence dropped to 0.5 on both; group means 0.72–0.76) | **Geometry-only boundary/corridor ambiguity is the no-name failure mode.** On e6e0f483 the split is explicitly dual-carriageway lane assignment (agy: "dual-carriageway where the top lane contains R3/R1/R4"); on 36f5f174 all three providers agree it is one trunk corridor but split on auxiliary-edge inclusion. Without names, neither can be settled from the rendered evidence. Simple no-name 1:N chains were still unanimous at 0.82–0.95. |
 | Cross-modality | co_bogota_bike | 2 NONE votes (claude and codex, on different groups); 3/5 majority-only | **Class-policy gap, not geometry**: refs are `primary` road centerlines, targets are `cycleway`. Providers explicitly asked whether cycleway↔vehicular counts as cross-mode (the class gate deliberately treats cycleway as NEUTRAL). Two providers match the parallel cycleway to the road, one refuses per rubric — the rubric under-determines this modality. |
-| Rural/sparse | us_usfs_flathead, us_montana_missoula | 7/10 unanimous, 3 majority (all agy dissents) | Mildest regime. Dissents are the same sliver/boundary axis (agy prefers supersets including boundary-spanning refs). No sparse-specific failure found. |
+| Rural/sparse | us_usfs_flathead, us_montana_missoula | 7/10 unanimous, 3 majority (all agy dissents) | Mildest regime. Dissents are the same sliver/boundary axis (2 of 3 agy dissents are strict supersets incl. boundary-spanning refs; the third is a same-size edge swap). No sparse-specific failure found. |
 | Sidewalk control | us_seattle_sidewalks | see control table | Panel stable vs v1 labels; misses are menu coverage + sliver axis. |
 
 ## Pack-gap report (aggregated pack_feedback + historical rationale mining, ranked frequency × severity)
@@ -115,18 +118,20 @@ cite continuity/full-coverage language). This wave's 168 pack_feedback items agr
    (a) **SLIVER tags almost never fire**: 0 of 32 packs tagged any edge, because the hybrid rule
    requires `max(span_frac) < 0.10 AND max(abs_overlap_m) < 5` — on long urban segments a 2.9%
    span is >5 m absolute, so exactly the edges the panel argues over (e.g. Berlin 9c1cd4f7
-   R8→T3, ref_aln 0.029 / tgt_aln 0.025) stay untagged. Providers noticed: "SLIVER tags were
+   R8→T3, ref_aln 0.029 / tgt_aln 0.025) stay untagged. claude noticed on both dense Berlin groups: "SLIVER tags were
    referenced in guidance but not annotated on the edge list"; "per-edge SLIVER tags not marked
    in this pack".
-   (b) **No junction zoom crops**: 12+ feedback items ask for "closer zoom at the junction",
+   (b) **No junction zoom crops**: 55 feedback items request zoom/crop detail, e.g. "closer zoom at the junction",
    "zoomed crops at the T3 junction", "a zoom on the R1/T2 boundary to confirm the near-zero
    overlap".
    → Recommendation: print **absolute overlap meters** per edge (derivable at pack time from aln
    fracs × segment lengths) and add a BORDERLINE tag when the fraction test alone passes; add
    1–2 junction crop images for edges under a span threshold.
-2. **Dual-carriageway / directionality information (no-name datasets).** Tunis splits cite
-   "directionality/oneway tags to distinguish dual carriageway from consolidated centerline",
-   "whether R1/R2 are opposite carriageways … vs two collinear segments of one way".
+2. **Dual-carriageway / directionality information.** Requested verbatim on a Berlin N:1 group
+   (claude, 2b98a74f: "directionality/oneway tags to distinguish dual carriageway from
+   consolidated centerline"; "whether R1/R2 are opposite carriageways … vs two collinear
+   segments of one way") and implicated in the Tunis e6e0f483 split (agy's dual-carriageway
+   lane-assignment reading vs the others').
    → Recommendation: per-segment heading arrows in renders and/or a corridor annotation (see
    #267 below). Highest-value fix before scaling to more no-name datasets.
 3. **Cycleway mode policy (modality datasets).** "whether 'cycleway' should be treated as a
@@ -177,16 +182,17 @@ frontier-cap artifact. Recheck only if future waves include >20-edge groups.
 
 **GO, with three pre-conditions.** Panel behavior on Berlin was the strongest of any road
 dataset this wave: 3/5 unanimous + 2/5 clean majorities, zero splits, zero NONE/abstain, mean
-unanimous confidence 0.80–0.83, and dissents were option-adjacent (F vs G differing on a single
-R8 assignment). German names, umlauts, and `A 114 BAB` class idioms caused no issues.
+unanimous confidence 0.80–0.83, and dissents were option-adjacent (F vs G is a two-edge swap:
+R8→T7 for R7→T3). German names, umlauts, and `A 114 BAB` class idioms caused no issues.
 
 1. **Regenerate the sidecar first.** The Berlin groups sidecar predates #282–#296 (no
    `n_pruned`/`rejected_edges` fields; pruning and optimizer determinism changed since). Panel
    verdicts are judged against the optimizer baseline embedded in the pack, so a stale baseline
    contaminates the panel-vs-optimizer routing signal. Rerun `matcher stitch` to a scratch dir
    on current main before the debut.
-2. **Budget for high optimizer-disagreement on dense M:N groups.** Both 8×8 wave groups produced
-   unanimous NON-optimizer picks pruning 3–5 optimizer edges. Under current export policy those
+2. **Budget for high optimizer-disagreement on dense M:N groups.** All three Berlin M:N wave
+   groups produced NON-optimizer consensus picks pruning 4–6 optimizer edges (unanimous on two
+   of the three). Under current export policy the unanimous ones
    become auto-accept labels that overturn optimizer edges — which is the point, but the review
    queue should be sized for a materially higher alt-choice rate than Boston.
 3. **Ship pack gap #1 (absolute-overlap meters + BORDERLINE tag) first.** Cheap, render/prompt
@@ -199,7 +205,7 @@ No pack change should alter the default prompt without an A/B diagnostic wave �
 ## Quota consumed
 
 ~99 provider invocations total (32 groups × 3 providers + 1 smoke re-run; zero retries):
-~33 calls per provider. Main-wave wall time 36 min for 31 groups. No provider hit a usage cap;
+~33 calls per provider. Main-wave vote-timestamp span 32 min for 31 groups (~36 min wall incl. setup). No provider hit a usage cap;
 consumption stayed well inside the ~40–60 calls/provider budget envelope.
 
 ## Artifacts
