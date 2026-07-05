@@ -111,6 +111,21 @@ class TestResolveSingleRunPaths:
         assert tgt == repo / "data" / "raw" / "demo_tgt.parquet"
         assert labels == (repo / "labels" / "human").resolve()
 
+    def test_explicit_rtl_needs_no_config_even_without_stitch(self, tmp_path):
+        # r/t/l provided, stitch omitted, config file absent -> must not raise;
+        # stitch stays None so the runner's labels-sibling fallback applies.
+        ref, tgt, labels, stitch, conn = _resolve_single_run_paths(
+            config=tmp_path / "does_not_exist.toml",
+            dataset="demo",
+            reference=Path("/custom/ref.parquet"),
+            target=Path("/custom/tgt.parquet"),
+            labels=Path("/custom/labels"),
+            stitch_labels=None,
+        )
+        assert ref == Path("/custom/ref.parquet")
+        assert stitch is None
+        assert conn is None
+
     def test_missing_config_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             _resolve_single_run_paths(

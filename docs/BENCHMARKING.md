@@ -31,7 +31,10 @@ cbench run matcher us_boston_streets \
     --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     --target ../data/raw/us_boston_streets_v1.0.parquet
 
-# Run Hootenanny on the same dataset
+# Run Hootenanny on the same dataset. NOTE: --opt values are explicit overrides
+# and are CWD-relative, so `hoot_dir=../../hootenanny` assumes you are in
+# `matcher/cbench`. From the repo root use `--opt hoot_dir=../hootenanny`, or
+# pass an absolute path to be CWD-independent.
 cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
     --opt hoot_dir=../../hootenanny
 

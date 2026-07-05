@@ -149,7 +149,10 @@ def _resolve_single_run_paths(
         ValueError: dataset not present in config.
     """
     connectors: Path | None = None
-    need_config = reference is None or target is None or labels is None or stitch_labels is None
+    # Stitch labels are optional (runner falls back to the labels-dir sibling
+    # `stitching/`), so a missing stitch path must NOT force loading the config:
+    # `cbench run ... -r ... -t ... -l ...` should work with no datasets.toml.
+    need_config = reference is None or target is None or labels is None
     if not need_config:
         return reference, target, labels, stitch_labels, connectors
 
