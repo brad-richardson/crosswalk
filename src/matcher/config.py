@@ -723,26 +723,43 @@ class MatcherSettings(BaseSettings):
         "kept). Records ``n_rejected_total`` + ``rejected_truncated`` when exceeded.",
     )
 
-    # --- Flag-gated confidence-drop prune (M2 / resolver Phase 1) --------------
+    # --- Confidence-drop prune (M2 / resolver Phase 1) -------------------------
     # Post-optimizer prune of group (M:N/1:N/N:1) selections: drop a selected
     # group edge whose (calibrated) confidence is below an absolute threshold.
     # This is the one-parameter model the #272 eval validated (evaluate.py
     # ``baseline_conf`` — an absolute confidence threshold, NOT group-relative —
-    # beat both keep-all and the learned per-edge model on the clean slice). The
-    # threshold default is the F1-maximizing operating point tuned on the Boston
-    # clean slice; retune per dataset before enabling. Default OFF: when disabled
-    # the optimizer selections are byte-identical to the pre-prune pipeline.
+    # beat both keep-all and the learned per-edge model on the clean slice).
+    #
+    # ENABLED BY DEFAULT since the coordinated retrain deploy. Validated on the
+    # 117-label Boston clean slice under the #271 stitch gate at the F1-maximizing
+    # operating point t=0.96 (filtered edge-F1 0.8671 -> 0.8790, group exact
+    # 0.5093 -> 0.5833; gate PASS). The optimal floor is dataset-dependent — a
+    # lower-confidence dataset over-prunes at 0.96 — so per-dataset thresholds
+    # live in ``resolver_prune_overrides`` (Seattle sidewalks: 0.96 regresses F1
+    # below keep-all, 0.90 is the F1/exact-maximizing point: 0.8665 -> 0.8913 /
+    # 0.40 -> 0.50 on the 27-label slice). Set an override <= 0 to disable the
+    # prune for a specific dataset. When the effective threshold is 0 the
+    # optimizer selections are byte-identical to the pre-prune pipeline.
     resolver_prune_enabled: bool = Field(
-        default=False,
-        description="Enable the post-optimizer confidence-drop prune of group edges. "
-        "Default OFF; enabling is a measured, per-dataset decision under the stitch gate.",
+        default=True,
+        description="Enable the post-optimizer confidence-drop prune of group edges "
+        "for datasets without an entry in ``resolver_prune_overrides``. Validated "
+        "under the stitch gate; retune the threshold per dataset as labels accrue.",
     )
     resolver_prune_min_confidence: float = Field(
         default=0.96,
-        description="Absolute (calibrated) confidence floor for a SELECTED group edge "
-        "when ``resolver_prune_enabled``. Edges below it are dropped, except each "
-        "group always retains its single highest-confidence edge (never emptied). "
-        "Tuned operating point from the #272 clean-slice eval.",
+        description="Global absolute (calibrated) confidence floor for a SELECTED "
+        "group edge when ``resolver_prune_enabled`` and the dataset has no override. "
+        "Edges below it are dropped, except each group always retains its single "
+        "highest-confidence edge (never emptied). Boston-tuned #272 operating point.",
+    )
+    resolver_prune_overrides: dict[str, float] = Field(
+        default_factory=lambda: {"us_seattle_sidewalks": 0.90},
+        description="Per-dataset confidence-drop prune threshold override, keyed by "
+        "dataset name (the bridge output stem minus ``_bridge``). Takes precedence "
+        "over ``resolver_prune_enabled`` / ``resolver_prune_min_confidence``. A value "
+        "<= 0 disables the prune for that dataset; a positive value both enables the "
+        "prune and sets its floor. Datasets absent here inherit the global default.",
     )
 
     # Training data validation thresholds
