@@ -4,12 +4,17 @@ Tests the greedy optimizer, bipartite component detection,
 contiguous ID grouping, and the M:N grouping entry point.
 """
 
+import math
+
 import pytest
 from shapely import LineString
 
 from matcher.matching.optimizer import (
+    _endpoints_are_collinear,
     _find_contiguous_id_groups,
+    build_contiguity_adjacency,
     find_match_components,
+    group_is_structurally_simple,
     optimize_matches_greedy,
     optimize_matches_with_grouping,
 )
@@ -631,15 +636,6 @@ class TestSliverFreeComponentGraph:
         _, _, results = self._two_island_fixture()
         components = find_match_components(results, min_confidence=0.5)
         assert len(components) == 1
-
-
-import math
-
-from matcher.matching.optimizer import (
-    _endpoints_are_collinear,
-    build_contiguity_adjacency,
-    group_is_structurally_simple,
-)
 
 
 class TestCollinearityGate:
