@@ -1643,6 +1643,18 @@ class MLMatcher:
             X[inf_mask] = MAX_DISTANCE_METERS
         return X
 
+    @property
+    def calibration_active(self) -> bool:
+        """True if :meth:`predict` returns calibrated (not raw) probabilities.
+
+        Requires both a loaded calibrator and ``settings.enable_calibration``.
+        Downstream operating points tuned against raw scores (e.g. the optimizer
+        glue prune) key off this to select the correct threshold.
+        """
+        from ..config import settings
+
+        return self.calibrator is not None and settings.enable_calibration
+
     def predict(self, features: list[dict[str, float]], calibrated: bool = True) -> np.ndarray:
         """Predict match probabilities.
 

@@ -746,6 +746,105 @@ class TestGroupingOnlyConfidencePrune:
         assert len(comps) == 1
 
 
+class TestGlueMinConfidenceCalibratedOperatingPoint:
+    """The grouping-only glue prune consumes ``MatchResult.confidence``, which is
+    calibrated P(match) when ``enable_calibration`` is True. The prune constant
+    is therefore the calibrated image of the raw-0.5 point the #267 corridor
+    design validated (isotonic maps mid-range raw 0.5 -> ~0.575), so the effective
+    prune population is preserved under calibration."""
+
+    def _mr(self, rid, tid, conf):
+        return MatchResult(rid, tid, MatchDecision.MATCH, conf, {}, {})
+
+    def test_default_is_calibrated_equivalent_of_raw_half(self):
+        from matcher.config import settings
+
+        # Guard against a silent revert to the raw-scale 0.5: with calibration on
+        # (the default), 0.5 would prune at an effective raw ~0.42 (weaker glue).
+        assert settings.optimizer_glue_min_confidence == pytest.approx(0.575)
+        assert settings.optimizer_glue_min_confidence > settings.scoring_match_threshold
+
+    def test_configured_default_prunes_the_calibrated_band(self):
+        from matcher.config import settings
+
+        # An edge whose calibrated confidence sits in the [0.5, 0.575) band --
+        # i.e. it maps below the raw-0.5 the design pruned -- must NOT glue at
+        # the configured default (which optimize_matches_with_grouping passes in).
+        assert settings.optimizer_glue_min_confidence > 0.55
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.55),  # calibrated conf in the (0.5, 0.575) band
+        ]
+        comps = find_match_components(
+            results,
+            min_confidence=0.1,
+            glue_min_confidence=settings.optimizer_glue_min_confidence,
+        )
+        assert len(comps) == 2  # 0.55 edge does not weld at the 0.575 default
+
+    def test_band_edge_would_glue_at_old_raw_half(self):
+        # The same 0.55 edge WOULD have glued under the old raw-scale 0.5 default,
+        # confirming the operating-point shift is real (not a no-op relabel).
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.55),
+        ]
+        comps = find_match_components(results, min_confidence=0.1, glue_min_confidence=0.5)
+        assert len(comps) == 1
+
+    def test_pipeline_selects_glue_by_calibration_state(self, monkeypatch):
+        # The pipeline keys the glue prune off whether the loaded model actually
+        # applies calibration: calibrated -> 0.575, raw -> 0.5. This keeps an
+        # uncalibrated model at the raw-0.5 point #267 validated (no over-prune).
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        class _FakeMatcher:
+            def __init__(self, *a, **k):
+                pass
+
+        _FakeMatcher.calibration_active = property(lambda self: self._active)
+
+        def make(active):
+            fm = _FakeMatcher()
+            fm._active = active
+            return fm
+
+        # The helper imports MLMatcher lazily from matcher.matching.ml, so patch
+        # it at the source module (patching runner.MLMatcher would be a no-op).
+        import matcher.matching.ml as ml_mod
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(True))
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence
+        )
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(False))
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence_raw
+        )
+
+    def test_pipeline_short_circuits_when_calibration_disabled(self, monkeypatch):
+        # With calibration globally off, the helper returns the raw threshold
+        # WITHOUT loading a model (calibration_active can never be True).
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", False)
+
+        import matcher.matching.ml as ml_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence_raw
+        )
+
+
 class TestStructuralGate:
     def test_single_corridor_always_simple_within_backstop(self):
         assert group_is_structurally_simple(1, 1, 30, 2, 30, 40)
