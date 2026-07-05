@@ -165,6 +165,39 @@ Same signature as Fort Collins: perfect recall, precision lost to parallel-road
 snapping. Non-blocking stitch eval (7 legacy groups): P 0.982 / R 0.964 /
 F1 0.973 / exact 0.714.
 
+## Operational complexity
+
+Quality is only half the story: the tools differ enormously in *what it takes to
+run them at all*. The rubric below scores the cold-start path for a new user
+holding the two input parquets (1 = painful, 5 = effortless) across steps to first
+result, dependency weight (pip vs Docker vs x86 emulation), config burden, time to
+first result, and maintainability. Full cold-start narratives, the rejected-engine
+survey ("is there another engine besides Valhalla?" → GraphHopper), and a ranked
+plan to close matcher's DX gap are in
+[`research/engine_dx_comparison.md`](../research/engine_dx_comparison.md).
+
+| Engine | Steps | Dep weight | Config | Time | Maint | **Σ/25** |
+|--------|:-----:|:----------:|:------:|:----:|:-----:|:--------:|
+| naive floor | 5 | 5 | 4 | 5 | 5 | **24** |
+| Valhalla Meili | 5 | 4 | 4 | 4 | 4 | **21** |
+| matcher | 2 | 3 | 4 | 2 | 3 | **14** |
+| Hootenanny 0.2.41 (emulated) | 3 | 2 | 3 | 1 | 1 | **10** |
+| Hootenanny 0.2.87 (native x86) | 1 | 1 | 2 | 2 | 2 | **8** |
+
+The headline is the **Meili (21) vs matcher (14)** gap: near-identical quality
+(F1 0.994 vs 0.996) but Meili gets there from one pip extra, no training, no labels,
+and an auto-built (cached) Overture graph in ~12 s, while matcher's fresh-clone path
+is clone → heavy install → **`matcher train`** (mandatory: `data/models/` is
+gitignored; ~35 s, labels *are* committed) → **`matcher data fetch`** (mandatory:
+`data/raw/` is gitignored) → stitch (~85 s). matcher's low steps/time scores come
+entirely from those two setup steps, not from stitch. The naive floor tops the
+rubric only because it does the least — it *is* the quality floor (F1 0.839 roads /
+0.365 sidewalks). The top-3 recommended fixes: **ship the 465 KB pretrained model**
+(+ a `FEATURE_VERSION` CI lockstep test, since model-load only *warns* on version
+mismatch today), **publish a PyPI wheel that bundles it**, and a **YAML-free
+`fetch-overture --bbox`** command — together collapsing cold-start to
+install → (fetch) → stitch, at matcher's higher quality.
+
 ## Takeaways
 
 - **matcher beats Hootenanny on match quality.** Target-level F1 0.9963 vs
