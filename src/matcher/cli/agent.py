@@ -1041,9 +1041,11 @@ def run_stitch_panel(
     group_ids: str = typer.Option(None, "--group-ids", help="Comma-separated subset to run"),
     timeout: int = typer.Option(240, "--timeout", help="Per-provider timeout (s)"),
     limit: int = typer.Option(0, "--limit", "-l", help="Max groups (0=all)"),
-    claude_model: str = typer.Option("sonnet", "--claude-model"),
-    codex_model: str = typer.Option("gpt-5.4", "--codex-model"),
-    agy_model: str = typer.Option("Gemini 3.5 Flash (Low)", "--agy-model"),
+    claude_model: str = typer.Option("claude-opus-4-8", "--claude-model"),
+    claude_effort: str = typer.Option("medium", "--claude-effort"),
+    codex_model: str = typer.Option("gpt-5.5", "--codex-model"),
+    codex_effort: str = typer.Option("low", "--codex-effort"),
+    agy_model: str = typer.Option("Gemini 3.5 Flash (Medium)", "--agy-model"),
 ):
     """Run the 3-provider consensus panel (claude + codex + agy) on a batch.
 
@@ -1060,8 +1062,8 @@ def run_stitch_panel(
         raise typer.Exit(1)
 
     panel = [
-        ProviderSpec(name="claude", model=claude_model),
-        ProviderSpec(name="codex", model=codex_model),
+        ProviderSpec(name="claude", model=claude_model, effort=claude_effort),
+        ProviderSpec(name="codex", model=codex_model, effort=codex_effort),
         ProviderSpec(name="agy", model=agy_model),
     ]
     gids = [g.strip() for g in group_ids.split(",") if g.strip()] if group_ids else None
@@ -1218,7 +1220,7 @@ def export_stitch_panel(
     Only unanimous ``auto_accept`` groups are candidates. Gates are applied in
     order and reported per group: (a) auto_accept, (b) edge count <= max-edges,
     (c) class-consistency, (d) sliver canonicalization, (e) human precedence.
-    Exported rows use the labeler ``panel_unanimous_v1`` and upsert by group_id
+    Exported rows use the labeler ``panel_unanimous_v2`` and upsert by group_id
     (idempotent).
 
     Examples:

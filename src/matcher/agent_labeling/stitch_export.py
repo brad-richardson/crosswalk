@@ -4,8 +4,9 @@ The 3-provider stitching panel (see :mod:`stitch_runner`) votes on M:N group edg
 selections and writes a ``consensus.csv`` per batch. This module promotes the
 subset of those verdicts that are safe to treat as durable labels -- only
 *unanimous* auto-accept groups -- into ``labels/stitching`` alongside the human
-labels, tagged with the labeler ``panel_unanimous_v1`` so their provenance stays
-visible.
+labels, tagged with the labeler ``panel_unanimous_v2`` so their provenance stays
+visible (v1 tagged the earlier sonnet/gpt-5.4/Gemini-Flash-Low panel; the tag is
+bumped whenever the panel composition changes).
 
 Gates (applied in order; the first failing gate decides the group and is
 reported):
@@ -24,7 +25,7 @@ reported):
      is left untouched.
 
 Writing is idempotent: rows are upserted by ``group_id`` under the
-``panel_unanimous_v1`` labeler, so re-running never duplicates and always
+``panel_unanimous_v2`` labeler, so re-running never duplicates and always
 refreshes to the latest consensus. Previously exported panel rows are excluded
 from the human-precedence check (they are not human), so re-runs stay accurate.
 """
@@ -45,7 +46,12 @@ from ..matching.sliver import annotate_group_sliver_flags
 from .stitch_eval import _load_group_metadata, map_human_labels_to_groups
 from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mode_edge
 
-PANEL_LABELER = "panel_unanimous_v1"
+# Bumped v1 -> v2 when the panel composition changed (Opus 4.8 / gpt-5.5 /
+# Gemini 3.5 Flash Medium). Existing v1 labels stay untouched; future waves are
+# tagged v2. Any labeler with the PANEL_LABELER_PREFIX is a panel (non-human)
+# label and is excluded from the human-precedence check below.
+PANEL_LABELER = "panel_unanimous_v2"
+PANEL_LABELER_PREFIX = "panel_"
 
 # Per-group outcome reasons (stable strings for reporting/tests).
 REASON_EXPORTED = "exported"
@@ -227,7 +233,13 @@ def plan_exports(
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     human_df = store.load(dataset)
     if not human_df.empty and "labeler" in human_df.columns:
-        human_df = human_df[human_df["labeler"] != PANEL_LABELER]
+        # Exclude ALL panel labelers (v1, v2, ...) — none are human, so they must
+        # not confer human precedence. Matching the prefix keeps re-runs idempotent
+        # across a labeler-tag bump. astype("string") + na=False: a missing
+        # labeler (hand-edited/legacy CSV, possibly an all-NaN float column) is
+        # not a panel label — keep the row instead of raising.
+        labeler = human_df["labeler"].astype("string")
+        human_df = human_df[~labeler.str.startswith(PANEL_LABELER_PREFIX, na=False)]
     human_gids = set(human_df["group_id"].astype(str)) if not human_df.empty else set()
 
     # Metadata + candidate edges for auto-accept groups (for the class gate and
@@ -390,7 +402,7 @@ def write_exports(
     dataset: str,
     labels_dir: Path,
 ) -> int:
-    """Persist the report's exported groups as ``panel_unanimous_v1`` labels.
+    """Persist the report's exported groups as ``panel_unanimous_v2`` labels.
 
     Upserts by ``group_id`` (the store replaces an existing row for the same
     group_id), so this is idempotent. The source batch name is recorded in the

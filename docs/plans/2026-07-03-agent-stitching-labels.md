@@ -93,8 +93,14 @@ Empirical CLI probe results (all panel members 2/2 correct, valid JSON):
 | `codex exec --skip-git-repo-check -s read-only --ephemeral -i img.png -o out.json "<prompt>" </dev/null` | native `-i` (repeatable — only CLI with native multi-image) | ~6s |
 | `agy --print-timeout=2m --model="Gemini 3.5 Flash (Low)" -p "<prompt>"` (`=`-form flags REQUIRED) | reads image path via its view_file tool | ~5-16s |
 
-- **Panel: claude (haiku/sonnet) + codex (gpt-5.5) + agy (Gemini 3.5 Flash)**
-  — three heterogeneous model families; parallel wall time ~11-16s/group.
+- **Panel v1 (labeler `panel_unanimous_v1`): claude (sonnet) + codex (gpt-5.4,
+  low) + agy (Gemini 3.5 Flash Low)** — the original composition.
+- **Panel v2 (labeler `panel_unanimous_v2`, default as of 2026-07-05): claude
+  (Opus 4.8, `--effort medium`) + codex (gpt-5.5, low) + agy (Gemini 3.5 Flash
+  Medium)** — three heterogeneous model families. Composition change → labeler
+  tag bump (v1 rows stay untouched; `stitch_export` excludes any `panel_*`
+  labeler from human precedence). Validated against settled v1 groups before
+  shipping (see `research/panel_v2_validation.md`).
 - `gemini` CLI is DEAD for individual tiers (IneligibleTierError → Antigravity
   is the Google path). Do not use agy's Claude/GPT-OSS models in the panel
   (collapses diversity; GPT-OSS is text-only anyway). `opencode` not
