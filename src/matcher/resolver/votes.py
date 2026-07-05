@@ -1,0 +1,146 @@
+"""Panel-vote soft labels for the resolver prototype.
+
+Panel batches (``data/agents/stitching/batches/*/votes.csv``) record, per group,
+each provider's chosen edge set. These cover more groups than the curated
+``labels/stitching`` exports, so they are a candidate way to expand training
+coverage with *soft* per-edge keep probabilities.
+
+Reliability weighting: ``codex`` is a systematic conservative dissenter (drops
+center-junction edges the others keep), so it is down-weighted rather than
+dropped. The per-edge soft keep-probability is the weighted fraction of
+providers whose chosen edge set includes the edge.
+
+Vote group_ids are batch-vintage hashes, so they are mapped to current sidecar
+groups by edge overlap (same churn-robust principle as
+``stitch_eval.recover_labeled_groups``).
+"""
+
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from pathlib import Path
+
+import pandas as pd
+
+# Default provider reliability weights (see module docstring).
+DEFAULT_PROVIDER_WEIGHTS: dict[str, float] = {
+    "claude": 1.0,
+    "agy": 1.0,
+    "codex": 0.5,
+}
+
+
+def _parse_edge_set(raw) -> frozenset[tuple[str, str]]:
+    if raw is None or (isinstance(raw, float)):
+        return frozenset()
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return frozenset()
+    return frozenset((str(a), str(b)) for a, b in data)
+
+
+def load_votes(paths: list[str | Path]) -> pd.DataFrame:
+    """Load and concatenate votes CSVs, keeping the latest vote per (group, provider).
+
+    A group_id can recur across batch phases (re-votes); the most recent
+    timestamp wins.
+    """
+    frames = []
+    for p in paths:
+        p = Path(p)
+        if not p.exists():
+            continue
+        frames.append(pd.read_csv(p, dtype={"group_id": str}))
+    if not frames:
+        return pd.DataFrame(
+            columns=["group_id", "provider", "choice", "confidence", "edge_set", "timestamp"]
+        )
+    df = pd.concat(frames, ignore_index=True)
+    df = df[df["error"].isna()] if "error" in df.columns else df
+    df = df.sort_values("timestamp")
+    df = df.drop_duplicates(subset=["group_id", "provider"], keep="last")
+    return df.reset_index(drop=True)
+
+
+def _map_vote_groups_to_sidecar(groups: list[dict], votes_df: pd.DataFrame) -> dict[str, str]:
+    """Map each vote group_id -> best sidecar group_id by edge overlap.
+
+    A vote group's candidate proxy is the union of all providers' chosen edges.
+    """
+    edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for g in groups:
+        for e in g.get("edges", []):
+            edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
+
+    mapping: dict[str, str] = {}
+    for vgid, sub in votes_df.groupby("group_id"):
+        union: set[tuple[str, str]] = set()
+        for raw in sub["edge_set"]:
+            union |= _parse_edge_set(raw)
+        cnt: dict[str, int] = defaultdict(int)
+        for e in union:
+            for sgid in edge_groups.get(e, ()):
+                cnt[sgid] += 1
+        if cnt:
+            mapping[str(vgid)] = max(cnt, key=cnt.get)
+    return mapping
+
+
+def edge_soft_labels(
+    groups: list[dict],
+    votes_df: pd.DataFrame,
+    provider_weights: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """Per-edge weighted panel keep-probability, mapped to sidecar groups.
+
+    Returns a DataFrame with columns
+    ``[group_id, ref_id, target_id, soft_keep, n_providers, unanimous]``
+    where ``soft_keep`` is the reliability-weighted fraction of providers whose
+    chosen edge set contained the edge, restricted to edges that exist in the
+    mapped sidecar group.
+    """
+    weights = provider_weights or DEFAULT_PROVIDER_WEIGHTS
+    vgid_to_sgid = _map_vote_groups_to_sidecar(groups, votes_df)
+    gmap = {g["group_id"]: g for g in groups}
+
+    rows: list[dict] = []
+    for vgid, sub in votes_df.groupby("group_id"):
+        sgid = vgid_to_sgid.get(str(vgid))
+        if sgid is None:
+            continue
+        sidecar_edges = {
+            (str(e["ref_id"]), str(e["target_id"])) for e in gmap[sgid].get("edges", [])
+        }
+        num = defaultdict(float)
+        chosen_by = defaultdict(int)
+        wsum = 0.0
+        n_prov = 0
+        for _, vrow in sub.iterrows():
+            w = weights.get(vrow["provider"], 1.0)
+            wsum += w
+            n_prov += 1
+            es = _parse_edge_set(vrow["edge_set"])
+            for e in es & sidecar_edges:
+                num[e] += w
+                chosen_by[e] += 1
+        if wsum == 0:
+            continue
+        for e in sidecar_edges:
+            rows.append(
+                {
+                    "group_id": sgid,
+                    "ref_id": e[0],
+                    "target_id": e[1],
+                    "soft_keep": num[e] / wsum,
+                    "n_providers": n_prov,
+                    "unanimous": int(chosen_by[e] == n_prov or chosen_by[e] == 0),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def default_votes_paths(batches_root: str | Path) -> list[Path]:
+    """All ``votes.csv`` under a batches root directory."""
+    return sorted(Path(batches_root).glob("*/votes.csv"))
