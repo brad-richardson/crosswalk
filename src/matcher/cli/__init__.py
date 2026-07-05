@@ -11,6 +11,7 @@ from .analyze import analyze_app
 from .blocking_recall import register_blocking_recall_commands
 from .classify import class_app
 from .data import data_app
+from .factory import factory_app
 from .main import register_commands
 
 # Create the main app
@@ -29,5 +30,6 @@ app.add_typer(data_app, name="data")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(class_app, name="class")
 app.add_typer(agent_app, name="agent")
+app.add_typer(factory_app, name="factory")
 
 __all__ = ["app"]
