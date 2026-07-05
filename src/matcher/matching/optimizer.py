@@ -1232,6 +1232,57 @@ def optimize_matches_with_grouping(
     return final
 
 
+def apply_confidence_drop_prune(
+    results: list[MatchResult],
+    min_confidence: float,
+) -> tuple[list[MatchResult], set[tuple[Any, Any]]]:
+    """Drop low-confidence SELECTED group edges (M2 / resolver Phase 1).
+
+    Post-optimizer prune: within each M:N / 1:N / N:1 group (a result carrying a
+    ``group_id``), drop any selected edge whose confidence is below
+    ``min_confidence``. This is the one-parameter confidence filter the #272
+    resolver eval validated — an ABSOLUTE threshold, not group-relative
+    (``evaluate.py::run_cv`` tuned raw ``confidence >= t`` and that baseline beat
+    both keep-all and the learned per-edge model on the clean slice).
+
+    Guarantees:
+    - 1:1 matches (no ``group_id``) are never touched — the eval only covered
+      M:N group selections.
+    - Each group always retains its single highest-confidence edge, so a group is
+      never fully emptied (respects the "keep the corridor's backbone edge"
+      spirit of the Phase-1 single-corridor exemption).
+    - Identity when nothing qualifies: the input list is returned unchanged and
+      ``pruned_pairs`` is empty. When ``min_confidence <= 0`` nothing is dropped.
+
+    Returns ``(kept_results, pruned_pairs)`` where ``pruned_pairs`` is the set of
+    dropped ``(ref_id, target_id)`` pairs (raw id types).
+    """
+    if min_confidence <= 0:
+        return results, set()
+
+    by_gid: dict[Any, list[int]] = defaultdict(list)
+    for i, r in enumerate(results):
+        gid = r.features.get("group_id")
+        if gid:
+            by_gid[gid].append(i)
+
+    pruned_idx: set[int] = set()
+    for _gid, idxs in by_gid.items():
+        # The single highest-confidence edge is always retained (never empty the
+        # group). Ties break on first occurrence — deterministic given input order.
+        keep_top = max(idxs, key=lambda i: results[i].confidence)
+        for i in idxs:
+            if i != keep_top and results[i].confidence < min_confidence:
+                pruned_idx.add(i)
+
+    if not pruned_idx:
+        return results, set()
+
+    pruned_pairs = {(results[i].ref_id, results[i].target_id) for i in pruned_idx}
+    kept = [r for i, r in enumerate(results) if i not in pruned_idx]
+    return kept, pruned_pairs
+
+
 def group_is_structurally_simple(
     n_corridors: int,
     n_assignment_components: int,

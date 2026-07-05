@@ -701,6 +701,50 @@ class MatcherSettings(BaseSettings):
         "Otherwise, uses geometry-only model if available.",
     )
 
+    # --- Candidate-graph persistence (M2 resolver prerequisite) ---------------
+    # The groups sidecar records, per group, the optimizer's SELECTED assignment
+    # in ``edges`` (unchanged) PLUS a separate ``rejected_edges`` list carrying
+    # the non-selected candidate pairs the optimizer saw for the group's nodes
+    # (each with ``selected: false`` + the same structural layer). This makes
+    # UNDER-selection learnable for the resolver track and surfaces the extra
+    # plausible edges the review UI previously discarded. ``rejected_edges`` is a
+    # SIBLING key: every existing consumer of ``edges`` is byte-unaffected, so the
+    # stitch gate is provably invariant to it (only resolver extract + a future
+    # review UI opt in). Bounded by a per-group cap to keep sidecars tractable
+    # (Tunis-scale groups.json is already ~145 MB); truncation is recorded.
+    stitch_persist_rejected_edges: bool = Field(
+        default=True,
+        description="Persist non-selected candidate edges per group in the sidecar "
+        "(separate ``rejected_edges`` list). Resolver-track prerequisite; additive.",
+    )
+    stitch_rejected_edges_max_per_group: int = Field(
+        default=64,
+        description="Cap on persisted rejected edges per group (highest-confidence "
+        "kept). Records ``n_rejected_total`` + ``rejected_truncated`` when exceeded.",
+    )
+
+    # --- Flag-gated confidence-drop prune (M2 / resolver Phase 1) --------------
+    # Post-optimizer prune of group (M:N/1:N/N:1) selections: drop a selected
+    # group edge whose (calibrated) confidence is below an absolute threshold.
+    # This is the one-parameter model the #272 eval validated (evaluate.py
+    # ``baseline_conf`` — an absolute confidence threshold, NOT group-relative —
+    # beat both keep-all and the learned per-edge model on the clean slice). The
+    # threshold default is the F1-maximizing operating point tuned on the Boston
+    # clean slice; retune per dataset before enabling. Default OFF: when disabled
+    # the optimizer selections are byte-identical to the pre-prune pipeline.
+    resolver_prune_enabled: bool = Field(
+        default=False,
+        description="Enable the post-optimizer confidence-drop prune of group edges. "
+        "Default OFF; enabling is a measured, per-dataset decision under the stitch gate.",
+    )
+    resolver_prune_min_confidence: float = Field(
+        default=0.96,
+        description="Absolute (calibrated) confidence floor for a SELECTED group edge "
+        "when ``resolver_prune_enabled``. Edges below it are dropped, except each "
+        "group always retains its single highest-confidence edge (never emptied). "
+        "Tuned operating point from the #272 clean-slice eval.",
+    )
+
     # Training data validation thresholds
     training_max_hausdorff_m: float = Field(
         default=1000.0,

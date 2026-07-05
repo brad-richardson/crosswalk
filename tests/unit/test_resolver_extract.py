@@ -136,3 +136,52 @@ def test_load_sidecar_groups_roundtrip(tmp_path):
     p.write_text(json.dumps({"n_groups": 1, "groups": groups}))
     loaded = load_sidecar_groups(p)
     assert len(loaded) == 1 and loaded[0]["group_id"] == "g1"
+
+
+# --- M2: rejected candidate edges (under-selection) --------------------------
+
+
+def test_rejected_edges_become_selected_false_rows():
+    """The M2 rejected_edges list is folded into the per-edge table as extra
+    rows with selected=False. This is what makes under-selection learnable."""
+    grp = _group("g1", [_edge("A", "T", 0.99)])
+    # C->T is a candidate the optimizer rejected (not selected anywhere)
+    grp["rejected_edges"] = [_edge("C", "T", 0.35, selected=False)]
+    human = _labels([_label_row("hg1", [("A", "T")])])
+    df = build_edge_table([grp], human, "ds")
+    assert len(df) == 2
+    by_ref = dict(zip(df["ref_id"], df["selected"]))
+    assert by_ref["A"] is True or by_ref["A"] == True  # noqa: E712
+    assert by_ref["C"] == False  # noqa: E712
+    # C was not human-selected -> a true negative the optimizer got right
+    assert dict(zip(df["ref_id"], df["keep"]))["C"] == 0
+
+
+def test_rejected_edge_that_human_selected_is_under_selection_positive():
+    """A rejected candidate the human DID select is keep=1 with selected=False —
+    an under-selection error impossible to observe from the selected-only sidecar."""
+    grp = _group("g1", [_edge("A", "T", 0.99)])
+    grp["rejected_edges"] = [_edge("B", "T", 0.45, selected=False)]
+    # human kept BOTH A->T and B->T
+    human = _labels([_label_row("hg1", [("A", "T"), ("B", "T")])])
+    df = build_edge_table([grp], human, "ds")
+    row_b = df[df["ref_id"] == "B"].iloc[0]
+    assert row_b["keep"] == 1
+    assert bool(row_b["selected"]) is False
+
+
+def test_include_rejected_flag_off_excludes_them():
+    grp = _group("g1", [_edge("A", "T", 0.99)])
+    grp["rejected_edges"] = [_edge("C", "T", 0.35, selected=False)]
+    human = _labels([_label_row("hg1", [("A", "T")])])
+    df = build_edge_table([grp], human, "ds", include_rejected=False)
+    assert set(df["ref_id"]) == {"A"}
+
+
+def test_rejected_edges_deduped_against_edges():
+    """A pair present in both edges and rejected_edges is not double-counted."""
+    grp = _group("g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4)])
+    grp["rejected_edges"] = [_edge("B", "T", 0.4, selected=False)]  # dup of an edge
+    human = _labels([_label_row("hg1", [("A", "T")])])
+    df = build_edge_table([grp], human, "ds")
+    assert len(df) == 2  # A, B — not 3

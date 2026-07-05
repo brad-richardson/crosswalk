@@ -255,6 +255,7 @@ def _export_groups_sidecar(
     sliver_edges: set[tuple[Any, Any]] | None = None,
     reference_proj: gpd.GeoDataFrame | None = None,
     target_proj: gpd.GeoDataFrame | None = None,
+    pruned_pairs: set[tuple[Any, Any]] | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -316,8 +317,9 @@ def _export_groups_sidecar(
         if gid:
             assignment_by_gid[str(gid)].append(r)
 
-    # Highest-confidence raw candidate per (ref,target) pair, indexed by ref for
-    # fast per-group candidate collection. Keyed by string ids to match output.
+    # Highest-confidence raw candidate per (ref,target) pair, indexed by ref AND
+    # by target for fast per-group candidate collection. Keyed by string ids to
+    # match output.
     best_by_pair: dict[tuple[str, str], Any] = {}
     for r in results:
         if r.confidence < min_confidence:
@@ -327,8 +329,23 @@ def _export_groups_sidecar(
         if prev is None or r.confidence > prev.confidence:
             best_by_pair[pair] = r
     cands_by_ref: dict[str, list] = defaultdict(list)
-    for (rid, _tid), r in best_by_pair.items():
+    cands_by_tgt: dict[str, list] = defaultdict(list)
+    for (rid, tid), r in best_by_pair.items():
         cands_by_ref[rid].append(r)
+        cands_by_tgt[tid].append(r)
+
+    # Every (ref,target) pair the optimizer SELECTED into any group (post-prune).
+    # A rejected candidate must never collide with a pair that is selected in
+    # some other group, so this global set gates the rejected-edge collection.
+    pruned_pairs = pruned_pairs or set()
+    pruned_pairs_str = {(str(r), str(t)) for r, t in pruned_pairs}
+    all_selected_pairs: set[tuple[str, str]] = set()
+    for _gid, _assign in assignment_by_gid.items():
+        for r in _assign:
+            all_selected_pairs.add((str(r.ref_id), str(r.target_id)))
+
+    persist_rejected = settings.stitch_persist_rejected_edges
+    rejected_cap = settings.stitch_rejected_edges_max_per_group
 
     # Projected (metric) geometry + name lookups for corridor/structure analysis
     # (contiguity tolerance is in meters, so WGS84 geoms cannot be used here).
@@ -398,6 +415,31 @@ def _export_groups_sidecar(
         if val is None and sid.isdigit():
             val = lookup.get(int(sid))
         return val
+
+    def _serialize_edge(pair: tuple[str, str], r: Any, struct: dict | None) -> dict:
+        """Serialize one candidate edge (selected or rejected) to a sidecar dict.
+
+        Casts numpy scalars to JSON floats, attaches alignment fractions and the
+        per-edge structure block, and marks ``pruned`` when the pair was dropped
+        by the confidence-drop prune (Task B). ``selected`` comes from ``struct``
+        (True iff the pair is in the group's assignment).
+        """
+        edge = {
+            "ref_id": pair[0],
+            "target_id": pair[1],
+            "confidence": round(float(r.confidence), 4),
+        }
+        if r.gers_start_frac is not None:
+            edge["gers_start_frac"] = round(float(r.gers_start_frac), ALIGNMENT_FRAC_PRECISION)
+            edge["gers_end_frac"] = round(float(r.gers_end_frac), ALIGNMENT_FRAC_PRECISION)
+        if r.local_start_frac is not None:
+            edge["local_start_frac"] = round(float(r.local_start_frac), ALIGNMENT_FRAC_PRECISION)
+            edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
+        if struct:
+            edge.update(struct)
+        if pair in pruned_pairs_str:
+            edge["pruned"] = True
+        return edge
 
     groups = []
     for group_id, assign in assignment_by_gid.items():
@@ -470,28 +512,79 @@ def _export_groups_sidecar(
             target_name_lookup=tgt_names_proj,
         )
 
-        # Serialize candidate edges (cast numpy scalars to Python float for JSON)
-        # with their per-edge structure block.
-        edges = []
-        for pair in sorted(cand_by_pair.keys()):
-            r = cand_by_pair[pair]
-            edge = {
-                "ref_id": pair[0],
-                "target_id": pair[1],
-                "confidence": round(float(r.confidence), 4),
-            }
-            if r.gers_start_frac is not None:
-                edge["gers_start_frac"] = round(float(r.gers_start_frac), ALIGNMENT_FRAC_PRECISION)
-                edge["gers_end_frac"] = round(float(r.gers_end_frac), ALIGNMENT_FRAC_PRECISION)
-            if r.local_start_frac is not None:
-                edge["local_start_frac"] = round(
-                    float(r.local_start_frac), ALIGNMENT_FRAC_PRECISION
+        # Serialize the in-product candidate edges (selected assignment + any
+        # in-corridor sliver/weak alternatives) with their per-edge structure.
+        # NOTE: this `edges` list and its per-edge fields are UNCHANGED from the
+        # pre-M2 sidecar (the rejected candidates below go in a sibling list), so
+        # every existing consumer — and the stitch gate — is byte-invariant.
+        edges = [
+            _serialize_edge(pair, cand_by_pair[pair], per_edge.get(pair))
+            for pair in sorted(cand_by_pair.keys())
+        ]
+
+        # Rejected candidate edges (M2): every OTHER raw candidate the optimizer
+        # saw for this group's nodes — a group ref matched to an out-of-group
+        # target, or vice versa — that it did NOT select anywhere. These are the
+        # under-selection negatives the resolver needs and the "extra plausible
+        # edges" the review UI previously discarded. Persisted in a SEPARATE list
+        # so `edges` stays byte-identical. Bounded per group (highest-confidence
+        # kept) with truncation recorded.
+        rejected_edges: list[dict] = []
+        n_rejected_total = 0
+        rejected_truncated = False
+        if persist_rejected:
+            rej_best: dict[tuple[str, str], Any] = {}
+            # Candidates incident to a group node (ref->out-of-group target, or
+            # target->out-of-group ref) that are neither an in-product candidate
+            # nor selected in any other group. Keep the highest-confidence per pair.
+            _incident = [
+                (rid, str(r.target_id), r) for rid in ref_ids for r in cands_by_ref.get(rid, [])
+            ]
+            _incident += [
+                (str(r.ref_id), tid, r) for tid in target_ids for r in cands_by_tgt.get(tid, [])
+            ]
+            for _r0, _t0, r in _incident:
+                pair = (_r0, _t0)
+                if pair in cand_by_pair or pair in all_selected_pairs:
+                    continue
+                prev = rej_best.get(pair)
+                if prev is None or r.confidence > prev.confidence:
+                    rej_best[pair] = r
+
+            n_rejected_total = len(rej_best)
+            # Highest-confidence first; cap per group to bound sidecar growth.
+            rej_ranked = sorted(rej_best.items(), key=lambda kv: (-kv[1].confidence, kv[0]))
+            if rejected_cap >= 0 and len(rej_ranked) > rejected_cap:
+                rej_ranked = rej_ranked[:rejected_cap]
+                rejected_truncated = True
+
+            if rej_ranked:
+                # Structure for rejected edges is computed on the AUGMENTED
+                # candidate graph (group nodes + the rejected edges' foreign
+                # endpoints) so degree/bridge/corridor are well-defined. Computed
+                # separately from `edges` so the in-product edges' structure is
+                # never perturbed.
+                rej_pairs = [p for p, _ in rej_ranked]
+                aug_ref_ids = sorted({p[0] for p in rej_pairs} | set(ref_ids))
+                aug_tgt_ids = sorted({p[1] for p in rej_pairs} | set(target_ids))
+                aug_edges = list(cand_by_pair.keys()) + rej_pairs
+                rej_struct, _ = compute_group_structure(
+                    edges=aug_edges,
+                    ref_ids=aug_ref_ids,
+                    target_ids=aug_tgt_ids,
+                    assignment_pairs=assignment_pairs,
+                    sliver_pairs=sliver_pairs_str,
+                    ref_geoms=ref_geoms_proj,
+                    target_geoms=tgt_geoms_proj,
+                    tolerance=DEFAULT_SNAP_TOLERANCE_M,
+                    corridor_aware=settings.optimizer_corridor_aware,
+                    max_turn_deg=settings.optimizer_corridor_max_turn_deg,
+                    ref_name_lookup=ref_names_proj,
+                    target_name_lookup=tgt_names_proj,
                 )
-                edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
-            st = per_edge.get(pair)
-            if st:
-                edge.update(st)
-            edges.append(edge)
+                rejected_edges = [
+                    _serialize_edge(pair, r, rej_struct.get(pair)) for pair, r in rej_ranked
+                ]
 
         optimizer_assignment = [
             {
@@ -575,6 +668,14 @@ def _export_groups_sidecar(
                 "n_assignment_components": per_group["n_assignment_components"],
                 "largest_biconnected_block": per_group["largest_biconnected_block"],
                 "oversized_group": oversized,
+                # M2 candidate-graph persistence: non-selected candidates the
+                # optimizer saw for this group's nodes (sibling to `edges`).
+                "rejected_edges": rejected_edges,
+                "n_rejected_edges": len(rejected_edges),
+                "n_rejected_total": n_rejected_total,
+                "rejected_truncated": rejected_truncated,
+                # Confidence-drop prune effect (Task B); 0 when the flag is OFF.
+                "n_pruned": sum(1 for e in edges + rejected_edges if e.get("pruned")),
             }
         )
 
@@ -798,6 +899,26 @@ def run_pipeline(
         target_id_column=target_id_column,
     )
 
+    # Step 4.5 (flag-gated, default OFF): confidence-drop prune of group edges
+    # (M2 / resolver Phase 1). Drops selected group edges below an absolute
+    # confidence floor — the one-parameter filter the #272 eval validated. When
+    # disabled the optimizer selections are byte-identical to the pre-prune
+    # pipeline; the pruned pairs are recorded in the sidecar so the prune's
+    # effect is auditable and gate-measurable.
+    pruned_pairs: set[tuple[Any, Any]] = set()
+    if settings.resolver_prune_enabled:
+        from ..matching.optimizer import apply_confidence_drop_prune
+
+        n_before = len(optimized)
+        optimized, pruned_pairs = apply_confidence_drop_prune(
+            optimized, settings.resolver_prune_min_confidence
+        )
+        logger.info(
+            f"Step 4.5: Resolver confidence-drop prune "
+            f"(min_confidence={settings.resolver_prune_min_confidence}): dropped "
+            f"{len(pruned_pairs)} group edges ({n_before} -> {len(optimized)})"
+        )
+
     # Export groups sidecar for stitching review (using WGS84 geometries).
     # The sliver set is computed from the PROJECTED data (identical to what the
     # optimizer classified internally) so sidecar grouping matches optimizer
@@ -817,6 +938,7 @@ def run_pipeline(
         sliver_edges=sliver_edges,
         reference_proj=reference,
         target_proj=target,
+        pruned_pairs=pruned_pairs,
     )
 
     if progress_callback:
