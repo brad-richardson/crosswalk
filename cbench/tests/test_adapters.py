@@ -300,5 +300,7 @@ class TestNaiveAdapter:
         assert out.exists()
         parsed = adapter.parse_output(out)
         assert list(parsed.matches.columns) == ["ref_id", "target_id", "confidence"]
-        assert parsed.matches["ref_id"].dtype == object
+        # ids must be string-valued (dtype may be object or pandas StringDtype
+        # depending on the pandas/pyarrow version — assert the values, not dtype)
+        assert isinstance(parsed.matches["ref_id"].iloc[0], str)
         assert parsed.metadata["distinct_targets"] >= 1
