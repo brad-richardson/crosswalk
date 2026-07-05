@@ -236,6 +236,46 @@ docker compose exec core-services /var/lib/hootenanny/bin/hoot --version
 
 To stop services: `make -f Makefile.docker down`
 
+### Native x86 one-shot recipe (valid wall time)
+
+The `†` rows in `BENCHMARK_RESULTS.md` were produced this way on a remote 20-core
+x86 box that already had a source-built `hootenanny-core-services:latest`
+(hoot 0.2.87). The `hoot` CLI needs neither the compose stack nor Tomcat/postgres,
+so run it **standalone** off the image with the source checkout bind-mounted at
+`$HOOT_HOME` (this is what supplies `bin/hoot` + libs) — this sidesteps the
+OOM-prone service startup:
+
+```bash
+# On the x86 box. cbench builds the OSM inputs locally (see cbench.convert.osm);
+# scp them to <workdir> alongside where the output should land.
+docker run --rm --cpus 12 --memory 40g --user "$(id -u):$(id -g)" \
+  -e HOOT_HOME=/var/lib/hootenanny \
+  -v ~/dev/hootenanny:/var/lib/hootenanny \
+  -v <workdir>:/data \
+  --entrypoint /usr/bin/time \
+  hootenanny-core-services:latest \
+  -v /var/lib/hootenanny/bin/hoot conflate --warn \
+    -D match.creators=HighwayMatchCreator \
+    -D geometry.linear.merger.default=LinearTagOnlyMerger \
+    /data/<ref>.osm /data/<tgt>.osm /data/<out>.osm
+# hoot conflation is single-threaded, so --cpus 12 (to spare a shared box) does
+# not affect wall time. /usr/bin/time -v reports Elapsed + Maximum resident set.
+```
+
+Then `scp` `<out>.osm` back next to the `_reference.osm`/`_target.osm` cbench
+wrote, and score with the adapter's own eval:
+`cbench run hootenanny <dataset> --opt skip_conflate=True`.
+
+> **0.2.87 caveat:** the default/Unifying `LinearSnapMerger` **aborts** in the
+> merge phase (`No node ID specified for RemoveNodeByEid`) on synthetic
+> (connector-less) target OSM, so the recipe uses
+> `geometry.linear.merger.default=LinearTagOnlyMerger` (hoot's Attribute-Conflation
+> merge, which skips geometry snapping). The matcher is identical; only the merge
+> representation differs. Tag-only merge is near-faithful on finely-segmented data
+> (footways) but under-surfaces sub-segment road matches — see
+> [`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md).
+> There is no built-in remote-execution mode in cbench; this is a manual recipe.
+
 ### OSM Conversion
 
 cbench handles GeoParquet to OSM conversion automatically when running the Hootenanny adapter. The converter:

@@ -68,8 +68,33 @@ Target = 10,844 local road segments; reference = 125,769 Overture segments.
 | naive (geometric floor) | 0.7500 | 0.9515 | 0.8388 | 255 | 85 | 13 | 28,664 | 4.0s | buffer=15m, min_overlap=0.30, angle_tol=35°; guard fix 2026-07-05 |
 | ~~naive (pre-fix, PR #275 bug)~~ | ~~0.7754~~ | ~~0.5410~~ | ~~0.6374~~ | ~~145~~ | ~~42~~ | ~~123~~ | ~~11,520~~ | ~~4.4s~~ | superseded — symmetric-Hausdorff guard bug |
 | Hootenanny 0.2.41 | 0.9470 | 1.0000 | 0.9728 | 268 | 15 | 0 | 20,408 | n/a (emulated)* | HighwayMatchCreator/HighwaySnapMergerCreator |
+| Hootenanny 0.2.87 (native x86, tag-only merge) | 0.9884 | 0.6343 | 0.7727 | 170 | 2 | 98 | 10,121 | **5m47s** (3m26s match-only; 1.79 GB)† | HighwayMatchCreator + LinearTagOnlyMerger; snap-merge crashes‡ |
 | Meili (Valhalla 3.7.0) | 0.9889 | 1.0000 | 0.9944 | 268 | 3 | 0 | 15,591 | 12.0s (5.0s match-only; 838 MB) | pedestrian costing, densify 10m, search_radius 25m, min_overlap 0.10/8m |
 | **matcher (xgboost)** | **0.9963** | **0.9963** | **0.9963** | 267 | 1 | 1 | 15,549 | 85.3s (2965 MB) | full ML stitch pipeline |
+
+† **Native x86 timing is now valid — this closes the "emulated" caveat.** Run
+one-shot on the user's box (Intel Core Ultra 7 265K, 20-core, 62 GiB, Ubuntu
+24.04, Docker 29.5.2) using **Hootenanny 0.2.87** (`0.2.87_3_g3eb7beb`, current
+release family). hoot conflation is **single-threaded** (99% of one core), so the
+wall time is honest and the 12-CPU container cap (`docker run --cpus 12`, imposed
+because the box also serves media) was non-binding. See
+[`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md) for host,
+exact command, and logs.
+
+‡ **The faithful snap-merge quality could not be reproduced on 0.2.87**, so this
+row's *quality* is not comparable to the 0.2.41 row — the 0.2.41 emulated numbers
+(F1 0.973) remain the Boston quality reference. 0.2.87's default/Unifying
+`LinearSnapMerger` aborts mid-merge (`No node ID specified for RemoveNodeByEid`,
+via `RecursiveElementRemover`) on this synthetic OSM's coincident-coordinate
+nodes; the Network algorithm and `AttributeConflation.conf` hit the same abort.
+The only completing merge is **`LinearTagOnlyMerger`** (same `HighwayMatchCreator`
+matcher — which found 13,121 match sets — but transfers tags instead of snapping
+geometry). Because tag-only never splits reference ways, it cannot surface
+sub-segment matches, so Boston's short-local-vs-long-Overture segmentation
+mismatch depresses recall to 0.634. This is a **merge-representation artifact, not
+a matcher regression** (contrast Fort Collins below, where fine 1:1 segmentation
+makes tag-only near-faithful at F1 0.940). Per policy we did not rebuild hoot from
+source to chase the merger bug.
 
 ### us_boston_streets — stitch-level match quality (M:N groups)
 
@@ -104,8 +129,15 @@ dataset, so target-level only.
 | naive (geometric floor) | 0.8065 | 0.2358 | 0.3650 | 50 | 12 | 162 | 14,036 | 4.2s |
 | ~~naive (pre-fix, PR #275 bug)~~ | ~~0.7885~~ | ~~0.1934~~ | ~~0.3106~~ | ~~41~~ | ~~11~~ | ~~171~~ | ~~9,525~~ | ~~4.6s~~ |
 | Hootenanny 0.2.41 | 0.9289 | 0.9245 | 0.9267 | 196 | 15 | 16 | 33,038 | n/a (emulated)* |
+| Hootenanny 0.2.87 (native x86, tag-only merge) | 1.0000 | 0.8868 | 0.9400 | 188 | 0 | 24 | 21,876 | **4m50s** (1.48 GB)† |
 | Meili (Valhalla 3.7.0) | 0.9258 | 1.0000 | 0.9615 | 212 | 17 | 0 | 41,221 | 15.2s (build+match; 852 MB) |
 | **matcher (xgboost)** | **1.0000** | **0.9528** | **0.9758** | 202 | 0 | 10 | 19,981 | 68.0s (1825 MB) |
+
+† Same native x86 / hoot 0.2.87 / tag-only-merge run as the Boston row (see that
+footnote and [`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md)).
+On sidewalks tag-only merge is **near-faithful** — fine ~1:1 segmentation means few
+sub-segment matches are lost — so the native 0.2.87 quality (F1 0.940, perfect
+precision) is on par with the 0.2.41 emulated row (F1 0.927) and directly usable.
 
 Sidewalks verdict: **Hootenanny CAN match footways** — `HighwayMatchCreator`
 handles `highway=footway` about as well as roads (F1 0.927 vs 0.973 on roads), no
@@ -204,19 +236,29 @@ uv run cbench compare cbench_results.jsonl
   (Valhalla Meili / GraphHopper), which are the *live* comparisons going forward.
   The hoot row is recorded with its exact version + config and is not re-run
   routinely.
-- **`* wall time is n/a here — Hootenanny ran under x86 emulation on Apple
-  Silicon, which makes timing meaningless.** Only the quality columns
-  (target-level P/R/F1) are valid from this machine. For real hoot timing, run
-  once on native x86 Linux — the user's box still has the full compose-built
-  stack (`hootenanny-core-services:latest`, built ~4 months ago). Note: those
-  containers have previously died with `Exited (137)` (OOM), so give the run a
-  generous memory limit (see BENCHMARKING.md).
-- **Version is 0.2.41 (2018), not the current 0.2.87.** This is the newest
-  *runnable* prebuilt image; the current release has no runnable image (the
-  `hootenanny/rpmbuild-*` images are build-*environments* with no installed
-  `hoot` binary) and must be built from source. 0.2.41's `HighwayMatchCreator`
-  is the same core matcher; a modern build would likely shift these numbers only
-  modestly. An updated native row is a future one-shot on the box above.
+- **`* wall time is n/a in the 0.2.41 rows — that image ran under x86 emulation
+  on Apple Silicon, which makes its timing meaningless.** Only the 0.2.41 quality
+  columns (target-level P/R/F1) are valid from that machine. **This caveat is now
+  closed:** the `†` rows above report **valid native x86 wall times** from a
+  one-shot run of current-family **hoot 0.2.87** on the user's 20-core box
+  (single-threaded; 5m47s Boston full / 3m26s Boston match-only / 4m50s Fort
+  Collins). The from-source snap-merge quality could not be reproduced on 0.2.87
+  (`LinearSnapMerger` abort); see the `‡` footnote and
+  [`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md).
+  (Running the standalone `hoot` CLI container needs neither postgres/tomcat nor
+  much memory — the old `Exited (137)` OOMs were the full service stack, not the
+  CLI; the conflations peaked at ~1.8 GB.)
+- **The headline quality rows are 0.2.41 (2018); the current release is 0.2.87
+  (2024).** 0.2.41 is the newest *runnable prebuilt image* (the current release
+  has no runnable image — the `hootenanny/rpmbuild-*` images are build
+  *environments* with no installed `hoot`). The `†` rows now add a **native
+  0.2.87** datapoint from the user's box (source-built
+  `hootenanny-core-services:latest`). Findings: 0.2.87's `HighwayMatchCreator`
+  matcher is unchanged in spirit (Fort Collins native F1 0.940 ≈ 0.2.41's 0.927),
+  but its **merge phase regressed** on synthetic non-topological OSM — the
+  `LinearSnapMerger` aborts (`RemoveNodeByEid`), so the faithful snap-merge Boston
+  quality stays pinned to the 0.2.41 emulated numbers. Details:
+  [`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md).
 - Match quality is the only cross-tool comparison drawn here. naive runs
   in-process (Python; 0 child RSS by design), matcher spawns a child process —
   their wall times are valid but measure different things than hoot's.
