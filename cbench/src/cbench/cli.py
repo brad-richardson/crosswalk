@@ -111,6 +111,50 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
             )
 
 
+def _apply_stitch_gate(
+    config: Path,
+    outcomes_input: list[tuple[str, object]],
+) -> bool:
+    """Evaluate the stitch-level quality gate for the given runs.
+
+    ``outcomes_input`` is a list of ``(dataset, stitch_result_or_None)``. Loads
+    per-dataset floors from ``[gate.*]`` in the config, prints a status line per
+    dataset, and returns True iff any ARMED dataset failed its floor (blocking).
+
+    Never raises on config problems: a missing/malformed config just means no
+    floors, so every dataset reports ``no_config`` (non-blocking).
+    """
+    from cbench.eval.gate import evaluate_gate, load_gate_config
+
+    try:
+        cfg = load_datasets_config(config)
+        floors = load_gate_config(cfg)
+    except (FileNotFoundError, ValueError):
+        floors = {}
+
+    console.print("\n[bold]Stitch-level quality gate[/bold]")
+    if not floors:
+        console.print("  [yellow]No [gate.*] floors configured; nothing to enforce.[/yellow]")
+        return False
+
+    colors = {"pass": "green", "fail": "red", "skip_unarmed": "yellow", "no_config": "dim"}
+    any_blocking = False
+    for dataset, stitch_result in outcomes_input:
+        outcome = evaluate_gate(dataset, stitch_result, floors.get(dataset))
+        color = colors.get(outcome.status, "white")
+        console.print(
+            f"  [{color}]{outcome.status.upper():13}[/{color}] {dataset}: {outcome.message}"
+        )
+        if outcome.blocking:
+            any_blocking = True
+
+    if any_blocking:
+        console.print("  [bold red]GATE FAILED[/bold red] — stitch quality regressed below floor.")
+    else:
+        console.print("  [green]Gate OK[/green]")
+    return any_blocking
+
+
 def _resolve_config_default(config_path: Path, value: str) -> Path:
     """Resolve a config *default* path relative to the config file's directory.
 
@@ -233,6 +277,13 @@ def run(
     match_level: str = typer.Option(
         "target", "--match-level", help="Evaluation level: 'target' (default) or 'pair'"
     ),
+    gate: bool = typer.Option(
+        False,
+        "--gate",
+        help="Enforce the stitch-level quality gate: exit nonzero if an armed "
+        "dataset's sliver-filtered edge-F1/exact-match falls below its "
+        "[gate.*] floor in the config.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
@@ -290,6 +341,11 @@ def run(
     _print_eval_result(tool, dataset, result)
     console.print(f"\nResult saved to {results_file}")
 
+    if gate:
+        blocking = _apply_stitch_gate(config, [(dataset, result.stitch_result)])
+        if blocking:
+            raise typer.Exit(1)
+
 
 @app.command("run-batch")
 def run_batch(
@@ -314,6 +370,13 @@ def run_batch(
     ),
     match_level: str = typer.Option(
         "target", "--match-level", help="Evaluation level: 'target' (default) or 'pair'"
+    ),
+    gate: bool = typer.Option(
+        False,
+        "--gate",
+        help="Enforce the stitch-level quality gate: exit nonzero if any armed "
+        "dataset's sliver-filtered edge-F1/exact-match falls below its "
+        "[gate.*] floor in the config.",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
@@ -417,6 +480,15 @@ def run_batch(
 
     console.print(table)
     console.print(f"\n{passed}/{len(batch_results)} datasets completed successfully.")
+
+    if gate:
+        gate_inputs = [
+            (ds_name, res.stitch_result if res is not None else None)
+            for ds_name, res, _err in batch_results
+        ]
+        blocking = _apply_stitch_gate(config, gate_inputs)
+        if blocking:
+            raise typer.Exit(1)
 
 
 @app.command("list-datasets")

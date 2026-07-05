@@ -43,15 +43,41 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
    rate, and a per-labeler breakdown (human vs `panel_*`). The standalone sliver
    rule in `cbench.eval.sliver` is parity-tested against
    `matcher.config.is_sliver_edge` (`tests/unit/test_cbench_sliver_parity.py`).
-   Observed at the #258 snapshot on Boston (`us_boston_streets`, 38 labels → 34
-   groups mapped): raw edge F1 ≈ 0.814, exact 0.53; filtered F1 ≈ 0.815 (1
-   sliver-affected group). Those figures predate the #263 clip-truncation
-   remediation and the #267 corridor-aware regroup; the curated set has since
-   changed (`us_boston_streets` now 73 labels, `us_seattle_sidewalks` 9), so
-   re-measure before citing. Still ungated. Remaining: grow stitching labels to
-   100+, then **promote to a CI gate** on stitch-level precision/recall (design in
-   `docs/plans/2026-02-21-stitch-eval-design.md`), then consider a learned group
-   resolver.
+   **Now gated (2026-07-05).** The metric was promoted from non-blocking to an
+   enforced, auto-arming gate. `cbench run[-batch] --gate` exits nonzero when an
+   *armed* dataset's sliver-filtered edge-F1 or exact-match falls below a
+   per-dataset floor in `cbench/datasets.toml` (`[gate.<dataset>]`). Because the
+   gate needs live pipeline outputs (a bridge parquet + its `*_groups.json`
+   sidecar) that don't exist in GitHub Actions (`data/output` is untracked), it
+   is enforced at **benchmark time** in the pre-merge checklist for
+   matching-logic PRs (see `docs/BENCHMARKING.md` and CLAUDE.md Change Tracking),
+   not in unit CI. The gate *machinery* (edge-overlap mapping, sliver filtering,
+   arming, floor logic) is regression-tested in CI on a committed miniature
+   fixture of real Boston groups (`cbench/tests/test_gate.py`,
+   `cbench/tests/fixtures/mini_*`), so the code cannot rot even though the
+   live-quality check runs out-of-band.
+
+   **Auto-arming.** A dataset's floor is enforced only once ≥ `min_mapped_groups`
+   (30) curated labels map to current pipeline groups; below that the gate
+   reports `skip_unarmed` (non-blocking). This makes the gate go live as the
+   label base grows with no second PR: `us_boston_streets` (73 labels → 67 mapped
+   groups) is already **armed**; `us_seattle_sidewalks` (9 labels → 2 mapped) is
+   unarmed and ungated until it grows.
+
+   **Re-measured baselines** (2026-07-05, post-#263/#267, against the committed
+   `data/output/*_{bridge.parquet,groups.json}`; the #258 snapshot raw F1 ≈ 0.814
+   predated both remediations and is superseded):
+
+   | Dataset | Labels→mapped | Raw F1 | Raw exact | Filtered F1 | Filtered exact | Sliver-affected | Floors (F1 / exact) |
+   |---|---|---|---|---|---|---|---|
+   | us_boston_streets | 73 → 67 | 0.8345 | 0.5373 | 0.8345 | 0.5373 | 0 | 0.78 / 0.45 |
+   | us_seattle_sidewalks | 9 → 2 | 0.6939 | 0.5000 | 0.6939 | 0.5000 | 0 | unarmed |
+
+   (Boston per-labeler: human n=22 F1 0.7695 exact 0.409; panel n=45 F1 0.863
+   exact 0.60. Floors are baseline − margin, LOO-gate style: F1 −0.055, exact
+   −0.087 — the wider exact margin reflects that per-group exact-match is noisier
+   on a ~67-group base.) Remaining: grow stitching labels further (arms more
+   datasets), then consider a learned group resolver.
 2. **~~Uncalibrated probabilities under five hand-set thresholds.~~ (largely
    addressed — isotonic calibration shipped in #266.)** XGBoost scores are not
    guaranteed to be probabilities; `scoring_match/review_threshold` (0.5/0.1),
@@ -199,9 +225,13 @@ uv run python scripts/ablation_study.py --mode category \
 
 ## Recommended sequence
 
-1. Scale stitching-group ground truth (agent-assisted; separate plan doc), then
-   promote the (now shipped, non-blocking) cbench stitch-level metric to a CI
-   gate once 100+ labels exist.
+1. ~~Scale stitching-group ground truth, then promote the cbench stitch-level
+   metric to a gate.~~ **Done (2026-07-05):** promoted to an auto-arming,
+   benchmark-time gate (`cbench run --gate`, per-dataset floors in
+   `datasets.toml`, CI fixture test of the machinery). Boston is armed (67 mapped
+   groups); the gate engages on further datasets automatically as labels grow.
+   Continue scaling stitching labels (agent-assisted; separate plan doc) to arm
+   more datasets and enable a learned group resolver.
 2. ~~Isotonic calibration~~ (shipped, #266); per-dataset-type calibration was
    measured and rejected. Remaining: per-type *thresholds* from the calibrated PR
    curve (deferred, data-thin) and Spark-side consumption of the exported knots.
