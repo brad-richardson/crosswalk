@@ -29,6 +29,34 @@ full model match F1 ≈ 0.930 / accuracy 91.7%; Spark-portable match F1 ≈ 0.90
 accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
 0.926, sidewalk 0.871, other 0.932.
 
+### Coordinated retrain (2026-07-05, post-#273)
+
+After #273 repaired GERS-id-churn in backfill — refreshing 584 stale feature rows
+(jp_tokyo cross-script name fixes; de-poisoned topology/endpoint features for
+helsinki/geneva/tunis) — the model was retrained on the fully-refreshed corpus
+(5,487 human labels → 5,429 trained after unsure/hausdorff filtering; all
+`feature_version` 2026-07-04.2, stale guard clean). Refreshed numbers, seed-42
+holdout, 1,086 rows:
+
+| Metric | Post-#266 | Post-#273 retrain | Δ |
+|---|---|---|---|
+| Holdout accuracy | 0.9144 | 0.9134 | −0.0010 |
+| Holdout match F1 | 0.9283 | 0.9262 | −0.0021 |
+| CV F1 (5-fold) | 0.9317 | 0.9274 ± 0.0067 | −0.0043 |
+| ECE raw → calibrated | 0.0131 → 0.0096 | 0.0200 → 0.0140 | +0.0044 (cal) |
+| Brier raw → calibrated | 0.0619 → 0.0617 | 0.0619 → 0.0610 | −0.0007 (cal) |
+| Spark match F1 / acc | 0.9094 / 89.2% | ≈0.910 / 89.6% | ~flat |
+
+LOO-by-type macro-F1 (all above CI floors): road_good 0.9126 (+0.003),
+road_poor 0.9289 (+0.003, incl. repaired tn_tunis), sidewalk 0.8698 (−0.002,
+incl. repaired ch_geneva_pedestrian_network), other 0.9194 (−0.0125, incl.
+repaired ch_geneva_hiking_routes; +0.039 above the 0.88 floor). The changes are
+within-noise for this label-set size; the `other`-group dip and the small ECE
+rise are honest-difficulty from de-poisoned features (previously
+optimistic-poisoned topology/endpoint values), not a code regression. The
+calibrator is fit and active (`calibration_active=True`), so the optimizer glue
+prune operates at the 0.575 calibrated point (#269).
+
 ## Remaining gaps (ranked by threat to results)
 
 1. **The shipped output is barely evaluated.** All gated metrics measure the
