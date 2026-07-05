@@ -33,7 +33,9 @@ granularity loss.
 3. **CONFIRMED pack-delivery bug found by the wave (fixed in this PR):** `_image_paths()` in
    `src/matcher/agent_labeling/stitch_runner.py` attaches only `overview.png` +
    `option_*.png` to codex's `-i` list — the #302 `zoom_*.png` junction crops were referenced
-   in the prompt but **never delivered to codex** (codex reads no files itself; claude/agy
+   in the prompt but **never attached for codex** (codex is fed images via `-i`; whether
+   its read-only exec sandbox could in principle self-open the paths, it observably did not
+   ingest them — its own feedback says so; claude/agy
    read the paths). codex even self-reported it: "junction zooms were referenced but not
    shown inline" (9c1cd4f7). **All B-side codex votes are therefore text-enrichment-only**
    (overlap meters, tags, structural fields — no crops). The fix (+ regression test) is
@@ -41,7 +43,13 @@ granularity loss.
 
 ## Per-group A/B
 
-Aconf/Bconf = consensus mean confidence. `*` = provider changed its vote.
+Aconf/Bconf = the pipeline's `mean_confidence` from consensus.csv: the mean confidence of
+the votes FOR the listed choice — a 3-vote mean on `unanimous` rows, a 2-vote mean on
+`majority` rows, and on 3-way-split `none` rows a **single vote** (the claude-anchored
+choice by tie-break, i.e. claude's own confidence). It is NOT the all-votes group mean that
+diag_wave1's prose sometimes quotes (e.g. wave-1's "group means 0.72–0.76" for the Tunis
+splits vs the 0.5 anchored values here — same data, different statistic). `*` = provider
+changed its vote.
 
 | ds | group | A-cons | B-cons | A-ch | B-ch | Aconf | Bconf | claude | codex | agy |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -88,14 +96,18 @@ Aconf/Bconf = consensus mean confidence. `*` = provider changed its vote.
 | Auto-accept routing | 20 | 22 | +2 |
 | NONE votes | 2 (claude, codex — both bogota) | 2 (agy — 1dfc9b52, 46e57794) | 0, but different class |
 | Provider vote flips | — | 27/96 (claude 10 / codex 8 / agy 9) | — |
-| Median latency claude/codex/agy | 35.5 / 14.6 / 24.5 s | 36.9 / 15.9 / 31.9 s | ~flat (+30% agy) |
+| Median latency claude/codex/agy | 35.5 / 14.6 / 24.5 s | 36.9 / 15.9 / 31.9 s | ~flat (+30% agy‡) |
+
+‡ agy's B-side median includes 15 votes taken during its post-outage recovery window, so
+the +30% conflates enrichment cost with provider conditions; treat as an upper bound.
 
 **Flip direction (the headline behavioral effect):** of the 23 flips between two lettered
 options, **16 moved to a LARGER edge set vs 3 smaller** (4 same-size swaps; 4 more involved
 NONE/prior-NONE). 10 flips landed ON the optimizer option vs 4 moving off it. The overlap
 meters legitimize mid-size overlaps that providers previously discounted as possible
 slivers — quantified evidence pulls the panel toward inclusion-heavier, optimizer-shaped
-selections. Where wave-1 dissent was *pruning* dissent (Berlin M:N), nothing flipped; where
+selections. Where wave-1 dissent was *pruning* dissent (Berlin M:N), no vote moved toward
+the optimizer (the only Berlin M:N flips are a same-size letter swap and an agy NONE); where
 it was *coverage* hesitancy (sidewalk corridors, no-name roads), votes consolidated upward.
 
 ## The three named groups
@@ -136,32 +148,46 @@ Recommend a human re-adjudication of this one settled label rather than more pan
 
 ## Berlin — and the DEBUT VERDICT
 
-Per-group: the three M:N pruning verdicts that were wave-1's headline (consensus picks
-pruning 4–6 optimizer edges) reproduced **exactly** — 2b98a74f unanimous A, 5503832a
-unanimous B, 9c1cd4f7 unanimous F, same letters, no optimizer-pull (choices are unchanged
-non-optimizer sets). The two review-tier groups stayed review-tier: e1f4821a majority
-flipped choice A→B (agy joined codex; claude now minority — a 1-edge-smaller reading);
-1dfc9b52 degraded majority-F → none (claude F→G same-size swap of the contested 8th edge,
-agy → NONE citing the R8 corner split across T5/T7). Both were and remain human-review.
+Group identity first (correcting a draft error caught in review): the wave-1 M:N pruning
+trio is **1dfc9b52 (8×7, A-side majority F), 5503832a (8×8, unanimous B), 9c1cd4f7 (8×5,
+unanimous F)**; 2b98a74f and e1f4821a are the two **N:1** groups (2×1 each), and 2b98a74f's
+unanimous-A is an *optimizer-agreeing* verdict (letter A is the optimizer's option), not a
+pruning pick.
 
-**BERLIN DEBUT VERDICT: the enrichment is NEUTRAL-to-POSITIVE on Berlin — precondition 3
-of the diag_wave1 go/no-go is shipped and does not hurt.** The optimizer-over-selection
-signal (the thing the debut is for) is *unchanged and now quantitatively argued* — B-side
-rationales on the unanimous groups cite overlap meters for the pruned edges. No new
-failure mode appeared on Berlin: zero tag-chasing, no optimizer-pull, the only cost is one
-majority→none (which routes the same). The debut may proceed on the wave-1 conditions:
-regenerate the (stale) Berlin sidecar on current main first — the fresh remote-box sidecar
-was deliberately NOT used here to keep the A/B clean — and size the review queue for the
-high alt-choice rate. Enriched packs should be used for the debut (see recommendation).
+Per-group: **both unanimous M:N pruning verdicts reproduced exactly** — 5503832a unanimous
+B and 9c1cd4f7 unanimous F, same letters, same non-optimizer pruned sets, now with
+overlap-meter-citing rationales. The third M:N (1dfc9b52, wave-1's weakest at majority-F)
+**did not reproduce**: it degraded to no-consensus (claude F→G, a same-size swap of the
+contested 8th edge; agy → NONE citing the R8 corner split across T5/T7) — review-routed
+before and after, but a real loss of consensus, not a reproduction. The N:1 groups:
+2b98a74f unanimous A unchanged (conf up 0.83→0.897); e1f4821a stayed majority but the
+majority choice flipped A→B (agy joined codex on the 1-edge-smaller reading; claude now
+minority).
 
-## Tunis (directionality gap #2 — expected "no change"; expectation REFUTED)
+**BERLIN DEBUT VERDICT: the enrichment is NEUTRAL on Berlin — precondition 3 of the
+diag_wave1 go/no-go is shipped and does not hurt, but it does not help Berlin either.**
+Scorecard: 3 auto-accepts before and after (identical choices), 2 review-tier groups before
+and after, zero flips toward the optimizer on the M:N groups, zero tag-chasing — but one of
+the three M:N pruning verdicts lost its majority, and both review-tier groups shuffled
+internally. The optimizer-over-selection signal survives on the two unanimous groups and is
+now quantitatively argued; it got *noisier*, not stronger, on the third. The debut may
+proceed on the wave-1 conditions: regenerate the (stale) Berlin sidecar on current main
+first — the fresh remote-box sidecar was deliberately NOT used here to keep the A/B clean —
+and size the review queue for the high alt-choice rate (now plus the 1dfc9b52-style
+no-consensus case). Enriched packs are what the debut will get by construction (see
+recommendation — enrichment has been unconditional in the generator since #302).
+
+## Tunis (directionality gap #2 — the wave brief expected "no change"; the groups resolved)
 
 Both NONE-consensus groups **resolved**: 36f5f174 none → **unanimous A** (conf 0.803;
 claude 0.5→0.75, and both dissenters converged on codex's A = the optimizer 15-edge set);
-e6e0f483 none → majority B (claude A→B joined codex; agy still apart). The pre-registered
-expectation was no change because the enrichment "does not address directionality" — but
-the #267 corridor fields + overlap meters were passed through by #302, and they *partially
-substitute* for directionality: claude's B-side rationales lean on corr/overlap to assign
+e6e0f483 none → majority B (claude A→B joined codex; agy still apart). Expectation
+sourcing matters here: the *wave brief* expected no change on these groups ("the
+enrichment does not address the directionality gap"), but wave-1's own #267 analysis
+predicted the opposite — "`corridor_ref/tgt` directly addresses gap #2 (the Tunis
+dual-carriageway splits)" — and #302 passed exactly those fields through. The outcome
+confirms wave-1's prediction, not a surprise: corridor fields + overlap meters *partially
+substitute* for directionality; claude's B-side rationales lean on corr/overlap to assign
 lanes ("single continuous corridor (corr R0/T0)" reasoning appears across its flips).
 Gap #2 is therefore **narrower than mapped but not closed**: codex still asks for
 "per-segment direction or endpoint ordering" on e6e0f483, and the new 36f5f174 unanimity is
@@ -190,6 +216,10 @@ votes; zoom/crop requests 47/96 → 44/96; total feedback items 168 → 179 — 
 - The surviving zoom requests RE-TARGET: providers ask for crops on specific untagged
   mid-fraction edges (46e57794 R1→T7/T15; 670e939f R4/T1, R2/T1; 36f5f174 R6→T8, R2→T5)
   — i.e. the crop *selector* (SLIVER/BORDERLINE only, cap 6) is too narrow, not the idea.
+  Caveat: codex's B-side zoom requests are confounded by the delivery bug below (it saw NO
+  crops, so its requests are partly bug evidence); the selector-narrowness reading rests on
+  **claude's** requests, which came from votes where the shipped crops were visible and
+  cited, and which still ask for crops on additional, untagged edges.
 - codex's "zooms referenced but not shown inline" class disappears with the `_image_paths`
   fix in this PR.
 
@@ -219,24 +249,37 @@ settled-agreement for optimizer-agreement. Seattle settled-IoU table:
 † settled has 1 edge outside the group (wave-1 note). Every settled-exact unanimous stayed
 settled-exact; every degradation is confined to review-routed groups.
 
-## Recommendation: make enriched packs the panel default? **YES, with three riders.**
+## Recommendation: keep enriched packs as the panel input? **YES, with four riders.**
 
-Evidence for: unanimity up (20→22) with NONE-consensus halved (4→2); zero
+Framing correction (review finding): there is no "flip enriched packs on" decision left to
+make — **#302 made the enrichment unconditional in the pack generator**; there is no
+non-enriched mode on main. Any pack generated since #302 is enriched, so any production
+panel run today already runs on enriched evidence. The decision this wave informs is
+whether to KEEP it (vs revert #302's prompt surface) and what must accompany keeping it.
+
+Evidence for keeping: unanimity up (20→22) with NONE-consensus halved (4→2); zero
 abstentions/parse failures attributable to the enrichment; complaint class converted from
-missing-evidence to next-edge-adjudication; Berlin pruning signal intact and now
-quantitatively argued; the two watch-groups behaved fail-safe; latency cost ~flat (+30%
-agy). Evidence against: coverage pull on sidewalk corridor groups (all review-routed);
-bogota unanimity now front-runs an unresolved modality policy.
+missing-evidence to next-edge-adjudication; both unanimous Berlin pruning verdicts intact
+and now quantitatively argued; the two watch-groups behaved fail-safe; latency cost ~flat
+(+30% agy). Evidence against: coverage pull on sidewalk corridor groups (all
+review-routed); one Berlin M:N majority degraded to no-consensus; bogota unanimity now
+front-runs an unresolved modality policy.
 
 Riders:
-1. **Provenance bump required.** This is a panel-input composition change: if enriched
-   packs become the default, the export labeler must bump (e.g. `panel_unanimous_v2` →
-   `panel_unanimous_v3`) exactly as the v1→v2 panel bump did. **No default was flipped in
-   this PR** — the runner/generator behavior is unchanged apart from the codex crop-delivery
-   fix; flipping the default is a separate, deliberate change for the maintainer.
-2. Ship the `_image_paths` codex fix (this PR) before any default flip, else the "same
-   evidence" claim is false for one panel member.
-3. Resolve the cycleway policy (wave-1 gap #3) before the first bike-network export under
+1. **Provenance bump is ALREADY DUE on main, not conditional.** `stitch_export.py` still
+   hardcodes `PANEL_LABELER = "panel_unanimous_v2"` while the panel's input packs changed
+   with #302 — a production export run today would tag enriched-pack verdicts with the
+   pre-enrichment labeler. Bump to `panel_unanimous_v3` (exactly as the v1→v2 panel
+   composition bump did) **before the next `stitch-export` run**. **Not changed in this
+   PR** — this report's mandate was to flag, not flip; the bump is a one-line deliberate
+   change for the maintainer.
+2. The `_image_paths` codex fix (this PR) must land first — until then the "same evidence"
+   premise is false for one panel member.
+3. **The recommended configuration is itself unvalidated:** every B-side codex vote ran
+   crop-blind, so there is zero wave data on codex-WITH-crops behavior. Run a small smoke
+   batch (the 3 Seattle watch groups suffice) after this PR merges before treating codex
+   deltas as stable.
+4. Resolve the cycleway policy (wave-1 gap #3) before the first bike-network export under
    enriched packs, since the enrichment demonstrably increases cross-mode unanimity.
 
 ## Quota consumed
