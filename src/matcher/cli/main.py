@@ -1065,6 +1065,15 @@ def register_commands(app: typer.Typer) -> None:
             "label_encoder": matcher.label_encoder,
             "hyperparams": hyperparams,
         }
+        # Isotonic calibration knots (piecewise-linear P(match) remap). Portable
+        # by construction: the Spark scorer can apply it as interp(score, xs, ys)
+        # with endpoint clipping. NOTE: emitting the table makes the artifact
+        # calibration-ready; wiring the Spark MatchLayerToNetworkV2 job to
+        # consume it (and re-fit its thresholds on calibrated scores) is a
+        # tf-data-platform follow-up — see docs/EVAL_ROADMAP.md.
+        if matcher.calibrator is not None:
+            manifest["calibration"] = matcher.calibrator.to_knots()
+            manifest["calibration"]["applied"] = False  # consumer wiring is follow-up
         manifest_out = output_dir / "manifest.json"
         with open(manifest_out, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)

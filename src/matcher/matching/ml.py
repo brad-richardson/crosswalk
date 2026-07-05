@@ -42,6 +42,12 @@ from ..config import (
 )
 from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import extract_lr_value
+from .calibration import (
+    IsotonicCalibrator,
+    brier_score,
+    expected_calibration_error,
+    fit_isotonic_oof,
+)
 from .types import MatchDecision, MatchResult
 
 # Default XGBoost hyperparameters (F1-optimized via Optuna tuning).
@@ -838,6 +844,9 @@ class MLMatcher:
         self.label_decoder = {1: "match", 0: "no_match"}
         self.is_binary = True  # Track if model is binary or multiclass
         self.feature_version = None
+        # Isotonic probability calibrator (fit on out-of-fold train predictions
+        # in train()). None => predict() returns raw XGBoost probabilities.
+        self.calibrator: IsotonicCalibrator | None = None
         self._auto_select = auto_select
 
         if model_path and not auto_select:
@@ -860,6 +869,11 @@ class MLMatcher:
         self.label_decoder = data.get("label_decoder", self.label_decoder)
         self.is_binary = data.get("is_binary", True)
         self.feature_version = data.get("feature_version")
+        # Calibrator is optional (absent in pre-calibration models => raw scores)
+        calib_knots = data.get("calibration")
+        self.calibrator = (
+            IsotonicCalibrator.from_knots(calib_knots) if calib_knots is not None else None
+        )
         if self.feature_version is None:
             logger.warning(
                 f"Model {path} has no feature_version (pre-versioning model). "
@@ -892,6 +906,8 @@ class MLMatcher:
             "label_decoder": self.label_decoder,
             "is_binary": self.is_binary,
             "feature_version": self.feature_version,
+            # Portable isotonic knots (None when uncalibrated); see calibration.py
+            "calibration": self.calibrator.to_knots() if self.calibrator is not None else None,
         }
         joblib.dump(data, path)
         logger.info(f"Saved model to {path}")
@@ -1294,6 +1310,11 @@ class MLMatcher:
             X_cv = X[train_idx]
             y_cv = y[train_idx]
             n_cv_groups = groups_train.nunique()
+            # Out-of-fold predicted P(match) for every training row, used to fit
+            # the probability calibrator without leakage: each row's calibration
+            # input comes from a fold model that never trained on it, and the
+            # holdout test set never participates (X_cv = X[train_idx]).
+            oof_probs = np.full(len(X_cv), np.nan)
             if n_cv_groups >= 2:
                 n_splits = min(5, n_cv_groups)
                 gkf = GroupKFold(n_splits=n_splits)
@@ -1307,6 +1328,10 @@ class MLMatcher:
                     cv_model = xgb.XGBClassifier(**{**params, "n_jobs": 1})
                     cv_model.fit(X_cv_train, y_cv_train)
                     y_cv_pred = cv_model.predict(X_cv_test)
+                    # OOF P(match) is only meaningful for the binary classifier;
+                    # calibration is skipped for multiclass models (see below).
+                    if binary:
+                        oof_probs[cv_test_idx] = cv_model.predict_proba(X_cv_test)[:, 1]
                     fold_f1 = f1_score(
                         y_cv_test,
                         y_cv_pred,
@@ -1319,6 +1344,35 @@ class MLMatcher:
                 # Cannot do CV with < 2 groups
                 logger.warning("Skipping CV: fewer than 2 segment groups in training set")
                 cv_scores = np.array([np.nan])
+
+            # Fit the isotonic calibrator on the OOF predictions (measured on
+            # the same segment-grouped folds) and evaluate calibration quality
+            # on the untouched holdout test set. A single GLOBAL calibrator is
+            # used: per-dataset-type calibration was measured (road_good/
+            # road_poor/sidewalk/other) and rejected — it overfits the small
+            # sidewalk/other groups and did not beat global overall. See the PR
+            # for reliability numbers. Calibration is binary-only: P(match)
+            # calibration is undefined for a multiclass model, so it is skipped
+            # (predict() then returns raw scores).
+            if binary:
+                self.calibrator = fit_isotonic_oof(oof_probs, y_cv)
+                raw_test_probs = self.model.predict_proba(X_test)[:, 1]
+                results["ece_raw"] = expected_calibration_error(raw_test_probs, y_test)
+                results["brier_raw"] = brier_score(raw_test_probs, y_test)
+                if self.calibrator is not None:
+                    cal_test_probs = self.calibrator.transform(raw_test_probs)
+                    results["calibrated"] = True
+                    results["ece_calibrated"] = expected_calibration_error(cal_test_probs, y_test)
+                    results["brier_calibrated"] = brier_score(cal_test_probs, y_test)
+                else:
+                    results["calibrated"] = False
+                    logger.warning(
+                        "Calibrator not fit (insufficient OOF data); predict() returns raw scores"
+                    )
+            else:
+                self.calibrator = None
+                results["calibrated"] = False
+                logger.info("Multiclass model: probability calibration skipped")
 
             results.update(
                 {
@@ -1343,6 +1397,14 @@ class MLMatcher:
             print(f"Test samples: {results['n_test']}")
             print(f"Test accuracy: {results['test_accuracy']:.3f}")
             print(f"CV F1 (5-fold): {results['cv_f1_mean']:.3f} ± {results['cv_f1_std']:.3f}")
+            if results.get("calibrated"):
+                print(
+                    f"Calibration (holdout ECE): {results['ece_raw']:.4f} raw -> "
+                    f"{results['ece_calibrated']:.4f} isotonic | "
+                    f"Brier: {results['brier_raw']:.4f} -> {results['brier_calibrated']:.4f}"
+                )
+            else:
+                print(f"Calibration: not fit (raw ECE {results.get('ece_raw', float('nan')):.4f})")
             print("\nClassification Report:")
             print(classification_report(y_test, y_pred, target_names=target_names))
         else:
@@ -1581,11 +1643,17 @@ class MLMatcher:
             X[inf_mask] = MAX_DISTANCE_METERS
         return X
 
-    def predict(self, features: list[dict[str, float]]) -> np.ndarray:
+    def predict(self, features: list[dict[str, float]], calibrated: bool = True) -> np.ndarray:
         """Predict match probabilities.
 
         Args:
             features: List of feature dictionaries
+            calibrated: If True (default) and a calibrator is loaded and
+                ``settings.enable_calibration`` is set, apply isotonic
+                calibration so the returned probabilities are genuine
+                ``P(match)`` values that the downstream thresholds treat
+                correctly. Set False to obtain the raw XGBoost scores (e.g.
+                for raw-vs-calibrated comparisons).
 
         Returns:
             Array of match probabilities (0-1)
@@ -1605,7 +1673,14 @@ class MLMatcher:
             # Fallback for binary where classes are [0, 1]
             match_idx = 1
 
-        return probs[:, match_idx]
+        raw = probs[:, match_idx]
+
+        if calibrated and self.calibrator is not None:
+            from ..config import settings
+
+            if settings.enable_calibration:
+                return self.calibrator.transform(raw).astype(raw.dtype)
+        return raw
 
     def predict_class(self, features: list[dict[str, float]]) -> list[str]:
         """Predict class labels.

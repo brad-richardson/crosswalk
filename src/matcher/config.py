@@ -588,7 +588,20 @@ class MatcherSettings(BaseSettings):
         default=50.0,
         description="Candidate search radius (meters)",
     )
-    # Scoring thresholds (per-candidate, used by ML scorer for bridge file output)
+    # Probability calibration. When True (default) and the loaded model carries
+    # an isotonic calibrator, MLMatcher.predict() returns calibrated P(match).
+    # All five confidence thresholds below (scoring_*, optimizer_*, and
+    # bridge_min_confidence) are therefore applied to genuine probabilities.
+    # Set False to fall back to raw XGBoost scores (e.g. to reproduce
+    # pre-calibration behaviour for A/B comparison).
+    enable_calibration: bool = Field(
+        default=True,
+        description="Apply the model's isotonic probability calibrator at inference. "
+        "When True, all confidence thresholds operate on calibrated P(match).",
+    )
+
+    # Scoring thresholds (per-candidate, used by ML scorer for bridge file output).
+    # NOTE: applied to CALIBRATED P(match) when enable_calibration is True.
     scoring_match_threshold: float = Field(
         default=0.5,
         description="Confidence threshold for MATCH decision in ML scoring",
