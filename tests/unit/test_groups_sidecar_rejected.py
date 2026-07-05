@@ -256,6 +256,64 @@ def test_pruned_pendant_edge_recorded(tmp_path):
     assert g["n_rejected_edges"] <= g["n_rejected_total"]
 
 
+def test_pruned_pair_counted_once_across_corridor_subgroups(tmp_path):
+    """A pruned pair must be counted in EXACTLY its pre-prune (owner) group, even
+    when its surviving endpoint anchors a DIFFERENT corridor sub-group. The owner
+    records it (pendant recovery); the foreign group sees it only as a non-pruned
+    incident alternative. Global sum(n_pruned) == number of pruned pairs (no
+    double-count). Regresses the cross-group double-count the adversarial review
+    of #288 found."""
+    import geopandas as gpd
+    from shapely import LineString
+
+    # R1,R2,R4 refs ; T1,T2,T3 targets. R2's pruned edge R2->T2 belongs to g1
+    # (with R1->T1); R2 also SURVIVES in a separate sub-group g2 via R2->T3.
+    ref = gpd.GeoDataFrame(
+        {"id": ["R1", "R2", "R4"]},
+        geometry=[
+            LineString([(0, 0), (100, 0)]),
+            LineString([(0, 500), (100, 500)]),
+            LineString([(100, 500), (200, 500)]),
+        ],
+        crs=_CRS,
+    )
+    tgt = gpd.GeoDataFrame(
+        {"id": ["T1", "T2", "T3"]},
+        geometry=[
+            LineString([(0, 1), (100, 1)]),
+            LineString([(0, 3), (100, 3)]),
+            LineString([(0, 501), (200, 501)]),
+        ],
+        crs=_CRS,
+    )
+    r1t1 = _mr("R1", "T1", 0.98, 0, 0, gid="g1")  # keeps g1 alive (top edge)
+    r2t3 = _mr("R2", "T3", 0.97, 1, 2, gid="g2")  # R2 survives here
+    r4t3 = _mr("R4", "T3", 0.95, 2, 2, gid="g2")
+    r2t2 = _mr("R2", "T2", 0.30, 1, 1, gid="g1")  # pruned; pendant w.r.t. g1
+    results = [r1t1, r2t3, r4t3, r2t2]
+    kept = [r1t1, r2t3, r4t3]
+    groups = _export(
+        tmp_path,
+        results,
+        kept,
+        ref,
+        tgt,
+        pruned_pairs={("R2", "T2")},
+        pruned_group_ids={("R2", "T2"): "g1"},
+    )
+    g1 = next(g for g in groups if g["group_id"] == "g1")
+    g2 = next(g for g in groups if g["group_id"] == "g2")
+    # owner group g1 records the pruned pendant exactly once
+    assert g1["n_pruned"] == 1
+    # foreign group g2 (where R2 survives) sees R2->T2 as a plain incident
+    # candidate, NOT a pruned record
+    assert g2["n_pruned"] == 0
+    g2_r2t2 = [e for e in g2["rejected_edges"] if (e["ref_id"], e["target_id"]) == ("R2", "T2")]
+    assert g2_r2t2 and not g2_r2t2[0].get("pruned")
+    # global exactness: one pruned pair -> total n_pruned == 1
+    assert sum(g["n_pruned"] for g in groups) == 1
+
+
 def test_pendant_pruned_edge_lost_without_attribution(tmp_path):
     """Contrast: without the group_id attribution (pre-fix behaviour), the same
     pendant edge is invisible and n_pruned undercounts — documents why the

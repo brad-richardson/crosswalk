@@ -82,9 +82,13 @@ eval validated (it beat both keep-all and the learned per-edge model on the clea
 slice). It never touches 1:1 matches and always keeps each group's single
 highest-confidence edge (a group is never emptied). Pruned pairs are recorded in
 the sidecar (`pruned` per edge, `n_pruned` per group) so the effect is auditable —
-`n_pruned` is exact: pruned edges are exempt from the per-group rejected-edge cap,
-and a pruned *pendant* edge (both endpoints leave the surviving group) is recovered
-and recorded via its pre-prune `group_id`.
+`n_pruned` is exact: each pruned pair is attributed to its pre-prune `group_id` and
+counted in exactly that owner group — pruned edges are exempt from the per-group
+rejected-edge cap, a pruned *pendant* edge (both endpoints leave the owner group) is
+recovered and recorded there, and the same pair appearing as an incident alternative
+in a *foreign* corridor sub-group (where a surviving endpoint lives) is not
+re-counted. With attribution present the count is authoritative (independent of
+`stitch_persist_rejected_edges`); `sum(n_pruned)` equals the number of dropped edges.
 The optimal floor is **dataset-dependent**, so the prune is **per-dataset opt-in**:
 `runner.py::_effective_prune_threshold` applies it ONLY to datasets present in the
 `resolver_prune_overrides` **allowlist** (keyed by the dataset name derived from the

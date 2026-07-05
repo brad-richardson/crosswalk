@@ -527,13 +527,22 @@ def _export_groups_sidecar(
             val = lookup.get(int(sid))
         return val
 
+    # Set (per group) of pruned pairs OWNED by the group currently being
+    # serialized — i.e. pairs whose pre-prune ``group_id`` is this group. A pruned
+    # pair is marked/counted in EXACTLY its owner group; in any foreign group where
+    # a surviving endpoint makes it an incident rejected candidate it is a normal
+    # (non-pruned) alternative, so ``n_pruned`` never double-counts across the
+    # corridor sub-groups a shared node spans. ``_serialize_edge`` reads this via
+    # closure; it is re-bound at the top of each group iteration below.
+    group_owned_pruned: set[tuple[str, str]] = set()
+
     def _serialize_edge(pair: tuple[str, str], r: Any, struct: dict | None) -> dict:
         """Serialize one candidate edge (selected or rejected) to a sidecar dict.
 
         Casts numpy scalars to JSON floats, attaches alignment fractions and the
         per-edge structure block, and marks ``pruned`` when the pair was dropped
-        by the confidence-drop prune (Task B). ``selected`` comes from ``struct``
-        (True iff the pair is in the group's assignment).
+        by the confidence-drop prune AND this group owns it (Task B). ``selected``
+        comes from ``struct`` (True iff the pair is in the group's assignment).
         """
         edge = {
             "ref_id": pair[0],
@@ -548,12 +557,24 @@ def _export_groups_sidecar(
             edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
         if struct:
             edge.update(struct)
-        if pair in pruned_pairs_str:
+        if pair in group_owned_pruned:
             edge["pruned"] = True
         return edge
 
     groups = []
     for group_id, assign in assignment_by_gid.items():
+        # Pruned pairs owned by THIS group. With group attribution present
+        # (production), a pruned pair belongs to its pre-prune group_id only, so it
+        # is marked/counted exactly once even when its surviving endpoint anchors a
+        # different corridor sub-group. Without attribution (e.g. legacy callers
+        # that pass ``pruned_pairs`` but not ``pruned_group_ids``), fall back to
+        # global membership so a single-group prune is still recorded.
+        if pruned_gid_by_pair:
+            group_owned_pruned = {
+                p for p in pruned_pairs_str if pruned_gid_by_pair.get(p) == str(group_id)
+            }
+        else:
+            group_owned_pruned = pruned_pairs_str
         ref_ids = sorted({str(r.ref_id) for r in assign})
         target_ids = sorted({str(r.target_id) for r in assign})
         tgt_set = set(target_ids)
@@ -665,13 +686,16 @@ def _export_groups_sidecar(
             n_rejected_total = len(rej_best)
             # Highest-confidence first; cap per group to bound sidecar growth.
             rej_ranked = sorted(rej_best.items(), key=lambda kv: (-kv[1].confidence, kv[0]))
-            # Pruned edges are EXEMPT from the truncation cap: dropping one would
-            # make ``n_pruned`` undercount (the prune's effect must stay auditable).
-            # The cap bounds only the non-pruned remainder; ``rejected_truncated``
-            # reflects whether any non-pruned candidate was dropped.
+            # Pruned edges OWNED by this group are EXEMPT from the truncation cap:
+            # dropping one would make ``n_pruned`` undercount (the prune's effect
+            # must stay auditable). Only owned pruned pairs are exempt — a globally
+            # pruned pair that is merely a foreign group's incident alternative is
+            # not marked pruned here, so it is capped like any other candidate. The
+            # cap bounds the non-owned-pruned remainder; ``rejected_truncated``
+            # reflects whether any of those was dropped.
             if rejected_cap >= 0:
-                pruned_rej = [kv for kv in rej_ranked if kv[0] in pruned_pairs_str]
-                other_rej = [kv for kv in rej_ranked if kv[0] not in pruned_pairs_str]
+                pruned_rej = [kv for kv in rej_ranked if kv[0] in group_owned_pruned]
+                other_rej = [kv for kv in rej_ranked if kv[0] not in group_owned_pruned]
                 if len(other_rej) > rejected_cap:
                     other_rej = other_rej[:rejected_cap]
                     rejected_truncated = True
@@ -717,11 +741,10 @@ def _export_groups_sidecar(
             # so degree/bridge/corridor are undefined). Counted in n_rejected_total
             # so ``n_rejected_edges <= n_rejected_total`` holds.
             if pruned_gid_by_pair:
-                group_pruned = {p for p, gid in pruned_gid_by_pair.items() if gid == group_id}
                 serialized_pruned = {
                     (e["ref_id"], e["target_id"]) for e in edges + rejected_edges if e.get("pruned")
                 }
-                for pair in sorted(group_pruned - serialized_pruned):
+                for pair in sorted(group_owned_pruned - serialized_pruned):
                     r = best_by_pair.get(pair)
                     if r is None:
                         continue
@@ -817,7 +840,18 @@ def _export_groups_sidecar(
                 "n_rejected_total": n_rejected_total,
                 "rejected_truncated": rejected_truncated,
                 # Confidence-drop prune effect (Task B); 0 when the flag is OFF.
-                "n_pruned": sum(1 for e in edges + rejected_edges if e.get("pruned")),
+                # When group attribution is present (production), count is
+                # AUTHORITATIVE from the owned pruned set — exact regardless of
+                # ``stitch_persist_rejected_edges`` and independent of whether each
+                # pruned edge was serialized. Equals the serialized-pruned count
+                # when persistence is on (owned edges are all recorded, cap-exempt).
+                # Legacy callers without attribution fall back to the serialized
+                # count (a single-group prune is still recorded).
+                "n_pruned": (
+                    len(group_owned_pruned)
+                    if pruned_gid_by_pair
+                    else sum(1 for e in edges + rejected_edges if e.get("pruned"))
+                ),
             }
         )
 
