@@ -8,8 +8,9 @@
      and alignment fracs so the client can render coverage gaps + sliver counts) -->
 <script type="application/json" id="group-edges">{{ (client_edges if client_edges is defined else group.edges) | tojson }}</script>
 
-<!-- Context segment IDs (start hidden on map) -->
-<script type="application/json" id="group-context-ids">{{ (group.get("context_ref_ids", []) + group.get("context_target_ids", [])) | tojson }}</script>
+<!-- Context segment IDs (start hidden on map). Capped to the nearest N per side
+     in the web layer for large groups — see _cap_context_ids in stitching.py. -->
+<script type="application/json" id="group-context-ids">{{ (context_ids if context_ids is defined else (group.get("context_ref_ids", []) + group.get("context_target_ids", []))) | tojson }}</script>
 
 <!-- Group segments the optimizer left out (start hidden on map to match pre-seed) -->
 <script type="application/json" id="group-inactive-ids">{{ (preseed_inactive_ids if preseed_inactive_ids is defined else []) | tojson }}</script>
@@ -29,7 +30,11 @@
         </span>
         {% if context_ref_details is defined and (context_ref_details or context_target_details) %}
         <span class="collapse-hide" style="font-size: 0.7rem; color: var(--text-muted);">
+            {% if context_capped is defined and context_capped %}
+            (+{{ context_ref_total }}R / +{{ context_target_total }}T nearby, showing nearest {{ context_ref_details | length }}R / {{ context_target_details | length }}T)
+            {% else %}
             (+{{ context_ref_details | length }}R / +{{ context_target_details | length }}T nearby)
+            {% endif %}
         </span>
         {% endif %}
         <span class="pair-confidence" id="group-confidence" style="margin-left: 4px;">
