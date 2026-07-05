@@ -24,6 +24,26 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
 
+  cbench:
+    # cbench is a standalone package with its own env; the matcher `test` job
+    # only runs `pytest tests/`, so cbench's tests (incl. the stitch-gate
+    # machinery regression, test_gate.py) need their own job. Runs on committed
+    # fixtures only — no data/raw or data/output required.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+      - name: Run cbench tests
+        working-directory: cbench
+        run: >
+          uv run --with pandas --with pyarrow --with typer --with rich
+          --with loguru --with geopandas --with shapely --with pytest
+          pytest -q
+
   test:
     runs-on: ubuntu-latest
     steps:

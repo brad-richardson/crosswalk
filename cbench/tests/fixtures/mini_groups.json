@@ -1,0 +1,785 @@
+{
+ "groups": [
+  {
+   "group_id": "3ac36248",
+   "match_type": "1:N",
+   "ref_ids": [
+    "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4"
+   ],
+   "target_ids": [
+    "us_boston_streets_4696_882a306615",
+    "us_boston_streets_8673_882a306615"
+   ],
+   "edges": [
+    {
+     "ref_id": "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4",
+     "target_id": "us_boston_streets_4696_882a306615",
+     "confidence": 0.9943,
+     "gers_start_frac": 0.4218277,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.0,
+     "local_end_frac": 0.9440695,
+     "degree_ref": 2,
+     "degree_tgt": 1,
+     "is_bridge": true,
+     "biconnected_block": 0,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    },
+    {
+     "ref_id": "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4",
+     "target_id": "us_boston_streets_8673_882a306615",
+     "confidence": 0.996,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 0.4218236,
+     "local_start_frac": 0.0309908,
+     "local_end_frac": 1.0,
+     "degree_ref": 2,
+     "degree_tgt": 1,
+     "is_bridge": true,
+     "biconnected_block": 1,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    }
+   ],
+   "optimizer_assignment": [
+    {
+     "ref_id": "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4",
+     "target_id": "us_boston_streets_8673_882a306615",
+     "confidence": 0.996
+    },
+    {
+     "ref_id": "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4",
+     "target_id": "us_boston_streets_4696_882a306615",
+     "confidence": 0.9943
+    }
+   ],
+   "ref_geometries": {
+    "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0602416,
+       42.3567274
+      ],
+      [
+       -71.0602082,
+       42.3567623
+      ],
+      [
+       -71.059872,
+       42.3571367
+      ]
+     ]
+    }
+   },
+   "target_geometries": {
+    "us_boston_streets_4696_882a306615": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0600775,
+       42.356896
+      ],
+      [
+       -71.0598496,
+       42.3571459
+      ]
+     ]
+    },
+    "us_boston_streets_8673_882a306615": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.060239,
+       42.3567181
+      ],
+      [
+       -71.0600775,
+       42.356896
+      ]
+     ]
+    }
+   },
+   "ref_names": {
+    "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4": "Province Street"
+   },
+   "target_names": {
+    "us_boston_streets_4696_882a306615": "PROVINCE STREET",
+    "us_boston_streets_8673_882a306615": "PROVINCE STREET"
+   },
+   "ref_classes": {
+    "c6c8d93d-ca6d-4ad1-9a59-b7fff21e1cb4": "residential"
+   },
+   "target_classes": {
+    "us_boston_streets_4696_882a306615": "residential",
+    "us_boston_streets_8673_882a306615": "residential"
+   },
+   "n_edges": 2,
+   "n_corridors": 1,
+   "n_assignment_components": 1,
+   "largest_biconnected_block": 1,
+   "oversized_group": false
+  },
+  {
+   "group_id": "6cf0a147",
+   "match_type": "N:1",
+   "ref_ids": [
+    "29acb3ad-9e9c-4aca-85e6-482b4118b028",
+    "c67b5ede-fcb3-4db3-9e21-e371115f8c6f"
+   ],
+   "target_ids": [
+    "us_boston_streets_20_882a306639"
+   ],
+   "edges": [
+    {
+     "ref_id": "29acb3ad-9e9c-4aca-85e6-482b4118b028",
+     "target_id": "us_boston_streets_20_882a306639",
+     "confidence": 0.9888,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.5253599,
+     "local_end_frac": 0.9656312,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 1,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    },
+    {
+     "ref_id": "c67b5ede-fcb3-4db3-9e21-e371115f8c6f",
+     "target_id": "us_boston_streets_20_882a306639",
+     "confidence": 0.9909,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.0565063,
+     "local_end_frac": 0.5256268,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 0,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    }
+   ],
+   "optimizer_assignment": [
+    {
+     "ref_id": "c67b5ede-fcb3-4db3-9e21-e371115f8c6f",
+     "target_id": "us_boston_streets_20_882a306639",
+     "confidence": 0.9909
+    },
+    {
+     "ref_id": "29acb3ad-9e9c-4aca-85e6-482b4118b028",
+     "target_id": "us_boston_streets_20_882a306639",
+     "confidence": 0.9888
+    }
+   ],
+   "ref_geometries": {
+    "29acb3ad-9e9c-4aca-85e6-482b4118b028": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0694788,
+       42.3571021
+      ],
+      [
+       -71.0697354,
+       42.357045
+      ],
+      [
+       -71.0697691,
+       42.3570387
+      ],
+      [
+       -71.0698747,
+       42.3570179
+      ]
+     ]
+    },
+    "c67b5ede-fcb3-4db3-9e21-e371115f8c6f": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0698747,
+       42.3570179
+      ],
+      [
+       -71.0699919,
+       42.3569901
+      ],
+      [
+       -71.0701236,
+       42.3569594
+      ],
+      [
+       -71.0702553,
+       42.3569287
+      ],
+      [
+       -71.0702932,
+       42.3569198
+      ]
+     ]
+    }
+   },
+   "target_geometries": {
+    "us_boston_streets_20_882a306639": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0703498,
+       42.356923
+      ],
+      [
+       -71.0701774,
+       42.3569642
+      ],
+      [
+       -71.0698778,
+       42.3570316
+      ],
+      [
+       -71.0694572,
+       42.3571306
+      ]
+     ]
+    }
+   },
+   "ref_names": {
+    "29acb3ad-9e9c-4aca-85e6-482b4118b028": "Chestnut Street",
+    "c67b5ede-fcb3-4db3-9e21-e371115f8c6f": "Chestnut Street"
+   },
+   "target_names": {
+    "us_boston_streets_20_882a306639": "CHESTNUT STREET"
+   },
+   "ref_classes": {
+    "29acb3ad-9e9c-4aca-85e6-482b4118b028": "residential",
+    "c67b5ede-fcb3-4db3-9e21-e371115f8c6f": "residential"
+   },
+   "target_classes": {
+    "us_boston_streets_20_882a306639": "residential"
+   },
+   "n_edges": 2,
+   "n_corridors": 1,
+   "n_assignment_components": 1,
+   "largest_biconnected_block": 1,
+   "oversized_group": false
+  },
+  {
+   "group_id": "f1b99028",
+   "match_type": "1:N",
+   "ref_ids": [
+    "b2c3e225-c3de-47a6-913b-ad93d8fd6138"
+   ],
+   "target_ids": [
+    "us_boston_streets_5818_882a30661d",
+    "us_boston_streets_766_882a30661d"
+   ],
+   "edges": [
+    {
+     "ref_id": "b2c3e225-c3de-47a6-913b-ad93d8fd6138",
+     "target_id": "us_boston_streets_5818_882a30661d",
+     "confidence": 0.9972,
+     "gers_start_frac": 0.5157498,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.0,
+     "local_end_frac": 0.9355705,
+     "degree_ref": 2,
+     "degree_tgt": 1,
+     "is_bridge": true,
+     "biconnected_block": 1,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    },
+    {
+     "ref_id": "b2c3e225-c3de-47a6-913b-ad93d8fd6138",
+     "target_id": "us_boston_streets_766_882a30661d",
+     "confidence": 0.9972,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 0.5164027,
+     "local_start_frac": 0.0208226,
+     "local_end_frac": 1.0,
+     "degree_ref": 2,
+     "degree_tgt": 1,
+     "is_bridge": true,
+     "biconnected_block": 0,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    }
+   ],
+   "optimizer_assignment": [
+    {
+     "ref_id": "b2c3e225-c3de-47a6-913b-ad93d8fd6138",
+     "target_id": "us_boston_streets_5818_882a30661d",
+     "confidence": 0.9972
+    },
+    {
+     "ref_id": "b2c3e225-c3de-47a6-913b-ad93d8fd6138",
+     "target_id": "us_boston_streets_766_882a30661d",
+     "confidence": 0.9972
+    }
+   ],
+   "ref_geometries": {
+    "b2c3e225-c3de-47a6-913b-ad93d8fd6138": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0533026,
+       42.3612303
+      ],
+      [
+       -71.0536162,
+       42.361397
+      ],
+      [
+       -71.0539224,
+       42.3615567
+      ]
+     ]
+    }
+   },
+   "target_geometries": {
+    "us_boston_streets_5818_882a30661d": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0536145,
+       42.361407
+      ],
+      [
+       -71.0538168,
+       42.3615066
+      ],
+      [
+       -71.0539424,
+       42.3615684
+      ]
+     ]
+    },
+    "us_boston_streets_766_882a30661d": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0532971,
+       42.3612254
+      ],
+      [
+       -71.0536145,
+       42.361407
+      ]
+     ]
+    }
+   },
+   "ref_names": {
+    "b2c3e225-c3de-47a6-913b-ad93d8fd6138": "Cross Street"
+   },
+   "target_names": {
+    "us_boston_streets_5818_882a30661d": "CROSS STREET",
+    "us_boston_streets_766_882a30661d": "CROSS STREET"
+   },
+   "ref_classes": {
+    "b2c3e225-c3de-47a6-913b-ad93d8fd6138": "primary"
+   },
+   "target_classes": {
+    "us_boston_streets_5818_882a30661d": "primary",
+    "us_boston_streets_766_882a30661d": "primary"
+   },
+   "n_edges": 2,
+   "n_corridors": 1,
+   "n_assignment_components": 1,
+   "largest_biconnected_block": 1,
+   "oversized_group": false
+  },
+  {
+   "group_id": "b79368e8",
+   "match_type": "N:1",
+   "ref_ids": [
+    "18598a00-7a45-4b4a-a1d8-8d13be22c03c",
+    "b88d0172-46dc-4fe1-85b5-f29286a21b77"
+   ],
+   "target_ids": [
+    "us_boston_streets_305_882a306637"
+   ],
+   "edges": [
+    {
+     "ref_id": "18598a00-7a45-4b4a-a1d8-8d13be22c03c",
+     "target_id": "us_boston_streets_305_882a306637",
+     "confidence": 0.996,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.0503893,
+     "local_end_frac": 0.466785,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 1,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    },
+    {
+     "ref_id": "b88d0172-46dc-4fe1-85b5-f29286a21b77",
+     "target_id": "us_boston_streets_305_882a306637",
+     "confidence": 0.9946,
+     "gers_start_frac": 0.0129464,
+     "gers_end_frac": 1.0,
+     "local_start_frac": 0.4671127,
+     "local_end_frac": 1.0,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 0,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    }
+   ],
+   "optimizer_assignment": [
+    {
+     "ref_id": "18598a00-7a45-4b4a-a1d8-8d13be22c03c",
+     "target_id": "us_boston_streets_305_882a306637",
+     "confidence": 0.996
+    },
+    {
+     "ref_id": "b88d0172-46dc-4fe1-85b5-f29286a21b77",
+     "target_id": "us_boston_streets_305_882a306637",
+     "confidence": 0.9946
+    }
+   ],
+   "ref_geometries": {
+    "18598a00-7a45-4b4a-a1d8-8d13be22c03c": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0943556,
+       42.3455708
+      ],
+      [
+       -71.094362,
+       42.3455658
+      ],
+      [
+       -71.0943671,
+       42.3455622
+      ],
+      [
+       -71.0943716,
+       42.3455589
+      ],
+      [
+       -71.0943793,
+       42.3455535
+      ],
+      [
+       -71.0943899,
+       42.3455465
+      ],
+      [
+       -71.094406,
+       42.3455364
+      ],
+      [
+       -71.0944263,
+       42.3455248
+      ],
+      [
+       -71.0944467,
+       42.3455145
+      ],
+      [
+       -71.0944663,
+       42.3455051
+      ],
+      [
+       -71.0944861,
+       42.3454962
+      ],
+      [
+       -71.0945055,
+       42.3454876
+      ],
+      [
+       -71.0945262,
+       42.3454789
+      ],
+      [
+       -71.0945483,
+       42.3454704
+      ],
+      [
+       -71.0945779,
+       42.3454594
+      ],
+      [
+       -71.0946125,
+       42.3454476
+      ],
+      [
+       -71.0946275,
+       42.3454424
+      ],
+      [
+       -71.094655,
+       42.3454333
+      ],
+      [
+       -71.0946973,
+       42.3454204
+      ],
+      [
+       -71.0947637,
+       42.3454009
+      ]
+     ]
+    },
+    "b88d0172-46dc-4fe1-85b5-f29286a21b77": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0953354,
+       42.3452401
+      ],
+      [
+       -71.0951894,
+       42.3452794
+      ],
+      [
+       -71.0951512,
+       42.3452897
+      ],
+      [
+       -71.0950524,
+       42.3453163
+      ],
+      [
+       -71.0949459,
+       42.3453475
+      ],
+      [
+       -71.0947637,
+       42.3454009
+      ]
+     ]
+    }
+   },
+   "target_geometries": {
+    "us_boston_streets_305_882a306637": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0943036,
+       42.3455861
+      ],
+      [
+       -71.0944464,
+       42.3454994
+      ],
+      [
+       -71.0945954,
+       42.3454448
+      ],
+      [
+       -71.0946988,
+       42.3454163
+      ],
+      [
+       -71.0948299,
+       42.3453801
+      ],
+      [
+       -71.0948433,
+       42.3453764
+      ],
+      [
+       -71.0950414,
+       42.3453204
+      ],
+      [
+       -71.0953268,
+       42.3452397
+      ]
+     ]
+    }
+   },
+   "ref_names": {
+    "18598a00-7a45-4b4a-a1d8-8d13be22c03c": "Boylston Street",
+    "b88d0172-46dc-4fe1-85b5-f29286a21b77": "Boylston Street"
+   },
+   "target_names": {
+    "us_boston_streets_305_882a306637": "BOYLSTON STREET"
+   },
+   "ref_classes": {
+    "18598a00-7a45-4b4a-a1d8-8d13be22c03c": "primary",
+    "b88d0172-46dc-4fe1-85b5-f29286a21b77": "primary"
+   },
+   "target_classes": {
+    "us_boston_streets_305_882a306637": "primary"
+   },
+   "n_edges": 2,
+   "n_corridors": 1,
+   "n_assignment_components": 1,
+   "largest_biconnected_block": 1,
+   "oversized_group": false
+  },
+  {
+   "group_id": "33565d96",
+   "match_type": "N:1",
+   "ref_ids": [
+    "2f3dc626-4751-436f-8f3e-78992a85d0a9",
+    "bdb507dd-094e-43c9-b542-6d69b74a918c"
+   ],
+   "target_ids": [
+    "us_boston_streets_7263_882a306615"
+   ],
+   "edges": [
+    {
+     "ref_id": "2f3dc626-4751-436f-8f3e-78992a85d0a9",
+     "target_id": "us_boston_streets_7263_882a306615",
+     "confidence": 0.2468,
+     "gers_start_frac": 0.8781185,
+     "gers_end_frac": 0.9984354,
+     "local_start_frac": 0.0,
+     "local_end_frac": 0.0844653,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 1,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    },
+    {
+     "ref_id": "bdb507dd-094e-43c9-b542-6d69b74a918c",
+     "target_id": "us_boston_streets_7263_882a306615",
+     "confidence": 0.9348,
+     "gers_start_frac": 0.0,
+     "gers_end_frac": 0.9453608,
+     "local_start_frac": 0.080314,
+     "local_end_frac": 1.0,
+     "degree_ref": 1,
+     "degree_tgt": 2,
+     "is_bridge": true,
+     "biconnected_block": 0,
+     "corridor_ref": 0,
+     "corridor_tgt": 0,
+     "selected": true,
+     "is_sliver": false
+    }
+   ],
+   "optimizer_assignment": [
+    {
+     "ref_id": "bdb507dd-094e-43c9-b542-6d69b74a918c",
+     "target_id": "us_boston_streets_7263_882a306615",
+     "confidence": 0.9348
+    },
+    {
+     "ref_id": "2f3dc626-4751-436f-8f3e-78992a85d0a9",
+     "target_id": "us_boston_streets_7263_882a306615",
+     "confidence": 0.2468
+    }
+   ],
+   "ref_geometries": {
+    "2f3dc626-4751-436f-8f3e-78992a85d0a9": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0642375,
+       42.3533846
+      ],
+      [
+       -71.0641223,
+       42.3533649
+      ],
+      [
+       -71.0637874,
+       42.353305
+      ]
+     ]
+    },
+    "bdb507dd-094e-43c9-b542-6d69b74a918c": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0637874,
+       42.353305
+      ],
+      [
+       -71.0636328,
+       42.3532935
+      ],
+      [
+       -71.0633661,
+       42.3532851
+      ],
+      [
+       -71.0631478,
+       42.3532778
+      ]
+     ]
+    }
+   },
+   "target_geometries": {
+    "us_boston_streets_7263_882a306615": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -71.0638358,
+       42.3533365
+      ],
+      [
+       -71.063601,
+       42.3533028
+      ],
+      [
+       -71.0633871,
+       42.3532932
+      ],
+      [
+       -71.0633678,
+       42.3532924
+      ],
+      [
+       -71.0631819,
+       42.3532916
+      ]
+     ]
+    }
+   },
+   "ref_names": {
+    "2f3dc626-4751-436f-8f3e-78992a85d0a9": "Avery Street",
+    "bdb507dd-094e-43c9-b542-6d69b74a918c": "Avery Street"
+   },
+   "target_names": {
+    "us_boston_streets_7263_882a306615": "AVERY STREET"
+   },
+   "ref_classes": {
+    "2f3dc626-4751-436f-8f3e-78992a85d0a9": "unclassified",
+    "bdb507dd-094e-43c9-b542-6d69b74a918c": "unclassified"
+   },
+   "target_classes": {
+    "us_boston_streets_7263_882a306615": "primary"
+   },
+   "n_edges": 2,
+   "n_corridors": 1,
+   "n_assignment_components": 1,
+   "largest_biconnected_block": 1,
+   "oversized_group": false
+  }
+ ]
+}

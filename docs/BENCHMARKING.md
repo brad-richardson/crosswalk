@@ -105,6 +105,48 @@ truth) means the metrics are measured against a small labeled subset and
 should be read with caution. Labels marked `unsure` are skipped and reported
 as `skipped_unsure`.
 
+## Stitch-level quality gate
+
+Pair-level P/R/F1 measures the classifier. The **stitch-level** metric measures
+the optimizer's final M:N group edge selection against curated stitching labels
+(`labels/stitching/`), and it can be enforced as a **gate** with `--gate`:
+
+```bash
+# Enforce the gate on one dataset (nonzero exit if it regresses below its floor)
+cbench run matcher us_boston_streets -c cbench/datasets.toml --gate
+
+# Enforce across all configured datasets
+cbench run-batch matcher -c cbench/datasets.toml --gate
+```
+
+With `--gate`, cbench compares each dataset's **sliver-filtered** edge-F1 and
+exact-match against the per-dataset floors in `cbench/datasets.toml`
+(`[gate.<dataset>]`) and **exits nonzero** if any *armed* dataset falls below.
+Without `--gate` the stitch metrics are still computed and printed (non-blocking).
+
+**Why benchmark-time, not CI:** the gate needs live pipeline outputs (a bridge
+parquet + its `*_groups.json` sidecar), which don't exist in GitHub Actions
+(`data/raw` / `data/output` are untracked). So the gate is part of the
+**pre-merge checklist for matching-logic PRs**, run locally against fresh Boston
+output. The gate *machinery* itself (mapping, sliver filtering, arming, floor
+logic) is unit-tested in CI on a committed miniature fixture
+(`cbench/tests/test_gate.py`).
+
+**Auto-arming.** Each `[gate.<dataset>]` block sets `min_mapped_groups`: the
+floor is enforced only once at least that many curated labels map to current
+pipeline groups (mapping is by edge-overlap, robust to group_id churn). Below
+that the dataset reports `skip_unarmed` (non-blocking). This means the gate goes
+live automatically as the label base grows — no code change or second PR. As of
+2026-07-05, `us_boston_streets` is armed (67 mapped groups, floors F1 0.78 /
+exact 0.45, baseline F1 0.8345 / exact 0.5373); `us_seattle_sidewalks` (2 mapped)
+is unarmed.
+
+**Adding / updating a floor.** Re-measure the baseline against fresh output
+(`cbench run matcher <dataset>` prints the stitch block), then set
+`f1_filtered_floor` / `exact_filtered_floor` to baseline − margin (LOO-gate
+style: ~0.05 on F1, wider on the noisier exact-match) and `min_mapped_groups` to
+~30. Update the block in `cbench/datasets.toml`.
+
 ## Hootenanny Setup
 
 [Hootenanny](https://github.com/ngageoint/hootenanny) is a vector conflation tool from NGA.

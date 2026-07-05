@@ -6,6 +6,26 @@ data_dir = "../data/raw"
 labels_dir = "../labels/human"
 stitch_labels_dir = "../labels/stitching"
 
+# Stitch-level quality gate (enforced only with `cbench run[-batch] --gate`).
+#
+# Each [gate.<dataset>] block sets a per-dataset floor on the SLIVER-FILTERED
+# stitch metrics of the optimizer's group edge selection. The gate AUTO-ARMS:
+# a floor is enforced only once >= min_mapped_groups curated stitching labels
+# map to current pipeline groups; below that the gate reports skip_unarmed
+# (non-blocking), so growing the label base engages the gate with no code
+# change. Floors are baseline-minus-margin, mirroring tests/regression/
+# test_loo_cv.py. Re-measure and update when the label base or optimizer shifts
+# materially (see docs/BENCHMARKING.md "Stitch-level quality gate").
+#
+# us_boston_streets baseline (2026-07-05, post-#263/#267, 73 labels -> 67 mapped
+# groups): filtered edge-F1 0.8345, filtered exact-match 0.5373, 0 sliver-
+# affected. Floors: F1 0.8345-0.055 -> 0.78; exact 0.5373-0.087 -> 0.45 (wider
+# margin: per-group exact-match is the noisier metric on a ~67-group base).
+[gate.us_boston_streets]
+min_mapped_groups = 30
+f1_filtered_floor = 0.78
+exact_filtered_floor = 0.45
+
 [datasets.us_boston_bike_network]
 reference = "us_boston_bike_network_overture_segments_v1.0.parquet"
 target = "us_boston_bike_network_v1.0.parquet"

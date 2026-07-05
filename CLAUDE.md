@@ -188,6 +188,26 @@ Include comparison in PR description:
 
 Note: Numbers may not change for code cleanup/edge case fixes - include comparison for transparency.
 
+### Stitch-level quality gate (matching-logic PRs)
+
+For PRs touching matching logic, feature computation, or the optimizer, also run
+the **stitch-level quality gate** before merging. It enforces per-dataset floors
+on the optimizer's M:N group edge selection (sliver-filtered edge-F1 / exact-match
+vs `labels/stitching/`), which pair-level F1 does not measure:
+
+```bash
+# Fresh output for an armed dataset, then gate it (nonzero exit on regression)
+uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+    data/raw/us_boston_streets_v1.0.parquet \
+    -m xgboost -o data/output/us_boston_streets_bridge.parquet
+uv run cbench run matcher us_boston_streets -c cbench/datasets.toml --gate
+```
+
+The gate lives at benchmark time (not unit CI) because it needs `data/output`,
+which CI doesn't have; its machinery is CI-tested via `cbench/tests/test_gate.py`.
+Floors live in `cbench/datasets.toml` (`[gate.*]`) and auto-arm as the stitching
+label base grows. See `docs/BENCHMARKING.md` "Stitch-level quality gate".
+
 ## Default Development Workflow
 
 For any code changes, follow this workflow:
