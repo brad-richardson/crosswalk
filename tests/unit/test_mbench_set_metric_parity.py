@@ -17,9 +17,9 @@ import pytest
 
 # mbench lives in its own package tree; add it to the path so the main test suite
 # (which can import both) can compare the two implementations.
-_CBENCH_SRC = Path(__file__).resolve().parents[2] / "mbench" / "src"
-if str(_CBENCH_SRC) not in sys.path:
-    sys.path.insert(0, str(_CBENCH_SRC))
+_MBENCH_SRC = Path(__file__).resolve().parents[2] / "mbench" / "src"
+if str(_MBENCH_SRC) not in sys.path:
+    sys.path.insert(0, str(_MBENCH_SRC))
 
 from mbench.eval.stitch_metrics import set_label_metrics as mbench_set_metrics  # noqa: E402
 
