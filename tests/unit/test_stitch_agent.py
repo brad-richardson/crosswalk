@@ -1078,3 +1078,29 @@ def test_parse_vote_ignores_pack_feedback_key():
     )
     choice, conf, _ = sr.parse_vote(raw, {"A", "B"})
     assert choice == "B" and conf == 0.7
+
+
+def test_run_provider_collect_feedback_toggle(monkeypatch):
+    """collect_feedback=True captures the self-report; False leaves it empty."""
+    raw = json.dumps(
+        {
+            "choice": "A",
+            "confidence": 0.9,
+            "reasoning": "ok",
+            "pack_feedback": {"missing_info": ["x"], "ambiguities": [], "confidence_basis": "y"},
+        }
+    )
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return raw
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    args = (sr.ProviderSpec("claude", "m"), "g", None, "prompt", ["A"], {"A": [(R1, T1)]})
+
+    vote_off = sr.run_provider_on_group(*args)
+    assert vote_off.choice == "A"
+    assert vote_off.pack_feedback == ""
+
+    vote_on = sr.run_provider_on_group(*args, collect_feedback=True)
+    assert vote_on.choice == "A"
+    assert json.loads(vote_on.pack_feedback)["missing_info"] == ["x"]
