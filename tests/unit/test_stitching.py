@@ -2117,3 +2117,503 @@ class TestContextPillDistinction:
                     assert 'segment-pill-target"' not in line
         finally:
             self._stop(patches)
+
+
+class TestRejectedPairSubmit:
+    """Fix #1: the manual cross-product must draw from selected edges UNION the
+    rejected candidates, so a reviewer who pairs two segments whose only shared
+    edge was rejected by the optimizer has that pair recorded (not silently
+    dropped), and the #237 inconsistency guard counts the union too."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        # r1,t1 is the optimizer-selected edge; r2,t2 is a REJECTED candidate
+        # over the group's own segments. No (r2,t1) edge exists at all.
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "grej",
+                    "match_type": "M:N",
+                    "ref_ids": ["r1", "r2"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [_edge("r1", "t1", 0.9)],
+                    "rejected_edges": [_edge("r2", "t2", 0.42)],
+                }
+            ],
+        }
+
+    def _client_and_recorder(self):
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        recorder = MagicMock()
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), recorder, patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def _post(self, client, refs, targets):
+        return client.post(
+            "/stitching-review/select",
+            data={
+                "dataset": self.DATASET,
+                "group_id": "grej",
+                "group_index": 0,
+                "included_refs": refs,
+                "included_targets": targets,
+                "selected_edges": "",
+            },
+        )
+
+    def test_rejected_only_pair_is_recorded_not_dropped(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            # Reviewer pairs r2+t2 whose only shared edge is REJECTED.
+            resp = self._post(client, "r2", "t2")
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            stored = {(e["ref_id"], e["target_id"]) for e in kwargs["selected_edges"]}
+            assert stored == {("r2", "t2")}
+            assert kwargs["num_refs"] == 1
+            assert kwargs["num_targets"] == 1
+        finally:
+            self._stop(patches)
+
+    def test_union_guard_still_rejects_a_true_non_candidate_pair(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            # (r2,t1) is neither a selected nor a rejected candidate -> inconsistent.
+            resp = self._post(client, "r2", "t1")
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)
+
+    def test_union_records_selected_and_rejected_together(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            # Activate all pills: cross-product over the union yields both the
+            # selected (r1,t1) and rejected (r2,t2) candidate edges.
+            resp = self._post(client, "r1,r2", "t1,t2")
+            assert resp.status_code == 200
+            stored = {
+                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
+            }
+            assert stored == {("r1", "t1"), ("r2", "t2")}
+        finally:
+            self._stop(patches)
+
+
+class TestDeAnchoredMode:
+    """De-anchored review mode: blank-slate rendering (no active pills, proposals
+    collapsed, no leaked selection styling / confidence), provenance stamping,
+    and mode persistence across the HTMX swap chain."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gda1",
+                    "match_type": "M:N",
+                    "ref_ids": ["r1", "r2"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [_edge("r1", "t1", 0.9)],
+                    "rejected_edges": [_edge("r2", "t2", 0.42)],
+                    "optimizer_assignment": [_edge("r1", "t1", 0.9)],
+                },
+                {
+                    "group_id": "gda2",
+                    "match_type": "1:N",
+                    "ref_ids": ["r3"],
+                    "target_ids": ["t3"],
+                    "edges": [_edge("r3", "t3", 0.8)],
+                    "optimizer_assignment": [_edge("r3", "t3", 0.8)],
+                },
+            ],
+        }
+
+    def _client(self, recorder=None, unreviewed=None):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch(
+                "matcher.web.routes.stitching.get_unreviewed_stitch_groups",
+                return_value=unreviewed if unreviewed is not None else [],
+            ),
+        ]
+        if recorder is not None:
+            patches.append(patch("matcher.web.routes.stitching.record_stitching_label", recorder))
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def _fragment(self, client, deanchored):
+        q = f"/stitching-review/group?dataset={self.DATASET}&group_id=gda1&group_index=0"
+        if deanchored:
+            q += "&deanchored=1"
+        return client.get(q).text
+
+    def test_blank_slate_no_active_pills(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=True)
+            # No group selection pill starts active (blank slate).
+            assert "segment-pill-ref active" not in html
+            assert "segment-pill-target active" not in html
+        finally:
+            self._stop(patches)
+
+    def test_normal_mode_keeps_optimizer_preseed(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=False)
+            # Zero behavior change for normal mode: the optimizer pill is active
+            # and its option is pre-selected.
+            assert "segment-pill-ref active" in html
+            assert "is-optimizer selected" in html
+            assert "deanchored-proposals" not in html
+        finally:
+            self._stop(patches)
+
+    def test_proposals_collapsed_and_no_option_preselected(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=True)
+            # Proposals are collapsed behind an explicit reveal; nothing pre-picked.
+            assert "deanchored-proposals" in html
+            assert "Reveal optimizer proposals" in html
+            assert "is-optimizer selected" not in html
+        finally:
+            self._stop(patches)
+
+    def test_confidence_readout_blanked(self):
+        client, patches = self._client()
+        try:
+            da = self._fragment(client, deanchored=True)
+            normal = self._fragment(client, deanchored=False)
+            # The confidence readout must not leak the proposal's score.
+            assert "&mdash;" in da
+            assert "&mdash;" not in normal
+        finally:
+            self._stop(patches)
+
+    def test_candidate_union_in_client_edges(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=True)
+            # The rejected candidate is present in the client edge payload so the
+            # live confidence can reason about a reviewer-built rejected pair.
+            assert '"ref_id": "r2"' in html and '"target_id": "t2"' in html
+        finally:
+            self._stop(patches)
+
+    def test_mode_toggle_present_in_both_modes(self):
+        client, patches = self._client()
+        try:
+            normal = self._fragment(client, deanchored=False)
+            da = self._fragment(client, deanchored=True)
+            assert "deanchor-toggle" in normal and "&deanchored=1" in normal
+            assert 'class="deanchor-toggle active"' in da
+        finally:
+            self._stop(patches)
+
+    def test_forms_carry_mode_flag(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=True)
+            assert '<input type="hidden" name="deanchored" value="1">' in html
+        finally:
+            self._stop(patches)
+
+    def test_provenance_stamped_deanchored(self):
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "r1",
+                    "included_targets": "t1",
+                    "selected_edges": "",
+                    "deanchored": "1",
+                },
+            )
+            assert resp.status_code == 200
+            assert recorder.call_args.kwargs["session_id"] == "deanchored_v1"
+        finally:
+            self._stop(patches)
+
+    def test_provenance_none_in_normal_mode(self):
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "r1",
+                    "included_targets": "t1",
+                    "selected_edges": "",
+                    "deanchored": "0",
+                },
+            )
+            assert resp.status_code == 200
+            assert recorder.call_args.kwargs["session_id"] is None
+        finally:
+            self._stop(patches)
+
+    def test_mode_persists_across_swap_chain(self):
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        # After submitting gda1, the next unreviewed group (gda2) is returned.
+        client, patches = self._client(recorder=recorder, unreviewed=[self._batch()["groups"][1]])
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "r1",
+                    "included_targets": "t1",
+                    "selected_edges": "",
+                    "deanchored": "1",
+                },
+            )
+            assert resp.status_code == 200
+            # The next group fragment stays de-anchored (blank slate + collapsed
+            # proposals + mode flag carried in its own forms).
+            assert "deanchored-proposals" in resp.text
+            assert '<input type="hidden" name="deanchored" value="1">' in resp.text
+            assert "segment-pill-ref active" not in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_skip_preserves_mode(self):
+        client, patches = self._client(unreviewed=self._batch()["groups"])
+        try:
+            resp = client.post(
+                "/stitching-review/skip",
+                data={"dataset": self.DATASET, "group_id": "gda1", "deanchored": "1"},
+            )
+            assert resp.status_code == 200
+            assert "deanchored-proposals" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_empty_deanchored_submit_requires_confirmation(self):
+        """A blank-slate misclick on Select must NOT record a reject-all label:
+        in de-anchored mode 'no active pills' is the untouched default, not a
+        deliberate deselection, so an unconfirmed empty submit is refused."""
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": "",
+                    "deanchored": "1",
+                },
+            )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)
+
+    def test_confirmed_empty_deanchored_submit_stores_reject_all(self):
+        """With the explicit confirm flag (set by the client's confirm dialog) a
+        deliberate de-anchored reject-all is stored as [] with provenance."""
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": "",
+                    "deanchored": "1",
+                    "confirm_reject_all": "1",
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["selected_edges"] == []
+            assert kwargs["session_id"] == "deanchored_v1"
+        finally:
+            self._stop(patches)
+
+    def test_normal_mode_empty_submit_needs_no_confirmation(self):
+        """Normal mode keeps its original semantics: both pill fields empty is a
+        deliberate deselection of the pre-seed and stores [] without any flag."""
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": "",
+                    "deanchored": "0",
+                },
+            )
+            assert resp.status_code == 200
+            assert recorder.call_args.kwargs["selected_edges"] == []
+        finally:
+            self._stop(patches)
+
+    def test_confirm_field_present_in_select_form(self):
+        client, patches = self._client()
+        try:
+            html = self._fragment(client, deanchored=True)
+            assert 'id="confirm-reject-all"' in html
+        finally:
+            self._stop(patches)
+
+
+class TestRejectedSliverExclusion:
+    """Sliver exclusion applies to rejected candidates identically: a rejected
+    edge with near-zero overlap is dropped from a manual submit when
+    exclude_slivers is on, and kept when it is off."""
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        # (r1,t1) selected substantive edge; (r2,t2) REJECTED sliver candidate
+        # (2-5% spans on ~50 m segments -> hybrid rule flags it).
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "grsl",
+                    "match_type": "M:N",
+                    "ref_ids": ["r1", "r2"],
+                    "target_ids": ["t1", "t2"],
+                    "edges": [_frac_edge("r1", "t1", 0.0, 1.0, 0.0, 1.0, conf=0.9)],
+                    "rejected_edges": [_frac_edge("r2", "t2", 0.0, 0.02, 0.0, 0.05, conf=0.3)],
+                    "ref_geometries": {
+                        "r1": _line_of_length_m(50.0),
+                        "r2": _line_of_length_m(50.0),
+                    },
+                    "target_geometries": {
+                        "t1": _line_of_length_m(50.0),
+                        "t2": _line_of_length_m(50.0),
+                    },
+                }
+            ],
+        }
+
+    def _client_and_recorder(self):
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        recorder = MagicMock()
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), recorder, patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def _post(self, client, exclude):
+        return client.post(
+            "/stitching-review/select",
+            data={
+                "dataset": self.DATASET,
+                "group_id": "grsl",
+                "group_index": 0,
+                "included_refs": "r1,r2",
+                "included_targets": "t1,t2",
+                "selected_edges": "",
+                "exclude_slivers": exclude,
+            },
+        )
+
+    def test_rejected_sliver_dropped_when_excluding(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(client, "true")
+            assert resp.status_code == 200
+            stored = {
+                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
+            }
+            assert stored == {("r1", "t1")}
+        finally:
+            self._stop(patches)
+
+    def test_rejected_sliver_kept_when_including(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = self._post(client, "false")
+            assert resp.status_code == 200
+            stored = {
+                (e["ref_id"], e["target_id"]) for e in recorder.call_args.kwargs["selected_edges"]
+            }
+            assert stored == {("r1", "t1"), ("r2", "t2")}
+        finally:
+            self._stop(patches)

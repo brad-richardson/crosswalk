@@ -1206,6 +1206,7 @@ def record_stitching_label(
     match_type: str,
     num_refs: int,
     num_targets: int,
+    session_id: str | None = None,
 ) -> None:
     """Record a stitching review label.
 
@@ -1216,12 +1217,17 @@ def record_stitching_label(
         match_type: "1:N", "N:1", or "M:N"
         num_refs: Number of ref segments
         num_targets: Number of target segments
+        session_id: Provenance stamp for the label's ``session_id`` column. When
+            None, a fresh random per-review id is generated (normal reviews).
+            The de-anchored review mode passes a fixed sentinel (``deanchored_v1``)
+            so the unbiased eval slice can be selected without adding a new column.
     """
     from ..labeling.stitching_store import StitchingLabelStore
 
     store = StitchingLabelStore(dataset_id)
     labeler = get_labeler_name()
-    session_id = get_session_id()
+    if session_id is None:
+        session_id = get_session_id()
 
     store.add(
         group_id=group_id,
