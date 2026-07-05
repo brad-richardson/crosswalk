@@ -812,8 +812,8 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
             fm._active = active
             return fm
 
-        monkeypatch.setattr(runner, "MLMatcher", lambda *a, **k: make(True), raising=False)
-        # runner imports MLMatcher lazily inside the helper, so patch the source.
+        # The helper imports MLMatcher lazily from matcher.matching.ml, so patch
+        # it at the source module (patching runner.MLMatcher would be a no-op).
         import matcher.matching.ml as ml_mod
 
         monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(True))
@@ -822,6 +822,24 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         )
 
         monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(False))
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence_raw
+        )
+
+    def test_pipeline_short_circuits_when_calibration_disabled(self, monkeypatch):
+        # With calibration globally off, the helper returns the raw threshold
+        # WITHOUT loading a model (calibration_active can never be True).
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", False)
+
+        import matcher.matching.ml as ml_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
         assert runner._effective_glue_min_confidence() == pytest.approx(
             settings.optimizer_glue_min_confidence_raw
         )

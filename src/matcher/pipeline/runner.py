@@ -40,6 +40,11 @@ def _effective_glue_min_confidence() -> float:
     so it never silently over-prunes. ``run_pipeline`` always scores with
     ``settings.model_path``, so that is the model inspected here.
     """
+    # Short-circuit when calibration is globally disabled: calibration_active
+    # can never be True, so skip the model load (and its I/O) entirely.
+    if not settings.enable_calibration:
+        return settings.optimizer_glue_min_confidence_raw
+
     from ..matching.ml import MLMatcher
 
     try:
