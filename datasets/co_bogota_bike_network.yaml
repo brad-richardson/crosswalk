@@ -8,7 +8,21 @@ source:
 fetch:
   id_prefix: bog_bike
   id_column: OBJECTID
+  # CICTSUPERF is the surface MATERIAL (Tipo de superficie), not a road/path
+  # class: 0=Sin dato, 1=Concreto, 2=Asfalto, 3=Mixtos, 4=Adoquin concreto,
+  # 5=Adoquin arcilla. Without a mapping the raw integer codes were written
+  # straight into `class`, which semantic.py cannot resolve -> class_similarity
+  # was 100% NaN. Every feature in this layer is a dedicated cicloruta, so the
+  # correct semantic class is `cycleway` for all surface codes (the bike-type
+  # default), which recovers class_similarity against Overture's cycleway refs.
   class_column: CICTSUPERF
+  class_mapping:
+    0: cycleway
+    1: cycleway
+    2: cycleway
+    3: cycleway
+    4: cycleway
+    5: cycleway
   bbox:
   - -74.25
   - 4.45
