@@ -2199,10 +2199,11 @@ def stitch_batch(
         help="Number of groups per batch (default: 15)",
     ),
     k_alternatives: int = typer.Option(
-        5,
+        8,
         "--alternatives",
         "-k",
-        help="Number of top-K alternatives per group (default: 5)",
+        help="Number of top-K organic alternatives per group (default: 8; "
+        "two whole-group seed options are appended on top)",
     ),
 ):
     """Generate a curated batch of M:N groups for stitching review.
@@ -2384,10 +2385,11 @@ def stitch_refresh_queue(
         help="Refresh queues for all datasets with an existing batch cache",
     ),
     k_alternatives: int = typer.Option(
-        5,
+        8,
         "--alternatives",
         "-k",
-        help="Number of top-K alternatives per group (default: 5)",
+        help="Number of top-K organic alternatives per group (default: 8; "
+        "two whole-group seed options are appended on top)",
     ),
     backup_suffix: str = typer.Option(
         "",

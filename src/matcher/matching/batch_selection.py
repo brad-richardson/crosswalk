@@ -52,7 +52,14 @@ def select_stitching_batch(
         if gid in reviewed_group_ids:
             continue
 
-        alternatives = group.get("alternatives", [])
+        # Score on ORGANIC alternatives only: whole-group seed options
+        # (is_seed=True, e.g. the full candidate set) are supersets of proper
+        # assignments, so their summed total_confidence would always win
+        # max()/top-2 and skew the borderline / low-confidence tiers. Fall back
+        # to all alternatives if only seeds exist (defensive; the generator
+        # always emits >=1 organic alternative when the group has edges).
+        all_alternatives = group.get("alternatives", [])
+        alternatives = [a for a in all_alternatives if not a.get("is_seed")] or all_alternatives
         edges = group.get("edges", [])
         n_edges = len(edges)
 

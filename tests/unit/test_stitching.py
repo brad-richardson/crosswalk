@@ -113,7 +113,9 @@ class TestGenerateTopKAlternatives:
         assert indices == list(range(len(alts)))
 
     def test_k_limits_results(self, edges_m_to_n):
-        alts = generate_top_k_alternatives(edges_m_to_n, k=2)
+        # Organic enumeration is bounded by k (seed options are counted separately;
+        # see TestSeedOptions for the +2 bound).
+        alts = generate_top_k_alternatives(edges_m_to_n, k=2, include_seed_options=False)
         assert len(alts) <= 2
 
     def test_no_duplicate_edge_sets(self, edges_m_to_n):
@@ -258,9 +260,16 @@ class TestMultiRefContiguousChains:
         assert _targets_to_refs(top).get("t1") == frozenset({"ra", "rb"})
 
     def test_chain_requires_contiguity(self):
-        """Two refs that both touch t1 but are NOT contiguous form no chain."""
+        """Two refs that both touch t1 but are NOT contiguous form no chain.
+
+        Enumeration invariant only: seeds are disabled because the
+        full-candidate-set seed deliberately offers the "accept every edge"
+        union regardless of contiguity (see TestSeedOptions).
+        """
         edges, ref_geoms = self._spanning_group(contiguous=False)
-        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=10)
+        alts = generate_top_k_alternatives(
+            edges, ref_geoms=ref_geoms, k=10, include_seed_options=False
+        )
         assert not any(_targets_to_refs(a).get("t1") == frozenset({"ra", "rb"}) for a in alts)
 
     def test_chain_is_subset_of_existing_edges(self):
@@ -279,9 +288,13 @@ class TestMultiRefContiguousChains:
         assert not any("rb" in _targets_to_refs(a).get("t1", frozenset()) for a in alts)
 
     def test_no_geoms_means_no_multiref(self):
-        """Without geometry, behaviour is unchanged: only single-ref options."""
+        """Without geometry, enumeration is unchanged: only single-ref options.
+
+        Enumeration invariant only (seeds disabled): the full-set seed is a
+        whole-group union and is exempt from the per-target single-ref rule.
+        """
         edges, _ = self._spanning_group(contiguous=True)
-        alts = generate_top_k_alternatives(edges, k=10)
+        alts = generate_top_k_alternatives(edges, k=10, include_seed_options=False)
         for a in alts:
             for refs in _targets_to_refs(a).values():
                 assert len(refs) == 1
@@ -295,7 +308,11 @@ class TestMultiRefContiguousChains:
         # Add a second target so this stays on the M:N (per-target) path.
         edges.append(_edge("r0", "t2", 0.5))
         ref_geoms = {f"r{i}": _line([[i * 0.001, 0], [(i + 1) * 0.001, 0]]) for i in range(5)}
-        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=50)
+        # Enumeration invariant only (seeds disabled): the full-set seed
+        # intentionally offers all refs->t1 as the "accept everything" union.
+        alts = generate_top_k_alternatives(
+            edges, ref_geoms=ref_geoms, k=50, include_seed_options=False
+        )
         for a in alts:
             for refs in _targets_to_refs(a).values():
                 assert len(refs) <= MAX_REF_CHAIN_LEN
@@ -339,9 +356,144 @@ class TestMultiRefContiguousChains:
                 edges.append(_edge(rid, f"t{t}", 0.9 - j * 0.1))
                 base = t * 10 + j
                 ref_geoms[rid] = _line([[base * 0.001, 0], [(base + 1) * 0.001, 0]])
-        alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=5)
+        # Organic bound only (seeds disabled): greedy enumeration stays <= k.
+        alts = generate_top_k_alternatives(
+            edges, ref_geoms=ref_geoms, k=5, include_seed_options=False
+        )
         assert 0 < len(alts) <= 5
         assert any(any(len(refs) >= 2 for refs in _targets_to_refs(a).values()) for a in alts)
+
+
+class TestSeedOptions:
+    """Whole-group seed options (full-candidate-set + optimizer-selected-set).
+
+    Seeds close the measured expressibility gap where the per-target enumeration
+    cannot express a settled answer (e.g. a target legitimately spanning more
+    refs than MAX_REF_CHAIN_LEN allows, so the correct answer is "accept every
+    candidate edge"), or where the optimizer's selection ranks below the
+    confidence-sorted top-K.
+    """
+
+    def _full(self, alts):
+        return [frozenset((e["ref_id"], e["target_id"]) for e in a["edges"]) for a in alts]
+
+    def test_full_candidate_set_always_offered(self):
+        """The union of all group edges is always an option, even when the
+        per-target model cannot enumerate it (a target spanning many refs)."""
+        # One target fed by 4 refs -> exceeds MAX_REF_CHAIN_LEN, so no enumerated
+        # chain covers all 4; only the full-set seed can express "accept all".
+        edges = [_edge(f"r{i}", "t1", 0.9 - i * 0.1) for i in range(4)]
+        edges.append(_edge("r0", "t2", 0.5))
+        full = frozenset((e["ref_id"], e["target_id"]) for e in edges)
+        with_seed = self._full(generate_top_k_alternatives(edges, k=5))
+        without = self._full(generate_top_k_alternatives(edges, k=5, include_seed_options=False))
+        assert full in with_seed
+        assert full not in without  # organic enumeration cannot express it
+
+    def test_optimizer_selected_seed_offered(self):
+        """Edges flagged ``selected`` are offered as an option even when they are
+        not the confidence-greedy pick and optimizer_assignment is unavailable."""
+        # 7 targets -> greedy path; the optimizer selected a low-confidence-ranked
+        # subset (drop one target) that greedy would not surface at small k.
+        edges = []
+        for t in range(7):
+            e = _edge(f"r{t}", f"t{t}", 0.9)
+            # Mark all but the last target as the optimizer's selection.
+            e["selected"] = t < 6
+            edges.append(e)
+        selected = frozenset((e["ref_id"], e["target_id"]) for e in edges if e.get("selected"))
+        offered = self._full(generate_top_k_alternatives(edges, k=3))
+        assert selected in offered
+
+    def test_seeds_bounded_to_plus_two(self):
+        """Seeds add at most two options beyond the organic top-K."""
+        edges = [
+            _edge("r1", "t1", 0.9),
+            _edge("r1", "t2", 0.4),
+            _edge("r2", "t1", 0.3),
+            _edge("r2", "t2", 0.85),
+        ]
+        for e in edges:
+            e["selected"] = True
+        organic = generate_top_k_alternatives(edges, k=3, include_seed_options=False)
+        seeded = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        assert len(seeded) <= len(organic) + 2
+
+    def test_seeds_deduped_against_organic(self):
+        """A seed equal to an organic option is not added twice."""
+        # N:1: the full set is the all-refs subset, already enumerated organically.
+        edges = [_edge("r1", "t1", 0.9), _edge("r2", "t1", 0.8), _edge("r3", "t1", 0.3)]
+        keys = self._full(generate_top_k_alternatives(edges, k=10))
+        assert len(keys) == len(set(keys))
+
+    def test_seeds_are_subset_of_group_edges(self):
+        """Seed options obey the subset invariant (only real group edges)."""
+        edges = [_edge("r1", "t1", 0.9), _edge("r2", "t2", 0.8)]
+        for e in edges:
+            e["selected"] = True
+        valid = {(e["ref_id"], e["target_id"]) for e in edges}
+        for a in generate_top_k_alternatives(edges, k=5):
+            for e in a["edges"]:
+                assert (e["ref_id"], e["target_id"]) in valid
+
+    def test_seeds_tagged_is_seed_organic_not(self):
+        """Seed options carry is_seed=True; organic alternatives do not."""
+        # t1 spans 4 refs -> full-set seed cannot be organic; mark a selection too.
+        edges = [_edge(f"r{i}", "t1", 0.9 - i * 0.1) for i in range(4)]
+        edges.append(_edge("r0", "t2", 0.5))
+        edges[0]["selected"] = True
+        alts = generate_top_k_alternatives(edges, k=5)
+        seeds = [a for a in alts if a.get("is_seed")]
+        organic = [a for a in alts if not a.get("is_seed")]
+        assert 1 <= len(seeds) <= 2
+        assert organic  # organic alternatives never carry the tag
+        full = frozenset((e["ref_id"], e["target_id"]) for e in edges)
+        assert any(
+            frozenset((e["ref_id"], e["target_id"]) for e in s["edges"]) == full for s in seeds
+        )
+
+    def test_selected_flag_survives_duplicate_dedup(self):
+        """The selected-seed uses flags from ALL input edges: a duplicate pair
+        whose flagged copy has LOWER confidence still contributes its pair."""
+        edges = []
+        for t in range(7):  # 7 targets -> greedy path (selection not organic)
+            edges.append(_edge(f"r{t}", f"t{t}", 0.9))
+        # Optimizer selected 6 of 7 pairs...
+        for e in edges[:6]:
+            e["selected"] = True
+        # ...but pair (r0, t0)'s flag lives on a lower-confidence duplicate.
+        edges[0]["selected"] = False
+        dup = _edge("r0", "t0", 0.2)
+        dup["selected"] = True
+        edges.append(dup)
+        selected = frozenset((f"r{t}", f"t{t}") for t in range(6))
+        offered = self._full(generate_top_k_alternatives(edges, k=3))
+        assert selected in offered
+
+    def test_batch_selection_scores_ignore_seeds(self):
+        """Seed options must not skew select_stitching_batch's tier scoring:
+        the full-set seed is a superset of every proper assignment and would
+        otherwise always win max(total_confidence)."""
+        # 3-target M:N with one high- and one low-confidence ref per target.
+        edges = []
+        for t in range(3):
+            edges.append(_edge(f"rh{t}", f"t{t}", 0.9))
+            edges.append(_edge(f"rl{t}", f"t{t}", 0.1))
+
+        def _group_with(seeded: bool):
+            return {
+                "group_id": "g",
+                "match_type": "M:N",
+                "edges": edges,
+                "alternatives": generate_top_k_alternatives(
+                    edges, k=5, include_seed_options=seeded
+                ),
+            }
+
+        sel_seeded = select_stitching_batch([_group_with(True)], set(), k=1)
+        sel_organic = select_stitching_batch([_group_with(False)], set(), k=1)
+        assert sel_seeded[0]["review_score"] == sel_organic[0]["review_score"]
+        assert sel_seeded[0]["review_tier"] == sel_organic[0]["review_tier"]
 
     def test_n_to_1_ignores_geoms_full_powerset(self):
         """N:1 mirror: refs already enumerate the full power set; geoms are a no-op."""
