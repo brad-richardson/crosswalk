@@ -55,6 +55,21 @@ The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Modes:
 | `/browser` | Browse features and labeled pairs per dataset |
 | `/stitching-review` | Review and curate M:N group edge selections |
 
+### Reviewing your stitching choices offline
+
+`scripts/render_review_diffs.py` reflects curated `/stitching-review` choices back
+as annotated PNGs: a per-group overview (your selected refs/targets vs the
+optimizer, with added/excluded connectors) plus per-diff zoom panels, and a
+terminal summary table. It also flags likely **cross-product artifacts** — manual
+/ de-anchored labels whose stored pairs are exactly the ref×target grid within the
+candidate universe and add pairs beyond the optimizer (pair-level intent the
+reviewer may not have expressed). Example:
+
+```bash
+uv run python scripts/render_review_diffs.py --data-root . \
+    --dataset us_boston_streets --labeler brad --since 2026-07-05T14:40
+```
+
 ## Adding a New Feature
 
 **CRITICAL: Features must be added to multiple files to work end-to-end.**
