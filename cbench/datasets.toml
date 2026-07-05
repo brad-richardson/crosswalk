@@ -17,14 +17,18 @@ stitch_labels_dir = "../labels/stitching"
 # test_loo_cv.py. Re-measure and update when the label base or optimizer shifts
 # materially (see docs/BENCHMARKING.md "Stitch-level quality gate").
 #
-# us_boston_streets baseline (2026-07-05, post-#263/#267, 73 labels -> 67 mapped
-# groups): filtered edge-F1 0.8345, filtered exact-match 0.5373, 0 sliver-
-# affected. Floors: F1 0.8345-0.055 -> 0.78; exact 0.5373-0.087 -> 0.45 (wider
-# margin: per-group exact-match is the noisier metric on a ~67-group base).
+# us_boston_streets baseline (2026-07-05, post-#295/#298 set-semantics
+# reinterpretation; 123 labels, 3 converted to set semantics -> 111 mapped PAIR
+# groups): filtered edge-F1 0.8840, filtered exact-match 0.5946, 0 sliver-
+# affected. Floors: F1 0.8840-0.054 -> 0.83; exact 0.5946-0.0946 -> 0.50 (wider
+# margin: per-group exact-match is the noisier metric). Set labels are scored
+# separately (membership/boundary/coverage) and are NOT gated: only 3 mapped set
+# labels exist, far below any sensible arming base — no set floor is invented
+# (see docs/BENCHMARKING.md "Stitch-level quality gate").
 [gate.us_boston_streets]
 min_mapped_groups = 30
-f1_filtered_floor = 0.78
-exact_filtered_floor = 0.45
+f1_filtered_floor = 0.83
+exact_filtered_floor = 0.50
 
 [datasets.us_boston_bike_network]
 reference = "us_boston_bike_network_overture_segments_v1.0.parquet"
