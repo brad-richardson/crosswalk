@@ -35,6 +35,14 @@ matcher agent stitch-run --batch <dir> --panel v3-candidate
 matcher agent stitch-run --batch <dir> --panel v3-candidate --resume
 ```
 
+Resume safety: `--resume` only reuses partial rows whose recorded provider set
+matches the current panel — a `v3-candidate` resume over partials written by the
+3-voter default ignores them and re-runs everything, so it can never silently
+return cached 3-voter votes with the 4th voter skipped. Carried-forward groups
+are also restricted to the current `--group-ids`/`--limit` selection (no leakage
+into the final output), while unselected groups' rows are preserved in the
+partial files for later crash recovery.
+
 ---
 
 ## Task 2 — Lone-dissenter accuracy (offline, 0 API calls)
@@ -207,6 +215,15 @@ errors; the cost of 4/4 is bounded (demotion to review, never a wrong label).
 
 **Do NOT adopt 3/4 majority** — it weakens today's unanimity bar in the one
 direction Task 2 flags as unsafe.
+
+**What ships now vs the recommended rule:** `compute_consensus` is intentionally
+UNCHANGED in this PR. The current code is *stricter* than the recommendation:
+unanimity requires all panelists to respond AND agree (zero abstentions
+tolerated), so with 4 voters a single opencode abstention (e.g. an OpenRouter
+quota blip) blocks auto-accept for that group. That is safe (demotion to review,
+never a wrong label) but wasteful at scale; the "≤1 abstention tolerated"
+relaxation is implemented at rollout step 4 together with the default flip, once
+the wider-wave evidence is in.
 
 ## Rollout plan (no default flip in this PR)
 

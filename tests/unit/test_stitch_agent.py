@@ -1463,6 +1463,72 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     assert set(votes_df["group_id"]) == {"g1", "g2"}
 
 
+def test_run_batch_resume_rejects_mismatched_panel(tmp_path, monkeypatch):
+    """Partials written by a DIFFERENT panel are ignored: every group re-runs.
+
+    Guards the silent-cache trap: 3-voter partials satisfying a --panel
+    v3-candidate --resume run would return cached 3-voter votes with the 4th
+    voter never invoked.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+
+    calls = {"n": 0, "providers": set()}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy", "opencode"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+
+    panel3 = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+    panel4 = [*panel3, sr.ProviderSpec("opencode", "m")]
+
+    # Complete a 3-voter run: partials now record every group with 3 providers.
+    sr.run_batch(batch_dir, panel=panel3)
+    assert calls["n"] == 3
+
+    calls["n"] = 0
+    # Resume with the 4-voter panel: provider-set mismatch -> partials ignored,
+    # g1 re-runs with all FOUR voters (not returned from the 3-voter cache).
+    votes_df, _cons_df = sr.run_batch(batch_dir, panel=panel4, resume=True)
+    assert calls["n"] == 4
+    assert set(votes_df["provider"]) == {"claude", "codex", "agy", "opencode"}
+
+
+def test_run_batch_resume_respects_group_selection(tmp_path, monkeypatch):
+    """A filtered resume must not leak previously-done, unrequested groups."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    _write_min_pack(batch_dir, "g2")
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+
+    panel = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+    # Run everything once (partials record g1 + g2).
+    sr.run_batch(batch_dir, panel=panel)
+    # Filtered resume asking ONLY for g2: g1 must not appear in the output.
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel, group_ids=["g2"], resume=True)
+    assert set(votes_df["group_id"]) == {"g2"}
+    assert set(cons_df["group_id"]) == {"g2"}
+
+
 def test_run_provider_collect_feedback_toggle(monkeypatch):
     """collect_feedback=True captures the self-report; False leaves it empty."""
     raw = json.dumps(
