@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from loguru import logger
+
 from cbench.eval.stitch_metrics import StitchEvalResult
 
 
@@ -73,9 +75,13 @@ def load_gate_config(config: dict) -> dict[str, GateFloors]:
     no error (a dataset with no gate block is simply ungated).
     """
     raw = config.get("gate", {})
+    if not isinstance(raw, dict):
+        logger.warning(f"[gate] config is not a table (got {type(raw).__name__}); no floors loaded")
+        return {}
     floors: dict[str, GateFloors] = {}
     for dataset, cfg in raw.items():
         if not isinstance(cfg, dict):
+            logger.warning(f"[gate.{dataset}] is not a table; skipping (no floor enforced)")
             continue
         try:
             floors[dataset] = GateFloors(
@@ -83,9 +89,13 @@ def load_gate_config(config: dict) -> dict[str, GateFloors]:
                 f1_filtered_floor=float(cfg["f1_filtered_floor"]),
                 exact_filtered_floor=float(cfg["exact_filtered_floor"]),
             )
-        except (KeyError, TypeError, ValueError):
-            # A malformed gate block should not silently pass — but parsing lives
-            # in the CLI, which surfaces the skipped dataset. Skip here.
+        except (KeyError, TypeError, ValueError) as exc:
+            # A malformed gate block must not silently disable enforcement — warn
+            # loudly so a typo/missing key is visible rather than an accidental pass.
+            logger.warning(
+                f"[gate.{dataset}] malformed ({exc}); skipping (no floor enforced). "
+                "Required keys: min_mapped_groups, f1_filtered_floor, exact_filtered_floor."
+            )
             continue
     return floors
 
@@ -98,9 +108,13 @@ def evaluate_gate(
     """Apply a dataset's floor to its stitch metrics.
 
     - No floor configured -> ``no_config`` (non-blocking).
+    - Floor configured but NO stitch metrics available (``result is None``) ->
+      ``fail`` (blocking): the dataset was explicitly configured to be gated but
+      could not be evaluated (missing labels dir / missing groups sidecar / a
+      swallowed stitch-eval error), so ``--gate`` must NOT silently pass it.
     - Fewer than ``min_mapped_groups`` groups mapped -> ``skip_unarmed``
-      (non-blocking): not enough curated ground truth mapped to current groups
-      to gate on yet. This is the auto-arming mechanism.
+      (non-blocking): the metric ran but not enough curated ground truth mapped
+      to current groups to gate on yet. This is the auto-arming mechanism.
     - Otherwise compare sliver-filtered F1 and exact-match against the floors;
       ``pass`` iff BOTH hold, else ``fail`` (blocking).
     """
@@ -110,8 +124,9 @@ def evaluate_gate(
     if result is None:
         return GateOutcome(
             dataset,
-            STATUS_SKIP_UNARMED,
-            "no stitch metrics available (no labels / no groups sidecar)",
+            STATUS_FAIL,
+            "configured to gate but no stitch metrics available "
+            "(missing labels/groups sidecar or stitch eval errored)",
         )
 
     n = result.groups_evaluated

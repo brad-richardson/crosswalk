@@ -148,10 +148,15 @@ def test_gate_no_config_is_non_blocking():
     assert out.blocking is False
 
 
-def test_gate_none_result_is_non_blocking():
+def test_gate_none_result_with_floor_is_blocking():
+    """A configured dataset that could not be evaluated must FAIL, not pass.
+
+    Otherwise a swallowed stitch-eval error (missing labels/sidecar) would let
+    --gate silently pass a dataset it was told to guard.
+    """
     out = evaluate_gate("boston", None, FLOORS)
-    assert out.status == STATUS_SKIP_UNARMED
-    assert out.blocking is False
+    assert out.status == STATUS_FAIL
+    assert out.blocking is True
 
 
 def test_gate_boundary_is_inclusive():
