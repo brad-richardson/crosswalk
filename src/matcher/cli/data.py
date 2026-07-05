@@ -2353,3 +2353,208 @@ def stitch_batch(
         console.print(f"  [green]Wrote batch of {len(selected)} groups to {batch_path}[/green]")
         tier_str = ", ".join(f"{t}={c}" for t, c in sorted(tier_counts.items()))
         console.print(f"  Tiers: {tier_str}")
+
+        # Maintenance invariant: a freshly generated queue must be in parity with
+        # the sidecar it was built from (each entry's optimizer_assignment == the
+        # sidecar group's selected edges). This is trivially true here because the
+        # entries ARE the sidecar groups, but running the check makes the
+        # stale-proposal invariant a guarded property of the rebuild path itself.
+        from ..matching.stitch_queue_refresh import check_queue_optimizer_parity
+
+        sidecar_by_id = {g.get("group_id"): g for g in groups}
+        drift = check_queue_optimizer_parity(selected, sidecar_by_id)
+        if drift:
+            console.print(
+                f"  [red]WARNING: {len(drift)} generated entries drifted from the "
+                f"sidecar selected set (stale proposals): "
+                f"{', '.join(d['group_id'] for d in drift[:5])}[/red]"
+            )
+
+
+@data_app.command("stitch-refresh-queue")
+def stitch_refresh_queue(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID to refresh the review queue for (e.g., us_boston_streets)",
+    ),
+    all_datasets: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Refresh queues for all datasets with an existing batch cache",
+    ),
+    k_alternatives: int = typer.Option(
+        5,
+        "--alternatives",
+        "-k",
+        help="Number of top-K alternatives per group (default: 5)",
+    ),
+    backup_suffix: str = typer.Option(
+        "",
+        "--backup-suffix",
+        help="If set, copy the existing cache to '{path}{suffix}' before writing",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would change without writing the cache",
+    ),
+):
+    """Refresh a stitching review queue against the CURRENT groups sidecar.
+
+    Fixes the "stale proposal" bug class: a queue rebuilt by preserving
+    unreviewed entries verbatim keeps a pre-retrain / pre-prune vintage of each
+    group's ``optimizer_assignment``, per-edge ``confidence`` and enumerated
+    ``alternatives`` while the sidecar has moved on, so the review UI shows and
+    reviewers ratify stale proposals.
+
+    This rebuilds every queue entry whose group still exists in the sidecar from
+    the authoritative sidecar group (same machinery as ``stitch-batch``:
+    alternatives + review tier/score + spatial context), IN PLACE — same group
+    ids, same queue order (the queue is never reshaped; the reviewer may be
+    mid-review). Entries whose group no longer exists (old grouping) cannot be
+    refreshed; they are flagged ``stale_grouping`` so the UI shows a visible
+    notice.
+
+    Examples:
+        matcher data stitch-refresh-queue us_boston_streets
+        matcher data stitch-refresh-queue --all --backup-suffix .prestalefix.bak
+        matcher data stitch-refresh-queue us_seattle_sidewalks --dry-run
+    """
+    import copy
+    import json
+    from datetime import UTC, datetime
+
+    from ..filenames import (
+        PROJECT_ROOT,
+        bridge_filename,
+        groups_sidecar_path,
+        stitch_batch_path,
+    )
+    from ..matching.alternatives import generate_top_k_alternatives
+    from ..matching.batch_selection import select_stitching_batch
+    from ..matching.stitch_queue_refresh import (
+        STALE_GROUPING_KEY,
+        check_queue_optimizer_parity,
+        plan_queue_refresh,
+    )
+
+    if k_alternatives <= 0:
+        console.print("[red]Error: --alternatives must be positive[/red]")
+        raise typer.Exit(1)
+
+    cache_dir = stitch_batch_path("x").parent
+    if all_datasets:
+        datasets_to_process = []
+        if cache_dir.exists():
+            for cache_file in sorted(cache_dir.glob("*_batch.json")):
+                datasets_to_process.append(cache_file.stem.replace("_batch", ""))
+        if not datasets_to_process:
+            console.print("[yellow]No batch caches found in data/cache/stitch/[/yellow]")
+            raise typer.Exit(0)
+    elif dataset:
+        datasets_to_process = [dataset]
+    else:
+        console.print("[red]Error: Provide a dataset name or --all[/red]")
+        raise typer.Exit(1)
+
+    output_dir = PROJECT_ROOT / "data" / "output"
+
+    for ds_name in datasets_to_process:
+        console.print(f"\n[bold blue]Refreshing queue for {ds_name}...[/bold blue]")
+
+        batch_path = stitch_batch_path(ds_name)
+        if not batch_path.exists():
+            console.print(f"  [yellow]No batch cache at {batch_path}[/yellow]")
+            continue
+
+        sidecar_path = groups_sidecar_path(output_dir / bridge_filename(ds_name))
+        if not sidecar_path.exists():
+            console.print(f"  [yellow]No groups sidecar at {sidecar_path}[/yellow]")
+            continue
+
+        try:
+            cache = json.loads(batch_path.read_text())
+            sidecar = json.loads(sidecar_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            console.print(f"  [red]Failed to load cache/sidecar: {e}[/red]")
+            continue
+
+        queue = cache.get("groups", [])
+        sidecar_by_id = {g.get("group_id"): g for g in sidecar.get("groups", [])}
+
+        refreshable_ids, stale_ids = plan_queue_refresh(queue, sidecar_by_id)
+        pre_drift = check_queue_optimizer_parity(queue, sidecar_by_id)
+        console.print(
+            f"  Queue: {len(queue)} entries — {len(refreshable_ids)} refreshable, "
+            f"{len(stale_ids)} stale-grouping (unrefreshable). "
+            f"{len(pre_drift)} currently drifted from sidecar."
+        )
+
+        # Rebuild refreshable entries from the authoritative sidecar group,
+        # preserving queue order. Stale-grouping entries are kept verbatim but
+        # flagged so the UI can surface a notice.
+        new_queue: list[dict] = []
+        to_fill_context: list[dict] = []
+        for entry in queue:
+            gid = entry.get("group_id")
+            sidecar_group = sidecar_by_id.get(gid)
+            if sidecar_group is None:
+                stale_entry = dict(entry)
+                stale_entry[STALE_GROUPING_KEY] = True
+                new_queue.append(stale_entry)
+                continue
+            g = copy.deepcopy(sidecar_group)
+            g["alternatives"] = generate_top_k_alternatives(
+                component_edges=g.get("edges", []),
+                ref_geoms=g.get("ref_geometries", {}),
+                target_geoms=g.get("target_geometries", {}),
+                k=k_alternatives,
+            )
+            # Annotate review_tier / review_score in place (k=1 so the single
+            # group is always "selected" and thus annotated; order is ignored).
+            select_stitching_batch(groups=[g], reviewed_group_ids=set(), k=1)
+            g[STALE_GROUPING_KEY] = False
+            new_queue.append(g)
+            to_fill_context.append(g)
+
+        # Spatial context (envelope + context_* + n_edges_full/rendered/clipped)
+        # for the rebuilt entries. Reuses the exact stitch-batch machinery.
+        if to_fill_context:
+            console.print(f"  Filling spatial context for {len(to_fill_context)} entries...")
+            _fill_spatial_context(to_fill_context, ds_name)
+
+        # Post-refresh parity: refreshable entries MUST now match the sidecar.
+        post_drift = check_queue_optimizer_parity(new_queue, sidecar_by_id)
+        if post_drift:
+            console.print(
+                f"  [red]ERROR: {len(post_drift)} entries still drifted after refresh: "
+                f"{', '.join(d['group_id'] for d in post_drift[:5])}[/red]"
+            )
+            raise typer.Exit(1)
+        console.print(
+            f"  [green]Parity OK[/green] — {len(refreshable_ids)} refreshed, "
+            f"{len(stale_ids)} flagged stale_grouping"
+        )
+
+        if dry_run:
+            console.print("  [yellow]--dry-run: not writing[/yellow]")
+            continue
+
+        if backup_suffix:
+            backup_path = batch_path.with_name(batch_path.name + backup_suffix)
+            backup_path.write_text(batch_path.read_text())
+            console.print(f"  Backed up existing cache to {backup_path}")
+
+        cache["groups"] = new_queue
+        cache["batch_size"] = len(new_queue)
+        cache["stale_refreshed_at"] = datetime.now(UTC).isoformat()
+        prior_source = cache.get("source", "")
+        cache["source"] = (
+            "stale-proposal refresh: rebuilt refreshable entries from current "
+            "sidecar (alternatives + review + context), flagged old-grouping "
+            "entries stale_grouping; queue order + ids preserved"
+            + (f" | prior: {prior_source}" if prior_source else "")
+        )
+        batch_path.write_text(json.dumps(cache, indent=2))
+        console.print(f"  [green]Wrote refreshed queue to {batch_path}[/green]")

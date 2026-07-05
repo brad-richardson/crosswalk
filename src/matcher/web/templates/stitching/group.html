@@ -19,10 +19,15 @@
 <!-- Group segments the optimizer left out (start hidden on map to match pre-seed) -->
 <script type="application/json" id="group-inactive-ids">{{ (preseed_inactive_ids if preseed_inactive_ids is defined else []) | tojson }}</script>
 
-<!-- Group card (bottom of screen) -->
+<!-- Group card (bottom of screen).
+     data-stale marks a queue entry whose grouping changed since this batch was
+     generated (its group no longer exists in the current sidecar, so its
+     proposal could not be refreshed). The submit JS forces the pair-confirmation
+     panel for these so ratifying a stale proposal is an informed act. -->
 <div class="info-card map-overlay group-card" id="group-card"
      data-group-index="{{ group_index }}"
-     data-group-id="{{ group.group_id }}">
+     data-group-id="{{ group.group_id }}"
+     data-stale="{{ '1' if group.get('stale_grouping') else '0' }}">
 
     <!-- Header: match type + counts + confidence + tier -->
     <div class="group-card-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -74,6 +79,21 @@
             <span class="panel-collapse-icon" aria-hidden="true">&#9662;</span>
         </button>
     </div>
+
+    {% if group.get('stale_grouping') %}
+    <!-- Stale-proposal notice: this queue entry's group no longer exists in the
+         current sidecar (grouping changed since the batch was generated), so its
+         proposed assignment and option cards could not be refreshed and may be
+         out of date. Ratifying it still records a label; the pair-confirmation
+         panel shows exactly what would be stored. -->
+    <div class="stale-proposal-notice" id="stale-proposal-notice" role="status"
+         style="margin: 4px 0 8px; padding: 6px 8px; border-radius: 4px;
+                background: rgba(220, 140, 0, 0.15); border: 1px solid rgba(220, 140, 0, 0.5);
+                color: var(--text-muted); font-size: 0.72rem;">
+        &#9888; Stale proposal — the grouping has changed since this batch was
+        generated. This option may be out of date; confirm the pairs before recording.
+    </div>
+    {% endif %}
 
     <!-- Assignment option picker (verify, don't construct).
          De-anchored mode collapses the proposals behind an explicit opt-in
@@ -242,8 +262,34 @@
          Populated by updateContextNotice(). -->
     <div class="context-notice" id="context-notice" style="display:none" role="status"></div>
 
+    <!-- Pair-confirmation panel (inline, htmx-friendly — no native dialog).
+         Shown before recording a manual/de-anchored cross-product submit, and
+         before ratifying a potentially-stale option pick. Lists the exact pairs
+         that would be stored (ref → target, per-pair confidence, sliver flag);
+         each is untickable and unticked pairs are excluded from the label.
+         Populated + toggled by openPairConfirm()/renderPairConfirm() in page.html. -->
+    <div class="pair-confirm-panel" id="pair-confirm-panel" role="group"
+         aria-label="Confirm pairs to record" style="display:none; margin-top: 8px;">
+        <div class="pair-confirm-header" id="pair-confirm-header"
+             style="font-size: 0.78rem; font-weight: 600; margin-bottom: 6px;">
+            Confirm pairs to record
+        </div>
+        <div class="pair-confirm-list" id="pair-confirm-list"
+             style="max-height: 34vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;"></div>
+        <div class="pair-confirm-empty" id="pair-confirm-empty" style="display:none;
+             font-size: 0.72rem; color: var(--text-muted); padding: 4px 0;">
+            No pairs selected. This records the group as <strong>no matches</strong> (reject-all).
+        </div>
+        <div class="pair-confirm-actions" style="display:flex; gap: 8px; margin-top: 8px;">
+            <button type="button" class="btn-select" id="pair-confirm-ok"
+                    style="flex:1;" onclick="confirmPairSubmit()">Confirm &amp; record</button>
+            <button type="button" class="btn-skip-stitch" id="pair-confirm-cancel"
+                    onclick="cancelPairConfirm()">Cancel</button>
+        </div>
+    </div>
+
     <!-- Action buttons -->
-    <div class="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">
+    <div class="card-actions" id="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">
         <form style="flex: 1;" id="select-form"
               hx-post="/stitching-review/select"
               hx-target="#group-content"

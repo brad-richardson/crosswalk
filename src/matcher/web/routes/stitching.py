@@ -776,13 +776,22 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
     option itself, so when the client submits an unmodified option it sends the
     option's exact edge set here and we store it verbatim.
 
+    The submit-time pair-confirmation panel also routes through this path: a
+    manual / de-anchored selection the reviewer confirmed pair-by-pair is sent
+    as an explicit list so unticked pairs are excluded exactly. Those pairs are
+    drawn from the group's CANDIDATE union (selected edges ∪ rejected
+    candidates), so validation is against that union — matching the manual
+    cross-product path, which already lets a reviewer pair segments whose only
+    shared edge was rejected by the optimizer (the #270 silent-drop bug class).
+    Context pills are never in the candidate union, so they remain unrecordable.
+
     Returns:
         - None when no explicit payload was sent (caller uses cross-product).
         - A validated list of {ref_id, target_id} dicts otherwise.
 
     Raises:
         ValueError if the payload is malformed or references an edge that does
-        not exist in the group (guards against a stale/forged client submit).
+        not exist in the group's candidate union (guards a stale/forged submit).
     """
     if not raw:
         return None
@@ -793,7 +802,7 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
     if not isinstance(parsed, list):
         raise ValueError("selected_edges must be a list")
 
-    group_edge_set = {(e["ref_id"], e["target_id"]) for e in group.get("edges", [])}
+    group_edge_set = {(e["ref_id"], e["target_id"]) for e in _group_candidate_edges(group)}
     cleaned = []
     for e in parsed:
         if not isinstance(e, dict) or "ref_id" not in e or "target_id" not in e:
