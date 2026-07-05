@@ -111,6 +111,75 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
             )
 
 
+def _resolve_config_default(config_path: Path, value: str) -> Path:
+    """Resolve a config *default* path relative to the config file's directory.
+
+    Default paths in ``datasets.toml`` (e.g. ``../labels/human``, ``../data/raw``)
+    are written relative to the config file's location, not the process CWD.
+    Resolving them against CWD is the root cause of "labels not found" when
+    ``cbench`` is invoked from anywhere other than the config's directory (e.g.
+    the repo root). Absolute values are returned unchanged.
+    """
+    p = Path(value)
+    if p.is_absolute():
+        return p
+    return (config_path.parent / p).resolve()
+
+
+def _resolve_single_run_paths(
+    config: Path,
+    dataset: str,
+    reference: Path | None,
+    target: Path | None,
+    labels: Path | None,
+    stitch_labels: Path | None,
+) -> tuple[Path, Path, Path, Path | None, Path | None]:
+    """Fill unspecified single-run paths from ``datasets.toml``.
+
+    Explicit CLI paths are honored as-is (CWD-relative). Any path left as ``None``
+    is resolved from the config: reference/target/connectors from the dataset
+    entry (relative to the config's ``data_dir``), and labels/stitch from the
+    config defaults. All config-derived paths anchor to the config file's
+    directory so resolution is independent of the current working directory.
+
+    Returns ``(reference, target, labels, stitch_labels, connectors)``.
+
+    Raises:
+        FileNotFoundError: config needed but missing.
+        ValueError: dataset not present in config.
+    """
+    connectors: Path | None = None
+    # Stitch labels are optional (runner falls back to the labels-dir sibling
+    # `stitching/`), so a missing stitch path must NOT force loading the config:
+    # `cbench run ... -r ... -t ... -l ...` should work with no datasets.toml.
+    need_config = reference is None or target is None or labels is None
+    if not need_config:
+        return reference, target, labels, stitch_labels, connectors
+
+    cfg = load_datasets_config(config)  # raises FileNotFoundError/ValueError
+    defaults = cfg.get("defaults", {})
+    datasets = cfg["datasets"]
+    if dataset not in datasets:
+        raise ValueError(
+            f"Dataset '{dataset}' not found in {config}. Available: {', '.join(datasets.keys())}"
+        )
+    ds_cfg = datasets[dataset]
+
+    data_dir = _resolve_config_default(config, defaults.get("data_dir", "."))
+    if reference is None:
+        reference = data_dir / ds_cfg["reference"]
+    if target is None:
+        target = data_dir / ds_cfg["target"]
+    if labels is None:
+        labels = _resolve_config_default(config, defaults.get("labels_dir", "."))
+    if stitch_labels is None and "stitch_labels_dir" in defaults:
+        stitch_labels = _resolve_config_default(config, defaults["stitch_labels_dir"])
+    if "connectors" in ds_cfg:
+        connectors = data_dir / ds_cfg["connectors"]
+
+    return reference, target, labels, stitch_labels, connectors
+
+
 def load_datasets_config(config_path: Path) -> dict:
     """Load and validate datasets TOML config.
 
@@ -137,9 +206,21 @@ def load_datasets_config(config_path: Path) -> dict:
 def run(
     tool: str = typer.Argument(help="Tool adapter name (e.g., 'matcher', 'hootenanny')"),
     dataset: str = typer.Argument(help="Dataset name (must have labels)"),
-    labels: Path = typer.Option(..., "--labels", "-l", help="Path to labels directory"),
-    reference: Path = typer.Option(..., "--reference", "-r", help="Reference parquet file"),
-    target: Path = typer.Option(..., "--target", "-t", help="Target parquet file"),
+    labels: Path | None = typer.Option(
+        None, "--labels", "-l", help="Path to labels directory (default: from config)"
+    ),
+    reference: Path | None = typer.Option(
+        None, "--reference", "-r", help="Reference parquet file (default: from config)"
+    ),
+    target: Path | None = typer.Option(
+        None, "--target", "-t", help="Target parquet file (default: from config)"
+    ),
+    config: Path = typer.Option(
+        Path("datasets.toml"),
+        "--config",
+        "-c",
+        help="Datasets TOML config used to resolve unspecified paths",
+    ),
     output_dir: Path = typer.Option(
         Path("cbench_output"), "--output-dir", "-o", help="Output directory"
     ),
@@ -147,7 +228,7 @@ def run(
         Path("cbench_results.jsonl"), "--results", help="JSONL results file"
     ),
     stitch_labels: Path | None = typer.Option(
-        None, "--stitch-labels", help="Path to stitching labels directory"
+        None, "--stitch-labels", help="Path to stitching labels directory (default: from config)"
     ),
     match_level: str = typer.Option(
         "target", "--match-level", help="Evaluation level: 'target' (default) or 'pair'"
@@ -155,7 +236,12 @@ def run(
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     opt: list[str] = typer.Option([], "--opt", help="Tool option as key=value"),
 ) -> None:
-    """Run a tool on a dataset and evaluate against ground truth."""
+    """Run a tool on a dataset and evaluate against ground truth.
+
+    Reference/target/labels default to the entries in ``datasets.toml`` (resolved
+    relative to the config file's location), so ``cbench run matcher <dataset>``
+    works out of the box from a repo checkout. Explicit ``-r/-t/-l`` override.
+    """
     setup_logging(verbose)
 
     from cbench.runner import run_single
@@ -163,6 +249,22 @@ def run(
     adapter = _get_adapter(tool)
     match_level = _validate_match_level(match_level)
     kwargs = _coerce_path_opts(_parse_opts(opt))
+
+    try:
+        reference, target, labels, stitch_labels, connectors = _resolve_single_run_paths(
+            config=config,
+            dataset=dataset,
+            reference=reference,
+            target=target,
+            labels=labels,
+            stitch_labels=stitch_labels,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if connectors is not None and "connectors" not in kwargs:
+        kwargs["connectors"] = connectors
 
     try:
         result = run_single(
@@ -232,10 +334,17 @@ def run_batch(
         raise typer.Exit(1) from exc
 
     defaults = cfg.get("defaults", {})
-    resolved_data_dir = data_dir or Path(defaults.get("data_dir", "."))
-    resolved_labels_dir = labels_dir or Path(defaults.get("labels_dir", "."))
+    # Explicit CLI overrides are honored as-is (CWD-relative, user intent);
+    # config defaults resolve relative to the config file's directory so that
+    # `cbench run-batch` works from any CWD (e.g. the repo root).
+    resolved_data_dir = data_dir or _resolve_config_default(config, defaults.get("data_dir", "."))
+    resolved_labels_dir = labels_dir or _resolve_config_default(
+        config, defaults.get("labels_dir", ".")
+    )
     resolved_stitch_dir = (
-        Path(defaults["stitch_labels_dir"]) if "stitch_labels_dir" in defaults else None
+        _resolve_config_default(config, defaults["stitch_labels_dir"])
+        if "stitch_labels_dir" in defaults
+        else None
     )
 
     datasets = cfg["datasets"]
@@ -327,7 +436,9 @@ def list_datasets(
         raise typer.Exit(1) from exc
 
     defaults = cfg.get("defaults", {})
-    resolved_labels_dir = labels_dir or Path(defaults.get("labels_dir", "."))
+    resolved_labels_dir = labels_dir or _resolve_config_default(
+        config, defaults.get("labels_dir", ".")
+    )
 
     table = Table(title="Configured Datasets")
     table.add_column("Dataset", style="cyan")
