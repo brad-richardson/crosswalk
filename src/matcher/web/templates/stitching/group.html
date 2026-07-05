@@ -192,9 +192,10 @@
 
     <!-- Non-blocking notice surfaced when context pills are toggled on. Context
          segments are NOT part of this group; toggling them controls map
-         visibility only and they are silently dropped from the stored label.
-         This makes that explicit at submit time without hard-blocking the
-         legitimate map-visibility toggle. Populated by updateContextNotice(). -->
+         visibility only and they are never written to the stored label. This
+         notice makes that explicit at submit time (previously it happened
+         silently) without hard-blocking the legitimate map-visibility toggle.
+         Populated by updateContextNotice(). -->
     <div class="context-notice" id="context-notice" style="display:none" role="status"></div>
 
     <!-- Action buttons -->

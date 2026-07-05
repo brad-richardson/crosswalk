@@ -445,8 +445,9 @@ def _build_group_context(group: dict, dataset: str = "") -> dict:
 
     # Membership hint: which neighboring group each context segment belongs to.
     # Best-effort, cached; skip self-references (a context id should never point
-    # back at the current group, but guard anyway).
-    membership = _load_group_membership(dataset)
+    # back at the current group, but guard anyway). Only touch the (potentially
+    # tens-of-MB) sidecar when this group actually has context pills to annotate.
+    membership = _load_group_membership(dataset) if (capped_ref_ids or capped_target_ids) else {}
     current_gid = group.get("group_id")
 
     def _member_group(sid: str) -> str | None:
