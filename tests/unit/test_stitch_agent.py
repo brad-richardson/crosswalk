@@ -1305,6 +1305,262 @@ def test_parse_vote_ignores_pack_feedback_key():
     assert choice == "B" and conf == 0.7
 
 
+# ---------------------------------------------------------------------------
+# Fourth voter: opencode invoker + named panel config (default OFF)
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_registered_and_v3_panel_composition():
+    """The 4th voter is wired into the invoker registry and the opt-in panel."""
+    assert "opencode" in sr._INVOKERS
+    # DEFAULT_PANEL (production) is unchanged: still the 3 incumbents.
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "agy"]
+    # v3-candidate adds opencode as a distinct 4th, decorrelated model family.
+    v3 = sr.get_panel("v3-candidate")
+    assert [p.name for p in v3] == ["claude", "codex", "agy", "opencode"]
+    assert v3[3].model == "openrouter/qwen/qwen3-vl-235b-a22b-instruct"
+    # Named-panel resolution: default/v2 == 3 voters; unknown/empty -> default.
+    assert [p.name for p in sr.get_panel("default")] == ["claude", "codex", "agy"]
+    assert [p.name for p in sr.get_panel("v2")] == ["claude", "codex", "agy"]
+    assert sr.get_panel("nonexistent") is sr.DEFAULT_PANEL
+    assert sr.get_panel(None) is sr.DEFAULT_PANEL
+
+
+def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
+    """Prompt MUST precede every -f flag, else -f swallows it as a filename.
+
+    Also verifies -m model placement and one -f per attached image (overview +
+    each existing option_<letter>.png).
+    """
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    (gdir / "overview.png").write_bytes(b"\x89PNG")
+    (gdir / "option_A.png").write_bytes(b"\x89PNG")
+    (gdir / "option_B.png").write_bytes(b"\x89PNG")
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return sp.CompletedProcess(
+            cmd, 0, stdout='{"choice":"A","confidence":1,"reasoning":"x"}', stderr=""
+        )
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    out = sr.invoke_opencode("PROMPT TEXT", gdir, ["A", "B"], "openrouter/qwen/x", timeout=99)
+
+    cmd = captured["cmd"]
+    assert cmd[:2] == ["opencode", "run"]
+    # The prompt is the positional arg immediately after `run`.
+    assert cmd[2] == "PROMPT TEXT"
+    # -m model appears, and BEFORE any -f flag.
+    assert "-m" in cmd and cmd[cmd.index("-m") + 1] == "openrouter/qwen/x"
+    first_f = cmd.index("-f")
+    assert cmd.index("PROMPT TEXT") < first_f
+    assert cmd.index("-m") < first_f
+    # One -f per image: overview + option_A + option_B = 3.
+    assert cmd.count("-f") == 3
+    f_args = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "-f"]
+    assert f_args[0].endswith("overview.png")
+    assert any(a.endswith("option_A.png") for a in f_args)
+    assert any(a.endswith("option_B.png") for a in f_args)
+    assert captured["kwargs"]["timeout"] == 99
+    assert '"choice":"A"' in out
+
+
+def test_invoke_opencode_raises_on_nonzero_exit(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    (gdir / "overview.png").write_bytes(b"\x89PNG")
+
+    def fake_run(cmd, **kwargs):
+        return sp.CompletedProcess(cmd, 1, stdout="", stderr="quota exceeded")
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError) as exc:
+        sr.invoke_opencode("P", gdir, [], "m")
+    assert "opencode exited with code 1" in str(exc.value)
+    assert "quota exceeded" in str(exc.value)
+
+
+def test_opencode_vote_parses_through_runner(monkeypatch):
+    """A valid opencode-style JSON answer parses to a real vote."""
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "B", "confidence": 0.66, "reasoning": "qwen picks B"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "opencode", fake_invoker)
+    vote = sr.run_provider_on_group(
+        sr.OPENCODE_QWEN, "g", None, "prompt", ["A", "B"], {"B": [(R1, T1)]}
+    )
+    assert vote.provider == "opencode"
+    assert vote.choice == "B"
+    assert vote.edge_set == frozenset({(R1, T1)})
+
+
+def test_opencode_abstains_on_failure(monkeypatch):
+    def failing(prompt, group_dir, letters, model, timeout, effort=""):
+        raise RuntimeError("opencode exited with code 1: quota exceeded")
+
+    monkeypatch.setitem(sr._INVOKERS, "opencode", failing)
+    vote = sr.run_provider_on_group(sr.OPENCODE_QWEN, "g", None, "prompt", ["A"], {"A": [(R1, T1)]})
+    assert vote.choice == "ABSTAIN"
+    assert "quota exceeded" in vote.error
+
+
+def test_four_voter_consensus_unanimous_needs_all_four():
+    """With a 4-voter panel, unanimity requires all four agreeing (3/4 is majority)."""
+    es = frozenset({(R1, T1)})
+    four_agree = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("agy", "A", es),
+        _vote("opencode", "A", es),
+    ]
+    c = sr.compute_consensus(four_agree)
+    assert c.consensus == "unanimous"
+    assert c.routing == "auto_accept"
+    # 3/4 with a lone dissenter is a majority -> human review (never auto-accept).
+    three_one = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("agy", "A", es),
+        _vote("opencode", "B"),
+    ]
+    c2 = sr.compute_consensus(three_one)
+    assert c2.consensus == "majority"
+    assert c2.routing == "human_review"
+    assert "opencode=B" in c2.minority
+
+
+# ---------------------------------------------------------------------------
+# Resumable per-group batch driver
+# ---------------------------------------------------------------------------
+
+
+def _write_min_pack(batch_dir, gid):
+    """Write a minimal evidence pack (metadata + prompt) for run_batch."""
+    import yaml
+
+    g = make_group()
+    ctx = build_stitch_options(g)
+    meta = build_metadata(g, ctx)
+    d = batch_dir / gid
+    d.mkdir(parents=True)
+    (d / "metadata.yaml").write_text(yaml.safe_dump(meta))
+    (d / "prompt.txt").write_text('respond {"choice": "A"}')
+    return d
+
+
+def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
+    """resume=True reloads partials and does NOT re-invoke completed groups."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    _write_min_pack(batch_dir, "g2")
+
+    # Each group runs in an isolated scratch copy, so the invoker sees a scratch
+    # dir, not the group name — count invocations (3 providers per group) instead.
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+
+    panel = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+    # First run does g1 only, writing partials (3 invocations: one per provider).
+    sr.run_batch(batch_dir, panel=panel, group_ids=["g1"])
+    assert (batch_dir / "votes.partial.csv").exists()
+    assert calls["n"] == 3
+
+    calls["n"] = 0
+    # Resume over both groups: g1 already recorded -> only g2 runs (3 more calls).
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel, resume=True)
+    assert calls["n"] == 3  # g1 skipped; only g2 invoked
+    # Final output carries BOTH groups.
+    assert set(cons_df["group_id"]) == {"g1", "g2"}
+    assert set(votes_df["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_resume_rejects_mismatched_panel(tmp_path, monkeypatch):
+    """Partials written by a DIFFERENT panel are ignored: every group re-runs.
+
+    Guards the silent-cache trap: 3-voter partials satisfying a --panel
+    v3-candidate --resume run would return cached 3-voter votes with the 4th
+    voter never invoked.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+
+    calls = {"n": 0, "providers": set()}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy", "opencode"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+
+    panel3 = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+    panel4 = [*panel3, sr.ProviderSpec("opencode", "m")]
+
+    # Complete a 3-voter run: partials now record every group with 3 providers.
+    sr.run_batch(batch_dir, panel=panel3)
+    assert calls["n"] == 3
+
+    calls["n"] = 0
+    # Resume with the 4-voter panel: provider-set mismatch -> partials ignored,
+    # g1 re-runs with all FOUR voters (not returned from the 3-voter cache).
+    votes_df, _cons_df = sr.run_batch(batch_dir, panel=panel4, resume=True)
+    assert calls["n"] == 4
+    assert set(votes_df["provider"]) == {"claude", "codex", "agy", "opencode"}
+
+
+def test_run_batch_resume_respects_group_selection(tmp_path, monkeypatch):
+    """A filtered resume must not leak previously-done, unrequested groups."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    _write_min_pack(batch_dir, "g2")
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+
+    panel = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+    # Run everything once (partials record g1 + g2).
+    sr.run_batch(batch_dir, panel=panel)
+    # Filtered resume asking ONLY for g2: g1 must not appear in the output.
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel, group_ids=["g2"], resume=True)
+    assert set(votes_df["group_id"]) == {"g2"}
+    assert set(cons_df["group_id"]) == {"g2"}
+
+
 def test_run_provider_collect_feedback_toggle(monkeypatch):
     """collect_feedback=True captures the self-report; False leaves it empty."""
     raw = json.dumps(

@@ -1052,6 +1052,24 @@ def run_stitch_panel(
     codex_model: str = typer.Option("gpt-5.5", "--codex-model"),
     codex_effort: str = typer.Option("low", "--codex-effort"),
     agy_model: str = typer.Option("Gemini 3.5 Flash (Medium)", "--agy-model"),
+    panel_name: str = typer.Option(
+        "default",
+        "--panel",
+        help="Named panel config: 'default'/'v2' (3 voters: claude+codex+agy) or "
+        "'v3-candidate' (adds a 4th opencode/Qwen3-VL voter — OFF by default, "
+        "opt-in only; does not affect production waves).",
+    ),
+    opencode_model: str = typer.Option(
+        "openrouter/qwen/qwen3-vl-235b-a22b-instruct",
+        "--opencode-model",
+        help="Model string for the opencode 4th voter (only used by --panel v3-candidate).",
+    ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Resume from votes.partial.csv/consensus.partial.csv, skipping "
+        "already-completed groups (per-group persistence makes runs interruptible).",
+    ),
     pack_feedback: bool = typer.Option(
         False,
         "--pack-feedback",
@@ -1061,29 +1079,42 @@ def run_stitch_panel(
         "default production prompt is untouched.",
     ),
 ):
-    """Run the 3-provider consensus panel (claude + codex + agy) on a batch.
+    """Run the consensus panel (claude + codex + agy; opt-in 4th voter) on a batch.
 
     Writes votes.csv (every raw vote — audit data) and consensus.csv (per-group
     routing) into the batch dir. Writes NOTHING into labels/.
 
     Examples:
         matcher agent stitch-run --batch data/agents/stitching/batches/us_boston_streets
+        matcher agent stitch-run --batch <dir> --panel v3-candidate  # 4-voter candidate
     """
-    from ..agent_labeling.stitch_runner import ProviderSpec, run_batch
+    from ..agent_labeling.stitch_runner import ProviderSpec, get_panel, run_batch
 
     if not batch_dir.exists():
         console.print(f"[red]Batch dir not found: {batch_dir}[/red]")
         raise typer.Exit(1)
 
+    # Build the panel from the named config, applying the per-provider model/effort
+    # overrides so the incumbent flags keep working. DEFAULT_PANEL is unchanged:
+    # the 4th voter is only present when --panel v3-candidate is selected.
+    overrides = {
+        "claude": {"model": claude_model, "effort": claude_effort},
+        "codex": {"model": codex_model, "effort": codex_effort},
+        "agy": {"model": agy_model},
+        "opencode": {"model": opencode_model},
+    }
     panel = [
-        ProviderSpec(name="claude", model=claude_model, effort=claude_effort),
-        ProviderSpec(name="codex", model=codex_model, effort=codex_effort),
-        ProviderSpec(name="agy", model=agy_model),
+        ProviderSpec(
+            name=p.name,
+            model=overrides.get(p.name, {}).get("model", p.model),
+            effort=overrides.get(p.name, {}).get("effort", p.effort),
+        )
+        for p in get_panel(panel_name)
     ]
     gids = [g.strip() for g in group_ids.split(",") if g.strip()] if group_ids else None
 
     console.print(f"[blue]Running panel on batch {batch_dir}[/blue]")
-    console.print(f"  Panel: {', '.join(f'{p.name}={p.model}' for p in panel)}")
+    console.print(f"  Panel ({panel_name}): {', '.join(f'{p.name}={p.model}' for p in panel)}")
     if pack_feedback:
         console.print(
             "  [yellow]pack-feedback ON: appending diagnostic self-report request[/yellow]"
@@ -1095,6 +1126,7 @@ def run_stitch_panel(
         timeout=timeout,
         limit=limit,
         collect_feedback=pack_feedback,
+        resume=resume,
     )
 
     console.print(f"[green]{len(consensus_df)} groups, {len(votes_df)} votes[/green]")
