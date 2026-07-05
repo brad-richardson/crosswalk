@@ -151,12 +151,30 @@
         openPairConfirm(isOption);
     });
 
-    // Reset the confirmation state whenever a fresh group card swaps in.
-    document.addEventListener('htmx:afterSwap', function() {
+    function resetPairConfirmState() {
         window.__stitchConfirmedSubmit = false;
         window.__pendingIssueRequest = null;
         var flag = document.getElementById('confirm-reject-all');
         if (flag) flag.value = '';
+    }
+
+    // Reset the confirmation state whenever a fresh group card swaps in.
+    document.addEventListener('htmx:afterSwap', resetPairConfirmState);
+
+    // afterRequest fires even when the response is an ERROR (no swap). Without
+    // this, a confirmed submit that 400s would leave __stitchConfirmedSubmit
+    // stuck true (so the NEXT "Select This" silently bypasses the panel) and the
+    // action row hidden behind the panel. Reset the flag and restore the card so
+    // it stays usable and the panel is never silently skipped.
+    document.addEventListener('htmx:afterRequest', function(evt) {
+        if (!evt.detail || !evt.detail.elt || evt.detail.elt.id !== 'select-form') return;
+        resetPairConfirmState();
+        var panel = document.getElementById('pair-confirm-panel');
+        var actions = document.getElementById('card-actions');
+        if (panel && panel.style.display !== 'none') {
+            panel.style.display = 'none';
+            if (actions) actions.style.display = '';
+        }
     });
 
     // Short, human-scannable id (keeps the tail which carries the local suffix).

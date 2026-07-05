@@ -83,10 +83,18 @@ def check_queue_optimizer_parity(
     pair-set. Entries whose group is absent from the sidecar (old-grouping) are
     NOT checkable and are skipped.
 
-    An empty list means the queue is in parity with the sidecar. Each mismatch
-    dict carries ``group_id``, ``queue_only`` (proposed by the queue but no
-    longer selected) and ``sidecar_only`` (now selected but missing from the
-    queue proposal).
+    Scope note: this compares the SELECTED PAIR-SET only — the primary stale
+    signal (which pairs the UI pre-seeds and the "auto" card ratifies). It does
+    NOT compare per-edge ``confidence`` or the enumerated ``alternatives``, which
+    can also drift on a retrain that keeps the same pairs. So an empty result
+    means "the proposed pair-set is in parity", not "every field is fresh"; use
+    it as a corruption guard, not as proof a cache needs no refresh. The refresh
+    command rebuilds confidence/alternatives from the sidecar regardless.
+
+    An empty list means the queue's proposed pair-sets are in parity with the
+    sidecar. Each mismatch dict carries ``group_id``, ``queue_only`` (proposed by
+    the queue but no longer selected) and ``sidecar_only`` (now selected but
+    missing from the queue proposal).
     """
     mismatches: list[dict] = []
     for entry in queue_groups:
