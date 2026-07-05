@@ -81,8 +81,8 @@ def _cap_context_ids(group: dict, cap: int = CONTEXT_DISPLAY_CAP) -> dict:
             "target_total": target_total,
         }
 
-    # Anchor: union of the group's own geometries (falls back to bbox center of
-    # whatever geometries parse). If nothing parses, keep the original prefix.
+    # Anchor: union of whichever of the group's own geometries parse. If none
+    # parse (no usable anchor), fall back to the original prefix order (ids[:cap]).
     anchor = None
     group_geoms = []
     for geom in list(group.get("ref_geometries", {}).values()) + list(
