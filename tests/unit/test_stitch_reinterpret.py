@@ -76,8 +76,26 @@ def test_single_ref_fan_not_flagged():
     assert reinterpret_row_to_set(_row(fan), cache, None) is None
 
 
-def test_missing_cache_geometry_skips():
+def test_no_universe_source_skips():
+    """A row whose group is in NEITHER the cache NOR the sidecar is skipped."""
     assert reinterpret_row_to_set(_row(_GRID), None, None) is None
+
+
+def test_sidecar_only_group_converts():
+    """A group present only in the groups sidecar (not the review-queue cache)
+    still supplies the candidate universe: sidecar edges[selected] is the
+    optimizer set, rejected_edges extend the universe."""
+    sidecar_group = {
+        "group_id": "g1234567abcd",
+        "edges": [
+            {"ref_id": "r1", "target_id": "t1", "selected": True},
+            {"ref_id": "r2", "target_id": "t2", "selected": True},
+            {"ref_id": "r1", "target_id": "t2", "selected": False},
+        ],
+        "rejected_edges": [{"ref_id": "r2", "target_id": "t1"}],
+    }
+    decision = reinterpret_row_to_set(_row(_GRID), None, sidecar_group)
+    assert decision == (["r1", "r2"], ["t1", "t2"])
 
 
 def test_partial_grid_not_flagged():

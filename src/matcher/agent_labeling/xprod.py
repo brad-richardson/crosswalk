@@ -139,7 +139,12 @@ def reinterpret_row_to_set(
     Never converts (returns None) for:
       * ``panel_*`` labeler rows (agent labels — provenance-protected),
       * rows already ``label_semantics=set`` (idempotent re-runs),
-      * rows with no cache geometry to establish the candidate universe,
+      * rows whose group appears in NEITHER the stitch cache NOR the groups
+        sidecar (no source can establish the candidate universe). Either source
+        alone suffices: the universe is cache ``edges`` ∪ sidecar ``edges`` ∪
+        sidecar ``rejected_edges``, and the optimizer selection prefers the
+        sidecar — geometries (cache-only) are not needed here, unlike in the
+        render script,
       * rows that do not match the cross-product signature (explicit
         ratifications, deliberate single/fan picks, pure exclusions).
 
@@ -151,7 +156,7 @@ def reinterpret_row_to_set(
         return None
     if str(row.get("label_semantics") or "pair") == "set":
         return None
-    if cache_group is None:
+    if cache_group is None and sidecar_group is None:
         return None
     label_pairs = parse_selected_edges(row.get("selected_edges"))
     opt_pairs, _ = resolve_optimizer(cache_group, sidecar_group)

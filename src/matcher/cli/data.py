@@ -2656,15 +2656,16 @@ def stitch_reinterpret_sets(
 
         cache_groups = _load_groups(STITCH_CACHE_DIR / f"{ds}_batch.json")
         sidecar_groups = _load_groups(PROJECT_ROOT / "data" / "output" / f"{ds}_groups.json")
-        if not cache_groups:
+        if not cache_groups and not sidecar_groups:
             console.print(
-                f"[yellow]{ds}: no stitch cache ({STITCH_CACHE_DIR}/{ds}_batch.json); "
+                f"[yellow]{ds}: neither a stitch cache ({STITCH_CACHE_DIR}/{ds}_batch.json) "
+                f"nor a groups sidecar (data/output/{ds}_groups.json); "
                 "cannot determine candidate universe — skipping[/yellow]"
             )
             continue
 
         converted: list[tuple[str, int, int, int]] = []
-        skipped_no_geom = 0
+        skipped_no_universe = 0
         for idx, row in df.iterrows():
             lab = str(row.get("labeler") or "")
             if labeler and lab != labeler:
@@ -2672,14 +2673,17 @@ def stitch_reinterpret_sets(
             key = _gid_key(row["group_id"])
             cache_group = cache_groups.get(key)
             sidecar_group = sidecar_groups.get(key)
-            # Count a missing-geometry skip only for rows that were otherwise
+            # EITHER source can supply the candidate universe (the sidecar holds
+            # the full current grouping; the cache only the review queue).
+            # Count a no-universe skip only for rows that were otherwise
             # eligible (non-panel, still pair) so the report is meaningful.
             if (
                 cache_group is None
+                and sidecar_group is None
                 and not lab.startswith("panel")
                 and str(row.get("label_semantics") or "pair") != LABEL_SEMANTICS_SET
             ):
-                skipped_no_geom += 1
+                skipped_no_universe += 1
                 continue
             decision = reinterpret_row_to_set(row, cache_group, sidecar_group)
             if decision is None:
@@ -2698,7 +2702,7 @@ def stitch_reinterpret_sets(
         verb = "Would convert" if dry_run else "Converted"
         console.print(
             f"[bold]{ds}[/bold]: {verb} {len(converted)} cross-product label(s) to set "
-            f"({skipped_no_geom} skipped: no cache geometry)"
+            f"({skipped_no_universe} skipped: group in neither cache nor sidecar)"
         )
         for gid, npairs, nrefs, ntgts in converted:
             console.print(f"  {gid[:8]}  {npairs} pairs -> set(refs={nrefs}, targets={ntgts})")
