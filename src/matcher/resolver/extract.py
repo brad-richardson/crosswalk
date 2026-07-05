@@ -134,6 +134,10 @@ def build_edge_table(
                     "target_id": key[1],
                     EDGE_LABEL_COL: int(key in human_es),
                     "selected": bool(edge.get("selected", True)),
+                    # True iff the confidence-drop prune (#284) removed this edge
+                    # from the selection. Provenance only — NOT a model feature
+                    # (it is a deterministic function of `confidence`).
+                    "pruned": bool(edge.get("pruned", False)),
                     # raw per-edge sidecar fields
                     "confidence": float(edge.get("confidence", float("nan"))),
                     "degree_ref": int(edge.get("degree_ref", 0)),
