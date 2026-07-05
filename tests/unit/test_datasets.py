@@ -430,6 +430,32 @@ class TestOvertureSchemaMappings:
             if tgt:
                 assert tgt in VALID_CLASSES, f"{name}: rule target_class '{tgt}' is invalid"
 
+    def test_bogota_bike_cictsuperf_codes_resolve(self):
+        """Bogota bike CICTSUPERF surface codes must map to cycleway at fetch time.
+
+        Regression test for the class-vocab bug where raw integer surface codes
+        (CICTSUPERF is 'Tipo de superficie', not a road class) leaked into the
+        semantic `class` field, making class_similarity 100% NaN. Exercises the
+        actual fetch-time path (map_column) with the int-typed column values the
+        ArcGIS layer returns, so YAML int-key coercion is covered too.
+        """
+        from matcher.fetch.normalize import map_column
+
+        mapping = self.ALL_YAMLS["co_bogota_bike_network"]["fetch"]["class_mapping"]
+        # Full ArcGIS coded-value domain for CICTSUPERF
+        domain_codes = [0, 1, 2, 3, 4, 5]
+        assert set(mapping.keys()) == set(domain_codes), (
+            "class_mapping must cover the full CICTSUPERF domain"
+        )
+        # Int-typed values (as fetched) and their float/string forms all resolve
+        for series in (
+            pd.Series(domain_codes),
+            pd.Series([float(c) for c in domain_codes]),
+            pd.Series([str(c) for c in domain_codes]),
+        ):
+            mapped = map_column(series, mapping, fallback="unknown")
+            assert list(mapped) == ["cycleway"] * len(domain_codes)
+
 
 class TestDiscovery:
     """Tests for dataset discovery functions."""

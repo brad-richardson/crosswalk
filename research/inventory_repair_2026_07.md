@@ -68,8 +68,26 @@ class-NaN case of the four). Every feature in this layer is a dedicated ciclorut
 so the correct semantic class is `cycleway` for all surface codes (the bike-type
 default). Fix: add a `class_mapping` in `datasets/co_bogota_bike_network.yaml`
 mapping all six CICTSUPERF codes → `cycleway`. Re-fetch confirms **class =
-cycleway for all 6,191 features** (was raw `1`/`2`/`5`), recovering
-`class_similarity` against Overture's cycleway references.
+cycleway for all 6,191 features** (raw code distribution was
+`2: 5,657 · 1: 359 · 4: 81 · 5: 49 · 3: 45`), recovering `class_similarity`
+against Overture's cycleway references.
+
+### Label-store propagation (coordinated backfill)
+
+The config fix alone only affects future fetches; the 29 existing labeled pairs
+in `labels/data` still carried the raw codes (`2`×25, `1`×3, `5`×1) and their
+`labels/features` rows were 100%-NaN on `class_similarity`. The re-fetched
+OBJECTIDs share **zero** overlap with the stored target_ids (ArcGIS OBJECTID
+churn), so backfill resolves these pairs entirely from stored data — meaning the
+stored `target_class` had to be corrected in place (all 29 → `cycleway`),
+followed by `matcher backfill -D co_bogota_bike_network` (29/29 computed,
+0 skipped). Result: `class_similarity` **29/29 non-NaN** (mean 0.82, range
+0.5–1.0). The recompute also refreshed some relational/topology columns
+(graphlet, crossing-angle, endpoint-degree, clustering) because the restored raw
+target network now provides real neighborhood context where previously only the
+29 stored segments existed — the same legitimate spillover documented for
+geneva_ped in the audit's Task 2. Both label parquets ride in this PR
+(coordinated-backfill pattern of #256/#273).
 
 ## Factory validation
 
@@ -83,8 +101,9 @@ datasets, all `done`:
 | us_montana_missoula | 94.2 s | 9,002 (95%) | 316 | 103 | 1,897 | 3 |
 | co_bogota_bike_network | 79.0 s | 4,712 (76%) | 577 | 902 | 1,349 | 3 |
 
-`matcher factory discovery` now resolves **32 stitchable pairs** (was 24) — the 8
-restored datasets are all discovered with `release=2026-01-21.0`.
+Factory discovery (`matcher.factory.discovery.discover_pairs`, the routine
+behind `factory run --all`) now resolves **32 stitchable pairs** (was 24) — the
+8 restored datasets are all discovered with `release=2026-01-21.0`.
 
 ## `factory run --all` viability for the overnight box sweep
 
