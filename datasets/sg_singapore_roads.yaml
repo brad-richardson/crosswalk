@@ -86,8 +86,8 @@ quality_fingerprint:
     primary: 1524
     secondary: 1204
     motorway: 308
-notes: LTA ships RD_CD (road code) column completely empty (Aug 2025 through Mar 2026
-  quarterly releases; verified 100% null). No stable unique ID column available -
+notes: LTA ships RD_CD (road code) column completely empty (verified 100% null on
+  the Aug 2025 and Mar 2026 releases). No stable unique ID column available -
   only RD_CD_DESC (road name, 3818 unique across 15326 segments) and RD_CATG__1 (6
   classification categories). Resolved 2026-07 by switching id_column to the synthetic
   _geom_hash id (see fetch comment). Revisit if LTA restores RD_CD in a future release.
