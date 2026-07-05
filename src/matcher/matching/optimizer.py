@@ -115,8 +115,13 @@ def optimize_matches_greedy(
     if not valid_results:
         return []
 
-    # Sort by confidence (highest first)
-    sorted_results = sorted(valid_results, key=lambda r: -r.confidence)
+    # Sort by confidence (highest first). Break ties on stable string ids so the
+    # greedy assignment is independent of input list order (which upstream steps
+    # can permute) and of Python set/dict hash-seed iteration order — otherwise
+    # equal-confidence candidates competing for a shared node resolve arbitrarily.
+    sorted_results = sorted(
+        valid_results, key=lambda r: (-r.confidence, str(r.ref_id), str(r.target_id))
+    )
 
     assigned_refs: set = set()
     assigned_targets: set = set()
@@ -231,14 +236,17 @@ def find_match_components(
                 if neighbor not in visited:
                     queue.append(neighbor)
 
-        # Collect edges for this component
+        # Collect edges for this component. Sort node/neighbor iteration by id so
+        # the emitted edge order is independent of set iteration order (which is
+        # hash-seed dependent for str ids). The component's edge LIST order flows
+        # downstream into grouping and greedy tie-breaks, so it must be canonical.
         component_edges: list[MatchResult] = []
-        ref_nodes = {n for n in component_nodes if n[0] == "ref"}
-        tgt_nodes = {n for n in component_nodes if n[0] == "target"}
+        ref_nodes = sorted((n for n in component_nodes if n[0] == "ref"), key=lambda n: str(n[1]))
+        tgt_node_set = {n for n in component_nodes if n[0] == "target"}
 
         for rn in ref_nodes:
-            for tn in adj[rn]:
-                if tn in tgt_nodes:
+            for tn in sorted(adj[rn], key=lambda n: str(n[1])):
+                if tn in tgt_node_set:
                     key = (rn, tn)
                     if key in edge_lookup:
                         component_edges.append(edge_lookup[key])
@@ -464,7 +472,11 @@ def _find_contiguous_id_groups(
                 continue
             visited.add(node)
             group.append(node)
-            for neighbor in adjacency[node]:
+            # Sort neighbours by stable id: adjacency values are sets, whose
+            # iteration order is hash-seed dependent for str ids. The BFS append
+            # order determines each group's member order, which flows into the
+            # optimizer's sub-component edge order — so it must be canonical.
+            for neighbor in sorted(adjacency[node], key=str):
                 if neighbor not in visited:
                     queue.append(neighbor)
         groups.append(group)
@@ -779,8 +791,12 @@ def _classify_and_resolve_component(
     Returns:
         Tuple of (group_results, leftover_1to1_candidates)
     """
-    ref_ids = list(set(r.ref_id for r in component_results))
-    target_ids = list(set(r.target_id for r in component_results))
+    # Deduplicate to a CANONICAL order (sorted by stable string id) rather than
+    # list(set(...)), whose order is hash-seed dependent for str ids. This id
+    # order seeds contiguity grouping and the sub-component decomposition below,
+    # so it must be deterministic to keep group membership/selection reproducible.
+    ref_ids = sorted({r.ref_id for r in component_results}, key=str)
+    target_ids = sorted({r.target_id for r in component_results}, key=str)
 
     n_refs = len(ref_ids)
     n_targets = len(target_ids)
