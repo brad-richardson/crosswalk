@@ -230,6 +230,22 @@ def test_is_crossproduct_artifact_empty_label():
     assert rrd.is_crossproduct_artifact(set(), {("rA", "t1")}, set()) is False
 
 
+def test_is_crossproduct_artifact_needs_grid_not_1to1():
+    # Single added 1:1 pair is a deliberate pick, not a cross-product artifact.
+    universe = {("rA", "t1")}
+    assert rrd.is_crossproduct_artifact({("rA", "t1")}, set(), universe) is False
+
+
+def test_is_crossproduct_artifact_needs_grid_not_1toN():
+    # Legitimate 1:N fan (one ref, many targets) has no ref×target grid.
+    universe = {("rA", "t1"), ("rA", "t2"), ("rA", "t3")}
+    label = set(universe)
+    assert rrd.is_crossproduct_artifact(label, {("rA", "t1")}, universe) is False
+    # And the symmetric N:1 (many refs, one target).
+    universe2 = {("rA", "t1"), ("rB", "t1"), ("rC", "t1")}
+    assert rrd.is_crossproduct_artifact(set(universe2), {("rA", "t1")}, universe2) is False
+
+
 # ---------------------------------------------------------------------------
 # build_review integration + reject-all detection
 # ---------------------------------------------------------------------------

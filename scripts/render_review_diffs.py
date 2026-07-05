@@ -207,8 +207,16 @@ def is_crossproduct_artifact(
     within the candidate universe AND it adds pairs beyond the optimizer — i.e.
     the reviewer's pill selection over-expanded into pairs they may never have
     consciously chosen. Pure exclusions (added set empty) never flag.
+
+    Requires a genuine grid — at least two refs *and* two targets. A 1:1 or
+    1:N (single ref or single target) selection has no meaningful cross-product,
+    so a deliberately-added single pair or a legitimate fan is never flagged.
     """
     if not label_pairs:
+        return False
+    refs = {a for a, _ in label_pairs}
+    tgts = {b for _, b in label_pairs}
+    if len(refs) < 2 or len(tgts) < 2:  # no ref×target grid to over-expand into
         return False
     if not (label_pairs - opt_pairs):  # no pairs beyond the optimizer
         return False
@@ -223,13 +231,20 @@ def _gid_key(gid: str) -> str:
 
 
 def index_groups(groups: list[dict]) -> dict[str, dict]:
-    """Index group dicts by their 8-char group-id key.
+    """Index group dicts by their 8-char group-id key, keeping the first seen.
 
-    Emits nothing on collision but keeps the first seen (callers may warn).
+    Warns on the (astronomically unlikely) 8-hex-char prefix collision so a
+    dropped group is never silent.
     """
     idx: dict[str, dict] = {}
     for g in groups:
-        idx.setdefault(_gid_key(g["group_id"]), g)
+        key = _gid_key(g["group_id"])
+        if key in idx and idx[key]["group_id"] != g["group_id"]:
+            print(
+                f"WARN: group-id prefix collision on {key}; keeping first, dropping {g['group_id']}"
+            )
+            continue
+        idx.setdefault(key, g)
     return idx
 
 
@@ -641,16 +656,20 @@ def main(argv: list[str] | None = None) -> int:
         cache_group = cache_groups.get(key)
         sidecar_group = sidecar_groups.get(key)
         if cache_group is None:
-            print(f"WARN: group {key} absent from cache and sidecar; skipping")
+            where = "sidecar only" if sidecar_group is not None else "neither source"
+            print(f"WARN: group {key} has no stitch-cache geometries ({where}); skipping")
             continue
-        review = build_review(row, cache_group, sidecar_group)
+        try:
+            review = build_review(row, cache_group, sidecar_group)
+            render_overview(review, cache_group, out_dir / f"review_{key}.png")
+            n_overview += 1
+            if review.has_diff:
+                render_zoom(review, cache_group, sidecar_group, out_dir / f"zoom_{key}.png")
+                n_zoom += 1
+        except Exception as exc:  # noqa: BLE001 — one bad row must not abort the batch
+            print(f"WARN: failed to render group {key}: {exc!r}; skipping")
+            continue
         reviews.append(review)
-
-        render_overview(review, cache_group, out_dir / f"review_{key}.png")
-        n_overview += 1
-        if review.has_diff:
-            render_zoom(review, cache_group, sidecar_group, out_dir / f"zoom_{key}.png")
-            n_zoom += 1
 
     print(format_summary(reviews))
     print(f"\nRendered {n_overview} overview + {n_zoom} zoom PNG(s) to {out_dir}")
