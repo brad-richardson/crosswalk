@@ -583,32 +583,42 @@ def run_panel_on_group(
 # Class-consistency gate
 # ---------------------------------------------------------------------------
 #
-# Deterministic mitigation for a specific auto-accept failure mode: a
-# pedestrian-mode reference segment (footway/sidewalk/...) matched to a
-# vehicular-mode target segment (or vice-versa). A sidewalk that runs alongside
-# a road is a DIFFERENT physical feature than the road, so such a cross-mode
-# edge is almost never a true same-traveled-way correspondence — but its
-# geometry is parallel and nearby, which can fool a geometry-only panel.
+# Deterministic mitigation for a specific auto-accept failure mode: a reference
+# segment of one travel MODE (e.g. a pedestrian footway/sidewalk, or a bike
+# cycleway) matched to a target segment of a DIFFERENT mode (e.g. a vehicular
+# road), or vice-versa. A sidewalk or a separated cycleway that runs alongside a
+# road is a DIFFERENT physical feature than the road, so such a cross-mode edge
+# is almost never a true same-traveled-way correspondence — but its geometry is
+# parallel and nearby, which can fool a geometry-only panel.
 #
 # The gate demotes any auto-accept candidate whose CHOSEN edge set contains a
 # cross-mode edge to human review. It only fires when BOTH sides are
-# unambiguously classified: same-mode pairs, and any pair where a class is
-# missing/unknown/ambiguous, pass (we do not over-gate on absent data).
+# unambiguously classified into DIFFERENT modes: same-mode pairs, and any pair
+# where a class is missing/unknown/ambiguous (neutral), pass (we do not
+# over-gate on absent data).
 #
-# Mode-set membership (derived from the OSM `class` values that actually appear
-# in the Boston stitch batches — footway/path/pedestrian/steps for pedestrian,
-# and motorway..living_street for vehicular):
+# Mode-set membership (derived from the OSM `class` values that appear in the
+# stitch batches — footway/path/pedestrian/steps for pedestrian, cycleway for
+# bike, and motorway..living_street for vehicular):
 #
-#   * PEDESTRIAN_CLASSES — foot-only / non-vehicular ways. `sidewalk` and
-#     `crossing` are included for completeness (standard OSM footway subtypes)
-#     even though the current Boston data tags them as `footway`.
+#   * PEDESTRIAN_CLASSES — foot-only ways. `sidewalk` and `crossing` are
+#     included for completeness (standard OSM footway subtypes) even though the
+#     current Boston data tags them as `footway`.
 #   * VEHICULAR_CLASSES — the drivable road hierarchy.
-#   * Everything else (cycleway, track, alley, unknown, "", None) is treated as
-#     NEUTRAL and never triggers the gate. cycleway/track are deliberately
-#     neutral: they are genuinely ambiguous (an on-road bike lane vs. a
-#     separated path; a farm/service track drivable or not), and the gate's job
-#     is to catch clear pedestrian-vs-road mismatches, not to adjudicate
-#     ambiguous classes. `alley` does not appear in the data at all.
+#   * CYCLEWAY_CLASSES — the bike mode. `cycleway` is its OWN mode (no longer
+#     neutral): on co_bogota_bike_network the reference is road-class centerlines
+#     while the targets are `cycleway`, so a road↔cycleway edge is a genuine
+#     cross-mode mismatch that must route to human review rather than auto-accept
+#     (Brad's decision, 2026-07-05). Modes are compared pairwise (any two
+#     DIFFERENT non-neutral modes are cross-mode), so pedestrian↔cycleway is ALSO
+#     treated as cross-mode — the conservative default (Brad ruled only on
+#     road↔cycleway; flagged as a reviewer-checkable default in the PR body).
+#     cycleway↔cycleway stays same-mode and remains auto-acceptable.
+#   * Everything else (track, alley, unknown, "", None) is treated as NEUTRAL and
+#     never triggers the gate. `track` is deliberately neutral: it is genuinely
+#     ambiguous (a farm/service track drivable or not), and the gate's job is to
+#     catch clear cross-mode mismatches, not to adjudicate ambiguous classes.
+#     `alley` does not appear in the data at all.
 
 PEDESTRIAN_CLASSES = frozenset({"footway", "sidewalk", "path", "pedestrian", "steps", "crossing"})
 VEHICULAR_CLASSES = frozenset(
@@ -626,30 +636,39 @@ VEHICULAR_CLASSES = frozenset(
         "road",
     }
 )
+CYCLEWAY_CLASSES = frozenset({"cycleway"})
 
 
 def road_class_mode(cls: str | None) -> str:
     """Classify an OSM road class into a travel mode.
 
-    Returns "pedestrian", "vehicular", or "neutral" (unknown/ambiguous/missing).
+    Returns "pedestrian", "vehicular", "bike", or "neutral"
+    (unknown/ambiguous/missing).
     """
     c = (cls or "").strip().lower()
     if c in PEDESTRIAN_CLASSES:
         return "pedestrian"
     if c in VEHICULAR_CLASSES:
         return "vehicular"
+    if c in CYCLEWAY_CLASSES:
+        return "bike"
     return "neutral"
 
 
 def is_cross_mode_edge(ref_class: str | None, target_class: str | None) -> bool:
-    """True iff one side is unambiguously pedestrian and the other vehicular.
+    """True iff the two sides are unambiguously classified into DIFFERENT modes.
 
-    Same-mode pairs and any pair involving a neutral/unknown/missing class
-    return False (they pass the gate).
+    Modes are pedestrian / vehicular / bike (see :func:`road_class_mode`). A pair
+    is cross-mode iff neither side is neutral AND the two modes differ — so
+    road↔cycleway and pedestrian↔cycleway are cross-mode, while cycleway↔cycleway
+    (and any same-mode pair) is not. Any pair involving a neutral/unknown/missing
+    class returns False (it passes the gate — we do not over-gate on absent data).
     """
     a = road_class_mode(ref_class)
     b = road_class_mode(target_class)
-    return {a, b} == {"pedestrian", "vehicular"}
+    if a == "neutral" or b == "neutral":
+        return False
+    return a != b
 
 
 def has_cross_mode_edge(edge_classes: list[tuple[str | None, str | None]]) -> bool:
