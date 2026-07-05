@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from shapely.geometry import LineString, mapping, shape
-from shapely.ops import substring
+from shapely.ops import substring, unary_union
 
 from ...matching.alternatives import _shorten_id
 from ...matching.sliver import (
@@ -40,6 +40,91 @@ def _validate_dataset(dataset: str) -> bool:
     if not dataset:
         return False
     return dataset in list_datasets()
+
+
+# Display-only cap on how many spatial-context segments are presented per side
+# (pills, map geometries, and the group-context-ids JSON blob). PR #262 expanded
+# the context clip envelope to a group's full bounds, which is correct for the
+# group itself but balloons the *context* layer for large groups (e.g. Boston
+# cbc5cae8: 51x45 group carrying 4,470 context refs / 615 context targets). That
+# swamps the UI with thousands of grey pills and a heavy Leaflet layer. We cap
+# the PRESENTATION to the N context segments nearest the group; this never
+# touches group data, the cached JSON, or recorded labels. Context pills are not
+# selectable as group edges — the manual submit cross-products only against
+# group.edges (which never reference context ids), so a context pill only toggles
+# map visibility. Median per-group context_ref is ~91 (< cap), so typical groups
+# render unchanged; only oversized groups get bounded.
+CONTEXT_DISPLAY_CAP = 150
+
+
+def _cap_context_ids(group: dict, cap: int = CONTEXT_DISPLAY_CAP) -> dict:
+    """Select the ``cap`` context segments per side nearest the group.
+
+    Returns a dict with the capped, order-stable id lists plus the true totals so
+    the template can surface truncation honestly. "Nearest" = shapely distance
+    from each context segment geometry to the union of the group's own segment
+    geometries (cheap: single-page render, not the feature hot path).
+
+    Display-only: group ref/target ids, edges, pills, and the cached batch JSON
+    are untouched. When a side is at/under the cap its ids are returned unchanged.
+    """
+    ctx_ref_ids = list(group.get("context_ref_ids", []))
+    ctx_target_ids = list(group.get("context_target_ids", []))
+    ref_total = len(ctx_ref_ids)
+    target_total = len(ctx_target_ids)
+
+    if ref_total <= cap and target_total <= cap:
+        return {
+            "ref_ids": ctx_ref_ids,
+            "target_ids": ctx_target_ids,
+            "ref_total": ref_total,
+            "target_total": target_total,
+        }
+
+    # Anchor: union of whichever of the group's own geometries parse. If none
+    # parse (no usable anchor), fall back to the original prefix order (ids[:cap]).
+    anchor = None
+    group_geoms = []
+    for geom in list(group.get("ref_geometries", {}).values()) + list(
+        group.get("target_geometries", {}).values()
+    ):
+        try:
+            shp = shape(geom)
+            if not shp.is_empty:
+                group_geoms.append(shp)
+        except Exception:
+            continue
+    if group_geoms:
+        try:
+            anchor = unary_union(group_geoms)
+        except Exception:
+            anchor = None
+
+    def _nearest(ids: list[str], geoms: dict, side_total: int) -> list[str]:
+        if side_total <= cap:
+            return ids
+        if anchor is None:
+            return ids[:cap]
+        scored = []
+        for idx, sid in enumerate(ids):
+            geom = geoms.get(sid)
+            try:
+                dist = shape(geom).distance(anchor) if geom is not None else float("inf")
+            except Exception:
+                dist = float("inf")
+            # idx as tiebreaker keeps order stable for equal distances
+            scored.append((dist, idx, sid))
+        scored.sort()
+        return [sid for _, _, sid in scored[:cap]]
+
+    return {
+        "ref_ids": _nearest(ctx_ref_ids, group.get("context_ref_geometries", {}), ref_total),
+        "target_ids": _nearest(
+            ctx_target_ids, group.get("context_target_geometries", {}), target_total
+        ),
+        "ref_total": ref_total,
+        "target_total": target_total,
+    }
 
 
 def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: float) -> dict | None:
@@ -152,8 +237,17 @@ def _build_group_geojson(group: dict) -> dict:
     # Tier 3: Context segments — same role as group segments so they get
     # identical solid styling when activated.  They start hidden via
     # hiddenSegments in the JS and appear as normal edges when toggled on.
+    # Capped to the nearest N per side (display-only; see _cap_context_ids).
+    # Iterating the capped id lists (not the geometry dicts) keeps the map,
+    # pills, and context-ids JSON on one consistent ordering + label scheme.
+    capped = _cap_context_ids(group)
+    ctx_ref_geoms = group.get("context_ref_geometries", {})
+    ctx_target_geoms = group.get("context_target_geometries", {})
     n_ref = len(ref_id_list)
-    for i, (rid, geom) in enumerate(group.get("context_ref_geometries", {}).items()):
+    for i, rid in enumerate(capped["ref_ids"]):
+        geom = ctx_ref_geoms.get(rid)
+        if geom is None:
+            continue
         features.append(
             {
                 "type": "Feature",
@@ -166,7 +260,10 @@ def _build_group_geojson(group: dict) -> dict:
             }
         )
     n_target = len(target_id_list)
-    for i, (tid, geom) in enumerate(group.get("context_target_geometries", {}).items()):
+    for i, tid in enumerate(capped["target_ids"]):
+        geom = ctx_target_geoms.get(tid)
+        if geom is None:
+            continue
         features.append(
             {
                 "type": "Feature",
@@ -281,9 +378,17 @@ def _build_group_context(group: dict) -> dict:
     context_target_names = group.get("context_target_names", {})
     context_target_classes = group.get("context_target_classes", {})
 
+    # Cap the presented context to the nearest N per side (display-only; the
+    # cached batch, group edges, and recorded labels are untouched). The map
+    # (_build_group_geojson) and the context-ids JSON blob use the same capped
+    # ordering so pills, geometries, and labels stay consistent.
+    capped = _cap_context_ids(group)
+    capped_ref_ids = capped["ref_ids"]
+    capped_target_ids = capped["target_ids"]
+
     context_ref_details = [
         {"id": rid, "cls": context_ref_classes.get(rid, ""), "name": context_ref_names.get(rid, "")}
-        for rid in group.get("context_ref_ids", [])
+        for rid in capped_ref_ids
     ]
     context_target_details = [
         {
@@ -291,8 +396,11 @@ def _build_group_context(group: dict) -> dict:
             "cls": context_target_classes.get(tid, ""),
             "name": context_target_names.get(tid, ""),
         }
-        for tid in group.get("context_target_ids", [])
+        for tid in capped_target_ids
     ]
+    context_capped = capped["ref_total"] > len(capped_ref_ids) or capped["target_total"] > len(
+        capped_target_ids
+    )
 
     # Edges enriched with a per-edge sliver flag for the client-side UI. The map
     # + panel use these to render coverage gaps and a live sliver-exclusion count.
@@ -311,6 +419,12 @@ def _build_group_context(group: dict) -> dict:
         "target_details": target_details,
         "context_ref_details": context_ref_details,
         "context_target_details": context_target_details,
+        "context_ref_total": capped["ref_total"],
+        "context_target_total": capped["target_total"],
+        "context_capped": context_capped,
+        # Combined capped id list for the map's initial hidden-context set (JSON
+        # blob in group.html). Keeps the DOM/map bounded for large groups.
+        "context_ids": list(capped_ref_ids) + list(capped_target_ids),
         **_build_stitch_options(group),
     }
 

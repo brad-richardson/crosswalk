@@ -1752,3 +1752,122 @@ class TestStitchingUiHooks:
             assert "is_sliver" in html
         finally:
             self._stop(patches)
+
+
+class TestContextDisplayCap:
+    """Display-only cap on presented spatial-context segments.
+
+    PR #262 expanded the context clip envelope to the group's full bounds, which
+    ballooned the context layer for large groups (thousands of pills/geometries).
+    ``_cap_context_ids`` bounds the PRESENTATION to the N nearest per side without
+    touching group data, the cached JSON, or recorded labels.
+    """
+
+    @staticmethod
+    def _pt_line(x0, y0, x1, y1):
+        return {"type": "LineString", "coordinates": [[x0, y0], [x1, y1]]}
+
+    def _big_group(self, n_ctx_ref=400, n_ctx_target=400):
+        """Group at the origin with many context segments placed at increasing x
+        distance so 'nearest' ordering is deterministic and checkable."""
+        # Group's own geometry sits near x=0.
+        ref_geoms = {"r1": self._pt_line(0.0, 0.0, 0.001, 0.0)}
+        target_geoms = {"t1": self._pt_line(0.0, 0.0, 0.0, 0.001)}
+        # Context refs/targets march away along +x: id ctxr{i} at x=i (far = large i)
+        ctx_ref_ids = [f"ctxr{i}" for i in range(n_ctx_ref)]
+        ctx_target_ids = [f"ctxt{i}" for i in range(n_ctx_target)]
+        ctx_ref_geoms = {
+            f"ctxr{i}": self._pt_line(0.01 * (i + 1), 0.0, 0.01 * (i + 1) + 0.001, 0.0)
+            for i in range(n_ctx_ref)
+        }
+        ctx_target_geoms = {
+            f"ctxt{i}": self._pt_line(0.01 * (i + 1), 0.0, 0.01 * (i + 1) + 0.001, 0.0)
+            for i in range(n_ctx_target)
+        }
+        return {
+            "group_id": "big",
+            "match_type": "N:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+            "ref_geometries": ref_geoms,
+            "target_geometries": target_geoms,
+            "context_ref_ids": ctx_ref_ids,
+            "context_target_ids": ctx_target_ids,
+            "context_ref_geometries": ctx_ref_geoms,
+            "context_target_geometries": ctx_target_geoms,
+        }
+
+    def test_large_group_capped_to_nearest(self):
+        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
+
+        group = self._big_group(n_ctx_ref=400, n_ctx_target=300)
+        capped = _cap_context_ids(group)
+        # Totals report the true (uncapped) counts.
+        assert capped["ref_total"] == 400
+        assert capped["target_total"] == 300
+        # Each side capped to CONTEXT_DISPLAY_CAP.
+        assert len(capped["ref_ids"]) == CONTEXT_DISPLAY_CAP
+        assert len(capped["target_ids"]) == CONTEXT_DISPLAY_CAP
+        # Nearest kept: ctxr0..ctxr{cap-1} are closest to the group at x~0.
+        kept = set(capped["ref_ids"])
+        assert "ctxr0" in kept
+        assert f"ctxr{CONTEXT_DISPLAY_CAP - 1}" in kept
+        assert f"ctxr{CONTEXT_DISPLAY_CAP}" not in kept  # first dropped one
+        assert "ctxr399" not in kept  # farthest dropped
+
+    def test_small_group_unchanged(self):
+        from matcher.web.routes.stitching import _cap_context_ids
+
+        group = self._big_group(n_ctx_ref=8, n_ctx_target=7)
+        capped = _cap_context_ids(group)
+        # Under the cap: ids returned verbatim, in original order.
+        assert capped["ref_ids"] == [f"ctxr{i}" for i in range(8)]
+        assert capped["target_ids"] == [f"ctxt{i}" for i in range(7)]
+        assert capped["ref_total"] == 8
+        assert capped["target_total"] == 7
+
+    def test_no_context_is_noop(self):
+        from matcher.web.routes.stitching import _cap_context_ids
+
+        capped = _cap_context_ids({"ref_ids": ["r1"], "target_ids": ["t1"]})
+        assert capped["ref_ids"] == []
+        assert capped["target_ids"] == []
+        assert capped["ref_total"] == 0
+        assert capped["target_total"] == 0
+
+    def test_missing_anchor_geometry_keeps_prefix(self):
+        """When group geometries don't parse, fall back to the first N by order."""
+        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
+
+        group = self._big_group(n_ctx_ref=200, n_ctx_target=0)
+        group["ref_geometries"] = {}  # no anchor
+        group["target_geometries"] = {}
+        capped = _cap_context_ids(group)
+        assert capped["ref_ids"] == [f"ctxr{i}" for i in range(CONTEXT_DISPLAY_CAP)]
+
+    def test_context_builder_surfaces_truncation(self):
+        from matcher.web.routes.stitching import _build_group_context
+
+        group = self._big_group(n_ctx_ref=400, n_ctx_target=50)
+        # names/classes lookups default to "" — present so the builder runs.
+        ctx = _build_group_context(group)
+        assert ctx["context_capped"] is True
+        assert ctx["context_ref_total"] == 400
+        assert ctx["context_target_total"] == 50
+        assert len(ctx["context_ref_details"]) == 150
+        # target side is under the cap -> untouched
+        assert len(ctx["context_target_details"]) == 50
+        # Combined capped id list for the map JSON blob is bounded.
+        assert len(ctx["context_ids"]) == 150 + 50
+
+    def test_geojson_capped(self):
+        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _build_group_geojson
+
+        group = self._big_group(n_ctx_ref=400, n_ctx_target=400)
+        fc = _build_group_geojson(group)
+        ctx_features = [
+            f for f in fc["features"] if f["properties"].get("_id", "").startswith("ctx")
+        ]
+        # 1 group ref + 1 group target are full geoms too; count only context ids.
+        assert len(ctx_features) == 2 * CONTEXT_DISPLAY_CAP
