@@ -301,6 +301,47 @@ def test_class_mismatch_rejected(tmp_path, labels_dir):
     assert g.reason == REASON_CLASS_MISMATCH
 
 
+def test_road_cycleway_class_mismatch_rejected(tmp_path, labels_dir):
+    # road<->cycleway is cross-mode on the export path too (co_bogota_bike_network
+    # shape: road-class ref, cycleway target) — must not auto-export.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "bikemode",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "ref_classes": {"r1": "primary"},
+                "target_classes": {"t1": "cycleway"},
+            }
+        ],
+    )
+    g = _by_gid(_plan([b], labels_dir))["bikemode"]
+    assert not g.exported
+    assert g.reason == REASON_CLASS_MISMATCH
+
+
+def test_cycleway_cycleway_exported(tmp_path, labels_dir):
+    # cycleway<->cycleway is same-mode and stays exportable.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "bikebike",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "ref_classes": {"r1": "cycleway"},
+                "target_classes": {"t1": "cycleway"},
+            }
+        ],
+    )
+    g = _by_gid(_plan([b], labels_dir))["bikebike"]
+    assert g.exported
+    assert g.reason == REASON_EXPORTED
+
+
 def test_sliver_dropped_but_group_exported(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
