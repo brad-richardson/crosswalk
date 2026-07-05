@@ -33,7 +33,7 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
 
 1. **The shipped output is barely evaluated.** All gated metrics measure the
    pairwise classifier. The optimizer's final assignments are evaluated by the
-   labeled stitching groups (`labels/stitching/`). As of this branch cbench
+   labeled stitching groups (`labels/stitching/`). Shipped in #258, cbench
    computes a **modernized, non-blocking** stitch-level metric on every run
    (default-on: the `labels/stitching` dir is auto-resolved; skipped silently
    when a dataset has none, and any error is swallowed). It reaches parity with
@@ -43,14 +43,17 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
    rate, and a per-labeler breakdown (human vs `panel_*`). The standalone sliver
    rule in `cbench.eval.sliver` is parity-tested against
    `matcher.config.is_sliver_edge` (`tests/unit/test_cbench_sliver_parity.py`).
-   Observed on Boston (`us_boston_streets`, 38 labels → 34 groups mapped): raw
-   edge F1 ≈ 0.814, exact 0.53; filtered F1 ≈ 0.815 (1 sliver-affected group).
-   Still ungated. Remaining: grow stitching labels to 100+, then **promote to a
-   CI gate** on stitch-level precision/recall (design in
+   Observed at the #258 snapshot on Boston (`us_boston_streets`, 38 labels → 34
+   groups mapped): raw edge F1 ≈ 0.814, exact 0.53; filtered F1 ≈ 0.815 (1
+   sliver-affected group). Those figures predate the #263 clip-truncation
+   remediation and the #267 corridor-aware regroup; the curated set has since
+   changed (`us_boston_streets` now 73 labels, `us_seattle_sidewalks` 9), so
+   re-measure before citing. Still ungated. Remaining: grow stitching labels to
+   100+, then **promote to a CI gate** on stitch-level precision/recall (design in
    `docs/plans/2026-02-21-stitch-eval-design.md`), then consider a learned group
    resolver.
 2. **~~Uncalibrated probabilities under five hand-set thresholds.~~ (largely
-   addressed — isotonic calibration shipped.)** XGBoost scores are not
+   addressed — isotonic calibration shipped in #266.)** XGBoost scores are not
    guaranteed to be probabilities; `scoring_match/review_threshold` (0.5/0.1),
    `optimizer_match/review_threshold` (0.75/0.5), and `bridge_min_confidence`
    (0.5) are static config defaults. **Fixed:** `MLMatcher.train` now fits an
@@ -67,8 +70,9 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
    single global calibrator overall, so a global calibrator is used and the
    thresholds are left unchanged. **Deferred follow-ups:** (a) fitting the
    thresholds themselves per type from the calibrated PR curve (data-thin, not
-   yet justified); (b) feeding calibrated confidence into the optimizer group
-   gates was left to the corridor-aware grouping owner to avoid conflicts;
+   yet justified); (b) corridor-aware grouping + a structural export gate shipped
+   in #267, but feeding calibrated confidence into its optimizer group gates is
+   still open;
    (c) the Spark export emits calibration knots into `manifest.json`
    (`applied=false`) but the Spark job does not yet consume them
    (tf-data-platform work).
@@ -86,12 +90,25 @@ accuracy 89.2%. LOO-by-type macro-F1 baselines: road_good 0.909, road_poor
    agree, coin-flip when they disagree — see `research/agent_eval_full_sweep.md`)
    is designed but unbuilt; `agent_weight=0.0` keeps agent labels out of
    training today.
-5. **Known train/serve skews.** Graphlet/clustering features are computed on
-   the full network at backfill time but candidate-only subgraphs at inference
-   (`cli/main.py` backfill comments acknowledge this). The Spark port has
-   documented feature skews (`class_similarity` tiering, name normalization —
-   `docs/SPARK_MODEL_CARD.md`). Either fix the skew or drop the affected
-   features (ablation suggests graphlets are near-free to drop).
+5. **Known train/serve skews.** The graphlet/clustering skew (full network at
+   backfill vs. candidate-only subgraph at inference) is **fixed**: post-#253 all
+   consumers — inference, labeling, backfill — build graphlet/clustering graphs on
+   the full ref/target networks through the shared `prepare_worker_data()`
+   (`features/pipeline.py`). The paired backlog idea — *drop graphlet features
+   (skew + Spark-speed twofer)* — was **re-evaluated and rejected on the evidence**
+   (2026-07-05, `research/graphlet_drop_reevaluation.md`): both drop rationales are
+   now void. The Spark-portable feature set excludes graphlets by construction (no
+   Spark inference speed to reclaim), and the local graph build costs only ~0.6–0.9 s
+   per dataset post-#255 — trivial next to per-pair work. Graphlet signal is
+   weak-but-real and US-concentrated (folded-AUC 0.576 US vs. 0.509 — near-random —
+   non-US), so the diverse-geography argument that justifies the topology/endpoint
+   features does **not** extend to graphlets. Decision: **keep in the local model,
+   keep excluded from Spark** (the current state); locally they are
+   redundant-but-harmless (category ablation −0.0016, within one CV-F1 std), which
+   the project's pruning policy says not to prune until the label base clears ~10K
+   diverse labels — revisit only then. The Spark port still has documented feature
+   skews unrelated to graphlets (`class_similarity` tiering, name normalization —
+   `docs/SPARK_MODEL_CARD.md`).
 6. **Blocking-conditioned ground truth.** All labels originate from blocked
    candidates, so recall against never-blocked true matches (>50–75 m apart,
    MultiLineString targets) is structurally unmeasurable. `matcher
@@ -185,7 +202,9 @@ uv run python scripts/ablation_study.py --mode category \
 1. Scale stitching-group ground truth (agent-assisted; separate plan doc), then
    promote the (now shipped, non-blocking) cbench stitch-level metric to a CI
    gate once 100+ labels exist.
-2. Isotonic calibration + per-dataset-type thresholds.
+2. ~~Isotonic calibration~~ (shipped, #266); per-dataset-type calibration was
+   measured and rejected. Remaining: per-type *thresholds* from the calibrated PR
+   curve (deferred, data-thin) and Spark-side consumption of the exported knots.
 3. Ground-truth trust cascade for pair labels (ensemble-agreement routing,
    provenance-tiered training weights).
 4. Learned group resolver once 100+ stitching labels exist.
