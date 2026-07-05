@@ -72,8 +72,9 @@ inputs changed, `reoptimize` refuses and tells you to `run --force`.
 Reports `local_id`-level GERS match churn between two factory releases of a
 dataset: `same` (identical GERS set), `changed` (matched in both, different set),
 `lost` (dropped out), `gained` (newly matched). `--format md|csv`, `-o FILE` to
-write. This is the consumer-facing release-notes artifact for a new Overture
-release.
+write. Only `match_decision == "match"` bridge rows count as matched (review-band
+rows are excluded, matching the pipeline's own matched/unmatched accounting). This
+is the consumer-facing release-notes artifact for a new Overture release.
 
 ### `matcher factory status`
 
@@ -119,7 +120,8 @@ The Overture release identifier is read from the segments file's `.meta.yaml`
     "bridge_min_confidence", "enable_calibration", "enable_score_propagation",
     "optimizer_corridor_aware", "optimizer_corridor_max_turn_deg",
     "optimizer_glue_min_confidence", "optimizer_glue_min_confidence_raw",
-    "snap_tolerance_m", "stitch_export_*", "stitch_persist_rejected_edges",
+    "optimizer_review_threshold", "contiguity_tolerance_m",
+    "stitch_export_*", "stitch_persist_rejected_edges",
     "stitch_rejected_edges_max_per_group",
     "resolver_prune_enabled", "resolver_prune_overrides"   // the tuned allowlist
   },
@@ -147,12 +149,14 @@ The Overture release identifier is read from the segments file's `.meta.yaml`
 
 ### Staleness keys — how incremental/resume works
 
-- **`score_key`** = hash of everything that changes the *scores*: input file
-  fingerprints (size + mtime), model fingerprint, `FEATURE_VERSION`,
-  `DATA_VERSION`, buffer distance. The `scored_candidates.parquet` cache is valid
-  iff its manifest's `score_key` still matches — this is what `reoptimize` checks.
+- **`score_key`** = hash of everything that changes the *scores* (or their
+  on-disk form): input file fingerprints (size + mtime), model fingerprint,
+  `FEATURE_VERSION`, `DATA_VERSION`, buffer distance, method, and the scored-cache
+  schema version. The `scored_candidates.parquet` cache is valid iff its
+  manifest's `score_key` still matches — this is what `reoptimize` checks.
 - **`optimize_key`** = hash of the optimizer/prune/export settings snapshot
-  (including the resolver-prune allowlist). These can change *without* invalidating
+  (including the resolver-prune allowlist and `optimizer_review_threshold`) plus
+  the optimizer `min_confidence` argument. These can change *without* invalidating
   the scores.
 - **`full_key`** = hash of both. `factory run` **skips** a dataset whose existing
   manifest has the same `full_key` (unless `--force`).

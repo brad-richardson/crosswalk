@@ -118,6 +118,10 @@ def test_score_key_ignores_optimize_settings(tmp_path):
     assert compute_score_key(ref_fp, tgt_fp, model_fp, 50.0) != k1
     # Different input fingerprint -> different score_key
     assert compute_score_key({**ref_fp, "size": 999}, tgt_fp, model_fp, 75.0) != k1
+    # Different method -> different score_key
+    assert compute_score_key(ref_fp, tgt_fp, model_fp, 75.0, method="other") != k1
+    # Different cache schema version -> different score_key (layout invalidation)
+    assert compute_score_key(ref_fp, tgt_fp, model_fp, 75.0, cache_schema_version=999) != k1
 
 
 def test_optimize_and_full_key(tmp_path):
@@ -126,6 +130,8 @@ def test_optimize_and_full_key(tmp_path):
     oa = compute_optimize_key(snap_a)
     ob = compute_optimize_key(snap_b)
     assert oa != ob
+    # min_confidence (optimizer arg) participates in optimize_key
+    assert compute_optimize_key(snap_a, min_confidence=0.2) != oa
 
     score_key = "abc123"
     full_a = compute_full_key(score_key, oa)
@@ -133,6 +139,24 @@ def test_optimize_and_full_key(tmp_path):
     assert full_a != full_b  # optimize change flips full_key
     # Same inputs -> same full_key
     assert compute_full_key(score_key, oa) == full_a
+
+
+def test_settings_snapshot_covers_decision_knobs():
+    """Every optimize-phase decision knob must be in the snapshot (else a change
+    to it would wrongly skip via full_key). optimizer_review_threshold is the one
+    the adversarial review caught missing."""
+    from matcher.factory.manifest import settings_snapshot
+
+    snap = settings_snapshot()
+    for knob in (
+        "optimizer_review_threshold",
+        "bridge_min_confidence",
+        "optimizer_glue_min_confidence",
+        "resolver_prune_enabled",
+        "resolver_prune_overrides",
+        "contiguity_tolerance_m",
+    ):
+        assert knob in snap, f"{knob} missing from settings_snapshot()"
 
 
 def test_is_up_to_date(tmp_path):
@@ -168,6 +192,14 @@ def test_build_keys_reoptimize_semantics(tmp_path, monkeypatch):
     assert k_a["score_key"] == k_b["score_key"]  # scores unaffected
     assert k_a["optimize_key"] != k_b["optimize_key"]
     assert k_a["full_key"] != k_b["full_key"]
+
+    # min_confidence (optimizer arg) flips optimize_key but not score_key
+    k_c = build_keys(pair, 75.0, min_confidence=0.3)
+    assert k_c["score_key"] == k_b["score_key"]
+    assert k_c["optimize_key"] != k_b["optimize_key"]
+    # method flips score_key
+    k_d = build_keys(pair, 75.0, method="other")
+    assert k_d["score_key"] != k_b["score_key"]
 
 
 def test_manifest_round_trip(tmp_path):
@@ -292,6 +324,35 @@ def test_compute_delta_classifies(tmp_path):
     md = result.to_markdown()
     assert "GERS churn delta" in md
     assert "changed" in md
+
+
+def test_compute_delta_excludes_review_rows(tmp_path):
+    """REVIEW-decision bridge rows must not count as matches in the delta —
+    the pipeline routes them to unmatched, so counting them would misreport
+    review-band flapping as GERS churn."""
+    a = tmp_path / "from.parquet"
+    b = tmp_path / "to.parquet"
+    pd.DataFrame(
+        {
+            "local_id": ["l1", "l2"],
+            "gers_id": ["x", "y"],
+            "match_decision": ["match", "review"],
+        }
+    ).to_parquet(a)
+    pd.DataFrame(
+        {
+            "local_id": ["l1", "l2"],
+            "gers_id": ["x", "y"],
+            "match_decision": ["match", "match"],
+        }
+    ).to_parquet(b)
+
+    result = compute_delta("ds", a, b, "r1", "r2")
+    # l1: same. l2: review->match counts as GAINED (was not a match before).
+    assert result.summary["same"] == 1
+    assert result.summary["gained"] == 1
+    assert result.summary["changed"] == 0
+    assert result.summary["lost"] == 0
 
 
 def test_compute_delta_multi_gers_set(tmp_path):

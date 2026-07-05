@@ -60,11 +60,18 @@ class FactoryPaths:
         return self.dataset_dir(release, name) / SCORED_CACHE_FILENAME
 
 
-def build_keys(pair: DatasetPair, buffer_distance_m: float) -> dict[str, Any]:
+def build_keys(
+    pair: DatasetPair,
+    buffer_distance_m: float,
+    method: str = "xgboost",
+    min_confidence: float = 0.1,
+) -> dict[str, Any]:
     """Compute staleness keys + provenance blocks for a pair.
 
     Returns a dict with ``inputs``, ``model``, ``snapshot``, ``score_key``,
-    ``optimize_key``, ``full_key``.
+    ``optimize_key``, ``full_key``. ``method`` participates in ``score_key``;
+    ``min_confidence`` (an optimizer argument, not a settings field) participates
+    in ``optimize_key`` — so a future CLI flag for either cannot silently skip.
     """
     ref_fp = manifest_mod.file_fingerprint(pair.reference_path)
     target_fp = manifest_mod.file_fingerprint(pair.target_path)
@@ -74,8 +81,10 @@ def build_keys(pair: DatasetPair, buffer_distance_m: float) -> dict[str, Any]:
     model_fp = manifest_mod.model_fingerprint()
     snapshot = manifest_mod.settings_snapshot()
 
-    score_key = manifest_mod.compute_score_key(ref_fp, target_fp, model_fp, buffer_distance_m)
-    optimize_key = manifest_mod.compute_optimize_key(snapshot)
+    score_key = manifest_mod.compute_score_key(
+        ref_fp, target_fp, model_fp, buffer_distance_m, method=method
+    )
+    optimize_key = manifest_mod.compute_optimize_key(snapshot, min_confidence=min_confidence)
     full_key = manifest_mod.compute_full_key(score_key, optimize_key)
     return {
         "inputs": {"reference": ref_fp, "target": target_fp, "connectors": connectors_fp},
@@ -148,7 +157,7 @@ def run_dataset(
     manifest_path = paths.manifest(release, pair.name)
     cache_path = paths.scored_cache(release, pair.name)
 
-    keys = build_keys(pair, buffer_distance_m)
+    keys = build_keys(pair, buffer_distance_m, method=method, min_confidence=min_confidence)
 
     if not force and is_up_to_date(manifest_path, bridge_path, keys["full_key"]):
         logger.info(f"[{pair.name}] up-to-date (full_key match) — skipping")
@@ -283,7 +292,7 @@ def reoptimize_dataset(
             "error": "no manifest; run 'matcher factory run' first",
         }
 
-    keys = build_keys(pair, buffer_distance_m)
+    keys = build_keys(pair, buffer_distance_m, method=method, min_confidence=min_confidence)
     prev = Manifest.read(manifest_path)
     if prev.score_key != keys["score_key"]:
         return {
@@ -292,6 +301,18 @@ def reoptimize_dataset(
             "status": "failed",
             "error": "scored cache is stale (inputs/model/FEATURE_VERSION changed); "
             "run 'matcher factory run --force'",
+        }
+    # Belt-and-braces: score_key already folds in SCORED_CACHE_SCHEMA_VERSION, but
+    # a manifest hand-edited or produced by a future writer could pass the key
+    # check with a different recorded layout version — refuse to misread it.
+    prev_cache_schema = (prev.scored_cache or {}).get("schema_version")
+    if prev_cache_schema is not None and prev_cache_schema != SCORED_CACHE_SCHEMA_VERSION:
+        return {
+            "dataset": pair.name,
+            "release": release,
+            "status": "failed",
+            "error": f"scored cache schema v{prev_cache_schema} != reader "
+            f"v{SCORED_CACHE_SCHEMA_VERSION}; run 'matcher factory run --force'",
         }
 
     log_sink = logger.add(

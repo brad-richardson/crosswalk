@@ -5,6 +5,11 @@ local id's match into: ``same`` (identical GERS set), ``changed`` (matched in bo
 releases but to a different GERS set), ``lost`` (matched in ``from``, unmatched in
 ``to``), ``gained`` (unmatched in ``from``, matched in ``to``). This is the
 consumer-facing release-notes artifact for a new Overture release.
+
+Only rows with ``match_decision == "match"`` count as matched — the bridge also
+carries low-confidence ``review`` rows, which the pipeline's own accounting routes
+to unmatched, so including them would misreport review-band flapping as GERS
+churn. (Legacy bridges without the column are treated as all-match.)
 """
 
 from __future__ import annotations
@@ -19,8 +24,21 @@ CATEGORIES = ("same", "changed", "lost", "gained")
 
 
 def _gers_by_local(bridge_path: Path) -> dict[str, set[str]]:
-    """Map ``local_id`` -> set of matched ``gers_id`` from a bridge parquet."""
-    df = pd.read_parquet(bridge_path, columns=["local_id", "gers_id"])
+    """Map ``local_id`` -> set of matched ``gers_id`` from a bridge parquet.
+
+    Filters to ``match_decision == "match"`` rows (see module docstring); a
+    bridge without that column is treated as all-match.
+    """
+    import pyarrow.parquet as pq
+
+    available = {c for c in pq.ParquetFile(bridge_path).schema_arrow.names}
+    columns = ["local_id", "gers_id"]
+    has_decision = "match_decision" in available
+    if has_decision:
+        columns.append("match_decision")
+    df = pd.read_parquet(bridge_path, columns=columns)
+    if has_decision:
+        df = df[df["match_decision"] == "match"]
     out: dict[str, set[str]] = {}
     for local_id, gers_id in zip(df["local_id"].astype(str), df["gers_id"].astype(str)):
         out.setdefault(local_id, set()).add(gers_id)

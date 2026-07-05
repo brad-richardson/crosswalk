@@ -66,6 +66,8 @@ def settings_snapshot() -> dict[str, Any]:
     the tuned thresholds re-triggers a run. ``model_path`` / FEATURE_VERSION are
     tracked separately (they belong to ``score_key``).
     """
+    from ..config import DEFAULT_SNAP_TOLERANCE_M
+
     return {
         "bridge_min_confidence": settings.bridge_min_confidence,
         "enable_calibration": settings.enable_calibration,
@@ -74,7 +76,10 @@ def settings_snapshot() -> dict[str, Any]:
         "optimizer_corridor_max_turn_deg": settings.optimizer_corridor_max_turn_deg,
         "optimizer_glue_min_confidence": settings.optimizer_glue_min_confidence,
         "optimizer_glue_min_confidence_raw": settings.optimizer_glue_min_confidence_raw,
-        "snap_tolerance_m": settings.snap_tolerance_m,
+        "optimizer_review_threshold": settings.optimizer_review_threshold,
+        # The optimizer's contiguity tolerance is the module constant, not the
+        # settings.snap_tolerance_m field — snapshot what the optimizer reads.
+        "contiguity_tolerance_m": DEFAULT_SNAP_TOLERANCE_M,
         "stitch_export_max_assignment_components": settings.stitch_export_max_assignment_components,
         "stitch_export_soft_max_edges": settings.stitch_export_soft_max_edges,
         "stitch_export_backstop_max_edges": settings.stitch_export_backstop_max_edges,
@@ -92,9 +97,21 @@ def _stable_hash(obj: Any) -> str:
 
 
 def compute_score_key(
-    ref_fp: dict, target_fp: dict, model_fp: dict, buffer_distance_m: float
+    ref_fp: dict,
+    target_fp: dict,
+    model_fp: dict,
+    buffer_distance_m: float,
+    method: str = "xgboost",
+    cache_schema_version: int | None = None,
 ) -> str:
-    """Hash of everything that changes the scored candidates."""
+    """Hash of everything that changes the scored candidates (or their on-disk form).
+
+    ``cache_schema_version`` folds the scored-cache parquet layout version into the
+    key so a reader/writer layout change invalidates old caches even when the
+    scores themselves would be unchanged.
+    """
+    from .scored_cache import SCORED_CACHE_SCHEMA_VERSION
+
     return _stable_hash(
         {
             "ref": ref_fp,
@@ -103,13 +120,19 @@ def compute_score_key(
             "feature_version": FEATURE_VERSION,
             "data_version": DATA_VERSION,
             "buffer_distance_m": buffer_distance_m,
+            "method": method,
+            "cache_schema_version": (
+                cache_schema_version
+                if cache_schema_version is not None
+                else SCORED_CACHE_SCHEMA_VERSION
+            ),
         }
     )
 
 
-def compute_optimize_key(snapshot: dict) -> str:
-    """Hash of the optimizer/prune/export settings snapshot."""
-    return _stable_hash(snapshot)
+def compute_optimize_key(snapshot: dict, min_confidence: float = 0.1) -> str:
+    """Hash of the optimizer/prune/export settings snapshot + optimizer args."""
+    return _stable_hash({"snapshot": snapshot, "min_confidence": min_confidence})
 
 
 def compute_full_key(score_key: str, optimize_key: str) -> str:
