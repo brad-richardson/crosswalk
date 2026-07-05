@@ -59,6 +59,30 @@ def _effective_glue_min_confidence() -> float:
     )
 
 
+def _effective_prune_threshold(output_path: Path) -> float:
+    """Resolve the confidence-drop prune floor for this run (0 = disabled).
+
+    The optimal floor is dataset-dependent (a lower-confidence dataset
+    over-prunes at the Boston-tuned global default), so a per-dataset entry in
+    ``settings.resolver_prune_overrides`` — keyed by the dataset name derived
+    from the bridge output filename (``{dataset}_bridge.parquet``) — takes
+    precedence over the global ``resolver_prune_enabled`` /
+    ``resolver_prune_min_confidence``. An override value <= 0 disables the prune
+    for that dataset; datasets without an override inherit the global default.
+    Returns 0.0 when the prune is off, which ``apply_confidence_drop_prune``
+    treats as a no-op (selections byte-identical to the pre-prune pipeline).
+    """
+    name = output_path.name
+    suffix = "_bridge.parquet"
+    dataset = name[: -len(suffix)] if name.endswith(suffix) else output_path.stem
+    overrides = settings.resolver_prune_overrides or {}
+    if dataset in overrides:
+        return max(0.0, float(overrides[dataset]))
+    if settings.resolver_prune_enabled:
+        return settings.resolver_prune_min_confidence
+    return 0.0
+
+
 def score_candidates_from_geodataframes(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
@@ -906,16 +930,15 @@ def run_pipeline(
     # pipeline; the pruned pairs are recorded in the sidecar so the prune's
     # effect is auditable and gate-measurable.
     pruned_pairs: set[tuple[Any, Any]] = set()
-    if settings.resolver_prune_enabled:
+    prune_threshold = _effective_prune_threshold(output_path)
+    if prune_threshold > 0:
         from ..matching.optimizer import apply_confidence_drop_prune
 
         n_before = len(optimized)
-        optimized, pruned_pairs = apply_confidence_drop_prune(
-            optimized, settings.resolver_prune_min_confidence
-        )
+        optimized, pruned_pairs = apply_confidence_drop_prune(optimized, prune_threshold)
         logger.info(
             f"Step 4.5: Resolver confidence-drop prune "
-            f"(min_confidence={settings.resolver_prune_min_confidence}): dropped "
+            f"(min_confidence={prune_threshold}): dropped "
             f"{len(pruned_pairs)} group edges ({n_before} -> {len(optimized)})"
         )
 

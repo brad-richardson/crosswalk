@@ -106,6 +106,15 @@ prune operates at the 0.575 calibrated point (#269).
    −0.087 — the wider exact margin reflects that per-group exact-match is noisier
    on a ~67-group base.) Remaining: grow stitching labels further (arms more
    datasets), then consider a learned group resolver.
+
+   **Resolver confidence-drop prune enabled by default (2026-07-05).** The M2
+   confidence-drop prune (#282, the #272-validated one-parameter filter) was
+   flipped on with the coordinated-retrain deploy and re-validated under this
+   gate on the current label bases: Boston (117 labels) filtered edge-F1
+   0.8671→0.8790 / group exact 0.5093→0.5833 at the global t=0.96 (gate PASS with
+   margin); Seattle (27 labels) 0.8665→0.8913 / 0.40→0.50 at a per-dataset override
+   t=0.90 (0.96 over-prunes the lower-confidence sidewalks, F1 → 0.848). Per-dataset
+   thresholds live in `resolver_prune_overrides`; ≤0 disables per dataset.
 2. **~~Uncalibrated probabilities under five hand-set thresholds.~~ (largely
    addressed — isotonic calibration shipped in #266.)** XGBoost scores are not
    guaranteed to be probabilities; `scoring_match/review_threshold` (0.5/0.1),
