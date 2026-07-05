@@ -1878,3 +1878,242 @@ class TestContextDisplayCap:
         ]
         # 1 group ref + 1 group target are full geoms too; count only context ids.
         assert len(ctx_features) == 2 * CONTEXT_DISPLAY_CAP
+
+
+class TestContextMembershipHint:
+    """The context-segment membership hint (fix/context-pill-selection-trap).
+
+    Spatial-context pills can belong to a NEIGHBORING group (post corridor
+    decomposition). ``_load_group_membership`` builds an id -> owning-group_id
+    map from the groups sidecar, and ``_build_group_context`` annotates each
+    context detail with the neighboring group so reviewers know where a
+    corridor continuation will actually be reviewed.
+    """
+
+    DATASET = "membership_ds"
+
+    def _write_sidecar(self, tmp_path, groups):
+        """Write a groups sidecar where _load_group_membership will find it:
+        <PROJECT_ROOT>/data/output/<dataset>_groups.json."""
+        out = tmp_path / "data" / "output"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f"{self.DATASET}_groups.json").write_text(json.dumps({"groups": groups}))
+        return out
+
+    def _patch_root(self, tmp_path):
+        from unittest.mock import patch
+
+        import matcher.web.routes.stitching as st
+
+        # Clear the module cache so each test sees its own sidecar.
+        st._MEMBERSHIP_CACHE.clear()
+        return patch.object(st, "PROJECT_ROOT", tmp_path)
+
+    def test_load_membership_maps_ids_to_owning_group(self, tmp_path):
+        from matcher.web.routes.stitching import _load_group_membership
+
+        self._write_sidecar(
+            tmp_path,
+            [
+                {"group_id": "gA", "ref_ids": ["rA"], "target_ids": ["tA1", "tA2"]},
+                {"group_id": "gB", "ref_ids": ["rB"], "target_ids": ["tB1"]},
+            ],
+        )
+        with self._patch_root(tmp_path):
+            mem = _load_group_membership(self.DATASET)
+        assert mem["tA1"] == "gA"
+        assert mem["tA2"] == "gA"
+        assert mem["rB"] == "gB"
+        assert mem["tB1"] == "gB"
+        assert "missing" not in mem
+
+    def test_missing_sidecar_returns_empty(self, tmp_path):
+        from matcher.web.routes.stitching import _load_group_membership
+
+        with self._patch_root(tmp_path):  # no sidecar written
+            assert _load_group_membership(self.DATASET) == {}
+
+    def test_empty_dataset_returns_empty(self):
+        from matcher.web.routes.stitching import _load_group_membership
+
+        assert _load_group_membership("") == {}
+
+    def test_cache_invalidates_on_mtime(self, tmp_path):
+        import os
+
+        from matcher.web.routes.stitching import _load_group_membership
+
+        out = self._write_sidecar(
+            tmp_path, [{"group_id": "gA", "ref_ids": [], "target_ids": ["t1"]}]
+        )
+        sidecar = out / f"{self.DATASET}_groups.json"
+        with self._patch_root(tmp_path):
+            assert _load_group_membership(self.DATASET)["t1"] == "gA"
+            # Rewrite with a newer mtime and different membership.
+            sidecar.write_text(json.dumps({"groups": [{"group_id": "gZ", "target_ids": ["t1"]}]}))
+            os.utime(sidecar, (os.stat(sidecar).st_atime, os.stat(sidecar).st_mtime + 10))
+            assert _load_group_membership(self.DATASET)["t1"] == "gZ"
+
+    def test_build_context_annotates_member_group(self, tmp_path):
+        from matcher.web.routes.stitching import _build_group_context
+
+        # Current group has one real edge and two context targets, one of which
+        # belongs to a neighboring group; the other is unknown to the sidecar.
+        group = {
+            "group_id": "gcur",
+            "match_type": "1:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+            "context_target_ids": ["ctxNeighbor", "ctxUnknown"],
+            "context_target_names": {},
+            "context_target_classes": {},
+        }
+        self._write_sidecar(
+            tmp_path,
+            [
+                {"group_id": "gcur", "ref_ids": ["r1"], "target_ids": ["t1"]},
+                {"group_id": "gNbr", "ref_ids": [], "target_ids": ["ctxNeighbor"]},
+            ],
+        )
+        with self._patch_root(tmp_path):
+            ctx = _build_group_context(group, dataset=self.DATASET)
+        by_id = {d["id"]: d for d in ctx["context_target_details"]}
+        assert by_id["ctxNeighbor"]["member_group"] == "gNbr"
+        # Unknown to the sidecar -> no hint (None), never an error.
+        assert by_id["ctxUnknown"]["member_group"] is None
+
+    def test_context_id_owned_by_current_group_yields_no_hint(self, tmp_path):
+        from matcher.web.routes.stitching import _build_group_context
+
+        group = {
+            "group_id": "gcur",
+            "match_type": "1:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+            "context_target_ids": ["ctxSelf"],
+            "context_target_names": {},
+            "context_target_classes": {},
+        }
+        # Sidecar (pathologically) attributes the context id to the current group.
+        self._write_sidecar(
+            tmp_path, [{"group_id": "gcur", "ref_ids": ["r1"], "target_ids": ["t1", "ctxSelf"]}]
+        )
+        with self._patch_root(tmp_path):
+            ctx = _build_group_context(group, dataset=self.DATASET)
+        assert ctx["context_target_details"][0]["member_group"] is None
+
+    def test_no_dataset_leaves_member_group_none(self):
+        from matcher.web.routes.stitching import _build_group_context
+
+        group = {
+            "group_id": "gcur",
+            "match_type": "1:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+            "context_ref_ids": ["ctxR"],
+            "context_ref_names": {},
+            "context_ref_classes": {},
+        }
+        ctx = _build_group_context(group)  # dataset omitted
+        assert ctx["context_ref_details"][0]["member_group"] is None
+
+
+class TestContextPillDistinction:
+    """Context pills must be UNMISTAKABLE from group-member pills so a reviewer
+    cannot confuse toggling map context with adding a group edge (silent-drop
+    trap). Asserts the rendered markers the CSS/JS depend on.
+    """
+
+    DATASET = "ctxpill_ds"
+
+    def _batch(self):
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": "gpill",
+                    "match_type": "1:N",
+                    "ref_ids": ["r1"],
+                    "target_ids": ["t1"],
+                    "edges": [_edge("r1", "t1", 0.9)],
+                    "ref_classes": {"r1": "residential"},
+                    "ref_names": {"r1": "Main St"},
+                    "target_classes": {"t1": "residential"},
+                    "target_names": {"t1": "Main St"},
+                    "context_ref_ids": ["ctxR1"],
+                    "context_target_ids": ["ctxT1"],
+                    "context_ref_names": {"ctxR1": "Elm St"},
+                    "context_ref_classes": {"ctxR1": "residential"},
+                    "context_target_names": {"ctxT1": "Elm St"},
+                    "context_target_classes": {"ctxT1": "residential"},
+                }
+            ],
+        }
+
+    def _client(self):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from matcher.web.app import create_app
+
+        patches = [
+            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def test_context_pills_and_notice_markers_present(self):
+        client, patches = self._client()
+        try:
+            resp = client.get(
+                f"/stitching-review/group?dataset={self.DATASET}&group_id=gpill&group_index=0"
+            )
+            assert resp.status_code == 200
+            html = resp.text
+            # Context pills carry the distinct class + affix + data flag + tooltip.
+            assert "segment-pill-context" in html
+            assert 'data-context="true"' in html
+            assert "pill-ctx-affix" in html
+            assert "ctx</span>" in html
+            assert "Nearby context" in html
+            assert "won&#39;t be saved" in html or "won't be saved" in html
+            # The non-blocking submit notice element exists.
+            assert 'id="context-notice"' in html
+            # Group pills carry data-seg-id (used by map click) and are NOT
+            # tagged as context.
+            assert 'data-seg-id="r1"' in html
+            assert 'data-seg-id="t1"' in html
+        finally:
+            self._stop(patches)
+
+    def test_context_pill_is_not_a_group_selection_pill(self):
+        """A context pill must not carry the group ref/target selection classes,
+        so the submit path (which reads .segment-pill-ref/-target.active) can
+        never pick it up and silently drop it."""
+        client, patches = self._client()
+        try:
+            resp = client.get(
+                f"/stitching-review/group?dataset={self.DATASET}&group_id=gpill&group_index=0"
+            )
+            html = resp.text
+            # Isolate the context ref pill markup and assert it lacks the plain
+            # group selection class (it uses segment-pill-context-ref instead).
+            assert "segment-pill-context-ref" in html
+            assert "segment-pill-context-target" in html
+            # The context pill line must not contain the bare group class token.
+            for line in html.splitlines():
+                if "segment-pill-context" in line:
+                    assert 'segment-pill-ref"' not in line
+                    assert 'segment-pill-target"' not in line
+        finally:
+            self._stop(patches)

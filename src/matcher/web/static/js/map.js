@@ -1156,8 +1156,11 @@
             var fid = features[j].properties._id;
             if (fid && !seen[fid]) {
                 seen[fid] = true;
-                // Find the matching pill button by title attribute and click it
-                var pill = document.querySelector('.segment-pill[title="' + fid + '"]');
+                // Find the matching pill button by segment id and click it.
+                // Uses data-seg-id (not title) so context pills — whose title
+                // now carries a human "not part of this group" hint — still
+                // resolve, and group pills are unaffected.
+                var pill = document.querySelector('.segment-pill[data-seg-id="' + fid + '"]');
                 if (pill) {
                     pill.click();
                 }

@@ -1776,8 +1776,56 @@ body {
     color: white;
 }
 
+/* Context (nearby, non-group) pills. Deliberately UNMISTAKABLE from group
+   pills in BOTH states so a reviewer can never confuse toggling map context
+   with adding a group edge: dashed outline, reduced opacity, a "ctx" affix, and
+   a distinct purple accent (never the group blue/orange) when toggled on.
+   Works against the dark map theme (uses a fixed accent + transparent fills). */
+.segment-pill-context {
+    border-style: dashed;
+    border-color: #9575cd;
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0.7;
+    font-weight: 500;
+    font-style: italic;
+}
+
+.segment-pill-context .pill-ctx-affix {
+    margin-left: 3px;
+    font-size: 0.55rem;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+
+.segment-pill-context.active {
+    border-style: dashed;
+    border-color: #9575cd;
+    /* Faint purple tint, not a solid fill — reads as "shown on map", never as a
+       solid selected group pill. */
+    background: rgba(149, 117, 205, 0.22);
+    color: #b39ddb;
+    opacity: 1;
+}
+
 .segment-pill:hover {
     opacity: 0.85;
+}
+
+/* Non-blocking notice shown when context pills are toggled on: an explicit,
+   inline warning that those nearby segments won't be saved with the group. */
+.context-notice {
+    margin: 6px 0 2px;
+    padding: 5px 8px;
+    border: 1px dashed #9575cd;
+    border-radius: 6px;
+    background: rgba(149, 117, 205, 0.12);
+    color: #b39ddb;
+    font-size: 0.72rem;
+    line-height: 1.3;
 }
 
 /* Assignment option picker (verify, don't construct) */
@@ -2056,6 +2104,7 @@ body {
 .group-card.collapsed .group-summary,
 .group-card.collapsed .group-details,
 .group-card.collapsed .card-actions,
+.group-card.collapsed .context-notice,
 .group-card.collapsed .collapse-hide {
     display: none;
 }
