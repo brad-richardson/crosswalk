@@ -97,13 +97,19 @@ Goal: make under-selection learnable and bank the cheap optimizer win.
   because rejected candidates are discarded).
 - Ship the flag-gated confidence-drop prune from the #272 eval (the
   one-parameter model that beats the prototype: clean-slice F1 0.872 vs 0.828
-  keep-all baseline) behind the stitch gate. **DONE + enabled by default** (#282
-  shipped it flag-gated; the coordinated-retrain deploy flipped `resolver_prune_enabled`
-  to True). Validated under the #271 gate: Boston (117 labels) filtered edge-F1
-  0.8671→0.8790, group exact 0.5093→0.5833 at the global t=0.96, gate PASS;
-  Seattle (27 labels) 0.8665→0.8913 / 0.40→0.50 at a per-dataset override t=0.90
-  (0.96 over-prunes the lower-confidence sidewalks). Per-dataset thresholds live
-  in `resolver_prune_overrides` (see ARCHITECTURE.md).
+  keep-all baseline) behind the stitch gate. **DONE — per-dataset opt-in
+  (allowlist)** (#282 shipped it flag-gated; #284 tuned per-dataset thresholds;
+  the allowlist cutover made it opt-in). Validated under the #271 gate: Boston
+  (117 labels) filtered edge-F1 0.8671→0.8790, group exact 0.5093→0.5833 at
+  t=0.96, gate PASS; Seattle (27 labels) 0.8665→0.8913 / 0.40→0.50 at t=0.90
+  (0.96 over-prunes the lower-confidence sidewalks). The prune applies ONLY to
+  datasets in the `resolver_prune_overrides` **allowlist** (Boston 0.96, Seattle
+  0.90); there is no global default floor, so never-tuned datasets are not pruned.
+  **To add a dataset: tune its floor via the #284 sweep recipe first** (sweep the
+  confidence threshold on that dataset's clean stitching slice under the #271 gate,
+  pick the F1/exact-maximizing point, confirm it beats keep-all), THEN add the
+  validated `{dataset: threshold}` entry to `resolver_prune_overrides`. See
+  ARCHITECTURE.md "Resolver confidence-drop prune".
 
 ### M3 — Learned group resolver (armed by M1 + M2)
 

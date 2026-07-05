@@ -66,40 +66,90 @@ def _effective_glue_min_confidence() -> float:
     return settings.optimizer_glue_min_confidence_raw
 
 
-def _effective_prune_threshold(output_path: Path) -> float:
-    """Resolve the confidence-drop prune floor for this run (0 = disabled).
+# Known bridge-output filename prefixes emitted by the documented before/after
+# comparison workflow (CLAUDE.md). Stripped so ``before_us_boston_streets`` /
+# ``after_us_boston_streets`` resolve to the tuned ``us_boston_streets`` allowlist
+# entry instead of missing the override.
+_PRUNE_FILENAME_PREFIXES = ("before_", "after_")
 
-    The optimal floor is dataset-dependent (a lower-confidence dataset
-    over-prunes at the Boston-tuned global default), so a per-dataset entry in
-    ``settings.resolver_prune_overrides`` — keyed by the dataset name derived
-    from the bridge output filename (``{dataset}_bridge.parquet``) — takes
-    precedence over the global ``resolver_prune_enabled`` /
-    ``resolver_prune_min_confidence``. An override value <= 0 disables the prune
-    for that dataset; datasets without an override inherit the global default.
-    Returns 0.0 when the prune is off, which ``apply_confidence_drop_prune``
-    treats as a no-op (selections byte-identical to the pre-prune pipeline).
 
-    Calibration guard: the prune's operating points (0.96 global / the per-dataset
-    overrides) were tuned and validated ONLY on CALIBRATED ``MatchResult.confidence``
-    (#272/#284). Unlike the glue prune, NO raw-score operating point was validated.
-    Applying the calibrated floor to raw XGBoost scores would silently over-prune —
-    raw match scores seldom clear 0.96, so nearly every non-top M:N/1:N/N:1 edge
-    would be dropped, collapsing multi-edge groups to their single best edge. So,
-    mirroring the glue-prune guarantee, the prune is skipped when the active model
-    applies no calibration.
+def _resolve_prune_dataset(output_path: Path, allowlist: dict[str, float]) -> str | None:
+    """Resolve the allowlist dataset key for a bridge output filename.
+
+    The prune allowlist (``resolver_prune_overrides``) is keyed by dataset name —
+    the bridge output stem minus the ``_bridge`` suffix (e.g. ``us_boston_streets``
+    from ``us_boston_streets_bridge.parquet``). Resolution is robust to the
+    documented before/after comparison workflow, which writes
+    ``before_<dataset>_bridge.parquet`` / ``after_<dataset>_bridge.parquet``:
+
+    1. Exact match on the derived stem always wins.
+    2. Otherwise strip a known comparison prefix (``before_`` / ``after_``) and
+       retry an EXACT match.
+
+    Only exact (post-prefix-strip) matches count, so overlapping dataset names
+    never collide: a file for a hypothetical ``us_boston_streets_2`` (no allowlist
+    entry) does NOT resolve to the ``us_boston_streets`` key — substring/boundary
+    containment is deliberately avoided. Returns the resolved key, or None when the
+    filename matches no allowlist entry.
     """
     name = output_path.name
     suffix = "_bridge.parquet"
-    dataset = name[: -len(suffix)] if name.endswith(suffix) else output_path.stem
-    overrides = settings.resolver_prune_overrides or {}
-    if dataset in overrides:
-        threshold = max(0.0, float(overrides[dataset]))
-    elif settings.resolver_prune_enabled:
-        threshold = settings.resolver_prune_min_confidence
-    else:
-        threshold = 0.0
+    stem = name[: -len(suffix)] if name.endswith(suffix) else output_path.stem
+    # 1. Exact match wins (covers the canonical ``<dataset>_bridge.parquet``).
+    if stem in allowlist:
+        return stem
+    # 2. Strip a known before/after comparison prefix and retry exactly.
+    for prefix in _PRUNE_FILENAME_PREFIXES:
+        if stem.startswith(prefix):
+            stripped = stem[len(prefix) :]
+            if stripped in allowlist:
+                return stripped
+    return None
 
-    if threshold > 0 and not _calibration_active():
+
+def _effective_prune_threshold(output_path: Path) -> float:
+    """Resolve the confidence-drop prune floor for this run (0 = disabled).
+
+    The prune is PER-DATASET OPT-IN via an allowlist: it applies ONLY to datasets
+    with an explicit, validated threshold in ``settings.resolver_prune_overrides``
+    (keyed by the dataset name derived from the bridge output filename), and only
+    while ``settings.resolver_prune_enabled`` (the master switch) is True. A dataset
+    absent from the allowlist is NOT pruned — the floor is dataset-dependent and
+    the Boston-tuned 0.96 over-prunes never-tuned / sidewalk-like sets (#284 sweep),
+    so applying it by default silently over-prunes. An allowlist value <= 0 keeps a
+    listed dataset explicitly disabled. Returns 0.0 when the prune is off, which
+    ``apply_confidence_drop_prune`` treats as a no-op (selections byte-identical to
+    the pre-prune pipeline).
+
+    Calibration guard: every allowlist operating point was tuned and validated ONLY
+    on CALIBRATED ``MatchResult.confidence`` (#272/#284). Unlike the glue prune, NO
+    raw-score operating point was validated. Applying the calibrated floor to raw
+    XGBoost scores would silently over-prune — raw match scores seldom clear 0.9x,
+    so nearly every non-top M:N/1:N/N:1 edge would be dropped, collapsing multi-edge
+    groups to their single best edge. So, mirroring the glue-prune guarantee, the
+    prune is skipped when the active model applies no calibration.
+    """
+    if not settings.resolver_prune_enabled:
+        return 0.0
+
+    allowlist = settings.resolver_prune_overrides or {}
+    dataset = _resolve_prune_dataset(output_path, allowlist)
+    if dataset is None:
+        # Not in the validated allowlist: opt-in only, so the prune is off. One
+        # info line makes the skip visible (vs. silently over-pruning by default).
+        logger.info(
+            f"Resolver confidence-drop prune off for '{output_path.name}': dataset "
+            "not in the validated allowlist (settings.resolver_prune_overrides). "
+            "Tune it via the #284 sweep recipe before enabling."
+        )
+        return 0.0
+
+    threshold = max(0.0, float(allowlist[dataset]))
+    if threshold <= 0:
+        # Explicitly disabled for this dataset (allowlist value <= 0).
+        return 0.0
+
+    if not _calibration_active():
         logger.warning(
             "Resolver confidence-drop prune skipped: its operating points are "
             "calibrated-only, but the active model applies no calibration "
@@ -307,6 +357,7 @@ def _export_groups_sidecar(
     reference_proj: gpd.GeoDataFrame | None = None,
     target_proj: gpd.GeoDataFrame | None = None,
     pruned_pairs: set[tuple[Any, Any]] | None = None,
+    pruned_group_ids: dict[tuple[Any, Any], Any] | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -390,6 +441,15 @@ def _export_groups_sidecar(
     # some other group, so this global set gates the rejected-edge collection.
     pruned_pairs = pruned_pairs or set()
     pruned_pairs_str = {(str(r), str(t)) for r, t in pruned_pairs}
+    # Str-keyed pruned-pair -> original (pre-prune) group_id. Lets each group
+    # claim exactly its own pruned edges, so ``n_pruned`` stays exact even for
+    # pendant edges whose both endpoints left the surviving group (they are in
+    # neither this group's in-product `edges` nor its incident rejected set).
+    pruned_gid_by_pair: dict[tuple[str, str], str] = {
+        (str(r), str(t)): str(gid)
+        for (r, t), gid in (pruned_group_ids or {}).items()
+        if gid is not None
+    }
     all_selected_pairs: set[tuple[str, str]] = set()
     for _gid, _assign in assignment_by_gid.items():
         for r in _assign:
@@ -605,9 +665,19 @@ def _export_groups_sidecar(
             n_rejected_total = len(rej_best)
             # Highest-confidence first; cap per group to bound sidecar growth.
             rej_ranked = sorted(rej_best.items(), key=lambda kv: (-kv[1].confidence, kv[0]))
-            if rejected_cap >= 0 and len(rej_ranked) > rejected_cap:
-                rej_ranked = rej_ranked[:rejected_cap]
-                rejected_truncated = True
+            # Pruned edges are EXEMPT from the truncation cap: dropping one would
+            # make ``n_pruned`` undercount (the prune's effect must stay auditable).
+            # The cap bounds only the non-pruned remainder; ``rejected_truncated``
+            # reflects whether any non-pruned candidate was dropped.
+            if rejected_cap >= 0:
+                pruned_rej = [kv for kv in rej_ranked if kv[0] in pruned_pairs_str]
+                other_rej = [kv for kv in rej_ranked if kv[0] not in pruned_pairs_str]
+                if len(other_rej) > rejected_cap:
+                    other_rej = other_rej[:rejected_cap]
+                    rejected_truncated = True
+                rej_ranked = sorted(
+                    pruned_rej + other_rej, key=lambda kv: (-kv[1].confidence, kv[0])
+                )
 
             if rej_ranked:
                 # Structure for rejected edges is computed on the AUGMENTED
@@ -636,6 +706,27 @@ def _export_groups_sidecar(
                 rejected_edges = [
                     _serialize_edge(pair, r, rej_struct.get(pair)) for pair, r in rej_ranked
                 ]
+
+            # Pendant pruned edges (M2 auditability): a pruned edge whose BOTH
+            # endpoints left this group post-prune is neither an in-product `edges`
+            # pair nor incident to a surviving group node, so it is collected by
+            # nothing above and would silently drop from the sidecar — making
+            # `n_pruned` undercount. Recover each such edge, attributed to this
+            # group by its pre-prune group_id, as an explicit pruned record.
+            # Serialized with a minimal struct (its endpoints are not group nodes,
+            # so degree/bridge/corridor are undefined). Counted in n_rejected_total
+            # so ``n_rejected_edges <= n_rejected_total`` holds.
+            if pruned_gid_by_pair:
+                group_pruned = {p for p, gid in pruned_gid_by_pair.items() if gid == group_id}
+                serialized_pruned = {
+                    (e["ref_id"], e["target_id"]) for e in edges + rejected_edges if e.get("pruned")
+                }
+                for pair in sorted(group_pruned - serialized_pruned):
+                    r = best_by_pair.get(pair)
+                    if r is None:
+                        continue
+                    rejected_edges.append(_serialize_edge(pair, r, {"selected": False}))
+                    n_rejected_total += 1
 
         optimizer_assignment = [
             {
@@ -957,12 +1048,19 @@ def run_pipeline(
     # pipeline; the pruned pairs are recorded in the sidecar so the prune's
     # effect is auditable and gate-measurable.
     pruned_pairs: set[tuple[Any, Any]] = set()
+    # Group attribution for pruned pairs, snapshotted from the PRE-prune
+    # assignment (the prune drops these results, losing their group_id). Lets the
+    # sidecar attribute every pruned edge to its group so ``n_pruned`` is exact
+    # even for pendant edges whose both endpoints leave the surviving group.
+    pruned_group_ids: dict[tuple[Any, Any], Any] = {}
     prune_threshold = _effective_prune_threshold(output_path)
     if prune_threshold > 0:
         from ..matching.optimizer import apply_confidence_drop_prune
 
         n_before = len(optimized)
+        gid_by_pair = {(r.ref_id, r.target_id): r.features.get("group_id") for r in optimized}
         optimized, pruned_pairs = apply_confidence_drop_prune(optimized, prune_threshold)
+        pruned_group_ids = {pair: gid_by_pair.get(pair) for pair in pruned_pairs}
         logger.info(
             f"Step 4.5: Resolver confidence-drop prune "
             f"(min_confidence={prune_threshold}): dropped "
@@ -989,6 +1087,7 @@ def run_pipeline(
         reference_proj=reference,
         target_proj=target,
         pruned_pairs=pruned_pairs,
+        pruned_group_ids=pruned_group_ids,
     )
 
     if progress_callback:

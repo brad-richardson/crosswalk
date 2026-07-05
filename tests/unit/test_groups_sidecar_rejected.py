@@ -90,7 +90,7 @@ def _load(path):
     return json.loads(path.read_text())["groups"]
 
 
-def _export(tmp_path, results, optimized, ref, tgt, pruned_pairs=None):
+def _export(tmp_path, results, optimized, ref, tgt, pruned_pairs=None, pruned_group_ids=None):
     out = tmp_path / "bridge.parquet"
     p = _export_groups_sidecar(
         results=results,
@@ -104,6 +104,7 @@ def _export(tmp_path, results, optimized, ref, tgt, pruned_pairs=None):
         reference_proj=ref,
         target_proj=tgt,
         pruned_pairs=pruned_pairs,
+        pruned_group_ids=pruned_group_ids,
     )
     return _load(p)
 
@@ -197,6 +198,74 @@ def test_no_pruned_key_when_no_prune(tmp_path):
     g = groups[0]
     assert g["n_pruned"] == 0
     assert all("pruned" not in e for e in g["edges"] + g["rejected_edges"])
+
+
+def test_pruned_edge_exempt_from_truncation_cap(tmp_path):
+    """A pruned edge collected as a rejected candidate must never be dropped by
+    the per-group cap — else ``n_pruned`` undercounts. With the cap at 0, every
+    NON-pruned rejected candidate is truncated, but the pruned one survives."""
+    ref, tgt, results, selected = _scenario()  # N:1 {R1,R2}->T1
+    # Prune drops R2->T1 (T1 survives via R1->T1), so it becomes a rejected
+    # candidate incident to T1 alongside non-pruned R1->T2 and R3->T1.
+    kept = [r for r in selected if (r.ref_id, r.target_id) != ("R2", "T1")]
+    pruned_pairs = {("R2", "T1")}
+    orig = settings.stitch_rejected_edges_max_per_group
+    try:
+        settings.stitch_rejected_edges_max_per_group = 0
+        groups = _export(tmp_path, results, kept, ref, tgt, pruned_pairs=pruned_pairs)
+    finally:
+        settings.stitch_rejected_edges_max_per_group = orig
+    g = groups[0]
+    # non-pruned rejected candidates are truncated (cap 0) ...
+    assert g["rejected_truncated"] is True
+    # ... but the pruned edge survives and is counted exactly.
+    assert g["n_pruned"] == 1
+    pruned_marked = [e for e in g["edges"] + g["rejected_edges"] if e.get("pruned")]
+    assert any((e["ref_id"], e["target_id"]) == ("R2", "T1") for e in pruned_marked)
+    # no non-pruned rejected candidate survived the cap
+    assert all(e.get("pruned") for e in g["rejected_edges"])
+
+
+def test_pruned_pendant_edge_recorded(tmp_path):
+    """A pruned edge whose BOTH endpoints leave the group post-prune (a pendant)
+    is recorded and counted, attributed via its pre-prune group_id, so n_pruned
+    is exact. Without the attribution it would silently drop from the sidecar."""
+    ref, tgt = _ref_gdf(), _tgt_gdf()  # R1,R2,R3 ; T1,T2
+    # Pre-prune M:N group g1 = {R1,R2} x {T1,T2} with two selected components:
+    # R1->T1 (kept top) and R2->T2 (pruned) -> R2 and T2 both leave the group.
+    r1t1 = _mr("R1", "T1", 0.98, 0, 0, gid="g1")
+    r2t2 = _mr("R2", "T2", 0.30, 1, 1, gid="g1")
+    results = [r1t1, r2t2]
+    kept = [r1t1]
+    groups = _export(
+        tmp_path,
+        results,
+        kept,
+        ref,
+        tgt,
+        pruned_pairs={("R2", "T2")},
+        pruned_group_ids={("R2", "T2"): "g1"},
+    )
+    g = next(gg for gg in groups if gg["group_id"] == "g1")
+    # the pendant is neither an in-product edge nor incident to a surviving node
+    assert ("R2", "T2") not in {(e["ref_id"], e["target_id"]) for e in g["edges"]}
+    assert g["n_pruned"] == 1
+    all_edges = g["edges"] + g["rejected_edges"]
+    assert any((e["ref_id"], e["target_id"]) == ("R2", "T2") and e.get("pruned") for e in all_edges)
+    # accounting invariant holds after recovery
+    assert g["n_rejected_edges"] <= g["n_rejected_total"]
+
+
+def test_pendant_pruned_edge_lost_without_attribution(tmp_path):
+    """Contrast: without the group_id attribution (pre-fix behaviour), the same
+    pendant edge is invisible and n_pruned undercounts — documents why the
+    attribution is required."""
+    ref, tgt = _ref_gdf(), _tgt_gdf()
+    r1t1 = _mr("R1", "T1", 0.98, 0, 0, gid="g1")
+    r2t2 = _mr("R2", "T2", 0.30, 1, 1, gid="g1")
+    groups = _export(tmp_path, [r1t1, r2t2], [r1t1], ref, tgt, pruned_pairs={("R2", "T2")})
+    g = next(gg for gg in groups if gg["group_id"] == "g1")
+    assert g["n_pruned"] == 0  # pendant dropped when unattributed
 
 
 def test_stitch_eval_mapping_ignores_rejected_edges(tmp_path):

@@ -117,15 +117,34 @@ def test_resolver_not_imported_by_production_code():
 
     Guards the 'zero production behavior change' invariant: nothing under the
     matching / features / cli / optimizer paths may import matcher.resolver.
+
+    Catches BOTH absolute (``import matcher.resolver`` / ``from matcher.resolver
+    import``) and relative (``from ..resolver import`` / ``from .resolver import``
+    / ``from .. import resolver``) import forms — a plain ``matcher.resolver``
+    substring check misses relative imports entirely.
     """
     import pathlib
+    import re
+
+    # Import statements that pull in the experimental resolver package, in any of:
+    #   import matcher.resolver[...]
+    #   from matcher.resolver[...] import ...
+    #   from .resolver / ..resolver / ...resolver [...] import ...   (relative)
+    #   from . / .. / ... import resolver                            (relative)
+    patterns = [
+        re.compile(r"^\s*import\s+matcher\.resolver\b", re.MULTILINE),
+        re.compile(r"^\s*from\s+matcher\.resolver\b", re.MULTILINE),
+        re.compile(r"^\s*from\s+\.+resolver\b", re.MULTILINE),
+        re.compile(r"^\s*from\s+\.+\s+import\s+(?:[^\n]*[\s,(])?resolver\b", re.MULTILINE),
+    ]
 
     src = pathlib.Path(__file__).resolve().parents[2] / "src" / "matcher"
     offenders = []
     for py in src.rglob("*.py"):
         if "resolver" in py.parts:
             continue
-        if "matcher.resolver" in py.read_text():
+        text = py.read_text()
+        if any(p.search(text) for p in patterns):
             offenders.append(str(py.relative_to(src)))
     assert not offenders, f"production code imports experimental resolver: {offenders}"
 
