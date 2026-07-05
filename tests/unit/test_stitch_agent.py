@@ -500,6 +500,28 @@ def test_check_exit_passes_on_zero():
     sr._check_exit("claude", result)  # no raise
 
 
+def test_image_paths_include_junction_zoom_crops(tmp_path):
+    """codex only sees images attached via -i, so zoom_*.png must be listed.
+
+    Regression for the enriched_ab1 wave: #302 packs referenced junction zoom
+    crops in the prompt, but _image_paths omitted them, leaving codex blind to
+    the crops that claude/agy read by path.
+    """
+    (tmp_path / "overview.png").write_bytes(b"png")
+    (tmp_path / "option_A.png").write_bytes(b"png")
+    (tmp_path / "zoom_R3_T8.png").write_bytes(b"png")
+    (tmp_path / "zoom_R1_T2.png").write_bytes(b"png")
+
+    imgs = sr._image_paths(tmp_path, ["A"])
+
+    assert imgs[0].endswith("overview.png")
+    assert imgs[1].endswith("option_A.png")
+    assert [p for p in imgs if "zoom_" in p] == [
+        str(tmp_path / "zoom_R1_T2.png"),
+        str(tmp_path / "zoom_R3_T8.png"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Evidence metadata correctness
 # ---------------------------------------------------------------------------

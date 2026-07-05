@@ -240,6 +240,12 @@ def _image_paths(group_dir: Path, letters: list[str]) -> list[str]:
         p = group_dir / f"option_{ltr}.png"
         if p.exists():
             imgs.append(str(p))
+    # Junction zoom crops (#302 enrichment). claude/agy read these by the
+    # paths embedded in the prompt, but codex only sees images attached via
+    # -i, so they must be listed here or codex votes blind to the crops
+    # (observed in the enriched_ab1 wave: codex pack_feedback "junction zooms
+    # were referenced but not shown inline").
+    imgs.extend(sorted(str(p) for p in group_dir.glob("zoom_*.png")))
     return imgs
 
 
