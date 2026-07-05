@@ -286,6 +286,39 @@ class TestNaiveAdapter:
         matches = compute_naive_matches(reference, target, buffer_m=15.0)
         assert (matches["ref_id"] == "r1").sum() == 1
 
+    def test_coverage_asymmetry_short_ref_matches_long_target(self):
+        """A short reference covering part of a long target must still match.
+
+        Regression guard for the removed Hausdorff "shape sanity" gate. The
+        shipped gate used shapely's *symmetric* hausdorff_distance, which
+        rejected any pair whose target extended more than buffer_m beyond the
+        clipped reference — the coverage-asymmetry trap. Here a 10 m reference
+        sits alongside one end of a ~110 m target: the reference is fully
+        covered (overlap_frac ~ 1.0) and correctly aligned, so it must match.
+        """
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        from cbench.adapters.naive import compute_naive_matches
+
+        # ~110 m target along y=0 (near equator: 0.001 deg lon ~ 111 m).
+        target = gpd.GeoDataFrame(
+            {"id": ["t_long"]},
+            geometry=[LineString([(0.0, 0.0), (0.001, 0.0)])],
+            crs="EPSG:4326",
+        )
+        # ~10 m reference, parallel and ~1 m north, covering only the first ~9%
+        # of the target. Its far end (the rest of the target) lies well beyond
+        # buffer_m — the symmetric-Hausdorff gate would have wrongly rejected it.
+        reference = gpd.GeoDataFrame(
+            {"id": ["r_short"]},
+            geometry=[LineString([(0.0, 0.00001), (0.0001, 0.00001)])],
+            crs="EPSG:4326",
+        )
+        matches = compute_naive_matches(reference, target, buffer_m=15.0)
+        assert "r_short" in set(matches["ref_id"])
+        assert (matches["target_id"] == "t_long").all()
+
     def test_run_and_parse_roundtrip(self, tmp_path):
         from cbench.adapters.naive import NaiveAdapter
 

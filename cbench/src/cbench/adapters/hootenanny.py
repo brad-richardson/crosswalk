@@ -415,11 +415,17 @@ def _stream_and_check(cmd: list[str], out_dest: Path, output_osm: Path, cwd: Pat
         bufsize=1,
     )
 
+    # Hootenanny logs a benign "Internal Error: Two nodes were found with the
+    # same coordinate" line during ingest of coincident-vertex geometry; it is
+    # not a conflation failure, so don't surface it as an error-log match.
+    benign = "two nodes were found with the same coordinate"
+
     log_lines: list[str] = []
     for line in process.stdout:
         line = line.rstrip()
         if line:
-            if "STATUS" in line or "ERROR" in line or "WARN" in line or "Error" in line:
+            is_flag = "STATUS" in line or "ERROR" in line or "WARN" in line or "Error" in line
+            if is_flag and benign not in line.lower():
                 logger.info(f"  {line}")
             log_lines.append(line)
 

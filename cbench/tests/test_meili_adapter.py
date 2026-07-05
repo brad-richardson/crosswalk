@@ -10,7 +10,11 @@ from shapely.geometry import LineString
 
 pytest.importorskip("shapely")
 
-from cbench.adapters.meili import _aggregate_edges, _densify_lonlat  # noqa: E402
+from cbench.adapters.meili import (  # noqa: E402
+    _aggregate_edges,
+    _densify_lonlat,
+    _trace_request_payload,
+)
 
 
 def _resp(edges):
@@ -72,3 +76,16 @@ class TestDensify:
     def test_empty_geometry_returns_empty(self):
         crs = "EPSG:32619"
         assert _densify_lonlat(None, crs, 10.0) == []
+
+
+class TestTracePayload:
+    def test_units_pinned_to_kilometers(self):
+        # _aggregate_edges converts edge.length km -> m; the request must pin
+        # units=kilometers so a Valhalla default change can't silently corrupt it.
+        payload = _trace_request_payload(
+            [(-71.06, 42.36), (-71.05, 42.36)],
+            costing="pedestrian",
+            search_radius=25.0,
+            gps_acc=10.0,
+        )
+        assert payload["units"] == "kilometers"

@@ -194,6 +194,11 @@ def _trace_request_payload(
         "search_radius": search_radius,
         "gps_accuracy": gps_acc,
         "trace_options": {"turn_penalty_factor": 0},
+        # Pin distance units explicitly: _aggregate_edges converts edge.length
+        # km -> m assuming kilometers. Valhalla defaults to km today, but leaving
+        # it implicit means a default change would silently corrupt the km->m
+        # conversion (and thus every overlap fraction). Keep this in sync.
+        "units": "kilometers",
         "filters": {"attributes": ["edge.way_id", "edge.length"], "action": "include"},
     }
 
@@ -250,6 +255,16 @@ def match_targets(
     concurrent calls, but multiple actors share the read-only tileset on disk).
     """
     import valhalla
+
+    # The Valhalla trace shape must be lon/lat (EPSG:4326), and _densify_lonlat
+    # assumes its input geometry is already 4326. Overture parquets are 4326, but
+    # a target in another CRS would otherwise be fed to Valhalla as raw
+    # projected coordinates. Reproject up front, mirroring convert/pbf.py.
+    if target.crs is None:
+        raise ValueError("Target GeoDataFrame has no CRS; cannot map-match")
+    if target.crs.to_epsg() != 4326:
+        logger.info(f"Reprojecting target from {target.crs.to_epsg()} to EPSG:4326 for matching")
+        target = target.to_crs(epsg=4326)
 
     metric_crs = target.estimate_utm_crs()
     geoms = target.geometry.values
