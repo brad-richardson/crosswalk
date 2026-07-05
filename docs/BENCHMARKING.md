@@ -156,9 +156,11 @@ floor is enforced only once at least that many curated labels map to current
 pipeline groups (mapping is by edge-overlap, robust to group_id churn). Below
 that the dataset reports `skip_unarmed` (non-blocking). This means the gate goes
 live automatically as the label base grows — no code change or second PR. As of
-2026-07-05, `us_boston_streets` is armed (67 mapped groups, floors F1 0.78 /
-exact 0.45, baseline F1 0.8345 / exact 0.5373); `us_seattle_sidewalks` (2 mapped)
-is unarmed.
+2026-07-05 (post-#295/#298 set-semantics reinterpretation), `us_boston_streets`
+is armed (111 mapped pair groups, floors F1 0.83 / exact 0.50, baseline
+F1 0.8858 / exact 0.5946; its 3 set labels are reported separately and not
+gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
+gate block configured yet.
 
 **Adding / updating a floor.** Re-measure the baseline against fresh output
 (`cbench run matcher <dataset>` prints the stitch block), then set
