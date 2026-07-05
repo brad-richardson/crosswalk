@@ -1528,6 +1528,8 @@ def register_commands(app: typer.Typer) -> None:
             resolved_pairs = []  # list of (gers_id, target_id, pair_data)
             stored_target_overrides = {}  # target_id -> WGS84 geometry
             stored_target_attrs = {}  # target_id -> attribute dict (for segments not in raw data)
+            stored_ref_overrides = {}  # gers_id -> WGS84 geometry (refs gone from current release)
+            stored_ref_attrs = {}  # gers_id -> attribute dict for those refs
 
             for gers_id, target_id in dataset_keys:
                 pair_data = None
@@ -1567,6 +1569,18 @@ def register_commands(app: typer.Typer) -> None:
                             "names_lr": pair_data.get("target_names_lr"),
                             "class": pair_data.get("target_class"),
                             "subclass": pair_data.get("target_subclass"),
+                        }
+                    # GERS ids churn across Overture releases: a labeled gers_id may
+                    # no longer exist in the current release. Fall back to the stored
+                    # reference geometry so the pair stays resolvable (mirrors the
+                    # target-side augmentation below).
+                    if str(gers_id) not in ref_lookup.index:
+                        stored_ref_overrides[gers_id] = pair_data["ref_geometry"]
+                        stored_ref_attrs[gers_id] = {
+                            "names": pair_data.get("ref_names"),
+                            "names_lr": pair_data.get("ref_names_lr"),
+                            "class": pair_data.get("ref_class"),
+                            "subclass": pair_data.get("ref_subclass"),
                         }
 
                 resolved_pairs.append((gers_id, target_id, pair_data))
@@ -1619,6 +1633,31 @@ def register_commands(app: typer.Typer) -> None:
                     append_rows.append(row)
                 new_gdf = gpd.GeoDataFrame(append_rows, geometry="geometry", crs=utm_crs)
                 augmented_target = pd.concat([augmented_target, new_gdf], ignore_index=True)
+
+            # --- Phase 2b: Augment reference GDF with stored geometries for
+            # gers_ids that vanished from the current Overture release ---
+            # Append-only: refs still present in the release keep their live
+            # geometry/attributes; only churned ids fall back to stored data.
+            if stored_ref_overrides:
+                ref_append_geoms = gpd.GeoSeries(
+                    list(stored_ref_overrides.values()),
+                    crs="EPSG:4326",
+                ).to_crs(utm_crs)
+                ref_append_rows = []
+                for gid, geom in zip(stored_ref_overrides, ref_append_geoms):
+                    row = {"id": str(gid), "geometry": geom}
+                    row.update(stored_ref_attrs[gid])
+                    if "connectors" in ref_gdf_proj.columns:
+                        # Explicit None (not concat-NaN): downstream connector
+                        # iteration handles None but not float NaN.
+                        row["connectors"] = None
+                    ref_append_rows.append(row)
+                ref_new_gdf = gpd.GeoDataFrame(ref_append_rows, geometry="geometry", crs=utm_crs)
+                ref_gdf_proj = pd.concat([ref_gdf_proj, ref_new_gdf], ignore_index=True)
+                console.print(
+                    f"  [yellow]{len(ref_append_rows)} gers_id(s) missing from current "
+                    f"Overture release - using stored reference geometries[/yellow]"
+                )
 
             # --- Phase 3: Create CandidatePair objects ---
             ref_id_to_idx = {str(rid): idx for idx, rid in enumerate(ref_gdf_proj["id"])}
