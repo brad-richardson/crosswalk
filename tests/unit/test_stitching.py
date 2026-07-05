@@ -1395,6 +1395,120 @@ class TestSliverGroupHelpers:
         assert "is_sliver" not in group["edges"][0]
 
 
+class TestSliverOverlapAndBorderline:
+    """DISPLAY-ONLY helpers: absolute overlap meters + the BORDERLINE band.
+
+    BORDERLINE (pack display only, never consumed by the optimizer or label
+    gates): an edge that is NOT a strict sliver yet whose larger coverage
+    fraction is below ``SLIVER_BORDERLINE_SPAN_THRESHOLD`` (1.5x the sliver span
+    threshold). Captures the junction-kiss edges the strict rule leaves untagged
+    on long urban segments (fail the sliver test only on the 5 m absolute floor)
+    plus those sitting just above the span threshold.
+    """
+
+    def test_overlap_m_single_definition(self):
+        # The config-level overlap must match the sliver rule's absolute gate.
+        from matcher.config import SLIVER_ABS_OVERLAP_M, is_sliver_edge, sliver_overlap_m
+
+        # 9% of a 2 km ref = 180 m absolute overlap.
+        ov = sliver_overlap_m(0.09, 0.05, 2000.0, 50.0)
+        assert ov == pytest.approx(180.0)
+        # 180 m overlap is above the 5 m floor, and the rule agrees (not a sliver).
+        assert ov >= SLIVER_ABS_OVERLAP_M
+        assert not is_sliver_edge(0.09, 0.05, 2000.0, 50.0)
+        # Tiny short-segment overlap is below the floor -> classified sliver.
+        assert sliver_overlap_m(0.0012, 0.067, 162.0, 10.0) < SLIVER_ABS_OVERLAP_M
+        assert is_sliver_edge(0.0012, 0.067, 162.0, 10.0)
+
+    def test_overlap_m_missing_length_is_inf(self):
+        import math
+
+        from matcher.config import sliver_overlap_m
+
+        assert math.isinf(sliver_overlap_m(0.01, 0.01))
+
+    def test_edge_overlap_m_from_group_lengths(self):
+        from matcher.matching.sliver import edge_overlap_m, group_segment_lengths_m
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(200.0)},
+            "target_geometries": {"t": _line_of_length_m(50.0)},
+        }
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        # 2.9% of a 200 m ref = ~5.8 m absolute overlap (the Berlin R8->T3 regime).
+        edge = _frac_edge("r", "t", 0.0, 0.029, 0.0, 0.025)
+        assert edge_overlap_m(edge, ref_lens, tgt_lens) == pytest.approx(5.8, abs=0.1)
+
+    def test_borderline_when_sliver_blocked_only_by_abs_floor(self):
+        # The named case: 2.9% span on a long ref maps to >5 m, so the strict
+        # rule does NOT tag it a sliver, but it IS the contested junction-kiss.
+        from matcher.matching.sliver import (
+            edge_is_borderline,
+            edge_is_sliver,
+            edge_sliver_tag,
+            group_segment_lengths_m,
+        )
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(200.0)},
+            "target_geometries": {"t": _line_of_length_m(50.0)},
+        }
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        edge = _frac_edge("r", "t", 0.0, 0.029, 0.0, 0.025)
+        assert not edge_is_sliver(edge, ref_lens, tgt_lens)
+        assert edge_is_borderline(edge, ref_lens, tgt_lens)
+        assert edge_sliver_tag(edge, ref_lens, tgt_lens) == "BORDERLINE"
+
+    def test_borderline_just_above_span_threshold(self):
+        # Span 0.12 (> 0.10 sliver gate, < 0.15 band) with short segments -> BORDERLINE.
+        from matcher.matching.sliver import edge_is_borderline, edge_is_sliver
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(30.0)},
+            "target_geometries": {"t": _line_of_length_m(30.0)},
+        }
+        from matcher.matching.sliver import group_segment_lengths_m
+
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        edge = _frac_edge("r", "t", 0.0, 0.12, 0.0, 0.12)
+        assert not edge_is_sliver(edge, ref_lens, tgt_lens)
+        assert edge_is_borderline(edge, ref_lens, tgt_lens)
+
+    def test_sliver_is_never_also_borderline(self):
+        from matcher.matching.sliver import (
+            edge_is_borderline,
+            edge_is_sliver,
+            edge_sliver_tag,
+            group_segment_lengths_m,
+        )
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(50.0)},
+            "target_geometries": {"t": _line_of_length_m(10.0)},
+        }
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        edge = _frac_edge("r", "t", 0.0, 0.02, 0.0, 0.05)  # true sliver
+        assert edge_is_sliver(edge, ref_lens, tgt_lens)
+        assert not edge_is_borderline(edge, ref_lens, tgt_lens)
+        assert edge_sliver_tag(edge, ref_lens, tgt_lens) == "SLIVER"
+
+    def test_substantive_asymmetric_match_not_borderline(self):
+        # A large coverage on one side (45%) is a legitimate asymmetric match,
+        # not a junction-kiss, even if the absolute overlap is small.
+        from matcher.matching.sliver import edge_is_borderline, edge_sliver_tag
+
+        group = {
+            "ref_geometries": {"r": _line_of_length_m(11.0)},
+            "target_geometries": {"t": _line_of_length_m(220.0)},
+        }
+        from matcher.matching.sliver import group_segment_lengths_m
+
+        ref_lens, tgt_lens = group_segment_lengths_m(group)
+        edge = _frac_edge("r", "t", 0.0, 0.457, 0.0, 0.023)
+        assert not edge_is_borderline(edge, ref_lens, tgt_lens)
+        assert edge_sliver_tag(edge, ref_lens, tgt_lens) is None
+
+
 # ---------------------------------------------------------------------------
 # _parse_explicit_edges — edge-set fidelity validation
 # ---------------------------------------------------------------------------
