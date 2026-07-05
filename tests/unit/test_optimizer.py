@@ -1141,3 +1141,165 @@ class TestConfidenceDropPrune:
         ]
         _, pruned = apply_confidence_drop_prune(rs, 0.5)
         assert pruned == {("r1", "t2"), ("r3", "t5")}
+
+
+def _canonical_digest(optimized):
+    """Order-sensitive fingerprint of an optimizer result list.
+
+    Captures both WHICH edges were selected (and their decision/group) AND the
+    order they are emitted in — the sidecar's group array order derives from
+    this list order, so a determinism fix must stabilize both.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for r in optimized:
+        gid = r.features.get("group_id", "")
+        h.update(f"{r.ref_id}|{r.target_id}|{r.decision.value}|{gid}\n".encode())
+    return h.hexdigest()
+
+
+def _churn_scenario():
+    """A grouping scenario whose selection is a hash-order tie-break trap.
+
+    Each target has K non-contiguous candidate refs at IDENTICAL confidence.
+    Non-contiguous refs decompose to singleton leftovers all competing for the
+    one target, so the greedy assignment must break an exact confidence tie —
+    historically resolved by Python set/dict iteration order (hash-seed and
+    input-order dependent). Returns ``(results, ref_gdf, tgt_gdf)``.
+    """
+    import geopandas as gpd
+
+    results = []
+    ref_geoms = {}
+    tgt_geoms = {}
+    for c in range(12):
+        tid = f"tgt_{c:03d}"
+        tgt_geoms[tid] = LineString([(c * 1000, 0), (c * 1000 + 50, 0)])
+        for k in range(4):
+            rid = f"ref_{c:03d}_{k}"
+            # far apart from each other -> NOT contiguous -> singleton leftovers
+            ref_geoms[rid] = LineString(
+                [(c * 1000 + k * 500, 5000 + k * 5000), (c * 1000 + k * 500 + 40, 5000 + k * 5000)]
+            )
+            results.append(MatchResult(rid, tid, MatchDecision.MATCH, 0.80, {}, {}))
+
+    ref_gdf = gpd.GeoDataFrame(
+        {"id": list(ref_geoms.keys())}, geometry=list(ref_geoms.values()), crs="EPSG:32619"
+    )
+    tgt_gdf = gpd.GeoDataFrame(
+        {"local_id": list(tgt_geoms.keys())}, geometry=list(tgt_geoms.values()), crs="EPSG:32619"
+    )
+    return results, ref_gdf, tgt_gdf
+
+
+class TestOptimizerDeterminism:
+    """The optimizer output must be independent of Python hash-seed iteration
+    order (set/dict) and of input list order. See PR: source-level determinism
+    fix (sorted id dedup, canonical BFS neighbour order, explicit greedy
+    tie-break) replacing the old PYTHONHASHSEED=0 workaround.
+    """
+
+    def test_greedy_tiebreak_invariant_to_input_order(self):
+        """Equal-confidence edges competing for a shared target must resolve to
+        the same canonical winner regardless of input order."""
+        import random
+
+        base = [
+            MatchResult("ref_b", "t_x", MatchDecision.MATCH, 0.8, {}, {}),
+            MatchResult("ref_a", "t_x", MatchDecision.MATCH, 0.8, {}, {}),
+            MatchResult("ref_c", "t_x", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+        winners = set()
+        rng = random.Random(0)
+        for _ in range(25):
+            shuffled = base[:]
+            rng.shuffle(shuffled)
+            out = optimize_matches_greedy(shuffled, min_confidence=0.5)
+            winners.add(tuple((r.ref_id, r.target_id) for r in out))
+        # Exactly one canonical outcome across all permutations.
+        assert len(winners) == 1
+        # Canonical tie-break is smallest string id.
+        assert winners == {(("ref_a", "t_x"),)}
+
+    def test_grouping_invariant_to_input_order(self):
+        """Full M:N grouping output must be byte-stable under input reordering."""
+        import random
+
+        results, ref_gdf, tgt_gdf = _churn_scenario()
+        digests = set()
+        rng = random.Random(1234)
+        for _ in range(20):
+            shuffled = results[:]
+            rng.shuffle(shuffled)
+            out = optimize_matches_with_grouping(
+                shuffled,
+                ref_gdf,
+                tgt_gdf,
+                min_confidence=0.5,
+                ref_id_column="id",
+                target_id_column="local_id",
+            )
+            digests.add(_canonical_digest(out))
+        assert len(digests) == 1, f"input-order sensitive: {len(digests)} distinct outputs"
+
+    @pytest.mark.slow
+    def test_grouping_invariant_to_pythonhashseed(self):
+        """The optimizer output must be identical across processes with
+        different PYTHONHASHSEED — the honest cross-process determinism check.
+
+        Runs the same tie-break-trap scenario in fresh subprocesses under
+        several hash seeds and asserts a single canonical digest.
+        """
+        import os
+        import subprocess
+        import sys
+        import textwrap
+
+        script = textwrap.dedent(
+            """
+            import hashlib
+            import geopandas as gpd
+            from shapely import LineString
+            from matcher.matching.optimizer import optimize_matches_with_grouping
+            from matcher.matching.types import MatchDecision, MatchResult
+
+            results, ref_geoms, tgt_geoms = [], {}, {}
+            for c in range(12):
+                tid = f"tgt_{c:03d}"
+                tgt_geoms[tid] = LineString([(c*1000, 0), (c*1000+50, 0)])
+                for k in range(4):
+                    rid = f"ref_{c:03d}_{k}"
+                    ref_geoms[rid] = LineString(
+                        [(c*1000+k*500, 5000+k*5000), (c*1000+k*500+40, 5000+k*5000)]
+                    )
+                    results.append(MatchResult(rid, tid, MatchDecision.MATCH, 0.80, {}, {}))
+            ref_gdf = gpd.GeoDataFrame(
+                {"id": list(ref_geoms)}, geometry=list(ref_geoms.values()), crs="EPSG:32619"
+            )
+            tgt_gdf = gpd.GeoDataFrame(
+                {"local_id": list(tgt_geoms)}, geometry=list(tgt_geoms.values()), crs="EPSG:32619"
+            )
+            out = optimize_matches_with_grouping(
+                results, ref_gdf, tgt_gdf, min_confidence=0.5,
+                ref_id_column="id", target_id_column="local_id",
+            )
+            h = hashlib.sha256()
+            for r in out:
+                gid = r.features.get("group_id", "")
+                h.update(f"{r.ref_id}|{r.target_id}|{r.decision.value}|{gid}\\n".encode())
+            print(h.hexdigest())
+            """
+        )
+        digests = set()
+        for seed in ("0", "1", "2", "31337"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            digests.add(proc.stdout.strip())
+        assert len(digests) == 1, f"hash-seed sensitive: {digests}"

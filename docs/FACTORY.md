@@ -167,13 +167,23 @@ did not finish — resume is automatic.
 
 ### Determinism note
 
-The optimizer has a pre-existing hash-seed-dependent tie-break, so two *separate*
-process invocations on identical scores can differ in a handful of edge selections
-(observed: ~1% of groups on a trails dataset). Within a fixed `PYTHONHASHSEED`,
-`reoptimize` reproduces a full run's `groups.json` **byte-for-byte** (bridge
-identical except the `matched_at` timestamp). Set `PYTHONHASHSEED=0` if you need
-bit-reproducible reruns; otherwise treat sub-1% edge churn between reruns as
-expected (it also shows up honestly in `factory delta`).
+The optimizer is **fully deterministic** — its output does not depend on
+`PYTHONHASHSEED`. Two *separate* process invocations on identical scores produce
+a byte-for-byte identical `groups.json` and an identical bridge parquet (modulo
+the `matched_at` timestamp column). `reoptimize` likewise reproduces a full run
+exactly. No `PYTHONHASHSEED` workaround is needed, and `factory delta` between
+releases reflects only genuine input/model changes — no phantom churn.
+
+This was not always true: the optimizer historically had a hash-seed-dependent
+tie-break (grouping / greedy assignment resolved equal-confidence edges via
+Python set/dict iteration order), so separate processes could churn a handful of
+edge selections (~1% of groups on some datasets), polluting `factory delta` and
+breaking bridge-table bit-reproducibility. The source of that nondeterminism —
+`list(set(...))` id dedup, set-iteration in BFS neighbour traversal / component
+edge collection, and an input-order-dependent greedy tie-break — was replaced
+with canonical ordering (sorted stable ids, explicit greedy tie-break key). See
+`tests/unit/test_optimizer.py::TestOptimizerDeterminism` (including a slow
+cross-`PYTHONHASHSEED` subprocess check).
 
 ## Box deployment runbook (the 20-core / 64 GB workhorse)
 
