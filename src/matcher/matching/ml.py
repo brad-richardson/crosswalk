@@ -19,6 +19,7 @@ Model Architecture:
 - Handles class imbalance via scale_pos_weight or class_weight
 """
 
+import os
 import time
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -829,13 +830,20 @@ def segment_aware_split(
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
-    def __init__(self, model_path: str | None = None, auto_select: bool = False):
+    def __init__(
+        self,
+        model_path: str | None = None,
+        auto_select: bool = False,
+        allow_version_mismatch: bool = False,
+    ):
         """Initialize the ML matcher.
 
         Args:
             model_path: Path to trained model (optional)
             auto_select: If True, defer model loading until score_candidates is called
                         so that model can be selected based on target dataset
+            allow_version_mismatch: If True, downgrade a feature_version mismatch on
+                        load from a hard error to a warning (see ``load_model``)
         """
         self.model = None
         self.model_path = model_path
@@ -850,13 +858,27 @@ class MLMatcher:
         self._auto_select = auto_select
 
         if model_path and not auto_select:
-            self.load_model(model_path)
+            self.load_model(model_path, allow_version_mismatch=allow_version_mismatch)
 
-    def load_model(self, path: str) -> None:
+    def load_model(self, path: str, allow_version_mismatch: bool = False) -> None:
         """Load a trained model from disk.
+
+        A model whose stored ``feature_version`` differs from the current code's
+        ``FEATURE_VERSION`` would score against a stale feature contract and
+        silently degrade. By default this is a **hard error** — retrain with
+        ``matcher train`` (or update matcher) so the model and features stay in
+        lockstep.
+
+        Escape hatches (for intentionally loading a mismatched model):
+        - pass ``allow_version_mismatch=True`` (used for the shipped/bundled
+          artifact, whose lockstep is enforced at build time by a CI test, and by
+          ``matcher stitch --allow-version-mismatch``), or
+        - set env var ``MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1``.
 
         Args:
             path: Path to model file
+            allow_version_mismatch: Downgrade a version mismatch to a warning
+                instead of raising.
         """
         path = Path(path)
         if not path.exists():
@@ -874,17 +896,28 @@ class MLMatcher:
         self.calibrator = (
             IsotonicCalibrator.from_knots(calib_knots) if calib_knots is not None else None
         )
+        allow_mismatch = allow_version_mismatch or os.environ.get(
+            "MATCHER_ALLOW_MODEL_VERSION_MISMATCH"
+        ) in ("1", "true", "True")
         if self.feature_version is None:
+            # Pre-versioning model: legacy, not the shipped-artifact concern — warn only.
             logger.warning(
                 f"Model {path} has no feature_version (pre-versioning model). "
                 f"Current code uses FEATURE_VERSION={FEATURE_VERSION}."
             )
         elif self.feature_version != FEATURE_VERSION:
-            logger.warning(
+            msg = (
                 f"Model feature_version={self.feature_version} does not match "
-                f"current code FEATURE_VERSION={FEATURE_VERSION}. "
-                "Consider retraining the model."
+                f"current code FEATURE_VERSION={FEATURE_VERSION}. The model would "
+                "score against a stale feature contract. Run 'matcher train' to "
+                "retrain (or update matcher). To load anyway, pass "
+                "allow_version_mismatch=True / 'matcher stitch --allow-version-mismatch' "
+                "or set MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1."
             )
+            if allow_mismatch:
+                logger.warning(msg)
+            else:
+                raise ValueError(msg)
         logger.info(f"Loaded model from {path}")
 
     def save_model(self, path: str) -> None:

@@ -190,6 +190,7 @@ def score_candidates_from_geodataframes(
     n_jobs: int = -1,
     model_path: str | None = None,
     auto_select: bool = False,
+    allow_version_mismatch: bool = False,
 ) -> tuple[list, ProjectionResult]:
     """Project, block, and score candidates from GeoDataFrames.
 
@@ -240,19 +241,31 @@ def score_candidates_from_geodataframes(
 
     # Score candidates using ML
     if model_path:
-        matcher = MLMatcher(model_path=model_path)
+        matcher = MLMatcher(model_path=model_path, allow_version_mismatch=allow_version_mismatch)
     elif auto_select:
         matcher = MLMatcher(auto_select=True)
     else:
+        from ..config import bundled_model_path
         from ..config import settings as _settings
 
         _model_path = _settings.model_path
-        if not _model_path.exists():
-            raise FileNotFoundError(
-                f"ML model not found at {_model_path}. "
-                "Run 'matcher train' to train the model on labeled data."
+        if _model_path.exists():
+            # A locally trained model takes precedence over the shipped one.
+            matcher = MLMatcher(
+                model_path=str(_model_path), allow_version_mismatch=allow_version_mismatch
             )
-        matcher = MLMatcher(model_path=str(_model_path))
+        else:
+            # Fall back to the pretrained model shipped in the package so a fresh
+            # clone / pip install can stitch with zero training. Its lockstep with
+            # FEATURE_VERSION is enforced by CI, so it is trusted here.
+            _bundled = bundled_model_path()
+            if not _bundled.exists():
+                raise FileNotFoundError(
+                    f"ML model not found at {_model_path} and no bundled model at "
+                    f"{_bundled}. Run 'matcher train' to train on labeled data."
+                )
+            logger.info(f"Using pretrained model shipped with matcher: {_bundled}")
+            matcher = MLMatcher(model_path=str(_bundled), allow_version_mismatch=True)
 
     results = matcher.score_candidates(
         candidates,
@@ -1196,6 +1209,7 @@ def run_pipeline(
     n_jobs: int = -1,
     run_screen: bool = False,
     screen_tests: list[str] | None = None,
+    allow_version_mismatch: bool = False,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -1250,6 +1264,7 @@ def run_pipeline(
         ref_class_column=ref_class_column,
         target_class_column=target_class_column,
         n_jobs=n_jobs,
+        allow_version_mismatch=allow_version_mismatch,
     )
     # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326).
     # Computed from the pre-projection (filtered) frames; row order is preserved.

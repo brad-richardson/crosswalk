@@ -75,19 +75,43 @@ class TestLoadModelVersionWarnings:
         assert "pre-versioning" in output.lower()
         assert matcher.feature_version is None
 
-    def test_load_mismatched_version_warns(self, tmp_path, log_capture):
-        """Loading a model with stale feature_version should warn."""
+    def test_load_mismatched_version_raises(self, tmp_path):
+        """Loading a model with stale feature_version should hard-error by default.
+
+        A stale model would score against an old feature contract and silently
+        degrade, so the mismatch is a hard error unless explicitly allowed.
+        """
         model_path = tmp_path / "stale_model.joblib"
         stale_version = "2020-01-01"
         _save_model_dict(model_path, extra={"feature_version": stale_version})
 
         matcher = MLMatcher()
-        matcher.load_model(str(model_path))
+        with pytest.raises(ValueError, match="does not match"):
+            matcher.load_model(str(model_path))
+
+    def test_load_mismatched_version_allowed_with_flag(self, tmp_path, log_capture):
+        """allow_version_mismatch=True downgrades the error back to a warning."""
+        model_path = tmp_path / "stale_model.joblib"
+        stale_version = "2020-01-01"
+        _save_model_dict(model_path, extra={"feature_version": stale_version})
+
+        matcher = MLMatcher()
+        matcher.load_model(str(model_path), allow_version_mismatch=True)
 
         output = log_capture.getvalue()
         assert "does not match" in output
         assert stale_version in output
         assert matcher.feature_version == stale_version
+
+    def test_load_mismatched_version_allowed_via_env(self, tmp_path, log_capture, monkeypatch):
+        """MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1 is a universal escape hatch."""
+        monkeypatch.setenv("MATCHER_ALLOW_MODEL_VERSION_MISMATCH", "1")
+        model_path = tmp_path / "stale_model.joblib"
+        _save_model_dict(model_path, extra={"feature_version": "2020-01-01"})
+
+        matcher = MLMatcher()
+        matcher.load_model(str(model_path))  # must not raise
+        assert matcher.feature_version == "2020-01-01"
 
     def test_load_matching_version_no_warning(self, tmp_path, log_capture):
         """Loading a model with matching feature_version should not warn."""

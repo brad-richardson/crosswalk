@@ -732,6 +732,12 @@ def register_commands(app: typer.Typer) -> None:
             "--profile",
             help="Enable per-feature timing breakdown (sets MATCHER_PROFILE=1)",
         ),
+        allow_version_mismatch: bool = typer.Option(
+            False,
+            "--allow-version-mismatch",
+            help="Load a model whose feature_version differs from the current "
+            "FEATURE_VERSION (normally a hard error). Scores may be degraded.",
+        ),
     ):
         """Run the stitch pipeline (pair matching + M:N optimization).
 
@@ -844,12 +850,157 @@ def register_commands(app: typer.Typer) -> None:
                     method=method,
                     buffer_distance_m=buffer_distance_m,
                     n_jobs=workers,
+                    allow_version_mismatch=allow_version_mismatch,
                 )
 
                 progress.update(task, completed=True)
 
             console.print(f"[green]Matched {result.n_matched} / {result.n_target} features[/green]")
             console.print(f"[green]Bridge file: {out_path}[/green]")
+
+    @app.command("fetch-overture")
+    def fetch_overture(
+        bbox: str | None = typer.Option(
+            None,
+            "--bbox",
+            help="Bounding box as 'xmin,ymin,xmax,ymax' in WGS84 (lon/lat) degrees",
+        ),
+        clip_target: Path | None = typer.Option(
+            None,
+            "--clip-target",
+            help="Derive the bbox automatically from this target parquet's extent "
+            "(alternative to --bbox; the zero-thought path)",
+        ),
+        output: Path = typer.Option(
+            Path("overture_segments.parquet"),
+            "--output",
+            "-o",
+            help="Output GeoParquet path for the Overture road segments",
+        ),
+        release: str | None = typer.Option(
+            None,
+            "--release",
+            help="Overture Maps release to pin (e.g. 2026-06-18.0). "
+            "Default: settings.overture_release, else the latest release. "
+            "The release used is recorded in the .meta.yaml sidecar.",
+        ),
+        buffer_m: float | None = typer.Option(
+            None,
+            "--buffer-m",
+            help="Expand the bbox by this many meters to capture edge topology "
+            "(default: 1000; pass 0 to disable)",
+        ),
+        connectors: bool = typer.Option(
+            False,
+            "--connectors",
+            help="Also fetch Overture connectors to a sibling *_connectors.parquet. "
+            "Not needed for 'matcher stitch' (topology comes from the segments' "
+            "connectors column).",
+        ),
+    ):
+        """Fetch Overture road segments for a bbox — no dataset YAML needed.
+
+        The YAML-free path to the reference half of a match: supply either an
+        explicit --bbox or --clip-target (your local parquet, whose extent is
+        used), and stitch the result directly.
+
+        Examples:
+            matcher fetch-overture --bbox -71.06,42.35,-71.03,42.37 -o ref.parquet
+            matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet
+            matcher stitch -r ref.parquet -t my_roads.parquet -o bridge.parquet
+        """
+        from ..config import settings
+        from ..fetch.overture import (
+            DEFAULT_OVERTURE_BUFFER_M,
+            BoundingBox,
+            fetch_overture_connectors,
+            fetch_overture_segments,
+            get_buffered_bbox,
+        )
+
+        if (bbox is None) == (clip_target is None):
+            console.print("[red]Provide exactly one of --bbox or --clip-target[/red]")
+            raise typer.Exit(1)
+
+        if bbox is not None:
+            try:
+                parts = [float(p) for p in bbox.split(",")]
+            except ValueError:
+                parts = []
+            if len(parts) != 4:
+                console.print(
+                    "[red]--bbox must be 'xmin,ymin,xmax,ymax' (4 comma-separated numbers)[/red]"
+                )
+                raise typer.Exit(1)
+            xmin, ymin, xmax, ymax = parts
+        else:
+            import geopandas as gpd
+
+            if not clip_target.exists():
+                console.print(f"[red]Target parquet not found: {clip_target}[/red]")
+                raise typer.Exit(1)
+            console.print(f"[blue]Deriving bbox from {clip_target}...[/blue]")
+            target_gdf = gpd.read_parquet(clip_target)
+            if len(target_gdf) == 0:
+                console.print(f"[red]Target parquet is empty: {clip_target}[/red]")
+                raise typer.Exit(1)
+            if target_gdf.crs is not None and target_gdf.crs.to_epsg() != 4326:
+                target_gdf = target_gdf.to_crs("EPSG:4326")
+            xmin, ymin, xmax, ymax = (float(v) for v in target_gdf.total_bounds)
+
+        valid_bbox = (
+            xmin < xmax
+            and ymin < ymax
+            and xmin >= -180
+            and xmax <= 180
+            and ymin >= -90
+            and ymax <= 90
+        )
+        if not valid_bbox:
+            console.print(
+                f"[red]Invalid WGS84 bbox: {xmin},{ymin},{xmax},{ymax} "
+                "(expected xmin<xmax, ymin<ymax, lon in [-180,180], lat in [-90,90])[/red]"
+            )
+            raise typer.Exit(1)
+
+        original_bbox = BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+        fetch_bbox, effective_buffer = get_buffered_bbox(
+            original_bbox, buffer_m, DEFAULT_OVERTURE_BUFFER_M
+        )
+        effective_release = release or settings.overture_release
+
+        console.print(
+            f"[blue]Fetching Overture segments for bbox "
+            f"({xmin:.4f},{ymin:.4f},{xmax:.4f},{ymax:.4f})"
+            + (f" +{effective_buffer:.0f}m buffer" if effective_buffer else "")
+            + (f", release {effective_release}" if effective_release else ", latest release")
+            + "...[/blue]"
+        )
+
+        seg_path = fetch_overture_segments(
+            bbox=fetch_bbox,
+            output_path=output,
+            release=effective_release,
+            original_bbox=original_bbox,
+            buffer_m=effective_buffer,
+        )
+        console.print(f"[green]Saved Overture segments to {seg_path}[/green]")
+
+        if connectors:
+            conn_path = output.with_name(output.stem + "_connectors.parquet")
+            conn_path = fetch_overture_connectors(
+                bbox=fetch_bbox,
+                output_path=conn_path,
+                release=effective_release,
+                original_bbox=original_bbox,
+                buffer_m=effective_buffer,
+            )
+            console.print(f"[green]Saved Overture connectors to {conn_path}[/green]")
+
+        console.print(
+            "\nNext: [bold]matcher stitch -r "
+            f"{output} -t <your_local.parquet> -o bridge.parquet[/bold]"
+        )
 
     @app.command()
     def train(

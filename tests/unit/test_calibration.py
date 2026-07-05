@@ -130,11 +130,15 @@ def _tiny_matcher():
     rng = np.random.RandomState(3)
     X = rng.rand(300, 2)
     y = (X[:, 0] + rng.rand(300) * 0.3 > 0.7).astype(int)
+    from matcher.config import FEATURE_VERSION
+
     m = MLMatcher()
     m.feature_names = ["f0", "f1"]
     m.model = xgb.XGBClassifier(n_estimators=10, max_depth=3)
     m.model.fit(X, y)
-    m.feature_version = 999
+    # Current version so round-trip loads don't trip the version-mismatch hard
+    # error (version policy is tested in test_model_version.py, not here).
+    m.feature_version = FEATURE_VERSION
     return m
 
 

@@ -308,6 +308,19 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
 FEATURE_VERSION = "2026-07-04.2"
 
+
+def bundled_model_path() -> Path:
+    """Path to the pretrained model shipped inside the package.
+
+    This artifact is committed under ``src/matcher/_model/`` and ships in the
+    wheel, so a fresh clone / ``pip install`` can ``matcher stitch`` with zero
+    training. Its ``feature_version`` is kept in lockstep with ``FEATURE_VERSION``
+    by a CI test (``tests/unit/test_shipped_model.py``) that fails whenever the
+    two diverge — forcing a retrain + reship in the same PR that bumps features.
+    """
+    return Path(__file__).parent / "_model" / "matcher_model_combined.joblib"
+
+
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================

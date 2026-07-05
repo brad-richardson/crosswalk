@@ -113,30 +113,49 @@ flowchart TB
 
 ## Quick Start
 
-After installation, here's the typical workflow for matching a new dataset:
+Match your own road data against Overture in three commands — **no training, no
+dataset config, no clone**. A pretrained model ships inside the package (kept in
+lockstep with the feature code by CI), so `stitch` works out of the box:
+
+```bash
+# 1. Install (or from a clone: pip install -e .)
+pip install road-matcher
+
+# 2. Fetch the Overture reference for your data's area (bbox derived automatically)
+matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet
+
+# 3. Match — writes a GERS bridge table
+matcher stitch -r ref.parquet -t my_roads.parquet -o bridge.parquet
+```
+
+`fetch-overture` also takes an explicit `--bbox xmin,ymin,xmax,ymax` and a
+`--release` pin; the Overture release used is recorded in a `.meta.yaml` sidecar
+next to the output.
+
+### Full workflow (configured datasets, retraining)
+
+For a *configured* dataset (YAML in `datasets/`) with labeling and retraining:
 
 ```bash
 # 1. Fetch all data (target + Overture reference) for a dataset
 matcher data fetch all us_boston_streets
 
-# 2. Train the ML model (required after fresh clone)
-matcher train
-
-# 3. Run matching
+# 2. Run matching (uses the bundled pretrained model, or data/models/ if you trained one)
 matcher stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
-# 4. If match quality needs improvement, label more examples (auto-discovers datasets)
+# 3. If match quality needs improvement, label more examples (auto-discovers datasets)
 matcher ui
 
-# 5. Retrain and re-match until satisfied
+# 4. Retrain and re-match until satisfied (a local model takes precedence over the bundled one)
 matcher train && matcher stitch ...
 ```
 
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install road-matcher        # from PyPI (console script is `matcher`)
+pip install -e ".[dev]"         # from a clone, for development
 ```
 
 ### System Dependencies
@@ -154,8 +173,11 @@ If not available, the system falls back to pyosmium (slower but no system deps).
 
 ### Optional Dependencies
 
+The core install covers `stitch` and `fetch-overture` end to end (XGBoost and the
+bundled pretrained model included). Extras add maintainer tooling:
+
 ```bash
-# For machine learning matching (XGBoost, LightGBM)
+# Polygon-to-centerline conversion (pygeoops)
 pip install -e ".[ml]"
 
 # For web UI (labeling, QA, review)
@@ -175,6 +197,10 @@ Fetch Overture reference data and your local dataset. Local data typically comes
 - Internal road databases
 
 ```bash
+# YAML-free: fetch the Overture reference for any area (see Quick Start)
+matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet
+matcher fetch-overture --bbox -71.06,42.35,-71.03,42.37 -o ref.parquet
+
 # Fetch all data (target + Overture reference) for a configured dataset
 matcher data fetch all us_boston_streets
 
@@ -270,7 +296,8 @@ matcher class discover data/raw/new_dataset.parquet \
 | Command | Description |
 |---------|-------------|
 | `matcher stitch` | Run the stitch pipeline (pair matching + M:N optimization) |
-| `matcher train` | Train ML model on labeled data |
+| `matcher fetch-overture` | Fetch Overture road segments for a bbox (or `--clip-target`), no dataset YAML needed |
+| `matcher train` | Train ML model on labeled data (optional — a pretrained model is bundled) |
 | `matcher eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
 | `matcher backfill` | Recompute features for labeled pairs |
 | `matcher ui` | Launch web UI (labeling, label review, integration QA) |
