@@ -436,6 +436,65 @@ class TestSeedOptions:
             for e in a["edges"]:
                 assert (e["ref_id"], e["target_id"]) in valid
 
+    def test_seeds_tagged_is_seed_organic_not(self):
+        """Seed options carry is_seed=True; organic alternatives do not."""
+        # t1 spans 4 refs -> full-set seed cannot be organic; mark a selection too.
+        edges = [_edge(f"r{i}", "t1", 0.9 - i * 0.1) for i in range(4)]
+        edges.append(_edge("r0", "t2", 0.5))
+        edges[0]["selected"] = True
+        alts = generate_top_k_alternatives(edges, k=5)
+        seeds = [a for a in alts if a.get("is_seed")]
+        organic = [a for a in alts if not a.get("is_seed")]
+        assert 1 <= len(seeds) <= 2
+        assert organic  # organic alternatives never carry the tag
+        full = frozenset((e["ref_id"], e["target_id"]) for e in edges)
+        assert any(
+            frozenset((e["ref_id"], e["target_id"]) for e in s["edges"]) == full for s in seeds
+        )
+
+    def test_selected_flag_survives_duplicate_dedup(self):
+        """The selected-seed uses flags from ALL input edges: a duplicate pair
+        whose flagged copy has LOWER confidence still contributes its pair."""
+        edges = []
+        for t in range(7):  # 7 targets -> greedy path (selection not organic)
+            edges.append(_edge(f"r{t}", f"t{t}", 0.9))
+        # Optimizer selected 6 of 7 pairs...
+        for e in edges[:6]:
+            e["selected"] = True
+        # ...but pair (r0, t0)'s flag lives on a lower-confidence duplicate.
+        edges[0]["selected"] = False
+        dup = _edge("r0", "t0", 0.2)
+        dup["selected"] = True
+        edges.append(dup)
+        selected = frozenset((f"r{t}", f"t{t}") for t in range(6))
+        offered = self._full(generate_top_k_alternatives(edges, k=3))
+        assert selected in offered
+
+    def test_batch_selection_scores_ignore_seeds(self):
+        """Seed options must not skew select_stitching_batch's tier scoring:
+        the full-set seed is a superset of every proper assignment and would
+        otherwise always win max(total_confidence)."""
+        # 3-target M:N with one high- and one low-confidence ref per target.
+        edges = []
+        for t in range(3):
+            edges.append(_edge(f"rh{t}", f"t{t}", 0.9))
+            edges.append(_edge(f"rl{t}", f"t{t}", 0.1))
+
+        def _group_with(seeded: bool):
+            return {
+                "group_id": "g",
+                "match_type": "M:N",
+                "edges": edges,
+                "alternatives": generate_top_k_alternatives(
+                    edges, k=5, include_seed_options=seeded
+                ),
+            }
+
+        sel_seeded = select_stitching_batch([_group_with(True)], set(), k=1)
+        sel_organic = select_stitching_batch([_group_with(False)], set(), k=1)
+        assert sel_seeded[0]["review_score"] == sel_organic[0]["review_score"]
+        assert sel_seeded[0]["review_tier"] == sel_organic[0]["review_tier"]
+
     def test_n_to_1_ignores_geoms_full_powerset(self):
         """N:1 mirror: refs already enumerate the full power set; geoms are a no-op."""
         edges = [

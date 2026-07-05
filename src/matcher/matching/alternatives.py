@@ -205,10 +205,17 @@ def generate_top_k_alternatives(
     # confidence-sorted top-K (large groups) or are structurally inexpressible by
     # the per-target enumeration (e.g. settled answer == accept every edge).
     if include_seed_options:
+        # Selected pairs are collected from ALL input edges (not the deduped
+        # edge_data survivors), so the flag is not lost when a duplicate pair's
+        # flagged edge had lower confidence than the copy kept in edge_data.
+        selected_pairs = {
+            (e["ref_id"], e["target_id"]) for e in component_edges if e.get("selected")
+        }
+        selected_keys = [key for key in edge_data if key in selected_pairs]
         seen_keys = {
             frozenset((e["ref_id"], e["target_id"]) for e in alt["edges"]) for alt in top_k
         }
-        for seed in _seed_alternatives(edge_data, ref_ids):
+        for seed in _seed_alternatives(edge_data, ref_ids, selected_keys):
             key = frozenset((e["ref_id"], e["target_id"]) for e in seed["edges"])
             if key and key not in seen_keys:
                 seen_keys.add(key)
@@ -224,15 +231,23 @@ def generate_top_k_alternatives(
 def _seed_alternatives(
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
+    selected_keys: list[tuple[str, str]],
 ) -> list[dict]:
     """Whole-group seed alternatives: full candidate set + optimizer selection.
 
     Both are strict subsets of the group's candidate edges (built from
     ``edge_data``), so they satisfy the same output invariant as the enumerated
     alternatives. The optimizer-selected seed uses the per-edge ``selected``
-    flag, which is populated even for giant M:N groups whose
-    ``optimizer_assignment`` is empty; it is skipped when no edge is flagged or
-    when it coincides with the full set (dedup handles the latter downstream).
+    flag (pre-collected by the caller from the raw input edges), which is
+    populated even for giant M:N groups whose ``optimizer_assignment`` is empty;
+    it is skipped when no edge is flagged or when it coincides with the full set
+    (dedup handles the latter downstream).
+
+    Every seed is tagged ``is_seed: True`` so downstream consumers that score or
+    rank the ORGANIC alternatives (e.g. ``select_stitching_batch``'s
+    borderline / low-confidence tiers) can exclude seeds: the full-set seed is a
+    superset of every proper assignment and would otherwise always win
+    ``max(total_confidence)``, skewing selection.
     """
     seeds: list[dict] = []
 
@@ -243,13 +258,13 @@ def _seed_alternatives(
             "edges": edges,
             "total_confidence": total,
             "summary": _build_summary(edges, ref_ids),
+            "is_seed": True,
         }
 
     all_keys = list(edge_data.keys())
     if all_keys:
         seeds.append(_alt(all_keys))
 
-    selected_keys = [key for key, e in edge_data.items() if e.get("selected")]
     if selected_keys:
         seeds.append(_alt(selected_keys))
 
@@ -279,7 +294,10 @@ def prune_group_options_to_edges(
             if (e.get("ref_id"), e.get("target_id")) in surviving
         ]
     if group.get("alternatives"):
-        k = len(group["alternatives"]) or 5
+        # Preserve the ORGANIC k only: seed options (is_seed=True) are appended
+        # on top of k by the generator, so counting them here would grow k by
+        # up to 2 on every re-sync.
+        k = len([a for a in group["alternatives"] if not a.get("is_seed")]) or 5
         group["alternatives"] = generate_top_k_alternatives(
             group.get("edges", []),
             ref_geoms=ref_geoms if ref_geoms is not None else group.get("ref_geometries", {}),
