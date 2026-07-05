@@ -37,12 +37,16 @@ class ProviderSpec:
 
     name: str  # short id used in votes.csv (e.g. "claude")
     model: str  # model string recorded in votes
+    effort: str = ""  # reasoning/thinking effort where the CLI supports it
 
 
+# Panel v2 (composition change from v1 -> bump the export labeler to
+# panel_unanimous_v2). Effort is CLI-specific: claude takes --effort; codex takes
+# model_reasoning_effort; agy encodes it in the model name ("... (Medium)").
 DEFAULT_PANEL = [
-    ProviderSpec(name="claude", model="sonnet"),
-    ProviderSpec(name="codex", model="gpt-5.4"),
-    ProviderSpec(name="agy", model="Gemini 3.5 Flash (Low)"),
+    ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
+    ProviderSpec(name="codex", model="gpt-5.5", effort="low"),
+    ProviderSpec(name="agy", model="Gemini 3.5 Flash (Medium)"),
 ]
 
 
@@ -196,7 +200,12 @@ def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
 
 
 def invoke_claude(
-    prompt: str, group_dir: Path, letters: list[str], model: str, timeout: int = 240
+    prompt: str,
+    group_dir: Path,
+    letters: list[str],
+    model: str,
+    timeout: int = 240,
+    effort: str = "",
 ) -> str:
     """Invoke the claude CLI. Prompt via stdin, Read tool for images, JSON schema.
 
@@ -212,6 +221,8 @@ def invoke_claude(
         "--json-schema",
         _JSON_SCHEMA,
     ]
+    if effort:
+        cmd += ["--effort", effort]
     with tempfile.TemporaryDirectory() as neutral_cwd:
         result = subprocess.run(
             cmd,
@@ -226,7 +237,12 @@ def invoke_claude(
 
 
 def invoke_codex(
-    prompt: str, group_dir: Path, letters: list[str], model: str, timeout: int = 240
+    prompt: str,
+    group_dir: Path,
+    letters: list[str],
+    model: str,
+    timeout: int = 240,
+    effort: str = "",
 ) -> str:
     """Invoke the codex CLI. Native multi-image via -i, JSON written to -o file.
 
@@ -245,7 +261,7 @@ def invoke_codex(
             "-m",
             model,
             "-c",
-            "model_reasoning_effort=low",
+            f"model_reasoning_effort={effort or 'low'}",
         ]
         for img in imgs:
             cmd += ["-i", img]
@@ -266,9 +282,18 @@ def invoke_codex(
 
 
 def invoke_agy(
-    prompt: str, group_dir: Path, letters: list[str], model: str, timeout: int = 240
+    prompt: str,
+    group_dir: Path,
+    letters: list[str],
+    model: str,
+    timeout: int = 240,
+    effort: str = "",
 ) -> str:
-    """Invoke the agy (Antigravity) CLI. =-form flags only; reads images by path."""
+    """Invoke the agy (Antigravity) CLI. =-form flags only; reads images by path.
+
+    Effort is encoded in the model name (e.g. "Gemini 3.5 Flash (Medium)"), so
+    the ``effort`` argument is accepted for a uniform invoker signature but unused.
+    """
     cmd = [
         "agy",
         "--print-timeout=2m",
@@ -419,7 +444,7 @@ def _attempt_provider(
     for attempt in range(retries + 1):
         start = time.monotonic()
         try:
-            raw = invoker(prompt, group_dir, letters, provider.model, timeout)
+            raw = invoker(prompt, group_dir, letters, provider.model, timeout, provider.effort)
         except subprocess.TimeoutExpired:
             # Retrying a timeout just burns another full timeout window; abstain.
             last_err = f"timeout after {timeout}s"

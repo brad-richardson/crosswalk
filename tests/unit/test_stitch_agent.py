@@ -424,7 +424,7 @@ def test_class_gate_disabled_without_edge_classes():
 def test_run_provider_retries_once_then_succeeds(monkeypatch):
     calls = {"n": 0}
 
-    def fake_invoker(prompt, group_dir, letters, model, timeout):
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
         calls["n"] += 1
         if calls["n"] == 1:
             return "garbage no json"
@@ -445,7 +445,7 @@ def test_run_provider_retries_once_then_succeeds(monkeypatch):
 
 
 def test_run_provider_abstains_after_retries(monkeypatch):
-    def fake_invoker(prompt, group_dir, letters, model, timeout):
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
         return "still garbage"
 
     monkeypatch.setitem(sr._INVOKERS, "codex", fake_invoker)
@@ -464,7 +464,7 @@ def test_run_provider_abstains_after_retries(monkeypatch):
 def test_run_provider_cli_failure_records_stderr(monkeypatch):
     """Non-zero CLI exit is an invocation failure, not a parse error."""
 
-    def failing_invoker(prompt, group_dir, letters, model, timeout):
+    def failing_invoker(prompt, group_dir, letters, model, timeout, effort=""):
         raise RuntimeError("codex exited with code 2: auth expired")
 
     monkeypatch.setitem(sr._INVOKERS, "codex", failing_invoker)
