@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 from shapely.geometry import shape
 
-from ..config import is_sliver_edge
+from ..config import (
+    SLIVER_BORDERLINE_SPAN_THRESHOLD,
+    is_sliver_edge,
+    sliver_overlap_m,
+)
 from ..utils.geometry import geometry_length_meters
 
 if TYPE_CHECKING:
@@ -90,6 +94,62 @@ def edge_is_sliver(
     ref_len = (ref_lens or {}).get(str(edge.get("ref_id")))
     tgt_len = (tgt_lens or {}).get(str(edge.get("target_id")))
     return is_sliver_edge(ref_span, tgt_span, ref_len, tgt_len)
+
+
+def edge_overlap_m(
+    edge: dict,
+    ref_lens: dict[str, float] | None = None,
+    tgt_lens: dict[str, float] | None = None,
+) -> float:
+    """Absolute aligned-overlap (meters) for an edge dict.
+
+    Thin geometry-aware wrapper over :func:`matcher.config.sliver_overlap_m` — the
+    single definition the sliver rule's absolute gate uses. Returns +inf when the
+    relevant segment length is unknown (same convention as the classifier).
+    """
+    ref_span, tgt_span = edge_span_fracs(edge)
+    ref_len = (ref_lens or {}).get(str(edge.get("ref_id")))
+    tgt_len = (tgt_lens or {}).get(str(edge.get("target_id")))
+    return sliver_overlap_m(ref_span, tgt_span, ref_len, tgt_len)
+
+
+def edge_is_borderline(
+    edge: dict,
+    ref_lens: dict[str, float] | None = None,
+    tgt_lens: dict[str, float] | None = None,
+) -> bool:
+    """DISPLAY-ONLY near-sliver classification for an edge dict.
+
+    Returns True when the edge is NOT a strict junction sliver
+    (:func:`edge_is_sliver`) yet its larger coverage fraction is still below
+    ``SLIVER_BORDERLINE_SPAN_THRESHOLD``. This surfaces the junction-kiss edges
+    the hybrid rule leaves untagged — those failing the sliver test only on the
+    5 m absolute floor (a tiny span that maps to >= 5 m on a long urban segment),
+    plus those sitting just above the span threshold. It never overlaps the
+    SLIVER tag (a sliver is never also borderline) and is not consumed by the
+    optimizer or any label gate. See ``config.SLIVER_BORDERLINE_SPAN_THRESHOLD``.
+    """
+    if edge_is_sliver(edge, ref_lens, tgt_lens):
+        return False
+    ref_span, tgt_span = edge_span_fracs(edge)
+    return max(ref_span, tgt_span) < SLIVER_BORDERLINE_SPAN_THRESHOLD
+
+
+def edge_sliver_tag(
+    edge: dict,
+    ref_lens: dict[str, float] | None = None,
+    tgt_lens: dict[str, float] | None = None,
+) -> str | None:
+    """Return the display tag for an edge: ``"SLIVER"``, ``"BORDERLINE"``, or None.
+
+    SLIVER takes precedence (the validated hybrid definition, #244); BORDERLINE
+    is the display-only near-sliver band. Both are pack-display concerns only.
+    """
+    if edge_is_sliver(edge, ref_lens, tgt_lens):
+        return "SLIVER"
+    if edge_is_borderline(edge, ref_lens, tgt_lens):
+        return "BORDERLINE"
+    return None
 
 
 def annotate_group_sliver_flags(group: dict) -> tuple[list[dict], int]:

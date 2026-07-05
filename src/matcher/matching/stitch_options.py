@@ -15,6 +15,21 @@ import string
 
 _ALIGN_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
 
+# Per-edge structural features (#267) persisted in every groups sidecar. Passed
+# through verbatim so evidence packs can surface them (a degree-4 junction
+# endpoint / bridge / corridor membership explains a junction-kiss far better
+# than a bare confidence number). Older sidecar vintages may lack some or all of
+# these; missing keys are simply omitted (never defaulted), so downstream
+# display degrades gracefully rather than fabricating structure.
+_STRUCT_KEYS = (
+    "degree_ref",
+    "degree_tgt",
+    "is_bridge",
+    "biconnected_block",
+    "corridor_ref",
+    "corridor_tgt",
+)
+
 
 def build_stitch_options(group: dict) -> dict:
     """Build the assignment option picker + optimizer pre-seed for a group.
@@ -26,7 +41,8 @@ def build_stitch_options(group: dict) -> dict:
     Returns a context dict with:
     - options: list of option dicts. Each has ``letter`` (A, B, ...), ``key``,
       ``label``, ``is_optimizer``, ``edges`` (list of enriched
-      {ref_id, target_id, confidence, *fracs}), ``edge_count``,
+      {ref_id, target_id, confidence, *fracs, *#267 structural fields}),
+      ``edge_count``,
       ``total_confidence``, ``mean_confidence``, ``active_refs``,
       ``active_targets``.
     - optimizer_letter: the letter of the optimizer's option, or None.
@@ -61,6 +77,11 @@ def build_stitch_options(group: dict) -> dict:
                 for ak in _ALIGN_KEYS:
                     if ak in src:
                         enriched[ak] = src[ak]
+                # Pass through #267 structural features when present; omit missing
+                # ones so older sidecar vintages degrade gracefully.
+                for sk in _STRUCT_KEYS:
+                    if sk in src:
+                        enriched[sk] = src[sk]
                 out.append(enriched)
         return out
 

@@ -17,6 +17,7 @@ see the identical option set ("verify, don't construct").
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import yaml
@@ -24,9 +25,13 @@ from loguru import logger
 from PIL import Image, ImageDraw
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry import shape as shape_from_geojson
+from shapely.ops import nearest_points
 
-from ..matching.sliver import edge_is_sliver as _edge_is_sliver
-from ..matching.sliver import group_segment_lengths_m
+from ..matching.sliver import (
+    edge_overlap_m,
+    edge_sliver_tag,
+    group_segment_lengths_m,
+)
 from ..matching.stitch_options import build_stitch_options
 from .image_renderer import (
     BACKGROUND_COLOR,
@@ -56,6 +61,34 @@ CONTEXT_WIDTH = 1
 # to ~4m/px; allow a larger canvas so large groups stay legible. Small groups
 # are unaffected (size scales with extent, clamped to this max).
 STITCH_MAX_IMAGE_SIZE = 1280
+
+# Junction zoom crops for SLIVER/BORDERLINE edges. Panels repeatedly asked for a
+# close-up at the contested junction (55 feedback items). Each crop is a small
+# fixed-size close-up centred on the edge's aligned-overlap midpoint. Capped per
+# pack so the pack stays in the measured ~500-620 KB / ~11-PNG envelope: a 256px
+# crop is ~5-20 KB, so <= 6 crops adds at most ~120 KB on the hardest groups.
+ZOOM_BOX_M = 60.0  # crop side length in meters (~30 m radius around the junction)
+ZOOM_IMAGE_SIZE = 256
+MAX_ZOOM_CROPS = 6
+
+# Per-edge #267 structural fields surfaced in metadata/prompt. Kept in sync with
+# matcher.matching.stitch_options._STRUCT_KEYS (the pass-through source).
+_STRUCT_KEYS = (
+    "degree_ref",
+    "degree_tgt",
+    "is_bridge",
+    "biconnected_block",
+    "corridor_ref",
+    "corridor_tgt",
+)
+
+# Group-level #267 structural summary fields (surfaced compactly, missing omitted).
+_GROUP_STRUCT_KEYS = (
+    "n_corridors",
+    "n_assignment_components",
+    "largest_biconnected_block",
+    "oversized_group",
+)
 
 
 def _iter_lines(geojson_map: dict) -> list[tuple[str, LineString]]:
@@ -252,10 +285,13 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
     for opt in options_ctx["options"]:
         edges_meta = []
         sliver_edge_count = 0
+        borderline_edge_count = 0
         for e in opt["edges"]:
             rid, tid = e["ref_id"], e["target_id"]
-            is_sliver = _edge_is_sliver(e, ref_lens, tgt_lens)
+            tag = edge_sliver_tag(e, ref_lens, tgt_lens)
+            is_sliver = tag == "SLIVER"
             sliver_edge_count += int(is_sliver)
+            borderline_edge_count += int(tag == "BORDERLINE")
             row = {
                 "edge": f"{ref_labels.get(rid, rid)}->{target_labels.get(tid, tid)}",
                 "ref": ref_labels.get(rid, rid),
@@ -264,6 +300,17 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
                 "is_sliver": is_sliver,
             }
             row.update(_edge_align_fracs(e))
+            # Absolute overlap in meters (same arithmetic as the sliver rule's
+            # absolute gate). Omit when unmeasurable (+inf from a missing length).
+            overlap = edge_overlap_m(e, ref_lens, tgt_lens)
+            if math.isfinite(overlap):
+                row["overlap_m"] = round(overlap, 1)
+            if tag is not None:
+                row["tag"] = tag
+            # Pass through #267 structural fields present on the enriched edge.
+            for sk in _STRUCT_KEYS:
+                if sk in e:
+                    row[sk] = e[sk]
             edges_meta.append(row)
         options_meta.append(
             {
@@ -271,11 +318,15 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
                 "is_optimizer": opt["is_optimizer"],
                 "edge_count": opt["edge_count"],
                 "sliver_edge_count": sliver_edge_count,
+                "borderline_edge_count": borderline_edge_count,
                 "total_confidence": round(float(opt["total_confidence"]), 3),
                 "mean_confidence": round(float(opt["mean_confidence"]), 3),
                 "edges": edges_meta,
             }
         )
+
+    # Group-level #267 structural summary (present keys only; degrades gracefully).
+    group_structure = {k: group[k] for k in _GROUP_STRUCT_KEYS if k in group}
 
     return {
         "group_id": group.get("group_id"),
@@ -288,6 +339,7 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
         "n_edges_rendered": group.get("n_edges_rendered", len(group.get("edges", []))),
         "context_clipped": bool(group.get("context_clipped", False)),
         "optimizer_letter": options_ctx.get("optimizer_letter"),
+        "structure": group_structure,
         "segments": {
             "reference": [
                 {
@@ -310,6 +362,183 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
         },
         "options": options_meta,
     }
+
+
+def _edge_struct_str(e: dict) -> str:
+    """Compact per-edge structural line, e.g. ``deg R3/T2, bridge, corr R0/T0``.
+
+    Only includes fields present on the edge (older sidecars omit some/all).
+    """
+    parts: list[str] = []
+    dr, dt = e.get("degree_ref"), e.get("degree_tgt")
+    if dr is not None or dt is not None:
+        parts.append(f"deg R{dr if dr is not None else '?'}/T{dt if dt is not None else '?'}")
+    if e.get("is_bridge"):
+        parts.append("bridge")
+    cr, ct = e.get("corridor_ref"), e.get("corridor_tgt")
+    if cr is not None or ct is not None:
+        parts.append(f"corr R{cr if cr is not None else '?'}/T{ct if ct is not None else '?'}")
+    return ", ".join(parts)
+
+
+def _group_struct_str(structure: dict | None) -> str:
+    """One-line group-level structural summary; empty when no fields present."""
+    if not structure:
+        return ""
+    parts: list[str] = []
+    if "n_corridors" in structure:
+        parts.append(f"{structure['n_corridors']} corridors")
+    if "n_assignment_components" in structure:
+        parts.append(f"{structure['n_assignment_components']} assignment-components")
+    if "largest_biconnected_block" in structure:
+        parts.append(f"largest biconnected block {structure['largest_biconnected_block']} edges")
+    if structure.get("oversized_group"):
+        parts.append("OVERSIZED")
+    return ("Group structure: " + ", ".join(parts)) if parts else ""
+
+
+def _edge_junction_point(edge: dict, ref_line: LineString | None, tgt_line: LineString | None):
+    """Best-effort junction point for an edge: midpoint of the aligned overlap.
+
+    Prefers the ref-side aligned subline midpoint, then the target-side, then the
+    midpoint between the two lines' closest points, then a line midpoint.
+    """
+    rs, re_ = edge.get("gers_start_frac"), edge.get("gers_end_frac")
+    if ref_line is not None and rs is not None and re_ is not None:
+        try:
+            return ref_line.interpolate((float(rs) + float(re_)) / 2.0, normalized=True)
+        except Exception:
+            pass
+    ts, te = edge.get("local_start_frac"), edge.get("local_end_frac")
+    if tgt_line is not None and ts is not None and te is not None:
+        try:
+            return tgt_line.interpolate((float(ts) + float(te)) / 2.0, normalized=True)
+        except Exception:
+            pass
+    if ref_line is not None and tgt_line is not None:
+        try:
+            p1, p2 = nearest_points(ref_line, tgt_line)
+            return LineString([p1, p2]).interpolate(0.5, normalized=True)
+        except Exception:
+            pass
+    for ln in (ref_line, tgt_line):
+        if ln is not None:
+            try:
+                return ln.interpolate(0.5, normalized=True)
+            except Exception:
+                pass
+    return None
+
+
+def render_junction_zoom(
+    group: dict,
+    edge: dict,
+    ref_line: LineString | None,
+    tgt_line: LineString | None,
+    ref_labels: dict[str, str],
+    target_labels: dict[str, str],
+) -> Image.Image | None:
+    """Render a small close-up crop centred on a flagged edge's junction.
+
+    Both edge segments are drawn bright/solid (blue ref, red target); other group
+    segments are faded and nearby context roads gray-dashed, so the panel can see
+    exactly how the two segments meet at the contested junction. Returns None when
+    no junction point can be located.
+    """
+    center = _edge_junction_point(edge, ref_line, tgt_line)
+    if center is None:
+        return None
+    lat = center.y
+    half = ZOOM_BOX_M / 2.0
+    half_lat = half / 111000.0
+    half_lon = half / (111000.0 * max(math.cos(math.radians(lat)), 1e-6))
+    bbox = _make_bbox_square(
+        (center.x - half_lon, lat - half_lat, center.x + half_lon, lat + half_lat)
+    )
+    size = (ZOOM_IMAGE_SIZE, ZOOM_IMAGE_SIZE)
+
+    img, draw = _base_image(size)
+    _draw_context(draw, group, bbox, size)
+
+    # Faded other group segments first, so the edge's two segments draw on top.
+    active = {str(edge.get("ref_id")), str(edge.get("target_id"))}
+    for sid, ln in _iter_lines(group.get("ref_geometries", {})):
+        if sid not in active:
+            _draw_dashed_linestring(draw, ln, bbox, size, FADED_REF_COLOR, 1, (6, 5))
+    for sid, ln in _iter_lines(group.get("target_geometries", {})):
+        if sid not in active:
+            _draw_dashed_linestring(draw, ln, bbox, size, FADED_TARGET_COLOR, 1, (6, 5))
+
+    if ref_line is not None:
+        _draw_linestring(
+            draw,
+            ref_line,
+            bbox,
+            size,
+            REFERENCE_COLOR,
+            OPTION_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=24,
+        )
+        _draw_label(draw, ref_line, bbox, size, ref_labels.get(edge.get("ref_id"), ""))
+    if tgt_line is not None:
+        _draw_linestring(
+            draw,
+            tgt_line,
+            bbox,
+            size,
+            TARGET_COLOR,
+            OPTION_LINE_WIDTH,
+            decoration="circle",
+            decoration_spacing=30,
+        )
+        _draw_label(draw, tgt_line, bbox, size, target_labels.get(edge.get("target_id"), ""))
+
+    # Mark the junction center itself.
+    px, py = _geo_to_pixel(center.x, center.y, bbox, size)
+    draw.ellipse([(px - 4, py - 4), (px + 4, py + 4)], outline=LABEL_COLOR)
+    return img
+
+
+def _render_junction_zooms(group: dict, group_dir: Path) -> dict[str, str]:
+    """Render junction crops for SLIVER/BORDERLINE edges; return {edge_label: file}.
+
+    Dedupes to one crop per (ref, target) pair, prioritizes SLIVER over BORDERLINE
+    then smallest overlap, and caps at ``MAX_ZOOM_CROPS`` to bound pack size.
+    """
+    ref_lens, tgt_lens = group_segment_lengths_m(group)
+    ref_labels, target_labels = _seg_labels(group)
+    ref_lines = dict(_iter_lines(group.get("ref_geometries", {})))
+    tgt_lines = dict(_iter_lines(group.get("target_geometries", {})))
+
+    flagged: list[tuple[int, float, dict, tuple]] = []
+    seen: set[tuple] = set()
+    for e in group.get("edges", []) or []:
+        key = (e.get("ref_id"), e.get("target_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        tag = edge_sliver_tag(e, ref_lens, tgt_lens)
+        if tag is None:
+            continue
+        priority = 0 if tag == "SLIVER" else 1
+        flagged.append((priority, edge_overlap_m(e, ref_lens, tgt_lens), e, key))
+
+    flagged.sort(key=lambda x: (x[0], x[1]))
+
+    out: dict[str, str] = {}
+    for _prio, _ov, e, (rid, tid) in flagged[:MAX_ZOOM_CROPS]:
+        rl = ref_lines.get(str(rid))
+        tl = tgt_lines.get(str(tid))
+        img = render_junction_zoom(group, e, rl, tl, ref_labels, target_labels)
+        if img is None:
+            continue
+        rlab = ref_labels.get(rid, str(rid))
+        tlab = target_labels.get(tid, str(tid))
+        fname = f"zoom_{rlab}_{tlab}.png"
+        img.save(group_dir / fname)
+        out[f"{rlab}->{tlab}"] = fname
+    return out
 
 
 def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
@@ -337,6 +566,8 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("- One image PER OPTION below. In an option image, the segments included in")
     lines.append("  that option are drawn bright/solid; excluded group segments are faded/dashed.")
     lines.append("  Pick the option whose bright segments overlap/follow the SAME physical roads.")
+    lines.append("- Some edges below carry a 'junction zoom' image: a close-up centred on where")
+    lines.append("  those two segments meet, so you can see the actual overlap at the junction.")
     lines.append("")
     lines.append("GUIDANCE:")
     lines.append("- A correct edge R#->T# means the reference and target segment are the same")
@@ -346,6 +577,21 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("- An edge tagged SLIVER below is a junction artifact: the two segments share")
     lines.append("  almost no physical overlap (a road end merely clips another at a corner).")
     lines.append("  Prefer an option that excludes it; it is almost never a correct edge.")
+    lines.append("- 'overlap~Xm' on an edge is the absolute length the two segments physically")
+    lines.append("  share (aligned span x segment length). It is the same measurement the SLIVER")
+    lines.append("  rule uses; a small overlap means the segments only touch near a junction.")
+    lines.append("- An edge tagged BORDERLINE shares only a small fraction of at least one of its")
+    lines.append("  segments, but more than the SLIVER floor. It is the contested junction-kiss")
+    lines.append("  case: it may be a real short connector OR an artifact. There is no default —")
+    lines.append("  judge it from the geometry, the junction zoom, and the structural context.")
+    lines.append("- Edges may carry neutral structural context from the road graph (these are")
+    lines.append("  facts, not verdicts, and favor neither including nor excluding an edge):")
+    lines.append("  'deg R#/T#' is how many road segments meet at that edge's ref/target endpoint")
+    lines.append("  (a high degree is a busy junction; degree ~2 is a simple continuation);")
+    lines.append("  'bridge' marks an edge whose removal would split the group's graph; 'corr")
+    lines.append("  R#/T#' names the corridor (continuous through-road) each side belongs to, so")
+    lines.append("  two segments sharing a corridor tend to be one physical through-route. Use")
+    lines.append("  these to reason about continuation vs junction-kiss, not as a rule by itself.")
     lines.append("- A pedestrian-class segment (footway/sidewalk/path) is a DIFFERENT physical")
     lines.append("  feature than a road-class segment (residential/primary/service/...), even")
     lines.append("  when it runs right alongside one. Never match a footway/sidewalk/path to a")
@@ -365,6 +611,9 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     )
     if opt_letter:
         lines.append(f"Optimizer's proposed option: {opt_letter}")
+    struct_summary = _group_struct_str(metadata.get("structure"))
+    if struct_summary:
+        lines.append(struct_summary)
     lines.append("")
     lines.append("OPTIONS:")
     for opt in metadata["options"]:
@@ -381,10 +630,20 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
                 extra.append(f"ref_aln={e['ref_aligned_frac']}")
             if "target_aligned_frac" in e:
                 extra.append(f"tgt_aln={e['target_aligned_frac']}")
-            if e.get("is_sliver"):
+            if e.get("overlap_m") is not None:
+                extra.append(f"overlap~{e['overlap_m']}m")
+            etag = e.get("tag")
+            if etag == "SLIVER":
                 extra.append("SLIVER(junction artifact, ~0 overlap)")
+            elif etag == "BORDERLINE":
+                extra.append("BORDERLINE(junction-kiss, small overlap)")
             extra_s = ("  " + " ".join(extra)) if extra else ""
             lines.append(f"      {e['edge']}  conf={e['confidence']}{extra_s}")
+            struct_s = _edge_struct_str(e)
+            if struct_s:
+                lines.append(f"        {struct_s}")
+            if e.get("zoom"):
+                lines.append(f"        junction zoom: {group_dir / e['zoom']}")
     lines.append("")
     lines.append("SEGMENTS (name / class):")
     for s in metadata["segments"]["reference"]:
@@ -419,6 +678,19 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
         img.save(group_dir / f"option_{opt['letter']}.png")
 
     metadata = build_metadata(group, options_ctx)
+
+    # Junction zoom crops for SLIVER/BORDERLINE edges, and annotate the metadata
+    # edge rows (all options that contain the edge) with their crop filename so
+    # both the prompt and metadata.yaml reference them.
+    zoom_files = _render_junction_zooms(group, group_dir)
+    if zoom_files:
+        metadata["zoom_crops"] = sorted(zoom_files.values())
+        for opt_meta in metadata["options"]:
+            for e in opt_meta["edges"]:
+                fname = zoom_files.get(e["edge"])
+                if fname:
+                    e["zoom"] = fname
+
     (group_dir / "metadata.yaml").write_text(
         yaml.dump(metadata, default_flow_style=False, sort_keys=False)
     )

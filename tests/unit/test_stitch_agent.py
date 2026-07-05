@@ -8,6 +8,7 @@ consensus rules, evidence metadata, and eval matching.
 from __future__ import annotations
 
 import json
+import math
 
 import pandas as pd
 import pytest
@@ -545,6 +546,166 @@ def test_generate_group_evidence_no_options_returns_none(tmp_path):
     g["optimizer_assignment"] = []
     g["alternatives"] = []
     assert generate_group_evidence(g, tmp_path / "x") is None
+
+
+# ---------------------------------------------------------------------------
+# #267 structural pass-through + junction-sliver display (packs enrichment)
+# ---------------------------------------------------------------------------
+
+
+def _line_len(length_m, lat=42.36, lon=-71.06):
+    deg = length_m / (111000.0 * math.cos(math.radians(lat)))
+    return {"type": "LineString", "coordinates": [[lon, lat], [lon + deg, lat]]}
+
+
+def make_struct_group() -> dict:
+    """A 1x2 group carrying #267 structural fields and a BORDERLINE junction edge.
+
+    R1->T1 is a full-coverage continuation; R1->T2 shares only 2.9% of a 200 m
+    ref (~5.8 m absolute overlap) -> fails the sliver test only on the 5 m floor
+    -> BORDERLINE.
+    """
+    edges = [
+        {
+            "ref_id": R1,
+            "target_id": T1,
+            "confidence": 0.99,
+            "gers_start_frac": 0.0,
+            "gers_end_frac": 1.0,
+            "local_start_frac": 0.0,
+            "local_end_frac": 1.0,
+            "degree_ref": 2,
+            "degree_tgt": 1,
+            "is_bridge": True,
+            "biconnected_block": 3,
+            "corridor_ref": 0,
+            "corridor_tgt": 0,
+        },
+        {
+            "ref_id": R1,
+            "target_id": T2,
+            "confidence": 0.88,
+            "gers_start_frac": 0.0,
+            "gers_end_frac": 0.029,
+            "local_start_frac": 0.0,
+            "local_end_frac": 0.025,
+            "degree_ref": 4,
+            "degree_tgt": 2,
+            "is_bridge": False,
+            "biconnected_block": 3,
+            "corridor_ref": 0,
+            "corridor_tgt": 1,
+        },
+    ]
+    return {
+        "group_id": "grp_struct",
+        "match_type": "M:N",
+        "ref_ids": [R1],
+        "target_ids": [T1, T2],
+        "edges": edges,
+        "optimizer_assignment": [{"ref_id": R1, "target_id": T1}, {"ref_id": R1, "target_id": T2}],
+        "alternatives": [{"edges": [{"ref_id": R1, "target_id": T1}]}],
+        "ref_geometries": {R1: _line_len(200.0)},
+        "target_geometries": {T1: _line_len(200.0), T2: _line_len(50.0)},
+        "ref_names": {R1: "Main St"},
+        "target_names": {T1: "Main", T2: "Side"},
+        "ref_classes": {R1: "residential"},
+        "target_classes": {T1: "residential", T2: "residential"},
+        "n_corridors": 2,
+        "n_assignment_components": 1,
+        "largest_biconnected_block": 3,
+        "oversized_group": False,
+    }
+
+
+def test_valid_edges_passes_through_structural_fields():
+    """build_stitch_options must keep the six #267 per-edge fields."""
+    ctx = build_stitch_options(make_struct_group())
+    opt = ctx["options"][0]
+    e = next(x for x in opt["edges"] if x["target_id"] == T2)
+    for k in (
+        "degree_ref",
+        "degree_tgt",
+        "is_bridge",
+        "biconnected_block",
+        "corridor_ref",
+        "corridor_tgt",
+    ):
+        assert k in e, f"{k} stripped from enriched edge"
+    assert e["degree_ref"] == 4
+    assert e["corridor_tgt"] == 1
+
+
+def test_valid_edges_omits_missing_structural_fields():
+    """Older sidecars without structural fields degrade gracefully (omitted)."""
+    g = make_group()  # fixture with no #267 fields
+    ctx = build_stitch_options(g)
+    for opt in ctx["options"]:
+        for e in opt["edges"]:
+            assert "degree_ref" not in e
+            assert "is_bridge" not in e
+
+
+def test_build_metadata_surfaces_overlap_tag_and_structure():
+    g = make_struct_group()
+    ctx = build_stitch_options(g)
+    meta = build_metadata(g, ctx)
+    # Group-level structure summary present.
+    assert meta["structure"]["n_corridors"] == 2
+    assert meta["structure"]["oversized_group"] is False
+    opt_a = next(o for o in meta["options"] if o["is_optimizer"])
+    assert opt_a["borderline_edge_count"] == 1
+    # The junction-kiss edge carries overlap + BORDERLINE tag + struct fields.
+    e = next(x for x in opt_a["edges"] if x["target"] == "T2")
+    assert e["tag"] == "BORDERLINE"
+    assert e["overlap_m"] == pytest.approx(5.8, abs=0.2)
+    assert e["degree_ref"] == 4
+    assert e["is_sliver"] is False
+    # The full-coverage continuation is untagged.
+    e1 = next(x for x in opt_a["edges"] if x["target"] == "T1")
+    assert "tag" not in e1
+
+
+def test_build_metadata_graceful_without_structure():
+    """No #267 fields anywhere -> empty structure dict, no per-edge struct keys."""
+    g = make_group()
+    meta = build_metadata(g, build_stitch_options(g))
+    assert meta["structure"] == {}
+    for opt in meta["options"]:
+        for e in opt["edges"]:
+            assert "degree_ref" not in e
+
+
+def test_generate_evidence_renders_junction_zoom_and_prompt(tmp_path):
+    g = make_struct_group()
+    d = tmp_path / g["group_id"]
+    meta = generate_group_evidence(g, d)
+    # A zoom crop was rendered for the BORDERLINE edge and referenced in metadata.
+    assert meta["zoom_crops"] == ["zoom_R1_T2.png"]
+    assert (d / "zoom_R1_T2.png").exists()
+    prompt = (d / "prompt.txt").read_text()
+    assert "BORDERLINE" in prompt
+    assert "overlap~" in prompt
+    assert "deg R4/T2" in prompt
+    assert "Group structure:" in prompt
+    assert "junction zoom:" in prompt
+    assert str(d.resolve() / "zoom_R1_T2.png") in prompt
+
+
+def test_pack_size_and_zoom_crop_cap_bounded(tmp_path):
+    """Pack stays in the measured order of magnitude and zoom crops are capped."""
+    from matcher.agent_labeling import stitch_evidence as se
+
+    g = make_struct_group()
+    d = tmp_path / g["group_id"]
+    generate_group_evidence(g, d)
+    pngs = list(d.glob("*.png"))
+    zooms = list(d.glob("zoom_*.png"))
+    assert len(zooms) <= se.MAX_ZOOM_CROPS
+    total = sum(p.stat().st_size for p in d.glob("*") if p.is_file())
+    # Hardest measured packs were ~620 KB; keep the same order of magnitude with
+    # a generous ceiling so a runaway crop count would trip this.
+    assert total < 1_500_000, f"pack too large: {total} bytes across {len(pngs)} PNGs"
 
 
 # ---------------------------------------------------------------------------

@@ -112,6 +112,21 @@ MAX_ALIGNMENT_OVERLAP_M = 5.0
 SLIVER_SPAN_THRESHOLD = 0.10  # fraction of segment length (dimensionless)
 SLIVER_ABS_OVERLAP_M = 5.0  # absolute overlap floor (meters)
 
+# DISPLAY-ONLY near-sliver band. Not consumed by the optimizer or any label
+# gate: it exists purely so evidence packs can flag edges the strict hybrid rule
+# does NOT tag but which sit in the same junction-kiss regime the panel argues
+# over. An edge is BORDERLINE (see matcher.matching.sliver.edge_is_borderline)
+# when it is NOT a sliver yet its larger coverage fraction is still below this
+# band. The band (1.5x the sliver span threshold) captures two cases:
+#   1. Edges that fail the sliver test ONLY on the 5 m absolute floor — a tiny
+#      span fraction (< SLIVER_SPAN_THRESHOLD) that maps to >= 5 m on a long
+#      urban segment (e.g. 2.9% of a 200 m ref). These are exactly the edges the
+#      strict rule leaves untagged on dense datasets.
+#   2. Edges sitting just above the fraction threshold
+#      (SLIVER_SPAN_THRESHOLD <= max span frac < this band) — "near the
+#      boundary" — where inclusion/exclusion is genuinely contested.
+SLIVER_BORDERLINE_SPAN_THRESHOLD = 1.5 * SLIVER_SPAN_THRESHOLD  # 0.15
+
 
 def _sliver_frac(value: float | None, default: float) -> float:
     """Normalize an alignment span fraction, defaulting missing/NaN to ``default``."""
@@ -143,6 +158,27 @@ def _sliver_len(value: float | None) -> float:
     return v
 
 
+def sliver_overlap_m(
+    ref_span_frac: float | None,
+    tgt_span_frac: float | None,
+    ref_len_m: float | None = None,
+    tgt_len_m: float | None = None,
+) -> float:
+    """Absolute aligned-overlap length (meters) the hybrid rule's absolute gate uses.
+
+    Returns ``max(ref_span_frac*ref_len_m, tgt_span_frac*tgt_len_m)`` with the
+    exact same span/length normalization as :func:`is_sliver_edge`. This is the
+    SINGLE definition of an edge's absolute overlap — the sliver classifier and
+    any evidence-pack display both read it, so they can never drift. Missing
+    lengths normalize to +inf, so the result is +inf for unmeasurable edges.
+    """
+    rf = _sliver_frac(ref_span_frac, 1.0)
+    tf = _sliver_frac(tgt_span_frac, 1.0)
+    rl = _sliver_len(ref_len_m)
+    tl = _sliver_len(tgt_len_m)
+    return max(rf * rl, tf * tl)
+
+
 def is_sliver_edge(
     ref_span_frac: float | None,
     tgt_span_frac: float | None,
@@ -167,12 +203,11 @@ def is_sliver_edge(
     """
     rf = _sliver_frac(ref_span_frac, 1.0)
     tf = _sliver_frac(tgt_span_frac, 1.0)
-    rl = _sliver_len(ref_len_m)
-    tl = _sliver_len(tgt_len_m)
 
     frac_test = max(rf, tf) < SLIVER_SPAN_THRESHOLD
-    abs_overlap = max(rf * rl, tf * tl)
-    abs_test = abs_overlap < SLIVER_ABS_OVERLAP_M
+    abs_test = sliver_overlap_m(ref_span_frac, tgt_span_frac, ref_len_m, tgt_len_m) < (
+        SLIVER_ABS_OVERLAP_M
+    )
     return frac_test and abs_test
 
 
