@@ -14,7 +14,21 @@ from loguru import logger
 from cbench.adapters.base import EvalMode, ToolOutput
 from cbench.convert.osm import convert_parquet_to_osm
 
+# hoot binary location differs by delivery mechanism:
+#  - source docker-compose build installs to $HOOT_HOME/bin/hoot
+#  - the prebuilt Docker Hub run images (hootenanny/run:*) install to /usr/bin/hoot
 HOOT_BIN = "/var/lib/hootenanny/bin/hoot"
+HOOT_IMAGE_BIN = "/usr/bin/hoot"
+
+# Conflation creator classes. These MUST be fully namespaced (``hoot::``) and the
+# highway *merger* is ``HighwaySnapMergerCreator`` (not ``HighwayMergerCreator``)
+# — verified against hoot 0.2.41. Older/newer builds may accept unqualified
+# names; override with ``--opt match_creators=...`` / ``--opt merger_creators=...``.
+DEFAULT_MATCH_CREATORS = "hoot::HighwayMatchCreator"
+DEFAULT_MERGER_CREATORS = "hoot::HighwaySnapMergerCreator"
+
+# Prebuilt hoot images are x86; on Apple Silicon they run under emulation.
+DEFAULT_HOOT_PLATFORM = "linux/amd64"
 
 
 # ---------------------------------------------------------------------------
@@ -275,16 +289,31 @@ class HootAdapter:
             target: Path to target parquet.
             output_dir: Working directory for intermediate and output files.
             **kwargs:
-                hoot_dir: Path to Hootenanny repo.
+                hoot_image: Prebuilt Docker image with a hoot binary (e.g.
+                    ``hootenanny/run:0.2.41-1``). When set, conflation runs via
+                    ``docker run`` against this image — no docker-compose stack
+                    or Hootenanny source checkout is needed. This is the low-cost
+                    path on machines that cannot build hoot from source.
+                hoot_dir: Path to Hootenanny repo (docker-compose mode; used only
+                    when ``hoot_image`` is not set).
+                hoot_bin: Path to the hoot binary inside the container. Defaults
+                    to ``/usr/bin/hoot`` in image mode, ``$HOOT_HOME/bin/hoot`` in
+                    compose mode.
+                hoot_platform: Docker ``--platform`` for image mode (default
+                    ``linux/amd64``; runs under emulation on ARM).
+                match_creators / merger_creators: Override the conflation creator
+                    classes (see module constants).
                 connectors: Path to connectors parquet.
                 skip_conflate: If True, skip conflation and reuse existing output.
 
         Returns:
             Path to conflated OSM output.
         """
-        hoot_dir = _find_hoot_dir(kwargs.get("hoot_dir"))
+        hoot_image = kwargs.get("hoot_image")
         connectors = kwargs.get("connectors")
         skip_conflate = kwargs.get("skip_conflate", False)
+        match_creators = kwargs.get("match_creators", DEFAULT_MATCH_CREATORS)
+        merger_creators = kwargs.get("merger_creators", DEFAULT_MERGER_CREATORS)
 
         output_dir.mkdir(parents=True, exist_ok=True)
         dataset_name = target.stem
@@ -302,9 +331,31 @@ class HootAdapter:
             convert_parquet_to_osm(reference, ref_osm, connectors_path=connectors, source_tag="ref")
             convert_parquet_to_osm(target, tgt_osm, source_tag="tgt")
 
-            # Run conflation
-            ensure_compose_running(hoot_dir)
-            _run_conflate(ref_osm, tgt_osm, out_osm, hoot_dir)
+            if hoot_image:
+                # Standalone prebuilt-image mode: no compose stack, no source tree.
+                _run_conflate_image(
+                    ref_osm,
+                    tgt_osm,
+                    out_osm,
+                    image=hoot_image,
+                    hoot_bin=kwargs.get("hoot_bin", HOOT_IMAGE_BIN),
+                    platform=kwargs.get("hoot_platform", DEFAULT_HOOT_PLATFORM),
+                    match_creators=match_creators,
+                    merger_creators=merger_creators,
+                )
+            else:
+                # docker-compose mode against a Hootenanny source checkout.
+                hoot_dir = _find_hoot_dir(kwargs.get("hoot_dir"))
+                ensure_compose_running(hoot_dir)
+                _run_conflate(
+                    ref_osm,
+                    tgt_osm,
+                    out_osm,
+                    hoot_dir,
+                    hoot_bin=kwargs.get("hoot_bin", HOOT_BIN),
+                    match_creators=match_creators,
+                    merger_creators=merger_creators,
+                )
         else:
             if not out_osm.exists():
                 raise FileNotFoundError(f"--skip-conflate specified but {out_osm} doesn't exist")
@@ -349,13 +400,55 @@ class HootAdapter:
         )
 
 
+def _stream_and_check(cmd: list[str], out_dest: Path, output_osm: Path, cwd: Path | None) -> None:
+    """Run ``cmd``, stream STATUS/ERROR/WARN lines, and verify output exists.
+
+    ``out_dest`` is where hoot writes the file (may equal ``output_osm``); if it
+    differs it is copied to ``output_osm`` on success.
+    """
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    log_lines: list[str] = []
+    for line in process.stdout:
+        line = line.rstrip()
+        if line:
+            if "STATUS" in line or "ERROR" in line or "WARN" in line or "Error" in line:
+                logger.info(f"  {line}")
+            log_lines.append(line)
+
+    return_code = process.wait()
+
+    if not out_dest.exists():
+        logger.error("Hootenanny failed to create output file")
+        logger.error(f"Return code: {return_code}")
+        if log_lines:
+            logger.error("Output (last 20 lines):")
+            for line in log_lines[-20:]:
+                logger.error(f"  {line}")
+        raise RuntimeError("Hootenanny conflation failed - no output created")
+
+    if out_dest != output_osm:
+        shutil.copy2(out_dest, output_osm)
+    logger.info(f"Conflation complete: {output_osm}")
+
+
 def _run_conflate(
     reference_osm: Path,
     target_osm: Path,
     output_osm: Path,
     hoot_dir: Path,
+    hoot_bin: str = HOOT_BIN,
+    match_creators: str = DEFAULT_MATCH_CREATORS,
+    merger_creators: str = DEFAULT_MERGER_CREATORS,
 ) -> None:
-    """Run Hootenanny conflation via Docker compose."""
+    """Run Hootenanny conflation via Docker compose (source-checkout mode)."""
     hoot_data = hoot_dir / "data"
     hoot_data.mkdir(exist_ok=True)
 
@@ -366,7 +459,7 @@ def _run_conflate(
     shutil.copy2(reference_osm, ref_dest)
     shutil.copy2(target_osm, tgt_dest)
 
-    logger.info("Running Hootenanny conflation...")
+    logger.info("Running Hootenanny conflation (compose)...")
 
     cmd = [
         "docker",
@@ -374,44 +467,59 @@ def _run_conflate(
         "exec",
         "-T",
         "core-services",
-        HOOT_BIN,
+        hoot_bin,
         "conflate",
         "-D",
-        "match.creators=HighwayMatchCreator",
+        f"match.creators={match_creators}",
         "-D",
-        "merger.creators=HighwayMergerCreator",
+        f"merger.creators={merger_creators}",
         f"/var/lib/hootenanny/data/{reference_osm.name}",
         f"/var/lib/hootenanny/data/{target_osm.name}",
         f"/var/lib/hootenanny/data/{output_osm.name}",
     ]
 
-    process = subprocess.Popen(
-        cmd,
-        cwd=hoot_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+    _stream_and_check(cmd, out_dest, output_osm, cwd=hoot_dir)
 
-    stderr_lines = []
-    for line in process.stdout:
-        line = line.rstrip()
-        if line:
-            if "STATUS" in line or "ERROR" in line or "WARN" in line:
-                logger.info(f"  {line}")
-            stderr_lines.append(line)
 
-    return_code = process.wait()
+def _run_conflate_image(
+    reference_osm: Path,
+    target_osm: Path,
+    output_osm: Path,
+    image: str,
+    hoot_bin: str = HOOT_IMAGE_BIN,
+    platform: str = DEFAULT_HOOT_PLATFORM,
+    match_creators: str = DEFAULT_MATCH_CREATORS,
+    merger_creators: str = DEFAULT_MERGER_CREATORS,
+) -> None:
+    """Run Hootenanny conflation via ``docker run`` against a prebuilt image.
 
-    if not out_dest.exists():
-        logger.error("Hootenanny failed to create output file")
-        logger.error(f"Return code: {return_code}")
-        if stderr_lines:
-            logger.error("Output (last 20 lines):")
-            for line in stderr_lines[-20:]:
-                logger.error(f"  {line}")
-        raise RuntimeError("Hootenanny conflation failed - no output created")
+    The three OSM files live in ``output_osm.parent``; that directory is mounted
+    at ``/data`` inside the container, so hoot writes the output straight back to
+    the host with no copy step.
+    """
+    work_dir = output_osm.parent
+    logger.info(f"Running Hootenanny conflation (image {image}, platform {platform})...")
 
-    shutil.copy2(out_dest, output_osm)
-    logger.info(f"Conflation complete: {output_osm}")
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        platform,
+        "-e",
+        "HOOT_HOME=/var/lib/hootenanny",
+        "-v",
+        f"{work_dir}:/data",
+        image,
+        hoot_bin,
+        "conflate",
+        "-D",
+        f"match.creators={match_creators}",
+        "-D",
+        f"merger.creators={merger_creators}",
+        f"/data/{reference_osm.name}",
+        f"/data/{target_osm.name}",
+        f"/data/{output_osm.name}",
+    ]
+
+    _stream_and_check(cmd, output_osm, output_osm, cwd=None)

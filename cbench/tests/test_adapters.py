@@ -143,3 +143,162 @@ class TestHootAdapter:
         adapter = HootAdapter()
         assert adapter.name == "hootenanny"
         assert adapter.eval_mode == EvalMode.STITCH
+
+    def test_run_conflate_image_builds_docker_run_cmd(self, tmp_path):
+        """Image mode drives `docker run` against a prebuilt image with the
+        correct binary path, platform, mount, and namespaced creator flags."""
+        from cbench.adapters import hootenanny as hoot
+
+        ref = tmp_path / "ref.osm"
+        tgt = tmp_path / "tgt.osm"
+        out = tmp_path / "out.osm"
+        ref.write_text("<osm/>")
+        tgt.write_text("<osm/>")
+
+        captured = {}
+
+        class FakePopen:
+            def __init__(self, cmd, **kwargs):
+                captured["cmd"] = cmd
+                captured["cwd"] = kwargs.get("cwd")
+                self.stdout = iter(["STATUS running", ""])
+                # hoot writes the output inside the mounted dir
+                out.write_text("<osm/>")
+
+            def wait(self):
+                return 0
+
+        with patch.object(hoot.subprocess, "Popen", FakePopen):
+            hoot._run_conflate_image(ref, tgt, out, image="hootenanny/run:0.2.41-1")
+
+        cmd = captured["cmd"]
+        assert cmd[0] == "docker" and cmd[1] == "run"
+        assert "--platform" in cmd and "linux/amd64" in cmd
+        assert "hootenanny/run:0.2.41-1" in cmd
+        assert "/usr/bin/hoot" in cmd
+        assert "conflate" in cmd
+        assert "match.creators=hoot::HighwayMatchCreator" in cmd
+        assert "merger.creators=hoot::HighwaySnapMergerCreator" in cmd
+        # output dir is mounted at /data
+        assert any(str(tmp_path) + ":/data" == c for c in cmd)
+        assert cmd[-3:] == ["/data/ref.osm", "/data/tgt.osm", "/data/out.osm"]
+
+    def test_run_image_mode_skips_compose(self, tmp_path):
+        """run(hoot_image=...) must not touch the compose lifecycle."""
+        # Minimal parquet inputs the converter can read.
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        from cbench.adapters.hootenanny import HootAdapter
+
+        ref_pq = tmp_path / "ref.parquet"
+        tgt_pq = tmp_path / "tgt.parquet"
+        for p in (ref_pq, tgt_pq):
+            gpd.GeoDataFrame(
+                {"id": ["a"], "class": ["residential"], "names": [None]},
+                geometry=[LineString([(0, 0), (0.001, 0.001)])],
+                crs="EPSG:4326",
+            ).to_parquet(p)
+
+        with (
+            patch("cbench.adapters.hootenanny._run_conflate_image") as mock_img,
+            patch("cbench.adapters.hootenanny.ensure_compose_running") as mock_compose,
+        ):
+            HootAdapter().run(
+                ref_pq, tgt_pq, tmp_path / "out", hoot_image="hootenanny/run:0.2.41-1"
+            )
+        mock_img.assert_called_once()
+        mock_compose.assert_not_called()
+
+
+@pytest.mark.skipif(not _has_geopandas, reason="geopandas required for naive adapter")
+class TestNaiveAdapter:
+    def _toy_data(self):
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        # A target road along y=0 from x=0..100 (lon/lat degrees near equator).
+        # Reference r_near is nearly coincident; r_far is ~50m north; r_perp is
+        # perpendicular. Coordinates are small degree offsets; the adapter
+        # reprojects to UTM so distances are metric.
+        target = gpd.GeoDataFrame(
+            {"id": ["t1"]},
+            geometry=[LineString([(0.0, 0.0), (0.001, 0.0)])],
+            crs="EPSG:4326",
+        )
+        reference = gpd.GeoDataFrame(
+            {"id": ["r_near", "r_far", "r_perp"]},
+            geometry=[
+                LineString([(0.0, 0.00001), (0.001, 0.00001)]),  # ~1m north, parallel
+                LineString([(0.0, 0.01), (0.001, 0.01)]),  # ~1km north
+                LineString([(0.0005, -0.001), (0.0005, 0.001)]),  # perpendicular
+            ],
+            crs="EPSG:4326",
+        )
+        return reference, target
+
+    def test_name_and_eval_mode(self):
+        from cbench.adapters.naive import NaiveAdapter
+
+        adapter = NaiveAdapter()
+        assert adapter.name == "naive"
+        assert adapter.eval_mode == EvalMode.STITCH
+
+    def test_registered(self):
+        from cbench.adapters import REGISTRY
+
+        assert "naive" in REGISTRY
+
+    def test_matches_near_parallel_rejects_far_and_perpendicular(self):
+        from cbench.adapters.naive import compute_naive_matches
+
+        reference, target = self._toy_data()
+        matches = compute_naive_matches(reference, target, buffer_m=15.0)
+        assert set(matches.columns) == {"ref_id", "target_id", "confidence"}
+        # The near-parallel reference matches; the far one is outside the buffer
+        # and the perpendicular one fails the angle gate.
+        assert "r_near" in set(matches["ref_id"])
+        assert "r_far" not in set(matches["ref_id"])
+        assert "r_perp" not in set(matches["ref_id"])
+        assert (matches["target_id"] == "t1").all()
+
+    def test_greedy_reference_assigned_once(self):
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        from cbench.adapters.naive import compute_naive_matches
+
+        # One reference overlapping two candidate targets: greedy assigns it to
+        # exactly one (its single best), never both.
+        reference = gpd.GeoDataFrame(
+            {"id": ["r1"]},
+            geometry=[LineString([(0.0, 0.0), (0.001, 0.0)])],
+            crs="EPSG:4326",
+        )
+        target = gpd.GeoDataFrame(
+            {"id": ["t1", "t2"]},
+            geometry=[
+                LineString([(0.0, 0.00001), (0.001, 0.00001)]),
+                LineString([(0.0, -0.00001), (0.001, -0.00001)]),
+            ],
+            crs="EPSG:4326",
+        )
+        matches = compute_naive_matches(reference, target, buffer_m=15.0)
+        assert (matches["ref_id"] == "r1").sum() == 1
+
+    def test_run_and_parse_roundtrip(self, tmp_path):
+        from cbench.adapters.naive import NaiveAdapter
+
+        reference, target = self._toy_data()
+        ref_path = tmp_path / "ref.parquet"
+        tgt_path = tmp_path / "tgt.parquet"
+        reference.to_parquet(ref_path)
+        target.to_parquet(tgt_path)
+
+        adapter = NaiveAdapter()
+        out = adapter.run(ref_path, tgt_path, tmp_path / "out")
+        assert out.exists()
+        parsed = adapter.parse_output(out)
+        assert list(parsed.matches.columns) == ["ref_id", "target_id", "confidence"]
+        assert parsed.matches["ref_id"].dtype == object
+        assert parsed.metadata["distinct_targets"] >= 1

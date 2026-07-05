@@ -38,6 +38,11 @@ cbench run matcher us_boston_streets \
 cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
     --opt hoot_dir=../../hootenanny
 
+# Run the naive geometric baseline (the benchmark floor - pure buffer overlap,
+# no learning, no names, no topology). Fast and dependency-light.
+cbench run naive us_boston_streets -c cbench/datasets.toml \
+    --opt buffer_m=15 --opt min_overlap=0.30 --opt angle_tol_deg=35
+
 # Compare results
 cbench compare cbench_results.jsonl
 
@@ -149,9 +154,68 @@ style: ~0.05 on F1, wider on the noisier exact-match) and `min_mapped_groups` to
 
 ## Hootenanny Setup
 
-[Hootenanny](https://github.com/ngageoint/hootenanny) is a vector conflation tool from NGA.
+[Hootenanny](https://github.com/ngageoint/hootenanny) is a vector conflation tool
+from NGA. For our purposes we care only about the **matches it finds** (segment ↔
+segment correspondences), not its merged geometry — see the scope note in
+`BENCHMARK_RESULTS.md`. We run full `hoot conflate` only because hoot's match
+decisions are observable only through the conflated output (its
+`conflate.match.only` mode discards them); the cbench adapter then extracts
+correspondences from the `matcher_ref_*` / `matcher_tgt_*` provenance tags and
+review relations and ignores the merged geometry.
 
-### Docker Compose (Recommended)
+### Prebuilt Docker image (Recommended, validated on Apple Silicon)
+
+The fastest path — no source build, no compose stack, no Postgres/Tomcat. Uses a
+prebuilt image from Docker Hub that already contains the `hoot` binary. Runs
+under x86 emulation on ARM.
+
+```bash
+docker pull --platform linux/amd64 hootenanny/run:0.2.41-1
+docker run --rm --platform linux/amd64 --entrypoint /usr/bin/hoot \
+    hootenanny/run:0.2.41-1 version    # -> Hootenanny 0.2.41
+
+# Run the benchmark (adapter drives `docker run` for you):
+uv run cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+    --opt hoot_image=hootenanny/run:0.2.41-1
+```
+
+Notes and gotchas (all handled by the adapter, documented here for transparency):
+
+- **Version:** `hootenanny/run:0.2.41-1` is v0.2.41 (2018) — the newest *runnable*
+  prebuilt image. The `hootenanny/rpmbuild-hoot-release:latest` (2024) image is a
+  build *environment* with **no installed `hoot` binary and no RPMs staged**, so
+  it cannot run conflation without a full build. The current 0.2.87 release has
+  no runnable prebuilt image.
+- **Creator class names differ by version.** 0.2.41 requires fully namespaced
+  classes and the highway *merger* is `HighwaySnapMergerCreator` (not
+  `HighwayMergerCreator`). The adapter defaults to
+  `match.creators=hoot::HighwayMatchCreator` and
+  `merger.creators=hoot::HighwaySnapMergerCreator`; override for other versions
+  with `--opt match_creators=... --opt merger_creators=...`.
+- **Binary path** is `/usr/bin/hoot` in the run image (vs `$HOOT_HOME/bin/hoot`
+  in a source build); override with `--opt hoot_bin=...`.
+- The repeated `Internal Error: Two nodes were found with the same coordinate`
+  log lines during merging are the known non-fatal HighwaySnapMerger warnings —
+  conflation still completes.
+
+### Docker Compose (source build — for the current hoot release)
+
+Hootenanny here is a **version-pinned, one-shot frozen baseline** (hoot is out of
+active maintenance; the live comparisons going forward are the modern match-stage
+options in the landscape section). The numbers in `BENCHMARK_RESULTS.md` come
+from the prebuilt-image route above under **x86 emulation**, so their **wall
+times are invalid** — only match quality (P/R/F1) is reported from Apple Silicon.
+
+To get valid timing and/or a **current** hoot (0.2.87+) row, do a one-shot run on
+**native x86 Linux** — there is no runnable prebuilt image for current hoot, so it
+must be built from source. This is a multi-hour, high-risk build under emulation
+(EL/CentOS base, GDAL/GEOS/PROJ/v8/node from source); build it on the native box
+instead.
+
+> Memory: the compose `core-services`/`postgres` containers are memory-hungry and
+> have been observed dying with `Exited (137)` (OOM). Give the run a generous
+> memory limit (e.g. Docker Desktop / daemon limit of 16 GB+; conflation of a
+> city network peaks high). A box with plenty of RAM (e.g. 64 GB) is comfortable.
 
 ```bash
 # Clone Hootenanny as a sibling to matcher
@@ -159,11 +223,15 @@ cd /path/to/matcher/..
 git clone https://github.com/ngageoint/hootenanny.git
 cd hootenanny
 
-# Start services (first run builds everything - takes 20-40 min)
+# Start services (first run builds everything - takes 20-40 min on x86; longer under emulation)
 make -f Makefile.docker up
 
 # Verify it's working
 docker compose exec core-services /var/lib/hootenanny/bin/hoot --version
+
+# Then point the adapter at the checkout instead of an image:
+#   uv run cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+#       --opt hoot_dir=../hootenanny
 ```
 
 To stop services: `make -f Makefile.docker down`
@@ -180,11 +248,96 @@ cbench handles GeoParquet to OSM conversion automatically when running the Hoote
 
 When connectors are provided (via `--opt connectors=path/to/connectors.parquet`), segments sharing the same `connector_id` will reference the same OSM node, preserving network topology.
 
-## Alternative Tools
+## Baseline landscape
 
-- **[RoadMatcher](https://github.com/vividsolutions/roadmatcher)** - Java-based open source tool
-- **[JOSM Conflation Plugin](https://josm.openstreetmap.de/)** - Semi-automated conflation in JOSM editor
-- **[GraphHopper Map Matching](https://github.com/graphhopper/map-matching)** - For GPS trace to road network matching
+Verification of the open-source conflation / map-matching landscape as a source
+of benchmark baselines (verified July 2026). "Integration cost" is the effort to
+build a headless cbench adapter that takes two road-linework sets (reference =
+Overture segments, target = local roads) and emits matches.
+
+**Viability is weighted by MATCH-stage output**: can the tool produce
+segment ↔ segment *correspondences* headlessly? Merge/conflation completeness is
+irrelevant — `matcher` produces GERS bridge pairs, not merged geometry, so a
+baseline only needs to emit "local segment X ↔ Overture segment Y" pairs.
+
+| Tool | Status (Jul 2026) | Headless linework viability | Integration cost |
+|------|-------------------|-----------------------------|------------------|
+| **Naive geometric** (this repo) | shipped in `cbench` | Native — the benchmark floor | done |
+| **Hootenanny** (`ngageoint/hootenanny`) | Active, not archived; latest **v0.2.87 (2024-10)**, ~9-month release gap since; GPL-3.0 | Strong — `hoot conflate` is purpose-built vector-to-vector road conflation | **Medium–High.** No official multi-arch image, but usable **prebuilt amd64 images exist on Docker Hub** (`hootenanny/rpmbuild-hoot-release:latest`, 2024-08; `hootenanny/run:0.2.41-1`, 2018). Runs under emulation on Apple Silicon. The from-source `docker-compose` build (EL/CentOS, GDAL/GEOS/PROJ/v8/node) is the high-cost path; the prebuilt image is the low-cost path. |
+| **SharedStreets `shst match`** (`sharedstreets/sharedstreets-js`) | **Effectively abandoned** (last real release v0.15.2, May 2020) | Conceptual fit, but matches to the global SharedStreets reference tiles, not to an arbitrary supplied reference set — impedance mismatch with our ref/target contract | **High.** Needs ancient Node (10–14) in a pinned container; `node-gyp` native deps fail on Node 20/22. Depends on an unmaintained tile backend. **Recommend against.** |
+| **Valhalla Meili** (map-matching) | **Actively maintained**, clean multi-arch Docker | Yes — feed each segment as a synthetic GPS trace to `trace_attributes` with `map_snap`. A 2025 arXiv paper conflated 1.78M VDOT segments this way (>98% coverage, 2.5 m median error) | **Medium.** Main work: convert Overture → OSM-PBF → build the routable graph; densify segments into traces; handle one-way/direction; map matched edges back to Overture IDs. Needs a running Valhalla service (single container fine at benchmark scale). |
+| **GraphHopper map-matching** | **Actively maintained** (2025 releases); folded into main `graphhopper/graphhopper`, on Maven Central | Same segment-as-trace paradigm as Valhalla; embeddable JVM library (no server needed) | **Medium.** Same Overture→OSM-PBF ingestion tax as Valhalla; shares ~80% of that work. Lower runtime friction (in-process JVM), slightly less conflation-specific precedent. |
+| **OpenLR** (`tomtom-international/openlr`) | Maintained (last commit 2025-10; 2025 aarch64 + Java 17 work); released via Maven, no GitHub Releases | **Poor fit** — a location-referencing *codec* (encode on map A, decode on map B), not a conflation engine; decode quality hinges on consistent FRC/FOW attributes local data usually lacks | **High relative to payoff.** Runtime fine; you'd hand-build an encode→decode harness on a codec never meant for bulk conflation. **Low priority.** |
+
+### Overture / GERS ecosystem (2024–2026)
+
+There is **no official Overture drop-in "match two road-linework sets → GERS
+links" open-source tool** — Overture's own road conflation is an internal
+pipeline whose *outputs* are published, not the matcher. This is arguably the
+gap `matcher` fills. Related artifacts:
+
+- **GERS bridge files** (docs.overturemaps.org/gers/bridge-files) — release
+  *artifacts* mapping GERS IDs ↔ source IDs for a fixed set of upstream datasets
+  (OSM, Esri, Meta/Microsoft, etc.), not a tool. Useful as eval scaffolding for
+  OSM-sourced roads, not for arbitrary local data. (GERS IDs are UUIDv4 since the
+  June 2025 release.)
+- **`OvertureMaps/match-inspector`** — conflates *building footprints*, not
+  roads; interesting only as a labeling-UI reference.
+- **`OvertureMaps/osm-pbf-parquet`** — a PBF→Parquet transcoder (not a matcher),
+  but a useful fast ingestion step if we build an OSM-graph baseline.
+- Commercial (not open): TomTom **GEM**, CARTO/Databricks & Wherobots/Sedona
+  GERS-aware spatial joins.
+
+### Recommended next baseline (actionable)
+
+After the naive floor and Hootenanny, the best MATCH-stage baseline to build next
+is a **map-matcher fed local segments as synthetic GPS traces**, snapping them
+onto an Overture-derived routable graph. The matched edge sequence *is* the
+segment↔segment correspondence set — exactly the bridge-pair output we score. Two
+concrete, maintained options (build one, not both):
+
+**Option A — Valhalla Meili (recommended first).** Strongest precedent: a 2025
+arXiv recipe conflated 1.78M road segments this way (>98% coverage, 2.5 m median).
+
+- Runtime: official multi-arch Docker `ghcr.io/valhalla/valhalla:latest` (ARM-native, no emulation).
+- Pipeline: (1) convert Overture segments → OSM PBF (reuse `cbench/convert/osm.py`
+  geometry logic, emit PBF via `osmium`); (2) `valhalla_build_tiles`; (3) POST each
+  target segment to the local `/trace_attributes` endpoint with
+  `{"shape":[...], "costing":"auto", "shape_match":"map_snap"}`; (4) read
+  `edges[].way_id` back to Overture IDs (carry the GERS id as the OSM way id during
+  PBF export so no join is needed).
+- Trace-format notes: densify each target LineString to ~10 m spacing before
+  sending (Meili expects trace-like point density); set `"search_radius"` ~25 m;
+  one-way/directionality mismatches are the documented failure mode — send traces
+  in geometric order and allow `"trace_options.turn_penalty_factor":0`.
+- Integration cost: **Medium** — the only real work is the Overture→PBF export;
+  everything else is HTTP + JSON parsing.
+
+**Option B — GraphHopper map-matching (close second, no server).** Same paradigm
+as an embeddable JVM library (`com.graphhopper:graphhopper-map-matching`, 2025
+releases on Maven Central) — no service to run, but a JVM subprocess and the same
+Overture→PBF import. Pick this if avoiding a running service matters more than
+Valhalla's stronger conflation precedent; the Overture→PBF step is shared with
+Option A.
+
+**Explicitly deprioritized for MATCH-stage:**
+
+- **SharedStreets `shst match`** — even judged purely on emitting match pairs, it
+  emits *SharedStreets* reference IDs, not direct Overture↔local pairs, forcing a
+  SharedStreets-tile intermediary; combined with Node-10 `node-gyp` bit-rot
+  (won't install on Node 20/22 without pinning Node ≤14 in a container) and an
+  unmaintained tile backend, it is not worth the integration cost.
+- **OpenLR** — a location-referencing codec, not a matcher; you'd hand-build
+  encode→decode and it needs consistent FRC/FOW attributes local data lacks.
+
+Both recommended options impose an **Overture→OSM-PBF graph tax** (the reference
+must become a routable graph). Build that converter once — it is the shared
+dependency for A and B.
+
+### Other tools (not prioritized)
+
+- **[RoadMatcher](https://github.com/vividsolutions/roadmatcher)** - Java-based open source tool (dormant)
+- **[JOSM Conflation Plugin](https://josm.openstreetmap.de/)** - Semi-automated conflation in JOSM editor (interactive, not headless)
 
 ## Troubleshooting
 

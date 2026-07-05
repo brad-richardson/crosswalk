@@ -15,3 +15,11 @@ try:
     REGISTRY["hootenanny"] = HootAdapter
 except ImportError:
     pass
+
+# Naive geometric baseline also requires geopandas (optional dep)
+try:
+    from cbench.adapters.naive import NaiveAdapter
+
+    REGISTRY["naive"] = NaiveAdapter
+except ImportError:
+    pass
