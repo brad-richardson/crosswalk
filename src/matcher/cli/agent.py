@@ -1052,6 +1052,14 @@ def run_stitch_panel(
     codex_model: str = typer.Option("gpt-5.5", "--codex-model"),
     codex_effort: str = typer.Option("low", "--codex-effort"),
     agy_model: str = typer.Option("Gemini 3.5 Flash (Medium)", "--agy-model"),
+    pack_feedback: bool = typer.Option(
+        False,
+        "--pack-feedback",
+        help="DIAGNOSTIC (default off): ask each panelist to append a structured "
+        "pack_feedback self-report (missing_info/ambiguities/confidence_basis) to its "
+        "answer, recorded in votes.csv. Augments the prompt for this run only; the "
+        "default production prompt is untouched.",
+    ),
 ):
     """Run the 3-provider consensus panel (claude + codex + agy) on a batch.
 
@@ -1076,8 +1084,17 @@ def run_stitch_panel(
 
     console.print(f"[blue]Running panel on batch {batch_dir}[/blue]")
     console.print(f"  Panel: {', '.join(f'{p.name}={p.model}' for p in panel)}")
+    if pack_feedback:
+        console.print(
+            "  [yellow]pack-feedback ON: appending diagnostic self-report request[/yellow]"
+        )
     votes_df, consensus_df = run_batch(
-        batch_dir, panel=panel, group_ids=gids, timeout=timeout, limit=limit
+        batch_dir,
+        panel=panel,
+        group_ids=gids,
+        timeout=timeout,
+        limit=limit,
+        collect_feedback=pack_feedback,
     )
 
     console.print(f"[green]{len(consensus_df)} groups, {len(votes_df)} votes[/green]")

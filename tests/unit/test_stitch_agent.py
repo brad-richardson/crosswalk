@@ -1014,3 +1014,93 @@ def test_evaluate_batch_uses_batch_json_candidate_edges(tmp_path):
     ).to_csv(batch_dir / "votes.csv", index=False)
 
     assert evaluate_batch(batch_dir, human_df) == []
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic pack-feedback instrumentation (wave-local flag; default OFF)
+# ---------------------------------------------------------------------------
+
+
+def test_pack_feedback_column_present_in_votes_schema():
+    # The votes.csv schema must carry the diagnostic self-report column.
+    assert "pack_feedback" in sr.VOTES_COLUMNS
+
+
+def test_augment_prompt_only_adds_feedback_request():
+    base = 'respond with {"choice": "A", ...}'
+    aug = sr.augment_prompt_with_feedback(base)
+    assert aug.startswith(base)
+    assert "pack_feedback" in aug
+    assert "missing_info" in aug and "ambiguities" in aug and "confidence_basis" in aug
+    # Default prompt is untouched by the augmentation helper.
+    assert "pack_feedback" not in base
+
+
+def test_extract_pack_feedback_pulls_nested_object():
+    raw = json.dumps(
+        {
+            "choice": "A",
+            "confidence": 0.8,
+            "reasoning": "clear",
+            "pack_feedback": {
+                "missing_info": ["no name on T1"],
+                "ambiguities": [],
+                "confidence_basis": "parallel geometry",
+            },
+        }
+    )
+    fb = sr._extract_pack_feedback(raw)
+    parsed = json.loads(fb)
+    assert parsed["missing_info"] == ["no name on T1"]
+    assert parsed["confidence_basis"] == "parallel geometry"
+
+
+def test_extract_pack_feedback_absent_returns_empty():
+    raw = '{"choice": "A", "confidence": 0.8, "reasoning": "clear"}'
+    assert sr._extract_pack_feedback(raw) == ""
+    assert sr._extract_pack_feedback("total garbage no json") == ""
+
+
+def test_extract_pack_feedback_empty_object_returns_empty():
+    raw = '{"choice": "A", "confidence": 0.8, "reasoning": "x", "pack_feedback": {}}'
+    assert sr._extract_pack_feedback(raw) == ""
+
+
+def test_parse_vote_ignores_pack_feedback_key():
+    # A vote carrying the diagnostic key still parses to a valid choice.
+    raw = json.dumps(
+        {
+            "choice": "B",
+            "confidence": 0.7,
+            "reasoning": "ok",
+            "pack_feedback": {"ambiguities": ["z"]},
+        }
+    )
+    choice, conf, _ = sr.parse_vote(raw, {"A", "B"})
+    assert choice == "B" and conf == 0.7
+
+
+def test_run_provider_collect_feedback_toggle(monkeypatch):
+    """collect_feedback=True captures the self-report; False leaves it empty."""
+    raw = json.dumps(
+        {
+            "choice": "A",
+            "confidence": 0.9,
+            "reasoning": "ok",
+            "pack_feedback": {"missing_info": ["x"], "ambiguities": [], "confidence_basis": "y"},
+        }
+    )
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return raw
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    args = (sr.ProviderSpec("claude", "m"), "g", None, "prompt", ["A"], {"A": [(R1, T1)]})
+
+    vote_off = sr.run_provider_on_group(*args)
+    assert vote_off.choice == "A"
+    assert vote_off.pack_feedback == ""
+
+    vote_on = sr.run_provider_on_group(*args, collect_feedback=True)
+    assert vote_on.choice == "A"
+    assert json.loads(vote_on.pack_feedback)["missing_info"] == ["x"]
