@@ -84,7 +84,6 @@ def featurize(df: pd.DataFrame) -> pd.DataFrame:
     ) / grp["confidence"].transform(lambda s: max(len(s) - 1, 1))
 
     # competition: how many edges in the group share this edge's ref / target
-    out["n_share_ref"] = grp["ref_id"].transform("count")  # placeholder, replaced below
     out["n_share_ref"] = out.groupby(["group_id", "ref_id"])["ref_id"].transform("count")
     out["n_share_tgt"] = out.groupby(["group_id", "target_id"])["target_id"].transform("count")
 

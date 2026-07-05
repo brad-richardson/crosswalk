@@ -88,7 +88,7 @@ def _make_model(n_pos: int, n_neg: int):
         reg_lambda=1.5,
         scale_pos_weight=spw,
         eval_metric="logloss",
-        n_jobs=4,
+        n_jobs=1,  # single-threaded for reproducible results on this tiny dataset
         random_state=0,
     )
 
@@ -147,6 +147,8 @@ def run_cv(
     groups = df["group_id"].to_numpy()
 
     n_groups = df["group_id"].nunique()
+    if n_groups < 2:
+        raise ValueError(f"grouped CV needs >= 2 groups, got {n_groups}; nothing to hold out.")
     n_splits = min(n_splits, n_groups)
     gkf = GroupKFold(n_splits=n_splits)
 
@@ -189,12 +191,13 @@ def run_cv(
         _, _, f1_fold = _prf(oof_pred[te], y[te])
         fold_f1.append(round(f1_fold, 3))
 
-    keep_all = np.ones(len(df), dtype=int)
+    # Optimizer baseline = the sidecar's own per-edge `selected` flag (True for
+    # ~all persisted edges, False for the handful of junction slivers), NOT a
+    # blanket all-ones vector.
+    keep_all = df["selected"].astype(int).to_numpy()
     results = {
         "model": _eval_from_predictions("learned (xgb, grouped CV)", df, oof_pred),
-        "baseline_keepall": _eval_from_predictions(
-            "baseline: optimizer selected (keep-all)", df, keep_all
-        ),
+        "baseline_keepall": _eval_from_predictions("baseline: optimizer selected", df, keep_all),
         "baseline_conf": _eval_from_predictions(
             "baseline: tuned conf threshold", df, oof_conf_pred
         ),

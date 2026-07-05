@@ -29,12 +29,23 @@ from pathlib import Path
 
 import pandas as pd
 
-from matcher.agent_labeling.stitch_eval import (
-    _human_edge_set,
-    recover_labeled_groups,
-)
+from matcher.agent_labeling.stitch_eval import recover_labeled_groups
 
 EDGE_LABEL_COL = "keep"
+
+
+def _human_edge_set(selected_edges_raw) -> frozenset[tuple[str, str]]:
+    """Parse a stitching label's ``selected_edges`` JSON to an edge frozenset.
+
+    Local copy of the tiny parser (rather than importing the private
+    ``stitch_eval._human_edge_set``) so this research harness does not depend on
+    an internal API that may change without notice.
+    """
+    try:
+        edges = json.loads(selected_edges_raw)
+    except (ValueError, TypeError):
+        return frozenset()
+    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
 
 
 def load_sidecar_groups(path: str | Path) -> list[dict]:

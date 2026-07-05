@@ -6,7 +6,8 @@ classifier. This document reports the **data reality**, a grouped-CV eval of a
 prototype XGBoost classifier **vs the optimizer baseline**, and a **go/no-go**
 recommendation with a concrete productionization plan.
 
-Code (all experimental, flag-gated, **zero production behavior change**):
+Code (all experimental, **not imported by production at all** — no runtime flag
+path yet, **zero production behavior change**):
 `src/matcher/resolver/` (extract / features / votes / evaluate),
 `scripts/build_resolver_dataset.py`, `tests/unit/test_resolver_extract.py`.
 Reproduce:
@@ -25,8 +26,8 @@ uv run python scripts/build_resolver_dataset.py \
 cheap confidence-based drop-filter as the interim step.**
 
 There *is* measurable per-edge headroom over the keep-all optimizer baseline
-(clean labels: F1 0.828 → 0.852 learned, +0.02; all mapped labels: 0.777 →
-0.900, +0.12). **But three findings temper this into a "not yet":**
+(clean labels: F1 0.828 → 0.852 learned, +0.02; all mapped labels: 0.781 →
+0.895, +0.11). **But three findings temper this into a "not yet":**
 
 1. On the *cleanest* labels a trivial **tuned confidence threshold beats the
    structured model** (0.872 vs 0.852 F1). Almost all the signal is "edge
@@ -41,8 +42,8 @@ There *is* measurable per-edge headroom over the keep-all optimizer baseline
    classifier never sees a rejected-but-correct edge. A true keep/drop resolver
    needs the full candidate graph persisted first.
 
-The highest-leverage next step is **more labels, not more model**: adding 63
-panel-soft-labeled groups to training lifts clean F1 0.852 → 0.890 (+0.04),
+The highest-leverage next step is **more labels, not more model**: adding 62
+panel-soft-labeled groups to training lifts clean F1 0.852 → 0.903 (+0.05),
 a bigger gain than any feature work. See §5 milestone plan.
 
 ---
@@ -65,7 +66,9 @@ within-group keep set is *partial*, so drop labels are noisy), 6 **lost** (edges
 no longer survive), 0 empty. Seattle: 1 clean, 1 split, 2 empty, 5 lost — too
 small to eval alone.
 
-**Resulting per-edge dataset:** 379 edges / 68 groups (241 keep, 134 drop).
+**Resulting per-edge dataset:** 376 edges / 68 groups (241 keep, 135 drop;
+`PYTHONHASHSEED=0` — the split-label count varies by a few edges otherwise, see
+the reproducibility note in §3).
 Clean-only: 157 edges / 41 groups (109 keep, 46 drop = 29% drop rate). Slivers in
 labeled groups ≈ 0, so sliver-filtered metrics equal raw here.
 
@@ -100,6 +103,8 @@ truth.
 
 ## 3. Results — model vs optimizer baseline (identical held-out groups)
 
+All figures below are the deterministic `PYTHONHASHSEED=0` run.
+
 ### Per-edge P/R/F1 and group-exact (pooled OOF, GroupKFold-5)
 
 | slice | model | edges | groups | P | R | F1 | grp-exact | F1 (sliver-filt) |
@@ -107,13 +112,15 @@ truth.
 | **clean** | optimizer keep-all (baseline) | 157 | 41 | 0.707 | 1.000 | **0.828** | **0.805** | 0.828 |
 | **clean** | tuned conf threshold | 157 | 41 | 0.853 | 0.892 | **0.872** | 0.780 | 0.872 |
 | **clean** | learned XGB | 157 | 41 | 0.908 | 0.802 | **0.852** | **0.829** | 0.852 |
-| all mapped | optimizer keep-all | 379 | 68 | 0.636 | 1.000 | 0.777 | 0.691 | 0.777 |
-| all mapped | tuned conf threshold | 379 | 68 | 0.823 | 0.909 | 0.864 | 0.662 | 0.864 |
-| all mapped | learned XGB | 379 | 68 | 0.869 | 0.934 | **0.900** | 0.691 | 0.900 |
-| Boston only | optimizer keep-all | 372 | 66 | 0.634 | 1.000 | 0.776 | 0.697 | 0.776 |
-| Boston only | learned XGB | 372 | 66 | 0.876 | 0.928 | **0.901** | 0.742 | 0.901 |
+| all mapped | optimizer keep-all | 376 | 68 | 0.641 | 1.000 | 0.781 | 0.691 | 0.781 |
+| all mapped | tuned conf threshold | 376 | 68 | 0.833 | 0.909 | 0.869 | 0.662 | 0.869 |
+| all mapped | learned XGB | 376 | 68 | 0.886 | 0.905 | **0.895** | 0.691 | 0.895 |
+| Boston only | optimizer keep-all | 369 | 66 | 0.640 | 1.000 | 0.780 | 0.697 | 0.780 |
+| Boston only | learned XGB | 369 | 66 | 0.883 | 0.928 | **0.905** | 0.727 | 0.905 |
 
 Seattle alone (2 clean, tiny) is not separately evaluable — folded into "all".
+The "all mapped" / "Boston" rows include the noisier *split* labels; the
+**clean** rows are the trustworthy comparison.
 
 ### Per-labeler provenance (all mapped labels)
 
@@ -122,14 +129,15 @@ Seattle alone (2 clean, tiny) is not separately evaluable — folded into "all".
 | brad (human) | keep-all | 91 | 21 | 0.795 | 0.810 |
 | brad (human) | tuned conf | 91 | 21 | 0.797 | 0.619 |
 | brad (human) | learned XGB | 91 | 21 | **0.885** | 0.810 |
-| panel_unanimous_v1 | keep-all | 288 | 47 | 0.772 | 0.638 |
-| panel_unanimous_v1 | tuned conf | 288 | 47 | **0.870** | 0.660 |
-| panel_unanimous_v1 | learned XGB | 288 | 47 | 0.864 | 0.617 |
+| panel_unanimous_v1 | keep-all | 285 | 47 | 0.777 | 0.638 |
+| panel_unanimous_v1 | tuned conf | 285 | 47 | 0.872 | 0.638 |
+| panel_unanimous_v1 | learned XGB | 285 | 47 | **0.906** | 0.681 |
 
-Notable: on **human** labels the learned model clearly beats the confidence
-threshold (0.885 vs 0.797) — the structural features earn their keep against a
-human's more holistic judgement. On **panel** labels the panel's own decisions
-track confidence closely, so the threshold is competitive.
+Notable: on **human** labels the learned model crushes the confidence threshold
+(0.885 vs 0.797) — the structural features earn their keep against a human's more
+holistic judgement, where confidence alone is a poor proxy. On **panel** labels
+(mostly split-inclusive) the model still leads (0.906 vs 0.872) but by less,
+since the panel's own decisions track confidence more closely.
 
 ### Stability (per-fold F1 is noisy; pooled OOF is stable)
 
@@ -139,9 +147,18 @@ Individual CV folds swing hard (clean per-fold F1 e.g. `[0.42, 0.91, 0.86, 0.79,
 mean 0.850 (sd 0.006). So the point estimates in §3 are trustworthy; the
 per-fold spread is a small-sample artifact, not model instability.
 
+**Reproducibility note.** The **clean** slice is bit-stable (157 edges, 41
+groups). The **all-labels** count wobbles by a few edges run-to-run because
+`stitch_eval.recover_labeled_groups` breaks ties among equal-overlap groups by
+set-iteration order, which is subject to string-hash randomization — this only
+touches *split* labels (whose mapping is inherently ambiguous). Read the clean
+slice + shuffle-averaged numbers as the trustworthy figures; set
+`PYTHONHASHSEED=0` for an exactly reproducible split mapping. Digits are
+reported to ±0.01.
+
 ### Panel soft labels add real signal (with/without)
 
-Adding 63 panel-soft-labeled groups (not in the curated set) to the *training*
+Adding 62 panel-soft-labeled groups (not in the curated set) to the *training*
 folds, with per-edge soft keep = reliability-weighted provider vote share
 (codex down-weighted 0.5, see `resolver/votes.py`), evaluated only on curated
 clean labels:
@@ -149,9 +166,9 @@ clean labels:
 | training data | clean OOF F1 | grp-exact |
 |---|---:|---:|
 | curated clean only | 0.852 | 0.829 |
-| curated clean + 63 panel-soft groups | **0.890** | 0.805 |
+| curated clean + 62 panel-soft groups | **0.903** | 0.805 |
 
-+0.04 F1 from soft labels alone — larger than any feature-engineering gain
++0.05 F1 from soft labels alone — larger than any feature-engineering gain
 observed, and the cheapest lever available (panels already run).
 
 ### What the model keys on (gain importance, full-data fit)
@@ -172,9 +189,9 @@ so competitive on clean data.
   some recall (1.0→0.80). Net clean F1 +0.02 over keep-all, and it *loses* to a
   one-parameter confidence threshold (0.872).
 - **Does it help the decision that matters?** Only slightly. Group-exact clean
-  0.805→0.829 (+3 pts, ≈1 extra correct group in 41); on all labels it is flat.
-  Replacing `optimizer.py` edge selection with a model that doesn't move
-  group-exact is not justified yet.
+  0.805→0.829 (+2 pts, ≈1 extra correct group in 41); on all mapped labels it is
+  flat (0.691→0.691). Replacing `optimizer.py` edge selection with a model that
+  doesn't move group-exact is not justified yet.
 - **Why negative-ish is the right read:** at 40–60 labeled groups, a 25-feature
   model is in the regime where a single strong feature (confidence) plus
   regularization is near-optimal, and the extra features mostly add variance.
@@ -186,7 +203,7 @@ so competitive on clean data.
    under-selection becomes learnable — today's biggest blind spot.
 2. **~150–300 labeled groups** (vs 68), ideally human or human-audited, so the
    structural features clear the noise floor. Panel-soft labels are a cheap
-   accelerant (+0.04 F1 already).
+   accelerant (+0.05 F1 already).
 3. A **group-level objective** (structured/constrained prediction enforcing
    non-overlap) rather than independent per-edge calls, to move group-exact.
 
