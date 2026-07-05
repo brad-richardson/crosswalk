@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,29 @@ import pandas as pd
 from loguru import logger
 
 from cbench.adapters.base import EvalMode, ToolOutput
+
+# Default invocation. Uses ``uv run`` so the matcher CLI resolves from the
+# matcher project environment regardless of what is on ``PATH`` in the caller's
+# shell. Executed with ``cwd`` set to the repo root (see ``_find_repo_root``) so
+# matcher's relative model path (``data/models/...``) resolves correctly.
+DEFAULT_MATCHER_CMD = "uv run matcher"
+
+
+def _find_repo_root(start: Path | None = None) -> Path:
+    """Locate the matcher repo root.
+
+    Walks up from this file (or ``start``) looking for the directory that
+    contains ``src/matcher`` — the matcher package root. With an editable
+    install (``pip install -e``) this file lives at
+    ``<repo>/cbench/src/cbench/adapters/matcher.py``, so the walk finds
+    ``<repo>``. Falls back to the 4th parent if no marker is found.
+    """
+    here = (start or Path(__file__)).resolve()
+    for parent in here.parents:
+        if (parent / "src" / "matcher").is_dir():
+            return parent
+    # Fallback: cbench/src/cbench/adapters/matcher.py -> repo root is parents[4]
+    return here.parents[4] if len(here.parents) > 4 else here.parent
 
 
 def _groups_sidecar_path(bridge_path: Path) -> Path:
@@ -44,17 +68,32 @@ class MatcherAdapter:
             output_dir: Directory for output files.
             **kwargs: Extra options passed as CLI flags.
                 model: Model type (default: "xgboost").
+                matcher_cmd: How to invoke matcher (default: "uv run matcher").
+                    Split with shlex; e.g. "matcher" to use a binary on PATH.
+                repo_root: Directory to run matcher from (default: auto-detected
+                    matcher repo root). matcher resolves its model path relative
+                    to this directory.
 
         Returns:
             Path to the bridge parquet output.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
-        bridge_path = output_dir / "bridge.parquet"
+        # Resolve to absolute paths: the subprocess runs with cwd=repo_root, so
+        # any caller-relative paths would otherwise be resolved incorrectly.
+        bridge_path = (output_dir / "bridge.parquet").resolve()
+        reference = reference.resolve()
+        target = target.resolve()
 
         model = kwargs.get("model", "xgboost")
 
+        matcher_cmd = kwargs.get("matcher_cmd") or DEFAULT_MATCHER_CMD
+        base_cmd = shlex.split(str(matcher_cmd))
+
+        repo_root = kwargs.get("repo_root")
+        repo_root = Path(repo_root).resolve() if repo_root else _find_repo_root()
+
         cmd = [
-            "matcher",
+            *base_cmd,
             "stitch",
             "-r",
             str(reference),
@@ -68,9 +107,11 @@ class MatcherAdapter:
 
         timeout = int(kwargs.get("timeout", 3600))
 
-        logger.info(f"Running: {' '.join(cmd)}")
+        logger.info(f"Running (cwd={repo_root}): {' '.join(cmd)}")
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, cwd=repo_root
+            )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"matcher stitch timed out after {timeout}s") from exc
 
