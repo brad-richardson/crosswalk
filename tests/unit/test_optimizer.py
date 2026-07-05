@@ -746,6 +746,55 @@ class TestGroupingOnlyConfidencePrune:
         assert len(comps) == 1
 
 
+class TestGlueMinConfidenceCalibratedOperatingPoint:
+    """The grouping-only glue prune consumes ``MatchResult.confidence``, which is
+    calibrated P(match) when ``enable_calibration`` is True. The prune constant
+    is therefore the calibrated image of the raw-0.5 point the #267 corridor
+    design validated (isotonic maps mid-range raw 0.5 -> ~0.575), so the effective
+    prune population is preserved under calibration."""
+
+    def _mr(self, rid, tid, conf):
+        return MatchResult(rid, tid, MatchDecision.MATCH, conf, {}, {})
+
+    def test_default_is_calibrated_equivalent_of_raw_half(self):
+        from matcher.config import settings
+
+        # Guard against a silent revert to the raw-scale 0.5: with calibration on
+        # (the default), 0.5 would prune at an effective raw ~0.42 (weaker glue).
+        assert settings.optimizer_glue_min_confidence == pytest.approx(0.575)
+        assert settings.optimizer_glue_min_confidence > settings.scoring_match_threshold
+
+    def test_configured_default_prunes_the_calibrated_band(self):
+        from matcher.config import settings
+
+        # An edge whose calibrated confidence sits in the [0.5, 0.575) band --
+        # i.e. it maps below the raw-0.5 the design pruned -- must NOT glue at
+        # the configured default (which optimize_matches_with_grouping passes in).
+        assert settings.optimizer_glue_min_confidence > 0.55
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.55),  # calibrated conf in the (0.5, 0.575) band
+        ]
+        comps = find_match_components(
+            results,
+            min_confidence=0.1,
+            glue_min_confidence=settings.optimizer_glue_min_confidence,
+        )
+        assert len(comps) == 2  # 0.55 edge does not weld at the 0.575 default
+
+    def test_band_edge_would_glue_at_old_raw_half(self):
+        # The same 0.55 edge WOULD have glued under the old raw-scale 0.5 default,
+        # confirming the operating-point shift is real (not a no-op relabel).
+        results = [
+            self._mr("r1", "t1", 0.9),
+            self._mr("r2", "t2", 0.9),
+            self._mr("r1", "t2", 0.55),
+        ]
+        comps = find_match_components(results, min_confidence=0.1, glue_min_confidence=0.5)
+        assert len(comps) == 1
+
+
 class TestStructuralGate:
     def test_single_corridor_always_simple_within_backstop(self):
         assert group_is_structurally_simple(1, 1, 30, 2, 30, 40)
