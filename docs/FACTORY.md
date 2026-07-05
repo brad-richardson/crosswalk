@@ -87,6 +87,19 @@ is the consumer-facing release-notes artifact for a new Overture release.
 Lists every `release=*/dataset=*` output with its matched count, group count,
 wall time, and creation timestamp.
 
+### `matcher factory publish [DATASETS...] [--all]`
+
+Assembles the public R2 publication tree from the factory outputs and syncs it
+(Milestone **M5**). Pipeline-free: reads finished `release=/dataset=` outputs,
+license-gates them via `datasets/licenses.toml`, copies cleared bridge + manifest
+files, builds a per-release unified `all_bridges.parquet` + `checksums.txt` +
+machine-readable `index.json` + a static credibility `index.html`, then syncs.
+Defaults to `--dry-run` (build staging + report, upload nothing); `--target-dir`
+publishes to a local dir (no credentials); the R2 path uses the S3-compatible
+`aws` CLI with `R2_*` env-var credentials. Immutable release paths (refuses to
+overwrite a published release without `--force`). **Full design + the R2 setup
+steps: [PUBLISHING.md](PUBLISHING.md).**
+
 ## Output layout
 
 Versioned, Hive-partitioned under the factory root (default `data/factory/`):
@@ -255,9 +268,12 @@ which fits 64 GB comfortably one-at-a-time. Spatial tiling stays deferred
 - **`us_boston_streets` and `us_seattle_sidewalks`** are still produced by the
   legacy `matcher stitch` → `data/output/` path so the panel/review queues stay
   stable. Adopting them into the factory layout is a follow-up.
-- **R2 publish (M5)**: the versioned layout here is the local half; uploading
-  `release=…/dataset=…/bridge.parquet` to Cloudflare R2 + a unified long table is
-  the next milestone.
+- **R2 publish (M5)**: SHIPPED as `matcher factory publish` — assembles the public
+  staging tree (license-gated bridge + manifest per dataset, per-release unified
+  `all_bridges.parquet`, checksums, machine-readable `index.json`, credibility
+  `index.html`) and syncs to Cloudflare R2 via the S3-compatible `aws` CLI. The
+  live R2 upload awaits the user's `R2_*` credentials + bucket; local (`--target-dir`)
+  and `--dry-run` paths are validated. See [PUBLISHING.md](PUBLISHING.md).
 - **Inventory repair (M4 remainder)**: the 10 labeled datasets missing a local
   target parquet, and the bogota bike class-vocab fix, are prerequisites for
   running those datasets through the factory.

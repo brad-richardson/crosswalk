@@ -1,0 +1,301 @@
+# Publishing: R2-hosted bridge tables (Milestone M5)
+
+The public artifact of the project: queryable **local road/path ID ↔ Overture GERS
+id** bridge tables, hosted on Cloudflare R2 (free egress), regenerated per Overture
+release. Modeled on the geocoder repo's pattern — static Parquet + a credibility
+page, no serving infrastructure. This document is the design; the tooling is
+`matcher factory publish` (see [Command surface](#command-surface)).
+
+M5 builds on the factory (M4, [FACTORY.md](FACTORY.md)), which already produces the
+right shape locally: `data/factory/release=<overture-release>/dataset=<name>/{bridge.parquet,
+manifest.json, groups.json, ...}`, deterministic per PR #296. Publishing is a thin,
+pipeline-free step: it reads finished factory outputs, license-gates them, and
+assembles + syncs a public tree.
+
+## Status (what landed vs what awaits credentials)
+
+**Landed (this PR):** the `matcher factory publish` command; deterministic staging-
+tree assembly; the license registry (`datasets/licenses.toml`) + gating; the
+per-release unified `all_bridges.parquet`; `index.json` (machine-readable) +
+`index.html` (credibility page); SHA-256 checksums + `checksums.txt`; `--dry-run`
+(default) and `--target-dir` (local) sync; immutable-release enforcement; and the
+`aws s3 sync` R2 code path (untested against live R2). Validated end-to-end with
+`--target-dir` against the real `data/factory` outputs on the Mac (2 published, 3
+excluded — see [License review](#license-review-outcome)).
+
+**Awaits the user (credentials):** creating the R2 bucket, setting the `R2_*` env
+vars, and the first live `--no-dry-run` R2 upload. Also awaits a human license
+review to move more datasets from pending to approved.
+
+## Bucket layout
+
+The R2 bucket mirrors the factory's Hive partitioning so `release=` paths are
+**immutable** and directly range-queryable over HTTPS:
+
+```
+r2://<bucket>/
+  index.html                                    # credibility page (human landing)
+  index.json                                    # machine-readable index (all releases, latest pointer)
+  bridges/
+    release=<overture-release>/                 # IMMUTABLE once published
+      index.json                                # per-release index (datasets, checksums, stats)
+      checksums.txt                             # sha256sum-format manifest for the release
+      all_bridges.parquet                       # unified long table (+ `dataset` column), sorted by gers_id
+      dataset=<name>/
+        bridge.parquet                          # copied verbatim from the factory output
+        manifest.json                           # copied verbatim (provenance)
+```
+
+**Why mirror the factory partitioning.** The factory already thinks in
+`release=/dataset=`; reusing it means publish is a copy + index step with no
+reshaping, `factory delta` release-notes line up with published paths, and
+consumers get Hive-style partition columns for free if they glob the tree.
+
+**Immutable release paths + a stable "latest" pointer.** A published
+`release=<X>/` is never mutated — a new Overture release writes a new partition.
+R2/S3 has no symlinks, so the canonical "latest" pointer is the `latest_release`
+field in the top-level `index.json` (and each release's own `index.json`).
+Consumers read `index.json`, learn the newest release id, and construct URLs.
+This is preferred over a mutable `release=latest/` **copy** because a copy doubles
+current-release storage and invites the mutable/immutable confusion the layout is
+designed to avoid. (A `release=latest/` mirror can be added later if a consumer
+genuinely needs a fixed URL; it is deliberately not built now.)
+
+The publisher refuses to overwrite an existing `release=<X>/` without `--force`
+(checked against the local target, or via `aws s3 ls` for R2). Re-publishing the
+*same* release is idempotent — the bridge/manifest bytes are copied verbatim and
+`all_bridges.parquet` is written deterministically, so identical inputs produce
+identical checksums.
+
+## Public query story
+
+Every table is a plain Parquet file. DuckDB (or any Parquet-over-HTTP reader) does
+HTTP range reads, so consumers fetch only the row groups they touch — no download,
+no API.
+
+**Two access patterns, two files:**
+
+1. **Per-dataset** `bridge.parquet` — "give me one local dataset's mapping." Small
+   (1–50 MB), immutable, the primary object.
+
+   ```sql
+   SELECT * FROM read_parquet(
+     'https://<bucket-host>/bridges/release=2026-01-21.0/dataset=us_usfs_flathead/bridge.parquet'
+   )
+   WHERE match_decision = 'match';
+   ```
+
+2. **Per-release** `all_bridges.parquet` — the **reverse lookup**: "given a GERS
+   id, which local datasets reference it, across everything?" It concatenates every
+   published dataset's bridge for the release, adds a `dataset` column, and is
+   **sorted by `gers_id`** so `WHERE gers_id = …` prunes row groups.
+
+   ```sql
+   SELECT dataset, local_id, confidence, match_type, match_decision
+   FROM read_parquet(
+     'https://<bucket-host>/bridges/release=2026-01-21.0/all_bridges.parquet'
+   )
+   WHERE gers_id = '<gers-id>';
+   ```
+
+**Why a unified table is worth it (sizing).** 34 datasets at 1–50 MB each ≈ a few
+hundred MB to ~1.7 GB per release for `all_bridges.parquet`. That is small enough
+to be a single queryable object (DuckDB range-reads it; the `gers_id` sort makes
+point/range lookups prune row groups), and it is the *only* way to answer
+"who references this GERS id?" without the consumer fetching all 34 per-dataset
+files. The per-dataset files stay as the primary artifact; `all_bridges` is the
+convenience index. (If a release ever pushed `all_bridges` past a few GB, the
+fallback is to partition it — e.g. by GERS-id prefix — but we are far below that.)
+
+**Bridge schema** (as produced by the factory, published verbatim): `local_id,
+gers_id, confidence, match_type, match_method, match_decision, matched_at,
+pipeline_version, gers_start_frac, gers_end_frac, local_start_frac, local_end_frac`.
+`all_bridges.parquet` prepends `dataset`. The **quality columns are the
+differentiator**: `confidence` is a calibrated P(match) (#266), `match_type`
+(1:1 / 1:N / N:1 / M:N), `match_decision` (`match` vs `review`), and the fractional
+overlap columns let consumers reconstruct partial-segment matches.
+
+## Metadata / manifest publication
+
+The per-dataset `manifest.json` (the factory's provenance record —
+[FACTORY.md § Manifest schema](FACTORY.md#manifest-schema-manifestjson)) is
+published **verbatim alongside** each bridge. It is the provenance story: Overture
+release, `feature_version`, model fingerprint, buffer distance, optimizer/prune
+settings snapshot, timings, and counts/group stats. Consumers who want to know
+"how was this made / is it stale" read the manifest; nothing is recomputed at
+publish time.
+
+The generated `index.json` is the machine-readable roll-up across all releases:
+`latest_release`, the Overture attribution block, and per-dataset `{status,
+license, stats, files{sha256,bytes}, gate}`. `checksums.txt` (sha256sum format)
+accompanies each release for integrity verification.
+
+## Versioning / regeneration cadence
+
+**Per Overture release.** When a new Overture transportation release ships:
+
+1. Fetch the new Overture segments/connectors (release id lands in the segments
+   `.meta.yaml`).
+2. `matcher factory run --all` — writes a new `release=<new>/` partition (finished
+   datasets from a prior run are skipped via `full_key`).
+3. `matcher factory delta <dataset> --from <old> --to <new>` — the consumer-facing
+   GERS churn release-notes (same/changed/lost/gained).
+4. `matcher factory publish --all` — assembles + syncs the new release; the old
+   release stays untouched (immutable).
+
+Ad-hoc republish of a release (e.g. after a model/feature-version bump that you
+*intend* to supersede the prior output) uses `--force`. Otherwise releases are
+append-only.
+
+## Credibility page
+
+`index.html` is a self-contained (inline CSS, no external requests), responsive,
+light/dark static page generated from the manifests + registry + gate config. It
+is deliberately honest — it advertises what is *not* validated as loudly as what
+is. Contents:
+
+- **Header** — what the tables are, latest release, generation timestamp.
+- **Query it** — copy-pasteable DuckDB examples (per-dataset + reverse lookup),
+  with the actual `--site-url` baked in.
+- **Published datasets** — per-dataset table from the manifests: type, release,
+  target count, matched count, **match rate** (matched / targets, `match` decision
+  only), review count, group count, wall time, license, and the **stitch-gate
+  floor** where curated stitching labels exist (else "no stitching labels").
+- **Excluded — pending license review** — every withheld dataset + the reason,
+  so exclusion reads as deliberate, not missing.
+- **Honest caveats** — review-band edges excluded from headline match rates;
+  `confidence` is calibrated (pick your own operating point); stitch-gate coverage
+  is partial; per-dataset validation varies (benchmarked on a few; see
+  `BENCHMARK_RESULTS.md`).
+- **Licensing & attribution** — the Overture attribution (applies to every table)
+  + per-dataset source license; note that unverified-license datasets are excluded
+  rather than published under a guess.
+
+Stitch-gate metrics on the page come from `cbench/datasets.toml` `[gate.*]`
+floors (the human-curated quality bar), not a live measurement. Today only
+`us_boston_streets` is armed (F1 ≥ 0.83 / exact ≥ 0.50), and Boston/Seattle are
+**not yet in the factory** (they stay on the legacy `data/output/` review path —
+see FACTORY.md "Not yet in the factory"). So the page currently shows "no
+stitching labels" for the published factory datasets; when Boston/Seattle are
+adopted into the factory their armed floors will surface automatically.
+
+## Licensing & attribution
+
+Published bridge tables are **derived works of both** the local source dataset and
+Overture, so every published artifact must carry both attributions:
+
+- **Overture** — the `[overture]` block of `datasets/licenses.toml`. Overture's
+  transportation theme is OSM-derived and distributed under **ODbL 1.0**;
+  attribution: *"Contains data from the Overture Maps Foundation (overturemaps.org);
+  © OpenStreetMap contributors, available under the Open Database License (ODbL)
+  1.0."* (Re-confirm against each Overture release's own license notice — flagged
+  in the registry `note`.)
+- **Per-dataset source license** — the local dataset's own terms.
+
+### The registry (`datasets/licenses.toml`)
+
+The dataset YAMLs carry **no** license field (checked: 0/45), so licensing lives in
+a dedicated, human-reviewed registry. The publisher **never guesses**:
+
+| `status` | effect |
+|---|---|
+| `approved` (with `license` + `attribution`) | **published** |
+| `pending_review` | **excluded** (excluded-pending-review) |
+| no entry | treated as `pending_review` (excluded) |
+
+To publish a dataset: verify its source terms, then set `status = "approved"` with
+a `license` and `attribution` in `datasets/licenses.toml`. This is a one-line human
+decision per dataset, recorded in git.
+
+### License review outcome
+
+Conservative first pass — only unambiguous **public-domain government** sources are
+approved; everything else is `pending_review` (excluded) with a `likely_license`
+hint for the reviewer. This exercised both paths on the current factory outputs:
+
+- **Approved (published):** `us_usfs_flathead`, `us_montana_missoula` — plus
+  `us_usfs_lolo`, `us_montana_helena`, `us_montana_bozeman` in the registry (US
+  Forest Service = US federal PD under 17 U.S.C. § 105; Montana State Library MSDI
+  = published public domain).
+- **Excluded — pending review (present in factory):** `sg_singapore_footpaths`,
+  `sg_singapore_roads` (Singapore LTA DataMall — likely Singapore Open Data Licence,
+  attribution + redistribution terms to verify), `co_bogota_bike_network` (IDECA
+  Bogotá cadastre — terms unclear).
+- **All other 40 datasets:** `pending_review` by default, with per-dataset hints
+  in the registry — a ready-made review checklist.
+
+## Command surface
+
+```bash
+matcher factory publish [DATASETS...] [--all] [-D NAME]
+    [--release R]              # restrict to release(s); default: all present
+    [--target-dir PATH]        # publish to a LOCAL dir (no creds); omit for R2
+    [--dry-run/--no-dry-run]   # default: --dry-run (build staging + report, sync nothing)
+    [--force]                  # overwrite an already-published (immutable) release
+    [--site-url URL]           # public base URL for the credibility-page query examples
+    [--staging-dir PATH]       # staging build dir (default: data/publish_staging)
+    [--factory-root PATH]      # factory root to publish from (default: data/factory)
+```
+
+Behaviour:
+
+- **Always** builds the deterministic staging tree and prints a per-dataset
+  published/excluded summary. Safe to run anytime.
+- `--dry-run` (default): reports what *would* sync, uploads nothing.
+- `--target-dir PATH` + `--no-dry-run`: copies the staging tree to a local dir
+  (the offline test/validation path).
+- No `--target-dir` (R2) + `--no-dry-run`: `aws s3 sync` to R2. If any `R2_*` env
+  var is missing, it **forces a dry run** and tells you which vars to set.
+- Immutable release paths: an already-published release is refused without
+  `--force`.
+
+### R2 sync mechanics
+
+Cloudflare R2 is S3-compatible, so the publisher shells out to the **`aws` CLI**
+with `--endpoint-url` (rclone/boto3 not required; `aws` is already installed).
+Credentials come from **environment variables only** (never read from disk, never
+logged, passed to the CLI via the environment so they don't appear in process
+listings):
+
+| env var | meaning |
+|---|---|
+| `R2_ENDPOINT_URL` | `https://<account-id>.r2.cloudflarestorage.com` |
+| `R2_ACCESS_KEY_ID` | R2 API token access key |
+| `R2_SECRET_ACCESS_KEY` | R2 API token secret |
+| `R2_BUCKET` | target bucket name |
+
+The sync uses no `--delete` (immutable release paths are never removed); re-uploads
+overwrite identical bytes idempotently.
+
+### What the user does when ready
+
+1. Create an R2 bucket (e.g. `matcher-bridges`) and an R2 API token
+   (Object Read & Write). Attach a public custom domain / `r2.dev` URL for HTTPS
+   reads.
+2. Export the four env vars above in the publishing shell.
+3. (Optional) Review + `status = "approved"` more datasets in
+   `datasets/licenses.toml`.
+4. Dry-run first: `matcher factory publish --all --site-url https://<your-host>`
+   → inspect the summary + `data/publish_staging/index.html`.
+5. Go live: `matcher factory publish --all --no-dry-run --site-url https://<your-host>`.
+
+## Open operational question: publish from the box or the Mac?
+
+The scale sweep runs on the always-on 20-core box; the Mac has only a few
+validation-run outputs (`data/factory` here has 5 datasets). Publishing must run
+where the **complete** `data/factory` tree lives, and today that will be the box
+after a full sweep. Two options:
+
+- **Publish from the box (recommended).** The box holds the authoritative full
+  sweep; publishing there avoids a large `data/factory` sync back to the Mac and
+  keeps "regenerate → publish" a single machine's loop. Put the `R2_*` env vars on
+  the box. The publish step is pipeline-free and cheap (copy + checksum + index),
+  so it adds negligible load.
+- **Publish from the Mac.** Only sensible if `data/factory` is first synced back
+  (rsync/tailscale), which is the very transfer publishing-from-the-box avoids.
+  Prefer this only for one-off manual releases from Mac-local validation outputs.
+
+**Recommendation: publish from the box**, co-located with the factory sweep. The
+tooling is machine-agnostic (`--factory-root`), so the Mac remains fine for
+development, dry-runs, and `--target-dir` validation (as done for this PR).
+```
