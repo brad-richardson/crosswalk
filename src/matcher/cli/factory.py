@@ -317,7 +317,11 @@ def publish(
         None, help="Dataset names to publish (default: all cleared)."
     ),
     all_datasets: bool = typer.Option(
-        False, "--all", "-a", help="Publish all discovered datasets."
+        False,
+        "--all",
+        "-a",
+        help="Publish all discovered datasets (explicit alias of the default; "
+        "overrides any positional/-D names).",
     ),
     dataset_opt: list[str] = typer.Option(
         None, "--dataset", "-D", help="Dataset name (repeatable)."
@@ -356,7 +360,7 @@ def publish(
     datasets are excluded. Then, unless ``--dry-run`` (the default), syncs to a local
     directory (``--target-dir``) or to Cloudflare R2 (S3-compatible ``aws`` CLI,
     credentials from ``R2_*`` env vars). Immutable release paths: an already-
-    published release is refused without ``--force``.
+    published release is skipped (never overwritten) unless ``--force``.
     """
     from ..factory.licenses import LicenseRegistry
     from ..factory.publish import (
@@ -387,11 +391,10 @@ def publish(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
+    # Default (no names) = all cleared datasets; --all is the explicit alias and
+    # overrides any names passed alongside it.
     merged = list(datasets or []) + list(dataset_opt or [])
     ds_filter = None if all_datasets else (merged or None)
-    if not all_datasets and not ds_filter:
-        # Default: publish every cleared dataset present in the factory root.
-        ds_filter = None
 
     gate_floors = load_gate_floors(PROJECT_ROOT / "cbench" / "datasets.toml")
     report = assemble_staging(
@@ -425,11 +428,12 @@ def publish(
                 f"to {target_dir}. Re-run with --no-dry-run to write.[/blue]"
             )
             raise typer.Exit(0)
-        try:
-            written = sync_local(staging, target_dir, force=force)
-        except FileExistsError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
+        written, plan = sync_local(staging, target_dir, force=force)
+        if plan.skipped_releases:
+            console.print(
+                f"[yellow]Skipped already-published (immutable) release(s): "
+                f"{', '.join(plan.skipped_releases)} — use --force to replace.[/yellow]"
+            )
         console.print(f"[green]Published {len(written)} file(s) to {target_dir}[/green]")
         raise typer.Exit(0)
 
@@ -451,17 +455,20 @@ def publish(
         argv = build_aws_sync_argv(staging, cfg)
         console.print(
             f"[blue]DRY RUN: would run: {' '.join(argv)}\n"
+            "(already-published releases are excluded at upload time — immutable). "
             "Re-run with --no-dry-run to upload.[/blue]"
         )
         raise typer.Exit(0)
     try:
-        sync_r2(staging, cfg, force=force)
-    except FileExistsError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-    except Exception as exc:  # aws CLI failure
+        _, plan = sync_r2(staging, cfg, force=force)
+    except Exception as exc:  # aws CLI failure or a failed-closed existence check
         console.print(f"[red]R2 sync failed: {exc}[/red]")
         raise typer.Exit(1) from exc
+    if plan.skipped_releases:
+        console.print(
+            f"[yellow]Skipped already-published (immutable) release(s): "
+            f"{', '.join(plan.skipped_releases)} — use --force to replace.[/yellow]"
+        )
     console.print(f"[green]Published staging tree to R2 bucket '{cfg.bucket}'.[/green]")
 
 

@@ -61,11 +61,20 @@ current-release storage and invites the mutable/immutable confusion the layout i
 designed to avoid. (A `release=latest/` mirror can be added later if a consumer
 genuinely needs a fixed URL; it is deliberately not built now.)
 
-The publisher refuses to overwrite an existing `release=<X>/` without `--force`
-(checked against the local target, or via `aws s3 ls` for R2). Re-publishing the
-*same* release is idempotent — the bridge/manifest bytes are copied verbatim and
-`all_bridges.parquet` is written deterministically, so identical inputs produce
-identical checksums.
+The publisher never overwrites an existing `release=<X>/`: already-published
+releases are **skipped** (reported, left byte-identical) and only new releases +
+the mutable top-level index files sync — so the routine
+`publish --all --no-dry-run` keeps working release after release. `--force`
+intentionally re-publishes existing releases too. The R2 existence check **fails
+closed**: if the check itself errors (network/auth), the sync aborts rather than
+assuming the release is absent and overwriting it.
+
+Within one environment the staging build is deterministic — bridge/manifest
+bytes are copied verbatim and `all_bridges.parquet` is written with a stable
+sort — so re-assembly reproduces identical checksums. (Caveat: the regenerated
+`all_bridges.parquet` embeds the Parquet writer version in its footer, so its
+checksum is stable per pyarrow version rather than across environments; the
+verbatim-copied `bridge.parquet` files are environment-independent.)
 
 ## Public query story
 
@@ -246,8 +255,9 @@ Behaviour:
   (the offline test/validation path).
 - No `--target-dir` (R2) + `--no-dry-run`: `aws s3 sync` to R2. If any `R2_*` env
   var is missing, it **forces a dry run** and tells you which vars to set.
-- Immutable release paths: an already-published release is refused without
-  `--force`.
+- Immutable release paths: an already-published release is **skipped** (never
+  overwritten); only new releases + the top-level index files sync. `--force`
+  re-publishes existing releases too.
 
 ### R2 sync mechanics
 

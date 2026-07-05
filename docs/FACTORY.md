@@ -96,9 +96,9 @@ files, builds a per-release unified `all_bridges.parquet` + `checksums.txt` +
 machine-readable `index.json` + a static credibility `index.html`, then syncs.
 Defaults to `--dry-run` (build staging + report, upload nothing); `--target-dir`
 publishes to a local dir (no credentials); the R2 path uses the S3-compatible
-`aws` CLI with `R2_*` env-var credentials. Immutable release paths (refuses to
-overwrite a published release without `--force`). **Full design + the R2 setup
-steps: [PUBLISHING.md](PUBLISHING.md).**
+`aws` CLI with `R2_*` env-var credentials. Immutable release paths (an
+already-published release is skipped, never overwritten, unless `--force`).
+**Full design + the R2 setup steps: [PUBLISHING.md](PUBLISHING.md).**
 
 ## Output layout
 

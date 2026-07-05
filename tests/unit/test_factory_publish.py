@@ -11,6 +11,7 @@ All synthetic — no model, no pipeline, no network.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -278,15 +279,20 @@ def test_sync_local_copies_tree(factory_root, tmp_path, empty_datasets_dir):
         generated_at="fixed",
     )
     target = tmp_path / "target"
-    written = sync_local(staging, target, force=False)
+    written, plan = sync_local(staging, target, force=False)
     assert written
+    assert plan.releases == [RELEASE]
+    assert plan.skipped_releases == []
     assert (target / INDEX_JSON).exists()
     assert (
         target / BRIDGES_PREFIX / f"release={RELEASE}" / "dataset=us_ok_roads" / "bridge.parquet"
     ).exists()
 
 
-def test_sync_local_immutable_release(factory_root, tmp_path, empty_datasets_dir):
+def test_sync_local_immutable_release_skipped(factory_root, tmp_path, empty_datasets_dir):
+    """A re-publish never overwrites an existing release: it SKIPS it (and still
+    updates the mutable top-level index files), so multi-release publishing keeps
+    working run after run. ``force=True`` re-publishes."""
     staging = tmp_path / "staging"
     assemble_staging(
         factory_root,
@@ -297,11 +303,54 @@ def test_sync_local_immutable_release(factory_root, tmp_path, empty_datasets_dir
     )
     target = tmp_path / "target"
     sync_local(staging, target, force=False)
-    # Second publish of the same (immutable) release must refuse without force.
-    with pytest.raises(FileExistsError):
-        sync_local(staging, target, force=False)
-    # ...but succeed with force.
-    assert sync_local(staging, target, force=True)
+    # Tamper with the published release file so we can detect any overwrite.
+    marker = target / BRIDGES_PREFIX / f"release={RELEASE}" / "checksums.txt"
+    marker.write_text("tampered\n")
+
+    written, plan = sync_local(staging, target, force=False)
+    assert plan.skipped_releases == [RELEASE]
+    assert plan.releases == []
+    # Release files untouched (immutable), top-level index files re-synced.
+    assert marker.read_text() == "tampered\n"
+    assert INDEX_JSON in {p.split("/")[-1] for p in written}
+    assert all(not p.startswith(f"{BRIDGES_PREFIX}/release={RELEASE}/") for p in written)
+
+    # force=True replaces the release content.
+    written_forced, plan_forced = sync_local(staging, target, force=True)
+    assert plan_forced.skipped_releases == []
+    assert marker.read_text() != "tampered\n"
+
+
+def test_sync_local_publishes_new_release_alongside_existing(
+    factory_root, tmp_path, empty_datasets_dir
+):
+    """The go-live loop: release A already published, staging also contains new
+    release B — B must publish while A is skipped (regression for the
+    abort-on-any-existing-release bug)."""
+    target = tmp_path / "target"
+    staging = tmp_path / "staging"
+    assemble_staging(
+        factory_root, staging, _registry(), datasets_dir=empty_datasets_dir, generated_at="fixed"
+    )
+    sync_local(staging, target, force=False)
+
+    # A new Overture release lands in the factory root; re-stage everything.
+    new_release = "2026-06-17.0"
+    _make_factory_dataset(factory_root, "us_ok_roads", n_rows=5, release=new_release, matched=4)
+    assemble_staging(
+        factory_root, staging, _registry(), datasets_dir=empty_datasets_dir, generated_at="fixed"
+    )
+
+    written, plan = sync_local(staging, target, force=False)
+    assert plan.skipped_releases == [RELEASE]
+    assert plan.releases == [new_release]
+    assert (
+        target
+        / BRIDGES_PREFIX
+        / f"release={new_release}"
+        / "dataset=us_ok_roads"
+        / "bridge.parquet"
+    ).exists()
 
 
 def test_staged_release_dirs(factory_root, tmp_path, empty_datasets_dir):
@@ -314,6 +363,24 @@ def test_staged_release_dirs(factory_root, tmp_path, empty_datasets_dir):
         generated_at="fixed",
     )
     assert staged_release_dirs(staging) == [RELEASE]
+
+
+def test_build_aws_sync_argv_excludes_published_releases():
+    from matcher.factory.publish_sync import R2Config, build_aws_sync_argv
+
+    cfg = R2Config(
+        endpoint="https://acct.r2.cloudflarestorage.com",
+        access_key="k",
+        secret_key="s",
+        bucket="bridges",
+    )
+    argv = build_aws_sync_argv(
+        Path("/staging"), cfg, exclude_prefixes=[f"{BRIDGES_PREFIX}/release={RELEASE}/"]
+    )
+    assert "--exclude" in argv
+    assert f"{BRIDGES_PREFIX}/release={RELEASE}/*" in argv
+    # No secrets on the command line (env-only credentials).
+    assert "k" not in argv and "s" not in argv
 
 
 def test_r2_env_absent(monkeypatch):

@@ -499,8 +499,9 @@ def render_credibility_page(report: PublishReport) -> str:
                     f"<td>{dtype}</td><td>{reason}</td></tr>"
                 )
 
-    example_release = latest or "&lt;release&gt;"
-    example_ds = next((d.dataset for r in report.releases for d in r.published), "&lt;dataset&gt;")
+    # Raw placeholders — the whole query string is HTML-escaped exactly once below.
+    example_release = latest or "<release>"
+    example_ds = next((d.dataset for r in report.releases for d in r.published), "<dataset>")
     q_dataset = (
         f"SELECT * FROM read_parquet(\n"
         f"  '{site}/bridges/release={example_release}/dataset={example_ds}/bridge.parquet'\n"
@@ -580,7 +581,7 @@ def render_credibility_page(report: PublishReport) -> str:
 <body><main>
   <h1>GERS Bridge Tables</h1>
   <p class="lead">Public <strong>local road/path ID ↔ Overture GERS id</strong> bridge
-  tables, produced by <a href="https://github.com/">matcher</a> and regenerated per
+  tables, produced by <a href="https://github.com/brad-richardson/matcher">matcher</a> and regenerated per
   Overture release. Query directly over HTTPS — no API, no serving layer.</p>
   <p><span class="pill">latest release: {latest_txt}</span>
      <span class="pill">generated: {generated}</span></p>

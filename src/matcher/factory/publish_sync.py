@@ -9,10 +9,10 @@ Two targets:
   come from environment variables (``R2_*``); they are never read from disk or
   stored.
 
-Both honour **immutable release paths**: a ``release=<X>`` partition already present
-at the target is refused unless ``--force`` (a re-run of the *same* release is
-idempotent — identical bytes — so ``--force`` is only needed to intentionally
-replace one).
+Both honour **immutable release paths**: a ``release=<X>`` partition already
+present at the target is *skipped* (never overwritten); only new releases and the
+mutable top-level index files sync, so routine ``publish --all`` keeps working
+release after release. ``--force`` intentionally re-publishes existing releases.
 """
 
 from __future__ import annotations
@@ -76,42 +76,77 @@ def staged_files(staging_dir: Path) -> list[Path]:
 # --------------------------------------------------------------------------
 # Local-directory target
 # --------------------------------------------------------------------------
-def sync_local(staging_dir: Path, target_dir: Path, *, force: bool = False) -> list[str]:
+@dataclass(frozen=True)
+class SyncPlan:
+    """Which staged releases sync vs are skipped as already published.
+
+    Immutable release paths are enforced by *skipping*, not aborting: a release
+    already present at the target is left untouched (never overwritten) and only
+    new releases + the mutable top (``index.html`` / ``index.json``) sync. This
+    keeps the go-live command (``publish --all --no-dry-run``) working release
+    after release — aborting on the first existing release would permanently
+    block multi-release publishing. ``--force`` re-publishes everything.
+    """
+
+    releases: list[str]
+    skipped_releases: list[str]
+
+    def excluded_prefixes(self) -> list[str]:
+        return [f"{BRIDGES_PREFIX}/release={r}/" for r in self.skipped_releases]
+
+
+def _plan(staging_dir: Path, existing: set[str], force: bool) -> SyncPlan:
+    staged = staged_release_dirs(staging_dir)
+    if force:
+        return SyncPlan(releases=staged, skipped_releases=[])
+    return SyncPlan(
+        releases=[r for r in staged if r not in existing],
+        skipped_releases=[r for r in staged if r in existing],
+    )
+
+
+def sync_local(
+    staging_dir: Path, target_dir: Path, *, force: bool = False
+) -> tuple[list[str], SyncPlan]:
     """Copy the staging tree into ``target_dir`` with immutable release paths.
 
-    Returns the list of relative file paths written. Raises ``FileExistsError`` if
-    a ``release=<X>`` partition already exists at the target and ``force`` is False.
+    Releases already present at the target are skipped (never overwritten) unless
+    ``force``; new releases and the top-level index files always sync. Returns
+    ``(written_relative_paths, plan)``.
     """
     target_dir = Path(target_dir)
     target_bridges = target_dir / BRIDGES_PREFIX
-    if not force:
-        for rel in staged_release_dirs(staging_dir):
-            existing = target_bridges / f"release={rel}"
-            if existing.exists():
-                raise FileExistsError(
-                    f"release={rel} already published at {existing}. Published "
-                    "releases are immutable — pass --force to intentionally replace it."
-                )
+    existing = {d.name.split("=", 1)[1] for d in target_bridges.glob("release=*") if d.is_dir()}
+    plan = _plan(staging_dir, existing, force)
+    excluded = plan.excluded_prefixes()
+
     written: list[str] = []
     for src in staged_files(staging_dir):
         rel = src.relative_to(staging_dir)
+        rel_str = str(rel)
+        if any(rel_str.startswith(p) for p in excluded):
+            continue  # immutable: already published, leave untouched
         dst = target_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
-        written.append(str(rel))
-    return written
+        written.append(rel_str)
+    return written, plan
 
 
 # --------------------------------------------------------------------------
 # R2 target (aws CLI, S3-compatible)
 # --------------------------------------------------------------------------
-def build_aws_sync_argv(staging_dir: Path, cfg: R2Config) -> list[str]:
-    """Build the ``aws s3 sync`` argv for the whole staging tree.
+def build_aws_sync_argv(
+    staging_dir: Path, cfg: R2Config, exclude_prefixes: list[str] | None = None
+) -> list[str]:
+    """Build the ``aws s3 sync`` argv for the staging tree.
 
     Credentials are passed via the environment (see :func:`aws_sync_env`), not on
     the command line, so they never appear in process listings.
+    ``exclude_prefixes`` (already-published immutable releases) become
+    ``--exclude`` patterns so they are never re-uploaded.
     """
-    return [
+    argv = [
         "aws",
         "s3",
         "sync",
@@ -122,6 +157,9 @@ def build_aws_sync_argv(staging_dir: Path, cfg: R2Config) -> list[str]:
         # Immutable release paths + a small mutable top: never delete remote files
         # (no --delete); re-uploads overwrite identical bytes idempotently.
     ]
+    for prefix in exclude_prefixes or []:
+        argv += ["--exclude", f"{prefix}*"]
+    return argv
 
 
 def aws_sync_env(cfg: R2Config) -> dict[str, str]:
@@ -135,31 +173,62 @@ def aws_sync_env(cfg: R2Config) -> dict[str, str]:
 
 
 def remote_release_exists(cfg: R2Config, release: str) -> bool:
-    """Best-effort check whether a ``release=<X>`` prefix already exists in R2."""
-    prefix = f"s3://{cfg.bucket}/{BRIDGES_PREFIX}/release={release}/"
+    """Whether a ``release=<X>`` prefix already exists in R2. **Fails closed**:
+    an error on the check (network/auth) raises rather than reading as "absent",
+    so a broken check can never bypass release immutability.
+
+    Uses ``s3api list-objects-v2`` (not ``s3 ls``, whose exit code conflates
+    "empty" with "error" across CLI versions).
+    """
+    import json as _json
+
+    prefix = f"{BRIDGES_PREFIX}/release={release}/"
     proc = subprocess.run(
-        ["aws", "s3", "ls", prefix, "--endpoint-url", cfg.endpoint],
+        [
+            "aws",
+            "s3api",
+            "list-objects-v2",
+            "--bucket",
+            cfg.bucket,
+            "--prefix",
+            prefix,
+            "--max-items",
+            "1",
+            "--output",
+            "json",
+            "--endpoint-url",
+            cfg.endpoint,
+        ],
         env=aws_sync_env(cfg),
         capture_output=True,
         text=True,
     )
-    return proc.returncode == 0 and bool(proc.stdout.strip())
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Could not check whether release={release} exists in R2 "
+            f"(refusing to assume it is absent): {proc.stderr.strip()}"
+        )
+    out = proc.stdout.strip()
+    if not out:
+        return False
+    return bool(_json.loads(out).get("Contents"))
 
 
 def sync_r2(
     staging_dir: Path, cfg: R2Config, *, force: bool = False
-) -> subprocess.CompletedProcess:
-    """Run ``aws s3 sync`` to R2, refusing to clobber an existing release.
+) -> tuple[subprocess.CompletedProcess, SyncPlan]:
+    """Run ``aws s3 sync`` to R2 with immutable release paths.
 
-    Returns the completed process. Raises ``FileExistsError`` if a release is
-    already present remotely and ``force`` is False.
+    Releases already present remotely are excluded from the sync (never
+    re-uploaded) unless ``force``; new releases and the mutable top-level index
+    files always sync. Returns ``(completed_process, plan)``.
     """
+    existing: set[str] = set()
     if not force:
         for rel in staged_release_dirs(staging_dir):
             if remote_release_exists(cfg, rel):
-                raise FileExistsError(
-                    f"release={rel} already exists in R2 bucket '{cfg.bucket}'. "
-                    "Published releases are immutable — pass --force to replace it."
-                )
-    argv = build_aws_sync_argv(staging_dir, cfg)
-    return subprocess.run(argv, env=aws_sync_env(cfg), check=True)
+                existing.add(rel)
+    plan = _plan(staging_dir, existing, force)
+    argv = build_aws_sync_argv(staging_dir, cfg, exclude_prefixes=plan.excluded_prefixes())
+    proc = subprocess.run(argv, env=aws_sync_env(cfg), check=True)
+    return proc, plan
