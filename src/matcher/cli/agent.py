@@ -903,7 +903,11 @@ def generate_stitch_batch(
         15, "--batch-size", "-n", help="Tier-selected batch size (when no explicit group_ids)"
     ),
     k_alternatives: int = typer.Option(
-        5, "--alternatives", "-k", help="Top-K alternatives per group"
+        8,
+        "--alternatives",
+        "-k",
+        help="Top-K organic alternatives per group (default: 8; two whole-group "
+        "seed options are appended on top)",
     ),
 ):
     """Generate evidence packs for agent stitching-group labeling.
@@ -1197,6 +1201,68 @@ def _write_stitch_eval_report(output, summary, results, disagreements, dataset, 
         lines.append("\n")
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text("".join(lines))
+
+
+@agent_app.command("stitch-expressibility")
+def stitch_expressibility(
+    dataset: str = typer.Argument(..., help="Dataset name (e.g. us_boston_streets)"),
+    sidecar: Path = typer.Option(
+        None,
+        "--sidecar",
+        help="Groups sidecar JSON (default: data/output/{dataset}_groups.json)",
+    ),
+    k_alternatives: int = typer.Option(
+        8, "--alternatives", "-k", help="Top-K organic alternatives per group"
+    ),
+    show_misses: int = typer.Option(
+        20, "--show-misses", help="Max inexpressible labels to list (0 = none)"
+    ),
+):
+    """Measure option-menu EXPRESSIBILITY of the stitch generator vs settled labels.
+
+    Reports the fraction of settled (pair-semantics, non-reject-all) stitching
+    labels whose exact edge set is expressible by the current option generator
+    for the sidecar group they correspond to. Reads the sidecar and labels READ
+    ONLY; runs no provider. Useful as a before/after gate on generator changes.
+
+    Examples:
+        matcher agent stitch-expressibility us_boston_streets
+        matcher agent stitch-expressibility us_seattle_sidewalks -k 8
+    """
+    import json
+
+    from ..agent_labeling.stitch_expressibility import measure_expressibility
+    from ..filenames import PROJECT_ROOT
+
+    sidecar_path = sidecar or (PROJECT_ROOT / "data" / "output" / f"{dataset}_groups.json")
+    if not sidecar_path.exists():
+        console.print(f"[red]No groups sidecar at {sidecar_path}[/red]")
+        raise typer.Exit(1)
+    label_path = PROJECT_ROOT / "labels" / "stitching" / f"dataset={dataset}" / "data.csv"
+    if not label_path.exists():
+        console.print(f"[red]No stitching labels at {label_path}[/red]")
+        raise typer.Exit(1)
+
+    groups = json.loads(sidecar_path.read_text()).get("groups", [])
+    labels_df = pd.read_csv(label_path, dtype={"group_id": str})
+
+    report = measure_expressibility(dataset, groups, labels_df, k=k_alternatives)
+    s = report.summary()
+    console.print(f"[bold]Expressibility: {dataset} (k={report.k})[/bold]")
+    console.print(
+        f"  settled={s['n_settled']}  clean-recoverable={s['n_recoverable']}  "
+        f"covered={s['n_covered']}"
+    )
+    rate = s["expressibility"]
+    console.print(f"  EXPRESSIBILITY = [green]{rate:.1%}[/green]" if rate is not None else "  n/a")
+    console.print(f"  inexpressible (recoverable but no option matches): {s['n_misses']}")
+    if show_misses:
+        for m in sorted(report.misses, key=lambda x: -x.n_label_edges)[:show_misses]:
+            console.print(
+                f"    - label {m.label_group_id} -> group {m.sidecar_group_id} "
+                f"({m.match_type}): {m.n_label_edges} edges / {m.n_group_edges} in group, "
+                f"{m.n_options} options"
+            )
 
 
 @agent_app.command("stitch-export")
