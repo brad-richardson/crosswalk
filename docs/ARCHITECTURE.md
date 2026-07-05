@@ -47,7 +47,7 @@ when `enable_calibration` is True. There is no consumer left on raw scores:
 |----------|--------------|-------------------|-------|
 | ML scorer decision (`predict_batch`) | `scoring_match_threshold` 0.5, `scoring_review_threshold` 0.1 | `predict()` | Calibrated |
 | Optimizer candidate floor (`find_match_components`) | `min_confidence` (0.1 from runner) | `MatchResult.confidence` | Calibrated |
-| Optimizer grouping glue prune | `optimizer_glue_min_confidence` **0.575** | `MatchResult.confidence` | Calibrated |
+| Optimizer grouping glue prune | `optimizer_glue_min_confidence` **0.575** (calibrated) / `optimizer_glue_min_confidence_raw` 0.5 (uncalibrated) | `MatchResult.confidence` | Calibrated |
 | Optimizer 1:N group decision | `optimizer_review_threshold` 0.5 (avg conf) | `MatchResult.confidence` | Calibrated |
 | Labeling UI review band | `optimizer_match_threshold` 0.75 / `optimizer_review_threshold` 0.5 | `predict()` | Calibrated |
 | Bridge output filter (`generate_bridge_file`) | `bridge_min_confidence` 0.5 | `MatchResult.confidence` | Calibrated |
@@ -56,17 +56,22 @@ when `enable_calibration` is True. There is no consumer left on raw scores:
 | `stitch-run` panel routing | agent-vote confidence (LLM self-report) | LLM output | Not an ML score |
 | `score_propagation` (experimental) | — | logit of `MatchResult.confidence` | Default OFF |
 
-**Glue-prune calibration equivalence.** The grouping-only glue prune
-(`optimizer_glue_min_confidence`) is the one threshold that was *empirically
-tuned* against raw scores: the corridor-aware design (#267) validated it at raw
-`p=0.5` (`research/group_splitting_design.md`). Because isotonic calibration
-maps the mid-range raw 0.5 to ~0.575, a naive `0.5` on calibrated scores is a
-weaker raw~0.42 prune. The default is set to **0.575** — the calibrated image of
-raw 0.5 — so the effective prune population (and thus the monster-suppression
-behaviour) matches what #267 validated. Measured on Boston streets, keeping the
-prune at 0.5-calibrated regrouped 7.0% of selected edges vs the raw-0.5 baseline;
-0.575-calibrated cuts that to 4.4% (the residual is the candidate-floor effect,
-not the glue prune) while leaving all monster (>20-edge) groups identical.
+**Glue-prune calibration equivalence.** The grouping-only glue prune is the one
+threshold that was *empirically tuned* against raw scores: the corridor-aware
+design (#267) validated it at raw `p=0.5` (`research/group_splitting_design.md`).
+Because isotonic calibration maps the mid-range raw 0.5 to ~0.575, a naive `0.5`
+on calibrated scores is a weaker raw~0.42 prune. The prune is therefore
+**calibration-aware**: `runner.py::_effective_glue_min_confidence` inspects the
+loaded model's `MLMatcher.calibration_active` and passes
+`optimizer_glue_min_confidence` (**0.575**, the calibrated image of raw 0.5) when
+calibration is active, or `optimizer_glue_min_confidence_raw` (**0.5**) for an
+uncalibrated model — so the effective prune population matches what #267
+validated in either state and an uncalibrated model never silently over-prunes.
+Measured with a calibrated model, keeping the prune at 0.5-calibrated regrouped
+7.0% of selected edges (Boston) / 15.3% (Seattle) vs the raw-0.5 baseline; the
+0.575-calibrated point cuts that to 4.4% / 11.5% (the residual is the
+candidate-floor effect, not the glue prune) while leaving all monster (>20-edge)
+groups identical (Boston 6, Seattle 2).
 
 ### Scoring Thresholds (per-candidate, bridge file output)
 

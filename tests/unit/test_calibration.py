@@ -186,3 +186,22 @@ def test_predict_calibrated_flag(monkeypatch):
 
     monkeypatch.setattr(config.settings, "enable_calibration", False)
     np.testing.assert_allclose(m.predict(feats, calibrated=True), raw)
+
+
+def test_calibration_active_property(monkeypatch):
+    from matcher import config
+
+    m = _tiny_matcher()
+
+    # No calibrator -> never active, regardless of the setting.
+    m.calibrator = None
+    monkeypatch.setattr(config.settings, "enable_calibration", True)
+    assert m.calibration_active is False
+
+    # Calibrator present -> active only when enable_calibration is True.
+    m.calibrator = IsotonicCalibrator(
+        x_thresholds=np.array([0.0, 1.0]), y_thresholds=np.array([0.0, 1.0])
+    )
+    assert m.calibration_active is True
+    monkeypatch.setattr(config.settings, "enable_calibration", False)
+    assert m.calibration_active is False

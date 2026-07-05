@@ -794,6 +794,38 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         comps = find_match_components(results, min_confidence=0.1, glue_min_confidence=0.5)
         assert len(comps) == 1
 
+    def test_pipeline_selects_glue_by_calibration_state(self, monkeypatch):
+        # The pipeline keys the glue prune off whether the loaded model actually
+        # applies calibration: calibrated -> 0.575, raw -> 0.5. This keeps an
+        # uncalibrated model at the raw-0.5 point #267 validated (no over-prune).
+        from matcher.config import settings
+        from matcher.pipeline import runner
+
+        class _FakeMatcher:
+            def __init__(self, *a, **k):
+                pass
+
+        _FakeMatcher.calibration_active = property(lambda self: self._active)
+
+        def make(active):
+            fm = _FakeMatcher()
+            fm._active = active
+            return fm
+
+        monkeypatch.setattr(runner, "MLMatcher", lambda *a, **k: make(True), raising=False)
+        # runner imports MLMatcher lazily inside the helper, so patch the source.
+        import matcher.matching.ml as ml_mod
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(True))
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence
+        )
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(False))
+        assert runner._effective_glue_min_confidence() == pytest.approx(
+            settings.optimizer_glue_min_confidence_raw
+        )
+
 
 class TestStructuralGate:
     def test_single_corridor_always_simple_within_backstop(self):

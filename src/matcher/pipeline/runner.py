@@ -28,6 +28,32 @@ class PipelineError(Exception):
     pass
 
 
+def _effective_glue_min_confidence() -> float:
+    """Select the grouping-only glue prune for the pipeline's active model.
+
+    The prune (``optimizer_glue_min_confidence``) was validated by #267 against
+    RAW XGBoost scores at 0.5. When the loaded model applies isotonic calibration
+    (``MLMatcher.calibration_active``), ``MatchResult.confidence`` is a calibrated
+    P(match), so the equivalent operating point is the calibrated image of raw
+    0.5 (``settings.optimizer_glue_min_confidence``, ~0.575). An uncalibrated
+    model keeps the raw-0.5 point (``settings.optimizer_glue_min_confidence_raw``)
+    so it never silently over-prunes. ``run_pipeline`` always scores with
+    ``settings.model_path``, so that is the model inspected here.
+    """
+    from ..matching.ml import MLMatcher
+
+    try:
+        active = MLMatcher(model_path=str(settings.model_path)).calibration_active
+    except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
+        logger.warning(f"Could not determine calibration state for glue prune: {exc}")
+        active = False
+    return (
+        settings.optimizer_glue_min_confidence
+        if active
+        else settings.optimizer_glue_min_confidence_raw
+    )
+
+
 def score_candidates_from_geodataframes(
     reference: gpd.GeoDataFrame,
     target: gpd.GeoDataFrame,
@@ -751,14 +777,17 @@ def run_pipeline(
     # Step 4: Optimize matches with M:N grouping (resolve conflicts)
     # Grouping allows multiple contiguous segments and supports 1:1, 1:N, N:1, and M:N match types
     # This handles different segmentation schemes and overlapping relationships between datasets
+    glue_min_confidence = _effective_glue_min_confidence()
     logger.info(
-        f"Step 4: Optimizing matches with M:N grouping (min_confidence={min_confidence})..."
+        f"Step 4: Optimizing matches with M:N grouping "
+        f"(min_confidence={min_confidence}, glue_min_confidence={glue_min_confidence})..."
     )
     optimized = optimize_matches_with_grouping(
         results,
         reference=reference,
         target=target,
         min_confidence=min_confidence,
+        glue_min_confidence=glue_min_confidence,
         contiguity_tolerance=DEFAULT_SNAP_TOLERANCE_M,
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,

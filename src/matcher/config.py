@@ -651,25 +651,31 @@ class MatcherSettings(BaseSettings):
     # unaffected. Distinct from ``min_confidence`` (the candidate floor).
     #
     # CALIBRATION-EQUIVALENT OPERATING POINT. This prune is applied to
-    # ``MatchResult.confidence``, which is a CALIBRATED P(match) whenever
-    # ``enable_calibration`` is True (the default; see calibration.py). The
-    # corridor-aware grouping design (#267) tuned and validated this prune
-    # against RAW XGBoost scores at p=0.5 (research/group_splitting_design.md:
-    # Boston monster residue 23->6, Seattle 85->8, orphaning only 3.7%/5.9% of
-    # labeled selected edges). Isotonic calibration maps the mid-range raw 0.5
-    # to ~0.575, so a naive p=0.5 prune on calibrated scores is effectively a
-    # weaker raw~0.42 prune — it welds more weak edges and regrouped Boston
-    # (+0.9% groups / +1.9% grouped edges, max group 41->44 edges) relative to
-    # the validated point. The default is therefore set to the calibrated image
-    # of raw 0.5 so the EFFECTIVE prune population matches what #267 validated,
-    # keeping "calibrated probability" semantics everywhere with no regrouping
-    # regression. If ``enable_calibration`` is False (raw scores), override this
-    # back to 0.5 for the raw operating point.
+    # ``MatchResult.confidence``, which is a CALIBRATED P(match) whenever the
+    # active model carries an isotonic calibrator and ``enable_calibration`` is
+    # True (the default; see calibration.py). The corridor-aware grouping design
+    # (#267) tuned and validated this prune against RAW XGBoost scores at p=0.5
+    # (research/group_splitting_design.md: Boston monster residue 23->6, Seattle
+    # 85->8, orphaning only 3.7%/5.9% of labeled selected edges). Isotonic
+    # calibration maps the mid-range raw 0.5 to ~0.575, so a naive p=0.5 prune on
+    # calibrated scores is effectively a weaker raw~0.42 prune that welds more
+    # weak edges and regroups the M:N components. Setting the calibrated default
+    # to the calibrated image of raw 0.5 keeps the EFFECTIVE prune population
+    # equal to what #267 validated (measured regrouping vs raw baseline drops:
+    # Boston 7.0%->4.4%, Seattle 15.3%->11.5% edge-membership churn; monster
+    # counts identical). The pipeline selects between these two based on whether
+    # calibration is actually active on the loaded model (see
+    # runner.py::_effective_glue_min_confidence), so an UNcalibrated model still
+    # prunes at the raw-0.5 point and does not silently over-prune.
     optimizer_glue_min_confidence: float = Field(
         default=0.575,
-        description="Minimum confidence for a candidate edge to weld components "
-        "together during M:N grouping (grouping-only prune). Applied to calibrated "
-        "P(match); 0.575 is the calibrated image of the raw-0.5 point #267 validated.",
+        description="Grouping-only glue prune applied to CALIBRATED P(match). "
+        "0.575 is the calibrated image of the raw-0.5 point #267 validated.",
+    )
+    optimizer_glue_min_confidence_raw: float = Field(
+        default=0.5,
+        description="Grouping-only glue prune used when the active model applies no "
+        "calibration (raw XGBoost scores). This is the operating point #267 validated.",
     )
     # Structural export gate (replaces the flat max_edges cap in stitch_export).
     # A group is auto-exportable when it is a single corridor-pair OR has few
