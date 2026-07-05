@@ -134,6 +134,20 @@ once the flip conditions hold.
 
 Goal: `matcher factory run` — all stitchable datasets, unattended, restartable.
 
+**Status: orchestration SHIPPED** (`matcher factory` command group; see
+[FACTORY.md](FACTORY.md)). Landed: the parallel-process work queue with failure
+isolation + run-summary table; the versioned `data/factory/release=…/dataset=…/`
+layout (bridge + groups + per-dataset manifest + scored cache + log); incremental
+skip + automatic resume via a manifest `full_key`; the
+re-optimize-without-rescore fast-path (`factory reoptimize`, ~2 s from the scored
+cache); and the per-release GERS churn delta report (`factory delta`). The
+pipeline was refactored minimally to expose score-then-optimize as separable seams
+(`load_and_filter_inputs` / `optimize_and_export`) — the normal `matcher stitch`
+path is behavior-identical and the stitch tests / cbench gate stay green.
+Still open under M4: adopting Boston/Seattle into the factory layout (they stay on
+the legacy `data/output/` path for now to keep the review queues stable),
+box deployment, and the inventory repair below.
+
 - Work queue over dataset pairs with per-dataset parallel processes (feature
   scoring parallelizes across datasets trivially; full current inventory ≈ one
   overnight run).

@@ -107,7 +107,7 @@ def _resolve_prune_dataset(output_path: Path, allowlist: dict[str, float]) -> st
     return None
 
 
-def _effective_prune_threshold(output_path: Path) -> float:
+def _effective_prune_threshold(output_path: Path, dataset_key: str | None = None) -> float:
     """Resolve the confidence-drop prune floor for this run (0 = disabled).
 
     The prune is PER-DATASET OPT-IN via an allowlist: it applies ONLY to datasets
@@ -128,12 +128,22 @@ def _effective_prune_threshold(output_path: Path) -> float:
     so nearly every non-top M:N/1:N/N:1 edge would be dropped, collapsing multi-edge
     groups to their single best edge. So, mirroring the glue-prune guarantee, the
     prune is skipped when the active model applies no calibration.
+
+    ``dataset_key`` lets a caller resolve the allowlist by an explicit dataset name
+    instead of the bridge output filename. The bridge-table factory uses this
+    because its output is ``…/dataset=<name>/bridge.parquet`` — the filename alone
+    ("bridge") carries no dataset identity — so passing the dataset name keeps the
+    factory's prune behavior identical to ``matcher stitch``'s
+    ``<name>_bridge.parquet`` path.
     """
     if not settings.resolver_prune_enabled:
         return 0.0
 
     allowlist = settings.resolver_prune_overrides or {}
-    dataset = _resolve_prune_dataset(output_path, allowlist)
+    if dataset_key is not None:
+        dataset = dataset_key if dataset_key in allowlist else None
+    else:
+        dataset = _resolve_prune_dataset(output_path, allowlist)
     if dataset is None:
         # Not in the validated allowlist: opt-in only, so the prune is off. One
         # info line makes the skip visible (vs. silently over-pruning by default).
@@ -877,56 +887,37 @@ def _export_groups_sidecar(
     return sidecar_path
 
 
-def run_pipeline(
+def _to_wgs84(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Return ``gdf`` reprojected to EPSG:4326, or unchanged if already there.
+
+    Row order is preserved, so positional indices (``MatchResult.ref_idx`` /
+    ``target_idx``) remain valid against the returned frame.
+    """
+    if gdf.crs and not gdf.crs.equals("EPSG:4326"):
+        return gdf.to_crs("EPSG:4326")
+    return gdf
+
+
+def load_and_filter_inputs(
     reference_path: Path,
     target_path: Path,
-    output_path: Path,
-    method: str = "xgboost",
-    buffer_distance_m: float = 75.0,
-    min_confidence: float = 0.1,  # Lower = more aggressive matching
-    progress_callback: Callable[[int], None] | None = None,
-    ref_id_column: str = "id",
-    target_id_column: str = "id",
-    ref_name_column: str = NAMES_COLUMN,
-    target_name_column: str = NAMES_COLUMN,
-    ref_class_column: str = CLASS_COLUMN,
-    target_class_column: str = CLASS_COLUMN,
-    n_jobs: int = -1,
-    run_screen: bool = False,
-    screen_tests: list[str] | None = None,
-) -> PipelineResult:
-    """Run the full matching pipeline.
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Load reference/target parquets and apply the pipeline's Step-1 filtering.
 
-    Args:
-        reference_path: Path to reference GeoParquet (Overture)
-        target_path: Path to target GeoParquet (local data)
-        output_path: Path for output bridge file
-        method: Matching method (only "xgboost" supported)
-        buffer_distance_m: Candidate search radius in meters
-        progress_callback: Optional callback for progress updates
-        ref_id_column: ID column in reference
-        target_id_column: ID column in target
-        ref_name_column: Name column in reference
-        target_name_column: Name column in target
-        ref_class_column: Class column in reference
-        target_class_column: Class column in target
-        run_screen: Whether to run screen tests after matching
-        screen_tests: Specific screen tests to run (None = all)
+    Factored out of :func:`run_pipeline` so the bridge-table factory can reproduce
+    the exact same reference/target row ordering when re-optimizing from cached
+    scores — positional ``ref_idx`` / ``target_idx`` in cached ``MatchResult``
+    objects index into these frames, so the filtering (null-geometry drop +
+    LineString-only) must match byte-for-byte.
 
-    Returns:
-        PipelineResult with statistics
+    Raises:
+        PipelineError: If a file is missing or empty after filtering.
     """
-    logger.info("=" * 60)
-    logger.info("Starting matching pipeline")
-    logger.info("=" * 60)
-
-    # Validate input files exist
     if not reference_path.exists():
         raise PipelineError(f"Reference file not found: {reference_path}")
     if not target_path.exists():
         raise PipelineError(f"Target file not found: {target_path}")
 
-    # Step 1: Load data
     logger.info("Step 1: Loading data...")
     try:
         reference = gpd.read_parquet(reference_path)
@@ -938,7 +929,6 @@ def run_pipeline(
     except Exception as e:
         raise PipelineError(f"Failed to read target file {target_path}: {e}") from e
 
-    # Validate geometry columns
     if reference.geometry.isna().any():
         n_null = reference.geometry.isna().sum()
         logger.warning(f"Reference has {n_null} null geometries - these will be skipped")
@@ -949,7 +939,6 @@ def run_pipeline(
         logger.warning(f"Target has {n_null} null geometries - these will be skipped")
         target = target[~target.geometry.isna()]
 
-    # Filter to LineString geometries only (drop MultiLineStrings)
     reference = filter_to_linestrings(reference, source_name="reference")
     target = filter_to_linestrings(target, source_name="target")
 
@@ -964,52 +953,56 @@ def run_pipeline(
 
     logger.info(f"  Reference: {len(reference)} features from {reference_path}")
     logger.info(f"  Target: {len(target)} features from {target_path}")
+    return reference, target
 
-    if progress_callback:
-        progress_callback(10)
 
-    # Steps 2-3: Generate candidates and score using shared function
-    logger.info("Steps 2-3: Generating candidates and scoring...")
+def optimize_and_export(
+    results: list,
+    reference: gpd.GeoDataFrame,
+    target: gpd.GeoDataFrame,
+    reference_wgs84: gpd.GeoDataFrame,
+    target_wgs84: gpd.GeoDataFrame,
+    output_path: Path,
+    method: str = "xgboost",
+    min_confidence: float = 0.1,
+    ref_id_column: str = "id",
+    target_id_column: str = "id",
+    progress_callback: Callable[[int], None] | None = None,
+    prune_dataset_key: str | None = None,
+) -> PipelineResult:
+    """Optimize scored candidates, prune, export sidecar, and write outputs.
 
-    if method == "rule":
-        raise ValueError(
-            "Rule-based matching has been removed. Use method='xgboost' instead. "
-            "Train a model first with 'matcher train'."
-        )
-    elif method != "xgboost":
-        raise ValueError(f"Unknown method: {method}")
+    This is the post-scoring half of :func:`run_pipeline` (score propagation →
+    M:N optimizer → confidence-drop prune → groups sidecar → bridge/unmatched
+    files). Factored out so the factory can drive it from CACHED ``MatchResult``
+    objects (``matcher factory reoptimize``, ~2 s vs a full re-score).
+    ``run_pipeline`` calls this on the freshly-scored results, so the normal path
+    is behavior-identical.
 
-    results, projection_result = score_candidates_from_geodataframes(
-        reference=reference,
-        target=target,
-        buffer_distance_m=buffer_distance_m,
-        ref_id_column=ref_id_column,
-        target_id_column=target_id_column,
-        ref_name_column=ref_name_column,
-        target_name_column=target_name_column,
-        ref_class_column=ref_class_column,
-        target_class_column=target_class_column,
-        n_jobs=n_jobs,
-    )
-    # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326)
-    if reference.crs and not reference.crs.equals("EPSG:4326"):
-        reference_wgs84 = reference.to_crs("EPSG:4326")
-    else:
-        reference_wgs84 = reference
-    if target.crs and not target.crs.equals("EPSG:4326"):
-        target_wgs84 = target.to_crs("EPSG:4326")
-    else:
-        target_wgs84 = target
-    # Update reference/target to projected versions for downstream use
-    reference = projection_result.reference
-    target = projection_result.target
+    Args:
+        results: Raw ``MatchResult`` objects from scoring.
+        reference: Reference GeoDataFrame in the projected (metric) CRS.
+        target: Target GeoDataFrame in the projected (metric) CRS.
+        reference_wgs84: Reference GeoDataFrame in EPSG:4326 (sidecar geometry).
+        target_wgs84: Target GeoDataFrame in EPSG:4326 (sidecar geometry).
+        output_path: Path for the output bridge file.
+        method: Matching method (recorded in the bridge file).
+        min_confidence: Minimum confidence used during optimization.
+        ref_id_column: Reference ID column name.
+        target_id_column: Target ID column name.
+        progress_callback: Optional progress callback.
+        prune_dataset_key: Explicit dataset name for resolver-prune allowlist
+            resolution (see :func:`_effective_prune_threshold`). None keeps the
+            filename-derived behavior used by ``matcher stitch``.
 
+    Returns:
+        PipelineResult with statistics.
+    """
     logger.info(f"  Generated and scored {len(results)} candidates")
 
     if not results:
         logger.warning("No candidates found! Check data alignment and buffer distance.")
 
-        # Still write empty output files for consistency
         generate_bridge_file(
             matches=[],
             output_path=output_path,
@@ -1087,7 +1080,7 @@ def run_pipeline(
     # sidecar attribute every pruned edge to its group so ``n_pruned`` is exact
     # even for pendant edges whose both endpoints leave the surviving group.
     pruned_group_ids: dict[tuple[Any, Any], Any] = {}
-    prune_threshold = _effective_prune_threshold(output_path)
+    prune_threshold = _effective_prune_threshold(output_path, dataset_key=prune_dataset_key)
     if prune_threshold > 0:
         from ..matching.optimizer import apply_confidence_drop_prune
 
@@ -1138,13 +1131,6 @@ def run_pipeline(
         bridge_min_confidence=settings.bridge_min_confidence,
     )
 
-    # Step 5.5: Optional screen tests (placeholder - not yet implemented)
-    n_screen_failed = None
-    n_screen_warned = None
-
-    if run_screen:
-        logger.warning("Screen tests on bridge files not yet implemented, skipping...")
-
     # Unmatched report
     # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
     # and should appear in unmatched.parquet so they can be labeled/reviewed.
@@ -1172,9 +1158,6 @@ def run_pipeline(
     logger.info(f"  Matched: {n_matched}")
     logger.info(f"  Review: {n_review}")
     logger.info(f"  Unmatched: {n_unmatched}")
-    if n_screen_failed is not None:
-        logger.info(f"  Screen failed: {n_screen_failed}")
-        logger.info(f"  Screen warned: {n_screen_warned}")
     logger.info("=" * 60)
 
     return PipelineResult(
@@ -1186,8 +1169,104 @@ def run_pipeline(
         n_unmatched=n_unmatched,
         bridge_file=output_path,
         unmatched_file=unmatched_path,
-        n_screen_failed=n_screen_failed,
-        n_screen_warned=n_screen_warned,
+    )
+
+
+def run_pipeline(
+    reference_path: Path,
+    target_path: Path,
+    output_path: Path,
+    method: str = "xgboost",
+    buffer_distance_m: float = 75.0,
+    min_confidence: float = 0.1,  # Lower = more aggressive matching
+    progress_callback: Callable[[int], None] | None = None,
+    ref_id_column: str = "id",
+    target_id_column: str = "id",
+    ref_name_column: str = NAMES_COLUMN,
+    target_name_column: str = NAMES_COLUMN,
+    ref_class_column: str = CLASS_COLUMN,
+    target_class_column: str = CLASS_COLUMN,
+    n_jobs: int = -1,
+    run_screen: bool = False,
+    screen_tests: list[str] | None = None,
+) -> PipelineResult:
+    """Run the full matching pipeline.
+
+    Args:
+        reference_path: Path to reference GeoParquet (Overture)
+        target_path: Path to target GeoParquet (local data)
+        output_path: Path for output bridge file
+        method: Matching method (only "xgboost" supported)
+        buffer_distance_m: Candidate search radius in meters
+        progress_callback: Optional callback for progress updates
+        ref_id_column: ID column in reference
+        target_id_column: ID column in target
+        ref_name_column: Name column in reference
+        target_name_column: Name column in target
+        ref_class_column: Class column in reference
+        target_class_column: Class column in target
+        run_screen: Whether to run screen tests after matching
+        screen_tests: Specific screen tests to run (None = all)
+
+    Returns:
+        PipelineResult with statistics
+    """
+    logger.info("=" * 60)
+    logger.info("Starting matching pipeline")
+    logger.info("=" * 60)
+
+    # Step 1: Load + filter inputs (shared with the factory reoptimize path).
+    reference, target = load_and_filter_inputs(reference_path, target_path)
+
+    if progress_callback:
+        progress_callback(10)
+
+    # Steps 2-3: Generate candidates and score using shared function
+    logger.info("Steps 2-3: Generating candidates and scoring...")
+
+    if method == "rule":
+        raise ValueError(
+            "Rule-based matching has been removed. Use method='xgboost' instead. "
+            "Train a model first with 'matcher train'."
+        )
+    elif method != "xgboost":
+        raise ValueError(f"Unknown method: {method}")
+
+    results, projection_result = score_candidates_from_geodataframes(
+        reference=reference,
+        target=target,
+        buffer_distance_m=buffer_distance_m,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        ref_name_column=ref_name_column,
+        target_name_column=target_name_column,
+        ref_class_column=ref_class_column,
+        target_class_column=target_class_column,
+        n_jobs=n_jobs,
+    )
+    # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326).
+    # Computed from the pre-projection (filtered) frames; row order is preserved.
+    reference_wgs84 = _to_wgs84(reference)
+    target_wgs84 = _to_wgs84(target)
+    # Use projected versions for downstream (optimizer/structure) computations.
+    reference = projection_result.reference
+    target = projection_result.target
+
+    if run_screen:
+        logger.warning("Screen tests on bridge files not yet implemented, skipping...")
+
+    return optimize_and_export(
+        results=results,
+        reference=reference,
+        target=target,
+        reference_wgs84=reference_wgs84,
+        target_wgs84=target_wgs84,
+        output_path=output_path,
+        method=method,
+        min_confidence=min_confidence,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        progress_callback=progress_callback,
     )
 
 
