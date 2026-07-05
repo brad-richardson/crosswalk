@@ -34,6 +34,22 @@ def _default_workers() -> int:
     return max(1, min(4, cores // 4))
 
 
+def _warn_if_nested_pools(workers: int) -> None:
+    """Warn when ``--workers > 1``: the outer dataset ``ProcessPoolExecutor`` nests
+    inside each dataset's fork-based feature-scoring pool, which crashes with
+    ``BrokenProcessPool`` on large sweeps (see docs/FACTORY.md box runbook). Least
+    invasive honest guard — we don't restructure the multiprocessing here (deferred
+    follow-up); we just steer callers to ``--workers 1 --jobs-per-dataset N``.
+    """
+    if workers > 1:
+        console.print(
+            f"[yellow]WARNING: --workers={workers} (>1) nests fork-based process "
+            "pools (outer dataset pool x inner scoring pool) and can crash with "
+            "BrokenProcessPool on large sweeps. Prefer --workers 1 "
+            "--jobs-per-dataset N (see docs/FACTORY.md box runbook).[/yellow]"
+        )
+
+
 def _resolve_paths(raw_dir: Path | None, output_dir: Path | None):
     from ..factory import FactoryPaths
     from ..filenames import PROJECT_ROOT
@@ -116,10 +132,18 @@ def run(
         None,
         "--workers",
         "-w",
-        help="Concurrent dataset worker processes (default: min(4, cores/4); use 12 on the box).",
+        help=(
+            "Concurrent dataset worker processes (default: min(4, cores/4)). "
+            "WARNING: keep at 1 on the box — >1 nests fork-based process pools "
+            "(outer dataset pool x inner scoring pool) and crashes with "
+            "BrokenProcessPool on large sweeps; put cores into -j instead."
+        ),
     ),
     jobs_per_dataset: int = typer.Option(
-        1, "--jobs-per-dataset", "-j", help="Internal scoring parallelism per dataset process."
+        1,
+        "--jobs-per-dataset",
+        "-j",
+        help="Internal scoring parallelism per dataset process (use 12 on the box).",
     ),
     release: str = typer.Option(
         None,
@@ -139,9 +163,10 @@ def run(
     from ..factory.runner import run_batch
 
     raw, paths = _resolve_paths(raw_dir, output_dir)
+    w = workers if workers is not None else _default_workers()
+    _warn_if_nested_pools(w)
     merged = list(datasets or []) + list(dataset_opt or [])
     pairs = _select_pairs(raw, all_datasets, merged)
-    w = workers if workers is not None else _default_workers()
 
     console.print(
         f"[blue]Factory run: {len(pairs)} dataset(s), workers={w}, "

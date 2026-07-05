@@ -386,3 +386,49 @@ def test_file_fingerprint(tmp_path):
     assert fp["name"] == "x.parquet"
     assert fp["size"] == 5
     assert "mtime_ns" in fp
+
+
+def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
+    """Regression: the factory writes ``…/dataset=<name>/bridge.parquet`` whose
+    filename carries no dataset identity, so ``run_dataset`` MUST pass the dataset
+    name to ``optimize_and_export`` as ``prune_dataset_key``. Otherwise the resolver
+    confidence-drop prune falls back to filename parsing ("bridge.parquet"), misses
+    the per-dataset allowlist, and runs with prune OFF for allowlisted datasets
+    (e.g. us_boston_streets / us_seattle_sidewalks) — silently diverging from the
+    equivalent ``matcher stitch`` output.
+    """
+    from types import SimpleNamespace
+
+    import matcher.factory.runner as fr
+    import matcher.pipeline as pipeline
+
+    pair = _make_triple(tmp_path, "us_boston_streets")
+    paths = FactoryPaths(root=tmp_path / "factory")
+
+    # Stub the pipeline seams so no model/stitching is needed.
+    monkeypatch.setattr(
+        fr, "build_keys", lambda *a, **k: {"full_key": "k", "inputs": {}, "model": {}}
+    )
+    monkeypatch.setattr(pipeline, "load_and_filter_inputs", lambda ref, tgt: ("REF", "TGT"))
+    monkeypatch.setattr(
+        pipeline,
+        "score_candidates_from_geodataframes",
+        lambda **k: ([], SimpleNamespace(reference="REF", target="TGT")),
+    )
+    monkeypatch.setattr(fr, "write_scored_cache", lambda results, path: 0)
+    monkeypatch.setattr("matcher.pipeline.runner._to_wgs84", lambda x: x)
+
+    captured: dict = {}
+
+    def _fake_optimize_and_export(**kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after capturing kwargs")  # short-circuit; no output needed
+
+    monkeypatch.setattr(pipeline, "optimize_and_export", _fake_optimize_and_export)
+
+    result = fr.run_dataset(pair, "2026-01-21.0", paths)
+
+    # run_dataset isolates failures into a summary dict; we only care that the
+    # dataset name reached optimize_and_export before we short-circuited.
+    assert result["status"] == "failed"
+    assert captured["prune_dataset_key"] == "us_boston_streets"

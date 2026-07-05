@@ -147,8 +147,15 @@ def _effective_prune_threshold(output_path: Path, dataset_key: str | None = None
     if dataset is None:
         # Not in the validated allowlist: opt-in only, so the prune is off. One
         # info line makes the skip visible (vs. silently over-pruning by default).
+        # Name the TRUE dataset when a caller passed one: the factory's output is
+        # ``…/dataset=<name>/bridge.parquet``, so ``output_path.name`` is the
+        # useless, dataset-blind ``"bridge.parquet"`` for every factory dataset —
+        # indistinguishable in a multi-dataset sweep. Fall back to the filename
+        # only when no explicit key was supplied (``matcher stitch``'s
+        # ``<name>_bridge.parquet`` carries its own identity).
+        identity = dataset_key if dataset_key is not None else output_path.name
         logger.info(
-            f"Resolver confidence-drop prune off for '{output_path.name}': dataset "
+            f"Resolver confidence-drop prune off for '{identity}': dataset "
             "not in the validated allowlist (settings.resolver_prune_overrides). "
             "Tune it via the #284 sweep recipe before enabling."
         )
