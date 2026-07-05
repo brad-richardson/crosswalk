@@ -2511,9 +2511,12 @@ def stitch_refresh_queue(
                 target_geoms=g.get("target_geometries", {}),
                 k=k_alternatives,
             )
-            # Annotate review_tier / review_score in place (k=1 so the single
-            # group is always "selected" and thus annotated; order is ignored).
-            select_stitching_batch(groups=[g], reviewed_group_ids=set(), k=1)
+            # Attach review_tier / review_score. select_stitching_batch annotates
+            # and returns COPIES (it does not mutate its input), so use the
+            # returned entry; k=1 so the single group is always selected. Order
+            # is ignored here — the queue order is preserved by new_queue.
+            scored = select_stitching_batch(groups=[g], reviewed_group_ids=set(), k=1)
+            g = scored[0] if scored else g
             g[STALE_GROUPING_KEY] = False
             new_queue.append(g)
             to_fill_context.append(g)
