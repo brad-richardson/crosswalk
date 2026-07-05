@@ -209,14 +209,30 @@ def test_sidecar_uses_scored_geometry_for_duplicate_ids(tmp_path):
         ),
     ]
 
+    # The sidecar mirrors the optimizer's decomposed grouping, so supply the
+    # optimizer assignment (a 1:N group tagged with its group_id). ref/target
+    # id columns are both "id" in this fixture.
+    from matcher.matching.optimizer import optimize_matches_with_grouping
+
+    optimized = optimize_matches_with_grouping(
+        results,
+        reference,
+        target,
+        min_confidence=0.5,
+        ref_id_column="id",
+        target_id_column="id",
+    )
+
     bridge_path = tmp_path / "bridge.parquet"
     sidecar_path = _export_groups_sidecar(
         results=results,
-        optimized=[],
+        optimized=optimized,
         output_path=bridge_path,
         reference=reference,
         target=target,
         min_confidence=0.5,
+        ref_id_column="id",
+        target_id_column="id",
     )
 
     assert sidecar_path == groups_sidecar_path(bridge_path)

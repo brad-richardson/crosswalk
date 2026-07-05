@@ -38,7 +38,9 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
+from ..config import settings
 from ..labeling.stitching_store import StitchingLabelStore
+from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
 from .stitch_eval import _load_group_metadata, map_human_labels_to_groups
 from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mode_edge
@@ -48,6 +50,7 @@ PANEL_LABELER = "panel_unanimous_v1"
 # Per-group outcome reasons (stable strings for reporting/tests).
 REASON_EXPORTED = "exported"
 REASON_OVER_MAX = "over_max_edges"
+REASON_STRUCTURAL_TANGLE = "structural_tangle"
 REASON_CLASS_MISMATCH = "class_mismatch"
 REASON_EMPTIED_BY_SLIVER = "emptied_by_sliver"
 REASON_HUMAN_PRECEDENCE = "human_precedence"
@@ -180,12 +183,30 @@ def plan_exports(
     dataset: str,
     labels_dir: Path,
     max_edges: int = 20,
+    max_assignment_components: int | None = None,
+    soft_max_edges: int | None = None,
+    backstop_max_edges: int | None = None,
 ) -> ExportReport:
     """Run the export gates over merged consensus and return a full plan.
 
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
+
+    The size gate is *structural*, not a flat edge count: a group auto-exports
+    when it is a single corridor-pair OR has few assignment-components within a
+    soft edge budget (so a clean 30-edge single corridor is exportable, while a
+    small two-highway tangle is blocked). A hard backstop ceiling blocks
+    anything larger regardless — a defence against a structure-detection bug,
+    not the primary gate. When a group lacks structure fields (an older
+    batch.json predating the structure sidecar) the gate falls back to the flat
+    ``max_edges`` cap on the selected edge set.
     """
+    if max_assignment_components is None:
+        max_assignment_components = settings.stitch_export_max_assignment_components
+    if soft_max_edges is None:
+        soft_max_edges = settings.stitch_export_soft_max_edges
+    if backstop_max_edges is None:
+        backstop_max_edges = settings.stitch_export_backstop_max_edges
     merged = _merge_consensus(batch_dirs)
 
     # Load batch.json groups (geometries/edges) once per distinct batch dir.
@@ -252,6 +273,9 @@ def plan_exports(
                 human_gids=human_gids,
                 overlap_map=overlap_map,
                 max_edges=max_edges,
+                max_assignment_components=max_assignment_components,
+                soft_max_edges=soft_max_edges,
+                backstop_max_edges=backstop_max_edges,
             )
         )
 
@@ -272,6 +296,9 @@ def _gate_group(
     human_gids: set[str],
     overlap_map: dict[str, str],
     max_edges: int,
+    max_assignment_components: int,
+    soft_max_edges: int,
+    backstop_max_edges: int,
 ) -> GroupExport:
     """Apply gates (b)-(e) to one auto-accept group and return its outcome.
 
@@ -298,8 +325,32 @@ def _gate_group(
             **kw,
         )
 
-    # Gate (b): edge-count cap.
-    if n_raw > max_edges:
+    # Gate (b): size gate. Prefer the structural gate when the group carries
+    # structure fields (single corridor / few assignment-components within a
+    # soft budget, under a hard backstop). Fall back to the flat edge cap on the
+    # selected edge set for older batch.json packs without structure fields.
+    n_group_edges = grp.get("n_edges")
+    n_corridors = grp.get("n_corridors")
+    n_assign = grp.get("n_assignment_components")
+    if n_group_edges is None:
+        n_group_edges = len(grp.get("edges", [])) or n_raw
+    if n_corridors is not None and n_assign is not None:
+        simple = group_is_structurally_simple(
+            int(n_corridors),
+            int(n_assign),
+            int(n_group_edges),
+            max_assignment_components,
+            soft_max_edges,
+            backstop_max_edges,
+        )
+        if not simple:
+            reason = (
+                REASON_OVER_MAX
+                if int(n_group_edges) > backstop_max_edges
+                else REASON_STRUCTURAL_TANGLE
+            )
+            return _mk(reason, n_edges_final=n_raw)
+    elif n_raw > max_edges:
         return _mk(REASON_OVER_MAX, n_edges_final=n_raw)
 
     # Gate (c): class-consistency (cross-mode pedestrian<->vehicular).

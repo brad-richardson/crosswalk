@@ -14,11 +14,7 @@ from ..blocking import generate_candidates
 from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
 from ..filenames import extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
-from ..matching.optimizer import (
-    compute_group_id,
-    compute_sliver_candidate_edges,
-    find_match_components,
-)
+from ..matching.optimizer import compute_sliver_candidate_edges
 from ..matching.types import MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
@@ -226,6 +222,8 @@ def _export_groups_sidecar(
     ref_id_column: str = "id",
     target_id_column: str = "id",
     sliver_edges: set[tuple[Any, Any]] | None = None,
+    reference_proj: gpd.GeoDataFrame | None = None,
+    target_proj: gpd.GeoDataFrame | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -254,56 +252,59 @@ def _export_groups_sidecar(
 
     from shapely import to_geojson
 
-    # Re-derive components from raw results, excluding junction slivers from
-    # adjacency exactly like the optimizer does (same sliver set), so the
-    # sidecar's group membership mirrors the optimizer's grouping. Slivers
-    # whose endpoints share a component are still present in the group's edge
-    # list (annotated at display time), but never in optimizer_assignment.
+    from ..matching.optimizer import (
+        _geom_lookup,
+        _name_lookup,
+        compute_group_structure,
+        group_is_structurally_simple,
+    )
+
+    # Structure/corridor analysis needs metric geometry; fall back to the
+    # display GeoDataFrames only if projected ones were not supplied.
+    if reference_proj is None:
+        reference_proj = reference
+    if target_proj is None:
+        target_proj = target
+
     if sliver_edges is None:
         sliver_edges = compute_sliver_candidate_edges(
             results, reference, target, ref_id_column, target_id_column
         )
-    components = find_match_components(results, min_confidence, sliver_edges=sliver_edges)
+    sliver_pairs_str = {(str(r), str(t)) for r, t in sliver_edges}
 
-    # Build optimizer assignment lookup from optimized results.
-    #
-    # The optimizer DECOMPOSES a raw connected component into smaller sub-groups
-    # (per-ref 1:N, per-target N:1, smaller M:N, plus greedy 1:1 leftovers) when
-    # it isn't fully contiguous on both sides — see
-    # ``optimizer._classify_and_resolve_component``. Each sub-group gets its own
-    # ``group_id`` computed from the sub-group's ids, which will NOT equal the
-    # full raw-component ``group_id`` this sidecar keys groups by. Keying the
-    # lookup on ``features["group_id"]`` therefore drops the assignment for every
-    # decomposed component — i.e. exactly the large M:N groups where reviewers
-    # most need a pre-seed.
-    #
-    # Instead map each optimizer edge to the raw component it belongs to via
-    # segment membership. Every optimizer edge is a raw candidate pair, so both
-    # endpoints live in exactly one raw component.
-    node_to_component_gid: dict[tuple[str, Any], str] = {}
-    for component in components:
-        c_ref_ids = set(r.ref_id for r in component)
-        c_target_ids = set(r.target_id for r in component)
-        c_gid = compute_group_id(c_ref_ids, c_target_ids)
-        for rid in c_ref_ids:
-            node_to_component_gid[("ref", rid)] = c_gid
-        for tid in c_target_ids:
-            node_to_component_gid[("target", tid)] = c_gid
-
-    optimizer_edges: dict[str, list[dict]] = defaultdict(list)
+    # The sidecar mirrors the optimizer's DECOMPOSED grouping: after
+    # corridor-aware M:N splitting, each optimizer sub-group is a per-corridor
+    # unit (not the raw over-merged component). Group the optimizer assignment
+    # by its sub-group ``group_id``; 1:1 matches carry no group_id and are
+    # excluded. Each sub-group becomes one sidecar group, with candidate edges
+    # restricted to that sub-group's ref x target id product (so cross-corridor
+    # alternatives, which belong to a different sub-group, are not shown here).
+    assignment_by_gid: dict[str, list] = defaultdict(list)
     for r in optimized:
-        gid = node_to_component_gid.get(("ref", r.ref_id)) or node_to_component_gid.get(
-            ("target", r.target_id)
-        )
-        if not gid:
+        gid = r.features.get("group_id")
+        if gid:
+            assignment_by_gid[str(gid)].append(r)
+
+    # Highest-confidence raw candidate per (ref,target) pair, indexed by ref for
+    # fast per-group candidate collection. Keyed by string ids to match output.
+    best_by_pair: dict[tuple[str, str], Any] = {}
+    for r in results:
+        if r.confidence < min_confidence:
             continue
-        optimizer_edges[gid].append(
-            {
-                "ref_id": str(r.ref_id),
-                "target_id": str(r.target_id),
-                "confidence": round(float(r.confidence), 4),
-            }
-        )
+        pair = (str(r.ref_id), str(r.target_id))
+        prev = best_by_pair.get(pair)
+        if prev is None or r.confidence > prev.confidence:
+            best_by_pair[pair] = r
+    cands_by_ref: dict[str, list] = defaultdict(list)
+    for (rid, _tid), r in best_by_pair.items():
+        cands_by_ref[rid].append(r)
+
+    # Projected (metric) geometry + name lookups for corridor/structure analysis
+    # (contiguity tolerance is in meters, so WGS84 geoms cannot be used here).
+    ref_geoms_proj = {str(k): v for k, v in _geom_lookup(reference_proj, ref_id_column).items()}
+    tgt_geoms_proj = {str(k): v for k, v in _geom_lookup(target_proj, target_id_column).items()}
+    ref_names_proj = {str(k): v for k, v in _name_lookup(reference_proj, ref_id_column).items()}
+    tgt_names_proj = {str(k): v for k, v in _name_lookup(target_proj, target_id_column).items()}
 
     # Build id-keyed geometry lookups as a FALLBACK only. dict(zip(...)) silently
     # keeps the last row when an id repeats, so it cannot distinguish reference
@@ -347,28 +348,60 @@ def _export_groups_sidecar(
         else {}
     )
 
+    # Serialize geometries as GeoJSON with coordinate rounding (defined once).
+    def _round_coords(coords):
+        """Recursively round coordinates to GEOJSON_COORD_PRECISION."""
+        if isinstance(coords[0], (list, tuple)):
+            return [_round_coords(c) for c in coords]
+        return [round(v, GEOJSON_COORD_PRECISION) for v in coords]
+
+    def _geom_to_geojson(geom) -> dict | None:
+        if geom is None or geom.is_empty:
+            return None
+        gj = json.loads(to_geojson(geom))
+        gj["coordinates"] = _round_coords(gj["coordinates"])
+        return gj
+
+    def _lookup_with_int_fallback(lookup, sid):
+        val = lookup.get(sid)
+        if val is None and sid.isdigit():
+            val = lookup.get(int(sid))
+        return val
+
     groups = []
-    for component in components:
-        ref_ids = set(r.ref_id for r in component)
-        target_ids = set(r.target_id for r in component)
+    for group_id, assign in assignment_by_gid.items():
+        ref_ids = sorted({str(r.ref_id) for r in assign})
+        target_ids = sorted({str(r.target_id) for r in assign})
+        tgt_set = set(target_ids)
+        assignment_pairs = {(str(r.ref_id), str(r.target_id)) for r in assign}
 
-        # Skip 1:1 components
-        if len(ref_ids) == 1 and len(target_ids) == 1:
-            continue
+        # Candidate edges: highest-confidence raw pair for every (ref,target)
+        # within this sub-group's id product. Includes the selected assignment
+        # plus any in-corridor sliver/weak alternatives; cross-corridor
+        # candidates belong to a different sub-group and are excluded.
+        cand_by_pair: dict[tuple[str, str], Any] = {}
+        for rid in ref_ids:
+            for r in cands_by_ref.get(rid, []):
+                tid = str(r.target_id)
+                if tid in tgt_set:
+                    cand_by_pair[(rid, tid)] = r
+        for r in assign:  # defensive: ensure every selected edge is present
+            cand_by_pair.setdefault((str(r.ref_id), str(r.target_id)), r)
 
-        group_id = compute_group_id(ref_ids, target_ids)
+        # Classify match type from the resolved sub-group.
+        if len(ref_ids) == 1:
+            match_type = MatchType.ONE_TO_N
+        elif len(target_ids) == 1:
+            match_type = MatchType.N_TO_ONE
+        else:
+            match_type = MatchType.M_TO_N
 
         # Resolve each edge's geometry by its scored positional index so that
-        # reference/target rows sharing an id don't collapse to one geometry.
-        # The ref_geometries schema is id-keyed, so if a single group somehow
-        # contains multiple edges for the same id at different indices we pick
-        # the smallest index deterministically -- `component` is built from
-        # unordered sets, so relying on iteration order would give unstable
-        # sidecar output. The index still comes from an edge scored in THIS
-        # group, unlike the global last-row id lookup.
+        # rows sharing an id don't collapse to one geometry (id-keyed lookup is
+        # a fallback only). Pick the smallest index deterministically.
         ref_idx_by_id: dict[str, int] = {}
         tgt_idx_by_id: dict[str, int] = {}
-        for r in component:
+        for r in cand_by_pair.values():
             rid = str(r.ref_id)
             ridx = getattr(r, "ref_idx", None)
             if ridx is not None and ridx < ref_idx_by_id.get(rid, ridx + 1):
@@ -388,20 +421,32 @@ def _export_groups_sidecar(
             if (geom := _geom_at_pos(tgt_geoms_by_pos, idx)) is not None
         }
 
-        # Classify match type
-        if len(ref_ids) == 1:
-            match_type = MatchType.ONE_TO_N
-        elif len(target_ids) == 1:
-            match_type = MatchType.N_TO_ONE
-        else:
-            match_type = MatchType.M_TO_N
+        # Candidate-graph structure features (degree, bridge, biconnected block,
+        # corridor ids, selected, sliver) + per-group counts. Purely structural,
+        # derived from data already here; feeds the resolver + oversized flag.
+        per_edge, per_group = compute_group_structure(
+            edges=list(cand_by_pair.keys()),
+            ref_ids=ref_ids,
+            target_ids=target_ids,
+            assignment_pairs=assignment_pairs,
+            sliver_pairs=sliver_pairs_str,
+            ref_geoms=ref_geoms_proj,
+            target_geoms=tgt_geoms_proj,
+            tolerance=DEFAULT_SNAP_TOLERANCE_M,
+            corridor_aware=settings.optimizer_corridor_aware,
+            max_turn_deg=settings.optimizer_corridor_max_turn_deg,
+            ref_name_lookup=ref_names_proj,
+            target_name_lookup=tgt_names_proj,
+        )
 
-        # Serialize edges (cast numpy scalars to Python float for JSON)
+        # Serialize candidate edges (cast numpy scalars to Python float for JSON)
+        # with their per-edge structure block.
         edges = []
-        for r in component:
+        for pair in sorted(cand_by_pair.keys()):
+            r = cand_by_pair[pair]
             edge = {
-                "ref_id": str(r.ref_id),
-                "target_id": str(r.target_id),
+                "ref_id": pair[0],
+                "target_id": pair[1],
                 "confidence": round(float(r.confidence), 4),
             }
             if r.gers_start_frac is not None:
@@ -412,24 +457,22 @@ def _export_groups_sidecar(
                     float(r.local_start_frac), ALIGNMENT_FRAC_PRECISION
                 )
                 edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
+            st = per_edge.get(pair)
+            if st:
+                edge.update(st)
             edges.append(edge)
 
-        # Serialize geometries as GeoJSON with coordinate rounding
-        def _round_coords(coords):
-            """Recursively round coordinates to GEOJSON_COORD_PRECISION."""
-            if isinstance(coords[0], (list, tuple)):
-                return [_round_coords(c) for c in coords]
-            return [round(v, GEOJSON_COORD_PRECISION) for v in coords]
-
-        def _geom_to_geojson(geom) -> dict | None:
-            if geom is None or geom.is_empty:
-                return None
-            gj = json.loads(to_geojson(geom))
-            gj["coordinates"] = _round_coords(gj["coordinates"])
-            return gj
+        optimizer_assignment = [
+            {
+                "ref_id": str(r.ref_id),
+                "target_id": str(r.target_id),
+                "confidence": round(float(r.confidence), 4),
+            }
+            for r in assign
+        ]
 
         ref_geometries = {}
-        for rid in sorted(str(r) for r in ref_ids):
+        for rid in ref_ids:
             geom = ref_geom_by_id.get(rid)
             if geom is None:
                 geom = ref_geom_lookup.get(rid) or ref_geom_lookup.get(
@@ -438,10 +481,10 @@ def _export_groups_sidecar(
             if geom is not None:
                 gj = _geom_to_geojson(geom)
                 if gj:
-                    ref_geometries[str(rid)] = gj
+                    ref_geometries[rid] = gj
 
         target_geometries = {}
-        for tid in sorted(str(t) for t in target_ids):
+        for tid in target_ids:
             geom = tgt_geom_by_id.get(tid)
             if geom is None:
                 geom = tgt_geom_lookup.get(tid) or tgt_geom_lookup.get(
@@ -450,43 +493,57 @@ def _export_groups_sidecar(
             if geom is not None:
                 gj = _geom_to_geojson(geom)
                 if gj:
-                    target_geometries[str(tid)] = gj
+                    target_geometries[tid] = gj
 
         # Collect names and classes for each segment in the group
         ref_names = {}
         ref_classes = {}
-        for rid in sorted(str(r) for r in ref_ids):
-            name = ref_name_lookup.get(rid)
+        for rid in ref_ids:
+            name = _lookup_with_int_fallback(ref_name_lookup, rid)
             if name is not None:
                 ref_names[rid] = _extract_name_string(name)
-            cls = ref_class_lookup.get(rid)
+            cls = _lookup_with_int_fallback(ref_class_lookup, rid)
             if cls is not None:
                 ref_classes[rid] = str(cls) if not _is_nan(cls) else ""
 
         target_names = {}
         target_classes = {}
-        for tid in sorted(str(t) for t in target_ids):
-            name = tgt_name_lookup.get(tid)
+        for tid in target_ids:
+            name = _lookup_with_int_fallback(tgt_name_lookup, tid)
             if name is not None:
                 target_names[tid] = _extract_name_string(name)
-            cls = tgt_class_lookup.get(tid)
+            cls = _lookup_with_int_fallback(tgt_class_lookup, tid)
             if cls is not None:
                 target_classes[tid] = str(cls) if not _is_nan(cls) else ""
+
+        oversized = not group_is_structurally_simple(
+            per_group["n_corridors"],
+            per_group["n_assignment_components"],
+            per_group["n_edges"],
+            settings.stitch_export_max_assignment_components,
+            settings.stitch_export_soft_max_edges,
+            settings.stitch_export_backstop_max_edges,
+        )
 
         groups.append(
             {
                 "group_id": group_id,
                 "match_type": match_type.value,
-                "ref_ids": sorted(str(r) for r in ref_ids),
-                "target_ids": sorted(str(t) for t in target_ids),
+                "ref_ids": ref_ids,
+                "target_ids": target_ids,
                 "edges": edges,
-                "optimizer_assignment": optimizer_edges.get(group_id, []),
+                "optimizer_assignment": optimizer_assignment,
                 "ref_geometries": ref_geometries,
                 "target_geometries": target_geometries,
                 "ref_names": ref_names,
                 "target_names": target_names,
                 "ref_classes": ref_classes,
                 "target_classes": target_classes,
+                "n_edges": per_group["n_edges"],
+                "n_corridors": per_group["n_corridors"],
+                "n_assignment_components": per_group["n_assignment_components"],
+                "largest_biconnected_block": per_group["largest_biconnected_block"],
+                "oversized_group": oversized,
             }
         )
 
@@ -724,6 +781,8 @@ def run_pipeline(
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
         sliver_edges=sliver_edges,
+        reference_proj=reference,
+        target_proj=target,
     )
 
     if progress_callback:

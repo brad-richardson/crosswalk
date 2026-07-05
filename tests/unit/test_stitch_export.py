@@ -21,6 +21,7 @@ from matcher.agent_labeling.stitch_export import (
     REASON_EXPORTED,
     REASON_HUMAN_PRECEDENCE,
     REASON_OVER_MAX,
+    REASON_STRUCTURAL_TANGLE,
     plan_exports,
     write_exports,
 )
@@ -112,19 +113,23 @@ def make_batch(batch_dir: Path, dataset: str, groups: list[dict]) -> Path:
         ref_geoms = {r: _line(42.28 + 0.001 * i, 0.0005) for i, r in enumerate(ref_ids)}
         tgt_geoms = {t: _line(42.29 + 0.001 * i, 0.0005) for i, t in enumerate(tgt_ids)}
 
-        json_groups.append(
-            {
-                "group_id": g["group_id"],
-                "match_type": g.get("match_type", "M:N"),
-                "ref_ids": ref_ids,
-                "target_ids": tgt_ids,
-                "edges": edge_dicts,
-                "ref_geometries": ref_geoms,
-                "target_geometries": tgt_geoms,
-                "ref_classes": {r: ref_classes.get(r, "residential") for r in ref_ids},
-                "target_classes": {t: tgt_classes.get(t, "residential") for t in tgt_ids},
-            }
-        )
+        json_group = {
+            "group_id": g["group_id"],
+            "match_type": g.get("match_type", "M:N"),
+            "ref_ids": ref_ids,
+            "target_ids": tgt_ids,
+            "edges": edge_dicts,
+            "ref_geometries": ref_geoms,
+            "target_geometries": tgt_geoms,
+            "ref_classes": {r: ref_classes.get(r, "residential") for r in ref_ids},
+            "target_classes": {t: tgt_classes.get(t, "residential") for t in tgt_ids},
+        }
+        # Optional structure fields (drives the structural export gate). Omit
+        # them to exercise the flat-max_edges fallback path.
+        for k in ("n_edges", "n_corridors", "n_assignment_components"):
+            if k in g:
+                json_group[k] = g[k]
+        json_groups.append(json_group)
 
         # metadata.yaml
         meta = {
@@ -206,6 +211,75 @@ def test_over_max_edges_rejected(tmp_path, labels_dir):
     assert not g.exported
     assert g.reason == REASON_OVER_MAX
     assert g.n_edges_raw == 25
+
+
+def test_structural_gate_single_corridor_exports_above_flat_cap(tmp_path, labels_dir):
+    """A clean 30-edge single corridor passes even though it exceeds max_edges=20."""
+    edges = [(f"r{i}", f"t{i}") for i in range(30)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "corridor",
+                "routing": "auto_accept",
+                "edges": edges,
+                "n_edges": 30,
+                "n_corridors": 1,
+                "n_assignment_components": 1,
+            }
+        ],
+    )
+    report = _plan([b], labels_dir, max_edges=20)
+    g = _by_gid(report)["corridor"]
+    assert g.exported, f"single corridor should export, got {g.reason}"
+    assert g.reason == REASON_EXPORTED
+
+
+def test_structural_gate_small_tangle_blocked(tmp_path, labels_dir):
+    """A small multi-corridor tangle is blocked even below the flat cap."""
+    edges = [(f"r{i}", f"t{i}") for i in range(10)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "tangle",
+                "routing": "auto_accept",
+                "edges": edges,
+                "n_edges": 10,
+                "n_corridors": 3,
+                "n_assignment_components": 3,
+            }
+        ],
+    )
+    report = _plan([b], labels_dir, max_edges=20)
+    g = _by_gid(report)["tangle"]
+    assert not g.exported
+    assert g.reason == REASON_STRUCTURAL_TANGLE
+
+
+def test_structural_gate_backstop_blocks_giant_single_corridor(tmp_path, labels_dir):
+    """Even a single corridor is blocked above the hard backstop ceiling."""
+    edges = [(f"r{i}", f"t{i}") for i in range(45)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "giant",
+                "routing": "auto_accept",
+                "edges": edges,
+                "n_edges": 45,
+                "n_corridors": 1,
+                "n_assignment_components": 1,
+            }
+        ],
+    )
+    report = _plan([b], labels_dir, max_edges=20, backstop_max_edges=40)
+    g = _by_gid(report)["giant"]
+    assert not g.exported
+    assert g.reason == REASON_OVER_MAX
 
 
 def test_class_mismatch_rejected(tmp_path, labels_dir):

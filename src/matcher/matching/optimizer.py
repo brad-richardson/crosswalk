@@ -23,7 +23,7 @@ from loguru import logger
 from scipy.spatial import cKDTree
 from shapely import LineString
 
-from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, settings
+from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, NAMES_COLUMN, settings
 from .sliver import sliver_edges_for_match_results
 from .types import MatchDecision, MatchResult, MatchType
 
@@ -33,6 +33,14 @@ def _geom_lookup(gdf: gpd.GeoDataFrame, id_column: str) -> dict[Any, LineString]
     if id_column in gdf.columns:
         return dict(zip(gdf[id_column], gdf.geometry))
     return dict(zip(gdf.index, gdf.geometry))
+
+
+def _name_lookup(gdf: gpd.GeoDataFrame, id_column: str) -> dict[Any, Any]:
+    """Build an id -> name lookup from ``NAMES_COLUMN`` (empty if absent)."""
+    if NAMES_COLUMN not in gdf.columns:
+        return {}
+    keys = gdf[id_column] if id_column in gdf.columns else gdf.index
+    return dict(zip(keys, gdf[NAMES_COLUMN]))
 
 
 def compute_sliver_candidate_edges(
@@ -131,6 +139,7 @@ def find_match_components(
     results: list[MatchResult],
     min_confidence: float,
     sliver_edges: set[tuple[Any, Any]] | None = None,
+    glue_min_confidence: float | None = None,
 ) -> list[list[MatchResult]]:
     """Find connected components in the bipartite ref-target match graph.
 
@@ -152,6 +161,12 @@ def find_match_components(
             components — or whose endpoints have no non-sliver edge at all —
             is dropped from grouping entirely: the only evidence tying those
             segments together is a junction artifact.
+        glue_min_confidence: Optional grouping-only confidence prune. Candidate
+            edges with ``min_confidence <= confidence < glue_min_confidence``
+            are treated like slivers for adjacency (they never weld components
+            together) but remain in a component's edge list when their
+            endpoints co-land via stronger edges. Defaults to ``min_confidence``
+            (no prune).
 
     Returns:
         List of components, each a list of MatchResult edges
@@ -161,14 +176,18 @@ def find_match_components(
         return []
 
     sliver_edges = sliver_edges or set()
+    glue_min = min_confidence if glue_min_confidence is None else glue_min_confidence
 
-    # Split structural (component-building) edges from sliver edges. Both are
-    # deduplicated to the highest-confidence result per pair.
+    # Split structural (component-building) edges from non-gluing edges. A
+    # non-gluing edge is a sliver OR a weak edge below ``glue_min`` (grouping-
+    # only confidence prune): neither builds adjacency, both only attach to a
+    # component when their endpoints already co-land there via structural
+    # edges. All are deduplicated to the highest-confidence result per pair.
     structural: list[MatchResult] = []
     sliver_best: dict[tuple[Any, Any], MatchResult] = {}
     for r in valid:
         pair = (r.ref_id, r.target_id)
-        if pair in sliver_edges:
+        if pair in sliver_edges or r.confidence < glue_min:
             if pair not in sliver_best or r.confidence > sliver_best[pair].confidence:
                 sliver_best[pair] = r
         else:
@@ -249,10 +268,65 @@ def find_match_components(
     return components
 
 
+def _normalize_name(name: Any) -> str:
+    """Normalize a segment name to a lowercased comparison key.
+
+    Accepts plain strings and Overture-style name dicts (``{"primary": ...}``).
+    Returns ``""`` for missing / unusable names so callers can treat empty as
+    "no name evidence" rather than a match.
+    """
+    if name is None:
+        return ""
+    if isinstance(name, dict):
+        for key in ("primary", "common", "name", "value"):
+            v = name.get(key)
+            if isinstance(v, str) and v:
+                name = v
+                break
+        else:
+            name = next((v for v in name.values() if isinstance(v, str) and v), "")
+    if not isinstance(name, str):
+        return ""
+    return name.strip().lower()
+
+
+def _endpoints_are_collinear(
+    ep_a: tuple[float, float],
+    nb_a: tuple[float, float],
+    ep_b: tuple[float, float],
+    nb_b: tuple[float, float],
+    max_turn_deg: float,
+) -> bool:
+    """Test whether two segments form a collinear continuation at a shared endpoint.
+
+    ``ep_*`` is the shared (touching) endpoint of each segment and ``nb_*`` its
+    adjacent interior vertex, so ``nb_* - ep_*`` is the direction the segment
+    *leaves* the shared point. Two collinear continuations leave in nearly
+    opposite directions (a straight through-path), so the deflection from
+    straight is ``180 - angle(vec_a, vec_b)``. Returns True when that deflection
+    is within ``max_turn_deg`` (a genuine corridor) rather than a sharp turn (a
+    perpendicular junction kiss between two different streets).
+    """
+    va = (nb_a[0] - ep_a[0], nb_a[1] - ep_a[1])
+    vb = (nb_b[0] - ep_b[0], nb_b[1] - ep_b[1])
+    na = (va[0] ** 2 + va[1] ** 2) ** 0.5
+    nb = (vb[0] ** 2 + vb[1] ** 2) ** 0.5
+    if na == 0.0 or nb == 0.0:
+        return False
+    cos = (va[0] * vb[0] + va[1] * vb[1]) / (na * nb)
+    cos = max(-1.0, min(1.0, cos))
+    angle = np.degrees(np.arccos(cos))
+    turn = 180.0 - angle
+    return turn <= max_turn_deg
+
+
 def build_contiguity_adjacency(
     ids: list[Any],
     geom_lookup: dict[Any, LineString],
     tolerance: float,
+    require_collinear: bool = False,
+    max_turn_deg: float = 40.0,
+    name_lookup: dict[Any, Any] | None = None,
 ) -> dict[Any, set[Any]]:
     """Build an endpoint-proximity adjacency map over a set of IDs.
 
@@ -270,6 +344,15 @@ def build_contiguity_adjacency(
         geom_lookup: Dictionary mapping ID to LineString geometry, in the same
             coordinate units as ``tolerance``.
         tolerance: Maximum endpoint distance to consider contiguous.
+        require_collinear: When True, a proximity pair only becomes adjacent if
+            the two segments are a collinear continuation at the shared endpoint
+            (deflection <= ``max_turn_deg``) OR share a normalized name (the
+            "same-street rescue" for gently curving named corridors). This is
+            the corridor-aware gate used by the M:N branch so perpendicular
+            junction kisses do not chain independent corridors together.
+        max_turn_deg: Deflection threshold (degrees) for the collinearity gate.
+        name_lookup: Optional ID -> name map (string or Overture name dict) for
+            the same-name rescue. Ignored when ``require_collinear`` is False.
 
     Returns:
         Dict mapping each input ID to the set of IDs it is contiguous with.
@@ -280,6 +363,7 @@ def build_contiguity_adjacency(
 
     all_endpoints: list = []
     endpoint_to_id: list = []  # which id does each endpoint belong to
+    endpoint_neighbor: list = []  # adjacent interior vertex (for direction)
     for id_ in ids:
         geom = geom_lookup.get(id_)
         if geom is None or geom.is_empty:
@@ -288,20 +372,42 @@ def build_contiguity_adjacency(
         if len(coords) < 2:
             continue
         all_endpoints.append(coords[0][:2])
+        endpoint_to_id.append(id_)
+        endpoint_neighbor.append(coords[1][:2])
         all_endpoints.append(coords[-1][:2])
         endpoint_to_id.append(id_)
-        endpoint_to_id.append(id_)
+        endpoint_neighbor.append(coords[-2][:2])
 
     if len(all_endpoints) < 2:
         return adjacency
+
+    name_cache: dict[Any, str] = {}
+
+    def _name(id_: Any) -> str:
+        if id_ not in name_cache:
+            name_cache[id_] = _normalize_name(name_lookup.get(id_)) if name_lookup else ""
+        return name_cache[id_]
 
     tree = cKDTree(np.array(all_endpoints))
     for ep_i, ep_j in tree.query_pairs(tolerance):
         a = endpoint_to_id[ep_i]
         b = endpoint_to_id[ep_j]
-        if a != b:
-            adjacency[a].add(b)
-            adjacency[b].add(a)
+        if a == b:
+            continue
+        if require_collinear:
+            collinear = _endpoints_are_collinear(
+                all_endpoints[ep_i],
+                endpoint_neighbor[ep_i],
+                all_endpoints[ep_j],
+                endpoint_neighbor[ep_j],
+                max_turn_deg,
+            )
+            if not collinear:
+                na, nb = _name(a), _name(b)
+                if not (na and na == nb):
+                    continue
+        adjacency[a].add(b)
+        adjacency[b].add(a)
 
     return adjacency
 
@@ -310,6 +416,9 @@ def _find_contiguous_id_groups(
     ids: list[Any],
     geom_lookup: dict[Any, LineString],
     tolerance: float,
+    require_collinear: bool = False,
+    max_turn_deg: float = 40.0,
+    name_lookup: dict[Any, Any] | None = None,
 ) -> list[list[Any]]:
     """Find groups of IDs whose geometries are contiguous.
 
@@ -320,6 +429,10 @@ def _find_contiguous_id_groups(
         ids: List of IDs to check
         geom_lookup: Dictionary mapping ID to LineString geometry
         tolerance: Maximum endpoint distance to consider contiguous (meters)
+        require_collinear: Gate contiguity on collinear continuation or same
+            name (see :func:`build_contiguity_adjacency`).
+        max_turn_deg: Deflection threshold (degrees) for the collinearity gate.
+        name_lookup: Optional ID -> name map for the same-name rescue.
 
     Returns:
         List of groups, each a list of contiguous IDs.
@@ -328,7 +441,14 @@ def _find_contiguous_id_groups(
     if len(ids) <= 1:
         return [ids] if ids else []
 
-    adjacency = build_contiguity_adjacency(ids, geom_lookup, tolerance)
+    adjacency = build_contiguity_adjacency(
+        ids,
+        geom_lookup,
+        tolerance,
+        require_collinear=require_collinear,
+        max_turn_deg=max_turn_deg,
+        name_lookup=name_lookup,
+    )
 
     # Find connected components using BFS.
     visited: set[Any] = set()
@@ -636,6 +756,10 @@ def _classify_and_resolve_component(
     ref_geoms: dict[Any, LineString],
     target_geoms: dict[Any, LineString],
     tolerance: float,
+    corridor_aware: bool = False,
+    max_turn_deg: float = 40.0,
+    ref_name_lookup: dict[Any, Any] | None = None,
+    target_name_lookup: dict[Any, Any] | None = None,
 ) -> tuple[list[MatchResult], list[MatchResult]]:
     """Classify a connected component and resolve it into groups.
 
@@ -746,9 +870,28 @@ def _classify_and_resolve_component(
         return group_results, leftover
 
     # Case 4: M:N — multiple refs AND multiple targets
-    # Decompose using contiguity groups on both sides, then match sub-components
-    ref_groups = _find_contiguous_id_groups(ref_ids, ref_geoms, tolerance)
-    target_groups = _find_contiguous_id_groups(target_ids, target_geoms, tolerance)
+    # Decompose using contiguity groups on both sides, then match sub-components.
+    # Corridor-aware: gate contiguity on collinear continuation / same name so a
+    # perpendicular junction kiss does not chain two different streets into one
+    # over-merged "monster" corridor. Perpendicular corridors then fall into
+    # separate contiguity groups and the per-(ref_group x target_group)
+    # re-matching below decomposes the monster into per-corridor subgroups.
+    ref_groups = _find_contiguous_id_groups(
+        ref_ids,
+        ref_geoms,
+        tolerance,
+        require_collinear=corridor_aware,
+        max_turn_deg=max_turn_deg,
+        name_lookup=ref_name_lookup,
+    )
+    target_groups = _find_contiguous_id_groups(
+        target_ids,
+        target_geoms,
+        tolerance,
+        require_collinear=corridor_aware,
+        max_turn_deg=max_turn_deg,
+        name_lookup=target_name_lookup,
+    )
 
     refs_fully_contiguous = len(ref_groups) == 1 and len(ref_groups[0]) == n_refs
     targets_fully_contiguous = len(target_groups) == 1 and len(target_groups[0]) == n_targets
@@ -916,6 +1059,9 @@ def optimize_matches_with_grouping(
     contiguity_tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
     ref_id_column: str = "id",
     target_id_column: str = "local_id",
+    glue_min_confidence: float | None = None,
+    corridor_aware: bool | None = None,
+    corridor_max_turn_deg: float | None = None,
 ) -> list[MatchResult]:
     """Optimize matches with M:N group detection.
 
@@ -930,11 +1076,27 @@ def optimize_matches_with_grouping(
         contiguity_tolerance: Max distance for contiguity check (meters)
         ref_id_column: Column name for reference IDs
         target_id_column: Column name for target IDs
+        glue_min_confidence: Grouping-only confidence prune (see
+            :func:`find_match_components`). Defaults to
+            ``settings.optimizer_glue_min_confidence``.
+        corridor_aware: Gate M:N contiguity on collinear continuation / same
+            name. Defaults to ``settings.optimizer_corridor_aware``.
+        corridor_max_turn_deg: Collinearity deflection threshold (degrees).
+            Defaults to ``settings.optimizer_corridor_max_turn_deg``.
 
     Returns:
         List of optimized MatchResult objects
     """
     import time
+
+    if glue_min_confidence is None:
+        glue_min_confidence = settings.optimizer_glue_min_confidence
+    if corridor_aware is None:
+        corridor_aware = settings.optimizer_corridor_aware
+    if corridor_max_turn_deg is None:
+        corridor_max_turn_deg = settings.optimizer_corridor_max_turn_deg
+    # The prune only makes sense above the candidate floor.
+    glue_min_confidence = max(glue_min_confidence, min_confidence)
 
     t0 = time.perf_counter()
     logger.info(f"Optimizing {len(results)} results with M:N grouping...")
@@ -942,6 +1104,11 @@ def optimize_matches_with_grouping(
     # Build geometry lookups
     ref_geoms = _geom_lookup(reference, ref_id_column)
     target_geoms = _geom_lookup(target, target_id_column)
+
+    # Name lookups for the corridor-aware same-name rescue (opt-in). Missing
+    # names collapse to "" downstream so they never act as a match.
+    ref_name_lookup = _name_lookup(reference, ref_id_column) if corridor_aware else None
+    target_name_lookup = _name_lookup(target, target_id_column) if corridor_aware else None
 
     # Step 0: Classify junction-sliver candidate edges (shared hybrid rule).
     # Slivers never contribute adjacency when building components (a junction
@@ -953,13 +1120,22 @@ def optimize_matches_with_grouping(
     if sliver_edges:
         logger.info(f"  Classified {len(sliver_edges)} candidate edges as junction slivers")
 
-    # Step 1: Find connected components (sliver edges excluded from adjacency)
-    components = find_match_components(results, min_confidence, sliver_edges=sliver_edges)
+    # Step 1: Find connected components. Sliver edges and (via the grouping-only
+    # prune) weak edges below ``glue_min_confidence`` are excluded from adjacency
+    # so they never weld independent groups into a monster.
+    components = find_match_components(
+        results,
+        min_confidence,
+        sliver_edges=sliver_edges,
+        glue_min_confidence=glue_min_confidence,
+    )
     logger.info(f"  Found {len(components)} connected components")
 
     # Step 2: Classify and resolve each component. Slivers are filtered from
     # the resolution input so they can never be selected into an assignment;
-    # they stay in the component itself for group-membership purposes.
+    # they stay in the component itself for group-membership purposes. Weak
+    # (pruned) edges are NOT filtered here — they remain scored candidates and
+    # can be selected; they simply did not contribute gluing above.
     all_group_results: list[MatchResult] = []
     all_leftover: list[MatchResult] = []
 
@@ -968,10 +1144,38 @@ def optimize_matches_with_grouping(
         if not structural:
             continue
         group_results, leftover = _classify_and_resolve_component(
-            structural, ref_geoms, target_geoms, contiguity_tolerance
+            structural,
+            ref_geoms,
+            target_geoms,
+            contiguity_tolerance,
+            corridor_aware=corridor_aware,
+            max_turn_deg=corridor_max_turn_deg,
+            ref_name_lookup=ref_name_lookup,
+            target_name_lookup=target_name_lookup,
         )
         all_group_results.extend(group_results)
         all_leftover.extend(leftover)
+
+    # Step 2b: Recover weak edges that the grouping-only prune left unattached
+    # (both endpoints failed to co-land in any component). They are still valid
+    # candidates, so feed them to the greedy 1:1 pool — the prune must not
+    # reduce match coverage, only stop weak edges from GLUING monsters.
+    if glue_min_confidence > min_confidence:
+        in_component: set[tuple[Any, Any]] = {
+            (r.ref_id, r.target_id) for comp in components for r in comp
+        }
+        best_unattached: dict[tuple[Any, Any], MatchResult] = {}
+        for r in results:
+            pair = (r.ref_id, r.target_id)
+            if (
+                min_confidence <= r.confidence < glue_min_confidence
+                and pair not in sliver_edges
+                and pair not in in_component
+            ):
+                if pair not in best_unattached or r.confidence > best_unattached[pair].confidence:
+                    best_unattached[pair] = r
+        if best_unattached:
+            all_leftover.extend(best_unattached.values())
 
     # Step 3: Track claimed refs/targets from groups
     claimed_refs = {r.ref_id for r in all_group_results}
@@ -1026,3 +1230,152 @@ def optimize_matches_with_grouping(
     logger.info(f"  Total output: {len(final)} matches")
 
     return final
+
+
+def group_is_structurally_simple(
+    n_corridors: int,
+    n_assignment_components: int,
+    n_edges: int,
+    max_assignment_components: int,
+    soft_max_edges: int,
+    backstop_max_edges: int,
+) -> bool:
+    """Structural export gate: is this group a clean, single-decision unit?
+
+    Replaces a flat edge-count cap. A group is structurally simple when it is a
+    single corridor-pair (one street matched to one street — fine even when long,
+    e.g. a 30-edge Beacon-St corridor) OR it has few assignment-components and
+    stays within a soft edge budget. A hard backstop ceiling blocks anything
+    larger regardless — a defence against a structure-detection bug ever
+    auto-exporting a monster, NOT the primary gate.
+
+    Args:
+        n_corridors: Number of distinct corridor-pairs in the candidate graph.
+        n_assignment_components: Connected components of the selected assignment.
+        n_edges: Candidate edge count.
+        max_assignment_components: Max assignment-components for a simple group.
+        soft_max_edges: Soft edge budget for a multi-component simple group.
+        backstop_max_edges: Hard ceiling; nothing above this is ever simple.
+
+    Returns:
+        True if the group may auto-export under the structural gate.
+    """
+    if n_edges > backstop_max_edges:
+        return False
+    if n_corridors <= 1:
+        return True
+    return n_assignment_components <= max_assignment_components and n_edges <= soft_max_edges
+
+
+def compute_group_structure(
+    edges: list[tuple[Any, Any]],
+    ref_ids: list[Any],
+    target_ids: list[Any],
+    assignment_pairs: set[tuple[Any, Any]],
+    sliver_pairs: set[tuple[Any, Any]],
+    ref_geoms: dict[Any, LineString],
+    target_geoms: dict[Any, LineString],
+    tolerance: float = DEFAULT_SNAP_TOLERANCE_M,
+    corridor_aware: bool = True,
+    max_turn_deg: float = 40.0,
+    ref_name_lookup: dict[Any, Any] | None = None,
+    target_name_lookup: dict[Any, Any] | None = None,
+) -> tuple[dict[tuple[Any, Any], dict], dict]:
+    """Compute candidate-graph structure features for a match group.
+
+    Derives per-edge topology (degree, bridge, biconnected block, corridor ids,
+    selected, sliver) and per-group counts (edges, corridors,
+    assignment-components, largest biconnected block) from data already in the
+    sidecar. These are cheap, purely structural signals persisted for the future
+    learned group resolver (see the group-splitting design doc §6) and to drive
+    the ``oversized_group`` flag and the structural export gate.
+
+    Args:
+        edges: All candidate ``(ref_id, target_id)`` pairs in the group.
+        ref_ids / target_ids: The group's segment ids.
+        assignment_pairs: Pairs selected by the optimizer assignment.
+        sliver_pairs: Pairs classified as junction slivers.
+        ref_geoms / target_geoms: Projected (metric) geometry lookups.
+        tolerance: Contiguity tolerance (meters) for corridor detection.
+        corridor_aware / max_turn_deg / *_name_lookup: Corridor gate config,
+            matching the optimizer so corridor ids agree with the grouping.
+
+    Returns:
+        ``(per_edge, per_group)`` where ``per_edge`` maps each pair to its
+        structure dict and ``per_group`` holds the group-level counts.
+    """
+    import networkx as nx
+
+    # Corridor ids from same-side contiguity (collinear-gated), so a corridor is
+    # a maximal collinear/same-name chain of segments.
+    def _corridor_index(ids, geoms, names):
+        groups = _find_contiguous_id_groups(
+            list(ids),
+            geoms,
+            tolerance,
+            require_collinear=corridor_aware,
+            max_turn_deg=max_turn_deg,
+            name_lookup=names,
+        )
+        return {sid: i for i, grp in enumerate(groups) for sid in grp}
+
+    ref_corridor = _corridor_index(ref_ids, ref_geoms, ref_name_lookup)
+    tgt_corridor = _corridor_index(target_ids, target_geoms, target_name_lookup)
+
+    # Candidate bipartite graph (slivers excluded — they are junction artifacts,
+    # not real adjacency).
+    g = nx.Graph()
+    g.add_nodes_from(("ref", r) for r in ref_ids)
+    g.add_nodes_from(("target", t) for t in target_ids)
+    structural_edges = [e for e in edges if e not in sliver_pairs]
+    for rid, tid in structural_edges:
+        g.add_edge(("ref", rid), ("target", tid))
+
+    degree = dict(g.degree())
+    bridge_set = set()
+    block_of_edge: dict[frozenset, int] = {}
+    largest_block = 0
+    if g.number_of_edges() > 0:
+        for a, b in nx.bridges(g):
+            bridge_set.add(frozenset((a, b)))
+        for i, block in enumerate(nx.biconnected_component_edges(g)):
+            block = list(block)
+            for a, b in block:
+                block_of_edge[frozenset((a, b))] = i
+            largest_block = max(largest_block, len(block))
+
+    # Assignment-components: connected components of the selected subgraph.
+    ga = nx.Graph()
+    for rid, tid in assignment_pairs:
+        ga.add_edge(("ref", rid), ("target", tid))
+    n_assignment_components = nx.number_connected_components(ga) if ga.number_of_edges() else 0
+
+    # Corridor-pairs actually connected by a (non-sliver) edge.
+    corridor_pairs = {
+        (ref_corridor.get(rid), tgt_corridor.get(tid)) for rid, tid in structural_edges
+    }
+    n_corridors = len(corridor_pairs) if corridor_pairs else 0
+
+    per_edge: dict[tuple[Any, Any], dict] = {}
+    for rid, tid in edges:
+        rn, tn = ("ref", rid), ("target", tid)
+        key = frozenset((rn, tn))
+        is_sliver = (rid, tid) in sliver_pairs
+        per_edge[(rid, tid)] = {
+            "degree_ref": int(degree.get(rn, 0)),
+            "degree_tgt": int(degree.get(tn, 0)),
+            "is_bridge": (not is_sliver) and key in bridge_set,
+            "biconnected_block": block_of_edge.get(key, -1) if not is_sliver else -1,
+            "corridor_ref": ref_corridor.get(rid, -1),
+            "corridor_tgt": tgt_corridor.get(tid, -1),
+            "selected": (rid, tid) in assignment_pairs,
+            "is_sliver": is_sliver,
+        }
+
+    per_group = {
+        "n_edges": len(edges),
+        "n_corridors": n_corridors,
+        "n_assignment_components": n_assignment_components,
+        "largest_biconnected_block": largest_block,
+    }
+    return per_edge, per_group
