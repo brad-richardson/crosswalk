@@ -15,18 +15,24 @@ uv pip install -e ".[hootenanny,dev]"
 
 ### Running Benchmarks
 
+`cbench` resolves reference/target/labels from `cbench/datasets.toml` by default, so
+the common case needs only a tool and a dataset name:
+
 ```bash
-# Run matcher on a dataset
+# Run matcher on a dataset (reference/target/labels come from datasets.toml)
+cbench run matcher us_boston_streets -c cbench/datasets.toml
+
+# Run every configured dataset
+cbench run-batch matcher -c cbench/datasets.toml
+
+# Explicit paths still override the config
 cbench run matcher us_boston_streets \
     --labels ../labels/human \
     --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     --target ../data/raw/us_boston_streets_v1.0.parquet
 
 # Run Hootenanny on the same dataset
-cbench run hootenanny us_boston_streets \
-    --labels ../labels/human \
-    --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
-    --target ../data/raw/us_boston_streets_v1.0.parquet \
+cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
     --opt hoot_dir=../../hootenanny
 
 # Compare results
@@ -35,6 +41,32 @@ cbench compare cbench_results.jsonl
 # List available tool adapters
 cbench list-tools
 ```
+
+#### Working directory and path resolution
+
+Paths in `datasets.toml` (both the `[defaults]` `data_dir` / `labels_dir` /
+`stitch_labels_dir` and the per-dataset filenames) are written **relative to the
+config file's directory**, and `cbench` resolves them that way — not relative to
+your current working directory. This means `cbench run` / `run-batch` work from
+any CWD (e.g. the repo root or the `cbench/` directory) and reliably find pair
+labels under `labels/human` and stitching labels under `labels/stitching`.
+Explicit `--labels`, `--reference`, `--target`, `--data-dir`, `--labels-dir`
+overrides are treated as CWD-relative (normal shell semantics).
+
+#### How the matcher adapter invokes matcher
+
+The matcher adapter shells out with `uv run matcher stitch ...`, executed with
+its working directory set to the **matcher repo root** (auto-detected as the
+directory containing `src/matcher`). Running via `uv run` from the repo root
+means:
+
+- matcher does not need to be on your `PATH`, and
+- matcher's relative model path (`data/models/matcher_model_combined.joblib`)
+  resolves correctly regardless of where you launched `cbench`.
+
+Override the invocation with `--opt matcher_cmd="matcher"` (to use a binary
+already on `PATH`) and/or `--opt repo_root=/path/to/matcher` (to point at a
+different checkout).
 
 ### Evaluation Modes
 
