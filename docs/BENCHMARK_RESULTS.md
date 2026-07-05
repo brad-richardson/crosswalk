@@ -1,5 +1,7 @@
 # Benchmark Results
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench` (a deprecated `cbench` alias still forwards)._
+
 First recorded head-to-head of `matcher` against baselines — the naive geometric
 floor, Hootenanny (classical vector conflation), and **Valhalla Meili** (modern
 map-matching) — produced with the `cbench` harness and evaluated against

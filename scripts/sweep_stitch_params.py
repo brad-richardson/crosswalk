@@ -20,12 +20,12 @@ import geopandas as gpd
 import pandas as pd
 from loguru import logger
 
-# Add matcher and cbench to path
+# Add matcher and mbench to path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).parents[1] / "cbench" / "src"))
+sys.path.insert(0, str(Path(__file__).parents[1] / "mbench" / "src"))
 
-from cbench.eval.labels import load_stitch_labels
-from cbench.eval.stitch_metrics import StitchEvalResult, evaluate_stitch_groups
+from mbench.eval.labels import load_stitch_labels
+from mbench.eval.stitch_metrics import StitchEvalResult, evaluate_stitch_groups
 
 from matcher.config import DEFAULT_SNAP_TOLERANCE_M
 from matcher.matching.optimizer import optimize_matches_with_grouping

@@ -1,5 +1,7 @@
 # Valhalla Meili map-matching baseline — result & path-based-formulation pilot
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench`._
+
 This records the first Valhalla **Meili** (map-matching) baseline in `cbench` and
 reads it as a **pilot of the path-based-formulation bet** in
 `docs/EVAL_ROADMAP.md` (§Architecture assessment #3):

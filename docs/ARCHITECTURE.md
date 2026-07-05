@@ -320,5 +320,5 @@ ratifications are left untouched; idempotent, with a `.csv.bak` backup).
 match (the stitch gate's enforced metrics). Set labels are excluded from those
 pools and scored on membership exact-match / boundary precision / coverage — see
 BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
-`matcher.agent_labeling.stitch_eval` and the matcher-free `cbench.eval.stitch_metrics`,
-parity-guarded by `tests/unit/test_cbench_set_metric_parity.py`.
+`matcher.agent_labeling.stitch_eval` and the matcher-free `mbench.eval.stitch_metrics`,
+parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.

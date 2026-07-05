@@ -1,62 +1,62 @@
 # Benchmarking Guide
 
-This guide explains how to benchmark matcher against external tools like Hootenanny using `cbench`.
+This guide explains how to benchmark matcher against external tools like Hootenanny using `mbench`.
 
-## cbench CLI
+## mbench CLI
 
-`cbench` is the standalone benchmarking harness in `matcher/cbench/`. It runs conflation tools and evaluates their output against human-labeled ground truth.
+`mbench` is the standalone benchmarking harness in `matcher/mbench/`. It runs conflation tools and evaluates their output against human-labeled ground truth.
 
 ### Installation
 
 ```bash
-cd matcher/cbench
+cd matcher/mbench
 uv pip install -e ".[hootenanny,dev]"
 ```
 
 ### Running Benchmarks
 
-`cbench` resolves reference/target/labels from `cbench/datasets.toml` by default, so
+`mbench` resolves reference/target/labels from `mbench/datasets.toml` by default, so
 the common case needs only a tool and a dataset name:
 
 ```bash
 # Run matcher on a dataset (reference/target/labels come from datasets.toml)
-cbench run matcher us_boston_streets -c cbench/datasets.toml
+mbench run matcher us_boston_streets -c mbench/datasets.toml
 
 # Run every configured dataset
-cbench run-batch matcher -c cbench/datasets.toml
+mbench run-batch matcher -c mbench/datasets.toml
 
 # Explicit paths still override the config
-cbench run matcher us_boston_streets \
+mbench run matcher us_boston_streets \
     --labels ../labels/human \
     --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     --target ../data/raw/us_boston_streets_v1.0.parquet
 
 # Run Hootenanny on the same dataset. NOTE: --opt values are explicit overrides
 # and are CWD-relative, so `hoot_dir=../../hootenanny` assumes you are in
-# `matcher/cbench`. From the repo root use `--opt hoot_dir=../hootenanny`, or
+# `matcher/mbench`. From the repo root use `--opt hoot_dir=../hootenanny`, or
 # pass an absolute path to be CWD-independent.
-cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+mbench run hootenanny us_boston_streets -c mbench/datasets.toml \
     --opt hoot_dir=../../hootenanny
 
 # Run the naive geometric baseline (the benchmark floor - pure buffer overlap,
 # no learning, no names, no topology). Fast and dependency-light.
-cbench run naive us_boston_streets -c cbench/datasets.toml \
+mbench run naive us_boston_streets -c mbench/datasets.toml \
     --opt buffer_m=15 --opt min_overlap=0.30 --opt angle_tol_deg=35
 
 # Compare results
-cbench compare cbench_results.jsonl
+mbench compare mbench_results.jsonl
 
 # List available tool adapters
-cbench list-tools
+mbench list-tools
 ```
 
 #### Working directory and path resolution
 
 Paths in `datasets.toml` (both the `[defaults]` `data_dir` / `labels_dir` /
 `stitch_labels_dir` and the per-dataset filenames) are written **relative to the
-config file's directory**, and `cbench` resolves them that way — not relative to
-your current working directory. This means `cbench run` / `run-batch` work from
-any CWD (e.g. the repo root or the `cbench/` directory) and reliably find pair
+config file's directory**, and `mbench` resolves them that way — not relative to
+your current working directory. This means `mbench run` / `run-batch` work from
+any CWD (e.g. the repo root or the `mbench/` directory) and reliably find pair
 labels under `labels/human` and stitching labels under `labels/stitching`.
 Explicit `--labels`, `--reference`, `--target`, `--data-dir`, `--labels-dir`
 overrides are treated as CWD-relative (normal shell semantics).
@@ -70,7 +70,7 @@ means:
 
 - matcher does not need to be on your `PATH`, and
 - matcher's relative model path (`data/models/matcher_model_combined.joblib`)
-  resolves correctly regardless of where you launched `cbench`.
+  resolves correctly regardless of where you launched `mbench`.
 
 Override the invocation with `--opt matcher_cmd="matcher"` (to use a binary
 already on `PATH`) and/or `--opt repo_root=/path/to/matcher` (to point at a
@@ -78,7 +78,7 @@ different checkout).
 
 ### Evaluation Modes
 
-cbench supports two evaluation levels via `--match-level`:
+mbench supports two evaluation levels via `--match-level`:
 
 - **target** (default): Target-level matching. A labeled match target is a TP if
   it appears in *any* prediction, regardless of which reference segment was chosen,
@@ -94,10 +94,10 @@ cbench supports two evaluation levels via `--match-level`:
 
 ```bash
 # Default: target-level evaluation
-cbench run matcher us_boston_streets --labels ../labels/human ...
+mbench run matcher us_boston_streets --labels ../labels/human ...
 
 # Strict pair-level evaluation
-cbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
+mbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
 ```
 
 Note that precision only counts errors against labeled ground truth — a
@@ -118,14 +118,14 @@ the optimizer's final M:N group edge selection against curated stitching labels
 
 ```bash
 # Enforce the gate on one dataset (nonzero exit if it regresses below its floor)
-cbench run matcher us_boston_streets -c cbench/datasets.toml --gate
+mbench run matcher us_boston_streets -c mbench/datasets.toml --gate
 
 # Enforce across all configured datasets
-cbench run-batch matcher -c cbench/datasets.toml --gate
+mbench run-batch matcher -c mbench/datasets.toml --gate
 ```
 
-With `--gate`, cbench compares each dataset's **sliver-filtered** edge-F1 and
-exact-match against the per-dataset floors in `cbench/datasets.toml`
+With `--gate`, mbench compares each dataset's **sliver-filtered** edge-F1 and
+exact-match against the per-dataset floors in `mbench/datasets.toml`
 (`[gate.<dataset>]`) and **exits nonzero** if any *armed* dataset falls below.
 Without `--gate` the stitch metrics are still computed and printed (non-blocking).
 
@@ -137,8 +137,8 @@ pairs no human endorsed. Set labels are reported separately on three components:
 **membership exact-match**, **boundary precision** (no selected edge connects a
 member to a non-member), and **coverage** (every member has ≥1 selected incident
 edge). These set metrics are computed and printed alongside the pair metrics
-(and replicated matcher-free in cbench, parity-guarded by
-`tests/unit/test_cbench_set_metric_parity.py`); they are **not** yet gated —
+(and replicated matcher-free in mbench, parity-guarded by
+`tests/unit/test_mbench_set_metric_parity.py`); they are **not** yet gated —
 `[gate.<dataset>]` only floors the pair edge-F1 / exact-match. A set-metric floor
 can be armed later with no code change once the mapped set-label base is large
 enough (same auto-arm mechanism).
@@ -149,7 +149,7 @@ parquet + its `*_groups.json` sidecar), which don't exist in GitHub Actions
 **pre-merge checklist for matching-logic PRs**, run locally against fresh Boston
 output. The gate *machinery* itself (mapping, sliver filtering, arming, floor
 logic) is unit-tested in CI on a committed miniature fixture
-(`cbench/tests/test_gate.py`).
+(`mbench/tests/test_gate.py`).
 
 **Auto-arming.** Each `[gate.<dataset>]` block sets `min_mapped_groups`: the
 floor is enforced only once at least that many curated labels map to current
@@ -163,10 +163,10 @@ gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 
 **Adding / updating a floor.** Re-measure the baseline against fresh output
-(`cbench run matcher <dataset>` prints the stitch block), then set
+(`mbench run matcher <dataset>` prints the stitch block), then set
 `f1_filtered_floor` / `exact_filtered_floor` to baseline − margin (LOO-gate
 style: ~0.05 on F1, wider on the noisier exact-match) and `min_mapped_groups` to
-~30. Update the block in `cbench/datasets.toml`.
+~30. Update the block in `mbench/datasets.toml`.
 
 ## Hootenanny Setup
 
@@ -175,7 +175,7 @@ from NGA. For our purposes we care only about the **matches it finds** (segment 
 segment correspondences), not its merged geometry — see the scope note in
 `BENCHMARK_RESULTS.md`. We run full `hoot conflate` only because hoot's match
 decisions are observable only through the conflated output (its
-`conflate.match.only` mode discards them); the cbench adapter then extracts
+`conflate.match.only` mode discards them); the mbench adapter then extracts
 correspondences from the `matcher_ref_*` / `matcher_tgt_*` provenance tags and
 review relations and ignores the merged geometry.
 
@@ -191,7 +191,7 @@ docker run --rm --platform linux/amd64 --entrypoint /usr/bin/hoot \
     hootenanny/run:0.2.41-1 version    # -> Hootenanny 0.2.41
 
 # Run the benchmark (adapter drives `docker run` for you):
-uv run cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+uv run mbench run hootenanny us_boston_streets -c mbench/datasets.toml \
     --opt hoot_image=hootenanny/run:0.2.41-1
 ```
 
@@ -246,7 +246,7 @@ make -f Makefile.docker up
 docker compose exec core-services /var/lib/hootenanny/bin/hoot --version
 
 # Then point the adapter at the checkout instead of an image:
-#   uv run cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+#   uv run mbench run hootenanny us_boston_streets -c mbench/datasets.toml \
 #       --opt hoot_dir=../hootenanny
 ```
 
@@ -262,7 +262,7 @@ so run it **standalone** off the image with the source checkout bind-mounted at
 OOM-prone service startup:
 
 ```bash
-# On the x86 box. cbench builds the OSM inputs locally (see cbench.convert.osm);
+# On the x86 box. mbench builds the OSM inputs locally (see mbench.convert.osm);
 # scp them to <workdir> alongside where the output should land.
 docker run --rm --cpus 12 --memory 40g --user "$(id -u):$(id -g)" \
   -e HOOT_HOME=/var/lib/hootenanny \
@@ -278,9 +278,9 @@ docker run --rm --cpus 12 --memory 40g --user "$(id -u):$(id -g)" \
 # not affect wall time. /usr/bin/time -v reports Elapsed + Maximum resident set.
 ```
 
-Then `scp` `<out>.osm` back next to the `_reference.osm`/`_target.osm` cbench
+Then `scp` `<out>.osm` back next to the `_reference.osm`/`_target.osm` mbench
 wrote, and score with the adapter's own eval:
-`cbench run hootenanny <dataset> --opt skip_conflate=True`.
+`mbench run hootenanny <dataset> --opt skip_conflate=True`.
 
 > **0.2.87 caveat:** the default/Unifying `LinearSnapMerger` **aborts** in the
 > merge phase (`No node ID specified for RemoveNodeByEid`) on synthetic
@@ -290,11 +290,11 @@ wrote, and score with the adapter's own eval:
 > representation differs. Tag-only merge is near-faithful on finely-segmented data
 > (footways) but under-surfaces sub-segment road matches — see
 > [`research/hoot_native_baseline.md`](../research/hoot_native_baseline.md).
-> There is no built-in remote-execution mode in cbench; this is a manual recipe.
+> There is no built-in remote-execution mode in mbench; this is a manual recipe.
 
 ### OSM Conversion
 
-cbench handles GeoParquet to OSM conversion automatically when running the Hootenanny adapter. The converter:
+mbench handles GeoParquet to OSM conversion automatically when running the Hootenanny adapter. The converter:
 
 - Creates OSM `<node>` elements for vertices
 - Creates OSM `<way>` elements for each LineString
@@ -316,7 +316,7 @@ across many short Overture segments). Results + analysis:
 
 ### Pipeline (all handled by the adapter)
 
-1. **Overture → OSM PBF** (`cbench/convert/pbf.py`): each Overture segment becomes
+1. **Overture → OSM PBF** (`mbench/convert/pbf.py`): each Overture segment becomes
    a way carrying its **GERS id as the OSM `way_id`** (via a JSON sidecar), with
    vertices collapsed by rounded coordinate (≈1 cm) so shared connectors become
    shared nodes → a routable graph. Every way gets a routable `highway=*` tag.
@@ -329,13 +329,13 @@ across many short Overture segments). Results + analysis:
 ### Install & run
 
 `pyvalhalla` ships **native-ARM** Valhalla binaries (no Docker, no emulation → valid
-timing) but requires **Python ≥ 3.12**, so run cbench from a 3.12 env:
+timing) but requires **Python ≥ 3.12**, so run mbench from a 3.12 env:
 
 ```bash
-uv pip install -e "cbench[meili]" --python 3.12   # geopandas + pyosmium + pyvalhalla
-uv run --python 3.12 cbench run meili us_boston_streets -c cbench/datasets.toml
+uv pip install -e "mbench[meili]" --python 3.12   # geopandas + pyosmium + pyvalhalla
+uv run --python 3.12 mbench run meili us_boston_streets -c mbench/datasets.toml
 # sidewalks (Fort Collins / Seattle): pedestrian costing (the default) covers footways
-uv run --python 3.12 cbench run meili us_fort_collins_sidewalks -c cbench/datasets.toml
+uv run --python 3.12 mbench run meili us_fort_collins_sidewalks -c mbench/datasets.toml
 ```
 
 Key `--opt`s (defaults in parentheses): `costing` (`pedestrian` — bidirectional,
@@ -370,7 +370,7 @@ trace to `/trace_attributes`.
 
 Verification of the open-source conflation / map-matching landscape as a source
 of benchmark baselines (verified July 2026). "Integration cost" is the effort to
-build a headless cbench adapter that takes two road-linework sets (reference =
+build a headless mbench adapter that takes two road-linework sets (reference =
 Overture segments, target = local roads) and emits matches.
 
 **Viability is weighted by MATCH-stage output**: can the tool produce
@@ -380,7 +380,7 @@ baseline only needs to emit "local segment X ↔ Overture segment Y" pairs.
 
 | Tool | Status (Jul 2026) | Headless linework viability | Integration cost |
 |------|-------------------|-----------------------------|------------------|
-| **Naive geometric** (this repo) | shipped in `cbench` | Native — the benchmark floor | done |
+| **Naive geometric** (this repo) | shipped in `mbench` | Native — the benchmark floor | done |
 | **Hootenanny** (`ngageoint/hootenanny`) | Active, not archived; latest **v0.2.87 (2024-10)**, ~9-month release gap since; GPL-3.0 | Strong — `hoot conflate` is purpose-built vector-to-vector road conflation | **Medium–High.** No official multi-arch image, but usable **prebuilt amd64 images exist on Docker Hub** (`hootenanny/rpmbuild-hoot-release:latest`, 2024-08; `hootenanny/run:0.2.41-1`, 2018). Runs under emulation on Apple Silicon. The from-source `docker-compose` build (EL/CentOS, GDAL/GEOS/PROJ/v8/node) is the high-cost path; the prebuilt image is the low-cost path. |
 | **SharedStreets `shst match`** (`sharedstreets/sharedstreets-js`) | **Effectively abandoned** (last real release v0.15.2, May 2020) | Conceptual fit, but matches to the global SharedStreets reference tiles, not to an arbitrary supplied reference set — impedance mismatch with our ref/target contract | **High.** Needs ancient Node (10–14) in a pinned container; `node-gyp` native deps fail on Node 20/22. Depends on an unmaintained tile backend. **Recommend against.** |
 | **Valhalla Meili** (map-matching) | **Actively maintained**, clean multi-arch Docker | Yes — feed each segment as a synthetic GPS trace to `trace_attributes` with `map_snap`. A 2025 arXiv paper conflated 1.78M VDOT segments this way (>98% coverage, 2.5 m median error) | **Medium.** Main work: convert Overture → OSM-PBF → build the routable graph; densify segments into traces; handle one-way/direction; map matched edges back to Overture IDs. Needs a running Valhalla service (single container fine at benchmark scale). |
@@ -418,7 +418,7 @@ concrete, maintained options (build one, not both):
 arXiv recipe conflated 1.78M road segments this way (>98% coverage, 2.5 m median).
 
 - Runtime: official multi-arch Docker `ghcr.io/valhalla/valhalla:latest` (ARM-native, no emulation).
-- Pipeline: (1) convert Overture segments → OSM PBF (reuse `cbench/convert/osm.py`
+- Pipeline: (1) convert Overture segments → OSM PBF (reuse `mbench/convert/osm.py`
   geometry logic, emit PBF via `osmium`); (2) `valhalla_build_tiles`; (3) POST each
   target segment to the local `/trace_attributes` endpoint with
   `{"shape":[...], "costing":"auto", "shape_match":"map_snap"}`; (4) read
@@ -468,7 +468,7 @@ dependency for A and B.
 
 **"No node ID specified for RemoveNodeByEid":**
 - Known LinearSnapMerger bug triggered by shared connector nodes
-- The cbench adapter skips reference connectors by default to avoid this
+- The mbench adapter skips reference connectors by default to avoid this
 
 ### Conversion Issues
 

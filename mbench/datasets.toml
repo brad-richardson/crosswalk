@@ -1,0 +1,91 @@
+# mbench dataset configuration
+# Paths are filenames resolved against data_dir / labels_dir at runtime.
+
+[defaults]
+data_dir = "../data/raw"
+labels_dir = "../labels/human"
+stitch_labels_dir = "../labels/stitching"
+
+# Stitch-level quality gate (enforced only with `mbench run[-batch] --gate`).
+#
+# Each [gate.<dataset>] block sets a per-dataset floor on the SLIVER-FILTERED
+# stitch metrics of the optimizer's group edge selection. The gate AUTO-ARMS:
+# a floor is enforced only once >= min_mapped_groups curated stitching labels
+# map to current pipeline groups; below that the gate reports skip_unarmed
+# (non-blocking), so growing the label base engages the gate with no code
+# change. Floors are baseline-minus-margin, mirroring tests/regression/
+# test_loo_cv.py. Re-measure and update when the label base or optimizer shifts
+# materially (see docs/BENCHMARKING.md "Stitch-level quality gate").
+#
+# us_boston_streets baseline (2026-07-05, post-#295/#298 set-semantics
+# reinterpretation; 123 labels, 3 converted to set semantics -> 111 mapped PAIR
+# groups): filtered edge-F1 0.8858, filtered exact-match 0.5946, 0 sliver-
+# affected. Floors: F1 0.8858-0.0558 -> 0.83; exact 0.5946-0.0946 -> 0.50 (wider
+# margin: per-group exact-match is the noisier metric). Set labels are scored
+# separately (membership/boundary/coverage) and are NOT gated: only 3 mapped set
+# labels exist, far below any sensible arming base — no set floor is invented
+# (see docs/BENCHMARKING.md "Stitch-level quality gate").
+[gate.us_boston_streets]
+min_mapped_groups = 30
+f1_filtered_floor = 0.83
+exact_filtered_floor = 0.50
+
+[datasets.us_boston_bike_network]
+reference = "us_boston_bike_network_overture_segments_v1.0.parquet"
+target = "us_boston_bike_network_v1.0.parquet"
+connectors = "us_boston_bike_network_overture_connectors_v1.0.parquet"
+
+[datasets.us_frisco_trails]
+reference = "us_frisco_trails_overture_segments_v1.0.parquet"
+target = "us_frisco_trails_v1.0.parquet"
+connectors = "us_frisco_trails_overture_connectors_v1.0.parquet"
+
+[datasets.au_melbourne_roads]
+reference = "au_melbourne_roads_overture_segments_v1.0.parquet"
+target = "au_melbourne_roads_v1.0.parquet"
+connectors = "au_melbourne_roads_overture_connectors_v1.0.parquet"
+
+[datasets.us_austin_sidewalks]
+reference = "us_austin_sidewalks_overture_segments_v1.0.parquet"
+target = "us_austin_sidewalks_v1.0.parquet"
+connectors = "us_austin_sidewalks_overture_connectors_v1.0.parquet"
+
+[datasets.us_boston_streets]
+reference = "us_boston_streets_overture_segments_v1.0.parquet"
+target = "us_boston_streets_v1.0.parquet"
+connectors = "us_boston_streets_overture_connectors_v1.0.parquet"
+
+[datasets.us_montana_helena]
+reference = "us_montana_helena_overture_segments_v1.0.parquet"
+target = "us_montana_helena_v1.0.parquet"
+connectors = "us_montana_helena_overture_connectors_v1.0.parquet"
+
+[datasets.us_usfs_lolo]
+reference = "us_usfs_lolo_overture_segments_v1.0.parquet"
+target = "us_usfs_lolo_v1.0.parquet"
+connectors = "us_usfs_lolo_overture_connectors_v1.0.parquet"
+
+[datasets.ke_kisumu_roads]
+reference = "ke_kisumu_roads_overture_segments_v1.0.parquet"
+target = "ke_kisumu_roads_v1.0.parquet"
+connectors = "ke_kisumu_roads_overture_connectors_v1.0.parquet"
+
+[datasets.us_fort_collins_streets]
+reference = "us_fort_collins_streets_overture_segments_v1.0.parquet"
+target = "us_fort_collins_streets_v1.0.parquet"
+connectors = "us_fort_collins_streets_overture_connectors_v1.0.parquet"
+
+[datasets.us_fort_collins_sidewalks]
+reference = "us_fort_collins_sidewalks_overture_segments_v1.0.parquet"
+target = "us_fort_collins_sidewalks_v1.0.parquet"
+connectors = "us_fort_collins_sidewalks_overture_connectors_v1.0.parquet"
+
+[datasets.de_berlin_roads]
+reference = "de_berlin_roads_overture_segments_v1.0.parquet"
+target = "de_berlin_roads_v1.0.parquet"
+connectors = "de_berlin_roads_overture_connectors_v1.0.parquet"
+
+[datasets.in_mumbai_streets]
+reference = "in_mumbai_streets_overture_segments_v1.0.parquet"
+target = "in_mumbai_streets_v1.0.parquet"
+connectors = "in_mumbai_streets_overture_connectors_v1.0.parquet"

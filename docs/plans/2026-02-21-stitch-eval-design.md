@@ -1,5 +1,7 @@
 # Stitch-Level Evaluation in cbench
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). This is a historical design doc; "cbench" throughout refers to what is now `mbench`._
+
 ## Context
 
 The matcher's optimizer resolves M:N match groups using confidence-based greedy assignment, contiguity checks, and connected component detection. The main failure modes observed are:

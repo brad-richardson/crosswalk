@@ -1,5 +1,7 @@
 # Stitch-Level Evaluation Implementation Plan
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). This is a historical implementation plan; "cbench" throughout refers to what is now `mbench`._
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add group-level edge precision/recall evaluation to cbench using curated stitching labels, complementing existing pair-level F1.

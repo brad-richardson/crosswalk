@@ -39,7 +39,7 @@ for single-node operation.
   correspondences — the road gap to matcher is now precision, not recall), so
   the case for ML rests on dense parallel geometry where buffer+bearing can't
   separate near-parallel candidates and recall stays near 0.2.
-- **Stitch quality is gated**: cbench `--gate` enforces sliver-filtered edge-F1
+- **Stitch quality is gated**: mbench `--gate` enforces sliver-filtered edge-F1
   ≥ 0.78 / exact ≥ 0.45 on Boston (baseline 0.8345 / 0.537, 67 mapped labels,
   armed). Seattle arms automatically at 30 mapped labels (currently 27).
 - **Ground truth**: 140 curated stitching labels (113 Boston / 27 Seattle);
@@ -143,7 +143,7 @@ re-optimize-without-rescore fast-path (`factory reoptimize`, ~2 s from the score
 cache); and the per-release GERS churn delta report (`factory delta`). The
 pipeline was refactored minimally to expose score-then-optimize as separable seams
 (`load_and_filter_inputs` / `optimize_and_export`) — the normal `matcher stitch`
-path is behavior-identical and the stitch tests / cbench gate stay green.
+path is behavior-identical and the stitch tests / mbench gate stay green.
 Still open under M4: adopting Boston/Seattle into the factory layout (they stay on
 the legacy `data/output/` path for now to keep the review queues stable),
 box deployment, and the inventory repair below.

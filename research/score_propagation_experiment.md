@@ -1,5 +1,7 @@
 # Structure-Aware Score Propagation — Experiment Record
 
+> _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench`._
+
 **Status: NEGATIVE result → recommend GRAVEYARD (prototype kept, flag-gated OFF).**
 **Date:** 2026-07-03
 **Branch:** `experiment/score-propagation`
