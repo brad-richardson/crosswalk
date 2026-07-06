@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 
 import pandas as pd
 import pytest
@@ -1649,9 +1650,37 @@ def _attempt(invoker, retries=1, budget=300.0):
     )
 
 
+class _FakeClock:
+    """Deterministic monotonic clock: only sleep() advances time.
+
+    Lets the backoff/deadline logic run through many iterations with zero real
+    wall-clock, so budget exhaustion and exponential backoff are actually
+    exercised — a no-op sleep would freeze ``remaining`` and never exhaust the
+    budget, leaving the core mechanism untested.
+    """
+
+    def __init__(self):
+        self.t = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, s):
+        self.sleeps.append(s)
+        self.t += s
+
+
+def _install_fake_clock(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(sr.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(sr.time, "sleep", clock.sleep)
+    return clock
+
+
 def test_persistent_invocation_error_hard_fails(monkeypatch):
     """A provider that keeps failing (e.g. quota) raises, not abstains."""
-    monkeypatch.setattr(sr.time, "sleep", lambda *_: None)
+    _install_fake_clock(monkeypatch)
 
     def always_fail(*_a, **_k):
         raise RuntimeError("opencode exited with code 1: 429 insufficient_quota")
@@ -1660,9 +1689,37 @@ def test_persistent_invocation_error_hard_fails(monkeypatch):
         _attempt(always_fail, budget=0.0)
 
 
+def test_budget_exhaustion_backs_off_exponentially(monkeypatch):
+    """Persistent failure retries with doubling backoff until the budget is spent."""
+    clock = _install_fake_clock(monkeypatch)
+
+    def always_fail(*_a, **_k):
+        raise RuntimeError("exited with code 1: network unreachable")
+
+    with pytest.raises(sr.ProviderInvocationError):
+        _attempt(always_fail, budget=300.0)
+    # Exponential backoff (5,10,20,40,...), capped at 60, final sleep clamped to
+    # the remaining budget; the clock only advances via sleep, so the sleeps sum
+    # to exactly the budget.
+    assert clock.sleeps[:4] == [5.0, 10.0, 20.0, 40.0]
+    assert max(clock.sleeps) == 60.0
+    assert abs(sum(clock.sleeps) - 300.0) < 1e-6
+
+
+def test_timeout_hard_fails_after_budget(monkeypatch):
+    """A persistent timeout is an invocation failure -> hard-fail (chosen scope)."""
+    _install_fake_clock(monkeypatch)
+
+    def always_timeout(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=5)
+
+    with pytest.raises(sr.ProviderInvocationError, match="timeout after"):
+        _attempt(always_timeout, budget=30.0)
+
+
 def test_invocation_error_recovers_within_budget(monkeypatch):
     """A transient failure that clears on retry yields a normal vote (no raise)."""
-    monkeypatch.setattr(sr.time, "sleep", lambda *_: None)
+    _install_fake_clock(monkeypatch)
     calls = {"n": 0}
 
     def flaky(*_a, **_k):
@@ -1676,6 +1733,20 @@ def test_invocation_error_recovers_within_budget(monkeypatch):
     assert calls["n"] == 2  # failed once, succeeded on retry
 
 
+def test_unexpected_exception_propagates_not_retried(monkeypatch):
+    """A programming bug in an invoker must fail fast, not masquerade as quota."""
+    _install_fake_clock(monkeypatch)
+    calls = {"n": 0}
+
+    def buggy(*_a, **_k):
+        calls["n"] += 1
+        raise AttributeError("'NoneType' object has no attribute 'foo'")
+
+    with pytest.raises(AttributeError):
+        _attempt(buggy, budget=300.0)
+    assert calls["n"] == 1  # not caught, not retried across the budget
+
+
 def test_parse_error_still_abstains_not_hard_fail():
     """Malformed output abstains (soft) — it must NOT halt the run."""
 
@@ -1685,3 +1756,23 @@ def test_parse_error_still_abstains_not_hard_fail():
     vote = _attempt(garbage, retries=1)
     assert vote.choice == "ABSTAIN"
     assert "parse/validation" in vote.error
+
+
+def test_hard_fail_propagates_through_run_provider_on_group(monkeypatch):
+    """run_provider_on_group must not swallow ProviderInvocationError."""
+    _install_fake_clock(monkeypatch)
+
+    def always_fail(*_a, **_k):
+        raise RuntimeError("exited with code 1: quota exceeded")
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", always_fail)
+    with pytest.raises(sr.ProviderInvocationError):
+        sr.run_provider_on_group(
+            sr.ProviderSpec(name="claude", model="m"),
+            "g1",
+            None,  # group_dir None -> skip scratch pack
+            "prompt",
+            ["A"],
+            {"A": [("r1", "t1")]},
+            invocation_budget_s=0.0,
+        )

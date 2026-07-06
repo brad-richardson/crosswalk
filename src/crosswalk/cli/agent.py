@@ -1046,6 +1046,12 @@ def run_stitch_panel(
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch dir with evidence packs"),
     group_ids: str = typer.Option(None, "--group-ids", help="Comma-separated subset to run"),
     timeout: int = typer.Option(240, "--timeout", help="Per-provider timeout (s)"),
+    invocation_budget: float = typer.Option(
+        300.0,
+        "--invocation-budget",
+        help="Seconds to back off + retry a down provider (quota/rate-limit/network) "
+        "before hard-failing the run. Worst-case wall time is this + one --timeout.",
+    ),
     limit: int = typer.Option(0, "--limit", "-l", help="Max groups (0=all)"),
     claude_model: str = typer.Option("claude-opus-4-8", "--claude-model"),
     claude_effort: str = typer.Option("medium", "--claude-effort"),
@@ -1133,6 +1139,7 @@ def run_stitch_panel(
             limit=limit,
             collect_feedback=pack_feedback,
             resume=resume,
+            invocation_budget_s=invocation_budget,
         )
     except ProviderInvocationError as e:
         console.print(f"[red]Panel halted — provider down:[/red] {e}")
