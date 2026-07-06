@@ -153,14 +153,14 @@ SDOT's own description):
   matched extents (`min(start)`–`max(end)` across bridge rows) for one clean
   line per segment; per-row `ST_LineSubstring` gives exact per-match pieces.
 - **This bridge is not published yet.** `us_seattle_sidewalks` is still on the
-  legacy `data/output/` path (not yet adopted into the factory) and its source
-  license sits in `pending_review` in `datasets/licenses.toml` pending the
-  registry's human review — the demo reads the local parquet. Note the license
-  review is a real open item, not a formality: the license research panel
-  (`research/license_burndown_2026_07.md`) found the ArcGIS item itself carries
-  no named open license (only an accuracy disclaimer), so the applicable terms
-  are the City of Seattle Open Data Policy cited below, and a human needs to
-  confirm they cover redistribution before the bridge ships.
+  legacy `data/output/` path (not yet adopted into the factory) — the demo reads
+  the local parquet. The source license IS cleared: after the research panel
+  flagged that the ArcGIS item carries no named open license
+  (`research/license_burndown_2026_07.md`), a dedicated adversarial review
+  (`research/seattle_license_clearance.md`) confirmed the current City of
+  Seattle Open Data Terms impose no redistribution restriction, and the entry
+  was human-approved on 2026-07-06. What remains before publishing is
+  engineering, not legal: the COMPKEY re-key and factory adoption.
 
 ## The ID caveat (and the upstream fix)
 
