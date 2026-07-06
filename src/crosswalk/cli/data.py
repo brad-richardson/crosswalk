@@ -2205,21 +2205,40 @@ def stitch_batch(
         help="Number of top-K organic alternatives per group (default: 8; "
         "two whole-group seed options are appended on top)",
     ),
+    include_unvoted: bool = typer.Option(
+        False,
+        "--include-unvoted",
+        help="Escape hatch: restore the legacy behavior of sampling ANY "
+        "unreviewed group (including groups the agent panel never voted on). "
+        "By default the human queue is gated to groups the panel routed to "
+        "human_review, so it only surfaces panel failures.",
+    ),
 ):
-    """Generate a curated batch of M:N groups for stitching review.
+    """Generate a curated batch of M:N groups for HUMAN stitching review.
 
-    Reads the groups sidecar JSON from pipeline output, scores groups
-    by review value (label overlap + borderline confidence), and writes
-    a batch file with pre-computed alternatives.
+    Reads the groups sidecar JSON from pipeline output, scores groups by review
+    value, and writes ``data/cache/stitch/{dataset}_batch.json`` for the web
+    ``/stitching-review`` queue.
+
+    By default the queue is GATED to groups the agent panel could not
+    auto-accept (routed to ``human_review`` in ``data/agents/stitching/batches``,
+    most-recent vote per group). This keeps the human's time on genuine panel
+    failures rather than never-voted calibration samples. The tier sampling still
+    runs, but only over that gated pool. Pass ``--include-unvoted`` to restore the
+    legacy behavior of sampling any unreviewed group. (The agent PANEL feed —
+    ``crosswalk agent stitch-batch`` — is unaffected and keeps sampling fresh
+    groups.)
 
     Examples:
-        crosswalk data stitch-batch us_boston_streets        # Single dataset
+        crosswalk data stitch-batch us_boston_streets        # Panel-failure queue
         crosswalk data stitch-batch --all                    # All datasets with groups
         crosswalk data stitch-batch us_boston_streets -n 30  # Custom batch size
+        crosswalk data stitch-batch us_boston_streets --include-unvoted  # Legacy
     """
     import json
     from datetime import UTC, datetime
 
+    from ..agent_labeling.panel_routing import panel_failed_group_ids
     from ..filenames import (
         PROJECT_ROOT,
         groups_sidecar_path,
@@ -2291,6 +2310,29 @@ def stitch_batch(
         reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
         console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
 
+        # Gate the human queue to groups the agent panel routed to human_review
+        # (unless --include-unvoted). Restrict to the current sidecar's group ids
+        # so stale votes on ids that no longer exist (re-segmentation) are
+        # dropped. Passing this allow-list to select_stitching_batch confines the
+        # tier sampling to panel failures.
+        candidate_ids: set[str] | None = None
+        if not include_unvoted:
+            sidecar_ids = {g.get("group_id") for g in groups}
+            failed_ids = panel_failed_group_ids(ds_name)
+            candidate_ids = failed_ids & sidecar_ids
+            eligible = candidate_ids - reviewed_ids
+            console.print(
+                f"  Panel-failure gate: {len(failed_ids)} routed to human_review, "
+                f"{len(candidate_ids)} in current sidecar, {len(eligible)} unreviewed "
+                f"(use --include-unvoted to sample all groups)"
+            )
+            if not eligible:
+                console.print(
+                    "  [yellow]No unreviewed panel failures — writing an empty queue. "
+                    "Run the agent panel (crosswalk agent stitch-batch/stitch-run) to "
+                    "produce more, or pass --include-unvoted.[/yellow]"
+                )
+
         # Pre-compute alternatives per group. These drive both the batch
         # selection scoring AND the review UI's one-click option picker, so
         # they are intentionally retained in the batch file. Alternatives are
@@ -2310,10 +2352,25 @@ def stitch_batch(
             groups=groups,
             reviewed_group_ids=reviewed_ids,
             k=batch_size,
+            candidate_group_ids=candidate_ids,
         )
 
         if not selected:
             console.print("  [yellow]No groups selected for batch[/yellow]")
+            if not include_unvoted:
+                # Gating is active and nothing qualified. Write an EMPTY queue so
+                # a previously-generated (ungated) batch is not left serving stale
+                # never-voted groups to the reviewer.
+                empty_batch = {
+                    "dataset_id": ds_name,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "batch_size": 0,
+                    "groups": [],
+                }
+                empty_path = stitch_batch_path(ds_name)
+                empty_path.parent.mkdir(parents=True, exist_ok=True)
+                empty_path.write_text(json.dumps(empty_batch, indent=2))
+                console.print(f"  [green]Wrote empty queue to {empty_path}[/green]")
             continue
 
         # NOTE: alternatives and optimizer_assignment are deliberately kept on
