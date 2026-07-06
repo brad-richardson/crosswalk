@@ -856,6 +856,8 @@ class MLMatcher:
         # in train()). None => predict() returns raw XGBoost probabilities.
         self.calibrator: IsotonicCalibrator | None = None
         self._auto_select = auto_select
+        # Remembered so deferred loads (auto_select) honor the caller's choice too.
+        self._allow_version_mismatch = allow_version_mismatch
 
         if model_path and not auto_select:
             self.load_model(model_path, allow_version_mismatch=allow_version_mismatch)
@@ -897,22 +899,24 @@ class MLMatcher:
             IsotonicCalibrator.from_knots(calib_knots) if calib_knots is not None else None
         )
         allow_mismatch = allow_version_mismatch or os.environ.get(
-            "MATCHER_ALLOW_MODEL_VERSION_MISMATCH"
-        ) in ("1", "true", "True")
-        if self.feature_version is None:
-            # Pre-versioning model: legacy, not the shipped-artifact concern — warn only.
-            logger.warning(
-                f"Model {path} has no feature_version (pre-versioning model). "
-                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}."
+            "MATCHER_ALLOW_MODEL_VERSION_MISMATCH", ""
+        ).strip().lower() in ("1", "true", "yes")
+        if self.feature_version != FEATURE_VERSION:
+            # Covers both a stale version and a missing one (pre-versioning /
+            # foreign artifact) — either way the model would score against an
+            # unknown or stale feature contract and silently degrade.
+            described = (
+                f"feature_version={self.feature_version}"
+                if self.feature_version is not None
+                else "no feature_version (pre-versioning model)"
             )
-        elif self.feature_version != FEATURE_VERSION:
             msg = (
-                f"Model feature_version={self.feature_version} does not match "
-                f"current code FEATURE_VERSION={FEATURE_VERSION}. The model would "
-                "score against a stale feature contract. Run 'matcher train' to "
-                "retrain (or update matcher). To load anyway, pass "
-                "allow_version_mismatch=True / 'matcher stitch --allow-version-mismatch' "
-                "or set MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1."
+                f"Model {path} has {described}, which does not match current code "
+                f"FEATURE_VERSION={FEATURE_VERSION}. The model would score against "
+                "a stale feature contract. Run 'matcher train' to retrain (or "
+                "update matcher). To load anyway, pass allow_version_mismatch=True "
+                "/ 'matcher stitch --allow-version-mismatch' or set "
+                "MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1."
             )
             if allow_mismatch:
                 logger.warning(msg)
@@ -1808,9 +1812,11 @@ class MLMatcher:
                     full_model_path=self.model_path,
                     name_column=target_name_column,
                 )
-                self.load_model(selected_model)
+                self.load_model(selected_model, allow_version_mismatch=self._allow_version_mismatch)
             elif self.model_path:
-                self.load_model(self.model_path)
+                self.load_model(
+                    self.model_path, allow_version_mismatch=self._allow_version_mismatch
+                )
 
         if self.model is None:
             raise ValueError(
@@ -2129,7 +2135,9 @@ def evaluate_by_dataset(
     from ..labeling.label_store import LabelStore
 
     # Load model
-    matcher = MLMatcher(model_path)
+    # Evaluating an existing (possibly older) model is a first-class flow; a
+    # version mismatch warns rather than blocking the evaluation.
+    matcher = MLMatcher(model_path, allow_version_mismatch=True)
 
     # Load all labels using LabelStore
     all_labels = LabelStore.load_all(Path(labels_dir))

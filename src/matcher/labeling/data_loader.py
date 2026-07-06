@@ -153,8 +153,9 @@ def get_cached_matcher() -> MLMatcher | None:
         return None
 
     logger.info(f"Loading ML model from {model_path}...")
-    matcher = MLMatcher(auto_select=True)
-    matcher.load_model(str(model_path))
+    # Labeling-UI scores are advisory: a stale model warns (does not block the UI).
+    matcher = MLMatcher(auto_select=True, allow_version_mismatch=True)
+    matcher.load_model(str(model_path), allow_version_mismatch=True)
     logger.info("ML model loaded successfully")
     _cached_matcher = matcher
     _matcher_loaded = True

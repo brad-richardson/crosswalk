@@ -89,9 +89,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 # Keep the sdist to the installable package — without this, hatchling drags the
-# whole repo (labels/, research/, cbench/, ~11 MB) into the tarball.
+# whole repo (labels/, research/, mbench/, ~11 MB) into the tarball. Patterns are
+# anchored ('/...') so nested files like mbench/pyproject.toml don't leak in.
 [tool.hatch.build.targets.sdist]
-include = ["src", "README.md", "pyproject.toml"]
+include = ["/src", "/README.md", "/pyproject.toml"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/matcher"]

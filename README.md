@@ -118,7 +118,8 @@ dataset config, no clone**. A pretrained model ships inside the package (kept in
 lockstep with the feature code by CI), so `stitch` works out of the box:
 
 ```bash
-# 1. Install (or from a clone: pip install -e .)
+# 1. Install (until the first PyPI release is published, install from a clone
+#    instead: pip install . — see docs/RELEASING.md)
 pip install road-matcher
 
 # 2. Fetch the Overture reference for your data's area (bbox derived automatically)
@@ -154,9 +155,12 @@ matcher train && matcher stitch ...
 ## Installation
 
 ```bash
-pip install road-matcher        # from PyPI (console script is `matcher`)
+pip install road-matcher        # from PyPI once published (console script is `matcher`)
 pip install -e ".[dev]"         # from a clone, for development
 ```
+
+Until the first PyPI release is published (see [docs/RELEASING.md](docs/RELEASING.md)),
+install from a clone: `pip install .`
 
 ### System Dependencies
 

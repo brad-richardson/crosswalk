@@ -329,8 +329,9 @@ def analyze_errors(
         raise typer.Exit(1)
 
     console.print(f"[blue]Loading model: {model.name}[/blue]")
+    # Analysis of an existing (possibly older) model: mismatch warns, not blocks.
     matcher = MLMatcher()
-    matcher.load_model(str(model))
+    matcher.load_model(str(model), allow_version_mismatch=True)
 
     console.print("[blue]Loading labels...[/blue]")
     all_labels = LabelStore.load_all(labels_dir)

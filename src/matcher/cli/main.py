@@ -73,9 +73,10 @@ def _eval_existing_model(
 
     console.print(f"[blue]Evaluating {model.name} on 20% holdout (seed={seed})...[/blue]")
 
-    # Load model
+    # Load model. Evaluating an existing (possibly older) model is the point of
+    # this flow, so a feature_version mismatch warns rather than blocking.
     matcher = MLMatcher()
-    matcher.load_model(str(model))
+    matcher.load_model(str(model), allow_version_mismatch=True)
 
     # Load labels
     console.print("[blue]Loading labels...[/blue]")
@@ -944,7 +945,13 @@ def register_commands(app: typer.Typer) -> None:
             if len(target_gdf) == 0:
                 console.print(f"[red]Target parquet is empty: {clip_target}[/red]")
                 raise typer.Exit(1)
-            if target_gdf.crs is not None and target_gdf.crs.to_epsg() != 4326:
+            if target_gdf.crs is None:
+                console.print(
+                    "[yellow]Target parquet has no CRS; assuming EPSG:4326 (WGS84). "
+                    "If the data is in a projected CRS the derived bbox will be "
+                    "wrong — set a CRS on the parquet.[/yellow]"
+                )
+            elif target_gdf.crs.to_epsg() != 4326:
                 target_gdf = target_gdf.to_crs("EPSG:4326")
             xmin, ymin, xmax, ymax = (float(v) for v in target_gdf.total_bounds)
 
