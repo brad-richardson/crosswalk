@@ -1,0 +1,45 @@
+name: Deploy site to GitHub Pages
+
+# Publishes the static live data browser in `site/` to GitHub Pages.
+# The site is 100% static (HTML/JS + DuckDB-WASM from a CDN); it holds NO data.
+# The bridge-table data lives on Cloudflare R2 — the site reads it at runtime from
+# the base URL configured in `site/config.js` (or a `?base=` override). See
+# docs/PUBLISHING.md.
+#
+# One-time setup by the repo owner: Settings → Pages → Build and deployment →
+# Source = "GitHub Actions". After that this workflow deploys on every push to
+# main that touches `site/`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Least-privilege token scoped for Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deployment at a time; don't cancel a running one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

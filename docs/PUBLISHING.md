@@ -288,6 +288,103 @@ overwrite identical bytes idempotently.
 4. Dry-run first: `matcher factory publish --all --site-url https://<your-host>`
    → inspect the summary + `data/publish_staging/index.html`.
 5. Go live: `matcher factory publish --all --no-dry-run --site-url https://<your-host>`.
+6. Apply the **R2 CORS policy** below (required for the browser data browser to
+   range-read the Parquet cross-origin).
+
+### R2 CORS policy (required for the live data browser)
+
+The Pages-hosted [live data browser](#live-data-browser-github-pages) runs
+DuckDB-WASM in the visitor's browser and issues cross-origin `GET`/`HEAD` requests
+with `Range` headers straight at the R2 objects. R2 must return CORS headers that
+allow this, or the browser blocks the reads. Apply this policy to the bucket
+(Cloudflare dashboard → R2 → your bucket → **Settings → CORS Policy**, or
+`aws s3api put-bucket-cors --endpoint-url $R2_ENDPOINT_URL --bucket $R2_BUCKET
+--cors-configuration file://cors.json`):
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://<your-github-username>.github.io",
+      "http://localhost:8001"
+    ],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["Range", "Content-Type"],
+    "ExposeHeaders": ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Notes: `AllowedMethods` is read-only (no writes from browsers); `Range` in
+`AllowedHeaders` + `Content-Range`/`Accept-Ranges` in `ExposeHeaders` are what make
+partial (row-group) reads work. Replace the origin with your Pages URL (custom
+domain if you set one); keep `http://localhost:8001` only if you want to test the
+Pages site against live R2 from a local static server, otherwise drop it.
+`AllowedOrigins: ["*"]` also works and is fine for a fully public dataset.
+
+## Live data browser (GitHub Pages)
+
+A static, backend-free browser for the published tables lives in **`site/`** and
+deploys to **GitHub Pages** via `.github/workflows/pages.yml`. It holds **no data** —
+it reads `index.json` and the Parquet **at runtime** from R2 (DuckDB-WASM, HTTPS
+range reads). Two pages:
+
+- **`index.html` (Stats)** — fetches `index.json` and renders per-dataset coverage
+  (match rate, counts, groups, license), aggregate charts (match-rate + size), the
+  excluded-pending-review list, and the licensing/attribution block. No DuckDB.
+- **`browse.html` (Query & browse)** — DuckDB-WASM over the R2 Parquet:
+  - **Reverse GERS-id lookup** against `all_bridges.parquet`;
+  - **Per-dataset browse** of `bridge.parquet` with `match_decision` / confidence
+    filters, pagination, and direct download links;
+  - a **read-only "run your own SQL"** box (SELECT/WITH/… only);
+  - the bridge tables are **ID-only** (no geometry), so instead of a map the page
+    shows a copy-pasteable DuckDB example that **joins `gers_id` to Overture segment
+    geometry** on public S3.
+
+Every page carries an **unofficial/independent** banner — this is a community
+project matching local datasets to Overture GERS ids, not an Overture Maps
+Foundation product.
+
+### Configuring the data source (one place)
+
+`site/config.js` → `DEFAULT_BASE_URL` points at the **root** of the published tree
+(the dir holding `index.json` and `bridges/`). Set it to the R2 public domain
+(custom domain or `pub-<hash>.r2.dev`), no trailing slash. Any page also accepts a
+`?base=<url>` query-string override for testing against a staging host without
+editing the file (`?base` wins over `DEFAULT_BASE_URL`).
+
+### Enabling Pages (one-time, user step)
+
+In the repo: **Settings → Pages → Build and deployment → Source = "GitHub
+Actions"**. After that, the `pages.yml` workflow deploys `site/` on every push to
+`main` that touches it (path-filtered), and can be run manually via
+*workflow_dispatch*. The workflow uses the official `configure-pages` /
+`upload-pages-artifact` / `deploy-pages` actions with least-privilege
+(`pages: write`, `id-token: write`) permissions.
+
+### Local validation (no R2 needed)
+
+`scripts/serve_bridges_local.py` serves any directory with the **CORS + HTTP Range**
+support DuckDB-WASM needs (Python's stock `http.server` has neither). Build a real
+staging tree and point the site at it:
+
+```bash
+# 1. Build a local staging tree from finished factory outputs.
+matcher factory publish --all --no-dry-run \
+    --target-dir data/publish_staging_local --site-url http://localhost:8000
+
+# 2. Serve the data (CORS + Range) and the site, in two shells.
+python scripts/serve_bridges_local.py data/publish_staging_local --port 8000
+python scripts/serve_bridges_local.py site --port 8001
+
+# 3. Open the site pointed at the local data source.
+open "http://localhost:8001/index.html?base=http://localhost:8000"
+```
+
+Exercise: dashboard load, per-dataset browse + pagination, GERS-id reverse lookup,
+and the SQL box. (Validated this way on the Mac against the 2-published /
+3-excluded staging tree.)
 
 ## Open operational question: publish from the box or the Mac?
 

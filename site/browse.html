@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GERS Bridge Tables — query &amp; browse</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="config.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Query &amp; browse</h1>
+    <p class="lead">
+      All queries run <strong>in your browser</strong> via DuckDB-WASM, reading the
+      published Parquet directly over HTTPS with range requests — no server, no
+      download of the whole file. <span id="ddStatus" class="status"></span>
+    </p>
+    <div id="fatal"></div>
+
+    <!-- ============ Reverse GERS-id lookup ============ -->
+    <h2>Reverse lookup: which datasets reference a GERS id?</h2>
+    <p class="lead">Queries the per-release unified <code>all_bridges.parquet</code>
+      (sorted by <code>gers_id</code>, so this prunes row groups).</p>
+    <div class="controls">
+      <div class="field">
+        <label for="revRelease">release</label>
+        <select id="revRelease"></select>
+      </div>
+      <div class="field" style="flex:1; min-width:22rem;">
+        <label for="gersId">GERS id</label>
+        <input id="gersId" type="text" placeholder="e.g. 08f2… / a428fee0-… " style="width:100%;" />
+      </div>
+      <button id="revBtn">Look up</button>
+    </div>
+    <div id="revStatus" class="status"></div>
+    <div id="revResult"></div>
+    <details id="revSqlWrap"><summary>SQL used</summary><pre data-copy id="revSql"></pre></details>
+
+    <!-- ============ Per-dataset browse ============ -->
+    <h2>Browse a dataset</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="brRelease">release</label>
+        <select id="brRelease"></select>
+      </div>
+      <div class="field">
+        <label for="brDataset">dataset</label>
+        <select id="brDataset"></select>
+      </div>
+      <div class="field">
+        <label for="brDecision">match_decision</label>
+        <select id="brDecision">
+          <option value="">any</option>
+          <option value="match">match</option>
+          <option value="review">review</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="brMinConf">min confidence</label>
+        <input id="brMinConf" type="number" min="0" max="1" step="0.05" value="0" />
+      </div>
+      <div class="field">
+        <label for="brMaxConf">max confidence</label>
+        <input id="brMaxConf" type="number" min="0" max="1" step="0.05" value="1" />
+      </div>
+      <button id="brBtn">Browse</button>
+    </div>
+    <div id="brLinks" class="dl"></div>
+    <div id="brStatus" class="status"></div>
+    <div class="pager" id="brPager" hidden>
+      <button class="secondary" id="brPrev">‹ prev</button>
+      <span id="brPageInfo" class="status"></span>
+      <button class="secondary" id="brNext">next ›</button>
+    </div>
+    <div id="brResult"></div>
+    <details id="brSqlWrap"><summary>SQL used</summary><pre data-copy id="brSql"></pre></details>
+
+    <!-- ============ Free-form SQL ============ -->
+    <h2>Run your own SQL</h2>
+    <p class="lead">Read-only (SELECT / WITH / DESCRIBE / …). Reference any published
+      table by its URL with <code>read_parquet('…')</code>. Two examples are
+      pre-filled from the current data source; edit freely.</p>
+    <textarea id="sqlBox" spellcheck="false"></textarea>
+    <div class="controls" style="margin-top:.5rem;">
+      <button id="sqlBtn">Run</button>
+      <button class="secondary" id="sqlExDataset">example: dataset</button>
+      <button class="secondary" id="sqlExReverse">example: reverse lookup</button>
+    </div>
+    <div id="sqlStatus" class="status"></div>
+    <div id="sqlResult"></div>
+
+    <!-- ============ Geometry / join example ============ -->
+    <h2>Geometry?</h2>
+    <p class="lead">Bridge tables are <strong>ID-only</strong> — they map local ids to
+      GERS ids and do not carry geometry. To put matches on a map, join the
+      <code>gers_id</code> to the geometry in Overture's transportation theme. Example
+      (DuckDB, reading Overture's public S3 release directly):</p>
+    <pre data-copy id="joinSql"></pre>
+    <p class="lead">Overture geometry is ODbL 1.0 (© OpenStreetMap contributors); see
+      the licensing note on the <a id="statsLink" href="index.html">stats page</a>.</p>
+  </main>
+
+  <footer id="footer"></footer>
+
+  <script type="module" src="browse.js"></script>
+</body>
+</html>
