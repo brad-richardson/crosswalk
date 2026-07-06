@@ -4,7 +4,13 @@
   "title": "Crosswalk dataset recipe (schema_version 1)",
   "description": "One file per city dataset: everything a contributor declares (identity, where to fetch, how to conform, license evidence) and everything a reviewer decides (publication gates). Machine-generated run state (fetch provenance, quality fingerprints) does NOT belong in this file. See docs/plans/2026-07-06-dataset-registry-format.md.",
   "type": "object",
-  "required": ["schema_version", "name", "type", "source", "license"],
+  "required": [
+    "schema_version",
+    "name",
+    "type",
+    "source",
+    "license"
+  ],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
@@ -16,33 +22,79 @@
       "type": "string",
       "pattern": "^[a-z]{2}_[a-z0-9_]+$"
     },
-    "display_name": { "type": "string" },
+    "display_name": {
+      "type": "string"
+    },
     "type": {
       "description": "Network kind; drives matching defaults (e.g. cross-tier blocking).",
-      "enum": ["road", "bike", "sidewalk", "trail", "transit"]
+      "enum": [
+        "road",
+        "bike",
+        "sidewalk",
+        "trail",
+        "transit"
+      ]
     },
-    "description": { "type": "string" },
+    "description": {
+      "type": "string"
+    },
     "source": {
       "description": "Where the data comes from. Mirrors crosswalk.datasets.schema.SourceConfig.",
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "enum": ["arcgis", "osm", "overture", "download", "manual", "os_downloads"] },
-        "url": { "type": "string", "format": "uri" },
+        "type": {
+          "enum": [
+            "arcgis",
+            "osm",
+            "overture",
+            "download",
+            "manual",
+            "os_downloads"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
         "portal_url": {
           "description": "Human-readable portal / documentation page for the dataset.",
           "type": "string",
           "format": "uri"
         },
-        "file_format": { "enum": ["shp", "gpkg", "geojson", "gml"] },
-        "where_clause": { "type": "string" },
-        "api_key_env_var": { "type": "string" },
-        "api_key_header": { "type": "string" },
-        "product_id": { "type": "string" },
-        "file_pattern": { "type": "string" },
-        "cache_download": { "type": "boolean" },
-        "cache_ttl_hours": { "type": "integer", "minimum": 1 }
+        "file_format": {
+          "enum": [
+            "shp",
+            "gpkg",
+            "geojson",
+            "gml"
+          ]
+        },
+        "where_clause": {
+          "type": "string"
+        },
+        "api_key_env_var": {
+          "type": "string"
+        },
+        "api_key_header": {
+          "type": "string"
+        },
+        "product_id": {
+          "type": "string"
+        },
+        "file_pattern": {
+          "type": "string"
+        },
+        "cache_download": {
+          "type": "boolean"
+        },
+        "cache_ttl_hours": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "fetch": {
@@ -50,42 +102,104 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id_prefix": { "type": "string" },
-        "id_column": { "type": "string" },
-        "name_column": { "type": "string" },
-        "name_columns": { "type": "object", "additionalProperties": { "type": "string" } },
-        "class_column": { "type": "string" },
-        "class_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
-        "subclass_column": { "type": "string" },
-        "subclass_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
-        "level_column": { "type": "string" },
+        "id_prefix": {
+          "type": "string"
+        },
+        "id_column": {
+          "type": "string"
+        },
+        "name_column": {
+          "type": "string"
+        },
+        "name_columns": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "class_column": {
+          "type": "string"
+        },
+        "class_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "subclass_column": {
+          "type": "string"
+        },
+        "subclass_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "level_column": {
+          "type": "string"
+        },
         "bbox": {
           "description": "xmin, ymin, xmax, ymax in `crs`.",
           "type": "array",
-          "items": { "type": "number" },
+          "items": {
+            "type": "number"
+          },
           "minItems": 4,
           "maxItems": 4
         },
-        "crs": { "type": "string", "pattern": "^EPSG:[0-9]+$" },
-        "source_crs": { "type": "string", "pattern": "^EPSG:[0-9]+$" },
-        "encoding": { "type": "string" },
-        "non_road_type_codes": { "type": "array", "items": { "type": "string" } },
-        "filter_closed_loops": { "type": "boolean" },
+        "crs": {
+          "type": "string",
+          "pattern": "^EPSG:[0-9]+$"
+        },
+        "source_crs": {
+          "type": "string",
+          "pattern": "^EPSG:[0-9]+$"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "non_road_type_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter_closed_loops": {
+          "type": "boolean"
+        },
         "exclude": {
           "type": "object",
-          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
-        "oneway_column": { "type": "string" },
-        "speed_limit_column": { "type": "string" },
-        "speed_limit_unit": { "enum": ["kph", "mph"] },
-        "polygon_to_centerline": { "type": "boolean" }
+        "oneway_column": {
+          "type": "string"
+        },
+        "speed_limit_column": {
+          "type": "string"
+        },
+        "speed_limit_unit": {
+          "enum": [
+            "kph",
+            "mph"
+          ]
+        },
+        "polygon_to_centerline": {
+          "type": "boolean"
+        }
       }
     },
     "matching": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "block_cross_tier": { "type": "boolean" }
+        "block_cross_tier": {
+          "type": "boolean"
+        }
       }
     },
     "classification": {
@@ -95,20 +209,33 @@
     "license": {
       "description": "License facts + publication gates. `status`/`geometry_status` are HUMAN DECISIONS (default-deny; the publisher never guesses); everything else is evidence supporting them.",
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
         "status": {
           "description": "Gate for the ID-only bridge table. Only a human flips this to approved.",
-          "enum": ["approved", "pending_review", "rejected"]
+          "enum": [
+            "approved",
+            "pending_review",
+            "rejected"
+          ]
         },
         "geometry_status": {
           "description": "Gate for geometry-bearing artifacts (unmatched-segment export, #321). Missing = pending_review. Approving geometry requires redistribution rights to the data itself.",
-          "enum": ["approved", "pending_review", "rejected"]
+          "enum": [
+            "approved",
+            "pending_review",
+            "rejected"
+          ]
         },
         "spdx": {
           "description": "SPDX identifier when one exists (e.g. PDDL-1.0, CC-BY-4.0, ODbL-1.0). null/omitted for custom terms — put the full name in `name`.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[A-Za-z0-9.+-]+$"
         },
         "name": {
@@ -133,20 +260,90 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "redistribution_allowed": { "enum": ["yes", "no", "unknown"] },
-            "derivatives_allowed": { "enum": ["yes", "no", "unknown"] },
-            "commercial_use_allowed": { "enum": ["yes", "no", "unknown"] },
-            "attribution_required": { "enum": ["yes", "no", "unknown"] },
-            "share_alike_required": { "enum": ["yes", "no", "unknown"] }
+            "redistribution_allowed": {
+              "enum": [
+                "yes",
+                "no",
+                "unknown"
+              ]
+            },
+            "derivatives_allowed": {
+              "enum": [
+                "yes",
+                "no",
+                "unknown"
+              ]
+            },
+            "commercial_use_allowed": {
+              "enum": [
+                "yes",
+                "no",
+                "unknown"
+              ]
+            },
+            "attribution_required": {
+              "enum": [
+                "yes",
+                "no",
+                "unknown"
+              ]
+            },
+            "share_alike_required": {
+              "enum": [
+                "yes",
+                "no",
+                "unknown"
+              ]
+            }
           }
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "status": { "const": "approved" } } },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "approved"
+              }
+            }
+          },
           "then": {
-            "required": ["attribution", "url"],
-            "anyOf": [{ "required": ["spdx"] }, { "required": ["name"] }]
+            "required": [
+              "attribution",
+              "url"
+            ],
+            "anyOf": [
+              {
+                "required": [
+                  "spdx"
+                ]
+              },
+              {
+                "required": [
+                  "name"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "geometry_status": {
+                "const": "approved"
+              }
+            },
+            "required": [
+              "geometry_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "approved"
+              }
+            },
+            "$comment": "geometry_status=approved requires status=approved: the geometry-bearing artifact is the higher-risk publication (docs/plans/2026-07-06-unmatched-export-design.md)"
           }
         }
       ]
@@ -156,20 +353,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "panel_recommendation": { "enum": ["approve", "reject", "needs_human"] },
-        "panel_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "panel_reviewed_at": { "type": "string", "format": "date" },
+        "panel_recommendation": {
+          "enum": [
+            "approve",
+            "reject",
+            "needs_human"
+          ]
+        },
+        "panel_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "panel_reviewed_at": {
+          "type": "string",
+          "format": "date"
+        },
         "evidence": {
           "description": "URLs actually fetched, with the quotes that carry the conclusion.",
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["url"],
+            "required": [
+              "url"
+            ],
             "additionalProperties": false,
             "properties": {
-              "url": { "type": "string", "format": "uri" },
-              "quote": { "type": "string" },
-              "fetched_at": { "type": "string", "format": "date" }
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "quote": {
+                "type": "string"
+              },
+              "fetched_at": {
+                "type": "string",
+                "format": "date"
+              }
             }
           }
         },
@@ -179,6 +399,8 @@
         }
       }
     },
-    "notes": { "type": "string" }
+    "notes": {
+      "type": "string"
+    }
   }
 }
