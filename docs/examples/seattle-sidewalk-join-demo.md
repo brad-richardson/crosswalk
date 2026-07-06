@@ -53,10 +53,17 @@ Files in this demo:
 ## Run it
 
 ```bash
-# From the repo root. Needs network (SDOT ArcGIS + Overture S3) and the local
-# bridge at data/output/us_seattle_sidewalks_bridge.parquet.
+# From the repo root. Needs network (SDOT ArcGIS + Overture S3) plus two local
+# files that are NOT in git (both produced by the pipeline, see below):
+#   data/output/us_seattle_sidewalks_bridge.parquet   (crosswalk stitch output)
+#   data/raw/us_seattle_sidewalks_v1.0.parquet        (source snapshot; the ID
+#                                                      sidecar is derived from it)
 uv run python scripts/demo_seattle_sidewalk_join.py
 ```
+
+Until the Seattle bridge is published to R2, only a checkout that has run the
+Seattle pipeline (`crosswalk fetch` + `crosswalk stitch`) can reproduce the
+numbers; the committed artifacts below are the receipts in the meantime.
 
 The script fetches the observations table (~156K rows, cached), derives the ID
 sidecar from the bridge's source snapshot, then executes
@@ -143,9 +150,12 @@ SDOT's own description):
 - **This bridge is not published yet.** `us_seattle_sidewalks` is still on the
   legacy `data/output/` path (not yet adopted into the factory) and its source
   license sits in `pending_review` in `datasets/licenses.toml` pending the
-  registry's human review — the demo reads the local parquet. The Seattle Open
-  Data Policy (below) reads as clearly open, so the review should be a
-  formality.
+  registry's human review — the demo reads the local parquet. Note the license
+  review is a real open item, not a formality: the license research panel
+  (`research/license_burndown_2026_07.md`) found the ArcGIS item itself carries
+  no named open license (only an accuracy disclaimer), so the applicable terms
+  are the City of Seattle Open Data Policy cited below, and a human needs to
+  confirm they cover redistribution before the bridge ships.
 
 ## The ID caveat (and the upstream fix)
 
