@@ -32,11 +32,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): Verified a
 
 [datasets.au_melbourne_roads]
 display_name = "VicRoads Declared Roads (Melbourne)"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-3.0-AU"
+attribution = "Contains VicRoads Declared Roads data © State of Victoria (Department of Transport and Planning), licensed under CC BY 3.0 AU (https://creativecommons.org/licenses/by/3.0/au/)."
 likely_license = "CC-BY-3.0-AU"
 license_url = "https://creativecommons.org/licenses/by/3.0/au/"
 source_url = "https://services2.arcgis.com/18ajPSI0b3ppsmMt/arcgis/rest/services/VicRoads_Declared_Roads/FeatureServer/0"
-proposed_attribution = "Contains VicRoads Declared Roads data © State of Victoria (Department of Transport and Planning), licensed under CC BY 3.0 AU (https://creativecommons.org/licenses/by/3.0/au/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -68,11 +69,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossie
 
 [datasets.ca_toronto_roads]
 display_name = "Toronto Road Centreline"
-status = "pending_review"
+status = "approved"
+license = "Open Government Licence - Toronto"
+attribution = "Contains information licensed under the Open Government Licence – Toronto."
 likely_license = "Open Government Licence - Toronto"
 license_url = "https://open.toronto.ca/open-data-licence/"
 source_url = "https://gis.toronto.ca/arcgis/rest/services/cot_geospatial/FeatureServer/2"
-proposed_attribution = "Contains information licensed under the Open Government Licence – Toronto."
 panel_recommendation = "approve"
 panel_confidence = 0.95
 panel_reviewed_at = "2026-07-06"
@@ -80,11 +82,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.ch_geneva_hiking_routes]
 display_name = "Geneva Pedestrian Hiking Routes"
-status = "pending_review"
+status = "approved"
+license = "SITG Open Data — \"Accès libre\" (fully open tier); custom attribution-only terms, equivalent to opendata.swiss \"Open use. Must provide the source.\""
+attribution = "Source: Infrastructure cantonale de données géographiques (ICDG) — Système d'information du territoire à Genève (SITG), dataset « Chemins de randonnée pédestre » (FFP_ITINERAIRES_RANDO_PEDESTRE), extrait/extracted 2026-07-04."
 likely_license = "SITG Open Data — \"Accès libre\" (fully open tier); custom attribution-only terms, equivalent to opendata.swiss \"Open use. Must provide the source.\""
 license_url = "https://sitg.ge.ch/ressources/conditions-utilisation-donnees"
 source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/FFP_ITINERAIRES_RANDO_PEDESTRE/FeatureServer/0"
-proposed_attribution = "Source: Infrastructure cantonale de données géographiques (ICDG) — Système d'information du territoire à Genève (SITG), dataset « Chemins de randonnée pédestre » (FFP_ITINERAIRES_RANDO_PEDESTRE), extrait/extracted 2026-07-04."
 panel_recommendation = "approve"
 panel_confidence = 0.85
 panel_reviewed_at = "2026-07-06"
@@ -92,11 +95,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): Independent ve
 
 [datasets.ch_geneva_pedestrian_network]
 display_name = "Geneva Pedestrian Network (SPD)"
-status = "pending_review"
+status = "approved"
+license = "SITG open geodata terms (\"Conditions générales d'utilisation des géodonnées et produits du SITG en libre accès\") — Federal level A \"Accès libre\" = opendata.swiss \"Open use. Must provide the source.\""
+attribution = "Contains data from the Système d'information du territoire à Genève (SITG) — Infrastructure cantonale de données géographiques (ICDG), République et canton de Genève, used under the SITG open-data terms (opendata.swiss \"Open use. Must provide the source\")."
 likely_license = "SITG open geodata terms (\"Conditions générales d'utilisation des géodonnées et produits du SITG en libre accès\") — Federal level A \"Accès libre\" = opendata.swiss \"Open use. Must provide the source.\""
 license_url = "https://sitg.ge.ch/ressources/conditions-utilisation-donnees"
 source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer/0"
-proposed_attribution = "Contains data from the Système d'information du territoire à Genève (SITG) — Infrastructure cantonale de données géographiques (ICDG), République et canton de Genève, used under the SITG open-data terms (opendata.swiss \"Open use. Must provide the source\")."
 panel_recommendation = "approve"
 panel_confidence = 0.85
 panel_reviewed_at = "2026-07-06"
@@ -116,11 +120,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossie
 
 [datasets.co_bogota_bike_network]
 display_name = "IDECA Bogotá Ciclorutas"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Contains data from IDECA — Infraestructura de Datos Espaciales para el Distrito Capital, Bogotá D.C. (Unidad Administrativa Especial de Catastro Distrital), Mapa de Referencia — Ciclorutas (capa IDU), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://datosabiertos.bogota.gov.co/dataset/mapa-de-referencia"
 source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/18"
-proposed_attribution = "Contains data from IDECA — Infraestructura de Datos Espaciales para el Distrito Capital, Bogotá D.C. (Unidad Administrativa Especial de Catastro Distrital), Mapa de Referencia — Ciclorutas (capa IDU), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -128,11 +133,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.co_bogota_roads]
 display_name = "IDECA Bogotá Malla Vial"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Contains data from the Malla Vial Integral de Bogotá D.C., provided by the Infraestructura de Datos Espaciales para el Distrito Capital (IDECA) — Unidad Administrativa Especial de Catastro Distrital (UAECD), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://www.ideca.gov.co/recursos/mapas/malla-vial-integral-bogota-dc"
 source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/13"
-proposed_attribution = "Contains data from the Malla Vial Integral de Bogotá D.C., provided by the Infraestructura de Datos Espaciales para el Distrito Capital (IDECA) — Unidad Administrativa Especial de Catastro Distrital (UAECD), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.88
 panel_reviewed_at = "2026-07-06"
@@ -140,11 +146,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier is
 
 [datasets.co_bogota_sidewalks]
 display_name = "IDECA Bogotá Andenes"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Contains data from the Mapa de Referencia de Bogotá D.C. (nivel Andén, originado por el Instituto de Desarrollo Urbano — IDU), © Unidad Administrativa Especial de Catastro Distrital / IDECA — Infraestructura de Datos Espaciales de Bogotá D.C., licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://creativecommons.org/licenses/by/4.0/deed.es"
 source_url = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/16"
-proposed_attribution = "Contains data from the Mapa de Referencia de Bogotá D.C. (nivel Andén, originado por el Instituto de Desarrollo Urbano — IDU), © Unidad Administrativa Especial de Catastro Distrital / IDECA — Infraestructura de Datos Espaciales de Bogotá D.C., licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -164,11 +171,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): Refuted. T
 
 [datasets.fi_helsinki_roads]
 display_name = "Digiroad Finland (Helsinki + Southern Uusimaa)"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Source: Digiroad, Finnish Transport Infrastructure Agency. Contains data licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://vayla.fi/en/transport-network/data/open-data/terms-of-use"
 source_url = "https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1/collections/dr_tielinkki_toim_lk/items"
-proposed_attribution = "Source: Digiroad, Finnish Transport Infrastructure Agency. Contains data licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.95
 panel_reviewed_at = "2026-07-06"
@@ -188,10 +196,11 @@ note = "Panel exclude (see research/license_burndown_2026_07.md): The researcher
 
 [datasets.gb_london_roads]
 display_name = "OS Open Roads (London)"
-status = "pending_review"
+status = "approved"
+license = "Open Government Licence v3.0 (OGL-UK-3.0)"
+attribution = "Contains OS data © Crown copyright and database right 2026."
 likely_license = "Open Government Licence v3.0 (OGL-UK-3.0)"
 license_url = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/"
-proposed_attribution = "Contains OS data © Crown copyright and database right 2026."
 panel_recommendation = "approve"
 panel_confidence = 0.93
 panel_reviewed_at = "2026-07-06"
@@ -232,11 +241,12 @@ note = "Panel exclude (see research/license_burndown_2026_07.md): Verified again
 
 [datasets.ke_kisumu_roads]
 display_name = "Kenya Roads (Kisumu Region)"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Kenya road network data © Kenya Roads Board (KRB), provided via the World Bank Group / ENERGYDATA.INFO, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://creativecommons.org/licenses/by/4.0/"
 source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
-proposed_attribution = "Kenya road network data © Kenya Roads Board (KRB), provided via the World Bank Group / ENERGYDATA.INFO, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -244,11 +254,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier ve
 
 [datasets.ke_mombasa_roads]
 display_name = "Kenya Roads (Mombasa Region)"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Road data © Kenya Roads Board (KRB), published by the World Bank Group via energydata.info, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48"
 source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
-proposed_attribution = "Road data © Kenya Roads Board (KRB), published by the World Bank Group via energydata.info, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -256,11 +267,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier is
 
 [datasets.ke_nairobi_roads]
 display_name = "Kenya Roads (Nairobi Region)"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Kenya Roads © Kenya Roads Board (KRB), published by the World Bank Group via ENERGYDATA.INFO, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 likely_license = "CC-BY-4.0"
 license_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48"
 source_url = "https://energydata.info/dataset/b71146ac-0330-40f5-bd47-e0d20a761e48/resource/caf4f528-e982-4db8-811c-fdbf5322352f/download/roads.zip"
-proposed_attribution = "Kenya Roads © Kenya Roads Board (KRB), published by the World Bank Group via ENERGYDATA.INFO, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -268,10 +280,11 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.kr_seoul_roads]
 display_name = "Seoul Road Network"
-status = "pending_review"
+status = "approved"
+license = "Korea Open Government License (KOGL) Type 1 (공공누리 제1유형, 출처표시 / Attribution)"
+attribution = "Road centerline data © Ministry of Land, Infrastructure and Transport (국토교통부, MOLIT), Republic of Korea, obtained via the Korea Public Data Portal (data.go.kr, dataset 국토교통부_도로중심선). Licensed under the Korea Open Government License (KOGL) Type 1 (출처표시 / Attribution)."
 likely_license = "Korea Open Government License (KOGL) Type 1 (공공누리 제1유형, 출처표시 / Attribution)"
 license_url = "https://www.data.go.kr/data/15146878/fileData.do"
-proposed_attribution = "Road centerline data © Ministry of Land, Infrastructure and Transport (국토교통부, MOLIT), Republic of Korea, obtained via the Korea Public Data Portal (data.go.kr, dataset 국토교통부_도로중심선). Licensed under the Korea Open Government License (KOGL) Type 1 (출처표시 / Attribution)."
 panel_recommendation = "approve"
 panel_confidence = 0.88
 panel_reviewed_at = "2026-07-06"
@@ -279,11 +292,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier ho
 
 [datasets.nl_amsterdam_roads]
 display_name = "PDOK NWB Wegen"
-status = "pending_review"
+status = "approved"
+license = "CC0-1.0"
+attribution = "Contains data from the Nationaal Wegenbestand (NWB) - Wegen, Rijkswaterstaat, via PDOK — dedicated to the public domain under CC0 1.0."
 likely_license = "CC0-1.0"
 license_url = "https://data.overheid.nl/dataset/14767-nwb---wegen"
 source_url = "https://service.pdok.nl/rws/nationaal-wegenbestand-wegen/atom/downloads/nwb_wegen.gpkg"
-proposed_attribution = "Contains data from the Nationaal Wegenbestand (NWB) - Wegen, Rijkswaterstaat, via PDOK — dedicated to the public domain under CC0 1.0."
 panel_recommendation = "approve"
 panel_confidence = 0.95
 panel_reviewed_at = "2026-07-06"
@@ -315,11 +329,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossie
 
 [datasets.tn_tunis_ml_roads]
 display_name = "Tunis ML-Extracted Roads (Microsoft)"
-status = "pending_review"
+status = "approved"
+license = "ODbL-1.0"
+attribution = "Road geometry derived from Microsoft Road Detections (github.com/microsoft/RoadDetections), © Microsoft, available under the Open Database License (ODbL) 1.0."
 likely_license = "ODbL-1.0"
 license_url = "https://github.com/microsoft/RoadDetections/blob/main/LICENSE"
 source_url = "https://usaminedroads.z19.web.core.windows.net/drops/2025.04.28/Northern_Africa.zip"
-proposed_attribution = "Road geometry derived from Microsoft Road Detections (github.com/microsoft/RoadDetections), © Microsoft, available under the Open Database License (ODbL) 1.0."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -350,11 +365,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): The licens
 
 [datasets.us_boston_bike_network]
 display_name = "Boston Bicycle Network 2024"
-status = "pending_review"
+status = "approved"
+license = "PDDL-1.0 (Open Data Commons Public Domain Dedication and License)"
+attribution = "Contains data from the City of Boston (Analyze Boston, data.boston.gov), Existing Bike Network (2024), dedicated to the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0. (Attribution offered as courtesy; PDDL imposes no attribution requirement.)"
 likely_license = "PDDL-1.0 (Open Data Commons Public Domain Dedication and License)"
 license_url = "https://opendatacommons.org/licenses/pddl/1-0/"
 source_url = "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/Boston_Bicycle_Network_2024/FeatureServer/0"
-proposed_attribution = "Contains data from the City of Boston (Analyze Boston, data.boston.gov), Existing Bike Network (2024), dedicated to the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0. (Attribution offered as courtesy; PDDL imposes no attribution requirement.)"
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -362,11 +378,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.us_boston_sidewalks]
 display_name = "Boston Sidewalks"
-status = "pending_review"
+status = "approved"
+license = "Open Data Commons Public Domain Dedication and License (PDDL) 1.0"
+attribution = "Sidewalk Centerline data from the City of Boston (Boston Maps), dedicated to the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0."
 likely_license = "Open Data Commons Public Domain Dedication and License (PDDL) 1.0"
 license_url = "https://data.boston.gov/dataset/sidewalk-centerline"
 source_url = "https://gisportal.boston.gov/arcgis/rest/services/Infrastructure/OpenData/MapServer/5"
-proposed_attribution = "Sidewalk Centerline data from the City of Boston (Boston Maps), dedicated to the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0."
 panel_recommendation = "approve"
 panel_confidence = 0.93
 panel_reviewed_at = "2026-07-06"
@@ -374,11 +391,12 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.us_boston_streets]
 display_name = "Boston Streets"
-status = "pending_review"
+status = "approved"
+license = "PDDL-1.0 (Open Data Commons Public Domain Dedication and License)"
+attribution = "Contains street data from the City of Boston (Analyze Boston, data.boston.gov), released into the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0."
 likely_license = "PDDL-1.0 (Open Data Commons Public Domain Dedication and License)"
 license_url = "https://data.boston.gov/dataset/city-of-boston-managed-streets"
 source_url = "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0"
-proposed_attribution = "Contains street data from the City of Boston (Analyze Boston, data.boston.gov), released into the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0."
 panel_recommendation = "approve"
 panel_confidence = 0.9
 panel_reviewed_at = "2026-07-06"
@@ -408,11 +426,12 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossie
 
 [datasets.us_fresno_roads]
 display_name = "Fresno County Roads"
-status = "pending_review"
+status = "approved"
+license = "CC-BY (version unspecified)"
+attribution = "Public Road Functional Classification © California Department of Transportation (Caltrans), via California Open Data (data.ca.gov), licensed under CC BY."
 likely_license = "CC-BY (version unspecified)"
 license_url = "https://data.ca.gov/dataset/public-road-functional-classification"
 source_url = "https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0"
-proposed_attribution = "Public Road Functional Classification © California Department of Transportation (Caltrans), via California Open Data (data.ca.gov), licensed under CC BY."
 panel_recommendation = "approve"
 panel_confidence = 0.85
 panel_reviewed_at = "2026-07-06"
@@ -517,11 +536,12 @@ note = "US federal government work — public domain under 17 U.S.C. § 105."
 
 [datasets.us_utah_slc_roads]
 display_name = "Utah Salt Lake County Roads"
-status = "pending_review"
+status = "approved"
+license = "CC-BY-4.0"
+attribution = "Contains data from the Utah Roads dataset, Utah Geospatial Resource Center (UGRC), State Geographic Information Database (SGID), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Data was extracted and transformed into a GERS bridge table; segment identifiers only, geometry and attributes removed."
 likely_license = "CC-BY-4.0"
 license_url = "https://creativecommons.org/licenses/by/4.0/"
 source_url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRoads/FeatureServer/0"
-proposed_attribution = "Contains data from the Utah Roads dataset, Utah Geospatial Resource Center (UGRC), State Geographic Information Database (SGID), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Data was extracted and transformed into a GERS bridge table; segment identifiers only, geometry and attributes removed."
 panel_recommendation = "approve"
 panel_confidence = 0.93
 panel_reviewed_at = "2026-07-06"
