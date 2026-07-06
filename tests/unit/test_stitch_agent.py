@@ -1598,6 +1598,105 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     assert set(votes_df["group_id"]) == {"g1", "g2"}
 
 
+def _breaker_panel_and_invokers(monkeypatch, failing_invoker):
+    """3-provider panel where claude/codex vote A and agy uses failing_invoker."""
+
+    def ok_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", ok_invoker)
+    monkeypatch.setitem(sr._INVOKERS, "codex", ok_invoker)
+    monkeypatch.setitem(sr._INVOKERS, "agy", failing_invoker)
+    return [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+
+def test_run_batch_timeout_breaker_halts_after_consecutive(tmp_path, monkeypatch):
+    """N consecutive timeout-abstains from ONE provider promote to provider-down halt.
+
+    Completed groups must be flushed to the partials before the raise so the run
+    stays resumable.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4"):
+        _write_min_pack(batch_dir, gid)
+
+    def always_timeout(prompt, group_dir, letters, model, timeout, effort=""):
+        raise subprocess.TimeoutExpired(cmd="agy", timeout=timeout)
+
+    panel = _breaker_panel_and_invokers(monkeypatch, always_timeout)
+    with pytest.raises(sr.ProviderInvocationError, match="consecutive"):
+        sr.run_batch(batch_dir, panel=panel)
+    # Groups before the breaker group were flushed and are resumable.
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    assert set(votes["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_timeout_breaker_resets_on_success(tmp_path, monkeypatch):
+    """A successful vote resets the consecutive-timeout count — no false halt."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4", "g5"):
+        _write_min_pack(batch_dir, gid)
+
+    calls = {"n": 0}
+
+    def intermittent(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        if calls["n"] == 3:  # succeed on the 3rd group only
+            return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+        raise subprocess.TimeoutExpired(cmd="agy", timeout=timeout)
+
+    panel = _breaker_panel_and_invokers(monkeypatch, intermittent)
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)  # must NOT raise
+    assert set(cons_df["group_id"]) == {"g1", "g2", "g3", "g4", "g5"}
+    agy = votes_df[votes_df["provider"] == "agy"]
+    assert (agy["choice"] == "ABSTAIN").sum() == 4
+
+
+def test_run_batch_overflow_abstains_do_not_trip_breaker(tmp_path, monkeypatch):
+    """Context overflow is a group property: monsters in a row never halt the run."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4"):
+        _write_min_pack(batch_dir, gid)
+
+    def always_overflow(prompt, group_dir, letters, model, timeout, effort=""):
+        raise sr.GroupScopedProviderError(
+            "agy context overflow: prompt exceeds the model's context window"
+        )
+
+    panel = _breaker_panel_and_invokers(monkeypatch, always_overflow)
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)  # must NOT raise
+    assert set(cons_df["group_id"]) == {"g1", "g2", "g3", "g4"}
+    agy = votes_df[votes_df["provider"] == "agy"]
+    assert (agy["choice"] == "ABSTAIN").all()
+
+
+def test_quota_and_rate_limit_messages_not_misclassified_as_group_scoped():
+    """Marker-set breadth guard: provider-down bodies must stay provider-down.
+
+    Broadening _CONTEXT_OVERFLOW_MARKERS to something colliding with a realistic
+    quota/rate-limit message would silently convert #334 halts into abstains.
+    """
+    provider_down_bodies = [
+        "429 rate limit reached for gpt-5.5: limit 30000 tokens per min",
+        "insufficient_quota: you exceeded your current quota",
+        "401 unauthorized: invalid api key",
+        "upstream connect error or disconnect/reset before headers",
+        "billing hard limit has been reached",
+    ]
+    for body in provider_down_bodies:
+        result = subprocess.CompletedProcess(args=["codex"], returncode=1, stdout="", stderr=body)
+        with pytest.raises(RuntimeError) as exc_info:
+            sr._check_exit("codex", result)
+        assert not isinstance(exc_info.value, sr.GroupScopedProviderError), body
+
+
 def test_run_batch_resume_rejects_mismatched_panel(tmp_path, monkeypatch):
     """Partials written by a DIFFERENT panel are ignored: every group re-runs.
 

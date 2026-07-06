@@ -305,6 +305,12 @@ _CONTEXT_OVERFLOW_MARKERS = (
 #: as a subprocess timeout: abstain on this group, keep the run going.
 _CLI_TIMEOUT_MARKERS = ("timeout waiting for response",)
 
+#: Consecutive timeout-abstentions from ONE provider before ``run_batch``
+#: promotes it to the #334 provider-down halt. One or two slow oversized groups
+#: abstain and the wave survives; a provider hanging on every group in a row is
+#: provider health, not group size.
+_TIMEOUT_BREAKER_N = 3
+
 
 class GroupScopedProviderError(RuntimeError):
     """A provider failure that is deterministic for THIS group, not provider health.
@@ -1205,6 +1211,16 @@ def run_batch(
         )
 
     pending = [d for d in group_dirs if d.name not in done_ids]
+    # Circuit breaker: a provider whose votes are timeout-abstentions on
+    # _TIMEOUT_BREAKER_N consecutive groups is treated as genuinely hung
+    # (network blackhole with no fast error) and promotes to the #334
+    # provider-down halt. Per-group timeout abstains keep a wave alive when one
+    # oversized group is slow; a hang on EVERY group is provider health, and
+    # letting it degrade the panel silently is exactly what #334 forbids.
+    # Context-overflow abstains do NOT count: overflow is a property of the
+    # group's prompt size, and several monsters in a row say nothing about the
+    # provider. Any successful vote (or non-timeout abstain) resets the count.
+    consecutive_timeouts: dict[str, int] = {}
     for i, gdir in enumerate(pending):
         gid = gdir.name
         logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
@@ -1216,6 +1232,19 @@ def run_batch(
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
         )
+        for v in votes:
+            if v.choice == "ABSTAIN" and v.error.startswith("timeout after"):
+                consecutive_timeouts[v.provider] = consecutive_timeouts.get(v.provider, 0) + 1
+                if consecutive_timeouts[v.provider] >= _TIMEOUT_BREAKER_N:
+                    _flush()  # keep completed groups resumable past the halt
+                    raise ProviderInvocationError(
+                        f"{v.provider}: timed out on {_TIMEOUT_BREAKER_N} consecutive "
+                        f"groups (last: {gid}) — treating as provider-down and halting "
+                        f"the run. Completed groups were flushed; fix the provider and "
+                        f"re-run with --resume."
+                    )
+            else:
+                consecutive_timeouts[v.provider] = 0
         vote_rows.extend(_vote_row(v) for v in votes)
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
