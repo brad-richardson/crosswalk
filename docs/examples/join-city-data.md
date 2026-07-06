@@ -6,6 +6,13 @@ local street IDs. A bridge table maps `local_id → gers_id`, so that locally-ke
 data becomes joinable to [Overture Maps](https://overturemaps.org/) geometry (and
 to every *other* city's data on the same GERS ids) in one SQL query.
 
+> **Want the full worked demo with real city data?** See
+> [seattle-sidewalk-join-demo.md](seattle-sidewalk-join-demo.md): Seattle's
+> live sidewalk defect queue (151,898 open ADA observations) joined through the
+> `us_seattle_sidewalks` bridge onto live Overture geometry — runnable script,
+> measured coverage, interactive map. This page explains the generic pattern
+> and schema.
+
 Everything here runs in [DuckDB](https://duckdb.org/) and reads Overture's public
 S3 release directly — no local Overture download.
 
