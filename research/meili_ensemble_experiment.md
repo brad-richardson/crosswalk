@@ -1,5 +1,7 @@
 # Meili ensemble experiment: can Valhalla map-matching improve matcher?
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Date:** 2026-07-05 · **Verdict: NO-SHIP (both mechanisms).** The research report
 is the deliverable.
 
