@@ -479,7 +479,7 @@ def render_credibility_page(report: PublishReport) -> str:
                 gate_txt = (
                     f"F1≥{gate.get('f1_filtered_floor')}, exact≥{gate.get('exact_filtered_floor')}"
                     if gate
-                    else "no stitching labels"
+                    else "not yet gated"
                 )
                 rows_html.append(
                     f"<tr><td><code>{name}</code><div class='sub'>{dname}</div></td>"
@@ -518,7 +518,7 @@ def render_credibility_page(report: PublishReport) -> str:
         "<table><thead><tr>"
         "<th>dataset</th><th>type</th><th>release</th><th>targets</th><th>matched</th>"
         "<th>match rate</th><th>review</th><th>groups</th><th>wall s</th>"
-        "<th>license</th><th>stitch-gate floor</th>"
+        "<th>license</th><th>quality gate</th>"
         "</tr></thead><tbody>" + "".join(rows_html) + "</tbody></table>"
         if rows_html
         else "<p class='empty'>No datasets published in this staging build.</p>"
@@ -573,6 +573,9 @@ def render_credibility_page(report: PublishReport) -> str:
            padding:.1rem .6rem; font-size:.8rem; color:var(--muted); }}
   .caveat {{ border-left:3px solid var(--accent); padding:.2rem 0 .2rem .9rem;
              margin:.6rem 0; color:var(--fg); }}
+  details.methodology {{ margin:2.2rem 0 .6rem; }}
+  details.methodology summary {{ cursor:pointer; color:var(--accent);
+             font-weight:600; }}
   footer {{ margin-top:2.5rem; color:var(--muted); font-size:.8rem;
             border-top:1px solid var(--line); padding-top:1rem; }}
   a {{ color:var(--accent); }}
@@ -580,56 +583,65 @@ def render_credibility_page(report: PublishReport) -> str:
 </head>
 <body><main>
   <h1>GERS Bridge Tables</h1>
-  <p class="lead">Public <strong>local road/path ID ↔ Overture GERS id</strong> bridge
-  tables, produced by <a href="https://github.com/brad-richardson/matcher">crosswalk</a> and regenerated per
-  Overture release. Query directly over HTTPS — no API, no serving layer.</p>
+  <p class="lead">Look up how a city's own street and path IDs map to
+  <strong>Overture Maps GERS ids</strong>. Each city gets a bridge table — a plain
+  Parquet file connecting the two ID schemes — so anything keyed to local IDs can be
+  joined to the open map with one line of SQL. Built by
+  <a href="https://github.com/brad-richardson/matcher">crosswalk</a> and regenerated
+  for each Overture release.</p>
+  <p class="lead">This is an early work in progress — coverage grows city by city.
+  Spot a problem or want your city added?
+  <a href="https://github.com/brad-richardson/matcher/issues">Feedback is welcome</a>.</p>
+  <p class="lead">An independent community project — not affiliated with the Overture
+  Maps Foundation.</p>
   <p><span class="pill">latest release: {latest_txt}</span>
      <span class="pill">generated: {generated}</span></p>
 
   <h2>Query it</h2>
-  <p>Every table is a plain Parquet file. Point DuckDB (or any Parquet-over-HTTP
-  reader) straight at the URL — HTTP range reads mean you only fetch the row groups
-  you touch.</p>
+  <p>Every table is a plain Parquet file — point DuckDB (or any Parquet-over-HTTP
+  reader) straight at the URL. No API, no signup, and you only download the parts of
+  the file your query touches.</p>
   <p><strong>All matches for one dataset:</strong></p>
   <pre>{escape(q_dataset)}</pre>
   <p><strong>Reverse lookup — which local datasets reference a GERS id</strong>
-  (across every published dataset in a release; the unified table is sorted by
-  <code>gers_id</code> so this prunes row groups):</p>
+  (searches every published dataset in a release at once):</p>
   <pre>{escape(q_reverse)}</pre>
 
   <h2>Published datasets</h2>
-  <p class="lead">Counts come from each dataset's <code>manifest.json</code> (also
-  published, alongside the bridge, as the provenance record). <strong>matched</strong>
-  counts only rows with <code>match_decision = 'match'</code>; review-band rows are
-  reported separately and are <em>not</em> counted as matches.</p>
+  <p class="lead"><strong>matched</strong> counts confident matches only — borderline
+  candidates ship in each table marked <code>review</code>, but don't count as
+  matches. Counts come from each dataset's <code>manifest.json</code>, published
+  alongside the bridge as its provenance record.</p>
   <div class="tablewrap">{published_table}</div>
 
-  <h2>Excluded — pending license review</h2>
-  <p class="lead">A dataset is only published once its source license is verified.
-  Anything below is withheld on purpose, not missing.</p>
+  <h2>Waiting on license review</h2>
+  <p class="lead">We only publish data whose license we've verified. These datasets
+  are ready but on hold until their source license checks out.</p>
   <div class="tablewrap">{excluded_table}</div>
 
-  <h2>Honest caveats</h2>
-  <div class="caveat"><strong>Review-band edges are excluded.</strong> Only
+  <details class="methodology">
+  <summary>Methodology notes</summary>
+  <div class="caveat"><strong>What counts as a match.</strong> Only
   <code>match_decision = 'match'</code> rows are the bridge; <code>review</code> rows
   ship in the table but are lower-confidence and excluded from headline match rates.</div>
-  <div class="caveat"><strong>Calibrated confidence.</strong> The
-  <code>confidence</code> column is a calibrated P(match); pick your own precision/
-  recall operating point.</div>
-  <div class="caveat"><strong>Stitch-gate coverage is partial.</strong> The
-  stitch-gate floor validates M:N group edge selection only where curated stitching
-  labels exist; datasets showing "no stitching labels" are not yet gate-validated.</div>
+  <div class="caveat"><strong>Confidence scores.</strong> The <code>confidence</code>
+  column is a calibrated probability of a correct match — filter to whatever threshold
+  suits your use case.</div>
+  <div class="caveat"><strong>Quality gate coverage is partial.</strong> The quality
+  gate checks how well many-to-many match groups are assembled, but only where curated
+  review labels exist; datasets showing "not yet gated" haven't had that check.</div>
   <div class="caveat"><strong>Per-dataset validation varies.</strong> Match quality
   is benchmarked on a few datasets (see the repo's <code>BENCHMARK_RESULTS.md</code>);
   treat un-benchmarked datasets as provisional.</div>
+  </details>
 
   <h2>Licensing &amp; attribution</h2>
   <p>Each published table is a derived work of both the local source dataset and
   Overture. Redistribution must carry both attributions.</p>
   <p><strong>Overture:</strong> {ov_attr} (<a href="{ov_url}">{ov_url}</a>)</p>
   <p><strong>Per-dataset source license</strong> is shown in the table above and in
-  each dataset's entry in <code>index.json</code>. Datasets whose license is
-  unverified are excluded (see above) rather than published under a guessed license.</p>
+  each dataset's entry in <code>index.json</code>. We only publish data whose license
+  we've verified (see the on-hold list above).</p>
 
   <footer>
     Machine-readable index: <a href="{escape(site)}/index.json"><code>index.json</code></a> ·

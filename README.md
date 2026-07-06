@@ -2,6 +2,8 @@
 
 **The public rosetta stone between local government transportation data and the open map.** Crosswalk publishes a **bridge table** for each city — a mapping from that city's local street/path IDs to [Overture Maps](https://overturemaps.org/) GERS (Global Entity Reference System) IDs — so any dataset keyed to those local IDs becomes joinable to the open map in one line of SQL.
 
+**[Browse the published bridge tables live](https://brad-richardson.github.io/crosswalk/)** — look up how your city's street IDs map to the open map, right in your browser. This is an early work in progress: coverage grows city by city, and [feedback is welcome](https://github.com/brad-richardson/matcher/issues).
+
 > **Named "crosswalk"** because that is the data-integration term for exactly what this tool produces — a table mapping IDs in one scheme to another (here: local IDs ↔ Overture GERS IDs) — and, fittingly, a literal road feature. Installed from PyPI as [`crosswalk-py`](docs/RELEASING.md) (the console script is `crosswalk`). Previously named `matcher`; the deprecated `matcher` console-script alias still works and warns.
 
 ## Why this matters
@@ -18,7 +20,7 @@ The metric that matters is **join-ability** — cities with a cleared license an
 
 Prior efforts validated the demand: [SharedStreets](https://sharedstreets.io/) built a widely-cited cross-referencing layer so curb and safety data could be shared across basemaps, but its core referencing system had to invent its own identifiers and has seen little development since ~2023. GERS is the stable, institutionally-backed target that layer lacked — crosswalk maps local IDs straight onto it. And the license discipline is deliberate (the [OpenAddresses](https://openaddresses.io/) lesson): clearing a source's license once, publicly and machine-readably, *is* part of the product — see [`datasets/licenses.toml`](datasets/licenses.toml) and [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
-Published bridge tables are queryable in your browser (no download) via the DuckDB-WASM live browser under [`site/`](site/) (deployed to GitHub Pages); see [docs/PUBLISHING.md](docs/PUBLISHING.md).
+Published bridge tables are queryable in your browser (no download) via the DuckDB-WASM live browser under [`site/`](site/) ([deployed to GitHub Pages](https://brad-richardson.github.io/crosswalk/)); see [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ### When to use crosswalk vs a map-matcher
 
@@ -29,7 +31,7 @@ Crosswalk is a **matcher + stitch-resolver** — it produces GERS bridge tables 
 - **What crosswalk does that a map-matcher does not:** bidirectional coverage QA (which *reference* segments have no local counterpart, not just the other way around); M:N group semantics (stitching/bridge groups map-matchers don't emit); cross-modal handling (sidewalk ≠ road ≠ cycleway); calibrated confidence plus a human/agent review workflow; and it works on non-routable or messy inputs and on local↔local matching, not only trace-to-graph snapping.
 - An [ensemble with Meili was tested and did not help](research/meili_ensemble_experiment.md) — crosswalk does not promise ensembling.
 
-Crosswalk determines which local segments correspond to Overture GERS segments, producing a bridge file that links local IDs to GERS IDs with **calibrated confidence** and a `match_decision` band. Unmatched local segments fall out as a by-product — candidates for addition to Overture — but that is secondary to the join.
+Crosswalk determines which local segments correspond to Overture GERS segments, producing a bridge file that links local IDs to GERS IDs, each row carrying a confidence score and a match/review decision. Unmatched local segments fall out as a by-product — candidates for addition to Overture — but that is secondary to the join.
 
 ## Pipeline Stages
 

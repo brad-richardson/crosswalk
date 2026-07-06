@@ -56,7 +56,7 @@ function chartCard(title, note, bodyHtml) {
   const totTargets = published.reduce((a, r) => a + ((r.stats || {}).n_target || 0), 0);
   const tiles = [
     ["published datasets", fmtInt(published.length)],
-    ["excluded (pending)", fmtInt(excluded.length)],
+    ["pending license review", fmtInt(excluded.length)],
     ["matched rows", fmtInt(totMatched)],
     ["overall match rate", totTargets ? fmtPct(totMatched / totTargets) : "—"],
   ];
@@ -77,8 +77,8 @@ function chartCard(title, note, bodyHtml) {
     .join("");
 
   el("charts").innerHTML =
-    chartCard("Match rate by dataset", "matched / target features, match-decision only", rateBars) +
-    chartCard("Dataset size", "target (local) feature count", sizeBars);
+    chartCard("Match rate by dataset", "share of local segments with a confident match", rateBars) +
+    chartCard("Dataset size", "local segments per dataset", sizeBars);
 
   // ---- published table ----
   const pubHead =
@@ -129,13 +129,14 @@ function chartCard(title, note, bodyHtml) {
     `<p><strong>Overture:</strong> ${esc(ov.attribution || "")} ` +
     (ov.url ? `(<a href="${esc(safeUrl(ov.url))}">${esc(ov.url)}</a>)` : "") + `</p>` +
     `<p><strong>Per-dataset source license</strong> is shown in the published table above ` +
-    `and in each dataset's <code>index.json</code> entry. Datasets with unverified licenses ` +
-    `are excluded rather than published under a guess.</p>`;
+    `and in each dataset's <code>index.json</code> entry. We only publish data whose ` +
+    `license we've verified.</p>`;
 
   el("footer").innerHTML =
     `Machine-readable index: <a href="${esc(safeUrl((index.site_url || "") + "/index.json"))}"><code>index.json</code></a> · ` +
     `per-release <code>checksums.txt</code> (sha256) accompanies every release. ` +
-    `Independent project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a>.`;
+    `An independent community project · <a href="https://github.com/brad-richardson/crosswalk">source on GitHub</a> · ` +
+    `<a href="https://github.com/brad-richardson/crosswalk/issues">feedback welcome</a>.`;
 })();
 
 function fileLinks(r) {
