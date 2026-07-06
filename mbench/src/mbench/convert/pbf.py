@@ -8,6 +8,15 @@ suitable for a routing-graph build, and carries the Overture GERS id as the OSM
 ``way_id`` so a map-matcher's returned ``way_id`` maps straight back to a GERS id
 with no join.
 
+The synthetic OSM ``way_id`` is *also* written into the ``name`` tag of every
+way. Valhalla (Meili) reads the numeric ``way_id`` directly off matched edges, so
+it ignores this tag — but GraphHopper does **not** expose OSM way ids on matched
+edges (a long-standing limitation) and instead stores way ``name`` in its
+KVStorage, readable via ``edge.getName()``. Carrying the id in ``name`` lets the
+GraphHopper adapter recover the same ``way_id -> GERS`` mapping with no source
+patch and no third-party id-mapping fork. This is behavior-preserving for
+Valhalla: an extra ``name`` tag does not change routing or the returned way_id.
+
 Topology: Overture segments meet exactly at shared *connector* coordinates, so
 we build the routable graph by **coordinate de-duplication** — vertices with the
 same (rounded) lon/lat collapse to one OSM node, which is exactly what makes two
@@ -147,7 +156,12 @@ def convert_overture_to_pbf(
         for nid, lon, lat in node_list:
             writer.add_node(Node(id=nid, location=(lon, lat)))
         for way_id, node_ids, highway in ways:
-            writer.add_way(Way(id=way_id, nodes=node_ids, tags={"highway": highway}))
+            # ``name`` carries the synthetic way_id so GraphHopper (which does not
+            # expose OSM way ids on matched edges) can recover it via edge.getName();
+            # Valhalla ignores it and uses the numeric way_id directly.
+            writer.add_way(
+                Way(id=way_id, nodes=node_ids, tags={"highway": highway, "name": str(way_id)})
+            )
     finally:
         writer.close()
 

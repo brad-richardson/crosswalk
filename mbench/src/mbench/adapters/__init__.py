@@ -31,3 +31,13 @@ try:
     REGISTRY["meili"] = MeiliAdapter
 except ImportError:
     pass
+
+# GraphHopper map-matching baseline requires geopandas + pyosmium for the shared
+# Overture->PBF conversion (same optional deps as Meili). The engine itself is a
+# JVM library run via `jbang` at match time (checked at run() time, not import).
+try:
+    from mbench.adapters.graphhopper import GraphHopperAdapter
+
+    REGISTRY["graphhopper"] = GraphHopperAdapter
+except ImportError:
+    pass

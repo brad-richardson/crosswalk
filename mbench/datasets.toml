@@ -80,6 +80,11 @@ reference = "us_fort_collins_sidewalks_overture_segments_v1.0.parquet"
 target = "us_fort_collins_sidewalks_v1.0.parquet"
 connectors = "us_fort_collins_sidewalks_overture_connectors_v1.0.parquet"
 
+[datasets.us_seattle_sidewalks]
+reference = "us_seattle_sidewalks_overture_segments_v1.0.parquet"
+target = "us_seattle_sidewalks_v1.0.parquet"
+connectors = "us_seattle_sidewalks_overture_connectors_v1.0.parquet"
+
 [datasets.de_berlin_roads]
 reference = "de_berlin_roads_overture_segments_v1.0.parquet"
 target = "de_berlin_roads_v1.0.parquet"

@@ -366,6 +366,58 @@ working multi-arch pull (or native x86 Linux), the Docker recipe is:
 (place the PBF from `convert/pbf.py` in `custom_files/`), then POST each densified
 trace to `/trace_attributes`.
 
+## GraphHopper (map-matching)
+
+[GraphHopper](https://github.com/graphhopper/graphhopper) map-matching is the
+**second** actively-maintained match-stage baseline (adapter name `graphhopper`),
+and the one that runs as an **embeddable JVM library with no server**. It uses the
+same segment-as-trace formulation as Meili (HMM/Viterbi, Newson/Krumm), so the two
+together separate what in the map-matching signature is the *formulation* vs the
+*engine*. Results + analysis: `docs/BENCHMARK_RESULTS.md` and
+`research/graphhopper_baseline.md`.
+
+### Pipeline (all handled by the adapter)
+
+1. **Overture → OSM PBF** — the *same* `mbench/convert/pbf.py` shared with Meili.
+   The synthetic way_id is carried both as the OSM way id (for Valhalla) and in the
+   `name` tag; GraphHopper does not expose OSM way ids on matched edges, so the
+   adapter recovers the way_id via `edge.getName()` (KVStorage) — no source patch.
+2. **Import + match** in one JVM process via a single-file runner
+   (`mbench/src/mbench/adapters/GraphHopperRunner.java`) executed with
+   [`jbang`](https://www.jbang.dev): `GraphHopper.importOrLoad()` builds/loads the
+   graph (cached per reference file), then `MapMatching.match()` snaps each densified
+   trace. Matched edges are aggregated per target with the shared overlap filter
+   (`mapmatch_common.aggregate_edges`), using a trace-density matched-length estimate
+   (GraphHopper's API gives only full edge length, not Valhalla's matched sub-length).
+
+### Install & run
+
+Needs the `graphhopper` extra (geopandas + pyosmium; **no Python engine dep**, works
+on Python ≥ 3.11) **and** `jbang`, which resolves the pinned
+`graphhopper-map-matching:10.2` jar from Maven Central and manages JDK 17:
+
+```bash
+uv pip install -e "mbench[graphhopper]"
+brew install jbang                                   # macOS; else https://www.jbang.dev/download/
+uv run mbench run graphhopper us_boston_streets -c mbench/datasets.toml
+# sidewalks: the default `foot` profile covers footways — swap the dataset name.
+uv run mbench run graphhopper us_fort_collins_sidewalks -c mbench/datasets.toml
+```
+
+The JVM runs **ARM-native** (no Docker, no emulation), so the wall times are valid.
+The first run also downloads JDK 17 + resolves the jar (one-time, cached under
+`~/.jbang`). Java is **optional**: without jbang the adapter fails with a clear
+"install jbang" message and its unit tests skip cleanly, so mbench stays
+pip-installable and CI green.
+
+Key `--opt`s (defaults in parentheses): `vehicle` (`foot` — bidirectional, traverses
+all walkable classes so it handles roads *and* sidewalks; `car` for directional
+roads-only), `densify_m` (10), `sigma_m` (25, GraphHopper's `measurementErrorSigma`
+/ snap radius), `min_network_size` (0 = keep every edge snappable, mirroring
+Valhalla), `min_match_frac`/`min_match_m` (0.10 / 8 m overlap threshold), `workers`
+(8, one `MapMatching` per thread), `graph_cache_dir` (PBF + built graph cached per
+reference file — keep OUTSIDE `data/output`), `rebuild` (force a rebuild).
+
 ## Baseline landscape
 
 Verification of the open-source conflation / map-matching landscape as a source
@@ -406,15 +458,21 @@ gap `matcher` fills. Related artifacts:
 - Commercial (not open): TomTom **GEM**, CARTO/Databricks & Wherobots/Sedona
   GERS-aware spatial joins.
 
-### Recommended next baseline (actionable)
+### Map-matching baselines (BUILT — historical planning notes below)
 
-After the naive floor and Hootenanny, the best MATCH-stage baseline to build next
-is a **map-matcher fed local segments as synthetic GPS traces**, snapping them
-onto an Overture-derived routable graph. The matched edge sequence *is* the
+> **Status (2026-07):** both options below are now implemented and benchmarked —
+> **Valhalla Meili** (adapter `meili`, see "Valhalla Meili" above) and
+> **GraphHopper** (adapter `graphhopper`, see "GraphHopper (map-matching)" above).
+> The planning notes are kept for provenance; the shared Overture→OSM-PBF converter
+> they both anticipated is `mbench/convert/pbf.py`.
+
+The best MATCH-stage baseline after the naive floor and Hootenanny was a
+**map-matcher fed local segments as synthetic GPS traces**, snapping them onto an
+Overture-derived routable graph. The matched edge sequence *is* the
 segment↔segment correspondence set — exactly the bridge-pair output we score. Two
-concrete, maintained options (build one, not both):
+concrete, maintained options (both now built):
 
-**Option A — Valhalla Meili (recommended first).** Strongest precedent: a 2025
+**Option A — Valhalla Meili (built first).** Strongest precedent: a 2025
 arXiv recipe conflated 1.78M road segments this way (>98% coverage, 2.5 m median).
 
 - Runtime: official multi-arch Docker `ghcr.io/valhalla/valhalla:latest` (ARM-native, no emulation).
@@ -431,12 +489,14 @@ arXiv recipe conflated 1.78M road segments this way (>98% coverage, 2.5 m median
 - Integration cost: **Medium** — the only real work is the Overture→PBF export;
   everything else is HTTP + JSON parsing.
 
-**Option B — GraphHopper map-matching (close second, no server).** Same paradigm
+**Option B — GraphHopper map-matching (built second, no server).** Same paradigm
 as an embeddable JVM library (`com.graphhopper:graphhopper-map-matching`, 2025
-releases on Maven Central) — no service to run, but a JVM subprocess and the same
-Overture→PBF import. Pick this if avoiding a running service matters more than
-Valhalla's stronger conflation precedent; the Overture→PBF step is shared with
-Option A.
+releases on Maven Central) — no service to run, but a JVM subprocess (via jbang)
+and the same Overture→PBF import. Built and benchmarked: it confirmed the
+formulation's perfect-recall signature and reproduced the sidewalk precision tax
+almost exactly, diverging from Valhalla only on Boston road precision (see
+`research/graphhopper_baseline.md`). Pick this when avoiding a running service
+matters more than Valhalla's stronger road precision.
 
 **Explicitly deprioritized for MATCH-stage:**
 
