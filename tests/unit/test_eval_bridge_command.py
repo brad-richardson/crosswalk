@@ -7,11 +7,11 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-from matcher.cli import app
+from crosswalk.cli import app
 
 
 class TestMatchEvalCommand:
-    """Tests for matcher analyze bridge command."""
+    """Tests for crosswalk analyze bridge command."""
 
     @pytest.fixture
     def runner(self):

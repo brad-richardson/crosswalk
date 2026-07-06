@@ -12,8 +12,8 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from matcher.features.spatial_context import compute_road_graphlet_features
-from matcher.topology.sparse_graph import SparseGraph, build_graph_from_edges
+from crosswalk.features.spatial_context import compute_road_graphlet_features
+from crosswalk.topology.sparse_graph import SparseGraph, build_graph_from_edges
 
 
 def nx_to_sparse(G: nx.Graph) -> SparseGraph:

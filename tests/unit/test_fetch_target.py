@@ -9,8 +9,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.datasets.schema import FetchConfig
-from matcher.fetch.target import (
+from crosswalk.datasets.schema import FetchConfig
+from crosswalk.fetch.target import (
     _load_ms_roads_tsv,
     _transform_download_data,
     fetch_dataset,
@@ -156,8 +156,8 @@ class TestTransformDownloadData:
 class TestListDatasets:
     """Tests for list_datasets function."""
 
-    @patch("matcher.fetch.target.list_dataset_configs")
-    @patch("matcher.fetch.target.get_dataset_config")
+    @patch("crosswalk.fetch.target.list_dataset_configs")
+    @patch("crosswalk.fetch.target.get_dataset_config")
     def test_list_all_datasets(self, mock_get_config, mock_list_configs):
         """Test listing all datasets."""
         mock_list_configs.return_value = ["us_boston_streets", "co_bogota_roads"]
@@ -177,8 +177,8 @@ class TestListDatasets:
         assert result[0]["source_type"] == "arcgis"
         assert result[0]["api_key_required"] is False
 
-    @patch("matcher.fetch.target.list_dataset_configs")
-    @patch("matcher.fetch.target.get_dataset_config")
+    @patch("crosswalk.fetch.target.list_dataset_configs")
+    @patch("crosswalk.fetch.target.get_dataset_config")
     def test_list_datasets_with_prefix(self, mock_get_config, mock_list_configs):
         """Test filtering datasets by prefix."""
         mock_list_configs.return_value = ["us_boston_streets", "co_bogota_roads"]
@@ -199,7 +199,7 @@ class TestListDatasets:
 class TestFetchDataset:
     """Tests for fetch_dataset function."""
 
-    @patch("matcher.fetch.target.get_dataset_config")
+    @patch("crosswalk.fetch.target.get_dataset_config")
     def test_fetch_nonexistent_dataset(self, mock_get_config, tmp_path):
         """Test fetching a dataset that doesn't exist."""
         mock_get_config.return_value = None
@@ -208,8 +208,8 @@ class TestFetchDataset:
 
         assert result is None
 
-    @patch("matcher.fetch.target.fetch_arcgis_layer")
-    @patch("matcher.fetch.target.get_dataset_config")
+    @patch("crosswalk.fetch.target.fetch_arcgis_layer")
+    @patch("crosswalk.fetch.target.get_dataset_config")
     def test_fetch_arcgis_dataset(self, mock_get_config, mock_fetch_arcgis, tmp_path):
         """Test fetching an ArcGIS dataset."""
         # Setup mock config
@@ -234,7 +234,7 @@ class TestFetchDataset:
         assert result == output_path
         mock_fetch_arcgis.assert_called_once()
 
-    @patch("matcher.fetch.target.get_dataset_config")
+    @patch("crosswalk.fetch.target.get_dataset_config")
     def test_fetch_manual_dataset(self, mock_get_config, tmp_path):
         """Test fetching a manual download dataset returns None."""
         mock_config = MagicMock()
@@ -252,8 +252,8 @@ class TestFetchDataset:
 class TestFetchDatasetsByPrefix:
     """Tests for fetch_datasets_by_prefix function."""
 
-    @patch("matcher.fetch.target.fetch_dataset")
-    @patch("matcher.fetch.target.list_dataset_configs")
+    @patch("crosswalk.fetch.target.fetch_dataset")
+    @patch("crosswalk.fetch.target.list_dataset_configs")
     def test_fetch_by_prefix(self, mock_list_configs, mock_fetch_dataset, tmp_path):
         """Test fetching multiple datasets by prefix."""
         mock_list_configs.return_value = [
@@ -273,7 +273,7 @@ class TestFetchDatasetsByPrefix:
         assert "us_boston_sidewalks" in results
         assert mock_fetch_dataset.call_count == 2
 
-    @patch("matcher.fetch.target.list_dataset_configs")
+    @patch("crosswalk.fetch.target.list_dataset_configs")
     def test_fetch_by_prefix_no_matches(self, mock_list_configs, tmp_path):
         """Test fetching with no matching prefix."""
         mock_list_configs.return_value = ["us_boston_streets"]
@@ -288,7 +288,7 @@ class TestGetBufferedBbox:
 
     def test_uses_default_when_none(self):
         """Test that default buffer is used when buffer_m is None."""
-        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+        from crosswalk.fetch.overture import BoundingBox, get_buffered_bbox
 
         bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
         result_bbox, effective_buffer = get_buffered_bbox(bbox, None, 1000.0)
@@ -301,7 +301,7 @@ class TestGetBufferedBbox:
 
     def test_uses_explicit_buffer(self):
         """Test that explicit buffer overrides default."""
-        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+        from crosswalk.fetch.overture import BoundingBox, get_buffered_bbox
 
         bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
         result_bbox, effective_buffer = get_buffered_bbox(bbox, 500.0, 1000.0)
@@ -310,7 +310,7 @@ class TestGetBufferedBbox:
 
     def test_zero_buffer_returns_original(self):
         """Test that buffer=0 returns original bbox."""
-        from matcher.fetch.overture import BoundingBox, get_buffered_bbox
+        from crosswalk.fetch.overture import BoundingBox, get_buffered_bbox
 
         bbox = BoundingBox(xmin=-71.0, ymin=42.0, xmax=-70.0, ymax=43.0)
         result_bbox, effective_buffer = get_buffered_bbox(bbox, 0, 1000.0)
@@ -501,7 +501,7 @@ class TestFilePatternFiltering:
 
     def test_fetch_download_with_file_pattern(self, tmp_path):
         """Test fetch_download selects correct file from ZIP using file_pattern."""
-        from matcher.fetch.target import fetch_download
+        from crosswalk.fetch.target import fetch_download
 
         # Create a ZIP with files in subdirectories (like real MLIT ZIPs)
         zip_path = tmp_path / "test.zip"
@@ -539,7 +539,7 @@ class TestFilePatternFiltering:
         fetch_config = FetchConfig(id_prefix="test", id_column="ID", name_column="name")
 
         # Mock the download to return our local ZIP
-        with patch("matcher.fetch.target.requests.get") as mock_get:
+        with patch("crosswalk.fetch.target.requests.get") as mock_get:
             mock_resp = MagicMock()
             mock_resp.headers = {"content-type": "application/zip"}
             mock_resp.iter_content = lambda chunk_size: [zip_path.read_bytes()]
@@ -566,7 +566,7 @@ class TestMsRoadsTsvFetchDownload:
 
     def test_fetch_download_ms_roads_tsv(self, tmp_path):
         """Test fetch_download with ms_roads_tsv format end-to-end."""
-        from matcher.fetch.target import fetch_download
+        from crosswalk.fetch.target import fetch_download
 
         # Create a ZIP with a TSV file inside
         zip_path = tmp_path / "test.zip"
@@ -593,7 +593,7 @@ class TestMsRoadsTsvFetchDownload:
         output_path = tmp_path / "output.parquet"
         fetch_config = FetchConfig(id_prefix="tn_test", id_column="_geom_hash")
 
-        with patch("matcher.fetch.target.requests.get") as mock_get:
+        with patch("crosswalk.fetch.target.requests.get") as mock_get:
             mock_resp = MagicMock()
             mock_resp.headers = {"content-type": "application/zip"}
             mock_resp.iter_content = lambda chunk_size: [zip_path.read_bytes()]

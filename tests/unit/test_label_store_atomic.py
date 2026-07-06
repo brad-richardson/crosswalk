@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from matcher.labeling.label_store import (
+from crosswalk.labeling.label_store import (
     HUMAN_LABEL_COLUMNS,
     LabelLoadError,
     LabelStore,

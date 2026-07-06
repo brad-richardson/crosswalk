@@ -1,8 +1,8 @@
-"""Tests for the GeoJSON coordinate-rounding helper in matcher.cli.data."""
+"""Tests for the GeoJSON coordinate-rounding helper in crosswalk.cli.data."""
 
 from __future__ import annotations
 
-from matcher.cli.data import _round_geojson_coords
+from crosswalk.cli.data import _round_geojson_coords
 
 
 def test_round_point():

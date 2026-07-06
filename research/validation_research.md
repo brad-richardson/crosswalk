@@ -1,5 +1,7 @@
 # Road Existence Validation - Research Document
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 ## Status: Research/Documentation Only
 
 This document captures research on road existence validation approaches for future implementation. No immediate implementation planned.

@@ -2,7 +2,7 @@
 
 mbench is a standalone benchmarking package that cannot depend on matcher, so it
 replicates the SET-semantics scoring core (membership / boundary / coverage) from
-``matcher.agent_labeling.stitch_eval.set_label_metrics`` in
+``crosswalk.agent_labeling.stitch_eval.set_label_metrics`` in
 ``mbench.eval.stitch_metrics.set_label_metrics``. This test asserts the two agree
 across a representative grid of predicted-edge / membership inputs, so they cannot
 drift silently (mirrors ``test_mbench_sliver_parity.py``).
@@ -23,7 +23,7 @@ if str(_MBENCH_SRC) not in sys.path:
 
 from mbench.eval.stitch_metrics import set_label_metrics as mbench_set_metrics  # noqa: E402
 
-from matcher.agent_labeling.stitch_eval import (
+from crosswalk.agent_labeling.stitch_eval import (
     set_label_metrics as matcher_set_metrics,  # noqa: E402
 )
 

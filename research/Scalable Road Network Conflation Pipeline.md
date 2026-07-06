@@ -1,5 +1,7 @@
 # **Scalable Vector-to-Vector Road Network Conflation: A Comprehensive Architectural Analysis and Research Review**
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 ## **1\. Introduction: The Conflation Imperative in the Age of Open Data**
 
 The geospatial domain is currently navigating a profound structural shift characterized by the simultaneous proliferation of high-frequency crowd-sourced data and the rigorous standardization of global mapping frameworks. Historically, the maintenance of road network databases was the exclusive province of centralized authorities—municipal governments, national mapping agencies, and proprietary vendors. These authoritative datasets are characterized by high attribute precision and legal validation but often suffer from significant temporal latency and spatial fragmentation. Conversely, crowd-sourced platforms, most notably OpenStreetMap (OSM), have demonstrated an unprecedented capacity for rapid update cycles and the mapping of micromobility infrastructure, yet they frequently lack the consistent schema enforcement required for enterprise-grade applications.

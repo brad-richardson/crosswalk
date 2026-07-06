@@ -16,9 +16,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from matcher.factory.licenses import LicenseRegistry
-from matcher.factory.manifest import Manifest
-from matcher.factory.publish import (
+from crosswalk.factory.licenses import LicenseRegistry
+from crosswalk.factory.manifest import Manifest
+from crosswalk.factory.publish import (
     ALL_BRIDGES_FILENAME,
     BRIDGES_PREFIX,
     INDEX_HTML,
@@ -27,7 +27,7 @@ from matcher.factory.publish import (
     build_all_bridges,
     checksum_of,
 )
-from matcher.factory.publish_sync import (
+from crosswalk.factory.publish_sync import (
     missing_r2_env,
     r2_env,
     staged_release_dirs,
@@ -366,7 +366,7 @@ def test_staged_release_dirs(factory_root, tmp_path, empty_datasets_dir):
 
 
 def test_build_aws_sync_argv_excludes_published_releases():
-    from matcher.factory.publish_sync import R2Config, build_aws_sync_argv
+    from crosswalk.factory.publish_sync import R2Config, build_aws_sync_argv
 
     cfg = R2Config(
         endpoint="https://acct.r2.cloudflarestorage.com",

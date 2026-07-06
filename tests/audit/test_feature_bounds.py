@@ -5,7 +5,7 @@ Catches NaN/inf leaks, sign errors, and out-of-range values.
 
 import numpy as np
 
-from matcher.config import FEATURE_COLUMNS
+from crosswalk.config import FEATURE_COLUMNS
 
 from .conftest import FEATURE_BOUNDS, compute_features_simple, make_projected_line
 

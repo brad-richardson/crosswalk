@@ -8,8 +8,8 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.matching.optimizer import optimize_matches_with_grouping
-from matcher.matching.types import MatchDecision, MatchResult
+from crosswalk.matching.optimizer import optimize_matches_with_grouping
+from crosswalk.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture

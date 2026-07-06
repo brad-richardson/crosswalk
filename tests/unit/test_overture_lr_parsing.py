@@ -1,6 +1,6 @@
 """Unit tests for Overture linear-referenced attribute parsing."""
 
-from matcher.fetch.overture import (
+from crosswalk.fetch.overture import (
     _extract_range_from_rule,
     _get_language_priority,
     _get_variant_priority,

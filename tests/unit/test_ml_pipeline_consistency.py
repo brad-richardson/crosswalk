@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 
-from matcher.config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
+from crosswalk.config import FEATURE_COLUMNS, MAX_DISTANCE_METERS
 
 
 class TestPrecomputedFeaturePassthrough:
@@ -44,8 +44,8 @@ class TestPrecomputedFeaturePassthrough:
 
     def test_endpoint_features_passed_through(self, t_network):
         """Pre-computed endpoint features should be used unchanged."""
-        from matcher.features.compute import compute_pair_features
-        from matcher.features.spatial_context import (
+        from crosswalk.features.compute import compute_pair_features
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             compute_endpoint_features,
         )
@@ -78,8 +78,8 @@ class TestPrecomputedFeaturePassthrough:
 
     def test_topology_features_passed_through(self, t_network):
         """Pre-computed topology features should be used unchanged."""
-        from matcher.features.compute import compute_pair_features
-        from matcher.features.spatial_context import compute_all_topology
+        from crosswalk.features.compute import compute_pair_features
+        from crosswalk.features.spatial_context import compute_all_topology
         from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         topology = compute_all_topology(
@@ -113,7 +113,7 @@ class TestPrecomputedFeaturePassthrough:
         self, t_network, graphlet_input, expected_sim, expected_deg
     ):
         """Pre-computed graphlet features should be used unchanged."""
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(
@@ -137,7 +137,7 @@ class TestMissingValueHandling:
     @pytest.fixture
     def matcher_instance(self):
         """Matcher instance for testing."""
-        from matcher.matching.ml import MLMatcher
+        from crosswalk.matching.ml import MLMatcher
 
         matcher = MLMatcher()
         matcher.feature_names = FEATURE_COLUMNS.copy()
@@ -217,8 +217,8 @@ class TestAlignmentAwareGraphletComputation:
         self, mid_junction_network, alignment_fracs, description
     ):
         """Graphlet similarity should be valid for various alignment fractions."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import (
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import (
             compute_graphlet_similarity,
             precompute_graphlet_features,
         )
@@ -243,8 +243,8 @@ class TestAlignmentAwareGraphletComputation:
 
     def test_reversed_direction_handled(self):
         """Reversed alignment direction should compute correctly."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import (
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import (
             compute_graphlet_similarity,
             precompute_graphlet_features,
         )
@@ -280,9 +280,9 @@ class TestLabelStoreParity:
 
     def test_all_features_preserved_after_storage(self):
         """All computed features should be retrievable from stored labels."""
-        from matcher.features.compute import compute_pair_features
-        from matcher.labeling.feature_store import FeatureStore
-        from matcher.labeling.label_store import LabelStore
+        from crosswalk.features.compute import compute_pair_features
+        from crosswalk.labeling.feature_store import FeatureStore
+        from crosswalk.labeling.label_store import LabelStore
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         features = compute_pair_features(

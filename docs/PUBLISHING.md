@@ -4,7 +4,7 @@ The public artifact of the project: queryable **local road/path ID ↔ Overture 
 id** bridge tables, hosted on Cloudflare R2 (free egress), regenerated per Overture
 release. Modeled on the geocoder repo's pattern — static Parquet + a credibility
 page, no serving infrastructure. This document is the design; the tooling is
-`matcher factory publish` (see [Command surface](#command-surface)).
+`crosswalk factory publish` (see [Command surface](#command-surface)).
 
 M5 builds on the factory (M4, [FACTORY.md](FACTORY.md)), which already produces the
 right shape locally: `data/factory/release=<overture-release>/dataset=<name>/{bridge.parquet,
@@ -14,7 +14,7 @@ assembles + syncs a public tree.
 
 ## Status (what landed vs what awaits credentials)
 
-**Landed (this PR):** the `matcher factory publish` command; deterministic staging-
+**Landed (this PR):** the `crosswalk factory publish` command; deterministic staging-
 tree assembly; the license registry (`datasets/licenses.toml`) + gating; the
 per-release unified `all_bridges.parquet`; `index.json` (machine-readable) +
 `index.html` (credibility page); SHA-256 checksums + `checksums.txt`; `--dry-run`
@@ -145,11 +145,11 @@ accompanies each release for integrity verification.
 
 1. Fetch the new Overture segments/connectors (release id lands in the segments
    `.meta.yaml`).
-2. `matcher factory run --all` — writes a new `release=<new>/` partition (finished
+2. `crosswalk factory run --all` — writes a new `release=<new>/` partition (finished
    datasets from a prior run are skipped via `full_key`).
-3. `matcher factory delta <dataset> --from <old> --to <new>` — the consumer-facing
+3. `crosswalk factory delta <dataset> --from <old> --to <new>` — the consumer-facing
    GERS churn release-notes (same/changed/lost/gained).
-4. `matcher factory publish --all` — assembles + syncs the new release; the old
+4. `crosswalk factory publish --all` — assembles + syncs the new release; the old
    release stays untouched (immutable).
 
 Ad-hoc republish of a release (e.g. after a model/feature-version bump that you
@@ -236,7 +236,7 @@ hint for the reviewer. This exercised both paths on the current factory outputs:
 ## Command surface
 
 ```bash
-matcher factory publish [DATASETS...] [--all] [-D NAME]
+crosswalk factory publish [DATASETS...] [--all] [-D NAME]
     [--release R]              # restrict to release(s); default: all present
     [--target-dir PATH]        # publish to a LOCAL dir (no creds); omit for R2
     [--dry-run/--no-dry-run]   # default: --dry-run (build staging + report, sync nothing)
@@ -285,9 +285,9 @@ overwrite identical bytes idempotently.
 2. Export the four env vars above in the publishing shell.
 3. (Optional) Review + `status = "approved"` more datasets in
    `datasets/licenses.toml`.
-4. Dry-run first: `matcher factory publish --all --site-url https://<your-host>`
+4. Dry-run first: `crosswalk factory publish --all --site-url https://<your-host>`
    → inspect the summary + `data/publish_staging/index.html`.
-5. Go live: `matcher factory publish --all --no-dry-run --site-url https://<your-host>`.
+5. Go live: `crosswalk factory publish --all --no-dry-run --site-url https://<your-host>`.
 6. Apply the **R2 CORS policy** below (required for the browser data browser to
    range-read the Parquet cross-origin).
 
@@ -371,7 +371,7 @@ staging tree and point the site at it:
 
 ```bash
 # 1. Build a local staging tree from finished factory outputs.
-matcher factory publish --all --no-dry-run \
+crosswalk factory publish --all --no-dry-run \
     --target-dir data/publish_staging_local --site-url http://localhost:8000
 
 # 2. Serve the data (CORS + Range) and the site, in two shells.

@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 
-from matcher.blocking.spatial_index import CandidatePair
-from matcher.config import FEATURE_COLUMNS
-from matcher.features.pipeline import prepare_worker_data
-from matcher.matching.ml import _compute_feature_chunk, _init_worker
+from crosswalk.blocking.spatial_index import CandidatePair
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.features.pipeline import prepare_worker_data
+from crosswalk.matching.ml import _compute_feature_chunk, _init_worker
 
 # ---------------------------------------------------------------------------
 # Helpers

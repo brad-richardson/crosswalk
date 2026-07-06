@@ -34,10 +34,10 @@ from sklearn.model_selection import GroupKFold
 # Add matcher to path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from matcher.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
-from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE
-from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import DEFAULT_XGB_PARAMS, MLMatcher, segment_aware_split
+from crosswalk.config import FEATURE_CATEGORIES as CONFIG_CATEGORIES
+from crosswalk.config import FEATURE_COLUMNS, METRIC_AVERAGE
+from crosswalk.labeling.label_store import LabelStore
+from crosswalk.matching.ml import DEFAULT_XGB_PARAMS, MLMatcher, segment_aware_split
 
 
 def _make_ablation_categories() -> dict[str, list[str]]:

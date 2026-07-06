@@ -1,5 +1,7 @@
 # Fourth Panel Voter — Invoker, Dissenter Replay & 4-Voter Validation
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Date:** 2026-07-05
 **Goal:** Add a decorrelated 4th voter to the stitching consensus panel (claude +
 codex + agy) for quorum robustness, decide the 4-voter **export rule** (3/4

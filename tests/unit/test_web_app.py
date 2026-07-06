@@ -1,4 +1,4 @@
-"""Tests for the matcher web UI application."""
+"""Tests for the crosswalk web UI application."""
 
 import pytest
 
@@ -8,7 +8,7 @@ pytest.importorskip(
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from matcher.web.app import create_app  # noqa: E402
+from crosswalk.web.app import create_app  # noqa: E402
 
 
 @pytest.fixture

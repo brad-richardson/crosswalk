@@ -9,7 +9,7 @@ import math
 import pytest
 from shapely import LineString
 
-from matcher.matching.optimizer import (
+from crosswalk.matching.optimizer import (
     _endpoints_are_collinear,
     _find_contiguous_id_groups,
     apply_confidence_drop_prune,
@@ -19,7 +19,7 @@ from matcher.matching.optimizer import (
     optimize_matches_greedy,
     optimize_matches_with_grouping,
 )
-from matcher.matching.types import MatchDecision, MatchResult
+from crosswalk.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture
@@ -505,7 +505,7 @@ class TestOptimizeMatchesWithGrouping:
 class TestSliverFreeComponentGraph:
     """Junction slivers must not glue independent components together.
 
-    Sliver classification uses the shared hybrid rule from ``matcher.config``
+    Sliver classification uses the shared hybrid rule from ``crosswalk.config``
     (fraction < 0.10 AND absolute overlap < 5 m). Segments here are 100 m long,
     so a 0.01 alignment span = 1 m of overlap: comfortably a sliver.
     """
@@ -758,7 +758,7 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         return MatchResult(rid, tid, MatchDecision.MATCH, conf, {}, {})
 
     def test_default_is_calibrated_equivalent_of_raw_half(self):
-        from matcher.config import settings
+        from crosswalk.config import settings
 
         # Guard against a silent revert to the raw-scale 0.5: with calibration on
         # (the default), 0.5 would prune at an effective raw ~0.42 (weaker glue).
@@ -766,7 +766,7 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         assert settings.optimizer_glue_min_confidence > settings.scoring_match_threshold
 
     def test_configured_default_prunes_the_calibrated_band(self):
-        from matcher.config import settings
+        from crosswalk.config import settings
 
         # An edge whose calibrated confidence sits in the [0.5, 0.575) band --
         # i.e. it maps below the raw-0.5 the design pruned -- must NOT glue at
@@ -799,8 +799,8 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         # The pipeline keys the glue prune off whether the loaded model actually
         # applies calibration: calibrated -> 0.575, raw -> 0.5. This keeps an
         # uncalibrated model at the raw-0.5 point #267 validated (no over-prune).
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         class _FakeMatcher:
             def __init__(self, *a, **k):
@@ -813,9 +813,9 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
             fm._active = active
             return fm
 
-        # The helper imports MLMatcher lazily from matcher.matching.ml, so patch
+        # The helper imports MLMatcher lazily from crosswalk.matching.ml, so patch
         # it at the source module (patching runner.MLMatcher would be a no-op).
-        import matcher.matching.ml as ml_mod
+        import crosswalk.matching.ml as ml_mod
 
         monkeypatch.setattr(ml_mod, "MLMatcher", lambda *a, **k: make(True))
         assert runner._effective_glue_min_confidence() == pytest.approx(
@@ -830,12 +830,12 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
     def test_pipeline_short_circuits_when_calibration_disabled(self, monkeypatch):
         # With calibration globally off, the helper returns the raw threshold
         # WITHOUT loading a model (calibration_active can never be True).
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", False)
 
-        import matcher.matching.ml as ml_mod
+        import crosswalk.matching.ml as ml_mod
 
         def _boom(*a, **k):
             raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
@@ -854,7 +854,7 @@ class TestEffectivePruneThresholdCalibrationGuard:
     """
 
     def _patch_calibration(self, monkeypatch, active: bool):
-        import matcher.matching.ml as ml_mod
+        import crosswalk.matching.ml as ml_mod
 
         class _FakeMatcher:
             def __init__(self, *a, **k):
@@ -870,8 +870,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         """A dataset present in the allowlist prunes at its validated floor."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -894,8 +894,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         no global default floor is applied, so it returns 0.0."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -917,14 +917,14 @@ class TestEffectivePruneThresholdCalibrationGuard:
         even allowlisted ones — WITHOUT loading a model."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", False)
         monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
 
-        import matcher.matching.ml as ml_mod
+        import crosswalk.matching.ml as ml_mod
 
         def _boom(*a, **k):
             raise AssertionError("MLMatcher must not be loaded when the master switch is off")
@@ -939,8 +939,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         """An allowlist value <= 0 keeps a listed dataset explicitly disabled."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -955,14 +955,14 @@ class TestEffectivePruneThresholdCalibrationGuard:
         dataset so the calibration guard (not the allowlist) is what disables it."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", False)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
         monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
 
-        import matcher.matching.ml as ml_mod
+        import crosswalk.matching.ml as ml_mod
 
         def _boom(*a, **k):
             raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
@@ -979,8 +979,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         an allowlisted dataset."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -1009,8 +1009,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         Both must resolve to the allowlisted dataset's threshold."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -1031,8 +1031,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         ``us_boston_streets`` override — no substring/boundary collision."""
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -1071,7 +1071,7 @@ class TestEffectivePruneThresholdCalibrationGuard:
         The bridge-table factory writes ``…/dataset=<name>/bridge.parquet`` — the
         filename ("bridge") carries no dataset identity, so the factory passes
         ``dataset_key=<name>``. That override must resolve the allowlist exactly as
-        ``matcher stitch``'s ``<name>_bridge.parquet`` filename does. This behavior
+        ``crosswalk stitch``'s ``<name>_bridge.parquet`` filename does. This behavior
         already works (the ``dataset_key`` path predates this change); the test
         exists so a later refactor cannot silently drop the override and fall back
         to filename parsing — which (correctly) resolves the bare "bridge.parquet"
@@ -1079,8 +1079,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
         """
         from pathlib import Path
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -1116,8 +1116,8 @@ class TestEffectivePruneThresholdCalibrationGuard:
 
         from loguru import logger
 
-        from matcher.config import settings
-        from matcher.pipeline import runner
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
 
         monkeypatch.setattr(settings, "enable_calibration", True)
         monkeypatch.setattr(settings, "resolver_prune_enabled", True)
@@ -1339,8 +1339,8 @@ class TestOptimizerDeterminism:
             import hashlib
             import geopandas as gpd
             from shapely import LineString
-            from matcher.matching.optimizer import optimize_matches_with_grouping
-            from matcher.matching.types import MatchDecision, MatchResult
+            from crosswalk.matching.optimizer import optimize_matches_with_grouping
+            from crosswalk.matching.types import MatchDecision, MatchResult
 
             results, ref_geoms, tgt_geoms = [], {}, {}
             for c in range(12):

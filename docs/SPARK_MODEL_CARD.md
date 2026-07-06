@@ -112,7 +112,7 @@ epsilon-compact selection as ~1.3x slower for +0.002 holdout F1.
 
 ```bash
 # Single command: train + export
-uv run matcher export-spark-model
+uv run crosswalk export-spark-model
 ```
 
 This uses `SPARK_PORTABLE_FEATURES` from `config.py` (inclusive list of the 28 features)

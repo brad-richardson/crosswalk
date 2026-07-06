@@ -15,14 +15,14 @@ def model_path() -> Path:
     """Return path to the trained model."""
     path = Path(__file__).parent.parent.parent / "data" / "models" / "matcher_model_combined.joblib"
     if not path.exists():
-        pytest.skip(f"Model not found at {path}. Run 'matcher train --combined' first.")
+        pytest.skip(f"Model not found at {path}. Run 'crosswalk train --combined' first.")
     return path
 
 
 @pytest.fixture
 def trained_matcher(model_path):
     """Return a loaded MLMatcher instance."""
-    from matcher.matching.ml import MLMatcher
+    from crosswalk.matching.ml import MLMatcher
 
     return MLMatcher(str(model_path))
 

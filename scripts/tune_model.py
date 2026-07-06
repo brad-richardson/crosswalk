@@ -39,7 +39,7 @@ FEATURE SETS
 
 ``--feature-set spark`` tunes the Spark-portable model
 (``SPARK_PORTABLE_XGB_PARAMS``): the feature matrix is restricted to
-``SPARK_PORTABLE_FEATURES`` exactly the way ``matcher export-spark-model``
+``SPARK_PORTABLE_FEATURES`` exactly the way ``crosswalk export-spark-model``
 does it (``train(exclude_features=...)`` restricts ``feature_names`` BEFORE
 ``_validate_training_pairs()``, so the post-validation row set — and hence the
 seed-42 split — matches the exported model's training run). The objective
@@ -83,8 +83,8 @@ except ImportError as e:
         "uv pip install -e '.[dev,ml]' (plus optuna: uv pip install optuna)"
     ) from e
 
-from matcher.config import FEATURE_COLUMNS, METRIC_AVERAGE, SPARK_PORTABLE_FEATURES
-from matcher.matching.ml import MLMatcher, segment_aware_split
+from crosswalk.config import FEATURE_COLUMNS, METRIC_AVERAGE, SPARK_PORTABLE_FEATURES
+from crosswalk.matching.ml import MLMatcher, segment_aware_split
 
 # Size penalty for the spark feature set: 0.00001 F1 per tree above 100.
 # Matches the penalty used for the original Spark-portable tuning so the
@@ -230,7 +230,7 @@ def run_tuning(
     epsilon: float | None = None,
 ):
     """Run hyperparameter tuning on the training portion of the seed-42 split."""
-    from matcher.labeling.label_store import LabelStore
+    from crosswalk.labeling.label_store import LabelStore
 
     logger.info("Loading data...")
     df = LabelStore.load_all(Path(labels_dir))
@@ -243,7 +243,7 @@ def run_tuning(
 
     matcher = MLMatcher()
     if feature_set == "spark":
-        # Mirror `matcher export-spark-model`: train() restricts feature_names
+        # Mirror `crosswalk export-spark-model`: train() restricts feature_names
         # (FEATURE_COLUMNS order, minus non-portable features) BEFORE
         # _validate_training_pairs(), so validation's all-NaN check — and thus
         # the seed-42 split's row set — matches the exported model's run.

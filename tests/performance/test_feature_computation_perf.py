@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features.geometric import (
+from crosswalk.features.geometric import (
     _buffer_iou,
     _buffer_iou_from_buffers,
     _compute_hausdorff_stats,
@@ -24,7 +24,7 @@ from matcher.features.geometric import (
     compute_sinuosity,
     compute_vertex_density,
 )
-from matcher.features.relational import (
+from crosswalk.features.relational import (
     compute_endpoint_proximity,
     compute_parallel_alignment,
     compute_perpendicular_offset,
@@ -203,7 +203,7 @@ class TestFeatureComputationPerformance:
         multiple candidate pairs. The batch path uses vectorized Shapely 2.0
         operations to avoid per-pair Python dispatch overhead.
         """
-        from matcher.features.geometric import compute_geometric_features_batch
+        from crosswalk.features.geometric import compute_geometric_features_batch
 
         # Create pairs where the same geometries appear multiple times
         n_base_lines = 100
@@ -462,7 +462,7 @@ class TestFeatureComputationPerformance:
 
     def test_query_nearby_endpoints_jit_throughput(self, synthetic_lines):
         """Benchmark query_nearby_endpoints JIT function directly."""
-        from matcher.features._jit_helpers import query_nearby_endpoints_numba
+        from crosswalk.features._jit_helpers import query_nearby_endpoints_numba
 
         # Create endpoint array from all line endpoints
         all_endpoints = []

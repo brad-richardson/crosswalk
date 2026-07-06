@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from matcher.eval_utils import run_loo_by_type_cv
+from crosswalk.eval_utils import run_loo_by_type_cv
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("GITHUB_ACTIONS") != "true",

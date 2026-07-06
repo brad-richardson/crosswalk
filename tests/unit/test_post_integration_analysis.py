@@ -3,7 +3,7 @@
 import geopandas as gpd
 from shapely.geometry import LineString
 
-from matcher.post_integration import (
+from crosswalk.post_integration import (
     IslandSeverity,
     detect_gps_drift,
     detect_islands,

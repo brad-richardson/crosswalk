@@ -1,5 +1,7 @@
 # Phase-2 Panel Audit Sheet — us_boston_streets
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 Manually audit these 10 randomly-sampled (seed 20260703) auto-accept CANDIDATE groups before enabling unanimous auto-accept export. Each was a unanimous non-NONE panel pick on a group of ≤20 candidate edges.
 
 **To view a group:** run `uv run matcher ui`, then open the URL below (port 8505). The stitching-review UI pre-seeds the panel's chosen option; confirm the highlighted edge set is the correct M:N assignment.

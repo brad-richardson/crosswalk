@@ -18,8 +18,8 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.config import FEATURE_COLUMNS
-from matcher.features.compute import (
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.features.compute import (
     MissingContextError,
     _get_error_features,
     compute_pair_features,
@@ -188,8 +188,8 @@ class TestCallSiteContextConsistency:
     def test_topology_not_required_when_aligned_path_active(self):
         """Aligned topology path (graphlet_data + alignment + seg_ids) should work
         without explicit topology parameters."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import precompute_graphlet_features
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import precompute_graphlet_features
 
         gdf = gpd.GeoDataFrame(
             {
@@ -230,7 +230,7 @@ class TestCallSiteContextConsistency:
     def test_topology_features_match_real_network(self):
         """Topology from compute_all_topology should produce non-default features
         that match actual network structure."""
-        from matcher.features.spatial_context import compute_all_topology
+        from crosswalk.features.spatial_context import compute_all_topology
 
         # Build T-intersection: main road + side street
         gdf = gpd.GeoDataFrame(

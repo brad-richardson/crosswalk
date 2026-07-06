@@ -1,5 +1,7 @@
 # Scale-Out Readiness Audit — 2026-07
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 Scope: what it concretely takes to scale stitching + conflation from the current
 2-dataset panel (`us_boston_streets`, `us_seattle_sidewalks`) to all available
 datasets and beyond, plus a repair probe of the known non-US data-store debt.

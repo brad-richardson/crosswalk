@@ -13,16 +13,16 @@ import math
 import pandas as pd
 import pytest
 
-from matcher.agent_labeling import stitch_runner as sr
-from matcher.agent_labeling.stitch_eval import (
+from crosswalk.agent_labeling import stitch_runner as sr
+from crosswalk.agent_labeling.stitch_eval import (
     edge_prf,
     evaluate_batch,
     recover_empty_reject_all,
     recover_labeled_groups,
     summarize,
 )
-from matcher.agent_labeling.stitch_evidence import build_metadata, generate_group_evidence
-from matcher.matching.stitch_options import build_stitch_options
+from crosswalk.agent_labeling.stitch_evidence import build_metadata, generate_group_evidence
+from crosswalk.matching.stitch_options import build_stitch_options
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -780,7 +780,7 @@ def test_no_zoom_crop_for_edge_absent_from_all_options(tmp_path):
 
 def test_pack_size_and_zoom_crop_cap_bounded(tmp_path):
     """Pack stays in the measured order of magnitude and zoom crops are capped."""
-    from matcher.agent_labeling import stitch_evidence as se
+    from crosswalk.agent_labeling import stitch_evidence as se
 
     g = make_struct_group()
     d = tmp_path / g["group_id"]
@@ -1143,7 +1143,7 @@ def test_evaluate_batch_sliver_filtered(tmp_path):
 
 
 def _mapping_fixtures():
-    from matcher.agent_labeling.stitch_evidence import build_metadata
+    from crosswalk.agent_labeling.stitch_evidence import build_metadata
 
     g = make_group()
     ctx = build_stitch_options(g)
@@ -1155,7 +1155,7 @@ def _mapping_fixtures():
 def test_mapping_requires_edge_overlap_when_candidates_known():
     """A label whose segments are in the group but whose edges never existed
     as candidate edges must NOT map (would skew coverage/agreement metrics)."""
-    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+    from crosswalk.agent_labeling.stitch_eval import map_human_labels_to_groups
 
     metas, cand = _mapping_fixtures()
     # (R2, T1) uses group segments but is not a candidate edge.
@@ -1171,7 +1171,7 @@ def test_mapping_requires_edge_overlap_when_candidates_known():
 
 
 def test_mapping_prefers_max_edge_overlap():
-    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+    from crosswalk.agent_labeling.stitch_eval import map_human_labels_to_groups
 
     metas, cand = _mapping_fixtures()
     human_df = pd.DataFrame(
@@ -1196,7 +1196,7 @@ def test_mapping_prefers_max_edge_overlap():
 
 
 def test_mapping_falls_back_to_segment_membership_without_candidates():
-    from matcher.agent_labeling.stitch_eval import map_human_labels_to_groups
+    from crosswalk.agent_labeling.stitch_eval import map_human_labels_to_groups
 
     metas, _cand = _mapping_fixtures()
     # Same phantom edge; without candidate edges the segment fallback applies.

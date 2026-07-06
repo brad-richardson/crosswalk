@@ -5,7 +5,7 @@ from unittest.mock import patch
 import geopandas as gpd
 from shapely.geometry import MultiPolygon, Polygon
 
-from matcher.screen.context import (
+from crosswalk.screen.context import (
     fetch_overture_buildings,
     fetch_overture_landcover,
     fetch_overture_water,
@@ -16,8 +16,8 @@ from matcher.screen.context import (
 
 
 class TestFetchOvertureWater:
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_returns_polygons(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         water1 = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
@@ -31,8 +31,8 @@ class TestFetchOvertureWater:
         assert len(result) == 2
         assert all(result.geometry.geom_type.isin(["Polygon", "MultiPolygon"]))
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_filters_small_water_bodies(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         large = Polygon([(0, 0), (0, 0.01), (0.01, 0.01), (0.01, 0)])
@@ -44,8 +44,8 @@ class TestFetchOvertureWater:
         result = fetch_overture_water((-1, -1, 4, 4), min_area_m2=100.0)
         assert len(result) == 1
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_empty_returns_empty_gdf(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         mock_geodataframe.return_value = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
@@ -71,8 +71,8 @@ class TestGetWaterUnion:
 
 
 class TestFetchOvertureBuildings:
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_returns_polygons(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         b1 = Polygon([(0, 0), (0, 0.001), (0.001, 0.001), (0.001, 0)])
@@ -84,8 +84,8 @@ class TestFetchOvertureBuildings:
         result = fetch_overture_buildings((-1, -1, 4, 4))
         assert len(result) == 2
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_filters_small_buildings(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         large = Polygon([(0, 0), (0, 0.001), (0.001, 0.001), (0.001, 0)])
@@ -97,8 +97,8 @@ class TestFetchOvertureBuildings:
         result = fetch_overture_buildings((-1, -1, 4, 4), min_area_m2=20.0)
         assert len(result) == 1
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_empty_returns_empty_gdf(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         mock_geodataframe.return_value = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
@@ -123,8 +123,8 @@ class TestGetBuildingUnion:
 
 
 class TestFetchOvertureLandcover:
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_returns_polygons(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         wetland = Polygon([(0, 0), (0, 0.01), (0.01, 0.01), (0.01, 0)])
@@ -138,8 +138,8 @@ class TestFetchOvertureLandcover:
         result = fetch_overture_landcover((-1, -1, 4, 4))
         assert len(result) == 2
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_filters_by_subtype(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         wetland = Polygon([(0, 0), (0, 0.01), (0.01, 0.01), (0.01, 0)])
@@ -154,8 +154,8 @@ class TestFetchOvertureLandcover:
         # Only wetland should be included (park is not in RESTRICTED_SUBTYPES)
         assert len(result) == 1
 
-    @patch("matcher.screen.context.overture_polygons.geodataframe")
-    @patch("matcher.screen.context.overture_polygons.get_latest_release")
+    @patch("crosswalk.screen.context.overture_polygons.geodataframe")
+    @patch("crosswalk.screen.context.overture_polygons.get_latest_release")
     def test_fetch_empty_returns_empty_gdf(self, mock_release, mock_geodataframe):
         mock_release.return_value = "2024-01-01"
         mock_geodataframe.return_value = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")

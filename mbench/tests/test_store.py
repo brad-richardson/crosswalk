@@ -10,8 +10,8 @@ from mbench.results.store import (
 
 
 def test_create_result():
-    r = create_result("matcher", "boston", {"f1": 0.85}, {"version": "1.0"})
-    assert r.tool == "matcher"
+    r = create_result("crosswalk", "boston", {"f1": 0.85}, {"version": "1.0"})
+    assert r.tool == "crosswalk"
     assert r.dataset == "boston"
     assert r.metrics["f1"] == 0.85
     assert r.timestamp
@@ -20,7 +20,7 @@ def test_create_result():
 def test_save_and_load(tmp_path):
     path = tmp_path / "results.jsonl"
 
-    r1 = create_result("matcher", "boston", {"f1": 0.85})
+    r1 = create_result("crosswalk", "boston", {"f1": 0.85})
     r2 = create_result("hootenanny", "boston", {"f1": 0.70})
 
     save_result(r1, path)
@@ -28,7 +28,7 @@ def test_save_and_load(tmp_path):
 
     loaded = load_results(path)
     assert len(loaded) == 2
-    assert loaded[0].tool == "matcher"
+    assert loaded[0].tool == "crosswalk"
     assert loaded[1].tool == "hootenanny"
 
 
@@ -39,7 +39,7 @@ def test_load_nonexistent(tmp_path):
 
 def test_benchmark_result_roundtrip():
     r = BenchmarkResult(
-        tool="matcher",
+        tool="crosswalk",
         dataset="boston",
         timestamp="2026-02-17T00:00:00Z",
         metrics={"f1": 0.85, "precision": 0.9},
@@ -55,7 +55,7 @@ def test_benchmark_result_roundtrip():
 def test_compare_results_returns_table():
     results = [
         create_result(
-            "matcher",
+            "crosswalk",
             "boston",
             {
                 "precision": 0.9,

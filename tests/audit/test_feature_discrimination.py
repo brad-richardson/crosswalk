@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 from scipy import stats
 
-from matcher.config import FEATURE_COLUMNS
-from matcher.features.compute import _get_error_features
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.features.compute import _get_error_features
 
 
 class TestFeatureSeparationByLabel:
@@ -162,7 +162,7 @@ class TestDegenerateValueDetection:
           to label — so its fire rate is far higher than the road-network
           *population*, where split carriageways are a minority. The tight
           population-level fire rate (and the drop from the pre-gate ~64%) is
-          validated empirically via `matcher backfill` and reported in the PR,
+          validated empirically via `crosswalk backfill` and reported in the PR,
           not asserted on this biased fixture.
         * The stored features here may predate the gate (labels are not
           re-backfilled in the same PR), so the upper bound below is a coarse

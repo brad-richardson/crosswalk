@@ -20,13 +20,13 @@ the common case needs only a tool and a dataset name:
 
 ```bash
 # Run matcher on a dataset (reference/target/labels come from datasets.toml)
-mbench run matcher us_boston_streets -c mbench/datasets.toml
+mbench run crosswalk us_boston_streets -c mbench/datasets.toml
 
 # Run every configured dataset
-mbench run-batch matcher -c mbench/datasets.toml
+mbench run-batch crosswalk -c mbench/datasets.toml
 
 # Explicit paths still override the config
-mbench run matcher us_boston_streets \
+mbench run crosswalk us_boston_streets \
     --labels ../labels/human \
     --reference ../data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     --target ../data/raw/us_boston_streets_v1.0.parquet
@@ -63,9 +63,9 @@ overrides are treated as CWD-relative (normal shell semantics).
 
 #### How the matcher adapter invokes matcher
 
-The matcher adapter shells out with `uv run matcher stitch ...`, executed with
+The matcher adapter shells out with `uv run crosswalk stitch ...`, executed with
 its working directory set to the **matcher repo root** (auto-detected as the
-directory containing `src/matcher`). Running via `uv run` from the repo root
+directory containing `src/crosswalk`). Running via `uv run` from the repo root
 means:
 
 - matcher does not need to be on your `PATH`, and
@@ -94,10 +94,10 @@ mbench supports two evaluation levels via `--match-level`:
 
 ```bash
 # Default: target-level evaluation
-mbench run matcher us_boston_streets --labels ../labels/human ...
+mbench run crosswalk us_boston_streets --labels ../labels/human ...
 
 # Strict pair-level evaluation
-mbench run matcher us_boston_streets --labels ../labels/human --match-level pair ...
+mbench run crosswalk us_boston_streets --labels ../labels/human --match-level pair ...
 ```
 
 Note that precision only counts errors against labeled ground truth — a
@@ -118,10 +118,10 @@ the optimizer's final M:N group edge selection against curated stitching labels
 
 ```bash
 # Enforce the gate on one dataset (nonzero exit if it regresses below its floor)
-mbench run matcher us_boston_streets -c mbench/datasets.toml --gate
+mbench run crosswalk us_boston_streets -c mbench/datasets.toml --gate
 
 # Enforce across all configured datasets
-mbench run-batch matcher -c mbench/datasets.toml --gate
+mbench run-batch crosswalk -c mbench/datasets.toml --gate
 ```
 
 With `--gate`, mbench compares each dataset's **sliver-filtered** edge-F1 and
@@ -163,7 +163,7 @@ gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 
 **Adding / updating a floor.** Re-measure the baseline against fresh output
-(`mbench run matcher <dataset>` prints the stitch block), then set
+(`mbench run crosswalk <dataset>` prints the stitch block), then set
 `f1_filtered_floor` / `exact_filtered_floor` to baseline − margin (LOO-gate
 style: ~0.05 on F1, wider on the noisier exact-match) and `min_mapped_groups` to
 ~30. Update the block in `mbench/datasets.toml`.

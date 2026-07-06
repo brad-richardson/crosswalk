@@ -12,7 +12,7 @@ import pytest
 from shapely.geometry import LineString
 from shapely.ops import transform as shapely_transform
 
-from matcher.features.alignment import linestring_alignment
+from crosswalk.features.alignment import linestring_alignment
 
 
 class TestSyntheticAlignmentRegression:

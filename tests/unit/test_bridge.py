@@ -3,8 +3,8 @@
 import pyarrow.parquet as pq
 import pytest
 
-from matcher.matching.types import MatchDecision, MatchResult
-from matcher.resolution.bridge import generate_bridge_file
+from crosswalk.matching.types import MatchDecision, MatchResult
+from crosswalk.resolution.bridge import generate_bridge_file
 
 
 def _make_match(
@@ -103,7 +103,7 @@ class TestStitchProfiles:
 
     def test_profiles_exist(self):
         """All expected profiles are defined."""
-        from matcher.config import STITCH_PROFILES
+        from crosswalk.config import STITCH_PROFILES
 
         assert "recall" in STITCH_PROFILES
         assert "balanced" in STITCH_PROFILES
@@ -111,25 +111,25 @@ class TestStitchProfiles:
 
     def test_recall_profile_disables_filtering(self):
         """Recall profile should have None (no filtering)."""
-        from matcher.config import STITCH_PROFILES
+        from crosswalk.config import STITCH_PROFILES
 
         assert STITCH_PROFILES["recall"] is None
 
     def test_balanced_profile_value(self):
         """Balanced profile should use 0.5 threshold."""
-        from matcher.config import STITCH_PROFILES
+        from crosswalk.config import STITCH_PROFILES
 
         assert STITCH_PROFILES["balanced"] == 0.5
 
     def test_precision_profile_value(self):
         """Precision profile should use 0.7 threshold."""
-        from matcher.config import STITCH_PROFILES
+        from crosswalk.config import STITCH_PROFILES
 
         assert STITCH_PROFILES["precision"] == 0.7
 
     def test_default_settings_bridge_min_confidence(self):
         """Default settings should use balanced (0.5) bridge_min_confidence."""
-        from matcher.config import MatcherSettings
+        from crosswalk.config import MatcherSettings
 
         s = MatcherSettings()
         assert s.bridge_min_confidence == 0.5

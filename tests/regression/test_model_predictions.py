@@ -500,7 +500,7 @@ class TestThresholdBoundaries:
 
     def test_threshold_boundary_match(self, trained_matcher, perfect_match_features):
         """High confidence scores should result in MATCH decision."""
-        from matcher.matching.types import MatchDecision
+        from crosswalk.matching.types import MatchDecision
 
         confidence = trained_matcher.predict([perfect_match_features])[0]
 

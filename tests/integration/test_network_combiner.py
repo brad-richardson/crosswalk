@@ -8,13 +8,13 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.integration.combiner import (
+from crosswalk.integration.combiner import (
     _compute_buffer_iou,
     combine_networks,
     separate_matched_unmatched,
 )
-from matcher.integration.provenance import EdgeSource, TargetInput
-from matcher.matching.types import MatchDecision, MatchResult
+from crosswalk.integration.provenance import EdgeSource, TargetInput
+from crosswalk.matching.types import MatchDecision, MatchResult
 
 
 @pytest.fixture

@@ -192,9 +192,9 @@ def test_candidate_universe_union(cache_group, sidecar_group):
 
 def test_crossproduct_within_universe():
     # label refs {rA, rB} × targets {t1, t2} = 4 combos, universe drops one.
-    # The detector core now lives in the shared matcher.agent_labeling.xprod
+    # The detector core now lives in the shared crosswalk.agent_labeling.xprod
     # module (imported by the script); test it there.
-    from matcher.agent_labeling.xprod import crossproduct_within_universe
+    from crosswalk.agent_labeling.xprod import crossproduct_within_universe
 
     label = {("rA", "t1"), ("rB", "t2")}
     universe = {("rA", "t1"), ("rA", "t2"), ("rB", "t1"), ("rB", "t2")}

@@ -39,7 +39,7 @@ Meili failure mode) and traverses every local road class (residential .. footway
 which covers both the road and sidewalk datasets. Override with ``--opt
 costing=auto`` for a directional, roads-only comparison.
 
-No matcher imports — mbench stays matcher-free.
+No matcher imports — mbench stays crosswalk-free.
 """
 
 from __future__ import annotations
@@ -302,7 +302,7 @@ class MeiliAdapter:
             min_match_frac / min_match_m: overlap filter thresholds.
             workers: match concurrency (default 8; one Actor per thread).
             graph_cache_dir: where the built tileset lives (default under
-                output_dir; always OUTSIDE the matcher data/output tree).
+                output_dir; always OUTSIDE the crosswalk data/output tree).
             rebuild: force a graph rebuild even if a cached tileset exists.
         """
         output_dir.mkdir(parents=True, exist_ok=True)

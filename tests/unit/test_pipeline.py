@@ -8,8 +8,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.blocking.spatial_index import CandidatePair
-from matcher.features.pipeline import (
+from crosswalk.blocking.spatial_index import CandidatePair
+from crosswalk.features.pipeline import (
     WorkerDataResult,
     _extract_column_array,
     _extract_lr_column,

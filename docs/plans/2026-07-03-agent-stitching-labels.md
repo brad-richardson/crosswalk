@@ -1,5 +1,7 @@
 # Scaling Stitching-Group Ground Truth with Agents
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 Status: Tiers 0–2 shipped (#229, #230); option generator fixed for multi-ref
 M:N shapes (#231); Phase-2 production run (60 groups, 180 votes) complete —
 30 auto-accept candidates + 30 human-queue groups, gating artifacts in

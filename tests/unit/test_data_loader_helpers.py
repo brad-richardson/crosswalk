@@ -9,7 +9,7 @@ import pytest
 from pyproj import Transformer
 from shapely.geometry import LineString
 
-from matcher.labeling.data_loader import (
+from crosswalk.labeling.data_loader import (
     _build_aligned_geometries,
     extract_pair_attributes,
 )

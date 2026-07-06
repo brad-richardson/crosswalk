@@ -15,12 +15,12 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.matching.score_propagation import (
+from crosswalk.matching.score_propagation import (
     PropagationParams,
     _logit,
     propagate_scores,
 )
-from matcher.matching.types import MatchDecision, MatchResult
+from crosswalk.matching.types import MatchDecision, MatchResult
 
 
 def _gdf(rows):
@@ -33,7 +33,7 @@ def _gdf(rows):
 def _mr(ref_id, target_id, conf):
     # Mirror the scorer's decision bands via settings so a no-op propagation
     # leaves the decision unchanged even if the thresholds are reconfigured.
-    from matcher.config import settings
+    from crosswalk.config import settings
 
     if conf >= settings.scoring_match_threshold:
         dec = MatchDecision.MATCH
@@ -180,8 +180,8 @@ def test_pipeline_gates_propagation_on_flag(monkeypatch, tmp_path):
     """run_pipeline must invoke propagate_scores iff the settings flag is on."""
     from types import SimpleNamespace
 
-    import matcher.pipeline.runner as runner
-    from matcher.config import settings
+    import crosswalk.pipeline.runner as runner
+    from crosswalk.config import settings
 
     ref = _gdf({"R1": LineString([(0, 0), (100, 0)])})
     tgt = _gdf({"T1": LineString([(0, 1), (100, 1)])})
@@ -212,7 +212,7 @@ def test_pipeline_gates_propagation_on_flag(monkeypatch, tmp_path):
 
     # The runner lazy-imports propagate_scores inside the flag guard, so
     # patching the source module attribute intercepts the real call site.
-    monkeypatch.setattr("matcher.matching.score_propagation.propagate_scores", _fake_propagate)
+    monkeypatch.setattr("crosswalk.matching.score_propagation.propagate_scores", _fake_propagate)
 
     assert settings.enable_score_propagation is False
     runner.run_pipeline(ref_path, tgt_path, tmp_path / "off_bridge.parquet")

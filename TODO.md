@@ -13,7 +13,7 @@ Actionable backlog for the road network matcher.
 
 - **Problem**: `runner.py` uses `geopandas.read_parquet` which loads entire dataset into memory
 - **Impact**: Will fail on state-sized or larger datasets (target: 300M segments for Overture vs OSM)
-- **Location**: `src/matcher/pipeline/runner.py`
+- **Location**: `src/crosswalk/pipeline/runner.py`
 - **Solution**: Add PySpark + Sedona distributed backend alongside existing GDF path. Dual-backend architecture with `StitchExecutor` protocol, shared feature math, H3 spatial partitioning with halo for boundary correctness. See [design doc](docs/plans/2026-02-22-spark-dual-backend-design.md) for full stage-by-stage analysis, abstraction approach, risks, and implementation phases.
 
 ### Medium: Divergence Detection Fails on Winding Roads (PR #81 follow-up)
@@ -49,7 +49,7 @@ LINESTRING (-112.23242434877292 46.720523234706526, -112.23247237989453 46.72059
 
 </details>
 
-**Location**: `src/matcher/features/alignment.py:_detect_divergence_endpoints()` (lines 185-325), config thresholds in `src/matcher/config.py:47-49`
+**Location**: `src/crosswalk/features/alignment.py:_detect_divergence_endpoints()` (lines 185-325), config thresholds in `src/crosswalk/config.py:47-49`
 **Related PR**: #81 (original divergence detection), #169 (multi-seed offset fix)
 
 ### Low: Mid-Alignment Divergence in M:N Groups (Pond Pattern)
@@ -87,7 +87,7 @@ R1↔T2 matches full-length (shared approach/departure, different middle). R2 an
 
 **Related**: "Divergence Detection Fails on Winding Roads" (above) addresses edge-divergence; this is about middle-divergence.
 
-**Location**: `src/matcher/features/alignment.py:_detect_divergence_endpoints()`, `src/matcher/matching/optimizer.py`
+**Location**: `src/crosswalk/features/alignment.py:_detect_divergence_endpoints()`, `src/crosswalk/matching/optimizer.py`
 
 ### Medium: Robustness Issues
 
@@ -120,11 +120,11 @@ A pair can be `match` in `labels/human/` but absent from `labels/stitch/` (becau
 **Implementation path:**
 1. Data layer: stitch truth loading/saving (thin wrapper around `LabelStore` patterns)
 2. Evaluation: `evaluate_stitch()` comparing bridge output vs stitch truth — precision/recall/F1 scoped to curated IDs, alignment fraction error
-3. CLI: `matcher stitch eval` or `matcher analyze stitch --ground-truth`
+3. CLI: `crosswalk stitch eval` or `crosswalk analyze stitch --ground-truth`
 4. Bootstrap: seed from stitch bridge output, curate a neighborhood
 5. Later: graph overlay UI for visual curation
 
-**Location:** `src/matcher/labeling/`, `src/matcher/validation/`, `src/matcher/cli/`
+**Location:** `src/crosswalk/labeling/`, `src/crosswalk/validation/`, `src/crosswalk/cli/`
 
 ### Medium: Precision/Recall Tuning for Balanced Matching
 
@@ -163,7 +163,7 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 | Matcher | 0.7541 | 0.9923 | 0.8570 | 40 |
 | Hootenanny | 0.8185 | 0.8457 | 0.8319 | 25 |
 
-**Location:** `src/matcher/config.py` (thresholds), `src/matcher/matching/optimizer.py` (group resolution), `src/matcher/matching/ml.py` (model selection)
+**Location:** `src/crosswalk/config.py` (thresholds), `src/crosswalk/matching/optimizer.py` (group resolution), `src/crosswalk/matching/ml.py` (model selection)
 
 ---
 
@@ -172,9 +172,9 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 ### Stitch Pipeline — Graph-Level Resolution (Planned)
 
 **Priority:** Medium
-**Status:** Core pipeline implemented (`matcher stitch`); graph-level resolution planned (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
+**Status:** Core pipeline implemented (`crosswalk stitch`); graph-level resolution planned (see [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) Section 2)
 
-`matcher stitch` currently runs: candidate generation → feature computation → ML scoring → M:N optimization. The following graph-level resolution features would run after scoring and before optimization:
+`crosswalk stitch` currently runs: candidate generation → feature computation → ML scoring → M:N optimization. The following graph-level resolution features would run after scoring and before optimization:
 
 - Junction zone detection (degree≠2 node proximity)
 - Match role assignment (STRONG_EDGE, JUNCTION_ANCHOR, PARALLEL_COMPANION, AMBIGUOUS)
@@ -182,7 +182,7 @@ The matcher is intentionally tuned for high recall (stitch recall=0.99, precisio
 - Conflict resolution for competing matches
 - Confidence promotion/demotion based on graph context
 
-**Location:** New module `src/matcher/stitching/` or extend `src/matcher/matching/`
+**Location:** New module `src/crosswalk/stitching/` or extend `src/crosswalk/matching/`
 
 ### Implement Merging Stage
 
@@ -194,14 +194,14 @@ Formalize the merge step as a distinct stage with explicit policy:
 - Attribute transfer rules and thresholds
 - Net-new gating with junction zone awareness
 
-Currently partially implemented in `src/matcher/integration/`.
+Currently partially implemented in `src/crosswalk/integration/`.
 
 ### CLI: Separate Stitch and Merge Commands
 
 **Priority:** Medium
 
-- `matcher stitch` — Pair matching + M:N optimization (done)
-- `matcher merge` — Network integration (currently `matcher analyze integrate`, rename/restructure)
+- `crosswalk stitch` — Pair matching + M:N optimization (done)
+- `matcher merge` — Network integration (currently `crosswalk analyze integrate`, rename/restructure)
 
 ### mbench: Merge Evaluation Mode
 
@@ -239,7 +239,7 @@ Relaxing the ≥10m intersection rule means some existing `no_match` labels are 
 3. Relabel under the new philosophy: if same traveled way → match regardless of length
 4. Retrain after relabeling
 
-**Location:** Could extend `matcher agent batch` or add a `matcher labels audit` command
+**Location:** Could extend `crosswalk agent batch` or add a `matcher labels audit` command
 
 ---
 
@@ -260,7 +260,7 @@ The sampled connector pattern (PR #192) can be extended so backfill eventually n
 
 The pattern: during candidate generation (when full datasets are loaded), pre-compute all network-context-dependent features, store the results per-pair. Backfill then only needs stored pair data.
 
-**Location:** `src/matcher/features/pipeline.py`, `src/matcher/labeling/data_store.py`
+**Location:** `src/crosswalk/features/pipeline.py`, `src/crosswalk/labeling/data_store.py`
 
 ### Low: Spatially-Grounded Topology Features — Remaining Work
 
@@ -274,7 +274,7 @@ The pattern: during candidate generation (when full datasets are loaded), pre-co
 
 **Still open:** Cross-network endpoint proximity — measure distance from target aligned endpoints to nearest **reference** connector (not target connector). Currently `min_endpoint_proximity_m` measures target-to-target only.
 
-**Location:** `src/matcher/features/spatial_context.py`, `src/matcher/features/pipeline.py`
+**Location:** `src/crosswalk/features/spatial_context.py`, `src/crosswalk/features/pipeline.py`
 
 ### Dual Carriageway / Centerline Handling
 
@@ -323,7 +323,7 @@ Parallel sibling features (`has_parallel_sibling_ref`, `parallel_fraction_ref`, 
 
 **Solution:** Add a per-edge section to the expandable details showing each ref↔target pairing with confidence and aligned fraction. E.g., "R2↔T1: 12% conf, 2% overlap" vs "R2↔T2: 99% conf, 99% overlap".
 
-**Location:** `src/matcher/web/templates/stitching/group.html`, `src/matcher/web/routes/stitching.py`
+**Location:** `src/crosswalk/web/templates/stitching/group.html`, `src/crosswalk/web/routes/stitching.py`
 
 ---
 

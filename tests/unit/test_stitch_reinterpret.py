@@ -1,6 +1,6 @@
 """Tests for reinterpreting historical cross-product labels as SET labels.
 
-Covers the shared decision (matcher.agent_labeling.xprod.reinterpret_row_to_set):
+Covers the shared decision (crosswalk.agent_labeling.xprod.reinterpret_row_to_set):
 the cross-product signature, idempotency on already-set rows, panel-row safety,
 and the guards that leave non-artifact rows untouched.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from matcher.agent_labeling.xprod import reinterpret_row_to_set
+from crosswalk.agent_labeling.xprod import reinterpret_row_to_set
 
 
 def _cache_group(candidate_pairs, optimizer_pairs):
@@ -108,7 +108,7 @@ def test_partial_grid_not_flagged():
 def test_nan_and_malformed_selected_edges_do_not_crash():
     """A blank CSV cell reads back as float NaN (truthy!) and a hand-edited cell
     may not parse — one bad row must not abort a whole reinterpretation run."""
-    from matcher.agent_labeling.xprod import parse_selected_edges
+    from crosswalk.agent_labeling.xprod import parse_selected_edges
 
     assert parse_selected_edges(float("nan")) == set()
     assert parse_selected_edges(None) == set()
@@ -129,7 +129,7 @@ def test_preflag_sidecar_falls_back_to_cache_optimizer():
     like it adds pairs beyond the optimizer and wrongly convert it. The
     optimizer set falls back to the cache's optimizer_assignment (mirrors
     stitch_queue_refresh.selected_pair_set)."""
-    from matcher.agent_labeling.xprod import resolve_optimizer
+    from crosswalk.agent_labeling.xprod import resolve_optimizer
 
     preflag_sidecar = {
         "group_id": "g1234567abcd",
@@ -148,7 +148,7 @@ def test_preflag_sidecar_alone_yields_empty_not_conversion():
     """Pre-flag sidecar with NO cache: the optimizer set is unknowable (empty),
     but a genuine artifact grid still converts only via the signature; a
     reject-all-flagged sidecar (flags present, none selected) stays authoritative."""
-    from matcher.agent_labeling.xprod import resolve_optimizer
+    from crosswalk.agent_labeling.xprod import resolve_optimizer
 
     reject_all_sidecar = {
         "group_id": "g1234567abcd",

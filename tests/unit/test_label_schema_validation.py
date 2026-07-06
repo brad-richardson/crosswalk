@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from matcher.config import FEATURE_COLUMNS, PENDING_BACKFILL_FEATURES
-from matcher.labeling.data_store import DATA_COLUMNS, DataStore
-from matcher.labeling.feature_store import FEATURE_KEY_COLUMNS, FeatureStore
-from matcher.labeling.label_store import HUMAN_LABEL_COLUMNS, LabelStore
+from crosswalk.config import FEATURE_COLUMNS, PENDING_BACKFILL_FEATURES
+from crosswalk.labeling.data_store import DATA_COLUMNS, DataStore
+from crosswalk.labeling.feature_store import FEATURE_KEY_COLUMNS, FeatureStore
+from crosswalk.labeling.label_store import HUMAN_LABEL_COLUMNS, LabelStore
 
 # Default paths for label storage
 LABELS_DIR = Path("labels")
@@ -272,7 +272,7 @@ class TestLabelFeatureParity:
                 pytest.fail(
                     f"{len(missing)} labels ({missing_pct:.1f}%) without features. "
                     f"Sample: {sample}\n"
-                    f"Run 'matcher backfill' to compute missing features."
+                    f"Run 'crosswalk backfill' to compute missing features."
                 )
             else:
                 import warnings
@@ -292,7 +292,7 @@ class TestSchemaConsistency:
         # Create empty store and check columns
         import tempfile
 
-        from matcher.labeling.feature_store import FeatureStore
+        from crosswalk.labeling.feature_store import FeatureStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FeatureStore("test", features_dir=Path(tmpdir))
@@ -524,7 +524,7 @@ class TestCrossStoreReferentialIntegrity:
                     by_ds[ds] = by_ds.get(ds, 0) + 1
                 pytest.fail(
                     f"{len(missing)} agent labels ({missing_pct:.1f}%) without features: {by_ds}\n"
-                    f"Run 'matcher backfill' to compute missing features."
+                    f"Run 'crosswalk backfill' to compute missing features."
                 )
 
     def test_labels_have_backing_data(self):
@@ -806,7 +806,7 @@ class TestMatchLabelFeatureQuality:
         Error features have hausdorff=10000, buffer_iou=0,
         indicating a computation failure that returned all defaults.
         """
-        from matcher.config import MAX_DISTANCE_METERS
+        from crosswalk.config import MAX_DISTANCE_METERS
 
         df = match_features_df
         error_mask = (
@@ -821,7 +821,7 @@ class TestMatchLabelFeatureQuality:
                 f"{len(bad)} match labels have error-default features "
                 f"(hausdorff={MAX_DISTANCE_METERS}, buffer_iou=0): {by_dataset}\n"
                 f"This indicates feature computation failures. "
-                f"Run 'matcher backfill' to recompute."
+                f"Run 'crosswalk backfill' to recompute."
             )
 
     def test_match_labels_have_nonzero_overlap(self, match_features_df):
@@ -846,7 +846,7 @@ class TestMatchLabelFeatureQuality:
 
     def test_match_labels_hausdorff_reasonable(self, match_features_df):
         """Match labels should not have hausdorff at error default (10000m)."""
-        from matcher.config import MAX_DISTANCE_METERS
+        from crosswalk.config import MAX_DISTANCE_METERS
 
         df = match_features_df
         bad = df[df["hausdorff_distance_m"] >= MAX_DISTANCE_METERS]

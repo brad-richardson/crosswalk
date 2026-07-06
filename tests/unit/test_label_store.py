@@ -2,9 +2,9 @@
 
 from shapely.geometry import LineString
 
-from matcher.config import FEATURE_COLUMNS
-from matcher.features.compute import compute_pair_features
-from matcher.labeling.label_store import LabelStore
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.features.compute import compute_pair_features
+from crosswalk.labeling.label_store import LabelStore
 from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
 
@@ -59,8 +59,8 @@ class TestGeometryPersistence:
     def test_add_with_geometry_creates_companion_file(self, tmp_path):
         """Adding a label with geometry params persists to normalized stores."""
 
-        from matcher.labeling.data_store import DataStore
-        from matcher.labeling.feature_store import FeatureStore
+        from crosswalk.labeling.data_store import DataStore
+        from crosswalk.labeling.feature_store import FeatureStore
 
         labels_dir = tmp_path / "labels"
         dataset_id = "test_dataset_geo_persist"
@@ -184,8 +184,8 @@ class TestLabelUpdateDelete:
 
     def test_delete_label(self, tmp_path):
         """delete_label should remove label and associated data."""
-        from matcher.labeling.data_store import DataStore
-        from matcher.labeling.feature_store import FeatureStore
+        from crosswalk.labeling.data_store import DataStore
+        from crosswalk.labeling.feature_store import FeatureStore
 
         labels_dir = tmp_path / "labels"
         dataset_id = "test_delete"

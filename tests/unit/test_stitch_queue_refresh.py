@@ -12,7 +12,7 @@ proposal. ``check_queue_optimizer_parity`` is the maintenance check the cache
 rebuild path (``stitch-batch`` / ``stitch-refresh-queue``) calls.
 """
 
-from matcher.matching.stitch_queue_refresh import (
+from crosswalk.matching.stitch_queue_refresh import (
     STALE_GROUPING_KEY,
     check_queue_optimizer_parity,
     optimizer_pair_set,

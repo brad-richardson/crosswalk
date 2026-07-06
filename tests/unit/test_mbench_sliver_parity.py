@@ -2,7 +2,7 @@
 
 mbench is a standalone benchmarking package that cannot depend on matcher, so it
 replicates the numeric junction-sliver classifier from
-``matcher.config.is_sliver_edge`` in ``mbench.eval.sliver``. This test asserts
+``crosswalk.config.is_sliver_edge`` in ``mbench.eval.sliver``. This test asserts
 the two implementations agree across a representative grid of inputs (and share
 the same thresholds), so they cannot drift silently.
 """
@@ -23,7 +23,7 @@ if str(_MBENCH_SRC) not in sys.path:
 
 from mbench.eval import sliver as mbench_sliver  # noqa: E402
 
-from matcher import config as matcher_config  # noqa: E402
+from crosswalk import config as matcher_config  # noqa: E402
 
 
 def test_thresholds_match():

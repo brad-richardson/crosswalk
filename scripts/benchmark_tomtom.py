@@ -28,9 +28,9 @@ import geopandas as gpd
 from loguru import logger
 from overturemaps.core import geodataframe, get_latest_release
 
-from matcher.fetch.overture import BoundingBox, extract_lr_attributes
-from matcher.pipeline.runner import run_pipeline
-from matcher.utils.geometry import filter_to_linestrings
+from crosswalk.fetch.overture import BoundingBox, extract_lr_attributes
+from crosswalk.pipeline.runner import run_pipeline
+from crosswalk.utils.geometry import filter_to_linestrings
 
 # India bbox with good TomTom coverage (Mumbai area)
 # TomTom has significant coverage in urban India
@@ -228,7 +228,7 @@ def main():
         target.to_parquet(target_path, write_covering_bbox=True)
 
         # Run matching pipeline
-        logger.info("Running matcher pipeline...")
+        logger.info("Running crosswalk pipeline...")
         result = run_pipeline(
             reference_path=ref_path,
             target_path=target_path,

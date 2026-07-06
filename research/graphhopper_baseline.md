@@ -1,5 +1,7 @@
 # GraphHopper map-matching baseline — result & formulation-vs-engine analysis
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 This records the **GraphHopper** map-matching baseline in `mbench` (adapter name
 `graphhopper`), the *second* live external map-matcher after Valhalla Meili. It was
 built to answer one question the Meili pilot raised:

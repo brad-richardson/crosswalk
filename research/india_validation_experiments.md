@@ -1,5 +1,7 @@
 # India Validation Experiments - TomTom Drop Strategy
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 ## Experiment Overview
 
 Tested the matcher on Indian cities using the TomTom 50% drop strategy:

@@ -1,7 +1,7 @@
 """Build the Phase-2 agent-stitching panel run set for us_boston_streets.
 
 Composes ~50-60 sidecar groups from three strata and writes a group-ids file
-that ``matcher agent stitch-batch --group-ids-file`` renders into one batch:
+that ``crosswalk agent stitch-batch --group-ids-file`` renders into one batch:
 
   (a) eval-continuity: sidecar groups recovered from the non-empty human
       stitching labels (edge-overlap recovery, same set as --recover-labeled);
@@ -22,14 +22,14 @@ import argparse
 import json
 from pathlib import Path
 
-from matcher.agent_labeling.stitch_eval import (
+from crosswalk.agent_labeling.stitch_eval import (
     recover_empty_reject_all,
     recover_labeled_groups,
 )
-from matcher.filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
-from matcher.labeling.stitching_store import StitchingLabelStore
-from matcher.matching.alternatives import generate_top_k_alternatives
-from matcher.matching.batch_selection import select_stitching_batch
+from crosswalk.filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
+from crosswalk.labeling.stitching_store import StitchingLabelStore
+from crosswalk.matching.alternatives import generate_top_k_alternatives
+from crosswalk.matching.batch_selection import select_stitching_batch
 
 
 def main() -> None:
@@ -46,7 +46,7 @@ def main() -> None:
         raise SystemExit(
             f"Groups sidecar not found: {sidecar_path}\n"
             f"Run the pipeline first, e.g.:\n"
-            f"  uv run matcher stitch <reference.parquet> <target.parquet> "
+            f"  uv run crosswalk stitch <reference.parquet> <target.parquet> "
             f"-m xgboost -o {bridge}"
         )
     sidecar = json.loads(sidecar_path.read_text())

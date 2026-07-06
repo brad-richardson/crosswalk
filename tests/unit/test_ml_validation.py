@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 from loguru import logger
 
-from matcher.config import FEATURE_COLUMNS
-from matcher.matching.ml import MLMatcher
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.matching.ml import MLMatcher
 
 
 @pytest.fixture

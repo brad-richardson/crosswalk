@@ -1,5 +1,7 @@
 # Stitch-Level Evaluation Implementation Plan
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 > _Harness renamed `cbench` → `mbench` (2026-07-05). This is a historical implementation plan; "cbench" throughout refers to what is now `mbench`._
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

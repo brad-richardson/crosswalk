@@ -18,11 +18,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Add project root so we can import matcher config
+# Add project root so we can import crosswalk config
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from matcher.config import FEATURE_CATEGORIES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
+from crosswalk.config import FEATURE_CATEGORIES, FEATURE_COLUMNS, MAX_DISTANCE_METERS
 
 # Boundary/default values that indicate a feature may not have been computed meaningfully
 BOUNDARY_VALUES = {
@@ -338,7 +338,7 @@ def format_report(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Feature diagnostics for matcher datasets")
+    parser = argparse.ArgumentParser(description="Feature diagnostics for crosswalk datasets")
     parser.add_argument(
         "--dataset",
         type=str,

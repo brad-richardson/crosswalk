@@ -1,5 +1,7 @@
 # Agent Stitching Panel Eval — Boston 33 (2026-07-03)
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 First live run of the Tier 1+2 agent stitching-label pipeline
 (`matcher agent stitch-batch` / `stitch-run` / `stitch-eval`) against the 33
 existing human stitching labels for `us_boston_streets`.

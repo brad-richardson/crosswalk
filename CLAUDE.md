@@ -1,4 +1,6 @@
-# Matcher - Claude Development Guide
+# Crosswalk - Claude Development Guide
+
+> **Renamed `matcher` → `crosswalk` (2026-07-05).** Import package `crosswalk`, PyPI dist `crosswalk-py`, console script `crosswalk` (deprecated `matcher` alias warns + forwards). The mbench engine id is `crosswalk` (deprecated `matcher` alias). The GitHub repo is still named `matcher` (GitHub auto-redirects after rename).
 
 Road network conflation pipeline for linking local road datasets to Overture Maps GERS identifiers.
 
@@ -13,15 +15,15 @@ For ML pipeline architecture and feature details, see [docs/ARCHITECTURE.md](doc
 # Install with all dependencies
 uv pip install -e ".[dev,ml,web]"
 
-# Train ML model (optional — a pretrained model ships in src/matcher/_model/ and
+# Train ML model (optional — a pretrained model ships in src/crosswalk/_model/ and
 # is used automatically when data/models/ has no local model; a locally trained
 # model takes precedence. Keep the shipped model in lockstep with FEATURE_VERSION:
 # tests/unit/test_shipped_model.py fails if they diverge — reship with
-# `uv run matcher train -o src/matcher/_model/matcher_model_combined.joblib`)
-uv run matcher train
+# `uv run crosswalk train -o src/crosswalk/_model/matcher_model_combined.joblib`)
+uv run crosswalk train
 
 # Train + export Spark-portable model for Overture matching
-uv run matcher export-spark-model
+uv run crosswalk export-spark-model
 
 # Run tests
 uv run pytest tests/
@@ -30,7 +32,7 @@ uv run pytest tests/
 uv run ruff format src/ tests/ && uv run ruff check src/ tests/
 
 # CLI help
-uv run matcher --help
+uv run crosswalk --help
 ```
 
 ## Web UI
@@ -40,13 +42,13 @@ uv run matcher --help
 uv pip install -e ".[dev,web]"
 
 # Launch web UI
-uv run matcher ui
+uv run crosswalk ui
 
 # Development mode with auto-reload
-uv run matcher ui --reload
+uv run crosswalk ui --reload
 ```
 
-The web UI uses FastAPI + HTMX + Leaflet. Code in `src/matcher/web/`. Modes:
+The web UI uses FastAPI + HTMX + Leaflet. Code in `src/crosswalk/web/`. Modes:
 
 | Route | Purpose |
 |-------|---------|
@@ -85,14 +87,14 @@ When adding a new ML feature (e.g., a new similarity metric), update ALL of thes
    - `FEATURE_COLUMNS` is derived automatically from `FEATURE_CATEGORIES`
    - Add to `SEMANTIC_FEATURES` if it's a name/class feature
 
-2. **Compute the feature** in `src/matcher/features/` (geometric.py, semantic.py, etc.)
+2. **Compute the feature** in `src/crosswalk/features/` (geometric.py, semantic.py, etc.)
    - See **Performance Requirements** below for vectorization/numba rules
 
 3. **Wire it through compute.py**:
    - Add to `compute_pair_features()` return dict
    - Add to `_get_error_features()` with a sensible default
 
-4. **Backfill existing labels**: Run `matcher backfill` to compute the new feature for all existing labeled pairs
+4. **Backfill existing labels**: Run `crosswalk backfill` to compute the new feature for all existing labeled pairs
 
 **Automated verification:**
 - Run `pytest tests/unit/test_label_store.py` - this test ensures feature parity
@@ -130,7 +132,7 @@ Follow this performance hierarchy when implementing features:
 
 3. **Numba `@njit(cache=True)`** (for loops that can't be vectorized):
    - Use for O(N*M) computations, coordinate-level iteration, complex branching
-   - Add JIT helpers to `src/matcher/features/_jit_helpers.py`
+   - Add JIT helpers to `src/crosswalk/features/_jit_helpers.py`
    - Accept pre-extracted `np.ndarray` coords, not Shapely objects (numba can't handle them)
    - Always add `cache=True` to avoid recompilation across runs
    - Can call other `@njit` functions (e.g., `angle_diff_numba`, `compute_heading_numba`)
@@ -160,7 +162,7 @@ Reference (Overture) and target (local) datasets often have very different segme
 
 **The backfill command MUST remain a thin wrapper around the shared pipeline.**
 
-Backfill (`matcher backfill`) recomputes features for existing labeled pairs. It routes
+Backfill (`crosswalk backfill`) recomputes features for existing labeled pairs. It routes
 through the same `prepare_worker_data()` → `_compute_feature_chunk()` code path that inference
 uses. The only backfill-specific code handles:
 
@@ -185,13 +187,13 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
@@ -216,10 +218,10 @@ vs `labels/stitching/`), which pair-level F1 does not measure:
 
 ```bash
 # Fresh output for an armed dataset, then gate it (nonzero exit on regression)
-uv run matcher stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
+uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
     data/raw/us_boston_streets_v1.0.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
-uv run mbench run matcher us_boston_streets -c mbench/datasets.toml --gate
+uv run mbench run crosswalk us_boston_streets -c mbench/datasets.toml --gate
 ```
 
 The gate lives at benchmark time (not unit CI) because it needs `data/output`,

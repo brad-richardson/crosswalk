@@ -18,7 +18,7 @@ entirely unmeasured. The first three rounds of fixes landed 2026-07-02/03.
 |---|---|---|
 | Docs described mechanisms the code never had (Hungarian optimizer, median imputation, mbench target-level eval) | Docs corrected to match implementation | #222 |
 | mbench `--match-level target` documented but unimplemented; precision inflation invisible | Target-level eval implemented (now the default); `labeled_coverage` / `unlabeled_predictions` / `skipped_unsure` surfaced | #223 |
-| Blocking recall unmeasured (matches lost at candidate generation invisible to all metrics) | `matcher blocking-recall` command; replays the real `generate_candidates` path; also fixed falsy-zero buffer bug | #224 |
+| Blocking recall unmeasured (matches lost at candidate generation invisible to all metrics) | `crosswalk blocking-recall` command; replays the real `generate_candidates` path; also fixed falsy-zero buffer bug | #224 |
 | In-training CV included the test rows; agent labels concatenated before the split; stale `feature_version` only warned | CV runs on train rows only; agent labels appended post-split (and segment-overlap-excluded); stale features now error (`allow_stale_features` escape hatch) | #225 |
 | Only segment-level splits enforced — no cross-dataset generalization gate | LOO-by-type CV promoted to CI gate (`tests/regression/test_loo_cv.py`; per-type-group macro-F1 floors = baseline − 0.05) | #226 |
 | Hyperparameters tuned on all labels including the test set (optimistic metrics) | `tune_model.py` holds out the seed-42 test set before Optuna; `DEFAULT_XGB_PARAMS` regenerated (170 trees; honest CV F1 0.9317) | #227 |
@@ -65,7 +65,7 @@ prune operates at the 0.575 calibrated point (#269).
    computes a **modernized, non-blocking** stitch-level metric on every run
    (default-on: the `labels/stitching` dir is auto-resolved; skipped silently
    when a dataset has none, and any error is swallowed). It reaches parity with
-   the matcher-side `matcher agent stitch-eval`: group mapping robust to
+   the matcher-side `crosswalk agent stitch-eval`: group mapping robust to
    group_id churn (exact-id + edge-overlap against the `*_groups.json` sidecar),
    raw **and** sliver-filtered edge precision/recall/F1, per-group exact-match
    rate, and a per-labeler breakdown (human vs `panel_*`). The standalone sliver
@@ -245,13 +245,13 @@ Resume with:
 ```bash
 # 1. Coordinated backfill — recompute all label features with the new code.
 #    Some non-US datasets need Overture S3; retry -D <dataset> for any that fail.
-uv run matcher backfill
+uv run crosswalk backfill
 
 # 2. Retrain on the refreshed features.
-uv run matcher train
+uv run crosswalk train
 
 # 3. (optional) Refresh the Spark-portable model.
-uv run matcher export-spark-model
+uv run crosswalk export-spark-model
 
 # 4. Re-run the category ablation and compare against Feb 2026.
 uv run python scripts/ablation_study.py --mode category \

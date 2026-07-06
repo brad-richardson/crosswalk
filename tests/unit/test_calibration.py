@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from matcher.matching.calibration import (
+from crosswalk.matching.calibration import (
     MIN_CALIBRATION_ROWS,
     IsotonicCalibrator,
     apply_knots,
@@ -125,12 +125,12 @@ def test_ece_empty_is_nan():
 def _tiny_matcher():
     """MLMatcher wrapping a trivial 2-feature XGBoost model and a calibrator."""
     xgb = pytest.importorskip("xgboost")
-    from matcher.matching.ml import MLMatcher
+    from crosswalk.matching.ml import MLMatcher
 
     rng = np.random.RandomState(3)
     X = rng.rand(300, 2)
     y = (X[:, 0] + rng.rand(300) * 0.3 > 0.7).astype(int)
-    from matcher.config import FEATURE_VERSION
+    from crosswalk.config import FEATURE_VERSION
 
     m = MLMatcher()
     m.feature_names = ["f0", "f1"]
@@ -151,7 +151,7 @@ def test_matcher_save_load_round_trips_calibrator(tmp_path):
     path = tmp_path / "m.joblib"
     m.save_model(str(path))
 
-    from matcher.matching.ml import MLMatcher
+    from crosswalk.matching.ml import MLMatcher
 
     loaded = MLMatcher(str(path))
     assert loaded.calibrator is not None
@@ -167,7 +167,7 @@ def test_matcher_save_load_without_calibrator(tmp_path):
     path = tmp_path / "m.joblib"
     m.save_model(str(path))
 
-    from matcher.matching.ml import MLMatcher
+    from crosswalk.matching.ml import MLMatcher
 
     loaded = MLMatcher(str(path))
     assert loaded.calibrator is None
@@ -186,14 +186,14 @@ def test_predict_calibrated_flag(monkeypatch):
     assert np.any(cal < raw)
 
     # settings.enable_calibration=False disables calibration even with a calibrator
-    from matcher import config
+    from crosswalk import config
 
     monkeypatch.setattr(config.settings, "enable_calibration", False)
     np.testing.assert_allclose(m.predict(feats, calibrated=True), raw)
 
 
 def test_calibration_active_property(monkeypatch):
-    from matcher import config
+    from crosswalk import config
 
     m = _tiny_matcher()
 

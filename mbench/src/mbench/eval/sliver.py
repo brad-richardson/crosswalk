@@ -1,14 +1,14 @@
 """Standalone junction-sliver classification for mbench.
 
-mbench is a standalone package and does NOT depend on matcher. This module
-replicates the minimal sliver rule from ``matcher.config.is_sliver_edge`` (the
+mbench is a standalone package and does NOT depend on crosswalk. This module
+replicates the minimal sliver rule from ``crosswalk.config.is_sliver_edge`` (the
 pure numeric classifier) and the group-level geometry handling from
-``matcher.matching.sliver``, using only pure Python (no shapely / pyproj) so
+``crosswalk.matching.sliver``, using only pure Python (no shapely / pyproj) so
 mbench keeps its light dependency footprint.
 
-A parity test on the matcher side
+A parity test on the crosswalk side
 (``tests/unit/test_mbench_sliver_parity.py``) asserts this classifier matches
-``matcher.config.is_sliver_edge`` across a grid of representative inputs so the
+``crosswalk.config.is_sliver_edge`` across a grid of representative inputs so the
 two definitions cannot drift silently.
 
 A junction "sliver" is a candidate edge where two segments barely overlap —
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import math
 
-# Keep these in sync with matcher.config (enforced by the parity test).
+# Keep these in sync with crosswalk.config (enforced by the parity test).
 SLIVER_SPAN_THRESHOLD = 0.10  # fraction of segment length (dimensionless)
 SLIVER_ABS_OVERLAP_M = 5.0  # absolute overlap floor (meters)
 
@@ -69,7 +69,7 @@ def is_sliver_edge(
 ) -> bool:
     """Classify a candidate edge as a junction sliver using the hybrid rule.
 
-    Mirror of ``matcher.config.is_sliver_edge`` (verified by the parity test).
+    Mirror of ``crosswalk.config.is_sliver_edge`` (verified by the parity test).
     """
     rf = _sliver_frac(ref_span_frac, 1.0)
     tf = _sliver_frac(tgt_span_frac, 1.0)

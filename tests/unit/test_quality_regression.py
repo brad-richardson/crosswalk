@@ -3,8 +3,8 @@
 import geopandas as gpd
 from shapely.geometry import LineString
 
-from matcher.datasets.schema import QualityFingerprintConfig
-from matcher.quality.regression import check_quality_regression, compute_quick_fingerprint
+from crosswalk.datasets.schema import QualityFingerprintConfig
+from crosswalk.quality.regression import check_quality_regression, compute_quick_fingerprint
 
 
 def _make_fetched_gdf(
@@ -192,7 +192,7 @@ class TestLastFetchMigration:
         """Old flat last_fetch format should be auto-migrated to target sub-field."""
         import yaml
 
-        from matcher.datasets.schema import load_dataset_config
+        from crosswalk.datasets.schema import load_dataset_config
 
         # Write YAML with old flat format
         old_config = {
@@ -220,7 +220,7 @@ class TestLastFetchMigration:
         """New nested format should load without migration."""
         import yaml
 
-        from matcher.datasets.schema import load_dataset_config
+        from crosswalk.datasets.schema import load_dataset_config
 
         new_config = {
             "name": "test_dataset",

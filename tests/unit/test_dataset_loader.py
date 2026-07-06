@@ -4,8 +4,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point
 
-from matcher.config import DATA_VERSION
-from matcher.datasets.loader import DatasetLoader, LoadedPair
+from crosswalk.config import DATA_VERSION
+from crosswalk.datasets.loader import DatasetLoader, LoadedPair
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -247,7 +247,7 @@ class TestListAvailable:
         # list_available() does: from .schema import list_dataset_configs as _list_yaml
         # so we monkeypatch the function on the schema module
         monkeypatch.setattr(
-            "matcher.datasets.schema.list_dataset_configs",
+            "crosswalk.datasets.schema.list_dataset_configs",
             lambda: ["us_boston_streets"],
         )
         loader = DatasetLoader(data_dir_osm)

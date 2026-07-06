@@ -12,8 +12,8 @@ import json
 
 import pandas as pd
 
-from matcher.resolver.extract import build_edge_table, load_sidecar_groups
-from matcher.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.extract import build_edge_table, load_sidecar_groups
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
 
 
 def _edge(ref, tgt, conf, selected=True, **kw):
@@ -116,19 +116,19 @@ def test_resolver_not_imported_by_production_code():
     """The experimental resolver must not be referenced by pipeline modules.
 
     Guards the 'zero production behavior change' invariant: nothing under the
-    matching / features / cli / optimizer paths may import matcher.resolver.
+    matching / features / cli / optimizer paths may import crosswalk.resolver.
 
-    Catches BOTH absolute (``import matcher.resolver`` / ``from matcher.resolver
+    Catches BOTH absolute (``import crosswalk.resolver`` / ``from crosswalk.resolver
     import``) and relative (``from ..resolver import`` / ``from .resolver import``
-    / ``from .. import resolver``) import forms — a plain ``matcher.resolver``
+    / ``from .. import resolver``) import forms — a plain ``crosswalk.resolver``
     substring check misses relative imports entirely.
     """
     import pathlib
     import re
 
     # Import statements that pull in the experimental resolver package, in any of:
-    #   import matcher.resolver[...]
-    #   from matcher.resolver[...] import ...
+    #   import crosswalk.resolver[...]
+    #   from crosswalk.resolver[...] import ...
     #   from .resolver / ..resolver / ...resolver [...] import ...   (relative)
     #   from . / .. / ... import resolver                            (relative)
     patterns = [

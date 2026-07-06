@@ -16,8 +16,8 @@ import pandas as pd
 from shapely.geometry import LineString
 from typer.testing import CliRunner
 
-from matcher.cli import app
-from matcher.labeling.data_store import DataStore
+from crosswalk.cli import app
+from crosswalk.labeling.data_store import DataStore
 
 runner = CliRunner()
 

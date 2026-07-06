@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from matcher.matching.ml import create_segment_groups, segment_aware_split
+from crosswalk.matching.ml import create_segment_groups, segment_aware_split
 
 
 class TestCreateSegmentGroups:

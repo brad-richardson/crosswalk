@@ -16,14 +16,14 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features.compute import (
+from crosswalk.features.compute import (
     compute_graphlet_similarity,
     precompute_graphlet_features,
 )
-from matcher.features.spatial_context import (
+from crosswalk.features.spatial_context import (
     compute_road_graphlet_features,
 )
-from matcher.topology.sparse_graph import build_graph_from_edges
+from crosswalk.topology.sparse_graph import build_graph_from_edges
 
 
 def nx_to_sparse(G):

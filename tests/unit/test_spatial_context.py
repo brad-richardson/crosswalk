@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features.spatial_context import (
+from crosswalk.features.spatial_context import (
     SpatialContextIndex,
     TopologySpatialIndex,
     UnionFind,
@@ -821,7 +821,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_build_connector_graph_creates_correct_nodes(self, sample_segment_with_connectors):
         """build_connector_graph should create a node for each unique connector."""
-        from matcher.features.spatial_context import build_connector_graph
+        from crosswalk.features.spatial_context import build_connector_graph
 
         G, seg_to_connectors, features = build_connector_graph(
             sample_segment_with_connectors,
@@ -835,7 +835,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_build_connector_graph_creates_correct_edges(self, sample_segment_with_connectors):
         """build_connector_graph should create edges between consecutive connectors."""
-        from matcher.features.spatial_context import build_connector_graph
+        from crosswalk.features.spatial_context import build_connector_graph
 
         G, seg_to_connectors, features = build_connector_graph(
             sample_segment_with_connectors,
@@ -852,7 +852,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_seg_to_connectors_mapping(self, sample_segment_with_connectors):
         """seg_to_connectors should map segment IDs to connector positions."""
-        from matcher.features.spatial_context import build_connector_graph
+        from crosswalk.features.spatial_context import build_connector_graph
 
         G, seg_to_connectors, features = build_connector_graph(
             sample_segment_with_connectors,
@@ -870,7 +870,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_find_nearest_connector_exact_match(self):
         """find_nearest_connector should find exact matches."""
-        from matcher.features.spatial_context import find_nearest_connector
+        from crosswalk.features.spatial_context import find_nearest_connector
 
         connectors = [(0.0, 10), (0.5, 20), (1.0, 30)]
 
@@ -880,7 +880,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_find_nearest_connector_interpolation(self):
         """find_nearest_connector should find nearest for intermediate positions."""
-        from matcher.features.spatial_context import find_nearest_connector
+        from crosswalk.features.spatial_context import find_nearest_connector
 
         connectors = [(0.0, 10), (0.5, 20), (1.0, 30)]
 
@@ -893,13 +893,13 @@ class TestConnectorGraphAndAlignment:
 
     def test_find_nearest_connector_empty_list(self):
         """find_nearest_connector should return None for empty list."""
-        from matcher.features.spatial_context import find_nearest_connector
+        from crosswalk.features.spatial_context import find_nearest_connector
 
         assert find_nearest_connector([], 0.5) is None
 
     def test_get_alignment_connectors(self, sample_segment_with_connectors):
         """get_alignment_connectors should return correct nodes for alignment positions."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             build_connector_graph,
             get_alignment_connectors,
         )
@@ -924,7 +924,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_graphlet_similarity_with_alignment_full_segment(self, sample_segment_with_connectors):
         """graphlet_similarity_with_alignment should work for full segments."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             build_connector_graph,
             graphlet_similarity_with_alignment,
         )
@@ -957,7 +957,7 @@ class TestConnectorGraphAndAlignment:
 
     def test_graphlet_similarity_with_alignment_partial_match(self, sample_segment_with_connectors):
         """graphlet_similarity_with_alignment should handle partial alignment."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             build_connector_graph,
             graphlet_similarity_with_alignment,
         )
@@ -993,7 +993,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_returns_none_when_no_connectors_column(self):
         """Should return None when connectors column doesn't exist."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1007,7 +1007,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_returns_none_when_connectors_all_null(self):
         """Should return None when all connectors are null."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1025,7 +1025,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_single_segment_with_connectors(self):
         """Single segment with unique connectors has degree 1 at both ends."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1051,7 +1051,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_two_connected_segments_via_shared_connector(self):
         """Two segments sharing a connector should have degree 2 at that point."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1085,7 +1085,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_t_junction_with_shared_connector(self):
         """T-junction with shared connector should have degree 3."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1130,7 +1130,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_cross_intersection_with_shared_connector(self):
         """4-way intersection with shared connector should have degree 4."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         gdf = gpd.GeoDataFrame(
             {
@@ -1173,7 +1173,7 @@ class TestComputeAllTopologyExplicit:
 
     def test_mid_segment_connector_counted_correctly(self):
         """Mid-segment connectors should not affect endpoint degrees."""
-        from matcher.features.spatial_context import compute_all_topology_explicit
+        from crosswalk.features.spatial_context import compute_all_topology_explicit
 
         # seg1 has a mid-segment connector (at=0.5) that is shared with seg2's start
         gdf = gpd.GeoDataFrame(
@@ -1402,7 +1402,10 @@ class TestEndpointFeaturesCRSConsistency:
 
     def test_endpoint_features_with_projected_index_and_projected_query(self):
         """Endpoint features should work when index and query use same projected CRS."""
-        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+        from crosswalk.features.spatial_context import (
+            SpatialContextIndex,
+            compute_endpoint_features,
+        )
 
         # Create segments in projected CRS (UTM)
         gdf = gpd.GeoDataFrame(
@@ -1433,7 +1436,10 @@ class TestEndpointFeaturesCRSConsistency:
 
     def test_endpoint_features_with_geographic_index_and_geographic_query(self):
         """Endpoint features should work when index and query use same geographic CRS."""
-        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+        from crosswalk.features.spatial_context import (
+            SpatialContextIndex,
+            compute_endpoint_features,
+        )
 
         # Create segments in geographic CRS (WGS84)
         # Boston area: ~42.36°N, ~-71.06°E
@@ -1472,7 +1478,10 @@ class TestEndpointFeaturesCRSConsistency:
         The fix ensures both index and query use the same CRS.
         """
 
-        from matcher.features.spatial_context import SpatialContextIndex, compute_endpoint_features
+        from crosswalk.features.spatial_context import (
+            SpatialContextIndex,
+            compute_endpoint_features,
+        )
 
         # Build index from WGS84 data
         gdf_wgs84 = gpd.GeoDataFrame(
@@ -1512,7 +1521,7 @@ class TestEndpointFeaturesCRSConsistency:
         Before the fix, target_candidates_only was built from unprojected data
         but queries used projected geometries, causing CRS mismatch.
         """
-        from matcher.labeling.data_loader import compute_features_only
+        from crosswalk.labeling.data_loader import compute_features_only
 
         # Create small test datasets in WGS84
         reference = gpd.GeoDataFrame(
@@ -1697,8 +1706,8 @@ class TestEndpointProximityContinuity:
     """
 
     def test_proximity_beyond_radius_is_continuous_not_sentinel(self):
-        from matcher.config import MAX_DISTANCE_METERS
-        from matcher.features.spatial_context import (
+        from crosswalk.config import MAX_DISTANCE_METERS
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             compute_aligned_endpoint_features,
         )
@@ -1734,7 +1743,7 @@ class TestEndpointProximityContinuity:
 
     def test_connected_endpoint_reports_near_zero(self):
         """A shared junction endpoint still reports ~0 proximity (connectivity)."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             compute_aligned_endpoint_features,
         )
@@ -2001,7 +2010,7 @@ class TestAlignedEndpointFeaturesBatch:
 
     def test_batch_empty_endpoint_index(self):
         """Empty endpoint index should return defaults for all pairs."""
-        from matcher.config import MAX_DISTANCE_METERS
+        from crosswalk.config import MAX_DISTANCE_METERS
 
         empty_ctx = SpatialContextIndex()
         geom = LineString([(0, 0), (100, 0)])
@@ -2317,8 +2326,8 @@ class TestTargetDegreeSemanticsUnification:
         Returns a dict with everything needed to exercise the ref path, the old
         endpoint-cluster target path, and the new Overture-projected target path.
         """
-        from matcher.features.compute import precompute_graphlet_features
-        from matcher.features.spatial_context import (
+        from crosswalk.features.compute import precompute_graphlet_features
+        from crosswalk.features.spatial_context import (
             build_overture_connector_spatial_index,
             find_overture_connectors_for_targets,
             sample_topology_batch,
@@ -2459,9 +2468,9 @@ class TestTargetDegreeSemanticsUnification:
         downstream is_reversed swap must then re-pair them physically so
         from_degree_target matches the degree at the ref's FROM end (4).
         """
-        from matcher.blocking.spatial_index import CandidatePair
-        from matcher.features.pipeline import prepare_worker_data
-        from matcher.matching.ml import _compute_feature_chunk, _init_worker
+        from crosswalk.blocking.spatial_index import CandidatePair
+        from crosswalk.features.pipeline import prepare_worker_data
+        from crosswalk.matching.ml import _compute_feature_chunk, _init_worker
 
         # Ref: crossroads at (0, 0) with four arms; H is the eastbound arm
         # ending at a dead end cE. cC is referenced by all four arms -> degree 4.

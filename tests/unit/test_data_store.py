@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.features.semantic import display_name
-from matcher.labeling.data_store import DataStore
+from crosswalk.features.semantic import display_name
+from crosswalk.labeling.data_store import DataStore
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestDataStoreAddAndRetrieve:
 
     def test_topo_sampled_round_trip(self, tmp_data_dir, sample_pair_data):
         """target_topo_sampled survives add/save/load/get_pair cycle."""
-        from matcher.labeling.data_store import reconstruct_topo_connectors_from_sampled
+        from crosswalk.labeling.data_store import reconstruct_topo_connectors_from_sampled
 
         store = DataStore("test_dataset", data_dir=tmp_data_dir)
         sampled = [(0.0, 3), (0.25, 1), (0.5, 4), (1.0, 2)]
@@ -151,7 +151,7 @@ class TestDataStoreAddAndRetrieve:
 
     def test_reconstructed_node_ids_globally_unique(self, tmp_data_dir):
         """Node IDs from separate reconstruct calls don't collide."""
-        from matcher.labeling.data_store import reconstruct_topo_connectors_from_sampled
+        from crosswalk.labeling.data_store import reconstruct_topo_connectors_from_sampled
 
         sampled_a = [(0.0, 3), (1.0, 2)]
         sampled_b = [(0.0, 1), (1.0, 4)]

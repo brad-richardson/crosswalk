@@ -1,5 +1,7 @@
 # Dataset Inventory Repair — 2026-07 (M4 remainder)
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 Follow-up to `scaleout_readiness_2026_07.md` (PR #274) and the bridge-table
 factory (PR #292, `docs/FACTORY.md`). That audit found **10 labeled datasets
 missing their local target parquet** (re-fetch debt) plus a **bogota bike

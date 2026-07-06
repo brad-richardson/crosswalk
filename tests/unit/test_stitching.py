@@ -9,10 +9,10 @@ import json
 import pandas as pd
 import pytest
 
-from matcher.labeling.stitching_store import DEFAULT_STITCHING_DIR, STITCHING_LABEL_COLUMNS
-from matcher.matching.alternatives import generate_top_k_alternatives
-from matcher.matching.batch_selection import select_stitching_batch
-from matcher.matching.optimizer import compute_group_id
+from crosswalk.labeling.stitching_store import DEFAULT_STITCHING_DIR, STITCHING_LABEL_COLUMNS
+from crosswalk.matching.alternatives import generate_top_k_alternatives
+from crosswalk.matching.batch_selection import select_stitching_batch
+from crosswalk.matching.optimizer import compute_group_id
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -301,7 +301,7 @@ class TestMultiRefContiguousChains:
 
     def test_chain_length_bounded(self):
         """Chains never exceed MAX_REF_CHAIN_LEN refs for a single target."""
-        from matcher.matching.alternatives import MAX_REF_CHAIN_LEN
+        from crosswalk.matching.alternatives import MAX_REF_CHAIN_LEN
 
         # Five refs in a contiguous line, all matched to t1.
         edges = [_edge(f"r{i}", "t1", 0.9 - i * 0.05) for i in range(5)]
@@ -327,7 +327,7 @@ class TestMultiRefContiguousChains:
     def test_chain_enumeration_beam_bounded_on_dense_graph(self):
         """A dense adjacency graph (all refs mutually contiguous) cannot blow up
         intermediate chain enumeration: the beam caps each frontier."""
-        from matcher.matching.alternatives import (
+        from crosswalk.matching.alternatives import (
             MAX_CHAIN_FRONTIER,
             _enumerate_contiguous_chains,
         )
@@ -556,7 +556,7 @@ class TestAlternativeOutputInvariant:
 
     def test_sanitize_drops_invalid_and_duplicate_edges(self):
         """A malformed alternative is repaired to a valid dedup subset."""
-        from matcher.matching.alternatives import _sanitize_alternative
+        from crosswalk.matching.alternatives import _sanitize_alternative
 
         valid_keys = {("r1", "t1"), ("r2", "t2")}
         alt = {
@@ -578,7 +578,7 @@ class TestPruneGroupOptionsToEdges:
     """After a group's edges are clipped, options must be re-synced to them."""
 
     def test_prune_resyncs_alternatives_and_optimizer(self):
-        from matcher.matching.alternatives import prune_group_options_to_edges
+        from crosswalk.matching.alternatives import prune_group_options_to_edges
 
         # Group originally had (r1,t1),(r2,t2),(r3,t3); clipped to just (r1,t1).
         group = {
@@ -629,7 +629,7 @@ class TestExportGroupsSidecarOptimizerAssignment:
         import geopandas as gpd
         from shapely.geometry import LineString
 
-        from matcher.matching.types import MatchDecision, MatchResult
+        from crosswalk.matching.types import MatchDecision, MatchResult
 
         # A genuine 1:N corridor (r1 -> t1,t1b, two collinear contiguous
         # targets) plus a far-away independent pair (r2-t2). A weak cross-edge
@@ -677,9 +677,9 @@ class TestExportGroupsSidecarOptimizerAssignment:
         return results, ref, target
 
     def test_decomposed_component_gets_optimizer_assignment(self, tmp_path):
-        from matcher.filenames import groups_sidecar_path
-        from matcher.matching.optimizer import optimize_matches_with_grouping
-        from matcher.pipeline.runner import _export_groups_sidecar
+        from crosswalk.filenames import groups_sidecar_path
+        from crosswalk.matching.optimizer import optimize_matches_with_grouping
+        from crosswalk.pipeline.runner import _export_groups_sidecar
 
         results, ref, target = self._build_decomposed_mn()
 
@@ -856,7 +856,7 @@ class TestSelectStitchingBatch:
 class TestStitchingLabelStore:
     @pytest.fixture
     def store(self, tmp_path):
-        from matcher.labeling.stitching_store import StitchingLabelStore
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
 
         return StitchingLabelStore("test_dataset", labels_dir=tmp_path / "stitching")
 
@@ -910,7 +910,7 @@ class TestStitchingLabelStore:
             target_ids=["t3", "t1", "t2"],
         )
         # Reload from a fresh instance to exercise CSV persistence + _ensure_schema.
-        from matcher.labeling.stitching_store import StitchingLabelStore
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
 
         reloaded = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir)
         row = reloaded.df.iloc[0]
@@ -962,7 +962,7 @@ class TestStitchingLabelStore:
         assert reviewed == {"g1", "g2"}
 
     def test_get_reviewed_filters_by_dataset(self, store):
-        from matcher.labeling.stitching_store import StitchingLabelStore
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
 
         store.add("g1", [], "1:N", 1, 2, "tester", "s1")
         # Second store for a different dataset
@@ -980,7 +980,7 @@ class TestStitchingLabelStore:
         assert parsed[0]["ref_id"] == "r1"
 
     def test_persistence_across_instances(self, store):
-        from matcher.labeling.stitching_store import StitchingLabelStore
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
 
         store.add("g1", [], "1:N", 1, 2, "tester", "s1")
 
@@ -1018,7 +1018,7 @@ class TestStitchingLabelIntegrity:
         # Load through the store so the effective (schema-ensured) frame is
         # tested: committed CSVs predating the set-semantics columns are filled
         # with defaults on load, and the set columns migrate lazily on next save.
-        from matcher.labeling.stitching_store import StitchingLabelStore
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
 
         dataset = request.param
         return StitchingLabelStore(dataset).load(dataset)
@@ -1161,7 +1161,7 @@ class TestBuildStitchOptions:
         return group
 
     def test_preseed_from_optimizer_assignment(self):
-        from matcher.web.routes.stitching import _build_stitch_options
+        from crosswalk.web.routes.stitching import _build_stitch_options
 
         ctx = _build_stitch_options(self._mn_group())
         assert ctx["has_preseed"] is True
@@ -1177,7 +1177,7 @@ class TestBuildStitchOptions:
 
     def test_missing_optimizer_assignment_falls_back(self):
         """Old-format group without optimizer_assignment -> no pre-seed."""
-        from matcher.web.routes.stitching import _build_stitch_options
+        from crosswalk.web.routes.stitching import _build_stitch_options
 
         group = self._mn_group()
         del group["optimizer_assignment"]
@@ -1191,7 +1191,7 @@ class TestBuildStitchOptions:
 
     def test_empty_optimizer_assignment_falls_back(self):
         """An empty optimizer_assignment (optimizer dropped the group) -> no pre-seed."""
-        from matcher.web.routes.stitching import _build_stitch_options
+        from crosswalk.web.routes.stitching import _build_stitch_options
 
         ctx = _build_stitch_options(self._mn_group(optimizer_assignment=[]))
         assert ctx["has_preseed"] is False
@@ -1199,7 +1199,7 @@ class TestBuildStitchOptions:
 
     def test_inactive_segment_ids_derived(self):
         """Group segments the optimizer left out are reported inactive."""
-        from matcher.web.routes.stitching import _build_stitch_options
+        from crosswalk.web.routes.stitching import _build_stitch_options
 
         group = self._mn_group(
             ref_ids=["r1", "r2", "r3"],
@@ -1220,7 +1220,7 @@ class TestBuildStitchOptions:
 
     def test_options_deduplicated_against_optimizer(self):
         """An alternative identical to the optimizer's answer is not duplicated."""
-        from matcher.web.routes.stitching import _build_stitch_options
+        from crosswalk.web.routes.stitching import _build_stitch_options
 
         group = self._mn_group(
             alternatives=[
@@ -1273,27 +1273,27 @@ def _line_of_length_m(length_m, lat=42.36, lon=-71.06):
 
 
 class TestSliverConfigRule:
-    """The centralized numeric hybrid rule in ``matcher.config.is_sliver_edge``.
+    """The centralized numeric hybrid rule in ``crosswalk.config.is_sliver_edge``.
 
     Sliver iff BOTH: max(ref_span, tgt_span) < 0.10 (fraction gate) AND
     max(ref_span*ref_len, tgt_span*tgt_len) < 5.0 m (absolute-overlap gate).
     """
 
     def test_threshold_values(self):
-        from matcher.config import SLIVER_ABS_OVERLAP_M, SLIVER_SPAN_THRESHOLD
+        from crosswalk.config import SLIVER_ABS_OVERLAP_M, SLIVER_SPAN_THRESHOLD
 
         assert SLIVER_SPAN_THRESHOLD == 0.10
         assert SLIVER_ABS_OVERLAP_M == 5.0
 
     def test_tiny_overlap_short_segments_is_sliver(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # 0.2 m of a 162 m ref (0.0012*162=0.19 m) and 0.67 m of a 10 m target:
         # both fraction and absolute gates pass -> sliver.
         assert is_sliver_edge(0.0012, 0.067, 162.0, 10.0)
 
     def test_long_ref_nine_percent_not_sliver(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # 9% of a 2 km ref = 180 m of real road. Passes the fraction gate
         # (0.09 < 0.10) but the 180 m absolute overlap is far above 5 m, so the
@@ -1301,7 +1301,7 @@ class TestSliverConfigRule:
         assert not is_sliver_edge(0.09, 0.05, 2000.0, 50.0)
 
     def test_short_stub_large_fraction_not_sliver_residual_limit(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # 0.6 m of a 4 m stub = 15% span. Only 0.6 m physically overlaps, yet the
         # AND rule requires the fraction gate and 0.15 is NOT < 0.10, so this is
@@ -1309,31 +1309,31 @@ class TestSliverConfigRule:
         assert not is_sliver_edge(0.15, 0.15, 4.0, 4.0)
 
     def test_boundary_010_not_sliver(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # Fraction exactly at threshold: strict < excludes it regardless of length.
         assert not is_sliver_edge(0.10, 0.10, 1.0, 1.0)
 
     def test_uses_max_not_min_fraction(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # One large span keeps it substantive even if the other is tiny.
         assert not is_sliver_edge(0.5, 0.001, 100.0, 100.0)
 
     def test_missing_fracs_default_substantive(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         assert not is_sliver_edge(None, None, 10.0, 10.0)
 
     def test_nan_fracs_default_substantive(self):
         import math
 
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         assert not is_sliver_edge(math.nan, math.nan, 10.0, 10.0)
 
     def test_missing_lengths_never_sliver(self):
-        from matcher.config import is_sliver_edge
+        from crosswalk.config import is_sliver_edge
 
         # Tiny fractions but unknown lengths -> absolute overlap unknown (+inf)
         # -> never drop what we cannot measure.
@@ -1341,17 +1341,17 @@ class TestSliverConfigRule:
 
 
 class TestSliverGroupHelpers:
-    """Group/edge-dict helpers in ``matcher.matching.sliver``."""
+    """Group/edge-dict helpers in ``crosswalk.matching.sliver``."""
 
     def test_explicit_null_fracs_never_sliver(self):
-        from matcher.matching.sliver import edge_is_sliver, edge_span_fracs
+        from crosswalk.matching.sliver import edge_is_sliver, edge_span_fracs
 
         edge = {"gers_end_frac": None, "local_start_frac": None}
         assert edge_span_fracs(edge) == (1.0, 1.0)
         assert not edge_is_sliver(edge)
 
     def test_edge_is_sliver_with_group_lengths(self):
-        from matcher.matching.sliver import edge_is_sliver, group_segment_lengths_m
+        from crosswalk.matching.sliver import edge_is_sliver, group_segment_lengths_m
 
         group = {
             "ref_geometries": {"r": _line_of_length_m(162.0)},
@@ -1362,7 +1362,7 @@ class TestSliverGroupHelpers:
         assert edge_is_sliver(edge, ref_lens, tgt_lens)
 
     def test_long_ref_overlap_not_sliver(self):
-        from matcher.matching.sliver import edge_is_sliver, group_segment_lengths_m
+        from crosswalk.matching.sliver import edge_is_sliver, group_segment_lengths_m
 
         group = {
             "ref_geometries": {"r": _line_of_length_m(2000.0)},
@@ -1374,7 +1374,7 @@ class TestSliverGroupHelpers:
         assert not edge_is_sliver(edge, ref_lens, tgt_lens)
 
     def test_annotate_adds_flag_and_count(self):
-        from matcher.matching.sliver import annotate_group_sliver_flags
+        from crosswalk.matching.sliver import annotate_group_sliver_flags
 
         group = {
             "edges": [
@@ -1408,7 +1408,7 @@ class TestSliverOverlapAndBorderline:
 
     def test_overlap_m_single_definition(self):
         # The config-level overlap must match the sliver rule's absolute gate.
-        from matcher.config import SLIVER_ABS_OVERLAP_M, is_sliver_edge, sliver_overlap_m
+        from crosswalk.config import SLIVER_ABS_OVERLAP_M, is_sliver_edge, sliver_overlap_m
 
         # 9% of a 2 km ref = 180 m absolute overlap.
         ov = sliver_overlap_m(0.09, 0.05, 2000.0, 50.0)
@@ -1423,12 +1423,12 @@ class TestSliverOverlapAndBorderline:
     def test_overlap_m_missing_length_is_inf(self):
         import math
 
-        from matcher.config import sliver_overlap_m
+        from crosswalk.config import sliver_overlap_m
 
         assert math.isinf(sliver_overlap_m(0.01, 0.01))
 
     def test_edge_overlap_m_from_group_lengths(self):
-        from matcher.matching.sliver import edge_overlap_m, group_segment_lengths_m
+        from crosswalk.matching.sliver import edge_overlap_m, group_segment_lengths_m
 
         group = {
             "ref_geometries": {"r": _line_of_length_m(200.0)},
@@ -1442,7 +1442,7 @@ class TestSliverOverlapAndBorderline:
     def test_borderline_when_sliver_blocked_only_by_abs_floor(self):
         # The named case: 2.9% span on a long ref maps to >5 m, so the strict
         # rule does NOT tag it a sliver, but it IS the contested junction-kiss.
-        from matcher.matching.sliver import (
+        from crosswalk.matching.sliver import (
             edge_is_borderline,
             edge_is_sliver,
             edge_sliver_tag,
@@ -1461,13 +1461,13 @@ class TestSliverOverlapAndBorderline:
 
     def test_borderline_just_above_span_threshold(self):
         # Span 0.12 (> 0.10 sliver gate, < 0.15 band) with short segments -> BORDERLINE.
-        from matcher.matching.sliver import edge_is_borderline, edge_is_sliver
+        from crosswalk.matching.sliver import edge_is_borderline, edge_is_sliver
 
         group = {
             "ref_geometries": {"r": _line_of_length_m(30.0)},
             "target_geometries": {"t": _line_of_length_m(30.0)},
         }
-        from matcher.matching.sliver import group_segment_lengths_m
+        from crosswalk.matching.sliver import group_segment_lengths_m
 
         ref_lens, tgt_lens = group_segment_lengths_m(group)
         edge = _frac_edge("r", "t", 0.0, 0.12, 0.0, 0.12)
@@ -1475,7 +1475,7 @@ class TestSliverOverlapAndBorderline:
         assert edge_is_borderline(edge, ref_lens, tgt_lens)
 
     def test_sliver_is_never_also_borderline(self):
-        from matcher.matching.sliver import (
+        from crosswalk.matching.sliver import (
             edge_is_borderline,
             edge_is_sliver,
             edge_sliver_tag,
@@ -1495,13 +1495,13 @@ class TestSliverOverlapAndBorderline:
     def test_substantive_asymmetric_match_not_borderline(self):
         # A large coverage on one side (45%) is a legitimate asymmetric match,
         # not a junction-kiss, even if the absolute overlap is small.
-        from matcher.matching.sliver import edge_is_borderline, edge_sliver_tag
+        from crosswalk.matching.sliver import edge_is_borderline, edge_sliver_tag
 
         group = {
             "ref_geometries": {"r": _line_of_length_m(11.0)},
             "target_geometries": {"t": _line_of_length_m(220.0)},
         }
-        from matcher.matching.sliver import group_segment_lengths_m
+        from crosswalk.matching.sliver import group_segment_lengths_m
 
         ref_lens, tgt_lens = group_segment_lengths_m(group)
         edge = _frac_edge("r", "t", 0.0, 0.457, 0.0, 0.023)
@@ -1524,32 +1524,32 @@ class TestParseExplicitEdges:
         }
 
     def test_empty_payload_returns_none(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         assert _parse_explicit_edges("", self._group()) is None
 
     def test_valid_payload_stripped_to_id_pairs(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         raw = json.dumps([{"ref_id": "r1", "target_id": "t1", "confidence": 0.9}])
         parsed = _parse_explicit_edges(raw, self._group())
         assert parsed == [{"ref_id": "r1", "target_id": "t1"}]
 
     def test_non_group_edge_rejected(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         raw = json.dumps([{"ref_id": "r1", "target_id": "t9"}])
         with pytest.raises(ValueError):
             _parse_explicit_edges(raw, self._group())
 
     def test_malformed_json_rejected(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         with pytest.raises(ValueError):
             _parse_explicit_edges("not json", self._group())
 
     def test_non_list_rejected(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         with pytest.raises(ValueError):
             _parse_explicit_edges(json.dumps({"ref_id": "r1"}), self._group())
@@ -1565,7 +1565,7 @@ class TestParseExplicitEdges:
         }
 
     def test_rejected_candidate_pair_accepted(self):
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         raw = json.dumps([{"ref_id": "r2", "target_id": "t2"}])
         parsed = _parse_explicit_edges(raw, self._group_with_rejected())
@@ -1574,7 +1574,7 @@ class TestParseExplicitEdges:
     def test_true_non_candidate_still_rejected(self):
         # Not a selected edge nor a rejected candidate → still refused (#270:
         # context/forged pairs must never be recordable).
-        from matcher.web.routes.stitching import _parse_explicit_edges
+        from crosswalk.web.routes.stitching import _parse_explicit_edges
 
         raw = json.dumps([{"ref_id": "r1", "target_id": "t9"}])
         with pytest.raises(ValueError):
@@ -1619,14 +1619,14 @@ class TestStitchingSelectRoute:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         recorder = MagicMock()
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
-            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
-            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("crosswalk.web.routes.stitching.record_stitching_label", recorder),
         ]
         for p in patches:
             p.start()
@@ -1890,14 +1890,14 @@ class TestStitchingSliverExclusion:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         recorder = MagicMock()
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
-            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
-            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("crosswalk.web.routes.stitching.record_stitching_label", recorder),
         ]
         for p in patches:
             p.start()
@@ -2019,13 +2019,13 @@ class TestStitchingDeepLink:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
             patch(
-                "matcher.web.routes.stitching.get_unreviewed_stitch_groups",
+                "crosswalk.web.routes.stitching.get_unreviewed_stitch_groups",
                 return_value=unreviewed,
             ),
         ]
@@ -2098,11 +2098,11 @@ class TestStitchingUiHooks:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
         ]
         for p in patches:
             p.start()
@@ -2190,7 +2190,7 @@ class TestContextDisplayCap:
         }
 
     def test_large_group_capped_to_nearest(self):
-        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
+        from crosswalk.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
 
         group = self._big_group(n_ctx_ref=400, n_ctx_target=300)
         capped = _cap_context_ids(group)
@@ -2208,7 +2208,7 @@ class TestContextDisplayCap:
         assert "ctxr399" not in kept  # farthest dropped
 
     def test_small_group_unchanged(self):
-        from matcher.web.routes.stitching import _cap_context_ids
+        from crosswalk.web.routes.stitching import _cap_context_ids
 
         group = self._big_group(n_ctx_ref=8, n_ctx_target=7)
         capped = _cap_context_ids(group)
@@ -2219,7 +2219,7 @@ class TestContextDisplayCap:
         assert capped["target_total"] == 7
 
     def test_no_context_is_noop(self):
-        from matcher.web.routes.stitching import _cap_context_ids
+        from crosswalk.web.routes.stitching import _cap_context_ids
 
         capped = _cap_context_ids({"ref_ids": ["r1"], "target_ids": ["t1"]})
         assert capped["ref_ids"] == []
@@ -2229,7 +2229,7 @@ class TestContextDisplayCap:
 
     def test_missing_anchor_geometry_keeps_prefix(self):
         """When group geometries don't parse, fall back to the first N by order."""
-        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
+        from crosswalk.web.routes.stitching import CONTEXT_DISPLAY_CAP, _cap_context_ids
 
         group = self._big_group(n_ctx_ref=200, n_ctx_target=0)
         group["ref_geometries"] = {}  # no anchor
@@ -2238,7 +2238,7 @@ class TestContextDisplayCap:
         assert capped["ref_ids"] == [f"ctxr{i}" for i in range(CONTEXT_DISPLAY_CAP)]
 
     def test_context_builder_surfaces_truncation(self):
-        from matcher.web.routes.stitching import _build_group_context
+        from crosswalk.web.routes.stitching import _build_group_context
 
         group = self._big_group(n_ctx_ref=400, n_ctx_target=50)
         # names/classes lookups default to "" — present so the builder runs.
@@ -2253,7 +2253,7 @@ class TestContextDisplayCap:
         assert len(ctx["context_ids"]) == 150 + 50
 
     def test_geojson_capped(self):
-        from matcher.web.routes.stitching import CONTEXT_DISPLAY_CAP, _build_group_geojson
+        from crosswalk.web.routes.stitching import CONTEXT_DISPLAY_CAP, _build_group_geojson
 
         group = self._big_group(n_ctx_ref=400, n_ctx_target=400)
         fc = _build_group_geojson(group)
@@ -2287,14 +2287,14 @@ class TestContextMembershipHint:
     def _patch_root(self, tmp_path):
         from unittest.mock import patch
 
-        import matcher.web.routes.stitching as st
+        import crosswalk.web.routes.stitching as st
 
         # Clear the module cache so each test sees its own sidecar.
         st._MEMBERSHIP_CACHE.clear()
         return patch.object(st, "PROJECT_ROOT", tmp_path)
 
     def test_load_membership_maps_ids_to_owning_group(self, tmp_path):
-        from matcher.web.routes.stitching import _load_group_membership
+        from crosswalk.web.routes.stitching import _load_group_membership
 
         self._write_sidecar(
             tmp_path,
@@ -2312,20 +2312,20 @@ class TestContextMembershipHint:
         assert "missing" not in mem
 
     def test_missing_sidecar_returns_empty(self, tmp_path):
-        from matcher.web.routes.stitching import _load_group_membership
+        from crosswalk.web.routes.stitching import _load_group_membership
 
         with self._patch_root(tmp_path):  # no sidecar written
             assert _load_group_membership(self.DATASET) == {}
 
     def test_empty_dataset_returns_empty(self):
-        from matcher.web.routes.stitching import _load_group_membership
+        from crosswalk.web.routes.stitching import _load_group_membership
 
         assert _load_group_membership("") == {}
 
     def test_cache_invalidates_on_mtime(self, tmp_path):
         import os
 
-        from matcher.web.routes.stitching import _load_group_membership
+        from crosswalk.web.routes.stitching import _load_group_membership
 
         out = self._write_sidecar(
             tmp_path, [{"group_id": "gA", "ref_ids": [], "target_ids": ["t1"]}]
@@ -2339,7 +2339,7 @@ class TestContextMembershipHint:
             assert _load_group_membership(self.DATASET)["t1"] == "gZ"
 
     def test_build_context_annotates_member_group(self, tmp_path):
-        from matcher.web.routes.stitching import _build_group_context
+        from crosswalk.web.routes.stitching import _build_group_context
 
         # Current group has one real edge and two context targets, one of which
         # belongs to a neighboring group; the other is unknown to the sidecar.
@@ -2368,7 +2368,7 @@ class TestContextMembershipHint:
         assert by_id["ctxUnknown"]["member_group"] is None
 
     def test_context_id_owned_by_current_group_yields_no_hint(self, tmp_path):
-        from matcher.web.routes.stitching import _build_group_context
+        from crosswalk.web.routes.stitching import _build_group_context
 
         group = {
             "group_id": "gcur",
@@ -2389,7 +2389,7 @@ class TestContextMembershipHint:
         assert ctx["context_target_details"][0]["member_group"] is None
 
     def test_no_dataset_leaves_member_group_none(self):
-        from matcher.web.routes.stitching import _build_group_context
+        from crosswalk.web.routes.stitching import _build_group_context
 
         group = {
             "group_id": "gcur",
@@ -2442,11 +2442,11 @@ class TestContextPillDistinction:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
         ]
         for p in patches:
             p.start()
@@ -2534,14 +2534,14 @@ class TestRejectedPairSubmit:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         recorder = MagicMock()
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
-            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
-            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("crosswalk.web.routes.stitching.record_stitching_label", recorder),
         ]
         for p in patches:
             p.start()
@@ -2658,12 +2658,12 @@ class TestStaleProposalUI:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
             patch(
-                "matcher.web.routes.stitching.load_stitch_batch",
+                "crosswalk.web.routes.stitching.load_stitch_batch",
                 return_value=self._batch(stale),
             ),
         ]
@@ -2747,18 +2747,18 @@ class TestDeAnchoredMode:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
             patch(
-                "matcher.web.routes.stitching.get_unreviewed_stitch_groups",
+                "crosswalk.web.routes.stitching.get_unreviewed_stitch_groups",
                 return_value=unreviewed if unreviewed is not None else [],
             ),
         ]
         if recorder is not None:
-            patches.append(patch("matcher.web.routes.stitching.record_stitching_label", recorder))
+            patches.append(patch("crosswalk.web.routes.stitching.record_stitching_label", recorder))
         for p in patches:
             p.start()
         return TestClient(create_app()), patches
@@ -3057,14 +3057,14 @@ class TestRejectedSliverExclusion:
 
         from fastapi.testclient import TestClient
 
-        from matcher.web.app import create_app
+        from crosswalk.web.app import create_app
 
         recorder = MagicMock()
         patches = [
-            patch("matcher.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
-            patch("matcher.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
-            patch("matcher.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
-            patch("matcher.web.routes.stitching.record_stitching_label", recorder),
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch("crosswalk.web.routes.stitching.get_unreviewed_stitch_groups", return_value=[]),
+            patch("crosswalk.web.routes.stitching.record_stitching_label", recorder),
         ]
         for p in patches:
             p.start()

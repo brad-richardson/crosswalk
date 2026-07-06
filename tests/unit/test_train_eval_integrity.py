@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import matcher.matching.ml as ml_module
-from matcher.config import FEATURE_COLUMNS, FEATURE_VERSION
-from matcher.matching.ml import MLMatcher
+import crosswalk.matching.ml as ml_module
+from crosswalk.config import FEATURE_COLUMNS, FEATURE_VERSION
+from crosswalk.matching.ml import MLMatcher
 
 pytest.importorskip("xgboost")
 
@@ -324,7 +324,7 @@ def log_capture():
 class TestPendingBackfillTolerance:
     """Features in PENDING_BACKFILL_FEATURES may be missing from stored labels.
 
-    Newly declared features whose coordinated `matcher backfill` hasn't run yet
+    Newly declared features whose coordinated `crosswalk backfill` hasn't run yet
     are filled with NaN at train time (XGBoost handles NaN natively) instead of
     raising. Missing features NOT in the allowlist must still raise — that
     check guards against real feature-wiring mistakes.

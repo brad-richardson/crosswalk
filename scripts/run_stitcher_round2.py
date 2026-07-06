@@ -18,11 +18,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from matcher.resolver.evaluate import run_cv
-from matcher.resolver.extract import build_multi_dataset_table, load_sidecar_groups
-from matcher.resolver.features import FEATURE_COLUMNS, featurize
-from matcher.resolver.round2 import EXTENDED_FEATURE_COLUMNS, featurize_extended, run_cv2
-from matcher.resolver.votes import default_votes_paths, edge_soft_labels, load_votes
+from crosswalk.resolver.evaluate import run_cv
+from crosswalk.resolver.extract import build_multi_dataset_table, load_sidecar_groups
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.round2 import EXTENDED_FEATURE_COLUMNS, featurize_extended, run_cv2
+from crosswalk.resolver.votes import default_votes_paths, edge_soft_labels, load_votes
 
 
 def _rows(res: dict, slice_name: str, config: str) -> list[dict]:

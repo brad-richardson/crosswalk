@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from matcher.resolver.extract import build_edge_table
-from matcher.resolver.round2 import (
+from crosswalk.resolver.extract import build_edge_table
+from crosswalk.resolver.round2 import (
     EXTENDED_FEATURE_COLUMNS,
     featurize_extended,
     select_expected_f1,

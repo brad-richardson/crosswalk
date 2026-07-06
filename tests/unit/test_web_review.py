@@ -1,4 +1,4 @@
-"""Tests for the label review routes in the matcher web UI."""
+"""Tests for the label review routes in the crosswalk web UI."""
 
 from unittest.mock import patch
 
@@ -10,7 +10,7 @@ pytest.importorskip(
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from matcher.web.app import create_app  # noqa: E402
+from crosswalk.web.app import create_app  # noqa: E402
 
 
 def _make_labels():
@@ -62,10 +62,10 @@ def _make_labels():
 def mock_review_services():
     """Mock the service functions used by review routes."""
     with (
-        patch("matcher.web.routes.review.list_datasets") as mock_list,
-        patch("matcher.web.routes.review.get_labels_for_review") as mock_get_labels,
-        patch("matcher.web.routes.review.update_review_label") as mock_update,
-        patch("matcher.web.routes.review.delete_review_label") as mock_delete,
+        patch("crosswalk.web.routes.review.list_datasets") as mock_list,
+        patch("crosswalk.web.routes.review.get_labels_for_review") as mock_get_labels,
+        patch("crosswalk.web.routes.review.update_review_label") as mock_update,
+        patch("crosswalk.web.routes.review.delete_review_label") as mock_delete,
     ):
         mock_list.return_value = ["dataset_a", "dataset_b"]
         labels = _make_labels()

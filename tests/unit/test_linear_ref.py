@@ -2,7 +2,7 @@
 
 import pytest
 
-from matcher.utils.linear_ref import (
+from crosswalk.utils.linear_ref import (
     AttributeRange,
     LinearReferencedAttribute,
     coverage_for_value,

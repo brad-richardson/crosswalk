@@ -1,4 +1,4 @@
-"""Tests for the integration QA routes in the matcher web UI."""
+"""Tests for the integration QA routes in the crosswalk web UI."""
 
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +12,7 @@ pytest.importorskip(
 from fastapi.testclient import TestClient  # noqa: E402
 from shapely.geometry import LineString  # noqa: E402
 
-from matcher.web.app import create_app  # noqa: E402
+from crosswalk.web.app import create_app  # noqa: E402
 
 
 def _make_edges_gdf():
@@ -55,10 +55,10 @@ def _make_net_new_gdf():
 def mock_qa_services():
     """Mock the service functions used by QA routes."""
     with (
-        patch("matcher.web.routes.qa.list_datasets") as mock_list,
-        patch("matcher.web.routes.qa.load_qa_edges") as mock_load,
-        patch("matcher.web.routes.qa.record_qa_decision") as mock_record,
-        patch("matcher.web.routes.qa.integration_cache_dir") as mock_cache_dir,
+        patch("crosswalk.web.routes.qa.list_datasets") as mock_list,
+        patch("crosswalk.web.routes.qa.load_qa_edges") as mock_load,
+        patch("crosswalk.web.routes.qa.record_qa_decision") as mock_record,
+        patch("crosswalk.web.routes.qa.integration_cache_dir") as mock_cache_dir,
     ):
         mock_list.return_value = ["dataset_a", "dataset_b"]
         mock_load.return_value = {

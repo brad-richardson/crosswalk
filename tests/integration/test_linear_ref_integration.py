@@ -6,12 +6,12 @@ Tests the full flow from Overture data parsing through feature computation.
 import geopandas as gpd
 from shapely.geometry import LineString
 
-from matcher.features.alignment import AlignmentResult
-from matcher.fetch.overture import (
+from crosswalk.features.alignment import AlignmentResult
+from crosswalk.fetch.overture import (
     extract_lr_attributes,
     parse_names_lr,
 )
-from matcher.utils.linear_ref import (
+from crosswalk.utils.linear_ref import (
     AttributeRange,
     LinearReferencedAttribute,
     create_trivial_lr,

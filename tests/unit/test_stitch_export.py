@@ -1,4 +1,4 @@
-"""Tests for `matcher agent stitch-export` (panel-consensus -> stitching labels).
+"""Tests for `crosswalk agent stitch-export` (panel-consensus -> stitching labels).
 
 Fixtures are synthetic (the real batch dirs are gitignored) so these tests are
 self-contained and exercise every export gate plus idempotency and schema
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from matcher.agent_labeling.stitch_export import (
+from crosswalk.agent_labeling.stitch_export import (
     PANEL_LABELER,
     REASON_CLASS_MISMATCH,
     REASON_EMPTIED_BY_SLIVER,
@@ -25,7 +25,7 @@ from matcher.agent_labeling.stitch_export import (
     plan_exports,
     write_exports,
 )
-from matcher.labeling.stitching_store import STITCHING_LABEL_COLUMNS, StitchingLabelStore
+from crosswalk.labeling.stitching_store import STITCHING_LABEL_COLUMNS, StitchingLabelStore
 
 CONSENSUS_COLUMNS = [
     "group_id",

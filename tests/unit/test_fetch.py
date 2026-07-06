@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from matcher.fetch.arcgis import _is_truthy
-from matcher.fetch.normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
-from matcher.fetch.overture import (
+from crosswalk.fetch.arcgis import _is_truthy
+from crosswalk.fetch.normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
+from crosswalk.fetch.overture import (
     parse_names_lr,
     parse_oneway_lr,
     parse_speed_limit_lr,

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from matcher.matching.ml import train_model
+from crosswalk.matching.ml import train_model
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("GITHUB_ACTIONS") != "true",

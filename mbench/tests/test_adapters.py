@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from mbench.adapters.base import EvalMode, ToolOutput
-from mbench.adapters.matcher import DEFAULT_MATCHER_CMD, MatcherAdapter, _find_repo_root
+from mbench.adapters.crosswalk import DEFAULT_CROSSWALK_CMD, CrosswalkAdapter, _find_repo_root
 
 
 class TestToolOutput:
@@ -22,14 +22,14 @@ class TestToolOutput:
             ToolOutput(matches=df)
 
 
-class TestMatcherAdapter:
+class TestCrosswalkAdapter:
     def test_name_and_eval_mode(self):
-        adapter = MatcherAdapter()
-        assert adapter.name == "matcher"
+        adapter = CrosswalkAdapter()
+        assert adapter.name == "crosswalk"
         assert adapter.eval_mode == EvalMode.STITCH
 
-    @patch("mbench.adapters.matcher.subprocess.run")
-    def test_run_calls_matcher_cli(self, mock_run, tmp_path):
+    @patch("mbench.adapters.crosswalk.subprocess.run")
+    def test_run_calls_crosswalk_cli(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0)
 
         # Create fake output
@@ -43,7 +43,7 @@ class TestMatcherAdapter:
             }
         ).to_parquet(bridge_path)
 
-        adapter = MatcherAdapter()
+        adapter = CrosswalkAdapter()
         result = adapter.run(
             reference=tmp_path / "ref.parquet",
             target=tmp_path / "tgt.parquet",
@@ -53,16 +53,16 @@ class TestMatcherAdapter:
         assert result == bridge_path.resolve()
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        # Default invocation is `uv run matcher stitch ...` so it works from any
-        # CWD without matcher being on PATH.
-        assert cmd[: len(DEFAULT_MATCHER_CMD.split())] == DEFAULT_MATCHER_CMD.split()
+        # Default invocation is `uv run crosswalk stitch ...` so it works from any
+        # CWD without crosswalk being on PATH.
+        assert cmd[: len(DEFAULT_CROSSWALK_CMD.split())] == DEFAULT_CROSSWALK_CMD.split()
         assert "stitch" in cmd
-        # Subprocess runs from the repo root so matcher's relative model path
+        # Subprocess runs from the repo root so crosswalk's relative model path
         # (data/models/...) resolves regardless of the caller's CWD.
         assert mock_run.call_args.kwargs["cwd"] == _find_repo_root()
 
-    @patch("mbench.adapters.matcher.subprocess.run")
-    def test_run_honors_matcher_cmd_and_repo_root(self, mock_run, tmp_path):
+    @patch("mbench.adapters.crosswalk.subprocess.run")
+    def test_run_honors_crosswalk_cmd_and_repo_root(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0)
         bridge_path = tmp_path / "bridge.parquet"
         pd.DataFrame({"gers_id": ["r1"], "local_id": ["t1"]}).to_parquet(bridge_path)
@@ -70,41 +70,41 @@ class TestMatcherAdapter:
         repo_root = tmp_path / "myrepo"
         repo_root.mkdir()
 
-        adapter = MatcherAdapter()
+        adapter = CrosswalkAdapter()
         adapter.run(
             reference=tmp_path / "ref.parquet",
             target=tmp_path / "tgt.parquet",
             output_dir=tmp_path,
-            matcher_cmd="matcher",
+            crosswalk_cmd="crosswalk",
             repo_root=repo_root,
         )
 
         cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "matcher"
+        assert cmd[0] == "crosswalk"
         assert cmd[1] == "stitch"
         assert mock_run.call_args.kwargs["cwd"] == repo_root.resolve()
 
-    @patch("mbench.adapters.matcher.subprocess.run")
+    @patch("mbench.adapters.crosswalk.subprocess.run")
     def test_run_passes_absolute_paths(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0)
         bridge_path = tmp_path / "bridge.parquet"
         pd.DataFrame({"gers_id": ["r1"], "local_id": ["t1"]}).to_parquet(bridge_path)
 
-        adapter = MatcherAdapter()
+        adapter = CrosswalkAdapter()
         adapter.run(
             reference=Path("ref.parquet"),
             target=Path("tgt.parquet"),
             output_dir=tmp_path,
         )
         cmd = mock_run.call_args[0][0]
-        # All path args passed to matcher must be absolute since cwd != caller cwd.
+        # All path args passed to crosswalk must be absolute since cwd != caller cwd.
         for flag in ("-r", "-t", "-o"):
             val = cmd[cmd.index(flag) + 1]
             assert Path(val).is_absolute(), f"{flag} path not absolute: {val}"
 
-    def test_find_repo_root_locates_matcher_package(self):
+    def test_find_repo_root_locates_crosswalk_package(self):
         root = _find_repo_root()
-        assert (root / "src" / "matcher").is_dir()
+        assert (root / "src" / "crosswalk").is_dir()
 
     def test_parse_output(self, tmp_path):
         bridge_path = tmp_path / "bridge.parquet"
@@ -117,7 +117,7 @@ class TestMatcherAdapter:
             }
         ).to_parquet(bridge_path)
 
-        adapter = MatcherAdapter()
+        adapter = CrosswalkAdapter()
         output = adapter.parse_output(bridge_path)
 
         assert len(output.matches) == 2
