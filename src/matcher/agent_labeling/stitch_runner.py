@@ -40,8 +40,9 @@ class ProviderSpec:
     effort: str = ""  # reasoning/thinking effort where the CLI supports it
 
 
-# Panel v2 (composition change from v1 -> bump the export labeler to
-# panel_unanimous_v2). Effort is CLI-specific: claude takes --effort; codex takes
+# Panel v2 (composition change from v1 -> bump the export labeler; the labeler
+# was bumped again to panel_unanimous_v3 when the #302 pack enrichment changed
+# the panel's inputs). Effort is CLI-specific: claude takes --effort; codex takes
 # model_reasoning_effort; agy encodes it in the model name ("... (Medium)").
 DEFAULT_PANEL = [
     ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),

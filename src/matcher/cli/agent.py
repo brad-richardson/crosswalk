@@ -1354,7 +1354,7 @@ def export_stitch_panel(
     Only unanimous ``auto_accept`` groups are candidates. Gates are applied in
     order and reported per group: (a) auto_accept, (b) edge count <= max-edges,
     (c) class-consistency, (d) sliver canonicalization, (e) human precedence.
-    Exported rows use the labeler ``panel_unanimous_v2`` and upsert by group_id
+    Exported rows use the labeler ``panel_unanimous_v3`` and upsert by group_id
     (idempotent).
 
     Examples:
