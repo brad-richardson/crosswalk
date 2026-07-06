@@ -60,8 +60,10 @@ JOIN read_parquet(
 ```
 
 Published bridge tables live at the host configured in the [live browser](../PUBLISHING.md)
-(`site/config.js`); `us_montana_missoula` and `us_usfs_flathead` are the first
-approved-license datasets. Swap the `<bridge-host>` and `dataset=` for yours.
+(`site/config.js`); `us_montana_missoula` and `us_usfs_flathead` are among the
+approved-license (US-PD) datasets and the first two staged for publication — see
+[`datasets/licenses.toml`](../../datasets/licenses.toml) for the full registry.
+Swap the `<bridge-host>` and `dataset=` for yours.
 
 ## A version you can run right now
 
@@ -108,9 +110,9 @@ everything else live):
 ┌──────────────┬───────┬────────────────┬──────────────────────────────────────┬────────────┬────────────────────────────────────────────────────────────┐
 │   local_id   │  pci  │ overture_name  │               gers_id                │ confidence │                          matched_wkt                         │
 ├──────────────┼───────┼────────────────┼──────────────────────────────────────┼────────────┼────────────────────────────────────────────────────────────┤
-│ MT_MSL_10420 │    72 │ Montana Street │ 9e685568-de2c-40bb-9b41-8945e4406e87 │       0.98 │ LINESTRING (-114.0171123 46.8729073, …, -114.0185093 46.8729156) │
-│ MT_MSL_10421 │    58 │ Idaho Street   │ 9a7afdd7-397f-4ed0-a01e-f4b0b6d30ffa │       0.95 │ LINESTRING (-114.0172695 46.8738706, …, -114.0183377 46.8738677) │
-│ MT_MSL_10422 │    81 │ Dakota Street  │ d209d333-0d1c-4d68-a88b-1198198ad52f │       0.91 │ LINESTRING (-114.0177103 46.8706429, …, -114.0185166 46.870644)  │
+│ MT_MSL_10420 │    72 │ Montana Street │ 9e685568-de2c-40bb-9b41-8945e4406e87 │       0.98 │ LINESTRING (-114.0171123 46.8729073, …, -114.0185093 46.8729156)               │
+│ MT_MSL_10421 │    58 │ Idaho Street   │ 9a7afdd7-397f-4ed0-a01e-f4b0b6d30ffa │       0.95 │ LINESTRING (-114.01726951600182 46.87387057477697, …, -114.01833774044972 46.873867698594005) │
+│ MT_MSL_10422 │    81 │ Dakota Street  │ d209d333-0d1c-4d68-a88b-1198198ad52f │       0.91 │ LINESTRING (-114.0177103 46.8706429, …, -114.0185166 46.870644)                │
 └──────────────┴───────┴────────────────┴──────────────────────────────────────┴────────────┴────────────────────────────────────────────────────────────┘
 ```
 
