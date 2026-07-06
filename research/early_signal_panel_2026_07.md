@@ -28,11 +28,12 @@ interchange — §2 issue 4).
 | de_berlin_roads | 5 | 3 | 2 | 0 | 2 | **2** | 0.895 | footway↔service vocab |
 | co_bogota_bike_network | 5 | 4 | 1 | 0 | 3 | **2** | 0.885 | **cross-class**, edge-cap skip |
 | sg_singapore_footpaths | 5 | 4 | 1 | 0 | 2 | **2** | 0.936 | **cross-class** |
-| **Total** | **35** | **21** | **9** | **2** | **24** | **20** | 0.874 | |
+| **Total** | **35** | **25** | **9** | **1** | **21** | **20** | 0.874 | |
 
-Auto-accept candidates (24) exceed exports (20) because unanimous **reject** verdicts
-(choice = NONE) route to human_review not export (4 groups: Berlin 1, Bogotá 1, SG
-footpaths 2), and one Bogotá group was over the 20-edge export cap (issue 5).
+Unanimous verdicts (25) exceed auto-accept candidates (21) because unanimous
+**reject** verdicts (choice = NONE) route to human_review, not export (4 groups:
+Berlin 1, Bogotá 1, SG footpaths 2). Auto-accept (21) exceeds exports (20) because
+one Bogotá group was over the 20-edge export cap (issue 5).
 
 ### Per-dataset group detail
 
