@@ -11,7 +11,11 @@ import pytest
 
 from crosswalk.labeling.stitching_store import DEFAULT_STITCHING_DIR, STITCHING_LABEL_COLUMNS
 from crosswalk.matching.alternatives import generate_top_k_alternatives
-from crosswalk.matching.batch_selection import select_stitching_batch
+from crosswalk.matching.batch_selection import (
+    BORDERLINE_MIN_SCORE,
+    compute_borderline_score,
+    select_stitching_batch,
+)
 from crosswalk.matching.optimizer import compute_group_id
 
 # ---------------------------------------------------------------------------
@@ -739,6 +743,14 @@ class TestSelectStitchingBatch:
     def _alt(self, conf):
         return {"total_confidence": conf, "edges": [], "summary": ""}
 
+    def _alt_e(self, triples):
+        """Alternative from ``(ref, tgt, conf)`` triples (real per-edge confidence)."""
+        return {
+            "total_confidence": round(sum(c for _, _, c in triples), 4),
+            "edges": [{"ref_id": r, "target_id": t, "confidence": c} for r, t, c in triples],
+            "summary": "",
+        }
+
     def test_empty_groups(self):
         result = select_stitching_batch([], set(), k=10)
         assert result == []
@@ -759,19 +771,42 @@ class TestSelectStitchingBatch:
         assert result == []
 
     def test_tier_balancing_with_enough_groups(self):
-        """With 30 groups including large ones, k=20 should produce all four tiers."""
+        """A pool spanning all four signal shapes, k=20, should fill all four tiers.
+
+        Uses alternatives with real per-edge confidence so the contestedness-based
+        borderline metric has something to bite on (empty-edge alternatives score
+        0 and are no longer borderline).
+        """
         groups = []
-        for i in range(30):
-            conf = 0.5 + i * 0.01
-            # Give some groups 10+ edges so the large tier can fill
-            n_edges = 12 if i < 10 else 1
-            edges = [_edge(f"r{i}_{j}", f"t{i}_{j}", conf) for j in range(n_edges)]
+        # 10 LARGE groups (12 near-certain edges): fill the large tier.
+        for i in range(10):
+            triples = [(f"L{i}_{j}", f"t{i}_{j}", 0.95) for j in range(12)]
+            edges = [_edge(r, t, c) for r, t, c in triples]
+            groups.append(
+                _make_group(f"big{i}", edges, [self._alt_e(triples), self._alt_e(triples[:11])])
+            )
+        # 5 BORDERLINE groups: top-2 differ by a genuine 0.5-confidence coin-flip edge.
+        for i in range(5):
+            triples = [(f"B{i}a", f"B{i}t", 0.9), (f"B{i}b", f"B{i}t", 0.5)]
+            edges = [_edge(r, t, c) for r, t, c in triples]
+            groups.append(
+                _make_group(f"bord{i}", edges, [self._alt_e(triples), self._alt_e(triples[:1])])
+            )
+        # 5 LOW-CONFIDENCE groups: a single weak alternative.
+        for i in range(5):
             groups.append(
                 _make_group(
-                    f"g{i}",
-                    edges,
-                    [self._alt(conf), self._alt(conf - 0.01)],
+                    f"low{i}",
+                    [_edge(f"W{i}", f"Wt{i}", 0.2)],
+                    [self._alt_e([(f"W{i}", f"Wt{i}", 0.2)])],
                 )
+            )
+        # 10 CLEAR-WINNER groups: top-2 differ only by a near-certain 0.98 edge.
+        for i in range(10):
+            triples = [(f"C{i}a", f"C{i}t", 0.98), (f"C{i}b", f"C{i}t", 0.98)]
+            edges = [_edge(r, t, c) for r, t, c in triples]
+            groups.append(
+                _make_group(f"clear{i}", edges, [self._alt_e(triples), self._alt_e(triples[:1])])
             )
         result = select_stitching_batch(groups, set(), k=20)
         assert len(result) == 20
@@ -846,6 +881,168 @@ class TestSelectStitchingBatch:
         low_group = next((g for g in result if g["group_id"] == "low"), None)
         assert low_group is not None, "Low confidence group should be selected"
         assert low_group["review_tier"] == "low_confidence"
+
+
+# ---------------------------------------------------------------------------
+# compute_borderline_score (length-bias fix)
+# ---------------------------------------------------------------------------
+
+
+def _alt(triples):
+    """Alternative dict from ``(ref, tgt, conf)`` triples."""
+    return {
+        "total_confidence": round(sum(c for _, _, c in triples), 4),
+        "edges": [{"ref_id": r, "target_id": t, "confidence": c} for r, t, c in triples],
+    }
+
+
+class TestComputeBorderlineScore:
+    def test_fewer_than_two_alternatives_is_zero(self):
+        assert compute_borderline_score([]) == 0.0
+        assert compute_borderline_score([_alt([("r", "t", 0.9)])]) == 0.0
+
+    def test_identical_edge_sets_is_zero(self):
+        a = _alt([("r", "t", 0.9)])
+        b = _alt([("r", "t", 0.9)])
+        assert compute_borderline_score([a, b]) == 0.0
+
+    def test_clean_long_chain_scores_near_zero(self):
+        """552e0bd5-style: an 8-edge ~0.99 chain vs the same chain minus one edge.
+
+        The old summed-ratio metric scored this ~0.88 (1 - 1/8); the symmetric
+        difference is a single ~0.99-confidence edge, which is NOT contested.
+        """
+        chain = [("r0", f"t{j}", 0.99) for j in range(8)]
+        top = _alt(chain)
+        runner_up = _alt(chain[:7])  # same chain minus one 0.99 edge
+        score = compute_borderline_score([top, runner_up])
+        assert score < 0.1
+
+    def test_coin_flip_edge_scores_high(self):
+        """Top-2 differ by a genuine 0.5-confidence edge -> maximally contested."""
+        top = _alt([("r1", "t1", 0.9), ("r2", "t1", 0.5)])
+        runner_up = _alt([("r1", "t1", 0.9)])
+        score = compute_borderline_score([top, runner_up])
+        assert score > 0.9
+
+    def test_clean_chain_does_not_outrank_coin_flip(self):
+        """The core regression: a clean long chain must NOT look more borderline
+        than a genuinely contested small group."""
+        chain = [("r0", f"t{j}", 0.99) for j in range(8)]
+        clean_chain = compute_borderline_score([_alt(chain), _alt(chain[:7])])
+
+        coin_flip = compute_borderline_score(
+            [_alt([("ra", "tx", 0.8), ("rb", "tx", 0.42)]), _alt([("ra", "tx", 0.8)])]
+        )
+        assert coin_flip > clean_chain
+        # And only the coin-flip clears the borderline-tier bar.
+        assert clean_chain < BORDERLINE_MIN_SCORE <= coin_flip
+
+    def test_max_not_length_biased(self):
+        """Differing by many certain edges must not beat one 0.5 edge (no length bias)."""
+        many_certain = compute_borderline_score(
+            [
+                _alt([("r", f"t{j}", 0.99) for j in range(6)]),
+                _alt([("r", f"t{j}", 0.99) for j in range(1)]),
+            ]
+        )
+        one_coin_flip = compute_borderline_score(
+            [_alt([("r", "t0", 0.99), ("r", "t1", 0.5)]), _alt([("r", "t0", 0.99)])]
+        )
+        assert one_coin_flip > many_certain
+
+
+# ---------------------------------------------------------------------------
+# select_stitching_batch — human-queue gating (candidate_group_ids)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectStitchingBatchGating:
+    def _grp(self, gid, conf=0.5):
+        return _make_group(
+            gid, [_edge(f"r{gid}", f"t{gid}", conf)], [_alt([(f"r{gid}", f"t{gid}", conf)])]
+        )
+
+    def test_gating_restricts_to_candidates(self):
+        groups = [self._grp(f"g{i}") for i in range(10)]
+        result = select_stitching_batch(groups, set(), k=10, candidate_group_ids={"g2", "g5"})
+        ids = {g["group_id"] for g in result}
+        assert ids == {"g2", "g5"}
+
+    def test_gating_still_excludes_reviewed(self):
+        groups = [self._grp(f"g{i}") for i in range(5)]
+        result = select_stitching_batch(groups, {"g1"}, k=10, candidate_group_ids={"g1", "g2"})
+        ids = {g["group_id"] for g in result}
+        assert ids == {"g2"}  # g1 is a candidate but already reviewed
+
+    def test_empty_candidate_set_yields_empty_queue(self):
+        groups = [self._grp(f"g{i}") for i in range(5)]
+        assert select_stitching_batch(groups, set(), k=10, candidate_group_ids=set()) == []
+
+    def test_none_candidates_considers_all(self):
+        groups = [self._grp(f"g{i}") for i in range(5)]
+        result = select_stitching_batch(groups, set(), k=10, candidate_group_ids=None)
+        assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# panel_routing — human-queue panel-failure gate
+# ---------------------------------------------------------------------------
+
+
+class TestPanelRouting:
+    def _write_consensus(self, batch_dir, rows, mtime=None):
+        import csv as _csv
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=["group_id", "routing"])
+            w.writeheader()
+            for gid, routing in rows:
+                w.writerow({"group_id": gid, "routing": routing})
+        if mtime is not None:
+            import os
+
+            os.utime(cpath, (mtime, mtime))
+        return cpath
+
+    def test_failed_ids_are_human_review(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        self._write_consensus(
+            root / "ds_a", [("g1", "human_review"), ("g2", "auto_accept")], mtime=1000
+        )
+        assert panel_failed_group_ids("ds_a", root) == {"g1"}
+
+    def test_prefix_matches_dataset_dirs_only(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        self._write_consensus(root / "ds_a", [("g1", "human_review")], mtime=1000)
+        self._write_consensus(root / "ds_a_phase2", [("g2", "human_review")], mtime=1001)
+        # A different dataset that is NOT a prefix match must be ignored.
+        self._write_consensus(root / "other", [("g9", "human_review")], mtime=1002)
+        assert panel_failed_group_ids("ds_a", root) == {"g1", "g2"}
+
+    def test_most_recent_vote_wins(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        # Older wave: g1 failed. Newer wave: g1 now auto_accepts.
+        self._write_consensus(root / "ds_a", [("g1", "human_review")], mtime=1000)
+        self._write_consensus(root / "ds_a_phase2", [("g1", "auto_accept")], mtime=2000)
+        assert latest_panel_routing("ds_a", root)["g1"] == "auto_accept"
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_missing_dataset_returns_empty(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        assert panel_failed_group_ids("nope", tmp_path / "batches") == set()
 
 
 # ---------------------------------------------------------------------------
