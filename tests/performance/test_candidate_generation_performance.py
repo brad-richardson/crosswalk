@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.blocking.spatial_index import (
+from crosswalk.blocking.spatial_index import (
     CandidateBatch,
     CandidatePair,
     generate_candidates,
@@ -264,7 +264,7 @@ class TestCandidateGenerationProfiling:
         """Profile individual steps of candidate generation."""
         import geopandas as gpd
 
-        from matcher.blocking.spatial_index import (
+        from crosswalk.blocking.spatial_index import (
             _angle_diff_vectorized,
             _compute_headings_vectorized,
             _create_local_projection_crs,
@@ -401,7 +401,7 @@ class TestCandidateGenerationProfiling:
     @pytest.mark.slow
     def test_profile_dataframe_copy_overhead(self, overlapping_networks_factory):
         """Profile DataFrame copy vs assign overhead."""
-        from matcher.blocking.spatial_index import _compute_headings_vectorized
+        from crosswalk.blocking.spatial_index import _compute_headings_vectorized
 
         n_ref, n_target = 5000, 5000
         reference, _ = overlapping_networks_factory(n_reference=n_ref, n_target=n_target)

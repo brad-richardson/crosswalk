@@ -1,6 +1,8 @@
-# Matcher
+# Crosswalk
 
 Road network conflation pipeline for linking local road datasets to [Overture Maps](https://overturemaps.org/) GERS (Global Entity Reference System) identifiers.
+
+> **Named "crosswalk"** because that is the data-integration term for exactly what this tool produces — a table mapping IDs in one scheme to another (here: local IDs ↔ Overture GERS IDs) — and a literal road feature. Installed from PyPI as [`crosswalk-py`](docs/RELEASING.md) (the console script is `crosswalk`). Previously named `matcher`; the deprecated `matcher` console-script alias still works and warns.
 
 ## What is this matching?
 
@@ -20,7 +22,7 @@ The bridge file enables:
 
 The conflation pipeline has two stages. See [docs/MATCHING_MERGING_RULES.md](docs/MATCHING_MERGING_RULES.md) for the full canonical ruleset.
 
-1. **Stitch** (`matcher stitch`) — Candidate generation, feature computation, ML pair scoring, and M:N optimization. Pair matching is intentionally recall-biased (over-matching is acceptable). Graph-level resolution *(planned)* will add junction consistency enforcement, conflict resolution, and confidence promotion/demotion based on neighborhood context. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity), [Section 2](docs/MATCHING_MERGING_RULES.md#section-2-graph-level-resolution-planned))
+1. **Stitch** (`crosswalk stitch`) — Candidate generation, feature computation, ML pair scoring, and M:N optimization. Pair matching is intentionally recall-biased (over-matching is acceptable). Graph-level resolution *(planned)* will add junction consistency enforcement, conflict resolution, and confidence promotion/demotion based on neighborhood context. ([Section 1](docs/MATCHING_MERGING_RULES.md#section-1-pair-matching-rules-pure-identity), [Section 2](docs/MATCHING_MERGING_RULES.md#section-2-graph-level-resolution-planned))
 
 2. **Merge** *(Planned)* — Integrates accepted matches into the base network. Geometry replacement, attribute transfer, net-new gating. ([Section 3](docs/MATCHING_MERGING_RULES.md#section-3-merging-rules-network-integration))
 
@@ -120,13 +122,13 @@ lockstep with the feature code by CI), so `stitch` works out of the box:
 ```bash
 # 1. Install (until the first PyPI release is published, install from a clone
 #    instead: pip install . — see docs/RELEASING.md)
-pip install road-matcher
+pip install crosswalk-py
 
 # 2. Fetch the Overture reference for your data's area (bbox derived automatically)
-matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet
+crosswalk fetch-overture --clip-target my_roads.parquet -o ref.parquet
 
 # 3. Match — writes a GERS bridge table
-matcher stitch -r ref.parquet -t my_roads.parquet -o bridge.parquet
+crosswalk stitch -r ref.parquet -t my_roads.parquet -o bridge.parquet
 ```
 
 `fetch-overture` also takes an explicit `--bbox xmin,ymin,xmax,ymax` and a
@@ -139,23 +141,23 @@ For a *configured* dataset (YAML in `datasets/`) with labeling and retraining:
 
 ```bash
 # 1. Fetch all data (target + Overture reference) for a dataset
-matcher data fetch all us_boston_streets
+crosswalk data fetch all us_boston_streets
 
 # 2. Run matching (uses the bundled pretrained model, or data/models/ if you trained one)
-matcher stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+crosswalk stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
 # 3. If match quality needs improvement, label more examples (auto-discovers datasets)
-matcher ui
+crosswalk ui
 
 # 4. Retrain and re-match until satisfied (a local model takes precedence over the bundled one)
-matcher train && matcher stitch ...
+crosswalk train && crosswalk stitch ...
 ```
 
 ## Installation
 
 ```bash
-pip install road-matcher        # from PyPI once published (console script is `matcher`)
+pip install crosswalk-py        # from PyPI once published (console script is `crosswalk`)
 pip install -e ".[dev]"         # from a clone, for development
 ```
 
@@ -202,22 +204,22 @@ Fetch Overture reference data and your local dataset. Local data typically comes
 
 ```bash
 # YAML-free: fetch the Overture reference for any area (see Quick Start)
-matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet
-matcher fetch-overture --bbox -71.06,42.35,-71.03,42.37 -o ref.parquet
+crosswalk fetch-overture --clip-target my_roads.parquet -o ref.parquet
+crosswalk fetch-overture --bbox -71.06,42.35,-71.03,42.37 -o ref.parquet
 
 # Fetch all data (target + Overture reference) for a configured dataset
-matcher data fetch all us_boston_streets
+crosswalk data fetch all us_boston_streets
 
 # Fetch target data only (from ArcGIS/WFS)
-matcher data fetch target us_boston_streets
-matcher data fetch target --prefix us_boston  # All datasets for a region
+crosswalk data fetch target us_boston_streets
+crosswalk data fetch target --prefix us_boston  # All datasets for a region
 
 # Fetch reference data only (Overture by default)
-matcher data fetch reference us_boston_streets
-matcher data fetch reference us_boston_streets --source osm  # Use OSM instead
+crosswalk data fetch reference us_boston_streets
+crosswalk data fetch reference us_boston_streets --source osm  # Use OSM instead
 
 # List available datasets
-matcher data fetch list
+crosswalk data fetch list
 ```
 
 See [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for detailed instructions on adding new datasets.
@@ -249,7 +251,7 @@ The matcher computes 78 features for each candidate pair across 17 categories:
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete feature reference and computation architecture.
 
 ```bash
-matcher stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
+crosswalk stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 ```
 
@@ -259,14 +261,14 @@ When match quality isn't sufficient, use the labeling UI to create training data
 
 ```bash
 # Launch web UI (auto-discovers all datasets with data in data/raw/)
-matcher ui
+crosswalk ui
 ```
 
 Label pairs as `match`, `no_match`, or `unsure`, then retrain:
 
 ```bash
-matcher train
-matcher eval  # Cross-validation evaluation (default: 5-fold)
+crosswalk train
+crosswalk eval  # Cross-validation evaluation (default: 5-fold)
 ```
 
 ### Step 4: Integration
@@ -274,7 +276,7 @@ matcher eval  # Cross-validation evaluation (default: 5-fold)
 Merge unmatched segments into the reference network:
 
 ```bash
-matcher analyze integrate data/raw/overture_segments.parquet \
+crosswalk analyze integrate data/raw/overture_segments.parquet \
     -t boston_streets:data/output/bridge.parquet:data/output/unmatched.parquet:1 \
     -o data/integrated
 ```
@@ -285,10 +287,10 @@ Discover class mappings for new datasets:
 
 ```bash
 # Basic discovery - analyzes dataset structure
-matcher class discover data/raw/new_dataset.parquet
+crosswalk class discover data/raw/new_dataset.parquet
 
 # With match-based analysis (more accurate)
-matcher class discover data/raw/new_dataset.parquet \
+crosswalk class discover data/raw/new_dataset.parquet \
     --reference data/raw/overture_segments.parquet \
     --bridge data/output/new_dataset_bridge.parquet
 ```
@@ -299,13 +301,13 @@ matcher class discover data/raw/new_dataset.parquet \
 
 | Command | Description |
 |---------|-------------|
-| `matcher stitch` | Run the stitch pipeline (pair matching + M:N optimization) |
-| `matcher fetch-overture` | Fetch Overture road segments for a bbox (or `--clip-target`), no dataset YAML needed |
-| `matcher train` | Train ML model on labeled data (optional — a pretrained model is bundled) |
-| `matcher eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
-| `matcher backfill` | Recompute features for labeled pairs |
-| `matcher ui` | Launch web UI (labeling, label review, integration QA) |
-| `matcher version` | Show version information |
+| `crosswalk stitch` | Run the stitch pipeline (pair matching + M:N optimization) |
+| `crosswalk fetch-overture` | Fetch Overture road segments for a bbox (or `--clip-target`), no dataset YAML needed |
+| `crosswalk train` | Train ML model on labeled data (optional — a pretrained model is bundled) |
+| `crosswalk eval` | Cross-validation evaluation (or evaluate existing model with `--model`) |
+| `crosswalk backfill` | Recompute features for labeled pairs |
+| `crosswalk ui` | Launch web UI (labeling, label review, integration QA) |
+| `crosswalk version` | Show version information |
 
 ### Command Groups
 
@@ -341,7 +343,7 @@ Run `matcher --help` or `matcher <command> --help` for detailed options.
 ## Project Structure
 
 ```
-src/matcher/
+src/crosswalk/
 ├── cli.py              # CLI entry point (thin wrapper)
 ├── cli/                # CLI package with command groups
 ├── config.py           # Pydantic settings & feature definitions (source of truth)

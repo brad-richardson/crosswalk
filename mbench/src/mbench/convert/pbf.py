@@ -139,7 +139,7 @@ def convert_overture_to_pbf(
             ways.append((way_id, node_ids, highway))
             # Carry the GERS id as the way_id -> gers_id mapping. A MultiLineString
             # produces several ways all mapping to the same GERS id, which is fine:
-            # the matcher aggregates by gers_id.
+            # crosswalk aggregates by gers_id.
             id_map[str(way_id)] = gers_id
             highway_counts[highway] = highway_counts.get(highway, 0) + 1
 

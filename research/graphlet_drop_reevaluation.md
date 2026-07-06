@@ -1,5 +1,7 @@
 # Graphlet feature drop — re-evaluation (2026-07-04)
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Backlog item:** *"drop graphlet features (train-serve skew + Spark speed twofer)."*
 
 **Verdict: KEEP in the local model; they are ALREADY excluded from the Spark-portable

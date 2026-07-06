@@ -4,7 +4,7 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.blocking.spatial_index import (
+from crosswalk.blocking.spatial_index import (
     _angle_diff,
     _compute_overall_heading,
     generate_candidates,

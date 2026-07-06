@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from matcher.config import FEATURE_COLUMNS, FEATURE_VERSION
-from matcher.labeling.feature_store import FeatureStore
+from crosswalk.config import FEATURE_COLUMNS, FEATURE_VERSION
+from crosswalk.labeling.feature_store import FeatureStore
 
 
 @pytest.fixture

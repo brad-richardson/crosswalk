@@ -3,7 +3,7 @@
 import geopandas as gpd
 from shapely.geometry import LineString
 
-from matcher.datasets.schema import FetchConfig
+from crosswalk.datasets.schema import FetchConfig
 
 
 def _make_gdf(ids: list[str], geometries: list[LineString] | None = None) -> gpd.GeoDataFrame:
@@ -63,7 +63,7 @@ class TestTargetTransformDedup:
 
     def test_transform_deduplicates_true_duplicates(self):
         """_transform_download_data should deduplicate when same upstream ID + same H3 cell."""
-        from matcher.fetch.target import _transform_download_data
+        from crosswalk.fetch.target import _transform_download_data
 
         # Create input with duplicate OBJECTID values at the SAME location
         # (same H3 cell -> same composite ID -> deduped)
@@ -98,7 +98,7 @@ class TestTargetTransformDedup:
 
     def test_transform_disambiguates_different_locations(self):
         """Duplicate upstream IDs at different locations get different composite IDs."""
-        from matcher.fetch.target import _transform_download_data
+        from crosswalk.fetch.target import _transform_download_data
 
         # Same OBJECTID but very different locations (Boston vs NYC)
         gdf = gpd.GeoDataFrame(
@@ -132,7 +132,7 @@ class TestTargetTransformDedup:
 
     def test_transform_no_dedup_for_unique(self):
         """No dedup needed when all IDs are unique."""
-        from matcher.fetch.target import _transform_download_data
+        from crosswalk.fetch.target import _transform_download_data
 
         gdf = gpd.GeoDataFrame(
             {

@@ -215,7 +215,7 @@ class GraphHopperAdapter:
                 applied to the density-based matched-length (see parse_matches_tsv).
             workers: match concurrency (default 8; one MapMatching per thread).
             graph_cache_dir: where the PBF + built GH graph live (default under
-                output_dir; always OUTSIDE the matcher data/output tree).
+                output_dir; always OUTSIDE the crosswalk data/output tree).
             rebuild: force a PBF + graph rebuild even if cached.
         """
         output_dir.mkdir(parents=True, exist_ok=True)

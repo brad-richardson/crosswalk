@@ -8,20 +8,20 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.datasets import (
+from crosswalk.datasets import (
     ClassMappingRule,
     DatasetConfig,
     apply_class_mapping,
     list_dataset_configs,
     load_dataset_config,
 )
-from matcher.datasets.config import (
+from crosswalk.datasets.config import (
     PhysicalAttributes,
     SourceClassification,
     load_dataset_config_from_file,
     save_dataset_config,
 )
-from matcher.datasets.discover import (
+from crosswalk.datasets.discover import (
     _analyze_source_tags,
     _find_column_by_patterns,
     discover_dataset,
@@ -439,7 +439,7 @@ class TestOvertureSchemaMappings:
         actual fetch-time path (map_column) with the int-typed column values the
         ArcGIS layer returns, so YAML int-key coercion is covered too.
         """
-        from matcher.fetch.normalize import map_column
+        from crosswalk.fetch.normalize import map_column
 
         mapping = self.ALL_YAMLS["co_bogota_bike_network"]["fetch"]["class_mapping"]
         # Full ArcGIS coded-value domain for CICTSUPERF

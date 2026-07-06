@@ -132,9 +132,9 @@ once the flip conditions hold.
 
 ### M4 — Bridge-table factory orchestration (the 20-core box)
 
-Goal: `matcher factory run` — all stitchable datasets, unattended, restartable.
+Goal: `crosswalk factory run` — all stitchable datasets, unattended, restartable.
 
-**Status: orchestration SHIPPED** (`matcher factory` command group; see
+**Status: orchestration SHIPPED** (`crosswalk factory` command group; see
 [FACTORY.md](FACTORY.md)). Landed: the parallel-process work queue with failure
 isolation + run-summary table; the versioned `data/factory/release=…/dataset=…/`
 layout (bridge + groups + per-dataset manifest + scored cache + log); incremental
@@ -142,7 +142,7 @@ skip + automatic resume via a manifest `full_key`; the
 re-optimize-without-rescore fast-path (`factory reoptimize`, ~2 s from the scored
 cache); and the per-release GERS churn delta report (`factory delta`). The
 pipeline was refactored minimally to expose score-then-optimize as separable seams
-(`load_and_filter_inputs` / `optimize_and_export`) — the normal `matcher stitch`
+(`load_and_filter_inputs` / `optimize_and_export`) — the normal `crosswalk stitch`
 path is behavior-identical and the stitch tests / mbench gate stay green.
 Still open under M4: adopting Boston/Seattle into the factory layout (they stay on
 the legacy `data/output/` path for now to keep the review queues stable),
@@ -167,7 +167,7 @@ box deployment, and the inventory repair below.
 
 Goal: the public artifact that makes the project useful to others.
 
-**Status: publish tooling SHIPPED** (`matcher factory publish`; see
+**Status: publish tooling SHIPPED** (`crosswalk factory publish`; see
 [PUBLISHING.md](PUBLISHING.md)). Landed: the pipeline-free publisher that
 license-gates factory outputs and assembles a deterministic staging tree
 (`bridges/release=<X>/dataset=<name>/{bridge.parquet, manifest.json}` copied

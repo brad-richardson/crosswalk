@@ -1,4 +1,4 @@
-"""Tests for the labeling routes in the matcher web UI."""
+"""Tests for the labeling routes in the crosswalk web UI."""
 
 from unittest.mock import patch
 
@@ -11,8 +11,8 @@ pytest.importorskip(
 from fastapi.testclient import TestClient  # noqa: E402
 from shapely.geometry import LineString  # noqa: E402
 
-from matcher.labeling.data_loader import CandidatePairView  # noqa: E402
-from matcher.web.app import create_app  # noqa: E402
+from crosswalk.labeling.data_loader import CandidatePairView  # noqa: E402
+from crosswalk.web.app import create_app  # noqa: E402
 
 
 def _make_pair(ref_id="ref_001", target_id="target_001", confidence=0.65):
@@ -38,12 +38,12 @@ def _make_pair(ref_id="ref_001", target_id="target_001", confidence=0.65):
 def mock_services():
     """Mock the service functions used by labeling routes."""
     with (
-        patch("matcher.web.routes.labeling.list_datasets") as mock_list,
-        patch("matcher.web.routes.labeling._get_candidates") as mock_get_cands,
-        patch("matcher.web.routes.labeling.get_unlabeled_candidates") as mock_unlabeled,
-        patch("matcher.web.routes.labeling.record_label") as mock_record,
-        patch("matcher.web.routes.labeling.undo_last_label") as mock_undo,
-        patch("matcher.web.routes.labeling.is_dataset_cached") as mock_cached,
+        patch("crosswalk.web.routes.labeling.list_datasets") as mock_list,
+        patch("crosswalk.web.routes.labeling._get_candidates") as mock_get_cands,
+        patch("crosswalk.web.routes.labeling.get_unlabeled_candidates") as mock_unlabeled,
+        patch("crosswalk.web.routes.labeling.record_label") as mock_record,
+        patch("crosswalk.web.routes.labeling.undo_last_label") as mock_undo,
+        patch("crosswalk.web.routes.labeling.is_dataset_cached") as mock_cached,
     ):
         mock_list.return_value = ["dataset_a", "dataset_b"]
         pairs = [_make_pair(), _make_pair("ref_002", "target_002", 0.55)]
@@ -64,8 +64,8 @@ def mock_services():
 @pytest.fixture
 def client(mock_services):
     """Create a test client with mocked services."""
-    from matcher.web.routes.labeling import _candidate_cache
-    from matcher.web.services import loading_errors, loading_tasks
+    from crosswalk.web.routes.labeling import _candidate_cache
+    from crosswalk.web.services import loading_errors, loading_tasks
 
     _candidate_cache.clear()
     loading_tasks.clear()

@@ -1,5 +1,7 @@
 # Learned group resolver — prototype + honest eval
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 Prototype for the flagship milestone: replace/augment the hand-written optimizer
 edge-selection inside M:N stitching groups with a trained per-edge keep/drop
 classifier. This document reports the **data reality**, a grouped-CV eval of a

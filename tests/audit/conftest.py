@@ -7,9 +7,9 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.config import MAX_DISTANCE_METERS
-from matcher.features.compute import _get_error_features, compute_pair_features
-from matcher.labeling.label_store import LabelStore
+from crosswalk.config import MAX_DISTANCE_METERS
+from crosswalk.features.compute import _get_error_features, compute_pair_features
+from crosswalk.labeling.label_store import LabelStore
 from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
 LABELS_DIR = Path(__file__).parent.parent.parent / "labels"

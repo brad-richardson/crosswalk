@@ -101,9 +101,9 @@ def geom_midpoint(geom: dict | None) -> list[float] | None:
 # Pure diff / lookup logic
 # ---------------------------------------------------------------------------
 # The cross-product artifact detector and its edge/universe helpers are shared
-# with `matcher data stitch-reinterpret-sets` via matcher.agent_labeling.xprod,
+# with `crosswalk data stitch-reinterpret-sets` via crosswalk.agent_labeling.xprod,
 # so the render flag and the reinterpretation both key off the SAME signature.
-from matcher.agent_labeling.xprod import (  # noqa: E402
+from crosswalk.agent_labeling.xprod import (  # noqa: E402
     candidate_universe,
     compute_diff,
     is_crossproduct_artifact,

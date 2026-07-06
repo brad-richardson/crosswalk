@@ -6,7 +6,7 @@ import {
   esc, el, fmtInt, wireCopyButtons, showError,
 } from "./app.js";
 
-const CFG = window.MATCHER_CONFIG || {};
+const CFG = window.CROSSWALK_CONFIG || {};
 const PAGE_SIZE = CFG.PAGE_SIZE || 50;
 
 renderNav("browse");

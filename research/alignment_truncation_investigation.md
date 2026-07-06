@@ -1,5 +1,7 @@
 # Alignment-truncation investigation: parallel carriageways
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Status:** research note (no production code change proposed here — see "Recommended fix").
 **Trigger:** on the live stitching-review map, pairs of near-identical-length,
 cleanly-parallel road segments (American Legion Highway dual carriageway, Boston)

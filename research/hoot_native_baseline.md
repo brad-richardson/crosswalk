@@ -1,5 +1,7 @@
 # Hootenanny native x86 baseline (hoot 0.2.87)
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 > _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench`._
 
 This note records the one-shot **native x86 Linux** run of Hootenanny that closes

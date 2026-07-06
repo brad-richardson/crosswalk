@@ -1,5 +1,5 @@
 /* Live data browser — shared styles.
- * Palette mirrors the generated credibility page (docs: matcher factory publish)
+ * Palette mirrors the generated credibility page (docs: crosswalk factory publish)
  * so the hosted index.html and this browser read as one project. Light/dark via
  * prefers-color-scheme; one accent color; tabular numerics for all counts. */
 

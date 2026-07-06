@@ -3,7 +3,7 @@
 import ast
 import inspect
 
-from matcher.filenames import find_overture_segments
+from crosswalk.filenames import find_overture_segments
 
 
 class TestFindOvertureSegments:
@@ -42,7 +42,7 @@ class TestFindOvertureSegments:
 
     def test_finds_exact_version_match(self, tmp_path):
         """Finds file with exact version match."""
-        from matcher.config import DATA_VERSION
+        from crosswalk.config import DATA_VERSION
 
         # Create a file with the current version
         expected_file = tmp_path / f"us_boston_overture_segments_{DATA_VERSION}.parquet"
@@ -63,7 +63,7 @@ class TestFindOvertureSegments:
 
     def test_progressive_prefix_matching(self, tmp_path):
         """Finds file with progressively shorter prefixes."""
-        from matcher.config import DATA_VERSION
+        from crosswalk.config import DATA_VERSION
 
         # Create a file with shorter prefix (us_boston instead of us_boston_streets)
         expected_file = tmp_path / f"us_boston_overture_segments_{DATA_VERSION}.parquet"
@@ -74,7 +74,7 @@ class TestFindOvertureSegments:
 
     def test_prefers_longer_prefix_match(self, tmp_path):
         """Prefers longer prefix match over shorter one."""
-        from matcher.config import DATA_VERSION
+        from crosswalk.config import DATA_VERSION
 
         # Create both a longer and shorter prefix match
         longer_match = tmp_path / f"us_boston_streets_overture_segments_{DATA_VERSION}.parquet"

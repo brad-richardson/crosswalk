@@ -5,13 +5,13 @@ import pandas as pd
 import pytest
 from shapely import LineString
 
-from matcher.validation.evaluate import (
+from crosswalk.validation.evaluate import (
     analyze_failures,
     compute_metrics,
     evaluate_by_record_id,
     get_osm_way_id,
 )
-from matcher.validation.holdout import (
+from crosswalk.validation.holdout import (
     create_holdout,
     drop_random_osm,
     extract_record_ids,

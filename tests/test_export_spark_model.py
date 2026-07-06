@@ -11,14 +11,14 @@ import numpy as np
 import pytest
 import xgboost as xgb
 
-from matcher.config import SPARK_PORTABLE_FEATURES, SPARK_PORTABLE_XGB_PARAMS
+from crosswalk.config import SPARK_PORTABLE_FEATURES, SPARK_PORTABLE_XGB_PARAMS
 
 
 @pytest.fixture
 def exported_model(tmp_path):
     """Train and export a Spark-portable model to a temp directory."""
-    from matcher.config import FEATURE_COLUMNS
-    from matcher.matching.ml import MLMatcher
+    from crosswalk.config import FEATURE_COLUMNS
+    from crosswalk.matching.ml import MLMatcher
 
     labels_dir = Path("labels")
     if not labels_dir.exists():

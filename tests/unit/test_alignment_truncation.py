@@ -35,7 +35,7 @@ import pytest
 from shapely.geometry import LineString, shape
 from shapely.ops import transform
 
-from matcher.features.alignment import (
+from crosswalk.features.alignment import (
     _create_local_equidistant_crs,
     linestring_alignment,
 )
@@ -162,8 +162,8 @@ def test_sidecar_uses_scored_geometry_for_duplicate_ids(tmp_path):
     the length-100 geometry. The old id-keyed lookup would emit length 62 (the
     wrong duplicate) -- the ``bold sub-line stops partway`` symptom.
     """
-    from matcher.matching.types import MatchDecision, MatchResult
-    from matcher.pipeline.runner import (
+    from crosswalk.matching.types import MatchDecision, MatchResult
+    from crosswalk.pipeline.runner import (
         _export_groups_sidecar,
         groups_sidecar_path,
     )
@@ -212,7 +212,7 @@ def test_sidecar_uses_scored_geometry_for_duplicate_ids(tmp_path):
     # The sidecar mirrors the optimizer's decomposed grouping, so supply the
     # optimizer assignment (a 1:N group tagged with its group_id). ref/target
     # id columns are both "id" in this fixture.
-    from matcher.matching.optimizer import optimize_matches_with_grouping
+    from crosswalk.matching.optimizer import optimize_matches_with_grouping
 
     optimized = optimize_matches_with_grouping(
         results,

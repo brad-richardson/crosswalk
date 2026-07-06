@@ -5,13 +5,13 @@ import pytest
 from PIL import Image
 from shapely.geometry import LineString
 
-from matcher.agent_labeling import (
+from crosswalk.agent_labeling import (
     AgentLabelStore,
     SamplingConfig,
     generate_metadata_yaml,
 )
-from matcher.agent_labeling.context_generator import _round_value
-from matcher.agent_labeling.image_renderer import (
+from crosswalk.agent_labeling.context_generator import _round_value
+from crosswalk.agent_labeling.image_renderer import (
     BACKGROUND_COLOR,
     REFERENCE_COLOR,
     ROAD_CONTEXT_COLOR,
@@ -25,7 +25,7 @@ from matcher.agent_labeling.image_renderer import (
     render_subline_geometry_only,
     render_subline_road_context,
 )
-from matcher.agent_labeling.sampler import SampledCandidate
+from crosswalk.agent_labeling.sampler import SampledCandidate
 
 
 class TestSamplingConfig:

@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features.relational import (
+from crosswalk.features.relational import (
     compute_endpoint_proximity,
     compute_parallel_alignment,
     compute_perpendicular_offset,
     compute_perpendicular_offset_batch,
 )
-from matcher.features.spatial_context import (
+from crosswalk.features.spatial_context import (
     AnchorRoadMatcher,
     SpatialContextIndex,
     compute_endpoint_features,
@@ -74,7 +74,7 @@ class TestRelationalFeatures:
         assert offset_full > 50, "Full geometry should have large offset"
 
         # With aligned sublines (only overlapping portion), offset should be ~3m
-        from matcher.features.alignment import create_subline, linestring_alignment
+        from crosswalk.features.alignment import create_subline, linestring_alignment
 
         alignment = linestring_alignment(reference, target)
         target_subline = create_subline(
@@ -190,7 +190,7 @@ class TestInferEndpointDegree:
 
     def test_infer_degree_at_intersection(self, intersection_network):
         """Segments meeting at intersection should have high degree at that endpoint."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             infer_endpoint_degree,
         )
@@ -208,7 +208,7 @@ class TestInferEndpointDegree:
 
     def test_infer_degree_dead_end(self, dead_end_network):
         """Dead end segments should have degree 1 at dead end."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             infer_endpoint_degree,
         )
@@ -226,7 +226,7 @@ class TestInferEndpointDegree:
 
     def test_isolated_segment_degree_one(self, dead_end_network):
         """Isolated segment should have degree 1 at both ends."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             infer_endpoint_degree,
         )
@@ -264,7 +264,7 @@ class TestTopologyFeatures:
 
     def test_compute_topology_features(self, intersection_network):
         """Verify topology features are computed correctly."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             SpatialContextIndex,
             compute_topology_features,
         )
@@ -284,21 +284,21 @@ class TestTopologyFeatures:
 
     def test_degree_match_score_identical(self):
         """Identical degrees should have perfect match score."""
-        from matcher.features.spatial_context import compute_degree_match_score
+        from crosswalk.features.spatial_context import compute_degree_match_score
 
         score = compute_degree_match_score(4, 1, 4, 1)
         assert score == pytest.approx(1.0)
 
     def test_degree_match_score_swapped(self):
         """Swapped endpoints should still have perfect match score."""
-        from matcher.features.spatial_context import compute_degree_match_score
+        from crosswalk.features.spatial_context import compute_degree_match_score
 
         score = compute_degree_match_score(4, 1, 1, 4)  # Endpoints reversed
         assert score == pytest.approx(1.0)
 
     def test_degree_match_score_different(self):
         """Different degrees should have lower match score."""
-        from matcher.features.spatial_context import compute_degree_match_score
+        from crosswalk.features.spatial_context import compute_degree_match_score
 
         score = compute_degree_match_score(4, 1, 2, 2)
         assert score < 1.0
@@ -306,21 +306,21 @@ class TestTopologyFeatures:
 
     def test_degree_signature_similarity_identical(self):
         """Identical signatures should have similarity 1.0."""
-        from matcher.features.spatial_context import compute_degree_signature_similarity
+        from crosswalk.features.spatial_context import compute_degree_signature_similarity
 
         sim = compute_degree_signature_similarity((1, 4), (1, 4))
         assert sim == pytest.approx(1.0)
 
     def test_degree_signature_similarity_different(self):
         """Different signatures should have lower similarity."""
-        from matcher.features.spatial_context import compute_degree_signature_similarity
+        from crosswalk.features.spatial_context import compute_degree_signature_similarity
 
         sim = compute_degree_signature_similarity((1, 4), (2, 2))
         assert sim < 1.0
 
     def test_degree_signature_similarity_empty(self):
         """Empty signatures should return NaN (missing data)."""
-        from matcher.features.spatial_context import compute_degree_signature_similarity
+        from crosswalk.features.spatial_context import compute_degree_signature_similarity
 
         assert math.isnan(compute_degree_signature_similarity((), (1, 2)))
         assert math.isnan(compute_degree_signature_similarity((1, 2), ()))
@@ -406,7 +406,7 @@ class TestParallelSiblingDetection:
 
     def test_extract_route_number(self):
         """Route numbers are correctly extracted from road names."""
-        from matcher.features.relational import extract_route_number
+        from crosswalk.features.relational import extract_route_number
 
         # Interstate format
         assert extract_route_number("I-90") == "90"
@@ -434,7 +434,7 @@ class TestParallelSiblingDetection:
 
     def test_names_compatible(self):
         """Name compatibility logic for sibling detection."""
-        from matcher.features.relational import names_compatible
+        from crosswalk.features.relational import names_compatible
 
         # Both unnamed - inconclusive, must rely on class
         assert names_compatible(None, None) is None
@@ -458,7 +458,7 @@ class TestParallelSiblingDetection:
 
     def test_classes_compatible(self):
         """Road class compatibility for sibling detection."""
-        from matcher.features.relational import classes_compatible
+        from crosswalk.features.relational import classes_compatible
 
         # Same class
         assert classes_compatible("motorway", "motorway") is True
@@ -481,7 +481,7 @@ class TestParallelSiblingDetection:
         """Detect parallel sibling for split highway geometry."""
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Create a split highway: two parallel lines 15m apart (typical dual carriageway)
         eastbound = LineString([(0, 0), (500, 0)])
@@ -522,7 +522,7 @@ class TestParallelSiblingDetection:
         """No sibling for isolated centerline road."""
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Single centerline road (no parallel twin)
         main_st = LineString([(0, 0), (500, 0)])
@@ -552,7 +552,7 @@ class TestParallelSiblingDetection:
         """Siblings too close (<5m) should not be detected."""
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Two parallel lines only 2m apart (too close for dual carriageway)
         line_a = LineString([(0, 0), (500, 0)])
@@ -576,7 +576,7 @@ class TestParallelSiblingDetection:
         """Perpendicular roads should not be detected as siblings."""
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # One horizontal, one perpendicular (crossing road)
         horizontal = LineString([(0, 0), (500, 0)])
@@ -604,7 +604,7 @@ class TestParallelSiblingDetection:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         eastbound = LineString([(0, 0), (500, 0)])
         westbound = LineString([(0, 15), (500, 15)])  # 15m offset, same 500m span
@@ -639,7 +639,7 @@ class TestParallelSiblingDetection:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         long_road = LineString([(0, 0), (500, 0)])
         # Distinct short road 20m away, only 120m long (24% of the long road).
@@ -674,7 +674,7 @@ class TestParallelSiblingDetection:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         query = LineString([(0, 0), (500, 0)])
         neighbor = LineString([(0, 20), (500, 20)])  # parallel, same span, 20m
@@ -709,7 +709,7 @@ class TestParallelSiblingDetection:
         import numpy as np
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Otherwise-perfect geometric twins: same span, parallel, 15m apart
         road_a = LineString([(0, 0), (500, 0)])
@@ -738,7 +738,7 @@ class TestParallelSiblingDetection:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         road_a = LineString([(0, 0), (500, 0)])
         road_b = LineString([(0, 15), (500, 15)])
@@ -761,7 +761,7 @@ class TestParallelSiblingDetection:
 
     def test_precompute_parallel_siblings(self):
         """Batch precomputation of sibling info for dataset."""
-        from matcher.features.relational import precompute_parallel_siblings
+        from crosswalk.features.relational import precompute_parallel_siblings
 
         # Split highway geometry
         eastbound = LineString([(0, 0), (500, 0)])
@@ -788,7 +788,7 @@ class TestParallelSiblingDetection:
 
     def test_get_expected_half_width(self):
         """Expected half-width lookup by road class."""
-        from matcher.features.relational import get_expected_half_width
+        from crosswalk.features.relational import get_expected_half_width
 
         # Known classes
         assert get_expected_half_width("motorway") == 14.0
@@ -810,7 +810,7 @@ class TestParallelSiblingDetection:
         """
         import time
 
-        from matcher.features.relational import precompute_parallel_siblings
+        from crosswalk.features.relational import precompute_parallel_siblings
 
         # Generate 10k test segments - realistic sparse distribution
         # (not a dense grid - that's unrealistic for road networks)
@@ -873,7 +873,7 @@ class TestParallelSiblingDetection:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Create a split highway where one side is classified differently
         # This happens when conflating datasets with different classification schemes
@@ -911,7 +911,7 @@ class TestLocalParallelAlignment:
         """Local alignment should better handle curved segments."""
         import math
 
-        from matcher.features.relational import compute_parallel_alignment
+        from crosswalk.features.relational import compute_parallel_alignment
 
         # Create two parallel curved segments (arcs)
         # These are locally parallel but their overall direction differs
@@ -953,7 +953,7 @@ class TestLocalParallelAlignment:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Straight carriageway (500m long)
         straight = LineString([(0, 0), (500, 0)])
@@ -1003,7 +1003,7 @@ class TestLocalParallelAlignment:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Main highway (straight)
         highway = LineString([(0, 0), (500, 0)])
@@ -1051,7 +1051,7 @@ class TestLocalParallelAlignment:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # One carriageway (straight baseline)
         baseline = LineString([(0, 0), (600, 0)])
@@ -1097,7 +1097,7 @@ class TestLocalParallelAlignment:
         """
         from shapely import STRtree
 
-        from matcher.features.relational import find_parallel_sibling
+        from crosswalk.features.relational import find_parallel_sibling
 
         # Straight baseline
         baseline = LineString([(0, 0), (500, 0)])

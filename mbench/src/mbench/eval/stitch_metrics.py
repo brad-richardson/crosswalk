@@ -2,7 +2,7 @@
 
 Compares bridge output against curated stitching labels to measure whether the
 optimizer selects the correct edges within M:N groups. This is the mbench analog
-of the matcher-side ``matcher agent stitch-eval`` and shares its key machinery:
+of the crosswalk-side ``crosswalk agent stitch-eval`` and shares its key machinery:
 
 - **Group mapping robust to group_id churn** (``map_labels_to_groups``): grouping
   hashes change whenever the pipeline regroups, so labels are mapped to current
@@ -12,7 +12,7 @@ of the matcher-side ``matcher agent stitch-eval`` and shares its key machinery:
   predicted and curated edge sets before the filtered comparison, so agreement is
   not distorted by whether either side happened to include an artifact edge. The
   sliver rule is replicated standalone in ``mbench.eval.sliver`` (parity-tested
-  against ``matcher.config.is_sliver_edge``).
+  against ``crosswalk.config.is_sliver_edge``).
 - **Exact-match rate** per group, alongside edge precision / recall / F1.
 - **Per-labeler breakdown**: curated labels now carry a ``labeler`` column
   (human user ids and ``panel_*`` agent-panel auto-accepts); counts and
@@ -149,7 +149,7 @@ def set_label_metrics(
     """Score a predicted edge set against a SET label's membership.
 
     THE PARITY-CRITICAL CORE. Replicated verbatim in
-    ``matcher.agent_labeling.stitch_eval.set_label_metrics`` and guarded by
+    ``crosswalk.agent_labeling.stitch_eval.set_label_metrics`` and guarded by
     ``tests/unit/test_mbench_set_metric_parity.py`` — keep the two in lockstep.
 
     Args:
@@ -219,7 +219,7 @@ def map_labels_to_groups(
     Reject-all labels (empty ``selected_edges``, i.e. "no edges should be
     selected") carry no edges to recover by overlap, so they survive ONLY when
     their original ``group_id`` still exists verbatim in the current sidecar
-    (mirrors matcher's ``recover_empty_reject_all``). Keeping the recoverable
+    (mirrors crosswalk's ``recover_empty_reject_all``). Keeping the recoverable
     ones matters: they are real "no edges" ground truth and should influence
     exact-match / F1.
 

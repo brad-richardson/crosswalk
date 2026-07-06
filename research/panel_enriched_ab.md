@@ -1,5 +1,7 @@
 # Enriched-pack A/B re-vote (enriched_ab1) — does #302 junction-sliver evidence move the panel?
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Date:** 2026-07-05
 **Design:** strict A/B against `research/panel_diag_wave1.md` (PR #301). The SAME 32 groups
 across 7 datasets were re-voted by the SAME panel v2 (claude `claude-opus-4-8` medium /

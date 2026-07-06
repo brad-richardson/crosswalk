@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from shapely import LineString, MultiLineString
 
-from matcher.quality.blocking_recall import (
+from crosswalk.quality.blocking_recall import (
     BlockingRecallResult,
     compute_blocking_recall,
 )

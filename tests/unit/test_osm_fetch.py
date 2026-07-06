@@ -4,7 +4,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point
 
-from matcher.fetch.osm import (
+from crosswalk.fetch.osm import (
     _build_level_rules,
     _build_road_flags,
     _filter_connectors_for_roads,
@@ -16,12 +16,12 @@ from matcher.fetch.osm import (
     _transform_connectors_schema,
     _transform_to_overture_schema,
 )
-from matcher.fetch.osm_download import (
+from crosswalk.fetch.osm_download import (
     find_best_region,
     get_pbf_url,
 )
-from matcher.fetch.osm_pbf import HIGHWAY_VALUES, RoadHandler
-from matcher.fetch.overture import BoundingBox
+from crosswalk.fetch.osm_pbf import HIGHWAY_VALUES, RoadHandler
+from crosswalk.fetch.overture import BoundingBox
 
 
 class TestBuildRoadFlags:

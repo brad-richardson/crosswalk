@@ -73,8 +73,24 @@ def _validate_match_level(match_level: str) -> str:
 
 
 def _get_adapter(tool: str):
-    """Look up a tool adapter by name, or exit with error."""
-    from mbench.adapters import REGISTRY
+    """Look up a tool adapter by name, or exit with error.
+
+    Deprecated engine-id aliases (e.g. ``matcher`` -> ``crosswalk``) are
+    accepted with a stderr warning and forwarded to the canonical adapter.
+    """
+    import sys
+
+    from mbench.adapters import DEPRECATED_ALIASES, REGISTRY
+
+    if tool in DEPRECATED_ALIASES:
+        canonical = DEPRECATED_ALIASES[tool]
+        print(
+            f"warning: engine '{tool}' has been renamed to '{canonical}'. The "
+            f"'{tool}' alias is deprecated and will be removed in a future "
+            f"release; please use '{canonical}'.",
+            file=sys.stderr,
+        )
+        tool = canonical
 
     if tool not in REGISTRY:
         console.print(f"[red]Unknown tool: {tool}[/red]")
@@ -265,7 +281,7 @@ def load_datasets_config(config_path: Path) -> dict:
 
 @app.command()
 def run(
-    tool: str = typer.Argument(help="Tool adapter name (e.g., 'matcher', 'hootenanny')"),
+    tool: str = typer.Argument(help="Tool adapter name (e.g., 'crosswalk', 'hootenanny')"),
     dataset: str = typer.Argument(help="Dataset name (must have labels)"),
     labels: Path | None = typer.Option(
         None, "--labels", "-l", help="Path to labels directory (default: from config)"
@@ -307,7 +323,7 @@ def run(
     """Run a tool on a dataset and evaluate against ground truth.
 
     Reference/target/labels default to the entries in ``datasets.toml`` (resolved
-    relative to the config file's location), so ``mbench run matcher <dataset>``
+    relative to the config file's location), so ``mbench run crosswalk <dataset>``
     works out of the box from a repo checkout. Explicit ``-r/-t/-l`` override.
     """
     setup_logging(verbose)
@@ -366,7 +382,7 @@ def run(
 
 @app.command("run-batch")
 def run_batch(
-    tool: str = typer.Argument(help="Tool adapter name (e.g., 'matcher', 'hootenanny')"),
+    tool: str = typer.Argument(help="Tool adapter name (e.g., 'crosswalk', 'hootenanny')"),
     config: Path = typer.Option(
         Path("datasets.toml"), "--config", "-c", help="Datasets TOML config file"
     ),

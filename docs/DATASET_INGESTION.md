@@ -88,54 +88,54 @@ Create `datasets/<dataset_name>.yaml` using the template above.
 
 ```bash
 # verify one dataset
-matcher data fetch verify xx_example_sidewalks
+crosswalk data fetch verify xx_example_sidewalks
 
 # verify everything under a prefix
-matcher data fetch verify --prefix xx_
+crosswalk data fetch verify --prefix xx_
 
 # schema-only check (no URL checks)
-matcher data fetch verify xx_example_sidewalks --dry-run
+crosswalk data fetch verify xx_example_sidewalks --dry-run
 ```
 
 ## 3) Fetch target data
 
 ```bash
-matcher data fetch target xx_example_sidewalks
+crosswalk data fetch target xx_example_sidewalks
 
 # force refresh
-matcher data fetch target xx_example_sidewalks --force
+crosswalk data fetch target xx_example_sidewalks --force
 
 # fetch a set
-matcher data fetch target --prefix xx_ --workers 4
+crosswalk data fetch target --prefix xx_ --workers 4
 ```
 
 ## 4) Fetch reference data (Overture)
 
 ```bash
-matcher data fetch reference xx_example_sidewalks -s overture
+crosswalk data fetch reference xx_example_sidewalks -s overture
 ```
 
 Or fetch target + reference together:
 
 ```bash
-matcher data fetch all xx_example_sidewalks
+crosswalk data fetch all xx_example_sidewalks
 ```
 
 ## 5) Run stitch pipeline
 
 ```bash
-matcher stitch \
+crosswalk stitch \
   data/raw/xx_example_sidewalks_overture_segments_*.parquet \
   data/raw/xx_example_sidewalks_target_*.parquet \
   -o data/output/xx_example_sidewalks_bridge.parquet
 ```
 
-Tip: use `matcher data fetch list` and filenames in `data/raw/` to pick exact file paths.
+Tip: use `crosswalk data fetch list` and filenames in `data/raw/` to pick exact file paths.
 
 ## 6) Discover class mappings
 
 ```bash
-matcher class discover \
+crosswalk class discover \
   data/raw/xx_example_sidewalks_target_*.parquet \
   --reference data/raw/xx_example_sidewalks_overture_segments_*.parquet \
   --bridge data/output/xx_example_sidewalks_bridge.parquet
@@ -146,7 +146,7 @@ This updates/merges classification sections in `datasets/<dataset>.yaml`.
 ## 7) (Optional) Save quality fingerprint
 
 ```bash
-matcher data quality xx_example_sidewalks --save-yaml
+crosswalk data quality xx_example_sidewalks --save-yaml
 ```
 
 This writes `quality_fingerprint` into the dataset YAML for regression checks.
@@ -179,7 +179,7 @@ This writes `quality_fingerprint` into the dataset YAML for regression checks.
 - `source.type` and URL/typeName validated
 - Stable `fetch.id_column` set
 - `bbox` present and reasonable
-- `matcher data fetch verify` passes
-- `matcher data fetch target` succeeds
-- `matcher data fetch reference -s overture` succeeds
-- `matcher stitch` runs and produces bridge output
+- `crosswalk data fetch verify` passes
+- `crosswalk data fetch target` succeeds
+- `crosswalk data fetch reference -s overture` succeeds
+- `crosswalk stitch` runs and produces bridge output

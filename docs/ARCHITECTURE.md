@@ -7,22 +7,22 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 79 features across 17 categories (defined in `src/matcher/config.py::FEATURE_COLUMNS`)
+- **Features**: 79 features across 17 categories (defined in `src/crosswalk/config.py::FEATURE_COLUMNS`)
 - **Location**: `data/models/matcher_model_combined.joblib`
-- **Training**: `matcher train` (trains on all labeled data in `labels/`)
+- **Training**: `crosswalk train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
 - **Auto Model Selection**: When `settings.auto_select_model=True`, automatically uses geometry-only model for datasets with low name coverage (< 50%)
 
-The trained model is not committed to git. After cloning, run `matcher train` before using `-m xgboost`.
+The trained model is not committed to git. After cloning, run `crosswalk train` before using `-m xgboost`.
 
 ### Shipped models (bundled in the wheel)
 
-Two pretrained artifacts are committed under `src/matcher/_model/` and ship in
-the wheel, so `pip install road-matcher` needs zero training:
+Two pretrained artifacts are committed under `src/crosswalk/_model/` and ship in
+the wheel, so `pip install crosswalk-py` needs zero training:
 
 | Artifact | What it is | Consumer |
 |----------|------------|----------|
-| `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | `matcher stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
+| `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | `crosswalk stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
 | `spark_model.json` + `spark_manifest.json` | Spark-portable 28-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
 
 Both are kept in lockstep with `config.FEATURE_VERSION` by CI
@@ -60,7 +60,7 @@ endpoint clipping). The manifest ships `calibration.applied = false` — the kno
 are emitted so the Spark job *can* remap raw scores to calibrated `P(match)`;
 whether to consume them (and re-fit downstream thresholds on calibrated scores)
 is a consumer decision. A job that prefers not to depend on the installed
-package can instead vendor the two `src/matcher/_model/spark_*.json` files
+package can instead vendor the two `src/crosswalk/_model/spark_*.json` files
 directly out of the wheel.
 
 ## Decision Thresholds
@@ -183,7 +183,7 @@ Applied by the ML scorer when classifying each candidate pair:
 
 ### Optimizer/Labeling Thresholds (1:N groups and labeling UI)
 
-Group optimization (`src/matcher/matching/optimizer.py::optimize_matches_with_grouping`) resolves cases where a single Overture segment corresponds to multiple local segments (e.g., split carriageways), and vice versa. There is no assignment solver; the pipeline is:
+Group optimization (`src/crosswalk/matching/optimizer.py::optimize_matches_with_grouping`) resolves cases where a single Overture segment corresponds to multiple local segments (e.g., split carriageways), and vice versa. There is no assignment solver; the pipeline is:
 
 1. **Connected components**: Build bipartite connected components over candidate pairs above `min_confidence` (`find_match_components`)
 2. **Classification**: Classify each component as 1:1, 1:N, N:1, or M:N by counting distinct refs/targets (`_classify_and_resolve_component`)
@@ -207,16 +207,16 @@ Use cross-validation or holdout evaluation for unbiased metrics:
 
 ```bash
 # Cross-validation (default: 5-fold, segment-aware splitting)
-matcher eval
+crosswalk eval
 
 # Evaluate an existing model on 20% holdout
-matcher eval --model data/models/matcher_model_combined.joblib
+crosswalk eval --model data/models/matcher_model_combined.joblib
 
 # Custom folds or seed
-matcher eval --cv-folds 10 --seed 123
+crosswalk eval --cv-folds 10 --seed 123
 
 # Evaluate on specific dataset(s)
-matcher eval --model data/models/matcher_model_combined.joblib -d us_frisco_trails
+crosswalk eval --model data/models/matcher_model_combined.joblib -d us_frisco_trails
 ```
 
 **Why holdout/CV matters:**
@@ -264,7 +264,7 @@ config.py::FEATURE_COLUMNS (79 features)
          |           |
          |           +---> labeling UI (training data generation)
          |
-         +---> src/matcher/labeling/feature_store.py (Parquet storage, keyed by gers_id + target_id)
+         +---> src/crosswalk/labeling/feature_store.py (Parquet storage, keyed by gers_id + target_id)
 ```
 
 ### Computation Paths
@@ -320,7 +320,7 @@ The ML scorer pre-computes certain features **before** parallelization for effic
 
 There is **no imputation**. NaN feature values are passed through unchanged to XGBoost, which handles missing values natively (each tree split learns a default direction for missing values). The only sanitization is infinity capping: `ml.py::_cap_infinities` replaces `±inf` with `MAX_DISTANCE_METERS` because XGBoost handles NaN but not inf. This is applied consistently to training data, test data, and inference features (`_features_to_array` also fills missing dict keys with NaN, not 0).
 
-**Risk**: Because NaN is a valid model input, a feature that is systematically NaN at inference but populated during training (or vice versa) fails silently — tree routing changes for those rows instead of raising an error. Guardrails: `train()` raises if labels are missing expected features, `matcher backfill` keeps stored features current, and `tests/unit/test_ml_pipeline_consistency.py` verifies NaN preservation and inf capping.
+**Risk**: Because NaN is a valid model input, a feature that is systematically NaN at inference but populated during training (or vice versa) fails silently — tree routing changes for those rows instead of raising an error. Guardrails: `train()` raises if labels are missing expected features, `crosswalk backfill` keeps stored features current, and `tests/unit/test_ml_pipeline_consistency.py` verifies NaN preservation and inf capping.
 
 ## Test Coverage for Consistency
 
@@ -360,7 +360,7 @@ adjudicated.
 Loaders default a missing/blank `label_semantics` to `pair` (NaN-safe), so CSVs
 predating these columns read as ordinary pair labels; the columns migrate lazily
 on the next save. Historical cross-product manual labels are converted to set
-semantics with `matcher data stitch-reinterpret-sets` (uses the shared
+semantics with `crosswalk data stitch-reinterpret-sets` (uses the shared
 `agent_labeling.xprod` cross-product detector; panel rows and non-artifact
 ratifications are left untouched; idempotent, with a `.csv.bak` backup).
 

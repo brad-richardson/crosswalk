@@ -1,8 +1,8 @@
-"""Tests for the zero-cost Spark accessor module (``matcher.spark``).
+"""Tests for the zero-cost Spark accessor module (``crosswalk.spark``).
 
 Covers:
 - calibration parity with the in-process ``IsotonicCalibrator``,
-- import hygiene: ``import matcher.spark`` + ``spark_manifest()`` must not pull
+- import hygiene: ``import crosswalk.spark`` + ``spark_manifest()`` must not pull
   in shapely/geopandas/xgboost/pandas (numpy allowed only after
   ``apply_calibration`` runs).
 """
@@ -14,8 +14,8 @@ import textwrap
 
 import numpy as np
 
-from matcher.matching.calibration import IsotonicCalibrator
-from matcher.spark import apply_calibration, spark_manifest, spark_model_json
+from crosswalk.matching.calibration import IsotonicCalibrator
+from crosswalk.spark import apply_calibration, spark_manifest, spark_model_json
 
 
 def test_accessors_return_expected_types():
@@ -51,7 +51,7 @@ def test_apply_calibration_accepts_list_and_returns_float64_array():
 
 
 def test_import_matcher_spark_stays_dependency_light():
-    """`import matcher.spark; spark_manifest()` must not import heavy deps.
+    """`import crosswalk.spark; spark_manifest()` must not import heavy deps.
 
     shapely/geopandas/xgboost/pandas must be absent from sys.modules; numpy is
     absent until apply_calibration is called. Runs in a subprocess so the parent
@@ -61,7 +61,7 @@ def test_import_matcher_spark_stays_dependency_light():
         """
         import sys
 
-        import matcher.spark as ms
+        import crosswalk.spark as ms
 
         heavy = ("shapely", "geopandas", "xgboost", "pandas", "sklearn")
 

@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from sklearn.metrics import f1_score
 
-from matcher.config import METRIC_AVERAGE
-from matcher.labeling.label_store import LabelStore
-from matcher.matching.ml import MLMatcher, segment_aware_split
+from crosswalk.config import METRIC_AVERAGE
+from crosswalk.labeling.label_store import LabelStore
+from crosswalk.matching.ml import MLMatcher, segment_aware_split
 
 # Minimum acceptable F1 score on held-out test set
 MIN_TEST_F1_SCORE = 0.90
@@ -25,7 +25,7 @@ def trained_model_path() -> Path:
     """
     path = Path(__file__).parent.parent.parent / "data" / "models" / "matcher_model_combined.joblib"
     if not path.exists():
-        pytest.skip(f"Model not found at {path}. Run 'matcher train' first.")
+        pytest.skip(f"Model not found at {path}. Run 'crosswalk train' first.")
     return path
 
 

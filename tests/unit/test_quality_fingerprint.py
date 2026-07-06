@@ -7,12 +7,12 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.quality import (
+from crosswalk.quality import (
     QualityFingerprint,
     compute_quality_metrics,
     save_quality_report,
 )
-from matcher.quality.report import compare_fingerprints, load_quality_report
+from crosswalk.quality.report import compare_fingerprints, load_quality_report
 
 
 class TestQualityFingerprint:

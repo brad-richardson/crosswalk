@@ -1,5 +1,7 @@
 # Agent Stitching Panel v2 — Validation
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Date:** 2026-07-05
 **Goal:** Upgrade the 3-provider agent-stitching panel to new default models and
 verify the new panel (v2) still agrees with settled `panel_unanimous_v1` rounds

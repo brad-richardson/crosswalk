@@ -2,7 +2,7 @@
 
 import pytest
 
-from matcher.features.spatial_context import (
+from crosswalk.features.spatial_context import (
     _connectors_near_endpoint,
     compute_interior_connector_features,
     compute_shared_anchor_features,

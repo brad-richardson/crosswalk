@@ -1,7 +1,9 @@
 [project]
-# PyPI distribution name (import package stays `matcher`, console script stays `matcher`).
-# `matcher` itself is taken on PyPI; `road-matcher` was verified available (2026-07).
-name = "road-matcher"
+# PyPI distribution name. Import package is `crosswalk`, console script is `crosswalk`.
+# Bare `crosswalk` is squatted by an abandoned 2022 beta; `crosswalk-py` was verified
+# available (2026-07). "crosswalk" is the data-integration term for a table mapping IDs
+# in one scheme to another (and a literal road feature) — exactly what this tool produces.
+name = "crosswalk-py"
 version = "0.2.0"
 description = "Road network conflation pipeline - link local roads to Overture GERS"
 readme = "README.md"
@@ -17,7 +19,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 
-# Core = everything `matcher stitch` / `matcher fetch-overture` need, including the
+# Core = everything `crosswalk stitch` / `crosswalk fetch-overture` need, including the
 # bundled pretrained model's runtime (xgboost + scikit-learn). Heavier maintainer
 # tooling lives in extras: hyperparameter tuning (optuna) in dev, imagery rendering
 # (pillow/mercantile) in web/dev.
@@ -82,7 +84,9 @@ dev = [
 Repository = "https://github.com/brad-richardson/matcher"
 
 [project.scripts]
-matcher = "matcher.cli:app"
+crosswalk = "crosswalk.cli:app"
+# Deprecated alias: warns and forwards to `crosswalk`. Remove in a future release.
+matcher = "crosswalk.cli:matcher_deprecated"
 
 [build-system]
 requires = ["hatchling"]
@@ -95,13 +99,13 @@ build-backend = "hatchling.build"
 include = ["/src", "/README.md", "/pyproject.toml"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/matcher"]
-# Ship the pretrained models in the wheel so `pip install road-matcher` can stitch
+packages = ["src/crosswalk"]
+# Ship the pretrained models in the wheel so `pip install crosswalk-py` can stitch
 # with zero training (lockstep with FEATURE_VERSION enforced by
 # tests/unit/test_shipped_model.py), and Spark consumers can import the
 # Spark-portable booster + manifest straight from the package instead of
 # hand-copying files (lockstep enforced by tests/unit/test_shipped_spark_model.py).
-artifacts = ["src/matcher/_model/*.joblib", "src/matcher/_model/*.json"]
+artifacts = ["src/crosswalk/_model/*.joblib", "src/crosswalk/_model/*.json"]
 
 [tool.ruff]
 line-length = 100

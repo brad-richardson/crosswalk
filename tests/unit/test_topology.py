@@ -2,9 +2,9 @@
 
 import pytest
 
-from matcher.topology.graph import build_graph, compute_topology_features
-from matcher.topology.planarize import PlanarizedNetwork, planarize, should_intersect
-from matcher.topology.sparse_graph import is_connected
+from crosswalk.topology.graph import build_graph, compute_topology_features
+from crosswalk.topology.planarize import PlanarizedNetwork, planarize, should_intersect
+from crosswalk.topology.sparse_graph import is_connected
 
 
 class TestPlanarize:

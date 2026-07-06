@@ -11,7 +11,7 @@ class TestBuildInferredGraph:
 
     def test_empty_geodataframe(self):
         """Empty GeoDataFrame returns empty graph."""
-        from matcher.features.spatial_context import build_inferred_graph
+        from crosswalk.features.spatial_context import build_inferred_graph
 
         gdf = gpd.GeoDataFrame({"id": [], "geometry": []}, crs="EPSG:4326")
         G, seg_to_start, seg_to_end = build_inferred_graph(gdf, "id")
@@ -23,7 +23,7 @@ class TestBuildInferredGraph:
 
     def test_single_segment(self):
         """Single segment creates 2 nodes and 1 edge."""
-        from matcher.features.spatial_context import build_inferred_graph
+        from crosswalk.features.spatial_context import build_inferred_graph
 
         gdf = gpd.GeoDataFrame(
             {"id": ["r1"], "geometry": [LineString([(0, 0), (10, 0)])]},
@@ -50,7 +50,7 @@ class TestBuildInferredGraph:
         self, gap_meters, tolerance, expected_nodes, expected_edges
     ):
         """Tolerance parameter controls endpoint clustering."""
-        from matcher.features.spatial_context import build_inferred_graph
+        from crosswalk.features.spatial_context import build_inferred_graph
 
         # Three roads meeting at an intersection (with small gaps)
         # Using projected coordinates (EPSG:32632 - UTM zone 32N) so units are meters
@@ -72,7 +72,7 @@ class TestBuildInferredGraph:
 
     def test_t_intersection_topology(self):
         """T-intersection creates correct topology."""
-        from matcher.features.spatial_context import build_inferred_graph
+        from crosswalk.features.spatial_context import build_inferred_graph
 
         # T-intersection: main road + side street
         lines = [
@@ -96,7 +96,7 @@ class TestBuildInferredGraph:
 
     def test_loop_topology(self):
         """Closed loop creates correct graph structure."""
-        from matcher.features.spatial_context import build_inferred_graph
+        from crosswalk.features.spatial_context import build_inferred_graph
 
         # Square loop made of 4 segments
         lines = [
@@ -127,8 +127,8 @@ class TestComputeRoadGraphletFeatures:
         """Empty graph returns empty features dict."""
         from scipy.sparse import csr_matrix
 
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import SparseGraph
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import SparseGraph
 
         G = SparseGraph(
             adjacency=csr_matrix((0, 0), dtype=np.int32),
@@ -141,8 +141,8 @@ class TestComputeRoadGraphletFeatures:
 
     def test_single_node(self):
         """Single isolated node has degree 0."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         # Create graph with single isolated node
         G = build_graph_from_edges([], node_attrs={0: {}})
@@ -163,8 +163,8 @@ class TestComputeRoadGraphletFeatures:
     )
     def test_node_degree(self, edges, node, expected_degree):
         """Node degree is computed correctly."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         G = build_graph_from_edges(edges)
         features = compute_road_graphlet_features(G)
@@ -173,8 +173,8 @@ class TestComputeRoadGraphletFeatures:
 
     def test_triangle_detection(self):
         """Triangles are detected correctly."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         # Triangle: 0-1-2-0
         G = build_graph_from_edges([(0, 1), (1, 2), (2, 0)])
@@ -186,8 +186,8 @@ class TestComputeRoadGraphletFeatures:
 
     def test_square_detection(self):
         """4-cycles (squares) are detected correctly."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         # Square: 0-1-2-3-0 (no diagonals)
         G = build_graph_from_edges([(0, 1), (1, 2), (2, 3), (3, 0)])
@@ -199,8 +199,8 @@ class TestComputeRoadGraphletFeatures:
 
     def test_articulation_point_detection(self):
         """Articulation points are correctly identified."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         # Bridge topology: 0-1-2 where 1 is articulation point
         G = build_graph_from_edges([(0, 1), (1, 2)])
@@ -214,8 +214,8 @@ class TestComputeRoadGraphletFeatures:
 
     def test_two_hop_count(self):
         """Two-hop neighbor count is computed correctly."""
-        from matcher.features.spatial_context import compute_road_graphlet_features
-        from matcher.topology.sparse_graph import build_graph_from_edges
+        from crosswalk.features.spatial_context import compute_road_graphlet_features
+        from crosswalk.topology.sparse_graph import build_graph_from_edges
 
         # Chain: 0-1-2-3
         G = build_graph_from_edges([(0, 1), (1, 2), (2, 3)])
@@ -233,7 +233,7 @@ class TestGraphletSegmentSimilarity:
 
     def test_identical_features_perfect_similarity(self):
         """Identical endpoint features give similarity of 1.0."""
-        from matcher.features.spatial_context import graphlet_segment_similarity
+        from crosswalk.features.spatial_context import graphlet_segment_similarity
 
         # Create identical features for both segments
         ref_features = {0: np.array([2.0, 0.0, 0.0, 0.0, 1.0, 0.0])}
@@ -256,7 +256,7 @@ class TestGraphletSegmentSimilarity:
 
     def test_different_degrees_lower_similarity(self):
         """Different endpoint degrees result in lower similarity."""
-        from matcher.features.spatial_context import graphlet_segment_similarity
+        from crosswalk.features.spatial_context import graphlet_segment_similarity
 
         # Reference has degree 4 (4-way intersection)
         ref_features = {0: np.array([4.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
@@ -289,7 +289,7 @@ class TestGraphletSegmentSimilarity:
         (often perfect) similarity. Unknown topology is now undefined -> NaN so it
         passes through to XGBoost as a missing value rather than fake signal.
         """
-        from matcher.features.spatial_context import graphlet_segment_similarity
+        from crosswalk.features.spatial_context import graphlet_segment_similarity
 
         ref_features = {}  # No features
         target_features = {}
@@ -326,7 +326,7 @@ class TestGraphletSegmentSimilarity:
         expected_orientation,
     ):
         """Best orientation is selected for similarity computation."""
-        from matcher.features.spatial_context import graphlet_segment_similarity
+        from crosswalk.features.spatial_context import graphlet_segment_similarity
 
         # Create features with specified degrees
         ref_features = {
@@ -362,7 +362,7 @@ class TestGraphletIntegration:
 
     def test_end_to_end_graphlet_computation(self):
         """Full pipeline from GeoDataFrame to segment similarity."""
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             build_inferred_graph,
             compute_road_graphlet_features,
             graphlet_segment_similarity,
@@ -434,13 +434,13 @@ class TestRoadDegreeSimilarity:
         ],
     )
     def test_discrete_scale(self, a, b, expected):
-        from matcher.features.spatial_context import _road_degree_similarity
+        from crosswalk.features.spatial_context import _road_degree_similarity
 
         assert _road_degree_similarity(a, b) == pytest.approx(expected, abs=1e-9)
 
     def test_endpoint_degree_similarity_uses_new_scale(self):
         """endpoint_degree_similarity reflects the discrete mapping, not 1-|Δ|/10."""
-        from matcher.features.spatial_context import graphlet_segment_similarity
+        from crosswalk.features.spatial_context import graphlet_segment_similarity
 
         # ref degrees (2, 3), target degrees (3, 4): each endpoint is off-by-one.
         ref_features = {
@@ -468,7 +468,7 @@ class TestUnknownTopologyReturnsNaN:
 
     def test_alignment_missing_connectors_returns_nan(self):
         """graphlet_similarity_with_alignment returns NaN when a lookup misses."""
-        from matcher.features.spatial_context import graphlet_similarity_with_alignment
+        from crosswalk.features.spatial_context import graphlet_similarity_with_alignment
 
         ref_features = {0: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
         target_features = {1: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
@@ -490,7 +490,7 @@ class TestUnknownTopologyReturnsNaN:
 
     def test_alignment_both_known_is_finite(self):
         """When both sides resolve, similarity is a finite value (not NaN)."""
-        from matcher.features.spatial_context import graphlet_similarity_with_alignment
+        from crosswalk.features.spatial_context import graphlet_similarity_with_alignment
 
         ref_features = {0: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
         target_features = {1: np.array([3.0, 0.0, 0.0, 0.0, 0.0, 0.0])}
@@ -513,8 +513,8 @@ class TestClusteringUndefinedIsNaN:
     """Clustering coefficient is NaN (not 0.0) for degree < 2 nodes (defect #3)."""
 
     def test_degree_lt_2_nodes_are_nan(self):
-        from matcher.features.spatial_context import build_inferred_graph
-        from matcher.topology.sparse_graph import compute_clustering
+        from crosswalk.features.spatial_context import build_inferred_graph
+        from crosswalk.topology.sparse_graph import compute_clustering
 
         # A path graph: two dead-ends (degree 1) and one middle node (degree 2).
         lines = [
@@ -554,7 +554,7 @@ class TestGraphletDistributionSmoke:
         return gpd.GeoDataFrame({"id": ids, "geometry": lines}, crs="EPSG:32632")
 
     def test_similarity_not_single_valued(self):
-        from matcher.features.spatial_context import (
+        from crosswalk.features.spatial_context import (
             build_inferred_graph,
             compute_road_graphlet_features,
             graphlet_segment_similarity,

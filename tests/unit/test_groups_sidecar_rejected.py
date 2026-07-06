@@ -19,9 +19,9 @@ import json
 import geopandas as gpd
 from shapely import LineString
 
-from matcher.config import settings
-from matcher.matching.types import MatchDecision, MatchResult
-from matcher.pipeline.runner import _export_groups_sidecar
+from crosswalk.config import settings
+from crosswalk.matching.types import MatchDecision, MatchResult
+from crosswalk.pipeline.runner import _export_groups_sidecar
 
 # Metric CRS so sliver/structure computation runs on meters (as in production).
 _CRS = "EPSG:32619"
@@ -331,7 +331,7 @@ def test_stitch_eval_mapping_ignores_rejected_edges(tmp_path):
     candidate set only — the new rejected_edges list must not change mapping."""
     import pandas as pd
 
-    from matcher.agent_labeling.stitch_eval import recover_labeled_groups
+    from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
 
     ref, tgt, results, selected = _scenario()
     groups = _export(tmp_path, results, selected, ref, tgt)

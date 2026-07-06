@@ -3,7 +3,7 @@
 import geopandas as gpd
 from shapely import LineString, MultiLineString, MultiPolygon, Point, Polygon
 
-from matcher.utils.geometry import convert_polygons_to_centerlines, filter_to_linestrings
+from crosswalk.utils.geometry import convert_polygons_to_centerlines, filter_to_linestrings
 
 
 class TestFilterToLinestrings:

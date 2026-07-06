@@ -9,8 +9,8 @@ import pytest
 from loguru import logger
 from sklearn.tree import DecisionTreeClassifier
 
-from matcher.config import FEATURE_COLUMNS, FEATURE_VERSION
-from matcher.matching.ml import MLMatcher
+from crosswalk.config import FEATURE_COLUMNS, FEATURE_VERSION
+from crosswalk.matching.ml import MLMatcher
 
 
 def _make_simple_model():
@@ -196,7 +196,7 @@ class TestTrainVersionChecks:
         self._make_labels(labels_dir, versions)
 
         matcher = MLMatcher()
-        with pytest.raises(ValueError, match="matcher backfill"):
+        with pytest.raises(ValueError, match="crosswalk backfill"):
             matcher.train(labels_dir=str(labels_dir), test_size=0.0)
 
     def test_train_all_stale_versions_raises_by_default(self, tmp_path):

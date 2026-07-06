@@ -2,7 +2,7 @@
 
 import pytest
 
-from matcher.config import FEATURE_COLUMNS, SEMANTIC_FEATURES
+from crosswalk.config import FEATURE_COLUMNS, SEMANTIC_FEATURES
 
 
 class TestExcludeSemanticFlag:

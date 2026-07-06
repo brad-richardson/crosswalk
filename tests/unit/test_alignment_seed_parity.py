@@ -28,12 +28,12 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString, Point
 
-from matcher.config import (
+from crosswalk.config import (
     DIVERGENCE_DISTANCE_MULTIPLIER,
     DIVERGENCE_MIN_DISTANCE_M,
     DIVERGENCE_PARALLELNESS_THRESHOLD,
 )
-from matcher.features.alignment import (
+from crosswalk.features.alignment import (
     _ENDPOINT_SEED_THRESHOLD,
     _MIN_GRID_SAMPLES,
     _SEED_BUFFER_FRACTION,

@@ -5,7 +5,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString
 
-from matcher.utils.crs import (
+from crosswalk.utils.crs import (
     ProjectionResult,
     ensure_projected_crs,
     ensure_single_projected_crs,

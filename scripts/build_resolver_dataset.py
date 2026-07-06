@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from matcher.resolver.evaluate import feature_importances, run_cv, slice_report
-from matcher.resolver.extract import build_multi_dataset_table, load_sidecar_groups
-from matcher.resolver.features import featurize
-from matcher.resolver.votes import (
+from crosswalk.resolver.evaluate import feature_importances, run_cv, slice_report
+from crosswalk.resolver.extract import build_multi_dataset_table, load_sidecar_groups
+from crosswalk.resolver.features import featurize
+from crosswalk.resolver.votes import (
     default_votes_paths,
     edge_soft_labels,
     load_votes,

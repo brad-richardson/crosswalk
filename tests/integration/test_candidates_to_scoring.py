@@ -10,7 +10,7 @@ import geopandas as gpd
 import pytest
 from shapely import LineString
 
-from matcher.blocking.spatial_index import generate_candidates
+from crosswalk.blocking.spatial_index import generate_candidates
 
 
 @pytest.fixture
@@ -117,8 +117,8 @@ class TestAlignmentIntegration:
 
     def test_alignment_coverage_features_computed(self, reference_gdf, target_gdf):
         """Coverage features should be computed when alignment is enabled."""
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
@@ -164,7 +164,7 @@ class TestAlignmentIntegration:
 
     def test_partial_overlap_produces_lower_coverage(self):
         """Partial overlap should produce lower coverage than full overlap."""
-        from matcher.features.alignment import compute_coverage_features, linestring_alignment
+        from crosswalk.features.alignment import compute_coverage_features, linestring_alignment
 
         # Full overlap case
         ref_full = LineString([(0, 0), (100, 0)])
@@ -186,8 +186,8 @@ class TestAlignmentIntegration:
 
     def test_aligned_features_differ_from_full_geometry_features(self):
         """Aligned features should differ from full geometry features for partial overlap."""
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         # Reference covers more area than target
@@ -242,8 +242,8 @@ class TestFeatureComputation:
 
     def test_all_expected_features_computed(self, reference_gdf, target_gdf):
         """Feature computation should produce all expected features."""
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry
@@ -277,8 +277,8 @@ class TestFeatureComputation:
 
     def test_feature_values_are_reasonable(self, reference_gdf, target_gdf):
         """Feature values should be within expected ranges."""
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref_geom = reference_gdf.iloc[0].geometry

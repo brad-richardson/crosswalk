@@ -1,5 +1,7 @@
 # Agent Evaluation: Full Sweep - Claude Opus vs Human Labels
 
+> _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
+
 **Date**: 2026-02-08
 **Batch**: `sweep_2026-02-08_175328`
 **Model**: Claude Opus (via Claude Code CLI)

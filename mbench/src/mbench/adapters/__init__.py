@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from mbench.adapters.matcher import MatcherAdapter
+from mbench.adapters.crosswalk import CrosswalkAdapter
 
 REGISTRY: dict[str, type] = {
-    "matcher": MatcherAdapter,
+    "crosswalk": CrosswalkAdapter,
+}
+
+# Deprecated engine-id aliases: resolved (with a stderr warning) by
+# ``mbench.cli._get_adapter``. The tool was renamed matcher -> crosswalk (2026-07-05).
+DEPRECATED_ALIASES: dict[str, str] = {
+    "matcher": "crosswalk",
 }
 
 # Hootenanny adapter requires geopandas (optional dep)

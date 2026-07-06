@@ -3,7 +3,7 @@
 import pytest
 from shapely.geometry import LineString
 
-from matcher.screen import (
+from crosswalk.screen import (
     CandidateContext,
     ScreenOutcome,
     ScreenResult,
@@ -12,7 +12,7 @@ from matcher.screen import (
     get_test,
     register_test,
 )
-from matcher.screen.base import _SCREEN_TESTS
+from crosswalk.screen.base import _SCREEN_TESTS
 
 
 class TestScreenOutcome:

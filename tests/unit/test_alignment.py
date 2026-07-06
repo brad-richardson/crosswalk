@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString, Point
 
-from matcher.features.alignment import (
+from crosswalk.features.alignment import (
     AlignmentResult,
     _compute_centroid,
     _create_local_equidistant_crs,
@@ -712,7 +712,7 @@ class TestAlignedFeatureComputation:
         When two segments only partially overlap, computing Hausdorff on aligned
         sublines should give a smaller distance than on full geometries.
         """
-        from matcher.features.geometric import compute_geometric_features
+        from crosswalk.features.geometric import compute_geometric_features
 
         # Reference: 100m line
         ref = LineString([(0, 0), (100, 0)])

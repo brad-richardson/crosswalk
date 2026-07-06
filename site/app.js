@@ -8,10 +8,10 @@
  * - Small formatting / DOM utilities used by both pages.
  *
  * ES module: imported by dashboard.js and browse.js. Relies on the global
- * `window.MATCHER_CONFIG` set by config.js (loaded first as a classic script).
+ * `window.CROSSWALK_CONFIG` set by config.js (loaded first as a classic script).
  */
 
-const CFG = window.MATCHER_CONFIG || {};
+const CFG = window.CROSSWALK_CONFIG || {};
 
 // --------------------------------------------------------------------------
 // Base URL + URL builders

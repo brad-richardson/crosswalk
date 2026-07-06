@@ -27,11 +27,11 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "mbench" / "src"))
 from mbench.eval.labels import load_stitch_labels
 from mbench.eval.stitch_metrics import StitchEvalResult, evaluate_stitch_groups
 
-from matcher.config import DEFAULT_SNAP_TOLERANCE_M
-from matcher.matching.optimizer import optimize_matches_with_grouping
-from matcher.matching.types import MatchDecision, MatchResult
-from matcher.pipeline.runner import score_candidates_from_geodataframes
-from matcher.utils.geometry import filter_to_linestrings
+from crosswalk.config import DEFAULT_SNAP_TOLERANCE_M
+from crosswalk.matching.optimizer import optimize_matches_with_grouping
+from crosswalk.matching.types import MatchDecision, MatchResult
+from crosswalk.pipeline.runner import score_candidates_from_geodataframes
+from crosswalk.utils.geometry import filter_to_linestrings
 
 # Default paths (relative to project root)
 DEFAULT_REF_PATH = Path("data/raw/us_boston_streets_overture_segments_v1.0.parquet")

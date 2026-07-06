@@ -10,8 +10,8 @@ Fixtures used (from conftest.py):
 import geopandas as gpd
 from shapely import LineString, Point
 
-from matcher.fetch.overture import BoundingBox
-from matcher.integration import (
+from crosswalk.fetch.overture import BoundingBox
+from crosswalk.integration import (
     EdgeSource,
     IntegrationStatistics,
     TargetInput,
@@ -23,13 +23,13 @@ from matcher.integration import (
     filter_fringe_segments,
     filter_short_segments,
 )
-from matcher.integration.combiner import (
+from crosswalk.integration.combiner import (
     _build_multi_match_ranges,
     _complement_ranges,
     _merge_ranges,
 )
-from matcher.screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
-from matcher.topology.planarize import planarize
+from crosswalk.screen.constants import FRINGE_BUFFER_M, FRINGE_MIN_INSIDE_LENGTH_M
+from crosswalk.topology.planarize import planarize
 
 
 class TestCombineNetworks:

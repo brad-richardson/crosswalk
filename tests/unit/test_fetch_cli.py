@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from matcher.cli import app
+from crosswalk.cli import app
 
 runner = CliRunner()
 
@@ -33,7 +33,7 @@ class TestFetchTargetCommand:
         assert result.exit_code == 1
         assert "Error" in result.output
 
-    @patch("matcher.fetch.target.fetch_dataset")
+    @patch("crosswalk.fetch.target.fetch_dataset")
     def test_fetch_target_single_dataset(self, mock_fetch):
         """Test fetching a single dataset."""
         mock_fetch.return_value = Path("data/raw/test_v1.0.parquet")
@@ -43,7 +43,7 @@ class TestFetchTargetCommand:
         assert result.exit_code == 0
         mock_fetch.assert_called_once()
 
-    @patch("matcher.fetch.target.fetch_datasets_by_prefix")
+    @patch("crosswalk.fetch.target.fetch_datasets_by_prefix")
     def test_fetch_target_by_prefix(self, mock_fetch_by_prefix):
         """Test fetching datasets by prefix."""
         mock_fetch_by_prefix.return_value = {
@@ -67,8 +67,8 @@ class TestFetchReferenceCommand:
         assert "reference" in result.output.lower()
         assert "Overture" in result.output
 
-    @patch("matcher.datasets.schema.get_dataset_config")
-    @patch("matcher.datasets.schema.list_dataset_configs")
+    @patch("crosswalk.datasets.schema.get_dataset_config")
+    @patch("crosswalk.datasets.schema.list_dataset_configs")
     def test_fetch_reference_missing_dataset(self, mock_list, mock_get_config):
         """Test error when dataset doesn't exist."""
         mock_get_config.return_value = None
@@ -99,7 +99,7 @@ class TestFetchListCommand:
         assert result.exit_code == 0
         assert "List available datasets" in result.output
 
-    @patch("matcher.fetch.target.print_datasets")
+    @patch("crosswalk.fetch.target.print_datasets")
     def test_fetch_list_all(self, mock_print):
         """Test listing all datasets."""
         result = runner.invoke(app, ["data", "fetch", "list"])
@@ -107,7 +107,7 @@ class TestFetchListCommand:
         assert result.exit_code == 0
         mock_print.assert_called_once_with(None)
 
-    @patch("matcher.fetch.target.print_datasets")
+    @patch("crosswalk.fetch.target.print_datasets")
     def test_fetch_list_with_prefix(self, mock_print):
         """Test listing datasets with prefix filter."""
         result = runner.invoke(app, ["data", "fetch", "list", "--prefix", "us_"])
@@ -132,7 +132,7 @@ class TestFetchVerifyCommand:
         assert result.exit_code == 1
         assert "Error" in result.output or "Must specify" in result.output
 
-    @patch("matcher.datasets.schema.get_dataset_config")
+    @patch("crosswalk.datasets.schema.get_dataset_config")
     def test_fetch_verify_missing_dataset(self, mock_get_config):
         """Test error when dataset doesn't exist."""
         mock_get_config.return_value = None

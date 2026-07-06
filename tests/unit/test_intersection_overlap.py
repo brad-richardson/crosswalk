@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 
-from matcher.features.alignment import AlignmentResult
-from matcher.features.compute import _compute_intersection_overlap_features
+from crosswalk.features.alignment import AlignmentResult
+from crosswalk.features.compute import _compute_intersection_overlap_features
 
 
 def _make_result(ref, target, alignment):
@@ -150,7 +150,7 @@ class TestContinuationNumba:
         ids=["straight", "perpendicular", "diagonal_45", "single_point"],
     )
     def test_continuation(self, coords, dx, dy, expected):
-        from matcher.features._jit_helpers import compute_continuation_along_heading_numba
+        from crosswalk.features._jit_helpers import compute_continuation_along_heading_numba
 
         result = compute_continuation_along_heading_numba(np.array(coords, dtype=float), dx, dy)
         assert result == pytest.approx(expected, abs=2.0)
@@ -160,14 +160,14 @@ class TestHeadingAtFractionNumba:
     """Direct tests for compute_heading_at_fraction_numba."""
 
     def test_horizontal_line_start(self):
-        from matcher.features._jit_helpers import compute_heading_at_fraction_numba
+        from crosswalk.features._jit_helpers import compute_heading_at_fraction_numba
 
         coords = np.array([(0.0, 0.0), (100.0, 0.0)])
         heading = compute_heading_at_fraction_numba(coords, np.array([100.0]), 100.0, 0.0)
         assert heading == pytest.approx(0.0, abs=1.0)
 
     def test_midpoint_of_turn(self):
-        from matcher.features._jit_helpers import compute_heading_at_fraction_numba
+        from crosswalk.features._jit_helpers import compute_heading_at_fraction_numba
 
         coords = np.array([(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)])
         heading = compute_heading_at_fraction_numba(coords, np.array([50.0, 50.0]), 100.0, 0.5)

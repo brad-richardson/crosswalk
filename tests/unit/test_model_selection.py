@@ -62,7 +62,7 @@ class TestSelectModelForDataset:
 
     def test_high_name_coverage_selects_full_model(self, sample_gdf_with_names, model_paths):
         """With >50% name coverage, full model should be selected."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Create the full model file
         Path(model_paths["full"]).touch()
@@ -77,7 +77,7 @@ class TestSelectModelForDataset:
 
     def test_no_names_selects_geom_model_if_exists(self, sample_gdf_no_names, model_paths):
         """Without name column, geometry-only model should be selected if available."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Create both model files
         Path(model_paths["full"]).touch()
@@ -93,7 +93,7 @@ class TestSelectModelForDataset:
 
     def test_no_names_falls_back_to_full_model(self, sample_gdf_no_names, model_paths):
         """Without name column and no geom model, falls back to full model."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Only create the full model file
         Path(model_paths["full"]).touch()
@@ -108,7 +108,7 @@ class TestSelectModelForDataset:
 
     def test_low_name_coverage_selects_geom_model(self, sample_gdf_low_name_coverage, model_paths):
         """With <50% name coverage, geometry-only model should be selected."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Create both model files
         Path(model_paths["full"]).touch()
@@ -136,7 +136,7 @@ class TestSelectModelForDataset:
         self, model_paths, name_coverage, min_threshold, expected_model
     ):
         """Test various threshold boundary cases."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Create both model files
         Path(model_paths["full"]).touch()
@@ -163,7 +163,7 @@ class TestSelectModelForDataset:
 
     def test_empty_strings_not_counted_as_names(self, model_paths):
         """Empty strings should not count as having a name."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         # Create both model files
         Path(model_paths["full"]).touch()
@@ -188,7 +188,7 @@ class TestSelectModelForDataset:
 
     def test_alternative_name_column(self, model_paths):
         """Test with 'name' column instead of 'names'."""
-        from matcher.matching.ml import select_model_for_dataset
+        from crosswalk.matching.ml import select_model_for_dataset
 
         Path(model_paths["full"]).touch()
 

@@ -6,14 +6,14 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features.geometric import (
+from crosswalk.features.geometric import (
     _buffer_iou_from_buffers,
     compute_buffer_iou_batch,
     compute_collinear_gap_ratio,
     compute_geometric_features,
     compute_segment_heading,
 )
-from matcher.features.semantic import (
+from crosswalk.features.semantic import (
     _get_text_scripts,
     _has_non_latin_alpha,
     _names_are_cross_script,
@@ -123,7 +123,7 @@ class TestGeometricFeatures:
         drowning the feature's real distribution (the reason vertex_density
         was the worst-scoring ablation category).
         """
-        from matcher.features.geometric import compute_vertex_density
+        from crosswalk.features.geometric import compute_vertex_density
 
         sliver = LineString([(0, 0), (0.007, 0)])
         assert math.isnan(compute_vertex_density(sliver))
@@ -604,7 +604,7 @@ class TestExtractAllNameVariants:
 
     @pytest.fixture(autouse=True)
     def _import(self):
-        from matcher.features.semantic import _extract_all_name_variants
+        from crosswalk.features.semantic import _extract_all_name_variants
 
         self.extract = _extract_all_name_variants
 
@@ -1177,8 +1177,8 @@ class TestComputePairFeaturesWithAlignment:
 
     def test_compute_pair_features_includes_coverage_features(self):
         """compute_pair_features should include coverage features when alignment provided."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1215,7 +1215,7 @@ class TestComputePairFeaturesWithAlignment:
 
     def test_compute_pair_features_without_alignment(self):
         """compute_pair_features should work when alignment is None."""
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1243,8 +1243,8 @@ class TestComputePairFeaturesWithAlignment:
 
     def test_compute_pair_features_uses_sublines_with_alignment(self):
         """With alignment, similarity features should be computed on sublines."""
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Reference is longer than target, target matches second half
@@ -1284,9 +1284,9 @@ class TestComputePairFeaturesWithAlignment:
 
     def test_all_feature_columns_present(self):
         """compute_pair_features should return all expected feature columns."""
-        from matcher.config import FEATURE_COLUMNS
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.config import FEATURE_COLUMNS
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1319,8 +1319,8 @@ class TestComputePairFeaturesWithAlignment:
         Regression test: A target that extends beyond the reference should not
         inflate the lateral offset. Only the overlapping portion should be measured.
         """
-        from matcher.features.alignment import linestring_alignment
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import linestring_alignment
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Reference: 100m segment
@@ -1360,7 +1360,7 @@ class TestTargetNativeTopology:
 
     def test_native_topology_passes_through_full_segment_values(self):
         """Native features mirror the target's full-segment endpoint-cluster topology."""
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1400,7 +1400,7 @@ class TestTargetNativeTopology:
         """NaN degrees must propagate to NaN flags (not truthy-NaN → 1.0)."""
         import math
 
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1447,8 +1447,8 @@ class TestEndpointProximityInfCapping:
 
     def test_inf_endpoint_proximity_capped(self):
         """Inf values from endpoint computation should be capped to MAX_DISTANCE_METERS."""
-        from matcher.config import MAX_DISTANCE_METERS
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.config import MAX_DISTANCE_METERS
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1476,7 +1476,7 @@ class TestEndpointProximityInfCapping:
 
     def test_finite_endpoint_proximity_unchanged(self):
         """Finite endpoint values below MAX_DISTANCE_METERS should pass through unchanged."""
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (100, 0)])
@@ -1508,7 +1508,7 @@ class TestAngleHistogramSimilarity:
 
     def test_identical_lines(self):
         """Identical lines should have similarity of 1.0."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         line = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
         result = compute_angle_histogram_similarity(line, line)
@@ -1516,7 +1516,7 @@ class TestAngleHistogramSimilarity:
 
     def test_straight_lines_similar(self):
         """Two straight lines should have high similarity."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         straight1 = LineString([(0, 0), (10, 0), (20, 0), (30, 0)])
         straight2 = LineString([(0, 0), (15, 0), (25, 0), (50, 0)])
@@ -1526,7 +1526,7 @@ class TestAngleHistogramSimilarity:
 
     def test_straight_vs_curved_different(self):
         """Straight line vs curved line should have lower similarity."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         straight = LineString([(0, 0), (10, 0), (20, 0), (30, 0)])
         curved = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
@@ -1537,7 +1537,7 @@ class TestAngleHistogramSimilarity:
 
     def test_similar_curves(self):
         """Two curves with similar shape should have high similarity."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         curve1 = LineString([(0, 0), (10, 5), (20, 0), (30, 5), (40, 0)])
         # Same pattern, just translated
@@ -1548,7 +1548,7 @@ class TestAngleHistogramSimilarity:
 
     def test_both_short_lines_return_one(self):
         """Both lines with < 3 points (both straight) should return 1.0."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         short1 = LineString([(0, 0), (10, 0)])
         short2 = LineString([(0, 0), (20, 10)])
@@ -1558,7 +1558,7 @@ class TestAngleHistogramSimilarity:
 
     def test_one_short_line_compared_to_straight_hist(self):
         """One short line vs multi-point line uses straight histogram for short."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         short = LineString([(0, 0), (10, 0)])
         # Straight multi-point → same shape → high similarity
@@ -1569,7 +1569,7 @@ class TestAngleHistogramSimilarity:
 
     def test_empty_line_returns_one(self):
         """Empty lines should return 1.0."""
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         empty = LineString()
         normal = LineString([(0, 0), (10, 0), (20, 0)])
@@ -1581,7 +1581,7 @@ class TestAngleHistogramSimilarity:
         """Should work with pre-extracted coordinates."""
         import numpy as np
 
-        from matcher.features.geometric import compute_angle_histogram_similarity
+        from crosswalk.features.geometric import compute_angle_histogram_similarity
 
         line_a = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
         line_b = LineString([(0, 0), (10, 5), (20, 0), (30, 5)])
@@ -1599,7 +1599,7 @@ class TestEdgeDistanceRmse:
 
     def test_identical_lines(self):
         """Identical lines should have RMSE of 0."""
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         line = LineString([(0, 0), (100, 0)])
         result = compute_edge_distance_rmse(line, line)
@@ -1607,7 +1607,7 @@ class TestEdgeDistanceRmse:
 
     def test_parallel_lines_offset(self):
         """Parallel lines with constant offset should have RMSE equal to offset."""
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         line_a = LineString([(0, 0), (100, 0)])
         line_b = LineString([(0, 5), (100, 5)])  # 5m offset
@@ -1617,7 +1617,7 @@ class TestEdgeDistanceRmse:
 
     def test_diverging_lines(self):
         """Diverging lines should have higher RMSE than parallel lines."""
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         line_a = LineString([(0, 0), (100, 0)])
         # Starts at same point, ends 20m away
@@ -1634,8 +1634,8 @@ class TestEdgeDistanceRmse:
 
     def test_empty_line_returns_max_distance(self):
         """Empty lines should return MAX_DISTANCE_METERS."""
-        from matcher.config import MAX_DISTANCE_METERS
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.config import MAX_DISTANCE_METERS
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         empty = LineString()
         normal = LineString([(0, 0), (100, 0)])
@@ -1645,7 +1645,7 @@ class TestEdgeDistanceRmse:
 
     def test_different_lengths(self):
         """Should handle lines of different lengths."""
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         line_a = LineString([(0, 0), (100, 0)])  # 100m
         line_b = LineString([(0, 3), (50, 3)])  # 50m, 3m offset
@@ -1659,7 +1659,7 @@ class TestEdgeDistanceRmse:
 
         This is a key advantage over mean_hausdorff_distance which samples at vertices.
         """
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         # Low density line (2 vertices)
         line_a_low = LineString([(0, 0), (100, 0)])
@@ -1679,7 +1679,7 @@ class TestEdgeDistanceRmse:
 
     def test_custom_sample_interval(self):
         """Should work with custom sample interval."""
-        from matcher.features.geometric import compute_edge_distance_rmse
+        from crosswalk.features.geometric import compute_edge_distance_rmse
 
         line_a = LineString([(0, 0), (100, 0)])
         line_b = LineString([(0, 5), (100, 5)])
@@ -1699,49 +1699,49 @@ class TestRoutePrefixMatch:
 
     def test_same_interstate_routes(self):
         """Same interstate type should return 1.0."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("I-5", "Interstate 5")
         assert result == pytest.approx(1.0)
 
     def test_same_us_routes(self):
         """Same US route type should return 1.0."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("US-101", "U.S. Route 101")
         assert result == pytest.approx(1.0)
 
     def test_different_route_types(self):
         """Different route types should return 0.0."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("I-5", "US-5")
         assert result == pytest.approx(0.0)
 
     def test_interstate_vs_state_route(self):
         """Interstate vs state route should return 0.0."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("I-90", "SR-90")
         assert result == pytest.approx(0.0)
 
     def test_non_routes(self):
         """Non-routes should return NaN (missing signal)."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("Main Street", "Oak Avenue")
         assert math.isnan(result)
 
     def test_one_route_one_non_route(self):
         """One route, one non-route should return NaN (missing signal)."""
-        from matcher.features.semantic import compute_route_prefix_match
+        from crosswalk.features.semantic import compute_route_prefix_match
 
         result = compute_route_prefix_match("I-5", "Main Street")
         assert math.isnan(result)
 
     def test_canonicalize_route_name(self):
         """Test route name canonicalization."""
-        from matcher.features.semantic import canonicalize_route_name
+        from crosswalk.features.semantic import canonicalize_route_name
 
         assert canonicalize_route_name("I-5") == ("interstate", 5)
         assert canonicalize_route_name("Interstate 90") == ("interstate", 90)
@@ -1801,7 +1801,7 @@ class TestSemanticAuditRegressions:
 
     def test_leading_st_normalizes_to_saint(self):
         """Leading 'St' means Saint, not Street: 'St Louis' vs 'Saint Louis'."""
-        from matcher.features.semantic import _normalize_street_name
+        from crosswalk.features.semantic import _normalize_street_name
 
         assert _normalize_street_name("St Louis Ave") == "saint louis avenue"
         assert _normalize_street_name("St. Charles Ave") == "saint charles avenue"
@@ -1821,7 +1821,7 @@ class TestSemanticAuditRegressions:
         """
         import unicodedata
 
-        from matcher.features.semantic import (
+        from crosswalk.features.semantic import (
             STREET_ABBREVIATIONS,
             _normalize_street_name,
         )
@@ -1868,7 +1868,7 @@ class TestSemanticAuditRegressions:
 
     def test_ordinal_numbers_are_not_route_numbers(self):
         """'5th Avenue' vs '5th Street' must not score numeric_match = 1.0."""
-        from matcher.features.semantic import (
+        from crosswalk.features.semantic import (
             compute_name_numeric_match,
             extract_numeric_suffix,
         )
@@ -1888,7 +1888,7 @@ class TestClusteringCoefficientFeatures:
         """Should extract clustering coefficient from full feature vectors."""
         import numpy as np
 
-        from matcher.features.spatial_context import compute_clustering_coefficient_features
+        from crosswalk.features.spatial_context import compute_clustering_coefficient_features
 
         # Create mock feature vectors with clustering at index 3
         ref_features = {
@@ -1920,7 +1920,7 @@ class TestClusteringCoefficientFeatures:
 
     def test_clustering_coef_with_degrees_only(self):
         """Should return defaults when only degree values are available."""
-        from matcher.features.spatial_context import compute_clustering_coefficient_features
+        from crosswalk.features.spatial_context import compute_clustering_coefficient_features
 
         # Degrees-only mode (int values)
         ref_features = {0: 2, 1: 3}
@@ -1954,7 +1954,7 @@ class TestCrossingAngleFeatures:
 
     def test_crosswalk_perpendicular_to_vehicle_road(self):
         """A short N-S footway crossing an E-W vehicle road should have high angles."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Crosswalk: short north-south segment
         crosswalk = LineString([(50, 0), (50, 15)])
@@ -1982,7 +1982,7 @@ class TestCrossingAngleFeatures:
 
     def test_sidewalk_parallel_to_vehicle_road(self):
         """A sidewalk running parallel to a road should have low angles."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Sidewalk: runs east-west, parallel to the road
         sidewalk = LineString([(0, 5), (100, 5)])
@@ -2005,7 +2005,7 @@ class TestCrossingAngleFeatures:
 
     def test_same_tier_neighbors_are_ignored(self):
         """Neighbors of the same traffic tier should not influence crossing angle."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Candidate is a vehicle road
         candidate = LineString([(0, 0), (100, 0)])
@@ -2035,7 +2035,7 @@ class TestCrossingAngleFeatures:
         motorway (vehicle tier), so the minimum angle to corridor should be
         near 0° even though the end veers off at ~45°.
         """
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Slip road: runs parallel for ~200m, then veers off at 45° for ~50m
         ramp = LineString(
@@ -2071,7 +2071,7 @@ class TestCrossingAngleFeatures:
 
     def test_diagonal_crosswalk(self):
         """A diagonal crosswalk at ~45° to the road should have moderate angles."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Diagonal crosswalk crossing an E-W road
         crosswalk = LineString([(40, 0), (60, 20)])
@@ -2091,7 +2091,7 @@ class TestCrossingAngleFeatures:
 
     def test_empty_candidate_returns_neutral(self):
         """Empty or degenerate candidate should return neutral values."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         empty = LineString()
         result = compute_crossing_angle_features(
@@ -2108,7 +2108,7 @@ class TestCrossingAngleFeatures:
 
     def test_no_different_tier_neighbors_returns_neutral(self):
         """When all neighbors are same tier, should return NaN."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(0, 0), (50, 50)])
         nearby_geoms = [LineString([(0, 10), (100, 10)])]
@@ -2127,7 +2127,7 @@ class TestCrossingAngleFeatures:
 
     def test_no_neighbors_returns_neutral(self):
         """When no nearby geometries exist, should return NaN."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(0, 0), (50, 50)])
 
@@ -2143,7 +2143,7 @@ class TestCrossingAngleFeatures:
 
     def test_unknown_class_returns_neutral(self):
         """When candidate or neighbor class is unknown, return neutral."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(0, 0), (50, 50)])
         nearby_geoms = [LineString([(0, 10), (100, 10)])]
@@ -2168,7 +2168,7 @@ class TestCrossingAngleFeatures:
 
     def test_multiple_corridors_different_angles(self):
         """With corridors at different angles, min should reflect closest."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # North-south candidate
         candidate = LineString([(50, 0), (50, 30)])
@@ -2193,7 +2193,7 @@ class TestCrossingAngleFeatures:
 
     def test_cycleway_crossing_vehicle_road(self):
         """Cycleway crossing a vehicle road should be detected."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # Bike crossing: north-south
         bike_crossing = LineString([(50, 0), (50, 12)])
@@ -2213,7 +2213,7 @@ class TestCrossingAngleFeatures:
 
     def test_very_short_segment(self):
         """Very short segments (< sample_interval) should still work."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         # 3m crosswalk (shorter than default 10m sample interval)
         short_crosswalk = LineString([(50, 0), (50, 3)])
@@ -2233,7 +2233,7 @@ class TestCrossingAngleFeatures:
 
     def test_degenerate_zero_length_neighbor_ignored(self):
         """Zero-length neighbor geometries should be filtered out."""
-        from matcher.features.geometric import compute_crossing_angle_features
+        from crosswalk.features.geometric import compute_crossing_angle_features
 
         candidate = LineString([(50, 0), (50, 20)])
         nearby_geoms = [
@@ -2272,8 +2272,8 @@ class TestAlignedLengthM:
     )
     def test_aligned_length_computation(self, ref_length, start_frac, end_frac, expected):
         """aligned_length_m = ref_length * (end_frac - start_frac)."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (ref_length, 0)])
@@ -2299,7 +2299,7 @@ class TestAlignedLengthM:
 
     def test_no_alignment_returns_zero(self):
         """Without alignment, aligned_length_m = 0.0 (consistent with coverage features)."""
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         ref = LineString([(0, 0), (150, 0)])
@@ -2320,8 +2320,8 @@ class TestAlignedLengthM:
 
     def test_uses_ref_geom_length_not_subline(self):
         """Uses original ref geometry length, not subline (exact, no extraction error)."""
-        from matcher.features.alignment import AlignmentResult
-        from matcher.features.compute import compute_pair_features
+        from crosswalk.features.alignment import AlignmentResult
+        from crosswalk.features.compute import compute_pair_features
         from tests.conftest import MOCK_ENDPOINT_FEATURES, MOCK_TOPOLOGY_FEATURES
 
         # Curved ref — subline extraction may lose/gain tiny amounts
@@ -2348,7 +2348,7 @@ class TestAlignedLengthM:
 
     def test_error_case_returns_nan(self):
         """Error features should have aligned_length_m = NaN."""
-        from matcher.features.compute import _get_error_features
+        from crosswalk.features.compute import _get_error_features
 
         error_feats = _get_error_features(error=ValueError("test"))
         assert math.isnan(error_feats["aligned_length_m"])

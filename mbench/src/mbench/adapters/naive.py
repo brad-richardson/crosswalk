@@ -1,7 +1,7 @@
 """Naive geometric baseline adapter.
 
 A deliberately simple buffer-overlap conflation baseline. It exists to give the
-benchmark a *floor*: any real conflation tool (Hootenanny, matcher) should beat
+benchmark a *floor*: any real conflation tool (Hootenanny, crosswalk) should beat
 pure geometry with no learning, no name matching, and no topology reasoning.
 
 Algorithm (per target segment ``t``):
@@ -38,8 +38,8 @@ Algorithm (per target segment ``t``):
    shape while preventing a single reference from being claimed by several
    targets.
 
-Everything here is pure geopandas/shapely — no matcher imports. mbench stays
-matcher-free by design.
+Everything here is pure geopandas/shapely — no crosswalk imports. mbench stays
+crosswalk-free by design.
 """
 
 from __future__ import annotations

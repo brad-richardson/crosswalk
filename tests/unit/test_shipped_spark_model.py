@@ -1,9 +1,9 @@
 """Lockstep guard for the Spark-portable model shipped inside the package.
 
 The wheel bundles a Spark-portable XGBoost booster + manifest
-(``src/matcher/_model/spark_model.json`` / ``spark_manifest.json``) so Spark
+(``src/crosswalk/_model/spark_model.json`` / ``spark_manifest.json``) so Spark
 consumers (the tf-data-platform sister project) can import them straight from
-the package (``from matcher.spark import spark_model_json, spark_manifest``)
+the package (``from crosswalk.spark import spark_model_json, spark_manifest``)
 instead of hand-copying stale files.
 
 The danger mirrors the combined-model case (``test_shipped_model.py``): if
@@ -13,9 +13,9 @@ runtime guard (the Spark scorer just broadcasts ``manifest["features"]``).
 
 This test fails whenever the shipped manifest diverges from the current config —
 forcing a re-export + reship in the *same* PR. To reship:
-``uv run matcher export-spark-model -o data/models/export`` then copy
+``uv run crosswalk export-spark-model -o data/models/export`` then copy
 ``model.json``/``manifest.json`` to
-``src/matcher/_model/spark_model.json``/``spark_manifest.json`` (see
+``src/crosswalk/_model/spark_model.json``/``spark_manifest.json`` (see
 docs/RELEASING.md).
 """
 
@@ -24,7 +24,7 @@ import json
 import numpy as np
 import pytest
 
-from matcher.config import (
+from crosswalk.config import (
     FEATURE_VERSION,
     SPARK_PORTABLE_FEATURES,
     SPARK_PORTABLE_XGB_PARAMS,
@@ -34,9 +34,9 @@ from matcher.config import (
 
 _RESHIP = (
     "Re-export and reship the Spark model in this PR: "
-    "uv run matcher export-spark-model -o data/models/export && "
-    "cp data/models/export/model.json src/matcher/_model/spark_model.json && "
-    "cp data/models/export/manifest.json src/matcher/_model/spark_manifest.json"
+    "uv run crosswalk export-spark-model -o data/models/export && "
+    "cp data/models/export/model.json src/crosswalk/_model/spark_model.json && "
+    "cp data/models/export/manifest.json src/crosswalk/_model/spark_manifest.json"
 )
 
 
@@ -120,7 +120,7 @@ def test_shipped_spark_model_loads_and_predicts(shipped_manifest):
     NOTE: XGBoost's native JSON does not persist Python feature names, so this
     can only guard the feature *count* (num_feature), not name/order — the
     booster happily predicts on any 28 columns. Feature identity/order is
-    guaranteed by construction: `matcher export-spark-model` writes
+    guaranteed by construction: `crosswalk export-spark-model` writes
     ``matcher.feature_names`` (the training column order) into the manifest the
     booster ships with, and ``test_shipped_spark_manifest_features_match_config``
     pins that manifest to config. Consumers MUST feed columns in
@@ -128,7 +128,7 @@ def test_shipped_spark_model_loads_and_predicts(shipped_manifest):
     """
     import xgboost as xgb
 
-    from matcher.spark import spark_model_json
+    from crosswalk.spark import spark_model_json
 
     booster = xgb.Booster()
     booster.load_model(bytearray(spark_model_json().encode()))

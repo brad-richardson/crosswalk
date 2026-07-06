@@ -6,7 +6,7 @@ import json
 
 import pandas as pd
 
-from matcher.agent_labeling.stitch_expressibility import (
+from crosswalk.agent_labeling.stitch_expressibility import (
     measure_expressibility,
     settled_labels,
 )

@@ -10,7 +10,7 @@ pytest.importorskip(
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from matcher.web.app import create_app  # noqa: E402
+from crosswalk.web.app import create_app  # noqa: E402
 
 
 @pytest.fixture
@@ -30,8 +30,8 @@ class TestContextTileEndpoint:
         assert response.headers["content-type"] == "application/x-protobuf"
         assert response.content == b""
 
-    @patch("matcher.web.routes.tiles._generate_tile")
-    @patch("matcher.web.routes.tiles.list_dataset_configs")
+    @patch("crosswalk.web.routes.tiles._generate_tile")
+    @patch("crosswalk.web.routes.tiles.list_dataset_configs")
     def test_known_dataset_returns_protobuf(self, mock_configs, mock_gen, client):
         """Known dataset should return protobuf content type."""
         mock_configs.return_value = {"test_dataset"}

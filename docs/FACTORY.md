@@ -1,4 +1,4 @@
-# Bridge-Table Factory (`matcher factory`)
+# Bridge-Table Factory (`crosswalk factory`)
 
 Milestone **M4** of [SCALING_ROADMAP.md](SCALING_ROADMAP.md): batch, versioned,
 resumable stitching of many local datasets to Overture. The factory produces
@@ -10,31 +10,31 @@ The factory is a thin orchestration layer over the existing stitch pipeline. It
 routes every dataset through the same `run_pipeline` seams
 (`load_and_filter_inputs → score_candidates_from_geodataframes →
 optimize_and_export`), so factory output for a dataset is identical to
-`matcher stitch <dataset>` (modulo the versioned path + the `matched_at`
+`crosswalk stitch <dataset>` (modulo the versioned path + the `matched_at`
 timestamp). It does **not** fork pipeline logic.
 
 ## Quick start
 
 ```bash
 # Run all stitchable datasets discovered under data/raw, 4 workers
-uv run matcher factory run --all --workers 4
+uv run crosswalk factory run --all --workers 4
 
 # Run specific datasets
-uv run matcher factory run us_frisco_trails us_usfs_lolo -D de_berlin_roads
+uv run crosswalk factory run us_frisco_trails us_usfs_lolo -D de_berlin_roads
 
 # Re-run only grouping/optimization from cached scores (~2 s vs ~7 min)
-uv run matcher factory reoptimize --all
+uv run crosswalk factory reoptimize --all
 
 # GERS churn between two releases (release-notes artifact)
-uv run matcher factory delta us_frisco_trails --from 2026-01-21.0 --to 2026-06-17.0
+uv run crosswalk factory delta us_frisco_trails --from 2026-01-21.0 --to 2026-06-17.0
 
 # Status of everything produced so far
-uv run matcher factory status
+uv run crosswalk factory status
 ```
 
 ## Command surface
 
-### `matcher factory run [DATASETS...] [--all] [-D name ...]`
+### `crosswalk factory run [DATASETS...] [--all] [-D name ...]`
 
 Runs the full stitch pipeline per dataset in parallel worker **processes** (feature
 scoring is CPU-bound; it parallelizes trivially across datasets). Failure of one
@@ -64,7 +64,7 @@ comparable while staying stable. Restructuring the multiprocessing so an outer
 worker pool is safe (e.g. spawn context, or a single shared pool) is a deferred
 follow-up (see "Not yet in the factory").
 
-### `matcher factory reoptimize [DATASETS...] [--all]`
+### `crosswalk factory reoptimize [DATASETS...] [--all]`
 
 Re-runs only optimization / grouping / sidecar export from the cached scored
 candidates (`scored_candidates.parquet`). This is the iteration loop for grouping
@@ -73,7 +73,7 @@ or optimizer-setting changes: ~2 s instead of a full re-score. Requires a prior
 (inputs + model + `FEATURE_VERSION` + buffer) still matches. If the score-relevant
 inputs changed, `reoptimize` refuses and tells you to `run --force`.
 
-### `matcher factory delta DATASET --from RELEASE --to RELEASE`
+### `crosswalk factory delta DATASET --from RELEASE --to RELEASE`
 
 Reports `local_id`-level GERS match churn between two factory releases of a
 dataset: `same` (identical GERS set), `changed` (matched in both, different set),
@@ -82,12 +82,12 @@ write. Only `match_decision == "match"` bridge rows count as matched (review-ban
 rows are excluded, matching the pipeline's own matched/unmatched accounting). This
 is the consumer-facing release-notes artifact for a new Overture release.
 
-### `matcher factory status`
+### `crosswalk factory status`
 
 Lists every `release=*/dataset=*` output with its matched count, group count,
 wall time, and creation timestamp.
 
-### `matcher factory publish [DATASETS...] [--all]`
+### `crosswalk factory publish [DATASETS...] [--all]`
 
 Assembles the public R2 publication tree from the factory outputs and syncs it
 (Milestone **M5**). Pipeline-free: reads finished `release=/dataset=` outputs,
@@ -108,7 +108,7 @@ Versioned, Hive-partitioned under the factory root (default `data/factory/`):
 data/factory/
   release=<overture-release>/
     dataset=<name>/
-      bridge.parquet              # local_id ↔ gers_id bridge (same schema as matcher stitch)
+      bridge.parquet              # local_id ↔ gers_id bridge (same schema as crosswalk stitch)
       groups.json                 # M:N/1:N/N:1 stitching groups sidecar (identical to the stitch sidecar)
       manifest.json               # provenance + staleness keys + counts/group stats
       unmatched.parquet           # unmatched + review-band target features
@@ -216,7 +216,7 @@ cd ~/dev/matcher && git pull
 uv pip install -e ".[dev,ml,web]"
 
 # 2. Ensure the model exists (fresh clone) — required before scoring
-uv run matcher train                 # or copy data/models/matcher_model_combined.joblib
+uv run crosswalk train                 # or copy data/models/matcher_model_combined.joblib
 
 # 3. Cap native BLAS/OpenMP thread pools to 1 BEFORE launching. Scoring already
 #    parallelizes at the process level (-j 12), so per-process native threads only
@@ -235,17 +235,17 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 #    ~8-50s in at >=6 concurrent datasets (reproduced on this box; NOT OOM / cgroup
 #    / segfault / native-thread oversubscription — it is the nested fork itself).
 #    So run datasets sequentially and put all 12 cores into intra-dataset scoring.
-nohup uv run matcher factory run --all --workers 1 --jobs-per-dataset 12 \
+nohup uv run crosswalk factory run --all --workers 1 --jobs-per-dataset 12 \
     > factory.out 2>&1 &
 
 # 5. If it dies / you kill it, just re-run the same command — finished datasets
 #    are skipped via full_key; only unfinished ones re-run.
-uv run matcher factory run --all --workers 1 --jobs-per-dataset 12   # resumes
+uv run crosswalk factory run --all --workers 1 --jobs-per-dataset 12   # resumes
 
 # 6. Iterate on grouping/optimizer settings without re-scoring (~2 s/dataset).
 #    reoptimize does no feature scoring (reads the cache), so it never spawns the
 #    inner pool — but keep --workers 1 for consistency / to avoid the outer pool.
-uv run matcher factory reoptimize --all --workers 1
+uv run crosswalk factory reoptimize --all --workers 1
 ```
 
 Sizing: the full ~24-dataset inventory is roughly one overnight run. Feature
@@ -266,9 +266,9 @@ which fits 64 GB comfortably one-at-a-time. Spatial tiling stays deferred
 ## Not yet in the factory (deliberately)
 
 - **`us_boston_streets` and `us_seattle_sidewalks`** are still produced by the
-  legacy `matcher stitch` → `data/output/` path so the panel/review queues stay
+  legacy `crosswalk stitch` → `data/output/` path so the panel/review queues stay
   stable. Adopting them into the factory layout is a follow-up.
-- **R2 publish (M5)**: SHIPPED as `matcher factory publish` — assembles the public
+- **R2 publish (M5)**: SHIPPED as `crosswalk factory publish` — assembles the public
   staging tree (license-gated bridge + manifest per dataset, per-release unified
   `all_bridges.parquet`, checksums, machine-readable `index.json`, credibility
   `index.html`) and syncs to Cloudflare R2 via the S3-compatible `aws` CLI. The

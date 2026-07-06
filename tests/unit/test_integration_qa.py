@@ -1,6 +1,6 @@
 """Unit tests for integration QA module."""
 
-from matcher.integration_qa.decision_store import (
+from crosswalk.integration_qa.decision_store import (
     MergedDecisionStore,
     OrphanDecisionStore,
 )

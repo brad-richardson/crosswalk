@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from matcher.agent_labeling.runner import (
+from crosswalk.agent_labeling.runner import (
     IMAGE_DESCRIPTIONS,
     VARIANT_CONFIG,
     prepare_batch_prompt,
@@ -381,7 +381,9 @@ class TestRunAgentBatch:
                     break
             return MagicMock(returncode=0, stdout="Done", stderr="")
 
-        with patch("matcher.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run):
+        with patch(
+            "crosswalk.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run
+        ):
             run_agent_batch(
                 model="opus",
                 variant="geometry_only",
@@ -431,7 +433,9 @@ class TestRunAgentBatch:
                     break
             return MagicMock(returncode=0, stdout="Done", stderr="")
 
-        with patch("matcher.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run):
+        with patch(
+            "crosswalk.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run
+        ):
             run_agent_batch(
                 model="sonnet",
                 variant="geometry_only",
@@ -469,7 +473,9 @@ class TestRunAgentBatch:
                     break
             return MagicMock(returncode=0, stdout="Done", stderr="")
 
-        with patch("matcher.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run):
+        with patch(
+            "crosswalk.agent_labeling.runner.subprocess.run", side_effect=mock_subprocess_run
+        ):
             run_agent_batch(
                 model="opus",
                 variant="geometry_only",

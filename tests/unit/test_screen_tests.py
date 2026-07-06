@@ -3,11 +3,11 @@
 import geopandas as gpd
 from shapely.geometry import LineString, Polygon
 
-from matcher.screen import CandidateContext, ScreenOutcome
-from matcher.screen.tests.building_test import BuildingTest
-from matcher.screen.tests.landcover_test import LandcoverTest
-from matcher.screen.tests.travel_mode import get_travel_mode
-from matcher.screen.tests.water_body_test import WaterBodyTest
+from crosswalk.screen import CandidateContext, ScreenOutcome
+from crosswalk.screen.tests.building_test import BuildingTest
+from crosswalk.screen.tests.landcover_test import LandcoverTest
+from crosswalk.screen.tests.travel_mode import get_travel_mode
+from crosswalk.screen.tests.water_body_test import WaterBodyTest
 
 
 def _buffer_polygon(poly: Polygon, buffer_m: float, crs: str = "EPSG:32618") -> Polygon:

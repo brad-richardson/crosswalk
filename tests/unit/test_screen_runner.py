@@ -2,9 +2,9 @@
 
 import geopandas as gpd
 
-from matcher.screen import ScreenReport
-from matcher.screen.runner import _get_bridge_target_column
-from matcher.utils.dataframe import find_id_column
+from crosswalk.screen import ScreenReport
+from crosswalk.screen.runner import _get_bridge_target_column
+from crosswalk.utils.dataframe import find_id_column
 
 
 class TestIdColumnDetection:

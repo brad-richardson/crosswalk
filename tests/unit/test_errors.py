@@ -1,6 +1,6 @@
 """Tests for error tracking infrastructure."""
 
-from matcher.errors import (
+from crosswalk.errors import (
     ErrorAggregator,
     ErrorPhase,
     ErrorSeverity,

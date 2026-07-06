@@ -8,7 +8,7 @@ suffix changes for the same geometry, existing label linkages break.
 import h3
 from shapely.geometry import LineString
 
-from matcher.utils.spatial_id import (
+from crosswalk.utils.spatial_id import (
     H3_RESOLUTION,
     H3_TRAILING_F_COUNT,
     compute_spatial_suffix,

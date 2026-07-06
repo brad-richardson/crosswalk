@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from shapely import LineString
 
-from matcher.features._jit_helpers import (
+from crosswalk.features._jit_helpers import (
     angle_diff_numba,
     collinear_gap_ratio_numba,
     compute_crossing_angle_stats_numba,
@@ -19,14 +19,14 @@ from matcher.features._jit_helpers import (
     compute_shape_complexity_numba,
     query_nearby_endpoints_numba,
 )
-from matcher.features.geometric import (
+from crosswalk.features.geometric import (
     _compute_hausdorff_stats,
     compute_collinear_gap_ratio,
     compute_shape_complexity,
     compute_sinuosity,
     compute_vertex_density,
 )
-from matcher.features.relational import compute_endpoint_proximity, compute_parallel_alignment
+from crosswalk.features.relational import compute_endpoint_proximity, compute_parallel_alignment
 
 
 class TestComputeHeadingNumba:
@@ -694,7 +694,7 @@ class TestComputeAngleHistogramNumba:
 
     def test_straight_line_all_in_first_bin(self):
         """Straight line should have all turns in first bin (0° turns)."""
-        from matcher.features._jit_helpers import compute_angle_histogram_numba
+        from crosswalk.features._jit_helpers import compute_angle_histogram_numba
 
         # Perfectly straight line - all turn angles should be ~0
         coords = np.array([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]])
@@ -706,7 +706,7 @@ class TestComputeAngleHistogramNumba:
 
     def test_right_angle_turns(self):
         """Line with 90° turns should have turns in the 90° bin."""
-        from matcher.features._jit_helpers import compute_angle_histogram_numba
+        from crosswalk.features._jit_helpers import compute_angle_histogram_numba
 
         # Zigzag with 90° turns
         coords = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]])
@@ -719,7 +719,7 @@ class TestComputeAngleHistogramNumba:
 
     def test_mixed_angles(self):
         """Line with mixed turn angles should distribute across bins."""
-        from matcher.features._jit_helpers import compute_angle_histogram_numba
+        from crosswalk.features._jit_helpers import compute_angle_histogram_numba
 
         # One small turn (~15°) and one larger turn (~60°)
         # Point 1 -> 2: heading ~0°
@@ -742,7 +742,7 @@ class TestComputeAngleHistogramNumba:
 
     def test_too_few_points_returns_zeros(self):
         """Lines with fewer than 3 points should return zeros."""
-        from matcher.features._jit_helpers import compute_angle_histogram_numba
+        from crosswalk.features._jit_helpers import compute_angle_histogram_numba
 
         # 2 points - no turns possible
         coords = np.array([[0.0, 0.0], [10.0, 0.0]])
@@ -753,7 +753,7 @@ class TestComputeAngleHistogramNumba:
 
     def test_histogram_is_normalized(self):
         """Histogram should sum to 1.0 for valid lines."""
-        from matcher.features._jit_helpers import compute_angle_histogram_numba
+        from crosswalk.features._jit_helpers import compute_angle_histogram_numba
 
         # Complex line with multiple turns
         coords = np.array(
@@ -769,7 +769,7 @@ class TestHistogramIntersectionNumba:
 
     def test_identical_histograms(self):
         """Identical histograms should have intersection of 1.0."""
-        from matcher.features._jit_helpers import histogram_intersection_numba
+        from crosswalk.features._jit_helpers import histogram_intersection_numba
 
         h1 = np.array([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
         h2 = np.array([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -779,7 +779,7 @@ class TestHistogramIntersectionNumba:
 
     def test_disjoint_histograms(self):
         """Completely disjoint histograms should have intersection of 0.0."""
-        from matcher.features._jit_helpers import histogram_intersection_numba
+        from crosswalk.features._jit_helpers import histogram_intersection_numba
 
         h1 = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         h2 = np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
@@ -789,7 +789,7 @@ class TestHistogramIntersectionNumba:
 
     def test_partial_overlap(self):
         """Partially overlapping histograms should have intermediate intersection."""
-        from matcher.features._jit_helpers import histogram_intersection_numba
+        from crosswalk.features._jit_helpers import histogram_intersection_numba
 
         h1 = np.array([0.6, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         h2 = np.array([0.4, 0.4, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -800,7 +800,7 @@ class TestHistogramIntersectionNumba:
 
     def test_uniform_histograms(self):
         """Uniform histograms should have intersection of 1.0."""
-        from matcher.features._jit_helpers import histogram_intersection_numba
+        from crosswalk.features._jit_helpers import histogram_intersection_numba
 
         h1 = np.array([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125])
         h2 = np.array([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125])

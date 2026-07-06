@@ -8,7 +8,7 @@ import re
 
 from typer.testing import CliRunner
 
-from matcher.cli import app
+from crosswalk.cli import app
 
 runner = CliRunner()
 
@@ -56,7 +56,7 @@ class TestTopLevelCommands:
         """Test version command."""
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "matcher version" in result.output.lower()
+        assert "crosswalk version" in result.output.lower()
 
 
 class TestDataCommandGroup:

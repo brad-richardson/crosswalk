@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString
 
-from matcher.labeling.geometry_store import GeometryStore
+from crosswalk.labeling.geometry_store import GeometryStore
 
 
 @pytest.fixture

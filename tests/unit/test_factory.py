@@ -13,19 +13,19 @@ import json
 import pandas as pd
 import pytest
 
-from matcher.factory import discover_pairs, resolve_release
-from matcher.factory.delta import compute_delta
-from matcher.factory.discovery import DatasetPair, read_release_from_meta
-from matcher.factory.manifest import (
+from crosswalk.factory import discover_pairs, resolve_release
+from crosswalk.factory.delta import compute_delta
+from crosswalk.factory.discovery import DatasetPair, read_release_from_meta
+from crosswalk.factory.manifest import (
     Manifest,
     compute_full_key,
     compute_optimize_key,
     compute_score_key,
     file_fingerprint,
 )
-from matcher.factory.runner import FactoryPaths, build_keys, is_up_to_date
-from matcher.factory.scored_cache import read_scored_cache, write_scored_cache
-from matcher.matching.types import MatchDecision, MatchResult
+from crosswalk.factory.runner import FactoryPaths, build_keys, is_up_to_date
+from crosswalk.factory.scored_cache import read_scored_cache, write_scored_cache
+from crosswalk.matching.types import MatchDecision, MatchResult
 
 
 # --------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def test_settings_snapshot_covers_decision_knobs():
     """Every optimize-phase decision knob must be in the snapshot (else a change
     to it would wrongly skip via full_key). optimizer_review_threshold is the one
     the adversarial review caught missing."""
-    from matcher.factory.manifest import settings_snapshot
+    from crosswalk.factory.manifest import settings_snapshot
 
     snap = settings_snapshot()
     for knob in (
@@ -182,7 +182,7 @@ def test_build_keys_reoptimize_semantics(tmp_path, monkeypatch):
     raw.mkdir()
     pair = _make_triple(raw, "xx_test_roads")
 
-    from matcher.config import settings
+    from crosswalk.config import settings
 
     monkeypatch.setattr(settings, "resolver_prune_enabled", True)
     k_a = build_keys(pair, 75.0)
@@ -395,12 +395,12 @@ def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
     confidence-drop prune falls back to filename parsing ("bridge.parquet"), misses
     the per-dataset allowlist, and runs with prune OFF for allowlisted datasets
     (e.g. us_boston_streets / us_seattle_sidewalks) — silently diverging from the
-    equivalent ``matcher stitch`` output.
+    equivalent ``crosswalk stitch`` output.
     """
     from types import SimpleNamespace
 
-    import matcher.factory.runner as fr
-    import matcher.pipeline as pipeline
+    import crosswalk.factory.runner as fr
+    import crosswalk.pipeline as pipeline
 
     pair = _make_triple(tmp_path, "us_boston_streets")
     paths = FactoryPaths(root=tmp_path / "factory")
@@ -416,7 +416,7 @@ def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
         lambda **k: ([], SimpleNamespace(reference="REF", target="TGT")),
     )
     monkeypatch.setattr(fr, "write_scored_cache", lambda results, path: 0)
-    monkeypatch.setattr("matcher.pipeline.runner._to_wgs84", lambda x: x)
+    monkeypatch.setattr("crosswalk.pipeline.runner._to_wgs84", lambda x: x)
 
     captured: dict = {}
 
