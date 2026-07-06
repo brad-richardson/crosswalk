@@ -226,11 +226,19 @@ function busy(node, on, msg) {
   }
 
   // ---- geometry join example ----
-  const exDs = (relToDatasets[latest] || ["<dataset>"])[0];
+  // Overture's S3 bucket only keeps recent releases, so this is NOT the bridge
+  // release. Check https://docs.overturemaps.org for the latest; GERS ids are
+  // stable across releases (~99% measured survival), so a newer release joins fine.
+  const OVERTURE_RELEASE = "2026-06-17.0";
+  const dsList = relToDatasets[latest] || ["<dataset>"];
+  const exDs = dsList.includes("us_montana_missoula") ? "us_montana_missoula" : dsList[0];
   const joinSql =
     `-- Join bridge ids to Overture geometry (WKT) for mapping.\n` +
-    `-- Overture segments are published on public S3; DuckDB reads them directly.\n` +
+    `-- Run in the DuckDB CLI. Overture segments are on public S3; the bbox\n` +
+    `-- filter below is what keeps this fast — Overture's files are spatially\n` +
+    `-- sorted, so DuckDB skips everything outside the box (predicate pushdown).\n` +
     `INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;\n` +
+    `SET s3_region = 'us-west-2';\n` +
     `WITH bridge AS (\n` +
     `  SELECT * FROM read_parquet(${sqlStr(bridgeUrl(latest, exDs))})\n` +
     `  WHERE match_decision = 'match'\n` +
@@ -238,9 +246,15 @@ function busy(node, on, msg) {
     `SELECT b.local_id, b.gers_id, b.confidence, ST_AsText(s.geometry) AS overture_wkt\n` +
     `FROM bridge b\n` +
     `JOIN read_parquet(\n` +
-    `  's3://overturemaps-us-west-2/release/${latest}/theme=transportation/type=segment/*',\n` +
-    `  filename=false, hive_partitioning=true\n` +
+    `  -- Overture release: check https://docs.overturemaps.org for the latest.\n` +
+    `  -- GERS ids are stable across releases, so it need not match the bridge release.\n` +
+    `  's3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=transportation/type=segment/*',\n` +
+    `  hive_partitioning=true\n` +
     `) s ON s.id = b.gers_id\n` +
+    `-- bbox: Missoula, MT (us_montana_missoula). Swap bbox + dataset together —\n` +
+    `-- e.g. Seattle: xmin -122.44 / -122.22, ymin 47.49 / 47.74.\n` +
+    `WHERE s.bbox.xmin BETWEEN -114.41 AND -113.68\n` +
+    `  AND s.bbox.ymin BETWEEN 46.72 AND 47.14\n` +
     `LIMIT 100;`;
   setSql("joinSql", joinSql);
 
