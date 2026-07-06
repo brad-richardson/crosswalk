@@ -94,8 +94,10 @@
     <h2>Want geometry on a map?</h2>
     <p class="lead">Bridge tables carry <strong>IDs only</strong> — no geometry. To put
       matches on a map, join the <code>gers_id</code> to the geometry in Overture's
-      transportation theme. Example (DuckDB, reading Overture's public S3 release
-      directly):</p>
+      transportation theme, read straight from Overture's public S3. The whole theme
+      covers the planet (hundreds of millions of segments), but the bbox filter in the
+      example lets DuckDB skip almost all of it — only the row groups covering your
+      city are actually downloaded. Paste into the DuckDB CLI:</p>
     <pre data-copy id="joinSql"></pre>
     <p class="lead">Overture geometry is ODbL 1.0 (© OpenStreetMap contributors); see
       the licensing note on the <a id="statsLink" href="index.html">stats page</a>.</p>

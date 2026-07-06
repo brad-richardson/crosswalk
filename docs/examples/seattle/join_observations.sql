@@ -35,8 +35,10 @@ SELECT local_id, unitid, compkey, unitdesc
 FROM read_parquet('data/demo/seattle_sidewalk_ids.parquet');
 
 -- 3) The crosswalk bridge table (ID-only: local_id <-> gers_id + confidence).
---    Local path today; at publish time this line becomes the R2 URL, e.g.:
---    read_parquet('https://<bridge-host>/bridges/release=<overture-release>/dataset=us_seattle_sidewalks/bridge.parquet')
+--    Local path today; once us_seattle_sidewalks is published this line becomes
+--    the R2 URL (note: release= is the BRIDGE release, not the Overture release
+--    in the S3 path below), e.g.:
+--    read_parquet('https://pub-1960acc8b68148ac82da2fd033be804f.r2.dev/bridges/release=2026-01-21.0/dataset=us_seattle_sidewalks/bridge.parquet')
 CREATE OR REPLACE TEMP VIEW bridge AS
 SELECT local_id, gers_id, confidence, match_type, gers_start_frac, gers_end_frac
 FROM read_parquet('data/output/us_seattle_sidewalks_bridge.parquet')
@@ -44,6 +46,8 @@ WHERE match_decision = 'match';
 
 -- 4) The open map: Overture transportation segments, read live from public S3
 --    (HTTP range reads; the bbox predicate prunes to Seattle row groups).
+--    Overture release: check https://docs.overturemaps.org for the latest —
+--    GERS ids are stable across releases, so it need not match the bridge release.
 CREATE OR REPLACE TEMP TABLE ovt AS
 SELECT id, names.primary AS name, class, geometry
 FROM read_parquet(

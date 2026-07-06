@@ -93,9 +93,14 @@ the query is already written so that is the only change:
 ```sql
 -- today (local factory/stitch output):
 FROM read_parquet('data/output/us_seattle_sidewalks_bridge.parquet')
--- once published (see docs/PUBLISHING.md; placeholder until the first R2 upload):
-FROM read_parquet('https://<bridge-host>/bridges/release=<overture-release>/dataset=us_seattle_sidewalks/bridge.parquet')
+-- once us_seattle_sidewalks is published (see docs/PUBLISHING.md), the live host:
+FROM read_parquet('https://pub-1960acc8b68148ac82da2fd033be804f.r2.dev/bridges/release=2026-01-21.0/dataset=us_seattle_sidewalks/bridge.parquet')
 ```
+
+(The `release=` in the bridge URL is the bridge release — the Overture snapshot the
+bridge was built on. The Overture S3 path above uses a *current* Overture release
+instead, because Overture's bucket only keeps recent ones; GERS ids are stable
+across releases, so the mix is fine.)
 
 Real output (top of the hazard queue, live SDOT data, live Overture geometry;
 Overture footways are mostly unnamed, so the human-readable location comes from
