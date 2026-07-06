@@ -135,8 +135,8 @@ function chartCard(title, note, bodyHtml) {
   el("footer").innerHTML =
     `Machine-readable index: <a href="${esc(safeUrl((index.site_url || "") + "/index.json"))}"><code>index.json</code></a> · ` +
     `per-release <code>checksums.txt</code> (sha256) accompanies every release. ` +
-    `An independent community project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a> · ` +
-    `<a href="https://github.com/brad-richardson/matcher/issues">feedback welcome</a>.`;
+    `An independent community project · <a href="https://github.com/brad-richardson/crosswalk">source on GitHub</a> · ` +
+    `<a href="https://github.com/brad-richardson/crosswalk/issues">feedback welcome</a>.`;
 })();
 
 function fileLinks(r) {

@@ -12,7 +12,7 @@ A city already keys mountains of operational data to its own street IDs: crash r
 
 Concretely, a bridge table lets you:
 
-- **Join local attributes to the open map** — put crash counts, pavement scores, or curb rules onto Overture geometry ([worked SQL example](docs/examples/join-city-data.md)).
+- **Join local attributes to the open map** — put crash counts, pavement scores, or curb rules onto Overture geometry ([worked SQL example](docs/examples/join-city-data.md); [real-data demo: Seattle's open sidewalk-hazard queue on Overture](docs/examples/seattle-sidewalk-join-demo.md)).
 - **Cross-reference between cities** — the same GERS id anchors data from every city that publishes a bridge, so a multi-city analysis stops being N bespoke joins.
 - **Track change over time** — GERS ids are stable across Overture releases; compare matches release-to-release to detect churn.
 

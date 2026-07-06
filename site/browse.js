@@ -13,8 +13,8 @@ renderNav("browse");
 el("statsLink").href = withBase("index.html");
 el("footer").innerHTML =
   `Queries run in your browser (DuckDB-WASM) against read-only Parquet — nothing is sent to a server. ` +
-  `An independent community project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a> · ` +
-  `<a href="https://github.com/brad-richardson/matcher/issues">feedback welcome</a>.`;
+  `An independent community project · <a href="https://github.com/brad-richardson/crosswalk">source on GitHub</a> · ` +
+  `<a href="https://github.com/brad-richardson/crosswalk/issues">feedback welcome</a>.`;
 
 // --------------------------------------------------------------------------
 // Shared rendering
