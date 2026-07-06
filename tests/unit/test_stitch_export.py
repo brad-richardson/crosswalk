@@ -790,3 +790,49 @@ def test_vote_provenance_best_effort_on_malformed_votes(tmp_path):
     n_votes, n_consensus = write_vote_provenance([b1], DATASET, votes_dir=votes_dir)
     assert n_votes == 0 and n_consensus == 1
     assert (votes_dir / f"dataset={DATASET}" / "consensus.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound)
+# ---------------------------------------------------------------------------
+
+
+def _write_votes_csv(batch_dir: Path, providers: list[str]) -> None:
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    with open(batch_dir / "votes.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["group_id", "provider", "model", "choice"])
+        for p in providers:
+            w.writerow(["g1", p, "m", "A"])
+
+
+def test_nonstandard_panel_batches_flags_swapped_voter(tmp_path):
+    """A no-agy batch (opencode swapped in) is flagged; a default batch is not."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    ok = tmp_path / "batch_default"
+    _write_votes_csv(ok, ["claude", "codex", "agy"])
+    bad = tmp_path / "batch_noagy"
+    _write_votes_csv(bad, ["claude", "codex", "opencode"])
+
+    offending = nonstandard_panel_batches([ok, bad])
+    assert set(offending) == {"batch_noagy"}
+    assert offending["batch_noagy"] == {"claude", "codex", "opencode"}
+
+
+def test_nonstandard_panel_batches_flags_subset_panel(tmp_path):
+    """A degraded 2-provider batch is also nonstandard (missing voter)."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_two"
+    _write_votes_csv(b, ["claude", "codex"])
+    assert set(nonstandard_panel_batches([b])) == {"batch_two"}
+
+
+def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
+    """No votes.csv -> best-effort skip, not flagged (consensus gate lives in CLI)."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_novotes"
+    b.mkdir()
+    assert nonstandard_panel_batches([b]) == {}

@@ -1061,14 +1061,16 @@ def run_stitch_panel(
     panel_name: str = typer.Option(
         "default",
         "--panel",
-        help="Named panel config: 'default'/'v2' (3 voters: claude+codex+agy) or "
+        help="Named panel config: 'default'/'v2' (3 voters: claude+codex+agy), "
         "'v3-candidate' (adds a 4th opencode/Qwen3-VL voter — OFF by default, "
-        "opt-in only; does not affect production waves).",
+        "opt-in only; does not affect production waves), or 'no-agy' "
+        "(claude+codex+opencode quota-outage fallback; its labels are refused by "
+        "stitch-export without --allow-nonstandard-panel).",
     ),
     opencode_model: str = typer.Option(
         "openrouter/qwen/qwen3-vl-235b-a22b-instruct",
         "--opencode-model",
-        help="Model string for the opencode 4th voter (only used by --panel v3-candidate).",
+        help="Model string for the opencode voter (used by --panel v3-candidate and no-agy).",
     ),
     resume: bool = typer.Option(
         False,
@@ -1368,6 +1370,16 @@ def export_stitch_panel(
     labels_dir: Path = typer.Option(Path("labels/stitching"), "--labels", "-l"),
     max_edges: int = typer.Option(20, "--max-edges", help="Skip groups with > this many edges"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report only; write nothing"),
+    allow_nonstandard_panel: bool = typer.Option(
+        False,
+        "--allow-nonstandard-panel",
+        help=(
+            "Export even when a batch's votes.csv provider set differs from the "
+            "default claude+codex+agy panel (e.g. --panel no-agy). Labels are "
+            "still stamped panel_unanimous_v3, so only use this after an explicit "
+            "provenance decision."
+        ),
+    ),
 ):
     """Export unanimous panel consensus into human-equivalent stitching labels.
 
@@ -1375,7 +1387,8 @@ def export_stitch_panel(
     order and reported per group: (a) auto_accept, (b) edge count <= max-edges,
     (c) class-consistency, (d) sliver canonicalization, (e) human precedence.
     Exported rows use the labeler ``panel_unanimous_v3`` and upsert by group_id
-    (idempotent).
+    (idempotent). Batches voted by a nonstandard panel composition are refused
+    unless ``--allow-nonstandard-panel`` is passed (composition is provenance).
 
     Examples:
         crosswalk agent stitch-export \\
@@ -1384,6 +1397,7 @@ def export_stitch_panel(
     """
     from ..agent_labeling.stitch_export import (
         REASON_HUMAN_PRECEDENCE,
+        nonstandard_panel_batches,
         plan_exports,
         write_exports,
         write_vote_provenance,
@@ -1406,6 +1420,17 @@ def export_stitch_panel(
                 f"[yellow]Warning: no batch.json in {bd} — sliver canonicalization "
                 "and edge-overlap precedence degrade for its groups[/yellow]"
             )
+
+    offending = nonstandard_panel_batches(batch_dirs)
+    if offending and not allow_nonstandard_panel:
+        for name, providers in sorted(offending.items()):
+            console.print(
+                f"[red]Batch {name} was voted by a nonstandard panel "
+                f"({', '.join(sorted(providers))}) — refusing to stamp its labels "
+                f"panel_unanimous_v3. Re-run with --allow-nonstandard-panel only "
+                f"after an explicit provenance decision.[/red]"
+            )
+        raise typer.Exit(1)
 
     report = plan_exports(batch_dirs, dataset, labels_dir, max_edges=max_edges)
 
