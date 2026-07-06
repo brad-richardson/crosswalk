@@ -12,12 +12,17 @@ For each M:N group in a stitch batch, writes a self-contained evidence pack:
 The agent (any provider) picks one option letter, or NONE if no option is
 correct. Options are the deduplicated optimizer assignment + top-K
 alternatives, from the shared :func:`build_stitch_options` so humans and agents
-see the identical option set ("verify, don't construct").
+see the identical option set ("verify, don't construct"). One panel-only
+exception: on monster groups (thousands of distinct candidate edges) the
+near-duplicate perturbation options are pruned to a small, maximally-distinct
+subset (:func:`prune_options_for_panel`) before rendering — the web review UI
+keeps the full set.
 """
 
 from __future__ import annotations
 
 import math
+import string
 from pathlib import Path
 
 import yaml
@@ -27,6 +32,7 @@ from shapely.geometry import LineString, MultiLineString
 from shapely.geometry import shape as shape_from_geojson
 from shapely.ops import nearest_points
 
+from ..config import settings
 from ..matching.sliver import (
     edge_overlap_m,
     edge_sliver_tag,
@@ -263,6 +269,115 @@ def _edge_align_fracs(edge: dict) -> dict:
             abs(edge["local_end_frac"] - edge["local_start_frac"]), 3
         )
     return out
+
+
+def prune_options_for_panel(
+    options_ctx: dict,
+    group: dict,
+    *,
+    max_options: int | None = None,
+    min_distinct_edges_trigger: int | None = None,
+) -> dict | None:
+    """Prune a monster group's option set to a small, maximally-distinct subset.
+
+    On large M:N groups the greedy-perturbation alternatives are ~20
+    near-duplicate variations of one assignment (each differing by only a few
+    edges), which wastes panel attention and prompt bytes. This prunes the
+    options IN PLACE (evidence-pack path only — the web review UI keeps the full
+    one-click set) to at most ``max_options`` picked for max-min edge-set
+    diversity, then re-letters the survivors A, B, C... so metadata and prompt
+    stay consistent (vote parsing is driven by metadata letters).
+
+    No-op (returns ``None``, mutates nothing) when the group's options span at
+    most ``min_distinct_edges_trigger`` distinct candidate edges or there are at
+    most ``max_options`` options — small groups keep byte-identical packs.
+
+    Always kept (never pruned, even beyond ``max_options``):
+      * the optimizer's proposed option (``is_optimizer``), and
+      * the whole-group seed options from ``generate_top_k_alternatives``
+        (the seeds' ``is_seed`` flag does not survive ``build_stitch_options``,
+        so they are re-identified by edge set: the full candidate set, and the
+        optimizer-selected set from the group edges' ``selected`` flags).
+
+    Remaining slots are filled greedily with the option whose edge set has the
+    maximum minimum symmetric difference to every already-kept option
+    (max-min diversity), tie-broken by higher ``total_confidence`` then original
+    option order, so the result is deterministic.
+
+    If the pruned-away options contained the panel's "right answer", NONE
+    remains a valid vote and routes the group to human review.
+
+    Returns a provenance dict ``{n_before, n_after, dropped_keys}`` (recorded in
+    metadata as ``options_pruned``) when pruning ran, else ``None``.
+    """
+    if max_options is None:
+        max_options = settings.stitch_panel_max_options
+    if min_distinct_edges_trigger is None:
+        min_distinct_edges_trigger = settings.stitch_panel_prune_min_distinct_edges
+
+    options = options_ctx["options"]
+    if len(options) <= max_options:
+        return None
+    keys = [frozenset((e["ref_id"], e["target_id"]) for e in o["edges"]) for o in options]
+    distinct_edges: set[tuple] = set().union(*keys) if keys else set()
+    if len(distinct_edges) <= min_distinct_edges_trigger:
+        return None
+
+    # Protected options: optimizer proposal + whole-group seeds (re-identified
+    # by edge set; ``selected`` flags are absent on older sidecars, in which
+    # case only the full-set seed is identifiable).
+    group_edges = group.get("edges", []) or []
+    full_set = frozenset((e["ref_id"], e["target_id"]) for e in group_edges)
+    selected_set = frozenset(
+        (e["ref_id"], e["target_id"]) for e in group_edges if e.get("selected")
+    )
+    kept: list[int] = []
+    for i, opt in enumerate(options):
+        if opt["is_optimizer"] or keys[i] == full_set or (selected_set and keys[i] == selected_set):
+            kept.append(i)
+
+    remaining = [i for i in range(len(options)) if i not in kept]
+    if not kept and remaining:
+        # No protected option at all: seed the greedy walk with the
+        # highest-confidence option (deterministic tie-break by original order).
+        start = max(remaining, key=lambda i: (options[i]["total_confidence"], -i))
+        kept.append(start)
+        remaining.remove(start)
+
+    # Greedy max-min diversity fill.
+    while len(kept) < max_options and remaining:
+        best = max(
+            remaining,
+            key=lambda i: (
+                min(len(keys[i] ^ keys[j]) for j in kept),
+                options[i]["total_confidence"],
+                -i,
+            ),
+        )
+        kept.append(best)
+        remaining.remove(best)
+
+    kept.sort()  # survivors keep their original relative order
+    dropped_keys = [options[i]["key"] for i in range(len(options)) if i not in kept]
+    survivors = [options[i] for i in kept]
+
+    # Re-letter A, B, C... (same scheme as build_stitch_options) and refresh the
+    # optimizer letter so metadata, prompt, and vote parsing agree.
+    letters = list(string.ascii_uppercase)
+    optimizer_letter = None
+    for i, opt in enumerate(survivors):
+        letter = letters[i] if i < len(letters) else f"O{i}"
+        opt["letter"] = letter
+        if opt["is_optimizer"]:
+            optimizer_letter = letter
+
+    options_ctx["options"] = survivors
+    options_ctx["optimizer_letter"] = optimizer_letter
+    return {
+        "n_before": len(keys),
+        "n_after": len(survivors),
+        "dropped_keys": dropped_keys,
+    }
 
 
 def build_metadata(group: dict, options_ctx: dict) -> dict:
@@ -706,6 +821,15 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
         logger.warning(f"Group {group.get('group_id')}: no options, skipping")
         return None
 
+    # Panel-only diversity pruning for monster groups (no-op below thresholds;
+    # the web review UI, which shares build_stitch_options, is unaffected).
+    prune_info = prune_options_for_panel(options_ctx, group)
+    if prune_info is not None:
+        logger.info(
+            f"Group {group.get('group_id')}: pruned options "
+            f"{prune_info['n_before']} -> {prune_info['n_after']} (diversity)"
+        )
+
     group_dir.mkdir(parents=True, exist_ok=True)
 
     overview = render_group_overview(group)
@@ -716,6 +840,8 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
         img.save(group_dir / f"option_{opt['letter']}.png")
 
     metadata = build_metadata(group, options_ctx)
+    if prune_info is not None:
+        metadata["options_pruned"] = prune_info
 
     # Junction zoom crops for SLIVER/BORDERLINE edges, and annotate the metadata
     # edge rows (all options that contain the edge) with their crop filename so

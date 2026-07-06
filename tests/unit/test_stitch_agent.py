@@ -7,6 +7,7 @@ consensus rules, evidence metadata, and eval matching.
 
 from __future__ import annotations
 
+import copy
 import errno
 import json
 import math
@@ -27,6 +28,7 @@ from crosswalk.agent_labeling.stitch_evidence import (
     build_metadata,
     build_prompt,
     generate_group_evidence,
+    prune_options_for_panel,
 )
 from crosswalk.matching.stitch_options import build_stitch_options
 
@@ -853,6 +855,205 @@ def test_pack_size_and_zoom_crop_cap_bounded(tmp_path):
     # Hardest measured packs were ~620 KB; keep the same order of magnitude with
     # a generous ceiling so a runaway crop count would trip this.
     assert total < 1_500_000, f"pack too large: {total} bytes across {len(pngs)} PNGs"
+
+
+# ---------------------------------------------------------------------------
+# Panel option pruning (diverse subset for monster groups)
+# ---------------------------------------------------------------------------
+
+
+def _pairs(spec: list[int]) -> list[tuple[str, str]]:
+    return [(f"r{i}", f"t{i}") for i in spec]
+
+
+def _mk_option(key: str, pairs: list[tuple[str, str]], conf: float, is_optimizer=False) -> dict:
+    """Hand-build an option dict shaped like build_stitch_options output."""
+    edges = [{"ref_id": r, "target_id": t, "confidence": conf} for r, t in pairs]
+    total = round(conf * len(edges), 4)
+    return {
+        "key": key,
+        "label": key,
+        "is_optimizer": is_optimizer,
+        "edges": edges,
+        "edge_count": len(edges),
+        "total_confidence": total,
+        "mean_confidence": conf,
+        "active_refs": sorted({r for r, _ in pairs}),
+        "active_targets": sorted({t for _, t in pairs}),
+    }
+
+
+def _mk_ctx(options: list[dict]) -> dict:
+    for i, o in enumerate(options):
+        o["letter"] = chr(ord("A") + i)
+    opt_letter = next((o["letter"] for o in options if o["is_optimizer"]), None)
+    return {"options": options, "optimizer_letter": opt_letter}
+
+
+def _edge_sets(ctx: dict) -> list[frozenset]:
+    return [frozenset((e["ref_id"], e["target_id"]) for e in o["edges"]) for o in ctx["options"]]
+
+
+def test_prune_noop_below_option_count():
+    """<= max_options is a no-op: ctx untouched, no provenance (byte-identical packs)."""
+    g = make_group()
+    ctx = build_stitch_options(g)
+    snapshot = copy.deepcopy(ctx)
+    assert prune_options_for_panel(ctx, g) is None  # settings defaults
+    assert ctx == snapshot
+
+
+def test_prune_noop_below_distinct_edge_trigger():
+    """Many options over FEW distinct edges is a no-op: small groups keep everything."""
+    g = make_group()  # 3 distinct candidate edges
+    ctx = build_stitch_options(g)
+    snapshot = copy.deepcopy(ctx)
+    assert prune_options_for_panel(ctx, g, max_options=1, min_distinct_edges_trigger=5) is None
+    assert ctx == snapshot
+
+
+def test_prune_max_min_diversity_beats_confidence():
+    """Greedy fill must pick the most DISTINCT option, not the most confident.
+
+    The near-duplicate of the optimizer (symmetric difference 1) has much higher
+    total confidence than the fully disjoint option (symmetric difference 10);
+    greedy-by-confidence would keep the near-duplicate, diversity keeps the
+    disjoint one.
+    """
+    opt = _mk_option("optimizer", _pairs(list(range(5))), 0.9, is_optimizer=True)
+    near_dup = _mk_option("alt1", _pairs(list(range(4))), 0.9)  # optimizer minus one edge
+    disjoint = _mk_option("alt2", _pairs(list(range(5, 10))), 0.4)
+    ctx = _mk_ctx([opt, near_dup, disjoint])
+    group = {
+        "edges": [
+            {"ref_id": r, "target_id": t, "confidence": 0.5} for r, t in _pairs(list(range(10)))
+        ]
+    }
+
+    info = prune_options_for_panel(ctx, group, max_options=2, min_distinct_edges_trigger=5)
+
+    assert info == {"n_before": 3, "n_after": 2, "dropped_keys": ["alt1"]}
+    assert _edge_sets(ctx) == [
+        frozenset(_pairs(list(range(5)))),
+        frozenset(_pairs(list(range(5, 10)))),
+    ]
+    # Survivors re-lettered A, B; optimizer letter tracks the survivor.
+    assert [o["letter"] for o in ctx["options"]] == ["A", "B"]
+    assert ctx["optimizer_letter"] == "A"
+
+
+def test_prune_keeps_optimizer_and_seed_options():
+    """Optimizer + whole-group seeds (full set / optimizer-selected set) always survive.
+
+    Seed identity does not survive build_stitch_options (no is_seed on options),
+    so the pruner re-identifies them by edge set from the group's edges.
+    """
+    all_pairs = _pairs(list(range(6)))
+    selected = all_pairs[:2]
+    g = {
+        "group_id": "grp_big",
+        "match_type": "M:N",
+        "ref_ids": [r for r, _ in all_pairs],
+        "target_ids": [t for _, t in all_pairs],
+        "edges": [
+            {"ref_id": r, "target_id": t, "confidence": 0.9, "selected": (r, t) in selected}
+            for r, t in all_pairs
+        ],
+        "optimizer_assignment": [{"ref_id": all_pairs[0][0], "target_id": all_pairs[0][1]}],
+        "alternatives": [
+            # Seeds as generate_top_k_alternatives appends them (identity lost).
+            {"edges": [{"ref_id": r, "target_id": t} for r, t in all_pairs]},
+            {"edges": [{"ref_id": r, "target_id": t} for r, t in selected]},
+            # High-confidence near-duplicate fillers that diversity should drop.
+            {"edges": [{"ref_id": r, "target_id": t} for r, t in [all_pairs[0], all_pairs[2]]]},
+            {"edges": [{"ref_id": r, "target_id": t} for r, t in [all_pairs[0], all_pairs[3]]]},
+            {"edges": [{"ref_id": r, "target_id": t} for r, t in [all_pairs[0], all_pairs[4]]]},
+        ],
+    }
+    ctx = build_stitch_options(g)
+    assert len(ctx["options"]) == 6
+
+    info = prune_options_for_panel(ctx, g, max_options=3, min_distinct_edges_trigger=5)
+
+    assert info is not None and info["n_after"] == 3
+    kept = _edge_sets(ctx)
+    assert frozenset(all_pairs[:1]) in kept  # optimizer proposal
+    assert frozenset(all_pairs) in kept  # full-candidate-set seed
+    assert frozenset(selected) in kept  # optimizer-selected-set seed
+    assert ctx["optimizer_letter"] == "A"
+
+
+def test_prune_without_protected_starts_from_highest_confidence():
+    """No optimizer / seed option present: greedy seeds from max total_confidence."""
+    a = _mk_option("alt1", _pairs(list(range(3))), 0.5)
+    b = _mk_option("alt2", _pairs(list(range(3, 6))), 0.9)
+    c = _mk_option("alt3", _pairs(list(range(6, 9))), 0.4)
+    ctx = _mk_ctx([a, b, c])
+    group = {
+        "edges": [
+            {"ref_id": r, "target_id": t, "confidence": 0.5} for r, t in _pairs(list(range(9)))
+        ]
+    }
+
+    info = prune_options_for_panel(ctx, group, max_options=1, min_distinct_edges_trigger=5)
+
+    assert info == {"n_before": 3, "n_after": 1, "dropped_keys": ["alt1", "alt3"]}
+    assert _edge_sets(ctx) == [frozenset(_pairs(list(range(3, 6))))]
+    assert [o["letter"] for o in ctx["options"]] == ["A"]
+    assert ctx["optimizer_letter"] is None
+
+
+def test_generate_evidence_prunes_and_reletters_consistently(tmp_path, monkeypatch):
+    """End-to-end: pruning at the metadata level keeps letters, images, prompt,
+    and provenance consistent (vote parsing is metadata-letter driven)."""
+    from crosswalk.config import settings
+
+    monkeypatch.setattr(settings, "stitch_panel_max_options", 2)
+    monkeypatch.setattr(settings, "stitch_panel_prune_min_distinct_edges", 2)
+
+    g = make_group()
+    # alt1 = near-duplicate of the optimizer (dropped); alt2 = distinct (kept,
+    # re-lettered from C to B).
+    g["alternatives"] = [
+        {"edges": [{"ref_id": R1, "target_id": T1}]},
+        {"edges": [{"ref_id": R1, "target_id": T2}]},
+    ]
+    d = tmp_path / g["group_id"]
+    meta = generate_group_evidence(g, d)
+
+    assert meta["options_pruned"] == {"n_before": 3, "n_after": 2, "dropped_keys": ["alt1"]}
+    assert [o["letter"] for o in meta["options"]] == ["A", "B"]
+    assert meta["optimizer_letter"] == "A"
+    # The survivor re-lettered to B is the distinct alternative, not the near-dup.
+    opt_b = next(o for o in meta["options"] if o["letter"] == "B")
+    assert {(e["ref"], e["target"]) for e in opt_b["edges"]} == {("R1", "T2")}
+    # Images exist exactly for surviving letters.
+    assert (d / "option_A.png").exists()
+    assert (d / "option_B.png").exists()
+    assert not (d / "option_C.png").exists()
+    # Prompt agrees with metadata: pruned letters only, pruned choice string.
+    prompt = (d / "prompt.txt").read_text()
+    assert "Option A (optimizer):" in prompt
+    assert "Option B:" in prompt
+    assert "Option C" not in prompt
+    assert '"<A|B|NONE>"' in prompt
+    # Runner-side letter -> edge-set mapping loads the pruned metadata cleanly.
+    letters, options_by_letter, _ = sr._load_group_context(d)
+    assert letters == ["A", "B"]
+    assert set(options_by_letter["B"]) == {(R1, T2)}
+
+
+def test_generate_evidence_below_threshold_records_no_pruning(tmp_path, monkeypatch):
+    """Below-threshold groups: no options_pruned key, full option set intact."""
+    from crosswalk.config import settings
+
+    monkeypatch.setattr(settings, "stitch_panel_max_options", 8)
+    monkeypatch.setattr(settings, "stitch_panel_prune_min_distinct_edges", 200)
+
+    g = make_group()
+    meta = generate_group_evidence(g, tmp_path / g["group_id"])
+    assert "options_pruned" not in meta
+    assert len(meta["options"]) == 2
 
 
 # ---------------------------------------------------------------------------
