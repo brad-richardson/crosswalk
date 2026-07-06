@@ -12,6 +12,7 @@ compute_features_only().
 
 import logging
 import multiprocessing
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, NamedTuple
@@ -545,16 +546,33 @@ def compute_features_parallel(
     )
     t0 = time.perf_counter()
 
-    # On Linux (fork), set worker_data as a module-level global before forking.
-    # Child processes inherit the parent's memory via copy-on-write, avoiding
-    # the O(N_workers * pickle_time) cost of serializing multi-GB worker_data
-    # (STRtrees, geometry arrays, etc.) to each worker.
-    use_fork_shortcut = multiprocessing.get_start_method(allow_none=True) == "fork"
+    # On Linux, request the "fork" start method explicitly and set worker_data
+    # as a module-level global before forking. Child processes inherit the
+    # parent's memory via copy-on-write, avoiding the O(N_workers * pickle_time)
+    # cost of serializing multi-GB worker_data (STRtrees, geometry arrays, etc.)
+    # to each worker.
+    #
+    # Python 3.14 changed the default start method on Linux from "fork" to
+    # "forkserver", which silently disabled this shortcut: every worker then
+    # received worker_data via pickled initargs, serializing the whole
+    # "parallel" phase behind the parent's pickling (measured: load average
+    # ~1.8 on a 20-core machine during feature computation, phase wall time
+    # ~= single-process CPU time). Forking a process that has running threads
+    # is the hazard forkserver guards against; at this point in the pipeline
+    # the prepare_worker_data thread pools have exited, and this was the
+    # status-quo execution model on Python <= 3.13.
+    mp_context = None
+    if sys.platform.startswith("linux"):
+        try:
+            mp_context = multiprocessing.get_context("fork")
+        except ValueError:  # pragma: no cover - fork unavailable
+            mp_context = None
+    use_fork_shortcut = mp_context is not None
     if use_fork_shortcut:
         from ..matching import ml as _ml_module
 
         _ml_module._worker_data = worker_data
-        executor_kwargs: dict[str, Any] = {"max_workers": n_workers}
+        executor_kwargs: dict[str, Any] = {"max_workers": n_workers, "mp_context": mp_context}
         logger.debug("Using fork shortcut: worker_data set via module global (COW)")
     else:
         executor_kwargs = {
