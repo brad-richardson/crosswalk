@@ -763,6 +763,23 @@ class MatcherSettings(BaseSettings):
         default=40,
         description="Hard backstop edge ceiling; no group above this auto-exports.",
     )
+    # Panel option pruning (evidence packs only). On monster M:N groups the
+    # greedy-perturbation alternatives are ~20 near-duplicate variations of one
+    # assignment; the panel gets more signal from a small, maximally-distinct
+    # option set. Pruning happens at the metadata level in the evidence-pack
+    # path only — the web review UI keeps the full one-click option set.
+    stitch_panel_max_options: int = Field(
+        default=8,
+        description="Max options presented to the LLM stitching panel after diversity "
+        "pruning (protected options — optimizer proposal + whole-group seeds — are "
+        "always kept, even beyond this cap).",
+    )
+    stitch_panel_prune_min_distinct_edges: int = Field(
+        default=200,
+        description="Diversity pruning of panel options only triggers on groups whose "
+        "options span MORE than this many distinct candidate edges; smaller groups "
+        "keep the full option set (byte-identical packs).",
+    )
     auto_select_model: bool = Field(
         default=True,
         description="Automatically select between full and geometry-only models based on "
