@@ -30,9 +30,10 @@ Two ways to absorb Meili as a component were evaluated:
   extra), pedestrian costing, densify 10 m, search-radius 25 m, overlap filter
   0.10 / 8 m — the exact `docs/BENCHMARK_RESULTS.md` configuration.
 - matcher candidate universe reproduced with the production blocking call
-  `generate_candidates(ref, target, buffer_distance_m=50, id_column="id")`
-  (`src/matcher/blocking/spatial_index.py`) — the same call `pipeline/runner.py`
-  makes.
+  `generate_candidates(ref, target, ref_id_column="id", target_id_column="id")`
+  at the default `buffer_distance_m=50`
+  (`src/matcher/blocking/spatial_index.py`) — the same arguments
+  `pipeline/runner.py` passes.
 - Mechanism B CV is **leakage-aware**: segment-grouped `GroupKFold`
   (`create_segment_groups`, Union-Find over `gers_id`/`target_id`, matching the
   training path in `ml.py`), `DEFAULT_XGB_PARAMS`, threshold 0.5. Meili sees no
@@ -96,7 +97,9 @@ on the labeled slice, not even any new pairs for the scorer to reject.
 ## Step 3 — Mechanism B: `mapmatch_agreement` feature
 
 Agreement bit set for every labeled pair (1 if Meili matched that `(ref, target)`,
-else 0). Pooled contingency over the 3 datasets (n=1064, 577 matches):
+else 0). Pooled contingency over the 3 datasets (n=1064, 577 matches; `unsure`
+labels excluded throughout — e.g. Boston has 639 pair labels, 626 after dropping
+its 13 `unsure`):
 
 |            | agree=0 | agree=1 |
 |------------|--------:|--------:|
@@ -126,11 +129,19 @@ feature is weakest.
 | + agreement (84 feat) | 0.9495 ± 0.0110 | 0.9889 | 0.339 |
 | **delta** | **+0.0058** | **+0.0001** | |
 
-The threshold-independent **AUC delta is +0.0001 — zero discrimination gain.** The
-F1 delta (+0.0058) is smaller than one fold standard deviation (±0.011), i.e.
-noise. XGBoost assigns the feature nontrivial importance (0.34) yet gains nothing
-held-out — the classic signature of a feature **redundant with existing geometry
-features** (the model reshuffles importance onto it without improving separation).
+The threshold-independent **pooled AUC delta is +0.0001** — no aggregate
+discrimination gain. Two honesty qualifiers on that headline: (1) the pool is
+**ceiling-dominated** — Boston is 59 % of it (626/1064) with base AUC 0.995,
+where no feature has room to add separation, so "+0.0001 pooled" should be read
+as "no gain where the base model is saturated; see the per-dataset table for the
+non-saturated case (Seattle)". (2) The F1 comparison against the fold std
+(±0.011) is indicative only — that std describes the fold-to-fold *level* of F1,
+not the variance of the paired base→augmented *delta* (folds are shared between
+the two runs), so it is not a formal noise test; the AUC delta is the
+load-bearing evidence. XGBoost assigns the feature nontrivial importance (0.34)
+yet gains ~nothing held-out — the classic signature of a feature **largely
+redundant with existing geometry features** (the model reshuffles importance
+onto it without improving separation).
 
 ### Per-dataset out-of-fold delta (base → +agreement)
 
@@ -157,14 +168,17 @@ passes at baseline: `mbench run matcher us_boston_streets --gate` →
 
 **No-ship, both mechanisms.**
 
-- **(A) Candidate augmentation — dead.** Candidate recall is already 1.000;
-  matcher's FNs are scoring decisions on in-universe pairs; Meili injects zero
-  net-new candidates on the labeled slice. Only downside risk (FP injection), no
-  upside.
+- **(A) Candidate augmentation — no measurable win, and the upside is
+  unmeasurable on current labels.** Candidate recall is already 1.000 on the
+  adjudicable slice; matcher's FNs are scoring decisions on in-universe pairs;
+  Meili injects zero net-new candidates on the labeled slice. Any real upside
+  would live on unlabeled true matches matcher never surfaces, which the current
+  (matcher-seeded) label base cannot adjudicate — so on the evidence available
+  there is only downside risk (FP injection), no demonstrated upside.
 - **(B) Agreement feature — does not clear the bar.** Pooled leakage-aware AUC
-  delta +0.0001; F1 delta +0.0058 < 1 fold-std; feature actively low-quality on
-  dense sidewalks (FC AUC 0.60). The only movement (Seattle) is small-n and
-  aggregate-neutral.
+  delta +0.0001 (ceiling-dominated pool; see qualifiers above); feature actively
+  low-quality on dense sidewalks (FC AUC 0.60). The only movement (Seattle) is
+  small-n and aggregate-neutral.
 
 The shipping cost is steep and structural, which makes a ~0 global gain a clear
 no: a new feature bumps `FEATURE_VERSION`, forcing **re-export of both bundled
