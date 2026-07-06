@@ -81,7 +81,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/brad-richardson/matcher"
+Repository = "https://github.com/brad-richardson/crosswalk"
 
 [project.scripts]
 crosswalk = "crosswalk.cli:app"

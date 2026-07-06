@@ -1,23 +1,25 @@
 # Releasing `crosswalk-py` to PyPI
 
 The package is built and validated locally; **publishing is a deliberate human
-act** — nothing in CI pushes to PyPI. Distribution name: **`crosswalk-py`**
-(verified available 2026-07; `matcher` is taken). Import package and console
-script remain `matcher`.
+act** — CI publishes only when a maintainer pushes a `v*` tag (the `publish` job
+in `ci.yml`, via PyPI Trusted Publishing). Distribution name: **`crosswalk-py`**
+(verified available 2026-07; bare `crosswalk` is squatted). Import package and
+console script are `crosswalk`; a deprecated `matcher` console script warns and
+forwards.
 
 ## What ships in the wheel
 
-- The `matcher` package (`src/crosswalk/`), including the **pretrained model**
+- The `crosswalk` package (`src/crosswalk/`), including the **pretrained model**
   `src/crosswalk/_model/matcher_model_combined.joblib` (~466 KB, isotonic
   calibration bundled).
 - The **Spark-portable model** `src/crosswalk/_model/spark_model.json` (~1.1 MB
   XGBoost-native booster) + `src/crosswalk/_model/spark_manifest.json` (feature
   list, feature_version, hyperparams, isotonic calibration knots). Spark
-  consumers import these from the wheel via `from matcher.spark import
+  consumers import these from the wheel via `from crosswalk.spark import
   spark_model_json, spark_manifest` (see docs/ARCHITECTURE.md).
 - The sdist is trimmed to `src/` + `README.md` + `pyproject.toml`
   (`[tool.hatch.build.targets.sdist]`) — without that it drags labels/research/
-  cbench (~11 MB).
+  mbench (~11 MB).
 
 ## Pre-release checklist
 
@@ -70,20 +72,19 @@ script remain `matcher`.
    /tmp/rm-smoke/bin/crosswalk stitch -r /tmp/ref.parquet -t <some_local.parquet> -o /tmp/bridge.parquet
    ```
 
-6. **Tag** the release commit: `git tag v<version> && git push --tags`.
+6. **Tag** the release commit: `git tag v<version> && git push --tags`. **This
+   is the publish trigger** — see below.
 
 ## Publishing
 
-**Recommended: PyPI Trusted Publishing** (OIDC, no long-lived API tokens):
+**PyPI Trusted Publishing (configured, OIDC — no API tokens):** the PyPI project
+`crosswalk-py` trusts this repo's **`ci.yml`** workflow with the **`pypi`**
+GitHub environment. Pushing a `v*` tag runs the full CI matrix and then the
+`publish` job, which verifies the tag matches `pyproject.toml`'s version,
+builds with `uv build`, and uploads via `pypa/gh-action-pypi-publish`. Nothing
+publishes on branch pushes or PRs.
 
-1. On PyPI: project settings → "Publishing" → add a trusted publisher for the
-   GitHub repo (`brad-richardson/matcher`), a dedicated workflow filename (e.g.
-   `release.yml`), and (recommended) a `pypi` GitHub environment.
-2. Add a `release.yml` workflow triggered on the version tag that runs
-   `uv build` and `pypa/gh-action-pypi-publish@release/v1` with
-   `permissions: id-token: write`. The first publish registers the project name.
-
-**Manual fallback** (API token, scope it to the project after first upload):
+**Manual fallback** (API token, scope it to the project):
 
 ```bash
 uv publish  # prompts for credentials; or: uvx twine upload dist/*
@@ -92,7 +93,7 @@ uv publish  # prompts for credentials; or: uvx twine upload dist/*
 ## Post-publish
 
 - Verify: `pip install crosswalk-py==<version>` in a clean venv, then
-  `matcher --help` and the cold-start smoke test above.
+  `crosswalk --help` and the cold-start smoke test above.
 - Update `docs/BENCHMARK_RESULTS.md` / README if install instructions changed.
 
 ## Retrain cadence / repo bloat note
