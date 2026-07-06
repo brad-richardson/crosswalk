@@ -68,3 +68,20 @@ def test_shipped_model_loads_via_mlmatcher():
     assert matcher.model is not None
     assert matcher.feature_version == FEATURE_VERSION
     assert matcher.calibrator is not None
+
+
+def test_pipeline_calibration_probe_sees_bundled_model(tmp_path, monkeypatch):
+    """The calibration probe must inspect the bundled model when no local model exists.
+
+    Regression guard: the optimizer's glue operating point depends on
+    _calibration_active(). If the probe only looked at settings.model_path, the
+    fresh-clone path (bundled fallback) would score with calibrated confidences
+    but prune at the raw operating point.
+    """
+    from matcher.config import settings
+    from matcher.pipeline.runner import _calibration_active, _default_model_path
+
+    monkeypatch.setattr(settings, "model_path", tmp_path / "nonexistent.joblib")
+    assert _default_model_path() == bundled_model_path()
+    if settings.enable_calibration:
+        assert _calibration_active() is True

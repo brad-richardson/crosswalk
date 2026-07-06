@@ -28,12 +28,28 @@ class PipelineError(Exception):
     pass
 
 
+def _default_model_path() -> Path:
+    """Resolve the model the pipeline scores with when no explicit path is given.
+
+    A locally trained model (``settings.model_path``) takes precedence; otherwise
+    fall back to the pretrained model shipped inside the package (so a fresh
+    clone / pip install can stitch with zero training). Must stay in lockstep
+    with the fallback in ``score_candidates_from_geodataframes`` — the
+    calibration probe below inspects whichever model actually scores.
+    """
+    from ..config import bundled_model_path
+
+    local = settings.model_path
+    return local if local.exists() else bundled_model_path()
+
+
 def _calibration_active() -> bool:
     """Whether the pipeline's active model applies isotonic calibration.
 
-    ``run_pipeline`` always scores with ``settings.model_path``, so that is the
-    model inspected. Short-circuits without loading the model when calibration is
-    globally disabled (``MLMatcher.calibration_active`` can never be True then).
+    Inspects the same model the default scoring path resolves
+    (``_default_model_path()``: local ``settings.model_path``, else the bundled
+    pretrained model). Short-circuits without loading the model when calibration
+    is globally disabled (``MLMatcher.calibration_active`` can never be True then).
     """
     # Short-circuit when calibration is globally disabled: skip the model load
     # (and its I/O) entirely — the answer is unconditionally False.
@@ -43,7 +59,9 @@ def _calibration_active() -> bool:
     from ..matching.ml import MLMatcher
 
     try:
-        return MLMatcher(model_path=str(settings.model_path)).calibration_active
+        return MLMatcher(
+            model_path=str(_default_model_path()), allow_version_mismatch=True
+        ).calibration_active
     except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
         logger.warning(f"Could not determine calibration state: {exc}")
         return False
@@ -245,27 +263,27 @@ def score_candidates_from_geodataframes(
     elif auto_select:
         matcher = MLMatcher(auto_select=True)
     else:
-        from ..config import bundled_model_path
         from ..config import settings as _settings
 
-        _model_path = _settings.model_path
-        if _model_path.exists():
-            # A locally trained model takes precedence over the shipped one.
+        # Local trained model takes precedence; else the pretrained model shipped
+        # in the package (fresh clone / pip install stitches with zero training).
+        # Keep this resolution in lockstep with _default_model_path().
+        _model_path = _default_model_path()
+        if _model_path == _settings.model_path:
             matcher = MLMatcher(
                 model_path=str(_model_path), allow_version_mismatch=allow_version_mismatch
             )
         else:
-            # Fall back to the pretrained model shipped in the package so a fresh
-            # clone / pip install can stitch with zero training. Its lockstep with
-            # FEATURE_VERSION is enforced by CI, so it is trusted here.
-            _bundled = bundled_model_path()
-            if not _bundled.exists():
+            if not _model_path.exists():
                 raise FileNotFoundError(
-                    f"ML model not found at {_model_path} and no bundled model at "
-                    f"{_bundled}. Run 'matcher train' to train on labeled data."
+                    f"ML model not found at {_settings.model_path} and no bundled "
+                    f"model at {_model_path}. Run 'matcher train' to train on "
+                    "labeled data."
                 )
-            logger.info(f"Using pretrained model shipped with matcher: {_bundled}")
-            matcher = MLMatcher(model_path=str(_bundled), allow_version_mismatch=True)
+            # The bundled artifact's version lockstep with FEATURE_VERSION is
+            # enforced by CI (tests/unit/test_shipped_model.py), so it is trusted.
+            logger.info(f"Using pretrained model shipped with matcher: {_model_path}")
+            matcher = MLMatcher(model_path=str(_model_path), allow_version_mismatch=True)
 
     results = matcher.score_candidates(
         candidates,
