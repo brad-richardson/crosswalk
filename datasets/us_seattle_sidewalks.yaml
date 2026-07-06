@@ -8,7 +8,11 @@ source:
   portal_url: https://data-seattlecitygis.opendata.arcgis.com/
 fetch:
   id_prefix: sea_sidewalk
-  id_column: OBJECTID
+  # Stable SDOT asset-management key. OBJECTID is an ArcGIS row id that SDOT
+  # reassigns on republish (COMPKEY 658573 moved 27149648 -> 31932607 between
+  # the 2026-02-08 snapshot and live), which rots every published local_id.
+  # COMPKEY (and UNITID) are the keys the city's own datasets join on.
+  id_column: COMPKEY
   bbox:
   - -122.45
   - 47.48
