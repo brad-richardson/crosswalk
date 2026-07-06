@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seattle sidewalk hazards on Overture segments</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  html, body { height: 100%; margin: 0; }
+  #map { height: 100%; }
+  .panel {
+    position: absolute; z-index: 1000; background: #fcfcfb; color: #1a1a19;
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.25); padding: 10px 12px;
+  }
+  #about { top: 12px; left: 54px; max-width: 340px; }
+  #about h1 { font-size: 14px; margin: 0 0 4px; }
+  #about p { margin: 4px 0; color: #4a4a46; }
+  #legend { bottom: 24px; left: 12px; }
+  #legend .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  #legend .swatch { width: 22px; height: 4px; border-radius: 2px; }
+  .leaflet-popup-content { font: 12px/1.5 system-ui, sans-serif; }
+  .leaflet-popup-content b { font-size: 13px; }
+  .muted { color: #6f6f6a; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="about" class="panel">
+  <h1>Seattle sidewalk hazards, painted onto the open map</h1>
+  <p>SDOT's <em>open</em> sidewalk defect observations (trip hazards, obstructions,
+     surface breaks) joined onto Overture Maps segments through a
+     <a href="https://github.com/brad-richardson/crosswalk">crosswalk</a> bridge table
+     — the city data itself contains no map IDs.</p>
+  <p class="muted">Top segments by open observations. Line color = open trip
+     hazards on the adjoining sidewalks. Data: City of Seattle (SDOT), Overture
+     Maps / &copy; OpenStreetMap contributors (ODbL).</p>
+</div>
+<div id="legend" class="panel">
+  <div><b>Open trip hazards</b></div>
+  <div class="row"><span class="swatch" style="background:#f78d68"></span>1&ndash;2</div>
+  <div class="row"><span class="swatch" style="background:#e05540"></span>3&ndash;5</div>
+  <div class="row"><span class="swatch" style="background:#b52f26"></span>6&ndash;10</div>
+  <div class="row"><span class="swatch" style="background:#7d1a1a"></span>11+</div>
+</div>
+<script>
+const DATA = /*__GEOJSON__*/null;
+
+const map = L.map('map');
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+}).addTo(map);
+
+// Ordinal single-hue ramp, light->dark (validated: monotone L, >=2:1 light end).
+function color(trip) {
+  if (trip >= 11) return '#7d1a1a';
+  if (trip >= 6)  return '#b52f26';
+  if (trip >= 3)  return '#e05540';
+  return '#f78d68';
+}
+
+const layer = L.geoJSON(DATA, {
+  style: f => ({
+    color: color(f.properties.trip),
+    weight: 4,
+    opacity: 0.9,
+  }),
+  onEachFeature: (f, l) => {
+    const p = f.properties;
+    l.bindPopup(
+      `<b>${p.name || p.loc || '(unnamed segment)'}</b><br>` +
+      `<span class="muted">GERS ${p.gers_id}</span><br>` +
+      `${p.obs} open observations &middot; ${p.trip} trip hazards<br>` +
+      (p.uplift ? `max uplift ${p.uplift}&Prime; &middot; ` : '') +
+      `${p.obstr} obstructions &middot; ${p.surf} surface defects<br>` +
+      `<span class="muted">min match confidence ${p.conf}</span>`
+    );
+    l.on('mouseover', () => l.setStyle({ weight: 7 }));
+    l.on('mouseout', () => l.setStyle({ weight: 4 }));
+  },
+}).addTo(map);
+
+map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+</script>
+</body>
+</html>
