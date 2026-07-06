@@ -321,6 +321,27 @@ def bundled_model_path() -> Path:
     return Path(__file__).parent / "_model" / "matcher_model_combined.joblib"
 
 
+def bundled_spark_model_path() -> Path:
+    """Path to the Spark-portable XGBoost model shipped inside the package.
+
+    A committed XGBoost-native JSON booster (28 SPARK_PORTABLE_FEATURES) that
+    Spark consumers (the tf-data-platform sister project) import straight from
+    the wheel instead of hand-copying files. Its ``feature_version`` is kept in
+    lockstep with ``FEATURE_VERSION`` by ``tests/unit/test_shipped_spark_model.py``.
+    Reship with ``matcher export-spark-model`` (see docs/RELEASING.md).
+    """
+    return Path(__file__).parent / "_model" / "spark_model.json"
+
+
+def bundled_spark_manifest_path() -> Path:
+    """Path to the Spark-portable model manifest shipped inside the package.
+
+    JSON sidecar for :func:`bundled_spark_model_path`: feature list (order
+    matters), feature_version, hyperparams, and isotonic calibration knots.
+    """
+    return Path(__file__).parent / "_model" / "spark_manifest.json"
+
+
 # ============================================================================
 # FEATURE COLUMNS - Single source of truth for ML pipeline
 # ============================================================================
