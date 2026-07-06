@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bradrichardson/matcher/main/datasets/schema/dataset.schema.json",
+  "title": "Crosswalk dataset recipe (schema_version 1)",
+  "description": "One file per city dataset: everything a contributor declares (identity, where to fetch, how to conform, license evidence) and everything a reviewer decides (publication gates). Machine-generated run state (fetch provenance, quality fingerprints) does NOT belong in this file. See docs/plans/2026-07-06-dataset-registry-format.md.",
+  "type": "object",
+  "required": ["schema_version", "name", "type", "source", "license"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Recipe schema version. Bump only on breaking changes; loaders must reject versions they do not know.",
+      "const": 1
+    },
+    "name": {
+      "description": "Dataset identifier and registry key. Must equal the filename stem and is used verbatim in labels/, bridges/dataset=<name>/, and mbench.",
+      "type": "string",
+      "pattern": "^[a-z]{2}_[a-z0-9_]+$"
+    },
+    "display_name": { "type": "string" },
+    "type": {
+      "description": "Network kind; drives matching defaults (e.g. cross-tier blocking).",
+      "enum": ["road", "bike", "sidewalk", "trail", "transit"]
+    },
+    "description": { "type": "string" },
+    "source": {
+      "description": "Where the data comes from. Mirrors crosswalk.datasets.schema.SourceConfig.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["arcgis", "osm", "overture", "download", "manual", "os_downloads"] },
+        "url": { "type": "string", "format": "uri" },
+        "portal_url": {
+          "description": "Human-readable portal / documentation page for the dataset.",
+          "type": "string",
+          "format": "uri"
+        },
+        "file_format": { "enum": ["shp", "gpkg", "geojson", "gml"] },
+        "where_clause": { "type": "string" },
+        "api_key_env_var": { "type": "string" },
+        "api_key_header": { "type": "string" },
+        "product_id": { "type": "string" },
+        "file_pattern": { "type": "string" },
+        "cache_download": { "type": "boolean" },
+        "cache_ttl_hours": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "fetch": {
+      "description": "How to conform the source to crosswalk's model (the OpenAddresses 'conform' analog). Mirrors crosswalk.datasets.schema.FetchConfig.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id_prefix": { "type": "string" },
+        "id_column": { "type": "string" },
+        "name_column": { "type": "string" },
+        "name_columns": { "type": "object", "additionalProperties": { "type": "string" } },
+        "class_column": { "type": "string" },
+        "class_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
+        "subclass_column": { "type": "string" },
+        "subclass_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
+        "level_column": { "type": "string" },
+        "bbox": {
+          "description": "xmin, ymin, xmax, ymax in `crs`.",
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "crs": { "type": "string", "pattern": "^EPSG:[0-9]+$" },
+        "source_crs": { "type": "string", "pattern": "^EPSG:[0-9]+$" },
+        "encoding": { "type": "string" },
+        "non_road_type_codes": { "type": "array", "items": { "type": "string" } },
+        "filter_closed_loops": { "type": "boolean" },
+        "exclude": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "oneway_column": { "type": "string" },
+        "speed_limit_column": { "type": "string" },
+        "speed_limit_unit": { "enum": ["kph", "mph"] },
+        "polygon_to_centerline": { "type": "boolean" }
+      }
+    },
+    "matching": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_cross_tier": { "type": "boolean" }
+      }
+    },
+    "classification": {
+      "description": "Class-mapping rules discovered via `crosswalk discover-classes`. Kept loose: written by tooling, reviewed by humans.",
+      "type": "object"
+    },
+    "license": {
+      "description": "License facts + publication gates. `status`/`geometry_status` are HUMAN DECISIONS (default-deny; the publisher never guesses); everything else is evidence supporting them.",
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "description": "Gate for the ID-only bridge table. Only a human flips this to approved.",
+          "enum": ["approved", "pending_review", "rejected"]
+        },
+        "geometry_status": {
+          "description": "Gate for geometry-bearing artifacts (unmatched-segment export, #321). Missing = pending_review. Approving geometry requires redistribution rights to the data itself.",
+          "enum": ["approved", "pending_review", "rejected"]
+        },
+        "spdx": {
+          "description": "SPDX identifier when one exists (e.g. PDDL-1.0, CC-BY-4.0, ODbL-1.0). null/omitted for custom terms — put the full name in `name`.",
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9.+-]+$"
+        },
+        "name": {
+          "description": "Full license name as the source states it (e.g. \"Open Government Licence – Toronto\", \"SITG open geodata terms\"). Required when `spdx` is absent. Replaces licenses.toml `likely_license`.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Where the license/terms are stated (licenses.toml `license_url`).",
+          "type": "string",
+          "format": "uri"
+        },
+        "attribution": {
+          "description": "The attribution text shipped with published artifacts. Required when status = approved.",
+          "type": "string"
+        },
+        "proposed_attribution": {
+          "description": "Draft attribution written during research, promoted to `attribution` on approval.",
+          "type": "string"
+        },
+        "capabilities": {
+          "description": "What the terms permit, DMFR-style tri-state flags (yes/no/unknown). Evidence for the gates, not the gates themselves — `status`/`geometry_status` remain explicit human decisions.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "redistribution_allowed": { "enum": ["yes", "no", "unknown"] },
+            "derivatives_allowed": { "enum": ["yes", "no", "unknown"] },
+            "commercial_use_allowed": { "enum": ["yes", "no", "unknown"] },
+            "attribution_required": { "enum": ["yes", "no", "unknown"] },
+            "share_alike_required": { "enum": ["yes", "no", "unknown"] }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } } },
+          "then": {
+            "required": ["attribution", "url"],
+            "anyOf": [{ "required": ["spdx"] }, { "required": ["name"] }]
+          }
+        }
+      ]
+    },
+    "review": {
+      "description": "Provenance of the license research: who/what recommended, on what evidence. Written by the AI research panel and by human reviewers; never consumed by the publish gate.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "panel_recommendation": { "enum": ["approve", "reject", "needs_human"] },
+        "panel_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "panel_reviewed_at": { "type": "string", "format": "date" },
+        "evidence": {
+          "description": "URLs actually fetched, with the quotes that carry the conclusion.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["url"],
+            "additionalProperties": false,
+            "properties": {
+              "url": { "type": "string", "format": "uri" },
+              "quote": { "type": "string" },
+              "fetched_at": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "note": {
+          "description": "Freeform reviewer/panel notes (licenses.toml `note`).",
+          "type": "string"
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}
