@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "name": "us_boston_streets",
+  "display_name": "Boston Streets",
+  "type": "road",
+  "description": "Street centerlines with MassDOT functional classification",
+  "source": {
+    "type": "arcgis",
+    "url": "https://services.arcgis.com/sFnw0xNflSi8J0uh/arcgis/rest/services/City_of_Boston_Managed_Streets/FeatureServer/0",
+    "portal_url": "https://data.boston.gov/dataset/city-of-boston-managed-streets"
+  },
+  "fetch": {
+    "id_prefix": "us_boston_streets",
+    "id_column": "FID",
+    "name_column": "STREETNAME",
+    "class_column": "CLASS",
+    "class_mapping": {
+      "1": "motorway",
+      "2": "primary",
+      "3": "primary",
+      "4": "primary",
+      "5": "residential",
+      "6": "service"
+    },
+    "bbox": [
+      -71.19,
+      42.21,
+      -70.92,
+      42.4
+    ],
+    "crs": "EPSG:4326",
+    "oneway_column": "OP_DIR_SL",
+    "speed_limit_column": "SPEED_LIM",
+    "speed_limit_unit": "mph"
+  },
+  "classification": {
+    "source_classification": {
+      "column": "CLASS"
+    },
+    "class_mapping_rules": [
+      {
+        "source_value": 1,
+        "target_class": "motorway"
+      },
+      {
+        "source_value": 2,
+        "target_class": "primary"
+      },
+      {
+        "source_value": 3,
+        "target_class": "primary"
+      },
+      {
+        "source_value": 4,
+        "target_class": "tertiary"
+      },
+      {
+        "source_value": 5,
+        "target_class": "residential"
+      },
+      {
+        "source_value": 6,
+        "target_class": "service"
+      }
+    ]
+  },
+  "license": {
+    "status": "approved",
+    "geometry_status": "pending_review",
+    "spdx": "PDDL-1.0",
+    "name": "Open Data Commons Public Domain Dedication and License (PDDL) 1.0",
+    "url": "https://data.boston.gov/dataset/city-of-boston-managed-streets",
+    "capabilities": {
+      "redistribution_allowed": "yes",
+      "derivatives_allowed": "yes",
+      "commercial_use_allowed": "yes",
+      "attribution_required": "no",
+      "share_alike_required": "no"
+    },
+    "attribution": "Contains street data from the City of Boston (Analyze Boston, data.boston.gov), released into the public domain under the Open Data Commons Public Domain Dedication and License (PDDL) 1.0."
+  },
+  "review": {
+    "panel_recommendation": "approve",
+    "panel_confidence": 0.9,
+    "panel_reviewed_at": "2026-07-06",
+    "evidence": [
+      {
+        "url": "https://data.boston.gov/dataset/city-of-boston-managed-streets",
+        "quote": "Open Data Commons Public Domain Dedication and License (PDDL)",
+        "fetched_at": "2026-07-06"
+      }
+    ],
+    "note": "Panel approve (see research/license_burndown_2026_07.md): The dossier's core conclusion is correct and verifiable. I independently fetched the claimed license_url (data.boston.gov/dataset/city-of-boston-managed-streets) and confirmed it exists and displays the exact evidence_quote \"Open Data Commons Public Domain Dedication and License (PDDL)\" as that dataset's license field — dataset-level, not just portal-wide, and corroborated by Boston's documented …"
+  }
+}
