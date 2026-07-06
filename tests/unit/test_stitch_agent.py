@@ -1361,10 +1361,10 @@ def test_opencode_registered_and_v3_panel_composition():
 
 
 def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
-    """Prompt MUST precede every -f flag, else -f swallows it as a filename.
+    """Prompt goes via stdin (not argv); -m model and one -f per attached image.
 
-    Also verifies -m model placement and one -f per attached image (overview +
-    each existing option_<letter>.png).
+    The prompt used to be a positional arg, but a large group's prompt exceeds
+    the OS single-arg limit (E2BIG), so it is now piped via stdin.
     """
     import subprocess as sp
 
@@ -1388,13 +1388,11 @@ def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
 
     cmd = captured["cmd"]
     assert cmd[:2] == ["opencode", "run"]
-    # The prompt is the positional arg immediately after `run`.
-    assert cmd[2] == "PROMPT TEXT"
-    # -m model appears, and BEFORE any -f flag.
+    # The prompt is piped via stdin, never placed on argv.
+    assert captured["kwargs"]["input"] == "PROMPT TEXT"
+    assert "PROMPT TEXT" not in cmd
+    # -m model appears.
     assert "-m" in cmd and cmd[cmd.index("-m") + 1] == "openrouter/qwen/x"
-    first_f = cmd.index("-f")
-    assert cmd.index("PROMPT TEXT") < first_f
-    assert cmd.index("-m") < first_f
     # One -f per image: overview + option_A + option_B = 3.
     assert cmd.count("-f") == 3
     f_args = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "-f"]
