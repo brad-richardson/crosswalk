@@ -508,16 +508,15 @@ note = "Panel needs_human (see research/license_burndown_2026_07.md): Adversaria
 
 [datasets.us_seattle_sidewalks]
 display_name = "Seattle Sidewalks"
-status = "pending_review"
-likely_license = "Custom terms — City of Seattle Open Data Terms of Use (no named open license; PDDL/CC0 not confirmed and item metadata does not state one)"
+status = "approved"
+license = "City of Seattle Open Data Terms of Use — public-domain-equivalent (no attribution required, no share-alike; warranty/accuracy disclaimer only)"
+attribution = "Contains data from the City of Seattle, Seattle Department of Transportation (SDOT), via the Seattle Open Data program — used under the City of Seattle Open Data Terms of Use."
 license_url = "https://data.seattle.gov/stories/s/Data-Policy/6ukr-wvup/"
 source_url = "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Sidewalks_(Active)/FeatureServer/0"
-proposed_attribution = "Contains data from the City of Seattle (Seattle Department of Transportation), Seattle Open Data program (attribution not required by the source terms; provided as courtesy)."
 panel_recommendation = "needs_human"
 panel_confidence = 0.85
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossier is accurate and I upheld its needs_human verdict. I independently confirmed the decisive point by querying the authoritative ArcGIS item metadata for the exact Sidewalks item (20abc2269f6f4283a53cf31b93de718f, owner Transportation_SeattleCityGIS): its licenseInfo field contains ONLY the accuracy disclaimer, with no PDDL, no opendatacommons URL, and no public-domain dedication — so the …"
-
+note = "Approved by Brad 2026-07-06 after a dedicated adversarial hunt for evidence against public-domain-equivalent treatment found none (research/seattle_license_clearance.md): the 2010-2014 ToU termination clause is superseded, current ToU restricts only personal-data lists, attribution optional, and the OSM Seattle Sidewalk Import vetted this dataset as ODbL-compatible. Clearance covers geometry redistribution too (carry the accuracy disclaimer forward)."
 [datasets.us_usfs_flathead]
 display_name = "USFS Roads (Flathead NF)"
 status = "approved"
