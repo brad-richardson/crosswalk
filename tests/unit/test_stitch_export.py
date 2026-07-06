@@ -722,3 +722,71 @@ def test_vote_provenance_tolerates_missing_votes_csv(tmp_path):
     assert n_votes == 0 and n_consensus == 1
     assert not (votes_dir / f"dataset={DATASET}" / "votes.csv").exists()
     assert (votes_dir / f"dataset={DATASET}" / "consensus.csv").exists()
+
+
+def _make_group_batch(bd, group_id, edges):
+    """A one-group batch (consensus + batch.json) plus its 3 raw ballots."""
+    make_batch(
+        bd,
+        DATASET,
+        [{"group_id": group_id, "match_type": "1:1", "routing": "auto_accept", "edges": edges}],
+    )
+    _write_votes(bd, _voter_rows(group_id))
+
+
+def test_vote_provenance_accumulates_across_invocations(tmp_path):
+    """Separate exports of disjoint batches must not drop earlier ballots.
+
+    write_exports upserts labels per run (older labels persist), so provenance
+    must accumulate the same way — otherwise the audit trail stops covering
+    every exported label.
+    """
+    b1, b2 = tmp_path / "b1", tmp_path / "b2"
+    _make_group_batch(b1, "g1", [("r1", "t1")])
+    _make_group_batch(b2, "g2", [("r2", "t2")])
+    votes_dir = tmp_path / "votes"
+
+    write_vote_provenance([b1], DATASET, votes_dir=votes_dir)
+    n_votes, n_consensus = write_vote_provenance([b2], DATASET, votes_dir=votes_dir)
+
+    out = votes_dir / f"dataset={DATASET}"
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    cons = list(csv.DictReader((out / "consensus.csv").open()))
+    # BOTH batches survive the second, disjoint invocation.
+    assert {v["source_batch"] for v in votes} == {"b1", "b2"}
+    assert {c["source_batch"] for c in cons} == {"b1", "b2"}
+    assert len(votes) == 6 and len(cons) == 2
+    assert (n_votes, n_consensus) == (6, 2)  # returns the accumulated totals
+
+
+def test_vote_provenance_rejects_duplicate_basenames(tmp_path):
+    """Two batch dirs sharing a basename would collapse under one source_batch."""
+    p2 = tmp_path / "phase2" / "us_boston"
+    p3 = tmp_path / "phase3" / "us_boston"
+    _make_group_batch(p2, "g1", [("r1", "t1")])
+    _make_group_batch(p3, "g2", [("r2", "t2")])
+    with pytest.raises(ValueError, match="duplicate basenames"):
+        write_vote_provenance([p2, p3], DATASET, votes_dir=tmp_path / "votes")
+
+
+def test_vote_provenance_best_effort_on_malformed_votes(tmp_path):
+    """An empty votes.csv is skipped, not fatal; consensus still archives."""
+    b1 = tmp_path / "b1"
+    make_batch(
+        b1,
+        DATASET,
+        [
+            {
+                "group_id": "g1",
+                "match_type": "1:1",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+            }
+        ],
+    )
+    (b1 / "votes.csv").write_text("")  # 0-byte -> EmptyDataError, must be tolerated
+    votes_dir = tmp_path / "votes"
+
+    n_votes, n_consensus = write_vote_provenance([b1], DATASET, votes_dir=votes_dir)
+    assert n_votes == 0 and n_consensus == 1
+    assert (votes_dir / f"dataset={DATASET}" / "consensus.csv").exists()
