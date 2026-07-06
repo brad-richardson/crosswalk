@@ -11,47 +11,53 @@
   <main>
     <h1>Join your city's data to the open map</h1>
     <p class="lead">
-      A <strong>bridge table</strong> is a rosetta stone: it maps a city's own
-      <strong>local road/path IDs ↔ Overture GERS ids</strong>, so any dataset keyed to
-      those local IDs — crash records, pavement condition, permits, curb rules — becomes
-      joinable to the open map in one line of SQL. One table per city retroactively
-      unlocks all of that city's segment-keyed data.
+      Look up how your city's own street and path IDs map to
+      <strong>Overture Maps GERS ids</strong>. Each city gets a <strong>bridge
+      table</strong> — one file that connects the two ID schemes — so anything keyed to
+      local IDs (crash records, pavement condition, permits, curb rules) can be joined
+      to the open map with one line of SQL.
     </p>
     <p class="lead">
-      This page shows per-release, per-dataset stats for the published bridge tables,
-      read live from the published <code>index.json</code>. Head to
-      <a id="browseLink" href="browse.html">Query &amp; browse</a> to run SQL or look up a
-      GERS id, or see the
+      This is an early work in progress — coverage grows city by city. Spot a problem
+      or want your city added?
+      <a href="https://github.com/brad-richardson/matcher/issues">Feedback is welcome</a>.
+    </p>
+    <p class="lead">
+      Head to <a id="browseLink" href="browse.html">Query &amp; browse</a> to explore a
+      dataset or look up a GERS id, or see the
       <a href="https://github.com/brad-richardson/matcher/blob/main/docs/examples/join-city-data.md">worked join example</a>.
+      The stats below are read live from the published <code>index.json</code>.
     </p>
 
     <div id="meta"></div>
     <div id="tiles" class="tiles"></div>
 
-    <h2>Aggregate charts</h2>
-    <p class="lead">Honest per-dataset views — no smoothing, no cherry-picking. Only
-      rows with <code>match_decision = 'match'</code> count toward the match rate;
-      <code>review</code>-band rows are excluded from the headline.</p>
+    <h2>Datasets at a glance</h2>
+    <p class="lead">Match rates count confident matches only — borderline candidates
+      ship in each table marked <code>review</code>, but don't count here.</p>
     <div class="chartrow" id="charts"></div>
 
     <h2>Published datasets</h2>
-    <p class="lead">Counts come from each dataset's <code>manifest.json</code>. Click a
-      dataset to browse or download it.</p>
+    <p class="lead">Click a dataset to browse or download it. Counts come from each
+      dataset's <code>manifest.json</code>.</p>
     <div class="tablewrap"><table id="published"></table></div>
 
-    <h2>Excluded — pending license review</h2>
-    <p class="lead">Withheld on purpose until the source license is verified — not
-      missing. The publisher never publishes under a guessed license.</p>
+    <h2>Waiting on license review</h2>
+    <p class="lead">We only publish data whose license we've verified. These datasets
+      are ready but on hold until their source license checks out.</p>
     <div class="tablewrap"><table id="excluded"></table></div>
 
-    <h2>Honest caveats</h2>
-    <div class="caveat"><strong>Review-band edges excluded.</strong> Only
-      <code>match_decision = 'match'</code> rows drive the headline match rate;
-      <code>review</code> rows ship in the table but are lower-confidence.</div>
-    <div class="caveat"><strong>Calibrated confidence.</strong> <code>confidence</code>
-      is a calibrated P(match) — pick your own precision/recall operating point.</div>
-    <div class="caveat"><strong>Validation varies.</strong> Match quality is
-      benchmarked on a subset of datasets; treat un-benchmarked ones as provisional.</div>
+    <details class="methodology">
+      <summary>Methodology notes</summary>
+      <div class="caveat"><strong>What counts as a match.</strong> Only rows with
+        <code>match_decision = 'match'</code> drive the headline match rate;
+        <code>review</code> rows ship in the table but are lower-confidence.</div>
+      <div class="caveat"><strong>Confidence scores.</strong> The <code>confidence</code>
+        column is a calibrated probability of a correct match — filter to whatever
+        threshold suits your use case.</div>
+      <div class="caveat"><strong>Validation varies.</strong> Match quality is
+        benchmarked on a subset of datasets; treat un-benchmarked ones as provisional.</div>
+    </details>
 
     <h2 id="licensing">Licensing &amp; attribution</h2>
     <div id="licensing-body"></div>

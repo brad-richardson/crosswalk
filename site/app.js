@@ -178,9 +178,8 @@ export function renderNav(active) {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.innerHTML =
-    "<strong>Unofficial / independent project.</strong> Community-built bridge tables linking " +
-    "local road & path datasets to Overture Maps GERS ids. <em>Not</em> an Overture Maps Foundation product " +
-    "or endorsement. See licensing &amp; attribution below.";
+    "An independent community project — not affiliated with the Overture Maps Foundation. " +
+    "See licensing &amp; attribution below.";
   const nav = document.createElement("nav");
   nav.className = "top";
   nav.innerHTML =

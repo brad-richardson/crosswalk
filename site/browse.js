@@ -12,8 +12,9 @@ const PAGE_SIZE = CFG.PAGE_SIZE || 50;
 renderNav("browse");
 el("statsLink").href = withBase("index.html");
 el("footer").innerHTML =
-  `Queries execute locally in DuckDB-WASM against read-only Parquet. ` +
-  `Independent project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a>.`;
+  `Queries run in your browser (DuckDB-WASM) against read-only Parquet — nothing is sent to a server. ` +
+  `An independent community project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a> · ` +
+  `<a href="https://github.com/brad-richardson/matcher/issues">feedback welcome</a>.`;
 
 // --------------------------------------------------------------------------
 // Shared rendering
