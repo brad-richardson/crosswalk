@@ -452,3 +452,46 @@ def write_exports(
         )
         written += 1
     return written
+
+
+def write_vote_provenance(
+    batch_dirs: list[Path],
+    dataset: str,
+    votes_dir: Path = Path("labels/votes"),
+) -> tuple[int, int]:
+    """Snapshot raw panel ballots + consensus into a git-tracked location.
+
+    The panel writes ``votes.csv`` (every raw ballot) and ``consensus.csv`` per
+    batch, but those live under the batch dir in the git-ignored ``data/`` tree,
+    so the audit trail behind every exported label is never committed. This
+    copies them into ``labels/votes/dataset=<dataset>/`` — which *is* tracked —
+    tagging each row with a ``source_batch`` column for cross-batch traceability.
+
+    Idempotent: the dataset's files are rewritten from the given batches and
+    deduplicated (votes by ``source_batch``/``group_id``/``provider``, consensus
+    by ``source_batch``/``group_id``), so re-exporting the same batches is a
+    no-op. Missing ``votes.csv`` in a batch is skipped, not fatal. Returns
+    ``(n_vote_rows, n_consensus_rows)``.
+    """
+    out_dir = Path(votes_dir) / f"dataset={dataset}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def _collect(filename: str, dedupe_on: list[str]) -> int:
+        frames = []
+        for bd in batch_dirs:
+            path = Path(bd) / filename
+            if not path.exists():
+                continue
+            df = pd.read_csv(path, dtype={"group_id": str})
+            df.insert(0, "source_batch", Path(bd).name)
+            frames.append(df)
+        if not frames:
+            return 0
+        merged = pd.concat(frames, ignore_index=True)
+        merged = merged.drop_duplicates(subset=dedupe_on, keep="last")
+        merged.to_csv(out_dir / filename, index=False)
+        return len(merged)
+
+    n_votes = _collect("votes.csv", ["source_batch", "group_id", "provider"])
+    n_consensus = _collect("consensus.csv", ["source_batch", "group_id"])
+    return n_votes, n_consensus

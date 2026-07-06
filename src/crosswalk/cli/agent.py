@@ -1366,6 +1366,7 @@ def export_stitch_panel(
         REASON_HUMAN_PRECEDENCE,
         plan_exports,
         write_exports,
+        write_vote_provenance,
     )
 
     # Support both repeatable --batch and comma-separated values.
@@ -1430,6 +1431,12 @@ def export_stitch_panel(
 
     written = write_exports(report, dataset, labels_dir)
     console.print(f"[green]Wrote {written} panel labels to {labels_dir}/dataset={dataset}[/green]")
+
+    n_votes, n_consensus = write_vote_provenance(batch_dirs, dataset)
+    console.print(
+        f"[green]Archived vote provenance: {n_votes} ballots, {n_consensus} consensus "
+        f"rows to labels/votes/dataset={dataset}[/green]"
+    )
 
 
 @agent_app.command("import")
