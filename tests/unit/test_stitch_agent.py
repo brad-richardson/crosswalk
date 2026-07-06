@@ -1627,3 +1627,61 @@ def test_run_provider_collect_feedback_toggle(monkeypatch):
     vote_on = sr.run_provider_on_group(*args, collect_feedback=True)
     assert vote_on.choice == "A"
     assert json.loads(vote_on.pack_feedback)["missing_info"] == ["x"]
+
+
+# --- invocation hard-fail vs parse abstain (quota handling) -------------------
+
+
+def _attempt(invoker, retries=1, budget=300.0):
+    """Drive _attempt_provider with a fake invoker, group_dir=None (unit mode)."""
+    return sr._attempt_provider(
+        sr.ProviderSpec(name="claude", model="test-model"),
+        "g1",
+        None,  # group_dir -> skip scratch pack
+        "prompt",
+        ["A"],
+        {"A": [("r1", "t1")]},
+        {"A"},
+        invoker,
+        5,  # timeout
+        retries,
+        invocation_budget_s=budget,
+    )
+
+
+def test_persistent_invocation_error_hard_fails(monkeypatch):
+    """A provider that keeps failing (e.g. quota) raises, not abstains."""
+    monkeypatch.setattr(sr.time, "sleep", lambda *_: None)
+
+    def always_fail(*_a, **_k):
+        raise RuntimeError("opencode exited with code 1: 429 insufficient_quota")
+
+    with pytest.raises(sr.ProviderInvocationError, match="insufficient_quota"):
+        _attempt(always_fail, budget=0.0)
+
+
+def test_invocation_error_recovers_within_budget(monkeypatch):
+    """A transient failure that clears on retry yields a normal vote (no raise)."""
+    monkeypatch.setattr(sr.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def flaky(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("temporary 429 rate limit")
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    vote = _attempt(flaky, budget=60.0)
+    assert vote.choice == "A" and vote.provider == "claude"
+    assert calls["n"] == 2  # failed once, succeeded on retry
+
+
+def test_parse_error_still_abstains_not_hard_fail():
+    """Malformed output abstains (soft) — it must NOT halt the run."""
+
+    def garbage(*_a, **_k):
+        return "no json here, just prose"
+
+    vote = _attempt(garbage, retries=1)
+    assert vote.choice == "ABSTAIN"
+    assert "parse/validation" in vote.error

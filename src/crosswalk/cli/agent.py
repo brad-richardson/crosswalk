@@ -1088,7 +1088,12 @@ def run_stitch_panel(
         crosswalk agent stitch-run --batch data/agents/stitching/batches/us_boston_streets
         crosswalk agent stitch-run --batch <dir> --panel v3-candidate  # 4-voter candidate
     """
-    from ..agent_labeling.stitch_runner import ProviderSpec, get_panel, run_batch
+    from ..agent_labeling.stitch_runner import (
+        ProviderInvocationError,
+        ProviderSpec,
+        get_panel,
+        run_batch,
+    )
 
     if not batch_dir.exists():
         console.print(f"[red]Batch dir not found: {batch_dir}[/red]")
@@ -1119,15 +1124,23 @@ def run_stitch_panel(
         console.print(
             "  [yellow]pack-feedback ON: appending diagnostic self-report request[/yellow]"
         )
-    votes_df, consensus_df = run_batch(
-        batch_dir,
-        panel=panel,
-        group_ids=gids,
-        timeout=timeout,
-        limit=limit,
-        collect_feedback=pack_feedback,
-        resume=resume,
-    )
+    try:
+        votes_df, consensus_df = run_batch(
+            batch_dir,
+            panel=panel,
+            group_ids=gids,
+            timeout=timeout,
+            limit=limit,
+            collect_feedback=pack_feedback,
+            resume=resume,
+        )
+    except ProviderInvocationError as e:
+        console.print(f"[red]Panel halted — provider down:[/red] {e}")
+        console.print(
+            "[yellow]Completed groups were flushed; re-run with --resume once the "
+            "provider is healthy to continue.[/yellow]"
+        )
+        raise typer.Exit(1) from e
 
     console.print(f"[green]{len(consensus_df)} groups, {len(votes_df)} votes[/green]")
     tier_counts = consensus_df["consensus"].value_counts().to_dict()
