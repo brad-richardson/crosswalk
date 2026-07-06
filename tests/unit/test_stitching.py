@@ -2065,6 +2065,191 @@ class TestStitchingDeepLink:
             self._stop(patches)
 
 
+class TestStitchingReviewNavigation:
+    """Position-based navigation walks ONLY the unreviewed queue.
+
+    A reload of ``/stitching-review?dataset=...`` must land on the first
+    unreviewed group, and next/skip/save-advance must never re-serve a group the
+    reviewer already completed. The "N of M" counter is queue-relative (position
+    within the unreviewed list / total unreviewed). Deep links by ``group_id``
+    are the deliberate exception: they address the full batch (incl. reviewed
+    groups) and report batch position / batch total.
+    """
+
+    DATASET = "test_ds"
+
+    def _batch(self):
+        # Four groups in batch order g0, g1, g2, g3.
+        return {
+            "dataset_id": self.DATASET,
+            "groups": [
+                {
+                    "group_id": f"g{i}",
+                    "match_type": "1:N",
+                    "ref_ids": [f"r{i}"],
+                    "target_ids": [f"t{i}"],
+                    "edges": [_edge(f"r{i}", f"t{i}", 0.9)],
+                }
+                for i in range(4)
+            ],
+        }
+
+    def _group(self, gid):
+        return next(g for g in self._batch()["groups"] if g["group_id"] == gid)
+
+    def _client(self, unreviewed, recorder=None):
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        from crosswalk.web.app import create_app
+
+        recorder = recorder or MagicMock()
+        patches = [
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch("crosswalk.web.routes.stitching.load_stitch_batch", return_value=self._batch()),
+            patch(
+                "crosswalk.web.routes.stitching.get_unreviewed_stitch_groups",
+                return_value=unreviewed,
+            ),
+            patch("crosswalk.web.routes.stitching.record_stitching_label", recorder),
+        ]
+        for p in patches:
+            p.start()
+        return TestClient(create_app()), recorder, patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    def test_reload_lands_on_first_unreviewed_with_queue_counter(self):
+        # g0 and g2 already reviewed -> unreviewed queue is [g1, g3].
+        unreviewed = [self._group("g1"), self._group("g3")]
+        client, _, patches = self._client(unreviewed)
+        try:
+            resp = client.get(f"/stitching-review?dataset={self.DATASET}")
+            assert resp.status_code == 200
+            # Serves the first unreviewed group, not a completed one.
+            assert 'data-group-id="g1"' in resp.text
+            assert 'data-group-id="g0"' not in resp.text
+            # Counter is queue-relative: first of the two remaining.
+            assert "Group 1 of 2" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_all_reviewed_full_page(self):
+        client, _, patches = self._client(unreviewed=[])
+        try:
+            resp = client.get(f"/stitching-review?dataset={self.DATASET}")
+            assert resp.status_code == 200
+            assert "All groups reviewed!" in resp.text
+            # No stale "Group 1 of N" progress line for a fully-reviewed batch.
+            assert "Group 1 of" not in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_fragment_index_walks_unreviewed_not_batch(self):
+        # g0 reviewed -> unreviewed queue is [g1, g2, g3]. Index 1 into the queue
+        # is g2, NOT all_groups[1] (== g1) as the pre-fix code returned.
+        unreviewed = [self._group("g1"), self._group("g2"), self._group("g3")]
+        client, _, patches = self._client(unreviewed)
+        try:
+            resp = client.get(f"/stitching-review/group?dataset={self.DATASET}&group_index=1")
+            assert resp.status_code == 200
+            assert 'data-group-id="g2"' in resp.text
+            assert 'data-group-id="g1"' not in resp.text
+            assert "Group 2 of 3" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_fragment_deep_link_by_id_uses_batch_position(self):
+        # Deep link to an already-reviewed group (not in the unreviewed queue):
+        # still resolves, and reports its BATCH position (g2 -> "3 of 4").
+        unreviewed = [self._group("g1"), self._group("g3")]
+        client, _, patches = self._client(unreviewed)
+        try:
+            resp = client.get(f"/stitching-review/group?dataset={self.DATASET}&group_id=g2")
+            assert resp.status_code == 200
+            assert 'data-group-id="g2"' in resp.text
+            assert "Group 3 of 4" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_skip_advances_within_unreviewed_queue(self):
+        unreviewed = [self._group("g1"), self._group("g3")]
+        client, _, patches = self._client(unreviewed)
+        try:
+            resp = client.post(
+                "/stitching-review/skip",
+                data={"dataset": self.DATASET, "group_id": "g1"},
+            )
+            assert resp.status_code == 200
+            # Next unreviewed after g1 is g3 (a completed group is never served).
+            assert 'data-group-id="g3"' in resp.text
+            assert "Group 2 of 2" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_skip_last_unreviewed_wraps_to_first(self):
+        unreviewed = [self._group("g1"), self._group("g3")]
+        client, _, patches = self._client(unreviewed)
+        try:
+            resp = client.post(
+                "/stitching-review/skip",
+                data={"dataset": self.DATASET, "group_id": "g3"},
+            )
+            assert resp.status_code == 200
+            assert 'data-group-id="g1"' in resp.text
+            assert "Group 1 of 2" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_select_advances_to_first_remaining_never_repeats(self):
+        # Simulate the queue AFTER g0 was recorded: it has dropped out, so the
+        # save-advance serves g1 (never re-serves the just-labeled g0).
+        after = [self._group("g1"), self._group("g2"), self._group("g3")]
+        client, recorder, patches = self._client(after)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "g0",
+                    "group_index": 0,
+                    "included_refs": "r0",
+                    "included_targets": "t0",
+                },
+            )
+            assert resp.status_code == 200
+            assert recorder.called
+            assert 'data-group-id="g1"' in resp.text
+            assert 'data-group-id="g0"' not in resp.text
+            assert "Group 1 of 3" in resp.text
+        finally:
+            self._stop(patches)
+
+    def test_select_last_group_shows_all_reviewed(self):
+        client, recorder, patches = self._client(unreviewed=[])
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "g3",
+                    "group_index": 0,
+                    "included_refs": "r3",
+                    "included_targets": "t3",
+                },
+            )
+            assert resp.status_code == 200
+            assert recorder.called
+            # Fragment renders the all-reviewed empty state (no group card).
+            assert "All Done!" in resp.text
+            assert 'data-group-id=' not in resp.text
+        finally:
+            self._stop(patches)
+
+
 class TestStitchingUiHooks:
     """The group card exposes the DOM hooks the client-side UX JS relies on:
 
