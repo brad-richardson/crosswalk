@@ -82,7 +82,7 @@ PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
     "v2": DEFAULT_PANEL,
     "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
-    "no-agy": [DEFAULT_PANEL[0], DEFAULT_PANEL[1], OPENCODE_QWEN],
+    "no-agy": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_QWEN],
 }
 
 

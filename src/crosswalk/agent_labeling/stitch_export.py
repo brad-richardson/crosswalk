@@ -63,6 +63,39 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 PANEL_LABELER = "panel_unanimous_v3"
 PANEL_LABELER_PREFIX = "panel_"
 
+#: The provider composition PANEL_LABELER is valid provenance for. Composition
+#: changes have historically bumped the labeler (v1 -> v2), so a batch run with
+#: a different panel (e.g. ``--panel no-agy`` during a quota outage) must not be
+#: exported under this labeler without an explicit override.
+DEFAULT_PANEL_PROVIDERS = frozenset({"claude", "codex", "agy"})
+
+
+def nonstandard_panel_batches(
+    batch_dirs: list[Path],
+    expected: frozenset[str] = DEFAULT_PANEL_PROVIDERS,
+) -> dict[str, set[str]]:
+    """Return ``{batch_name: provider_set}`` for batches with a nonstandard panel.
+
+    Reads each batch's ``votes.csv`` provider column and flags any batch whose
+    provider set differs from ``expected``. Used by ``stitch-export`` to refuse
+    stamping :data:`PANEL_LABELER` on votes from a different panel composition.
+    Batches with a missing/unreadable ``votes.csv`` are skipped (the CLI already
+    hard-requires ``consensus.csv``; provenance for such batches is best-effort).
+    """
+    offending: dict[str, set[str]] = {}
+    for bd in batch_dirs:
+        votes_path = Path(bd) / "votes.csv"
+        if not votes_path.exists():
+            continue
+        try:
+            providers = set(pd.read_csv(votes_path)["provider"].astype(str).unique())
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, KeyError):
+            continue
+        if providers and providers != set(expected):
+            offending[Path(bd).name] = providers
+    return offending
+
+
 # Per-group outcome reasons (stable strings for reporting/tests).
 REASON_EXPORTED = "exported"
 REASON_OVER_MAX = "over_max_edges"
