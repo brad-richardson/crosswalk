@@ -165,6 +165,20 @@ class QualityFingerprintConfig(BaseModel):
     class_distribution: dict[str, int] = Field(default_factory=dict)
 
 
+class QualityHoldConfig(BaseModel):
+    """Persisted quality hold — blocks the dataset from being published.
+
+    Declares that the dataset's factory output is known-defective (e.g. a
+    systematic matching error) and must not ship even when its license is
+    approved. The publisher (``crosswalk.factory.publish``) excludes any
+    dataset carrying this block. Remove the block once the defect is fixed
+    and the output re-verified.
+    """
+
+    reason: str  # Human-readable defect description (shown on the credibility page)
+    since: str | None = None  # ISO date the hold was placed
+
+
 class DatasetConfig(BaseModel):
     """Complete unified dataset configuration.
 
@@ -193,6 +207,9 @@ class DatasetConfig(BaseModel):
 
     # Quality fingerprint (from crosswalk quality fingerprint)
     quality_fingerprint: QualityFingerprintConfig | None = None
+
+    # Quality hold (blocks publishing until removed; see factory/publish.py)
+    quality_hold: QualityHoldConfig | None = None
 
     # Additional metadata
     notes: str | None = None

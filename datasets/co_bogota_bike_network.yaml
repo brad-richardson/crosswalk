@@ -70,3 +70,9 @@ quality_fingerprint:
   total_segments: 6092
   name_coverage_ratio: 0.0
   class_coverage_ratio: 1.0
+# Blocks publishing (crosswalk factory publish) until the defect is fixed and
+# the block is removed. See src/crosswalk/factory/publish.py::dataset_quality_hold.
+quality_hold:
+  reason: 'cross-mode defect: cycleways matched to parallel road centerlines at
+    0.82-0.95 confidence; awaiting optimizer cross-mode gate / learned optimizer'
+  since: '2026-07-06'

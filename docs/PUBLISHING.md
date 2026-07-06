@@ -217,6 +217,28 @@ To publish a dataset: verify its source terms, then set `status = "approved"` wi
 a `license` and `attribution` in `datasets/licenses.toml`. This is a one-line human
 decision per dataset, recorded in git.
 
+### Quality holds (`quality_hold:` in the dataset YAML)
+
+A license approval is not a quality sign-off. When a dataset's factory output is
+**known-defective** (e.g. a systematic matching error), declare a persisted hold in
+its `datasets/<name>.yaml`:
+
+```yaml
+quality_hold:
+  reason: 'cross-mode defect: cycleways matched to parallel road centerlines at
+    0.82-0.95 confidence; awaiting optimizer cross-mode gate / learned optimizer'
+  since: '2026-07-06'
+```
+
+The publisher excludes any held dataset — *even if its license is approved* — with
+`reason: "quality hold: …"` in `index.json` and a distinct **quality hold** badge on
+the credibility page's on-hold table. The check is deterministic and offline (a YAML
+read, same path as display metadata). Fail-safe: any truthy `quality_hold` value
+holds, even a malformed block. Remove the block (a reviewed, git-recorded decision)
+once the defect is fixed and the output re-verified. Holds beat runtime memory: an
+"I'll skip it this sweep" decision made in a session dies with the session — the
+YAML block is what keeps the next sweep from shipping the defect.
+
 ### License review outcome
 
 Conservative first pass — only unambiguous **public-domain government** sources are

@@ -217,6 +217,145 @@ def test_unlisted_dataset_is_excluded(factory_root, tmp_path, empty_datasets_dir
 
 
 # --------------------------------------------------------------------------
+# Quality hold (declarative do-not-ship in the dataset YAML)
+# --------------------------------------------------------------------------
+HOLD = {
+    "reason": (
+        "cross-mode defect: cycleways matched to parallel road centerlines at 0.82-0.95 confidence"
+    ),
+    "since": "2026-07-06",
+}
+
+
+def _write_dataset_yaml(datasets_dir, name, *, quality_hold=None):
+    """Write a minimal dataset YAML config into the test datasets dir."""
+    import yaml
+
+    data = {"name": name, "display_name": f"Display {name}", "type": "bike"}
+    if quality_hold is not None:
+        data["quality_hold"] = quality_hold
+    (datasets_dir / f"{name}.yaml").write_text(yaml.safe_dump(data, sort_keys=False))
+
+
+def test_quality_hold_excludes_even_when_license_approved(
+    factory_root, tmp_path, empty_datasets_dir
+):
+    """The incident this mechanism prevents: license flips to approved, but the
+    bridge is known-defective — the persisted hold must keep it excluded."""
+    _write_dataset_yaml(empty_datasets_dir, "us_ok_roads", quality_hold=HOLD)
+    staging = tmp_path / "staging"
+    report = assemble_staging(
+        factory_root,
+        staging,
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    held = next(d for r in report.releases for d in r.datasets if d.dataset == "us_ok_roads")
+    assert held.status == "excluded"
+    assert held.reason == f"quality hold: {HOLD['reason']} (since 2026-07-06)"
+    # The license IS approved — the hold, not the license, is what blocks it.
+    assert held.license["approved"] is True
+    assert held.quality_hold == HOLD
+    # No data copied into the staging tree.
+    assert not (staging / BRIDGES_PREFIX / f"release={RELEASE}" / "dataset=us_ok_roads").exists()
+    assert report.n_published == 0
+
+    # index.json carries the hold distinctly from a plain exclusion reason.
+    idx = json.loads((staging / INDEX_JSON).read_text())
+    entry = idx["releases"][RELEASE]["datasets"]["us_ok_roads"]
+    assert entry["status"] == "excluded"
+    assert entry["quality_hold"] == HOLD
+    assert entry["reason"].startswith("quality hold:")
+    assert "files" not in entry
+
+
+def test_dataset_yaml_without_hold_publishes(factory_root, tmp_path, empty_datasets_dir):
+    """A YAML config with no quality_hold block changes nothing."""
+    _write_dataset_yaml(empty_datasets_dir, "us_ok_roads")
+    report = assemble_staging(
+        factory_root,
+        tmp_path / "staging",
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    ok = next(d for r in report.releases for d in r.datasets if d.dataset == "us_ok_roads")
+    assert ok.published
+    assert ok.quality_hold is None
+    assert report.n_published == 1
+
+
+def test_quality_hold_renders_distinctly_in_html(factory_root, tmp_path, empty_datasets_dir):
+    """The hold surfaces in the credibility page's on-hold table with its own
+    badge, and the reason is HTML-escaped exactly once."""
+    hold = {"reason": "defect at <0.95 & parallel roads", "since": "2026-07-06"}
+    _write_dataset_yaml(empty_datasets_dir, "us_ok_roads", quality_hold=hold)
+    staging = tmp_path / "staging"
+    assemble_staging(
+        factory_root,
+        staging,
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    html = (staging / INDEX_HTML).read_text()
+    assert "<span class='pill hold'>quality hold</span>" in html
+    assert "defect at &lt;0.95 &amp; parallel roads" in html  # escaped once
+    assert "defect at <0.95" not in html  # never raw
+    assert "since 2026-07-06" in html
+
+
+def test_quality_hold_takes_precedence_over_pending_license(
+    factory_root, tmp_path, empty_datasets_dir
+):
+    """A held dataset reports the hold even while its license is still pending,
+    so a later license flip can never change its outcome or its stated reason."""
+    _write_dataset_yaml(empty_datasets_dir, "xx_pending_roads", quality_hold=HOLD)
+    report = assemble_staging(
+        factory_root,
+        tmp_path / "staging",
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    d = next(x for r in report.releases for x in r.datasets if x.dataset == "xx_pending_roads")
+    assert not d.published
+    assert d.reason.startswith("quality hold:")
+    assert d.license["approved"] is False  # license state still recorded alongside
+
+
+def test_malformed_quality_hold_still_holds(factory_root, tmp_path, empty_datasets_dir):
+    """Fail-safe: any truthy quality_hold value holds — a defective dataset must
+    never ship on a parsing technicality."""
+    (empty_datasets_dir / "us_ok_roads.yaml").write_text("name: us_ok_roads\nquality_hold: true\n")
+    report = assemble_staging(
+        factory_root,
+        tmp_path / "staging",
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    held = next(d for r in report.releases for d in r.datasets if d.dataset == "us_ok_roads")
+    assert held.status == "excluded"
+    assert held.reason.startswith("quality hold:")
+
+
+def test_dataset_quality_hold_normalizes_unquoted_yaml_date(empty_datasets_dir):
+    """An unquoted ``since:`` parses as datetime.date — normalized to ISO string."""
+    from crosswalk.factory.publish import dataset_quality_hold
+
+    (empty_datasets_dir / "ds.yaml").write_text(
+        "name: ds\nquality_hold:\n  reason: broken\n  since: 2026-07-06\n"
+    )
+    assert dataset_quality_hold("ds", empty_datasets_dir) == {
+        "reason": "broken",
+        "since": "2026-07-06",
+    }
+    assert dataset_quality_hold("missing_ds", empty_datasets_dir) is None
+
+
+# --------------------------------------------------------------------------
 # Unified long table
 # --------------------------------------------------------------------------
 def test_all_bridges_has_dataset_col_and_sorted(factory_root, tmp_path, empty_datasets_dir):
