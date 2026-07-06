@@ -27,6 +27,7 @@ import pytest
 from matcher.config import (
     FEATURE_VERSION,
     SPARK_PORTABLE_FEATURES,
+    SPARK_PORTABLE_XGB_PARAMS,
     bundled_spark_manifest_path,
     bundled_spark_model_path,
 )
@@ -76,6 +77,25 @@ def test_shipped_spark_manifest_features_match_config(shipped_manifest):
     assert shipped_manifest.get("n_features") == len(SPARK_PORTABLE_FEATURES)
 
 
+def test_shipped_spark_manifest_hyperparams_match_config(shipped_manifest):
+    """Manifest hyperparams must match config.SPARK_PORTABLE_XGB_PARAMS.
+
+    Without this, retuning the Spark hyperparams in config without re-exporting
+    would ship a stale booster with no failing test (the booster itself carries
+    no marker of the params it was trained with).
+    """
+    hyperparams = shipped_manifest.get("hyperparams") or {}
+    mismatched = {
+        k: (hyperparams.get(k), v)
+        for k, v in SPARK_PORTABLE_XGB_PARAMS.items()
+        if hyperparams.get(k) != v
+    }
+    assert not mismatched, (
+        f"Shipped Spark manifest hyperparams diverge from config.SPARK_PORTABLE_XGB_PARAMS "
+        f"(manifest, config): {mismatched}. {_RESHIP}"
+    )
+
+
 def test_shipped_spark_manifest_calibration_present_and_monotonic(shipped_manifest):
     """Calibration knots must be present and monotonic (isotonic remap).
 
@@ -95,7 +115,17 @@ def test_shipped_spark_manifest_calibration_present_and_monotonic(shipped_manife
 
 
 def test_shipped_spark_model_loads_and_predicts(shipped_manifest):
-    """The shipped booster loads in xgboost and predicts on a zeros row."""
+    """The shipped booster loads in xgboost and predicts on a zeros row.
+
+    NOTE: XGBoost's native JSON does not persist Python feature names, so this
+    can only guard the feature *count* (num_feature), not name/order — the
+    booster happily predicts on any 28 columns. Feature identity/order is
+    guaranteed by construction: `matcher export-spark-model` writes
+    ``matcher.feature_names`` (the training column order) into the manifest the
+    booster ships with, and ``test_shipped_spark_manifest_features_match_config``
+    pins that manifest to config. Consumers MUST feed columns in
+    ``manifest["features"]`` order.
+    """
     import xgboost as xgb
 
     from matcher.spark import spark_model_json
@@ -103,6 +133,10 @@ def test_shipped_spark_model_loads_and_predicts(shipped_manifest):
     booster = xgb.Booster()
     booster.load_model(bytearray(spark_model_json().encode()))
     features = shipped_manifest["features"]
+    assert booster.num_features() == len(features), (
+        f"Shipped booster expects {booster.num_features()} features but the manifest "
+        f"declares {len(features)}. {_RESHIP}"
+    )
     dmatrix = xgb.DMatrix(
         np.zeros((1, len(features)), dtype=np.float32),
         feature_names=features,

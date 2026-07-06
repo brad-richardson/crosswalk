@@ -80,7 +80,9 @@ def apply_calibration(scores: Any, knots: dict[str, Any]) -> np.ndarray:
             ``x_thresholds`` / ``y_thresholds`` lists).
 
     Returns:
-        Calibrated probabilities as a ``float64`` numpy array.
+        Calibrated probabilities as a ``float64`` numpy array (a 0-d
+        ``np.float64`` scalar for scalar input, matching ``np.interp`` /
+        ``IsotonicCalibrator.transform`` semantics).
     """
     import numpy as np
 

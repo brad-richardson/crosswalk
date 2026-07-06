@@ -22,7 +22,7 @@ the wheel, so `pip install road-matcher` needs zero training:
 
 | Artifact | What it is | Consumer |
 |----------|------------|----------|
-| `matcher_model_combined.joblib` | Full 79-feature calibrated model | `matcher stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
+| `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | `matcher stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
 | `spark_model.json` + `spark_manifest.json` | Spark-portable 28-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
 
 Both are kept in lockstep with `config.FEATURE_VERSION` by CI
