@@ -21,6 +21,12 @@ hootenanny = ["geopandas>=1.0", "shapely>=2.0"]
 # and pyvalhalla (native-ARM Valhalla binaries + Actor binding) for the in-process
 # tile build + trace_attributes matching. pyvalhalla requires Python >= 3.12.
 meili = ["geopandas>=1.0", "shapely>=2.0", "osmium>=3.6", "pyvalhalla>=3.7; python_version>='3.12'"]
+# GraphHopper map-matching baseline. Shares the Overture->OSM-PBF conversion with
+# Meili (geopandas/shapely/osmium), but the engine is a JVM library run at match
+# time via `jbang` (which resolves the pinned graphhopper-map-matching jar from
+# Maven Central and manages the JDK) — so there is no Python engine dep and it
+# works on Python 3.11. Install jbang separately: `brew install jbang`.
+graphhopper = ["geopandas>=1.0", "shapely>=2.0", "osmium>=3.6"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]
@@ -34,6 +40,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mbench"]
+# Ship the GraphHopper jbang runner (a .java data file) inside the package so the
+# adapter can locate it at Path(__file__).with_name("GraphHopperRunner.java").
+artifacts = ["*.java"]
 
 [tool.ruff]
 line-length = 100

@@ -52,10 +52,10 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-import shapely
 from loguru import logger
 
 from mbench.adapters.base import EvalMode, ToolOutput
+from mbench.adapters.mapmatch_common import aggregate_edges, densify_lonlat
 from mbench.convert.pbf import convert_overture_to_pbf
 
 DEFAULT_COSTING = "pedestrian"
@@ -161,26 +161,9 @@ def build_valhalla_graph(pbf_path: Path, cache_dir: Path, rebuild: bool = False)
 # ---------------------------------------------------------------------------
 
 
-def _densify_lonlat(geom, metric_crs, densify_m: float) -> list[tuple[float, float]]:
-    """Return a densified lon/lat vertex sequence for a (Multi)LineString.
-
-    Densification is done in a metric CRS so spacing is truly ~``densify_m``
-    meters, then reprojected back to lon/lat. Returns the longest constituent
-    part for a MultiLineString.
-    """
-    if geom is None or geom.is_empty:
-        return []
-    if geom.geom_type == "MultiLineString":
-        parts = [g for g in geom.geoms if not g.is_empty]
-        if not parts:
-            return []
-        geom = max(parts, key=lambda g: g.length)
-    if geom.geom_type != "LineString":
-        return []
-    gs = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(metric_crs)
-    dens = gs.segmentize(densify_m).to_crs("EPSG:4326").iloc[0]
-    coords = shapely.get_coordinates(dens)
-    return [(float(x), float(y)) for x, y in coords]
+# Trace densification is shared with the GraphHopper baseline (identical
+# formulation); re-exported under the private name the Meili unit tests import.
+_densify_lonlat = densify_lonlat
 
 
 def _trace_request_payload(
@@ -206,34 +189,20 @@ def _trace_request_payload(
 def _aggregate_edges(
     resp: dict, id_map: dict[str, str], target_len_m: float, min_frac: float, min_m: float
 ) -> list[tuple[str, float]]:
-    """Aggregate matched edges into (gers_id, confidence) with overlap filtering.
+    """Aggregate a Valhalla ``trace_attributes`` response into (gers_id, confidence).
 
-    Sums matched edge length per GERS id (Valhalla splits a way into several
-    edges at nodes; all share the way_id). Keeps a GERS id if its matched length
-    is >= ``min_frac`` of the target length OR >= ``min_m`` meters. Confidence is
-    the matched-length fraction of the target, capped at 1.0.
+    Thin Valhalla-specific wrapper over ``mapmatch_common.aggregate_edges``: it
+    pulls ``(way_id, edge.length)`` from the response and converts Valhalla's edge
+    length km -> m (matching the ``units=kilometers`` pinned in the request), then
+    delegates the summing + overlap filter to the shared aggregator.
     """
     if not resp:
         return []
-    edges = resp.get("edges", [])
-    per_gers: dict[str, float] = {}
-    for e in edges:
-        way_id = e.get("way_id")
-        if way_id is None:
-            continue
-        gers = id_map.get(str(way_id))
-        if gers is None:
-            continue
-        length_m = float(e.get("length", 0.0)) * 1000.0  # km -> m
-        per_gers[gers] = per_gers.get(gers, 0.0) + length_m
-
-    out: list[tuple[str, float]] = []
-    denom = target_len_m if target_len_m > 0 else 1.0
-    for gers, matched_m in per_gers.items():
-        frac = matched_m / denom
-        if frac >= min_frac or matched_m >= min_m:
-            out.append((gers, min(1.0, frac)))
-    return out
+    edges = (
+        (e.get("way_id"), float(e.get("length", 0.0)) * 1000.0)  # km -> m
+        for e in resp.get("edges", [])
+    )
+    return aggregate_edges(edges, id_map, target_len_m, min_frac, min_m)
 
 
 def match_targets(

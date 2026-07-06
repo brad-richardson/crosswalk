@@ -3,19 +3,19 @@
 > _Harness renamed `cbench` → `mbench` (2026-07-05). Mentions of "cbench" below are historical; the harness is now invoked as `mbench` (a deprecated `cbench` alias still forwards)._
 
 First recorded head-to-head of `matcher` against baselines — the naive geometric
-floor, Hootenanny (classical vector conflation), and **Valhalla Meili** (modern
-map-matching) — produced with the `cbench` harness and evaluated against
-human-labeled ground truth. Primary datasets: the canonical
+floor, Hootenanny (classical vector conflation), and **two modern map-matchers,
+Valhalla Meili and GraphHopper** — produced with the `mbench` harness and
+evaluated against human-labeled ground truth. Primary datasets: the canonical
 **`us_boston_streets`** (roads) and **`us_fort_collins_sidewalks`** (footways),
-with **`us_seattle_sidewalks`** added for the Meili row.
+with **`us_seattle_sidewalks`** added for the map-matching rows.
 
 ## Headline
 
-| Dataset | naive F1 | Hootenanny 0.2.41 F1 | Meili (Valhalla) F1 | matcher F1 |
-|---------|----------|----------------------|---------------------|------------|
-| us_boston_streets (roads) | 0.839 | 0.973 | 0.994 | **0.996** |
-| us_fort_collins_sidewalks | 0.365 | 0.927 | 0.962 | **0.976** |
-| us_seattle_sidewalks | — | — | 0.944 | — |
+| Dataset | naive F1 | Hootenanny 0.2.41 F1 | Meili (Valhalla) F1 | GraphHopper F1 | matcher F1 |
+|---------|----------|----------------------|---------------------|----------------|------------|
+| us_boston_streets (roads) | 0.839 | 0.973 | 0.994 | 0.890 | **0.996** |
+| us_fort_collins_sidewalks | 0.365 | 0.927 | 0.962 | 0.964 | **0.976** |
+| us_seattle_sidewalks | — | — | 0.944 | 0.929 | — |
 
 > **Naive rows re-measured 2026-07-05** after fixing a shape-sanity guard bug in
 > the naive adapter (PR #275 shipped a symmetric-Hausdorff guard that rejected
@@ -24,20 +24,32 @@ with **`us_seattle_sidewalks`** added for the Meili row.
 > struck-through in the tables below for provenance. The fix roughly doubled
 > naive road recall (0.54 → 0.95); sidewalks still collapse (see below).
 
-matcher wins on both shared datasets (target-level F1). Meili is the strongest
-external baseline — it beats Hootenanny on both, with **perfect recall (1.000) on
-all three datasets** — but over-predicts (lower precision), which is the
-signature of map-matching: it snaps every trace onto *something*, so it never
-misses a true match but picks up spurious adjacent/parallel edges. matcher edges
-it out on F1 by trading a little recall for much higher precision. The naive floor
-collapses on dense parallel sidewalks; Hootenanny is a strong classical baseline
-on both roads and footways.
+matcher wins on both shared datasets (target-level F1). The two map-matchers are
+the strongest external baselines — both beat Hootenanny on sidewalks, with
+**perfect recall (1.000) on all three datasets for both engines** — but they
+over-predict (lower precision), which is the signature of map-matching: a trace
+snaps onto *something*, so it never misses a true match but picks up spurious
+adjacent/parallel edges. matcher edges them out on F1 by trading a little recall
+for much higher precision. The naive floor collapses on dense parallel sidewalks;
+Hootenanny is a strong classical baseline on both roads and footways.
 
-The Meili row also **pilots the path-based-formulation bet** from
+**GraphHopper is the second live map-matcher** (actively maintained, embeddable
+JVM library, *no server*), added to test whether Meili's perfect-recall /
+lower-precision signature is a property of the **formulation** or of Valhalla
+specifically. The verdict (details below): the **perfect-recall half is the
+formulation's** — both engines hit 1.000 recall everywhere. The **precision tax is
+also the formulation's on sidewalks** — GraphHopper and Meili lose almost exactly
+the same to parallel-road snapping (FC 16 vs 17 FP; Seattle 13 vs 10 FP) — but its
+**magnitude on roads is engine-specific**: on Boston, Valhalla rejects
+parallel-carriageway snaps that GraphHopper's HMM accepts (3 vs 66 false
+positives), so GraphHopper's road F1 (0.890) trails Meili's (0.994).
+
+The map-matching rows also **pilot the path-based-formulation bet** from
 `docs/EVAL_ROADMAP.md` (§Architecture assessment #3) — see
-[`research/meili_baseline.md`](../research/meili_baseline.md) for what the result
-implies (segmentation mismatch handled natively; precision lost to parallel
-geometry), with concrete example segment ids.
+[`research/meili_baseline.md`](../research/meili_baseline.md) and
+[`research/graphhopper_baseline.md`](../research/graphhopper_baseline.md) for what
+the results imply (segmentation mismatch handled natively; precision lost to
+parallel geometry), with concrete example segment ids.
 
 ## What is being measured (scope)
 
@@ -72,6 +84,7 @@ Target = 10,844 local road segments; reference = 125,769 Overture segments.
 | Hootenanny 0.2.41 | 0.9470 | 1.0000 | 0.9728 | 268 | 15 | 0 | 20,408 | n/a (emulated)* | HighwayMatchCreator/HighwaySnapMergerCreator |
 | Hootenanny 0.2.87 (native x86, tag-only merge) | 0.9884 | 0.6343 | 0.7727 | 170 | 2 | 98 | 10,121 | **5m47s** (3m26s match-only; 1.79 GB)† | HighwayMatchCreator + LinearTagOnlyMerger; snap-merge crashes‡ |
 | Meili (Valhalla 3.7.0) | 0.9889 | 1.0000 | 0.9944 | 268 | 3 | 0 | 15,591 | 12.0s (5.0s match-only; 838 MB) | pedestrian costing, densify 10m, search_radius 25m, min_overlap 0.10/8m |
+| GraphHopper 10.2 (map-matching) | 0.8024 | 1.0000 | 0.8904 | 268 | 66 | 0 | 20,764 | 29.1s (21.5s match-only; 1234 MB) | foot profile, densify 10m, sigma 25m, min_overlap 0.10/8m; JVM native (jbang) |
 | **matcher (xgboost)** | **0.9963** | **0.9963** | **0.9963** | 267 | 1 | 1 | 15,549 | 85.3s (2965 MB) | full ML stitch pipeline |
 
 † **Native x86 timing is now valid — this closes the "emulated" caveat.** Run
@@ -106,19 +119,22 @@ source to chase the merger bug.
 | ~~naive (pre-fix)~~ | ~~0.393~~ | ~~0.299~~ | ~~0.340~~ | ~~0.055~~ | ~~73~~ | legacy id-map |
 | Hootenanny 0.2.41 | 0.771 | 0.879 | 0.821 | 0.384 | 73 | legacy id-map |
 | Meili (Valhalla 3.7.0) | 0.873 | 0.931 | 0.901 | 0.521 | 73 | legacy id-map |
+| GraphHopper 10.2 (current epoch) | 0.609 | 0.881 | 0.720 | 0.126 | 111 | legacy id-map |
 | **matcher (xgboost)** | **0.871** | **0.793** | **0.830** | **0.537** | 67 | groups sidecar |
 
 Note: only matcher emits a groups sidecar, so its stitch eval is group-based (67
-groups); naive/Hootenanny/Meili have no sidecar and fall back to legacy segment-id
-mapping (73 groups). **Caveat on the naive stitch row:** it was re-measured after
-the guard fix against the *current* stitching-label base, which has since grown
-(73 → 113 mapped legacy groups), so its group basis differs from the frozen
-Hootenanny/Meili rows — cross-tool stitch numbers are only strictly comparable at
-the same label epoch. Target-level (above) is the clean apples-to-apples metric.
-Meili's high stitch-edge F1 (0.901) reflects its perfect recall + one-to-many
-edge coverage; its exact-group-match (0.521) trails matcher (0.537), i.e. it
-recovers the edges but groups them slightly less precisely — consistent with its
-target-level over-prediction.
+groups); naive/Hootenanny/Meili/GraphHopper have no sidecar and fall back to legacy
+segment-id mapping. **Caveat on the naive and GraphHopper stitch rows:** both were
+measured against the *current* stitching-label base, which has grown since the
+frozen Hootenanny/Meili rows (73 → 111 mapped legacy groups), so their group basis
+differs — cross-tool stitch numbers are only strictly comparable at the same label
+epoch. Target-level (above) is the clean apples-to-apples metric. For a same-epoch
+map-matcher comparison, Meili re-run at the current 111-group epoch on this machine
+scores stitch **P 0.886 / R 0.944 / F1 0.914 / exact 0.523**, so GraphHopper's
+lower stitch F1 (0.720) and much lower exact-group-match (0.126 vs 0.523) mirror
+its lower *target-level* precision on Boston roads — its extra parallel-carriageway
+edges land in the wrong groups. Meili's high stitch-edge F1 reflects its perfect
+recall + one-to-many edge coverage.
 
 ## us_fort_collins_sidewalks (footways) — target-level match quality
 
@@ -133,6 +149,7 @@ dataset, so target-level only.
 | Hootenanny 0.2.41 | 0.9289 | 0.9245 | 0.9267 | 196 | 15 | 16 | 33,038 | n/a (emulated)* |
 | Hootenanny 0.2.87 (native x86, tag-only merge) | 1.0000 | 0.8868 | 0.9400 | 188 | 0 | 24 | 21,876 | **4m50s** (1.48 GB)† |
 | Meili (Valhalla 3.7.0) | 0.9258 | 1.0000 | 0.9615 | 212 | 17 | 0 | 41,221 | 15.2s (build+match; 852 MB) |
+| GraphHopper 10.2 (map-matching) | 0.9298 | 1.0000 | 0.9636 | 212 | 16 | 0 | 42,919 | 27.1s (26.6s match-only; 657 MB) |
 | **matcher (xgboost)** | **1.0000** | **0.9528** | **0.9758** | 202 | 0 | 10 | 19,981 | 68.0s (1825 MB) |
 
 † Same native x86 / hoot 0.2.87 / tag-only-merge run as the Boston row (see that
@@ -152,20 +169,33 @@ matcher stays robust (F1 0.976, zero false
 positives). **Meili** lands between Hootenanny and matcher (F1 0.962): perfect
 recall, but 17 false positives — sidewalks snapped onto the adjacent parallel
 *road* centerline (the map-matching precision tax; see path-based section).
+**GraphHopper is essentially tied with Meili here** (F1 0.964, 16 FP vs Meili's
+17) — the two independent map-matchers make almost exactly the same
+parallel-road-snap errors on sidewalks, strong evidence that on footways this
+precision tax is a property of the *formulation*, not of either engine. (Note
+GraphHopper is ~1.7× slower than Meili on this dataset — flexible JVM routing vs
+Valhalla's precomputed tiles.)
 
-## us_seattle_sidewalks (footways) — target-level match quality (Meili baseline)
+## us_seattle_sidewalks (footways) — target-level match quality (map-matching baselines)
 
 Target = 46,145 local sidewalk segments; reference = 165,503 Overture segments.
-200 pair labels (85 match-labeled targets). Added for the Meili row; naive /
-Hootenanny / matcher rows are not (yet) recorded for this dataset.
+200 pair labels (85 match-labeled targets). Added for the map-matching rows; naive
+/ Hootenanny / matcher rows are not (yet) recorded for this dataset.
 
 | Tool | Precision | Recall | F1 | TP | FP | FN | Preds | Wall time |
 |------|-----------|--------|----|----|----|----|-------|-----------|
 | Meili (Valhalla 3.7.0) | 0.8947 | 1.0000 | 0.9444 | 85 | 10 | 0 | 53,217 | 29.1s (build+match; 1712 MB) |
+| GraphHopper 10.2 (map-matching) | 0.8673 | 1.0000 | 0.9290 | 85 | 13 | 0 | 56,374 | 108.6s (build+match; 1305 MB) |
 
-Same signature as Fort Collins: perfect recall, precision lost to parallel-road
-snapping. Non-blocking stitch eval (7 legacy groups): P 0.982 / R 0.964 /
-F1 0.973 / exact 0.714.
+Same signature as Fort Collins for both engines: perfect recall, precision lost to
+parallel-road snapping (Meili 10 FP, GraphHopper 13 — again close). The one clear
+gap is **wall time**: GraphHopper's 108s vs Meili's 29s. This is the largest
+reference graph (165k segments) and GraphHopper runs *flexible* routing (no CH/LM
+preprocessing) between HMM candidates over the whole graph, whereas Valhalla serves
+from precomputed tiles — so GraphHopper's match cost scales worse with graph size.
+Non-blocking stitch eval (current epoch, 20 legacy groups): GraphHopper P 0.436 /
+R 0.628 / F1 0.515 / exact 0.100, vs Meili (same epoch/machine) P 0.799 / R 0.930 /
+F1 0.860 / exact 0.450.
 
 ## Operational complexity
 
@@ -183,6 +213,7 @@ plan to close matcher's DX gap are in
 | naive floor | 5 | 5 | 4 | 5 | 5 | **24** |
 | Valhalla Meili | 5 | 4 | 4 | 4 | 4 | **21** |
 | **matcher (post top-3 DX fixes)** | 5 | 3 | 4 | 3 | 4 | **19** |
+| GraphHopper | 4 | 2 | 4 | 3 | 4 | **17** |
 | ~~matcher (pre-fix)~~ | ~~2~~ | ~~3~~ | ~~4~~ | ~~2~~ | ~~3~~ | ~~**14**~~ |
 | Hootenanny 0.2.41 (emulated) | 3 | 2 | 3 | 1 | 1 | **10** |
 | Hootenanny 0.2.87 (native x86) | 1 | 1 | 2 | 2 | 2 | **8** |
@@ -215,6 +246,20 @@ pip resolve is still numba/xgboost/geopandas-heavy); maint 4 (the retrain tax on
 remaining 2-point gap to Meili (dep weight + time) is inherent to the ML stack,
 not setup friction. The naive floor tops the rubric only because it does the
 least — it *is* the quality floor (F1 0.839 roads / 0.365 sidewalks).
+
+**GraphHopper scoring (17).** *Steps 4:* pip-install the `graphhopper` extra **and**
+`brew install jbang` (one extra, non-pip system tool), then run — one step more than
+Meili's pure pip. *Dep weight 2:* the honest cost — it needs a **JVM** (jbang fetches
+JDK 17 itself, but that is a ~200 MB toolchain + Maven jar resolution on first run),
+heavier than a Python wheel though far lighter than Docker/emulation. *Config 4:*
+same auto-built cached Overture graph as Meili, zero knobs required (foot profile
+covers roads and sidewalks). *Time 3:* comparable to Meili on Boston/FC (~20–27 s)
+but ~3.7× slower on the largest graph (Seattle 108 s), because it runs flexible JVM
+routing rather than serving precomputed tiles. *Maint 4:* actively maintained (2025
+releases on Maven Central), embeddable **with no running server** — its one genuine
+DX win over Meili. Net (17): behind Meili (21, pure-pip, tile-served) and just
+behind matcher's post-DX 19 — the JVM dependency is the whole gap, and the no-server
+embeddability is what it buys back.
 
 ## Takeaways
 
@@ -252,41 +297,82 @@ least — it *is* the quality floor (F1 0.839 roads / 0.365 sidewalks).
   datapoint: 5–29 s end-to-end, ~6–17× faster than matcher's ML pipeline. See
   [`research/meili_baseline.md`](../research/meili_baseline.md) for the full
   path-based-formulation analysis with example segment ids.
+- **GraphHopper is the second live map-matcher, and it disentangles what in
+  Meili's signature is the *formulation* vs the *engine*.** A separate,
+  independently-implemented HMM map-matcher (embeddable JVM, no server) over the
+  identical formulation reproduces **perfect recall (1.000) on all three
+  datasets** — pinning that half of the signature to the formulation, not to
+  Valhalla. On **sidewalks** it also reproduces Meili's precision tax almost
+  exactly (FC F1 0.964 / 16 FP vs 0.962 / 17; Seattle 0.929 / 13 FP vs 0.944 / 10)
+  — so the parallel-road-snap tax is the formulation's too on footways. The one
+  place they diverge is **Boston roads**, where GraphHopper's precision collapses
+  (F1 0.890, 66 FP) while Valhalla holds (0.994, 3 FP): Valhalla's costing rejects
+  parallel/opposing-carriageway snaps that GraphHopper's foot HMM accepts, so the
+  *magnitude* of the road precision tax is engine-specific. GraphHopper's DX edge
+  is running with **no server**; its cost is a **JVM dependency** and ~3.7× slower
+  matching on the largest graph (flexible routing vs Valhalla's tiles). See
+  [`research/graphhopper_baseline.md`](../research/graphhopper_baseline.md).
 
 ## Reproduce
 
 ```bash
 # naive floor
-uv run cbench run naive us_boston_streets -c cbench/datasets.toml
+uv run mbench run naive us_boston_streets -c mbench/datasets.toml
 
 # Hootenanny via prebuilt image (no source build needed; runs under emulation on ARM)
 docker pull --platform linux/amd64 hootenanny/run:0.2.41-1
-uv run cbench run hootenanny us_boston_streets -c cbench/datasets.toml \
+uv run mbench run hootenanny us_boston_streets -c mbench/datasets.toml \
     --opt hoot_image=hootenanny/run:0.2.41-1
 
 # matcher
-uv run cbench run matcher us_boston_streets -c cbench/datasets.toml
+uv run mbench run matcher us_boston_streets -c mbench/datasets.toml
 
 # Meili (Valhalla map-matching). Needs the `meili` extra (geopandas + pyosmium +
 # pyvalhalla); pyvalhalla ships native-ARM Valhalla binaries and requires Python
-# >= 3.12, so run cbench from a 3.12 env, e.g.:
-#   uv pip install -e "cbench[meili]" --python 3.12
-uv run --python 3.12 cbench run meili us_boston_streets -c cbench/datasets.toml
+# >= 3.12, so run mbench from a 3.12 env, e.g.:
+#   uv pip install -e "mbench[meili]" --python 3.12
+uv run --python 3.12 mbench run meili us_boston_streets -c mbench/datasets.toml
 # footways: costing defaults to `pedestrian` (bidirectional, all classes) — good
 # for both roads and sidewalks; swap the dataset name for FC / Seattle.
 
+# GraphHopper (embeddable JVM map-matching, no server). Needs the `graphhopper`
+# extra (geopandas + pyosmium) AND jbang (`brew install jbang`), which resolves the
+# pinned graphhopper-map-matching jar and manages JDK 17. Works on Python >= 3.11.
+#   uv pip install -e "mbench[graphhopper]"
+uv run mbench run graphhopper us_boston_streets -c mbench/datasets.toml
+# vehicle defaults to `foot` (bidirectional, all walkable classes; covers roads and
+# sidewalks); `--opt vehicle=car` for a directional roads-only comparison.
+
 # swap us_boston_streets -> us_fort_collins_sidewalks for the footway numbers
-uv run cbench compare cbench_results.jsonl
+uv run mbench compare mbench_results.jsonl
 ```
 
 ## Caveats / honesty notes
 
 - **Hootenanny is a version-pinned, one-shot FROZEN baseline — not a living
   harness.** hoot is out of active maintenance, so ongoing comparative
-  investment goes to the modern match-stage options in the landscape section
-  (Valhalla Meili / GraphHopper), which are the *live* comparisons going forward.
-  The hoot row is recorded with its exact version + config and is not re-run
-  routinely.
+  investment goes to the modern match-stage options (Valhalla Meili and
+  GraphHopper), which are the *live* comparisons going forward. **Both are now
+  built** — the "is there another live engine besides Valhalla?" survey in
+  `research/engine_dx_comparison.md` answered *GraphHopper*, and this doc's fifth
+  row is that engine, no longer a deferred/unbuilt entry. The hoot row is recorded
+  with its exact version + config and is not re-run routinely.
+- **GraphHopper caveats.** (1) It runs on the **embeddable JVM library, no
+  server** (adapter shells out via `jbang` to a single-file runner pinned to
+  `graphhopper-map-matching:10.2`; jbang resolves the jar from Maven Central and
+  manages JDK 17). Java is optional — the adapter fails with a clear "install
+  jbang" message and its unit tests skip cleanly, so mbench stays pip-installable
+  and CI green. (2) **Timing is valid (JVM runs ARM-native here, no emulation)**,
+  unlike the hoot rows. (3) GraphHopper's public map-matching API exposes only the
+  *full* length of each matched edge, not Valhalla's per-edge matched sub-length,
+  so the adapter estimates matched-length from trace density (`n_states ×
+  densify`, capped at edge length) — this is why parallel edges clipped by a few
+  points don't over-count, and it naturally drops "bridged" edges routed between
+  observations. On the labeled slice this made no difference to Boston's 66 FP
+  (they are *substantial* parallel snaps, not clip artifacts), so the number is
+  robust. (4) Like Meili, GraphHopper has **no first-class no-match abstention**;
+  the same 10%/8 m overlap threshold stands in for one, so recall is a perfect
+  1.000 on the labeled slice.
 - **`* wall time is n/a in the 0.2.41 rows — that image ran under x86 emulation
   on Apple Silicon, which makes its timing meaningless.** Only the 0.2.41 quality
   columns (target-level P/R/F1) are valid from that machine. **This caveat is now
