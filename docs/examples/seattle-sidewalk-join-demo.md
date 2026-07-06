@@ -176,11 +176,22 @@ with the snapshot). External SDOT-keyed data joins on the stable key:
 obs.SIDEWALK_UNITID → sidecar.unitid → sidecar.local_id → bridge.gers_id
 ```
 
-**Upstream fix:** re-fetch `us_seattle_sidewalks` with
-`fetch.id_column: COMPKEY` (stable SDOT asset key) instead of `OBJECTID`, so
-`local_id` embeds the key the city's other datasets actually use and the
-sidecar becomes unnecessary. Tracked as follow-up; requires re-matching and a
-label migration, so it is deliberately not part of this demo.
+**Upstream fix (landed):** `us_seattle_sidewalks` is now fetched with
+`fetch.id_column: COMPKEY` (stable SDOT asset key) instead of `OBJECTID`, so a
+freshly built `local_id` has the form `sea_sidewalk_{COMPKEY}_{h3}` and embeds
+the key the city's other datasets already use. For that **rebuilt** bridge the
+ID sidecar is unnecessary — external SDOT-keyed data joins straight through
+`COMPKEY` (or via `UNITID`→`COMPKEY`), no snapshot projection required.
+
+The instructions above still describe the **original** `OBJECTID`-keyed bridge
+(built from the `v1.0` 2026-02-08 snapshot), for which the sidecar remains the
+correct bridge — that snapshot and its sidecar are unchanged. The live re-fetch
+is written to `data/raw/us_seattle_sidewalks_v2.0.parquet` so the historical
+snapshot is preserved. The re-key covered re-matching against the new fetch and
+a migration of all Seattle labels (`labels/stitching`, `labels/human`,
+`labels/features`, `labels/data`) from `OBJECTID` to `COMPKEY` ids, deriving the
+mapping from the `v1.0` snapshot (which retains both columns) and preserving each
+label's stored h3 suffix.
 
 ## Licensing & attribution
 
