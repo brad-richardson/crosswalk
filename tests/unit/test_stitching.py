@@ -2245,7 +2245,7 @@ class TestStitchingReviewNavigation:
             assert recorder.called
             # Fragment renders the all-reviewed empty state (no group card).
             assert "All Done!" in resp.text
-            assert 'data-group-id=' not in resp.text
+            assert "data-group-id=" not in resp.text
         finally:
             self._stop(patches)
 
