@@ -1,6 +1,9 @@
-# Matcher Architecture
+# Crosswalk Architecture
 
-Technical details of the ML pipeline, feature computation, and decision thresholds.
+Crosswalk publishes `local_id ↔ GERS id` bridge tables — the rosetta stone that
+makes a city's locally-keyed data joinable to the open map. This document covers
+the engine behind that: technical details of the ML pipeline, feature computation,
+and decision thresholds.
 
 For usage instructions, see [README.md](../README.md). For development workflow, see [CLAUDE.md](../CLAUDE.md).
 

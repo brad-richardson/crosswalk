@@ -9,13 +9,20 @@
 </head>
 <body>
   <main>
-    <h1>Bridge-table stats</h1>
+    <h1>Join your city's data to the open map</h1>
     <p class="lead">
-      Per-release, per-dataset coverage for the published
-      <strong>local road/path ID ↔ Overture GERS id</strong> bridge tables.
-      Everything here is read live from the published <code>index.json</code>.
-      Head to <a id="browseLink" href="browse.html">Query &amp; browse</a> to run SQL
-      or look up a GERS id.
+      A <strong>bridge table</strong> is a rosetta stone: it maps a city's own
+      <strong>local road/path IDs ↔ Overture GERS ids</strong>, so any dataset keyed to
+      those local IDs — crash records, pavement condition, permits, curb rules — becomes
+      joinable to the open map in one line of SQL. One table per city retroactively
+      unlocks all of that city's segment-keyed data.
+    </p>
+    <p class="lead">
+      This page shows per-release, per-dataset stats for the published bridge tables,
+      read live from the published <code>index.json</code>. Head to
+      <a id="browseLink" href="browse.html">Query &amp; browse</a> to run SQL or look up a
+      GERS id, or see the
+      <a href="https://github.com/brad-richardson/matcher/blob/main/docs/examples/join-city-data.md">worked join example</a>.
     </p>
 
     <div id="meta"></div>

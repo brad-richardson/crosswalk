@@ -1,22 +1,35 @@
 # Crosswalk
 
-Road network conflation pipeline for linking local road datasets to [Overture Maps](https://overturemaps.org/) GERS (Global Entity Reference System) identifiers.
+**The public rosetta stone between local government transportation data and the open map.** Crosswalk publishes a **bridge table** for each city — a mapping from that city's local street/path IDs to [Overture Maps](https://overturemaps.org/) GERS (Global Entity Reference System) IDs — so any dataset keyed to those local IDs becomes joinable to the open map in one line of SQL.
 
-> **Named "crosswalk"** because that is the data-integration term for exactly what this tool produces — a table mapping IDs in one scheme to another (here: local IDs ↔ Overture GERS IDs) — and a literal road feature. Installed from PyPI as [`crosswalk-py`](docs/RELEASING.md) (the console script is `crosswalk`). Previously named `matcher`; the deprecated `matcher` console-script alias still works and warns.
+> **Named "crosswalk"** because that is the data-integration term for exactly what this tool produces — a table mapping IDs in one scheme to another (here: local IDs ↔ Overture GERS IDs) — and, fittingly, a literal road feature. Installed from PyPI as [`crosswalk-py`](docs/RELEASING.md) (the console script is `crosswalk`). Previously named `matcher`; the deprecated `matcher` console-script alias still works and warns.
 
-## What is this matching?
+## Why this matters
 
-This project determines which local road segments correspond to Overture GERS segments, producing a **bridge file** that links local IDs to GERS IDs with confidence scores.
+A city already keys mountains of operational data to its own street IDs: crash records, pavement condition, permits, bike counts, curb regulations, 311 requests, snow routes. Today that data is trapped in each city's local ID scheme. **One bridge table per city retroactively unlocks *all* of it** — join `local_id → gers_id` once and every locally-keyed dataset lands on a stable, shared, institutionally-backed map identifier. The IDs are the product.
 
-- **Primary goal**: Link local road features to their Overture counterparts, enabling data interoperability and update tracking
-- **Secondary goal**: Identify unmatched local segments as candidates for addition to the Overture transportation theme
-- **Framing**: The tool is a funnel for surfacing meaningful new road features that don't yet exist in Overture
+Concretely, a bridge table lets you:
 
-The bridge file enables:
+- **Join local attributes to the open map** — put crash counts, pavement scores, or curb rules onto Overture geometry ([worked SQL example](docs/examples/join-city-data.md)).
+- **Cross-reference between cities** — the same GERS id anchors data from every city that publishes a bridge, so a multi-city analysis stops being N bespoke joins.
+- **Track change over time** — GERS ids are stable across Overture releases; compare matches release-to-release to detect churn.
 
-- **Data interoperability** - Join local attributes with Overture's standardized schema
-- **Update tracking** - Detect changes by comparing GERS matches over time
-- **Network integration** - Merge local roads into the Overture network while preserving provenance
+The metric that matters is **join-ability** — cities with a cleared license and a published bridge table, times the locally-keyed datasets each unlocks — **not** geometry coverage. Crosswalk is deliberately *not* a geometry-import or map-completion project: Overture and vendor pipelines conflate geometry *into* the graph; crosswalk publishes the external ID mappings that make the graph *more useful*. (Sidewalks, cycleways, and trails are supported wherever Overture/OSM already cover them — e.g. Seattle — but coverage is not the mission.)
+
+Prior efforts validated the demand: [SharedStreets](https://sharedstreets.io/) built a widely-cited cross-referencing layer so curb and safety data could be shared across basemaps, but its core referencing system had to invent its own identifiers and has seen little development since ~2023. GERS is the stable, institutionally-backed target that layer lacked — crosswalk maps local IDs straight onto it. And the license discipline is deliberate (the [OpenAddresses](https://openaddresses.io/) lesson): clearing a source's license once, publicly and machine-readably, *is* part of the product — see [`datasets/licenses.toml`](datasets/licenses.toml) and [docs/PUBLISHING.md](docs/PUBLISHING.md).
+
+Published bridge tables are queryable in your browser (no download) via the DuckDB-WASM live browser under [`site/`](site/) (deployed to GitHub Pages); see [docs/PUBLISHING.md](docs/PUBLISHING.md).
+
+### When to use crosswalk vs a map-matcher
+
+Crosswalk is a **matcher + stitch-resolver** — it produces GERS bridge tables (segment ↔ segment correspondences), not merged geometry. It is not the only way to relate path-like data to a network, and honesty about that is the point:
+
+- **If you just need pair-level correspondence of path-like data (GPS traces, a road layer) to a routable Overture/OSM network, [Valhalla Meili](https://github.com/valhalla/valhalla) is excellent** — say so plainly. It is fast, ARM-native, and hits perfect recall on our benchmarks.
+- **Crosswalk's benchmark F1 edge carries home-field advantage**: the shipped model was trained on labels from the same datasets it is benchmarked on, while Meili and GraphHopper ran zero-shot. See [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) for the numbers and full caveats.
+- **What crosswalk does that a map-matcher does not:** bidirectional coverage QA (which *reference* segments have no local counterpart, not just the other way around); M:N group semantics (stitching/bridge groups map-matchers don't emit); cross-modal handling (sidewalk ≠ road ≠ cycleway); calibrated confidence plus a human/agent review workflow; and it works on non-routable or messy inputs and on local↔local matching, not only trace-to-graph snapping.
+- An [ensemble with Meili was tested and did not help](research/meili_ensemble_experiment.md) — crosswalk does not promise ensembling.
+
+Crosswalk determines which local segments correspond to Overture GERS segments, producing a bridge file that links local IDs to GERS IDs with **calibrated confidence** and a `match_decision` band. Unmatched local segments fall out as a by-product — candidates for addition to Overture — but that is secondary to the join.
 
 ## Pipeline Stages
 
@@ -377,6 +390,29 @@ labels/                 # Normalized training labels
 docs/                   # Architecture docs, dataset ingestion guide, benchmarks
 research/               # Point-in-time research documents
 ```
+
+## Add your city
+
+Every city that publishes a bridge table increases join-ability for everyone. The
+recipe is deliberately lightweight — no new machinery, just a source entry and the
+factory workflow:
+
+1. **Describe the source** — add a dataset YAML under `datasets/` (see
+   [docs/DATASET_INGESTION.md](docs/DATASET_INGESTION.md) for the template). The
+   essentials: the **data URL** (ArcGIS/WFS/OGC/download), the modality (`road`,
+   `sidewalk`, `bike`, `trail`), and the **local ID column** that keys the city's
+   other datasets — that column becomes `local_id` in the bridge and is the whole
+   point of the join.
+2. **Clear the license** — add an entry to
+   [`datasets/licenses.toml`](datasets/licenses.toml) with the source URL and
+   status. A dataset stays `pending_review` (excluded from publication) until a
+   human verifies the source terms and flips it to `approved` with a `license` +
+   `attribution`. The publisher **never guesses a license** — clearing it once,
+   publicly and machine-readably, is part of the product.
+3. **Run and publish** — `crosswalk stitch` (or `crosswalk factory run` for batch)
+   produces the bridge table; `crosswalk factory publish` license-gates it and
+   assembles the public tree. See [docs/FACTORY.md](docs/FACTORY.md) and
+   [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ## Development
 

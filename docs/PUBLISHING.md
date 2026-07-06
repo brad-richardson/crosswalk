@@ -1,9 +1,10 @@
 # Publishing: R2-hosted bridge tables (Milestone M5)
 
-The public artifact of the project: queryable **local road/path ID ↔ Overture GERS
-id** bridge tables, hosted on Cloudflare R2 (free egress), regenerated per Overture
-release. Modeled on the geocoder repo's pattern — static Parquet + a credibility
-page, no serving infrastructure. This document is the design; the tooling is
+The public artifact of the project — the rosetta stone that makes a city's
+locally-keyed data joinable to the open map: queryable **local road/path ID ↔
+Overture GERS id** bridge tables, hosted on Cloudflare R2 (free egress),
+regenerated per Overture release. Modeled on the geocoder repo's pattern — static
+Parquet + a credibility page, no serving infrastructure. This document is the design; the tooling is
 `crosswalk factory publish` (see [Command surface](#command-surface)).
 
 M5 builds on the factory (M4, [FACTORY.md](FACTORY.md)), which already produces the
