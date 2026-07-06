@@ -2,7 +2,9 @@
 
 The factory (``crosswalk factory run``, M4) produces per-dataset outputs under
 ``data/factory/release=<overture-release>/dataset=<name>/``. Publishing turns a
-selected, *license-cleared* subset of those into the public artifact:
+selected, *license-cleared* subset of those into the public artifact. Datasets
+declaring a ``quality_hold:`` block in their ``datasets/<name>.yaml`` (known-
+defective output) are excluded regardless of license status:
 
     <staging>/
       index.html                       # credibility page (human)
@@ -97,6 +99,7 @@ class DatasetPublication:
     stats: dict[str, Any] = field(default_factory=dict)
     files: dict[str, FileChecksum] = field(default_factory=dict)
     gate: dict[str, Any] | None = None
+    quality_hold: dict[str, Any] | None = None  # declarative hold from the dataset YAML
 
     @property
     def published(self) -> bool:
@@ -114,6 +117,8 @@ class DatasetPublication:
             out["reason"] = self.reason
         if self.gate is not None:
             out["gate"] = self.gate
+        if self.quality_hold is not None:
+            out["quality_hold"] = self.quality_hold
         if self.files:
             out["files"] = {name: c.to_dict() for name, c in sorted(self.files.items())}
         return out
@@ -181,20 +186,32 @@ def load_gate_floors(mbench_toml: Path) -> dict[str, dict[str, Any]]:
     return dict(data.get("gate", {}) or {})
 
 
-def dataset_display(name: str, datasets_dir: Path | None = None) -> dict[str, Any]:
-    """Best-effort human display metadata for a dataset from its YAML config."""
+def _load_dataset_yaml(name: str, datasets_dir: Path | None = None) -> dict[str, Any]:
+    """Best-effort raw YAML config for a dataset ({} when missing/unparseable).
+
+    Deliberately a plain ``yaml.safe_load`` — the publisher stays independent of
+    the matching pipeline's pydantic schema and must never crash on a config it
+    doesn't fully understand.
+    """
     if datasets_dir is None:
         from ..datasets.schema import get_datasets_dir
 
         datasets_dir = get_datasets_dir()
     yaml_path = datasets_dir / f"{name}.yaml"
     if not yaml_path.exists():
-        return {"display_name": name}
+        return {}
     import yaml
 
     try:
-        d = yaml.safe_load(yaml_path.read_text()) or {}
+        return yaml.safe_load(yaml_path.read_text()) or {}
     except Exception:
+        return {}
+
+
+def dataset_display(name: str, datasets_dir: Path | None = None) -> dict[str, Any]:
+    """Best-effort human display metadata for a dataset from its YAML config."""
+    d = _load_dataset_yaml(name, datasets_dir)
+    if not d:
         return {"display_name": name}
     src = d.get("source") or {}
     return {
@@ -203,6 +220,28 @@ def dataset_display(name: str, datasets_dir: Path | None = None) -> dict[str, An
         "description": d.get("description"),
         "source_type": src.get("type"),
         "source_url": src.get("url"),
+    }
+
+
+def dataset_quality_hold(name: str, datasets_dir: Path | None = None) -> dict[str, Any] | None:
+    """Declarative publishing hold from the dataset YAML (``quality_hold:`` block).
+
+    Returns ``{"reason": str, "since": str | None}`` when the dataset declares a
+    hold, else ``None``. Fail-safe by design: ANY truthy ``quality_hold`` value
+    holds the dataset, even a malformed one — a hold marks the factory output as
+    known-defective, so the publisher must never ship it on a parsing technicality.
+    """
+    hold = _load_dataset_yaml(name, datasets_dir).get("quality_hold")
+    if not hold:
+        return None
+    if not isinstance(hold, dict):
+        return {"reason": "unspecified (malformed quality_hold block)", "since": None}
+    reason = hold.get("reason")
+    since = hold.get("since")
+    return {
+        "reason": str(reason) if reason else "unspecified",
+        # yaml parses an unquoted date to datetime.date — normalize to ISO string.
+        "since": str(since) if since else None,
     }
 
 
@@ -345,6 +384,28 @@ def assemble_staging(
             stats = _manifest_stats(m)
             gate = gate_floors.get(name)
             display = dataset_display(name, datasets_dir)
+
+            # Quality hold: a declarative "do not ship" in the dataset YAML for
+            # known-defective factory output. Checked BEFORE the license so a
+            # held dataset stays excluded (with the hold as its reason) no
+            # matter what happens to its license status.
+            hold = dataset_quality_hold(name, datasets_dir)
+            if hold is not None:
+                since = f" (since {hold['since']})" if hold.get("since") else ""
+                ds_pubs.append(
+                    DatasetPublication(
+                        dataset=name,
+                        release=release,
+                        status="excluded",
+                        display=display,
+                        license=decision.to_dict(),
+                        reason=f"quality hold: {hold['reason']}{since}",
+                        stats=stats,
+                        gate=gate,
+                        quality_hold=hold,
+                    )
+                )
+                continue
 
             if not decision.approved:
                 ds_pubs.append(
@@ -500,7 +561,22 @@ def render_credibility_page(report: PublishReport) -> str:
                     f"<td>{lic}</td><td class='gate'>{escape(gate_txt)}</td></tr>"
                 )
             else:
-                reason = escape(str(d.reason or "excluded"))
+                if d.quality_hold:
+                    # Quality holds get a distinct badge: the data is defective,
+                    # not merely awaiting license review.
+                    hold_since = d.quality_hold.get("since")
+                    since_html = (
+                        f" <span class='sub'>since {escape(str(hold_since))}</span>"
+                        if hold_since
+                        else ""
+                    )
+                    reason = (
+                        "<span class='pill hold'>quality hold</span> "
+                        f"{escape(str(d.quality_hold.get('reason') or 'unspecified'))}"
+                        f"{since_html}"
+                    )
+                else:
+                    reason = escape(str(d.reason or "excluded"))
                 excluded_html.append(
                     f"<tr><td><code>{name}</code><div class='sub'>{dname}</div></td>"
                     f"<td>{dtype}</td><td>{reason}</td></tr>"
@@ -607,6 +683,7 @@ def render_credibility_page(report: PublishReport) -> str:
   .empty {{ color:var(--muted); }}
   .pill {{ display:inline-block; background:var(--code); border-radius:999px;
            padding:.1rem .6rem; font-size:.8rem; color:var(--muted); }}
+  .pill.hold {{ color:#c05621; font-weight:600; white-space:nowrap; }}
   .caveat {{ border-left:3px solid var(--accent); padding:.2rem 0 .2rem .9rem;
              margin:.6rem 0; color:var(--fg); }}
   details.methodology {{ margin:2.2rem 0 .6rem; }}
@@ -656,9 +733,11 @@ def render_credibility_page(report: PublishReport) -> str:
   alongside the bridge as its provenance record.</p>
   <div class="tablewrap">{published_table}</div>
 
-  <h2>Waiting on license review</h2>
-  <p class="lead">We only publish data whose license we've verified. These datasets
-  are ready but on hold until their source license checks out.</p>
+  <h2>On hold</h2>
+  <p class="lead">We only publish data whose license we've verified and whose output
+  passes our quality bar. Datasets below are excluded until their source license
+  checks out — or, for <span class="pill hold">quality hold</span> entries, until a
+  known defect in the generated bridge is fixed.</p>
   <div class="tablewrap">{excluded_table}</div>
 
   <details class="methodology">

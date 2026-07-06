@@ -283,6 +283,38 @@ class TestYAMLSaving:
         finally:
             path.unlink()
 
+    def test_quality_hold_survives_schema_roundtrip(self, tmp_path):
+        """The persisted publishing hold (quality_hold) must not be silently
+        dropped when a fetch/fingerprint update re-saves the YAML through the
+        pydantic schema — that is what makes the hold *persisted*."""
+        from crosswalk.datasets.schema import (
+            DatasetConfig as SchemaDatasetConfig,
+        )
+        from crosswalk.datasets.schema import (
+            QualityHoldConfig,
+        )
+        from crosswalk.datasets.schema import (
+            load_dataset_config as schema_load,
+        )
+        from crosswalk.datasets.schema import (
+            save_dataset_config as schema_save,
+        )
+
+        config = SchemaDatasetConfig(
+            name="held_ds",
+            quality_hold=QualityHoldConfig(reason="cross-mode defect", since="2026-07-06"),
+        )
+        path = tmp_path / "held_ds.yaml"
+        schema_save(config, path)
+        loaded = schema_load(path)
+        assert loaded.quality_hold is not None
+        assert loaded.quality_hold.reason == "cross-mode defect"
+        assert loaded.quality_hold.since == "2026-07-06"
+        # A second save/load (what update_last_fetch / update_quality_fingerprint
+        # do) must keep it too.
+        schema_save(loaded, path)
+        assert schema_load(path).quality_hold.since == "2026-07-06"
+
 
 class TestApplyClassMapping:
     """Tests for apply_class_mapping function."""
