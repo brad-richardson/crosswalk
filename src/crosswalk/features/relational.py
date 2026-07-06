@@ -53,11 +53,53 @@ from ..config import (
     PARALLEL_SIBLING_UNNAMED_MIN_LENGTH_RATIO,
     PARALLEL_SIBLING_UNNAMED_MIN_PARALLEL_FRACTION,
 )
+from ._exact_stats import percentile_sorted
 from ._jit_helpers import (
     compute_endpoint_proximity_numba,
     compute_local_parallel_alignment_numba,
     compute_parallel_alignment_numba,
 )
+
+
+def _offset_stats(
+    offsets: np.ndarray,
+    return_percentile: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Compute (mean, iqr, p95, pN) offset statistics for one pair.
+
+    Replaces three ``np.percentile`` calls (~50 µs of pure-Python machinery
+    each) with one ``np.sort`` plus exact scalar interpolation
+    (``percentile_sorted``, bitwise-equal to ``np.percentile``'s linear
+    method). ``np.mean`` is kept as-is: its pairwise summation is not
+    trivially reproducible, and it is already cheap.
+
+    pN is ``inf`` when ``return_percentile`` is None.
+    """
+    mean_offset = float(np.mean(offsets))
+    sorted_offsets = np.sort(offsets)
+    if np.isnan(sorted_offsets[-1]):
+        # NaNs present (sort places them last): preserve np.percentile's
+        # NaN propagation exactly rather than interpolating around them.
+        p25, p75 = np.percentile(offsets, [25, 75])
+        offset_iqr = float(p75 - p25)
+        offset_p95 = float(np.percentile(offsets, 95))
+        offset_pn = (
+            float(np.percentile(offsets, return_percentile))
+            if return_percentile is not None
+            else float("inf")
+        )
+        return mean_offset, offset_iqr, offset_p95, offset_pn
+
+    p25 = percentile_sorted(sorted_offsets, 25.0)
+    p75 = percentile_sorted(sorted_offsets, 75.0)
+    offset_iqr = float(p75 - p25)
+    offset_p95 = percentile_sorted(sorted_offsets, 95.0)
+    offset_pn = (
+        percentile_sorted(sorted_offsets, float(return_percentile))
+        if return_percentile is not None
+        else float("inf")
+    )
+    return mean_offset, offset_iqr, offset_p95, offset_pn
 
 
 class ParallelSiblingResult(NamedTuple):
@@ -91,6 +133,111 @@ class SiblingSearchContext:
 
     segment_data: list[tuple[str, str | None, str | None]]
     """List of (id, name, class) tuples, parallel to spatial_index geometries."""
+
+    segment_coords: list[np.ndarray] | None = None
+    """Per-segment coordinate arrays (same values as np.array(geom.coords)),
+    parallel to spatial_index geometries. Precomputed once per dataset so the
+    per-pair sibling search does not re-extract coordinates for every
+    spatial-query candidate. None when unavailable (fallback: extract per call)."""
+
+    segment_valid: np.ndarray | None = None
+    """Boolean array: geometry is present (not None) and not empty."""
+
+    segment_lengths: np.ndarray | None = None
+    """Float array of geometry lengths (0.0 for missing geometries)."""
+
+    segment_tiers: np.ndarray | None = None
+    """Traffic tier per segment encoded as small ints (see _TIER_CODES);
+    used by the crossing-angle fast path in compute.py."""
+
+    segment_headings: np.ndarray | None = None
+    """Gross heading (degrees, 0-360) per segment, computed with the exact
+    formula compute_crossing_angle_features uses (arctan2 over first/last
+    points). NaN for missing/empty geometries."""
+
+
+# Integer codes for traffic tiers (segment_tiers array). Code 0 = unknown
+# (get_traffic_tier returned None), matching the "skip neighbor" behavior.
+_TIER_CODES: dict[str | None, int] = {
+    None: 0,
+    "vehicle": 1,
+    "bicycle": 2,
+    "pedestrian": 3,
+    "neutral": 4,
+}
+
+
+def _precompute_context_arrays(
+    geometries: list[LineString],
+    classes: list[str | None],
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Precompute per-segment arrays for the sibling/crossing fast paths.
+
+    All values are bitwise-identical to what the per-pair code previously
+    computed on the fly:
+    - coords via shapely.get_coordinates (== np.array(geom.coords))
+    - lengths via shapely.length (== geom.length)
+    - headings via get_point/get_x/get_y + arctan2, the exact formula in
+      compute_crossing_angle_features
+    """
+    import shapely as shapely_mod
+
+    from .semantic import get_traffic_tier
+
+    geom_arr = np.empty(len(geometries), dtype=object)
+    geom_arr[:] = geometries
+
+    valid = ~(shapely_mod.is_missing(geom_arr) | shapely_mod.is_empty(geom_arr))
+    lengths = np.where(valid, shapely_mod.length(geom_arr), 0.0)
+
+    # Per-segment coordinate arrays. get_coordinates over the full array with
+    # return_index=False + split by counts gives contiguous row-slice views,
+    # value-identical to np.array(geom.coords) per geometry. include_z matches
+    # the dimensionality np.array(geom.coords) would produce; mixed 2D/3D
+    # datasets fall back to per-geometry extraction to preserve per-geom shape.
+    # Only Point/LineString/LinearRing expose .coords; np.array(geom.coords) on
+    # multi-part geometries and polygons raises NotImplementedError. Store None
+    # for those so the per-pair fallback re-runs np.array(geom.coords) and
+    # raises the IDENTICAL exception the pre-optimization code raised (the
+    # affected pair gets error features either way — behavior preserved).
+    type_ids = shapely_mod.get_type_id(geom_arr)
+    has_coords_seq = (type_ids >= 0) & (type_ids <= 2)
+
+    has_z = shapely_mod.has_z(geom_arr)
+    has_z = np.where(valid, has_z, False)
+    if has_z.any() and not has_z[valid].all():
+        coords_list: list[np.ndarray | None] = [
+            np.array(g.coords) if (v and hc) else None
+            for g, v, hc in zip(geometries, valid, has_coords_seq)
+        ]
+    else:
+        include_z = bool(has_z.any())
+        all_coords = shapely_mod.get_coordinates(geom_arr, include_z=include_z)
+        counts = shapely_mod.get_num_coordinates(geom_arr)
+        offsets = np.zeros(len(geometries) + 1, dtype=np.int64)
+        np.cumsum(counts, out=offsets[1:])
+        coords_list = [
+            all_coords[offsets[i] : offsets[i + 1]] if has_coords_seq[i] else None
+            for i in range(len(geometries))
+        ]
+
+    # Gross headings (exact formula from compute_crossing_angle_features)
+    headings = np.full(len(geometries), np.nan)
+    if valid.any():
+        vgeoms = geom_arr[valid]
+        starts = shapely_mod.get_point(vgeoms, 0)
+        ends = shapely_mod.get_point(vgeoms, -1)
+        dx = shapely_mod.get_x(ends) - shapely_mod.get_x(starts)
+        dy = shapely_mod.get_y(ends) - shapely_mod.get_y(starts)
+        headings[valid] = (np.degrees(np.arctan2(dy, dx)) + 360) % 360
+
+    tiers = np.fromiter(
+        (_TIER_CODES[get_traffic_tier(cls)] for cls in classes),
+        dtype=np.int8,
+        count=len(classes),
+    )
+
+    return coords_list, valid, lengths, tiers, headings
 
 
 def build_sibling_search_context(
@@ -126,8 +273,24 @@ def build_sibling_search_context(
     t_names = time.perf_counter() - t1
     logger.debug(f"[TIMING] Name normalization: {t_names:.2f}s ({n_segments} names)")
 
+    # Precompute per-segment arrays (coords, lengths, tiers, headings) once so
+    # the per-pair sibling search and crossing-angle features avoid per-call
+    # Shapely property access and coordinate extraction.
+    t2 = time.perf_counter()
+    coords_list, valid, lengths, tiers, headings = _precompute_context_arrays(geometries, classes)
+    t_pre = time.perf_counter() - t2
+    logger.debug(f"[TIMING] Context array precompute: {t_pre:.2f}s ({n_segments} segments)")
+
     segment_data = list(zip(segment_ids, normalized_names, classes))
-    return SiblingSearchContext(spatial_index=spatial_index, segment_data=segment_data)
+    return SiblingSearchContext(
+        spatial_index=spatial_index,
+        segment_data=segment_data,
+        segment_coords=coords_list,
+        segment_valid=valid,
+        segment_lengths=lengths,
+        segment_tiers=tiers,
+        segment_headings=headings,
+    )
 
 
 class RelationalFeatures(NamedTuple):
@@ -211,17 +374,9 @@ def compute_perpendicular_offset(
     # Vectorized distance computation - all points to anchor line
     offsets = shapely_distance(points, anchor_geom)
 
-    mean_offset = float(np.mean(offsets))
-
-    # IQR (interquartile range) - robust to outliers
-    p25, p75 = np.percentile(offsets, [25, 75])
-    offset_iqr = float(p75 - p25)
-
-    # P95 - captures worst-case while ignoring extreme outliers
-    offset_p95 = float(np.percentile(offsets, 95))
+    mean_offset, offset_iqr, offset_p95, offset_pN = _offset_stats(offsets, return_percentile)
 
     if return_percentile is not None:
-        offset_pN = float(np.percentile(offsets, return_percentile))
         return mean_offset, offset_iqr, offset_p95, offset_pN
 
     return mean_offset, offset_iqr, offset_p95
@@ -269,12 +424,15 @@ def compute_perpendicular_offset_batch(
             return mean_offsets, iqr_offsets, p95_offsets, pN_offsets
         return mean_offsets, iqr_offsets, p95_offsets
 
-    # Determine valid pairs first (before calling Shapely ufuncs that can't handle None)
-    valid_mask = np.array(
-        [
-            t is not None and a is not None and not shapely.is_empty(t) and not shapely.is_empty(a)
-            for t, a in zip(target_geoms, anchor_geoms)
-        ]
+    # Determine valid pairs first. Vectorized: shapely.is_missing handles None
+    # entries and shapely.is_empty returns False for None, so the combined mask
+    # is identical to the previous per-element Python loop
+    # (t is not None and a is not None and not is_empty(t) and not is_empty(a)).
+    valid_mask = ~(
+        shapely.is_missing(target_geoms)
+        | shapely.is_missing(anchor_geoms)
+        | shapely.is_empty(target_geoms)
+        | shapely.is_empty(anchor_geoms)
     )
 
     if not valid_mask.any():
@@ -317,12 +475,11 @@ def compute_perpendicular_offset_batch(
         end = boundaries[j + 1]
         offsets = all_dists[start:end]
 
-        mean_offsets[vi] = float(np.mean(offsets))
-        p25, p75 = np.percentile(offsets, [25, 75])
-        iqr_offsets[vi] = float(p75 - p25)
-        p95_offsets[vi] = float(np.percentile(offsets, 95))
+        mean_offsets[vi], iqr_offsets[vi], p95_offsets[vi], pn = _offset_stats(
+            offsets, return_percentile
+        )
         if return_percentile is not None:
-            pN_offsets[vi] = float(np.percentile(offsets, return_percentile))
+            pN_offsets[vi] = pn
 
     if return_percentile is not None:
         return mean_offsets, iqr_offsets, p95_offsets, pN_offsets
@@ -367,8 +524,11 @@ def compute_parallel_alignment(
         coords_b = np.array(line_b.coords)
 
     if use_local_alignment or return_fraction:
+        # Defaults passed explicitly: omitted-default numba calls can miss the
+        # fast C dispatch path and pay ~80 µs of _compile_for_args per call
+        # (numba 0.63). Values match the function's declared defaults.
         mean_alignment, parallel_fraction = compute_local_parallel_alignment_numba(
-            coords_a, coords_b
+            coords_a, coords_b, 16, 0.7
         )
         if return_fraction:
             return mean_alignment, parallel_fraction
@@ -676,6 +836,7 @@ def find_parallel_sibling(
     min_parallel_fraction: float = 0.3,  # At least 30% of segment must be parallel
     unnamed_min_parallel_fraction: float = PARALLEL_SIBLING_UNNAMED_MIN_PARALLEL_FRACTION,
     unnamed_min_length_ratio: float = PARALLEL_SIBLING_UNNAMED_MIN_LENGTH_RATIO,
+    context: "SiblingSearchContext | None" = None,
 ) -> ParallelSiblingResult:
     """Find parallel sibling segment (other half of split carriageway).
 
@@ -718,6 +879,10 @@ def find_parallel_sibling(
             unnamed path (positive same-road evidence), default 0.6
         unnamed_min_length_ratio: Minimum min(len)/max(len) required on the
             unnamed path (comparable extent), default 0.5
+        context: Optional SiblingSearchContext with precomputed per-segment
+            arrays (coords, validity, lengths). When provided, the per-candidate
+            coordinate extraction and Shapely property access are replaced with
+            array lookups — value-identical, just faster.
 
     Returns:
         ParallelSiblingResult with has_sibling, sibling_distance, and parallel_fraction.
@@ -741,6 +906,10 @@ def find_parallel_sibling(
     # Each entry: (candidate_class, parallel_fraction, name_match)
     survivor_info: list[tuple[str | None, float, bool | None]] = []
 
+    # Precomputed per-segment arrays (value-identical fast lookups)
+    ctx_coords = context.segment_coords if context is not None else None
+    ctx_valid = context.segment_valid if context is not None else None
+
     for candidate_idx in candidate_indices:
         # O(1) lookup using index directly - segment_data is parallel to spatial_index
         candidate_id, candidate_name, candidate_class = segment_data[candidate_idx]
@@ -751,7 +920,10 @@ def find_parallel_sibling(
         # Get the candidate geometry from the tree
         candidate_geom = spatial_index.geometries[candidate_idx]
 
-        if candidate_geom is None or candidate_geom.is_empty:
+        if ctx_valid is not None:
+            if not ctx_valid[candidate_idx]:
+                continue
+        elif candidate_geom is None or candidate_geom.is_empty:
             continue
 
         # Name compatibility (cheap, no geometry). Reject conflicts immediately.
@@ -760,14 +932,20 @@ def find_parallel_sibling(
             continue
 
         # Check parallel alignment using LOCAL alignment (handles curves and partial parallelism)
-        candidate_coords = np.array(candidate_geom.coords)
-        alignment, parallel_fraction = compute_parallel_alignment(
-            segment,
-            candidate_geom,
-            coords_a=segment_coords,
-            coords_b=candidate_coords,
-            return_fraction=True,
-            use_local_alignment=True,
+        candidate_coords = ctx_coords[candidate_idx] if ctx_coords is not None else None
+        if candidate_coords is None:
+            # Not precomputed (no context, or geometry without a coordinate
+            # sequence). np.array(geom.coords) raises NotImplementedError for
+            # multi-part geometries — intentionally identical to the
+            # pre-optimization behavior (the pair gets error features).
+            candidate_coords = np.array(candidate_geom.coords)
+        # Direct numba call (== compute_parallel_alignment with
+        # use_local_alignment=True, return_fraction=True): both geometries are
+        # known non-empty here, so the wrapper's is_empty checks (2 GEOS calls
+        # per candidate) are redundant. Defaults passed explicitly for numba
+        # fast dispatch.
+        alignment, parallel_fraction = compute_local_parallel_alignment_numba(
+            segment_coords, candidate_coords, 16, 0.7
         )
 
         # Require both mean alignment AND minimum parallel fraction

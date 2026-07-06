@@ -575,6 +575,7 @@ def _compute_non_geometric_features(
                 segment_class=ref_class,
                 spatial_index=ref_sibling_context_full.spatial_index,
                 segment_data=ref_sibling_context_full.segment_data,
+                context=ref_sibling_context_full,
             )
         else:
             if ref_sibling_context_full is None:
@@ -597,6 +598,7 @@ def _compute_non_geometric_features(
                 segment_class=target_class,
                 spatial_index=target_sibling_context_full.spatial_index,
                 segment_data=target_sibling_context_full.segment_data,
+                context=target_sibling_context_full,
             )
         else:
             if target_sibling_context_full is None:
@@ -934,6 +936,64 @@ def _compute_crossing_angle(
     buffer_geom = geom.buffer(_CROSSING_ANGLE_SEARCH_RADIUS_M)
     candidate_indices = sibling_context.spatial_index.query(buffer_geom)
 
+    # ---- Fast path: precomputed per-segment tiers/headings/validity ----
+    # Replicates compute_crossing_angle_features' neighbor filtering with
+    # array lookups instead of per-neighbor Shapely property access and
+    # heading extraction. Values are identical: the context arrays are built
+    # with the exact formulas the per-call code used (see
+    # relational._precompute_context_arrays).
+    if (
+        sibling_context.segment_tiers is not None
+        and sibling_context.segment_headings is not None
+        and sibling_context.segment_valid is not None
+        and sibling_context.segment_lengths is not None
+    ):
+        from .geometric import crossing_angle_from_headings
+        from .relational import _TIER_CODES
+        from .semantic import get_traffic_tier
+
+        neutral = _DEFAULT_CROSSING_ANGLE_FEATURES.copy()
+        if len(candidate_indices) == 0:
+            return neutral
+        # Candidate-side gates (same as compute_crossing_angle_features):
+        # degenerate candidate or unknown/neutral tier -> neutral result
+        if geom.length <= 0:
+            return neutral
+        candidate_tier = get_traffic_tier(road_class)
+        if candidate_tier is None or candidate_tier == "neutral":
+            return neutral
+
+        idx = np.asarray(candidate_indices)
+        # Neighbor gates: present, non-empty, non-degenerate, different
+        # (known, non-neutral) traffic tier
+        tiers = sibling_context.segment_tiers[idx]
+        mask = (
+            sibling_context.segment_valid[idx]
+            & (sibling_context.segment_lengths[idx] > 0)
+            & (tiers != _TIER_CODES[None])
+            & (tiers != _TIER_CODES["neutral"])
+            & (tiers != _TIER_CODES[candidate_tier])
+        )
+        # Self-exclusion by segment id (parallel to spatial_index order)
+        if seg_id is not None and mask.any():
+            segment_data = sibling_context.segment_data
+            for j, i in enumerate(idx):
+                if mask[j] and segment_data[i][0] == seg_id:
+                    mask[j] = False
+
+        if not mask.any():
+            return neutral
+
+        neighbor_headings = sibling_context.segment_headings[idx[mask]]
+        return crossing_angle_from_headings(
+            geom,
+            neighbor_headings,
+            sample_interval=10.0,
+            transverse_threshold=60.0,
+            neutral=neutral,
+        )
+
+    # ---- Fallback: per-neighbor geometry path ----
     nearby_geoms: list = []
     nearby_classes: list[str | None] = []
     for idx in candidate_indices:
@@ -991,10 +1051,18 @@ def _compute_intersection_overlap_features(
             "endpoint_heading_divergence": nan,
         }
 
-    ref_start = alignment.overture_start_frac
-    ref_end = alignment.overture_end_frac
-    target_start = alignment.dataset_start_frac
-    target_end = alignment.dataset_end_frac
+    # Coerce to Python floats: passing np.float64 scalars into @njit functions
+    # misses numba's fast C dispatch path and falls back to _compile_for_args
+    # on EVERY call (~80 µs of pure-Python overhead each; measured 4+ misses
+    # per pair through compute_heading_at_fraction_numba alone). float() is
+    # value-preserving, so results are bitwise identical. For the same reason,
+    # the numba calls below pass their trailing defaults (look_ahead_m=10.0,
+    # dot_threshold=0.5) explicitly — omitted-default calls also miss the fast
+    # dispatch path on numba 0.63.
+    ref_start = float(alignment.overture_start_frac)
+    ref_end = float(alignment.overture_end_frac)
+    target_start = float(alignment.dataset_start_frac)
+    target_end = float(alignment.dataset_end_frac)
 
     # Pre-compute coordinate arrays and per-segment lengths
     ref_coords = np.array(ref_geom_full.coords)
@@ -1029,10 +1097,12 @@ def _compute_intersection_overlap_features(
         if has_start_remainder:
             # Ref heading at the start boundary
             ref_heading_start = compute_heading_at_fraction_numba(
-                ref_coords, ref_seg_lens, ref_length_full, ref_start
+                ref_coords, ref_seg_lens, ref_length_full, ref_start, 10.0
             )
             rad = np.radians(ref_heading_start)
-            hdx, hdy = np.cos(rad), np.sin(rad)
+            # float(): np.cos/np.sin return np.float64, which misses numba's
+            # fast dispatch (see comment above) — value-preserving coercion.
+            hdx, hdy = float(np.cos(rad)), float(np.sin(rad))
 
             # Target remainder: from 0 to target_start (reversed — walk away from boundary)
             remainder_sub = create_subline(target_geom_full, 0.0, target_start)
@@ -1040,22 +1110,22 @@ def _compute_intersection_overlap_features(
                 rem_coords = np.array(remainder_sub.coords)
                 # Reverse so we walk FROM boundary outward
                 rem_coords = rem_coords[::-1].copy()
-                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy)
+                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy, 0.5)
                 continuation_values.append(cont)
 
         if has_end_remainder:
             # Ref heading at the end boundary
             ref_heading_end = compute_heading_at_fraction_numba(
-                ref_coords, ref_seg_lens, ref_length_full, ref_end
+                ref_coords, ref_seg_lens, ref_length_full, ref_end, 10.0
             )
             rad = np.radians(ref_heading_end)
-            hdx, hdy = np.cos(rad), np.sin(rad)
+            hdx, hdy = float(np.cos(rad)), float(np.sin(rad))
 
             # Target remainder: from target_end to 1.0
             remainder_sub = create_subline(target_geom_full, target_end, 1.0)
             if remainder_sub is not None and remainder_sub.length > 0.5:
                 rem_coords = np.array(remainder_sub.coords)
-                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy)
+                cont = compute_continuation_along_heading_numba(rem_coords, hdx, hdy, 0.5)
                 continuation_values.append(cont)
 
         if continuation_values:
@@ -1068,18 +1138,18 @@ def _compute_intersection_overlap_features(
     divergence_values = []
 
     ref_heading_at_start = compute_heading_at_fraction_numba(
-        ref_coords, ref_seg_lens, ref_length_full, ref_start
+        ref_coords, ref_seg_lens, ref_length_full, ref_start, 10.0
     )
     target_heading_at_start = compute_heading_at_fraction_numba(
-        target_coords, target_seg_lens, target_length_full, target_start
+        target_coords, target_seg_lens, target_length_full, target_start, 10.0
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_start, target_heading_at_start))
 
     ref_heading_at_end = compute_heading_at_fraction_numba(
-        ref_coords, ref_seg_lens, ref_length_full, ref_end
+        ref_coords, ref_seg_lens, ref_length_full, ref_end, 10.0
     )
     target_heading_at_end = compute_heading_at_fraction_numba(
-        target_coords, target_seg_lens, target_length_full, target_end
+        target_coords, target_seg_lens, target_length_full, target_end, 10.0
     )
     divergence_values.append(angle_diff_numba(ref_heading_at_end, target_heading_at_end))
 

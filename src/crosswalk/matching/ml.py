@@ -470,6 +470,7 @@ def _compute_feature_chunk(chunk):
                         segment_class=pd_item["ref_class"],
                         spatial_index=ref_sibling_ctx.spatial_index,
                         segment_data=ref_sibling_ctx.segment_data,
+                        context=ref_sibling_ctx,
                     )
                     precomputed_sibling_ref = (
                         result.has_sibling,
@@ -498,6 +499,7 @@ def _compute_feature_chunk(chunk):
                         segment_class=pd_item["target_class"],
                         spatial_index=target_sibling_ctx.spatial_index,
                         segment_data=target_sibling_ctx.segment_data,
+                        context=target_sibling_ctx,
                     )
                     precomputed_sibling_target = (result.has_sibling, result.sibling_distance)
                     sibling_cache[cache_key] = precomputed_sibling_target
@@ -584,11 +586,12 @@ def _compute_feature_chunk(chunk):
                 aligned_length_m = 0.0
 
             # Intersection overlap features (continuation, divergence) - uses full geometries
-            intersection_overlap_feats = _compute_intersection_overlap_features(
-                ref_geom_full=_worker_data["ref_geoms_full"][pd_item["ref_idx"]],
-                target_geom_full=_worker_data["target_geoms_full"][pd_item["target_idx"]],
-                alignment=alignment,
-            )
+            with timed_section("intersection_overlap"):
+                intersection_overlap_feats = _compute_intersection_overlap_features(
+                    ref_geom_full=_worker_data["ref_geoms_full"][pd_item["ref_idx"]],
+                    target_geom_full=_worker_data["target_geoms_full"][pd_item["target_idx"]],
+                    alignment=alignment,
+                )
 
             # Assemble via shared function (single source of truth for clamping)
             features = assemble_feature_dict(
