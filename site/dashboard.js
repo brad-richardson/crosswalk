@@ -1,6 +1,6 @@
 /* Stats dashboard: renders index.json into tiles, charts, and tables. */
 import {
-  loadIndex, renderNav, showError, esc, el, withBase,
+  loadIndex, renderNav, showError, esc, el, withBase, safeUrl,
   fmtInt, fmtPct,
 } from "./app.js";
 
@@ -127,13 +127,13 @@ function chartCard(title, note, bodyHtml) {
     `<p>Every published table is a derived work of <strong>both</strong> the local source dataset ` +
     `and Overture Maps. Redistribution must carry both attributions.</p>` +
     `<p><strong>Overture:</strong> ${esc(ov.attribution || "")} ` +
-    (ov.url ? `(<a href="${esc(ov.url)}">${esc(ov.url)}</a>)` : "") + `</p>` +
+    (ov.url ? `(<a href="${esc(safeUrl(ov.url))}">${esc(ov.url)}</a>)` : "") + `</p>` +
     `<p><strong>Per-dataset source license</strong> is shown in the published table above ` +
     `and in each dataset's <code>index.json</code> entry. Datasets with unverified licenses ` +
     `are excluded rather than published under a guess.</p>`;
 
   el("footer").innerHTML =
-    `Machine-readable index: <a href="${esc(index.site_url || "")}/index.json"><code>index.json</code></a> · ` +
+    `Machine-readable index: <a href="${esc(safeUrl((index.site_url || "") + "/index.json"))}"><code>index.json</code></a> · ` +
     `per-release <code>checksums.txt</code> (sha256) accompanies every release. ` +
     `Independent project · <a href="https://github.com/brad-richardson/matcher">source on GitHub</a>.`;
 })();

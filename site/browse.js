@@ -167,9 +167,12 @@ function busy(node, on, msg) {
     try {
       const res = await runQuery(sql);
       renderTable(el("brResult"), res, "No rows match those filters.");
-      const start = brState.offset + (res.rows.length ? 1 : 0);
       const end = brState.offset + res.rows.length;
-      el("brPageInfo").textContent = `rows ${start}–${end}`;
+      el("brPageInfo").textContent = res.rows.length
+        ? `rows ${brState.offset + 1}–${end}`
+        : brState.offset > 0
+          ? "no more rows"
+          : "no rows";
       el("brPrev").disabled = brState.offset === 0;
       el("brNext").disabled = res.rows.length < PAGE_SIZE;
       el("brPager").hidden = false;
@@ -234,7 +237,7 @@ function busy(node, on, msg) {
     `SELECT b.local_id, b.gers_id, b.confidence, ST_AsText(s.geometry) AS overture_wkt\n` +
     `FROM bridge b\n` +
     `JOIN read_parquet(\n` +
-    `  's3://overturemaps-us-west-2/release/${esc(latest)}/theme=transportation/type=segment/*',\n` +
+    `  's3://overturemaps-us-west-2/release/${latest}/theme=transportation/type=segment/*',\n` +
     `  filename=false, hive_partitioning=true\n` +
     `) s ON s.id = b.gers_id\n` +
     `LIMIT 100;`;

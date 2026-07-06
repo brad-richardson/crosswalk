@@ -34,10 +34,22 @@ export function allBridgesUrl(release) {
   return `${getBaseUrl()}/bridges/release=${release}/all_bridges.parquet`;
 }
 
-/** Preserve the ?base= override when linking between pages. */
+/** Preserve the ?base= override when linking between pages. Inserts the query
+ * BEFORE any #fragment and after any existing query string. */
 export function withBase(path) {
   const override = new URLSearchParams(location.search).get("base");
-  return override ? `${path}?base=${encodeURIComponent(override)}` : path;
+  if (!override) return path;
+  const hashIdx = path.indexOf("#");
+  const bare = hashIdx >= 0 ? path.slice(0, hashIdx) : path;
+  const frag = hashIdx >= 0 ? path.slice(hashIdx) : "";
+  const sep = bare.includes("?") ? "&" : "?";
+  return `${bare}${sep}base=${encodeURIComponent(override)}${frag}`;
+}
+
+/** Only allow http(s) URLs sourced from config to become live hrefs. */
+export function safeUrl(u) {
+  const s = String(u ?? "");
+  return /^https?:\/\//i.test(s) ? s : "#";
 }
 
 // --------------------------------------------------------------------------
@@ -84,11 +96,21 @@ export function getDB() {
 }
 
 /** Statements we allow from the free-form SQL box (read-only intent). */
-const READONLY_RE = /^\s*(with|select|from|pragma|describe|explain|show|values|table)\b/i;
+const READONLY_RE = /^\(*\s*(with|select|from|pragma|describe|explain|show|values|table)\b/i;
 const WRITE_RE = /\b(attach|copy|install|load|create|insert|update|delete|drop|alter|export|call)\b/i;
 
+/** Strip leading whitespace and SQL comments so a comment-led SELECT still passes. */
+function stripLeading(sql) {
+  let s = sql, prev;
+  do {
+    prev = s;
+    s = s.replace(/^\s+/, "").replace(/^--[^\n]*\n?/, "").replace(/^\/\*[\s\S]*?\*\//, "");
+  } while (s !== prev);
+  return s;
+}
+
 export function isReadOnlySql(sql) {
-  return READONLY_RE.test(sql) && !WRITE_RE.test(sql);
+  return READONLY_RE.test(stripLeading(sql)) && !WRITE_RE.test(sql);
 }
 
 /**

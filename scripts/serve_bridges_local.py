@@ -60,8 +60,16 @@ class CorsRangeHandler(SimpleHTTPRequestHandler):
         size = os.path.getsize(path)
         try:
             start_s, end_s = rng[len("bytes=") :].split("-", 1)
-            start = int(start_s) if start_s else 0
-            end = int(end_s) if end_s else size - 1
+            if start_s == "":
+                # Suffix range `bytes=-N` — the LAST N bytes (how Parquet readers
+                # grab the footer). Empty on both sides is malformed.
+                if end_s == "":
+                    return super().do_GET()
+                start = size - int(end_s)
+                end = size - 1
+            else:
+                start = int(start_s)
+                end = int(end_s) if end_s else size - 1
         except ValueError:
             return super().do_GET()
         start = max(0, start)
