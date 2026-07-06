@@ -23,7 +23,11 @@ from crosswalk.agent_labeling.stitch_eval import (
     recover_labeled_groups,
     summarize,
 )
-from crosswalk.agent_labeling.stitch_evidence import build_metadata, generate_group_evidence
+from crosswalk.agent_labeling.stitch_evidence import (
+    build_metadata,
+    build_prompt,
+    generate_group_evidence,
+)
 from crosswalk.matching.stitch_options import build_stitch_options
 
 # ---------------------------------------------------------------------------
@@ -605,6 +609,51 @@ def test_generate_group_evidence_writes_files(tmp_path):
     assert '"choice"' in prompt
     assert "NONE" in prompt
     assert meta is not None
+
+
+def test_prompt_dedupes_edge_descriptors_across_options(tmp_path):
+    """Each distinct edge is described ONCE in an EDGES legend; options reference
+    short ids. A shared edge is no longer re-printed in longhand per option.
+
+    make_group() has options A={R1->T1, R2->T2} and B={R1->T1, R1->T2}, so R1->T1
+    is shared -> its descriptor (`conf=`) line must appear exactly once.
+    """
+    g = make_group()
+    ctx = build_stitch_options(g)
+    meta = build_metadata(g, ctx)
+    prompt = build_prompt(tmp_path, meta, ctx)
+
+    # Legend header present; options no longer print `conf=` lines themselves.
+    assert "EDGES (" in prompt
+    lines = prompt.splitlines()
+    edges_i = next(i for i, ln in enumerate(lines) if ln.startswith("EDGES ("))
+    options_i = next(i for i, ln in enumerate(lines) if ln.startswith("OPTIONS:"))
+    legend = lines[edges_i:options_i]
+    options_block = lines[options_i:]
+
+    # Distinct edge universe = {R1->T1, R2->T2, R1->T2} -> exactly 3 legend rows,
+    # each carrying full detail once (the shared R1->T1 appears exactly once).
+    legend_rows = [ln for ln in legend if "conf=" in ln]
+    assert len(legend_rows) == 3
+    assert sum("R1->T1" in ln for ln in legend_rows) == 1
+    # No descriptor `conf=` lines leak into the OPTIONS section.
+    assert not any("conf=" in ln for ln in options_block if ln.startswith("      "))
+
+    # Build the short-id -> R#->T# map from the legend, then confirm each option's
+    # `edges:` line reconstructs exactly the option's true edge set (unambiguous).
+    id_to_edge = {}
+    for ln in legend_rows:
+        eid, rest = ln.strip().split(":", 1)
+        id_to_edge[eid] = rest.strip().split()[0]
+    # Options are emitted in order, each with one `edges:` line listing its short ids.
+    edge_lines = [
+        ln.strip()[len("edges: ") :] for ln in options_block if ln.strip().startswith("edges:")
+    ]
+    assert len(edge_lines) == len(meta["options"])
+    for opt, refs in zip(meta["options"], edge_lines):
+        got = {id_to_edge[r.strip()] for r in refs.split(",")}
+        want = {e["edge"] for e in opt["edges"]}
+        assert got == want
 
 
 def test_generate_group_evidence_no_options_returns_none(tmp_path):

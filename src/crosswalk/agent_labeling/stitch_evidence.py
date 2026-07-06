@@ -573,8 +573,13 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("- One image PER OPTION below. In an option image, the segments included in")
     lines.append("  that option are drawn bright/solid; excluded group segments are faded/dashed.")
     lines.append("  Pick the option whose bright segments overlap/follow the SAME physical roads.")
-    lines.append("- Some edges below carry a 'junction zoom' image: a close-up centred on where")
+    lines.append("- Some edges carry a 'junction zoom' image: a close-up centred on where")
     lines.append("  those two segments meet, so you can see the actual overlap at the junction.")
+    lines.append("- Every candidate edge is described ONCE in the EDGES legend below, each given a")
+    lines.append("  short id (e1, e2, ...) alongside its R#->T# endpoints. Each OPTION then lists")
+    lines.append("  only the short ids of the edges it selects — look up each id in the legend for")
+    lines.append("  its R#->T# endpoints and full detail. (An option's edge set is exactly the")
+    lines.append("  edges whose ids it lists.)")
     lines.append("")
     lines.append("GUIDANCE:")
     lines.append("- A correct edge R#->T# means the reference and target segment are the same")
@@ -623,16 +628,24 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     if struct_summary:
         lines.append(struct_summary)
     lines.append("")
-    lines.append("OPTIONS:")
+    # EDGES legend: describe every DISTINCT candidate edge exactly once, each given a
+    # short id (e1, e2, ... in first-seen order) alongside its R#->T# endpoints.
+    # Options below reference edges by short id only, so an edge that appears in many
+    # overlapping options is no longer re-printed in longhand each time (that
+    # duplication made large-group prompts several times bigger than necessary: the
+    # worst Boston group re-printed 4,183 distinct edges as ~17k descriptor lines).
+    lines.append(
+        "EDGES (each candidate edge described once, keyed by a short id; "
+        "options reference these ids):"
+    )
+    edge_ids: dict[str, str] = {}
     for opt in metadata["options"]:
-        tag = " (optimizer)" if opt["is_optimizer"] else ""
-        img_path = group_dir / f"option_{opt['letter']}.png"
-        lines.append(
-            f"  Option {opt['letter']}{tag}: {opt['edge_count']} edges, "
-            f"total_conf={opt['total_confidence']}, mean_conf={opt['mean_confidence']}"
-        )
-        lines.append(f"    image: {img_path}")
         for e in opt["edges"]:
+            label = e["edge"]
+            if label in edge_ids:
+                continue
+            eid = f"e{len(edge_ids) + 1}"
+            edge_ids[label] = eid
             extra = []
             if "ref_aligned_frac" in e:
                 extra.append(f"ref_aln={e['ref_aligned_frac']}")
@@ -647,13 +660,28 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
                 # Fraction-based band: don't claim "small overlap" — on long
                 # segments the absolute overlap~Xm printed alongside can be large.
                 extra.append("BORDERLINE(junction-kiss, low span fraction)")
-            extra_s = ("  " + " ".join(extra)) if extra else ""
-            lines.append(f"      {e['edge']}  conf={e['confidence']}{extra_s}")
             struct_s = _edge_struct_str(e)
             if struct_s:
-                lines.append(f"        {struct_s}")
+                extra.append(f"[{struct_s}]")
+            extra_s = ("  " + " ".join(extra)) if extra else ""
+            lines.append(f"  {eid}: {label}  conf={e['confidence']}{extra_s}")
             if e.get("zoom"):
-                lines.append(f"        junction zoom: {group_dir / e['zoom']}")
+                lines.append(f"      junction zoom: {group_dir / e['zoom']}")
+    lines.append("")
+    lines.append("OPTIONS:")
+    for opt in metadata["options"]:
+        tag = " (optimizer)" if opt["is_optimizer"] else ""
+        img_path = group_dir / f"option_{opt['letter']}.png"
+        lines.append(
+            f"  Option {opt['letter']}{tag}: {opt['edge_count']} edges, "
+            f"total_conf={opt['total_confidence']}, mean_conf={opt['mean_confidence']}"
+        )
+        lines.append(f"    image: {img_path}")
+        edge_refs = [edge_ids[e["edge"]] for e in opt["edges"]]
+        if edge_refs:
+            lines.append(f"    edges: {', '.join(edge_refs)}")
+        else:
+            lines.append("    edges: (none)")
     lines.append("")
     lines.append("SEGMENTS (name / class):")
     for s in metadata["segments"]["reference"]:
