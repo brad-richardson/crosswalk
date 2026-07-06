@@ -1,12 +1,26 @@
 [project]
-name = "matcher"
-version = "0.1.0"
+# PyPI distribution name (import package stays `matcher`, console script stays `matcher`).
+# `matcher` itself is taken on PyPI; `road-matcher` was verified available (2026-07).
+name = "road-matcher"
+version = "0.2.0"
 description = "Road network conflation pipeline - link local roads to Overture GERS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Brad Richardson" }]
+keywords = ["overture-maps", "gers", "conflation", "road-network", "gis", "map-matching"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+]
 
+# Core = everything `matcher stitch` / `matcher fetch-overture` need, including the
+# bundled pretrained model's runtime (xgboost + scikit-learn). Heavier maintainer
+# tooling lives in extras: hyperparameter tuning (optuna) in dev, imagery rendering
+# (pillow/mercantile) in web/dev.
 dependencies = [
     "geopandas>=1.0",
     "shapely>=2.0",
@@ -29,16 +43,14 @@ dependencies = [
     "loguru>=0.7",
     "python-dotenv>=1.0",
     "numba>=0.59",
-    "pillow>=10.0",
-    "mercantile>=1.2",
     "xgboost>=3.1.3",
-    "optuna>=4.7.0",
+    "networkx>=3.2",  # optimizer M:N chain grouping (matching/optimizer.py)
 ]
 
 [project.optional-dependencies]
 ml = [
-    "xgboost>=2.0",
-    "lightgbm>=4.2",
+    # xgboost is a core dependency (the shipped model needs it); this extra now
+    # carries only the optional polygon-to-centerline conversion helper.
     "pygeoops>=0.4",
 ]
 os = [
@@ -50,6 +62,8 @@ web = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "mapbox-vector-tile>=2.1",
+    "pillow>=10.0",  # tile rendering (web/routes/tiles.py)
+    "mercantile>=1.2",
 ]
 dev = [
     "pytest>=8.0",
@@ -57,10 +71,15 @@ dev = [
     "pytest-xdist>=3.5",
     "ruff>=0.5",
     "ipykernel>=6.27",
-    "networkx>=3.2",  # For generating synthetic test graphs
     "httpx>=0.27",  # Required for FastAPI TestClient
     "matplotlib>=3.8",  # For scripts/render_review_diffs.py review-diff PNGs
+    "optuna>=4.7.0",  # scripts/tune_model.py hyperparameter search
+    "pillow>=10.0",  # agent_labeling imagery (agent batch workflows)
+    "mercantile>=1.2",
 ]
+
+[project.urls]
+Repository = "https://github.com/brad-richardson/matcher"
 
 [project.scripts]
 matcher = "matcher.cli:app"
@@ -69,8 +88,18 @@ matcher = "matcher.cli:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Keep the sdist to the installable package — without this, hatchling drags the
+# whole repo (labels/, research/, mbench/, ~11 MB) into the tarball. Patterns are
+# anchored ('/...') so nested files like mbench/pyproject.toml don't leak in.
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/README.md", "/pyproject.toml"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/matcher"]
+# Ship the pretrained model in the wheel so `pip install road-matcher` can stitch
+# with zero training (lockstep with FEATURE_VERSION enforced by
+# tests/unit/test_shipped_model.py).
+artifacts = ["src/matcher/_model/*.joblib"]
 
 [tool.ruff]
 line-length = 100

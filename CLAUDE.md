@@ -13,7 +13,11 @@ For ML pipeline architecture and feature details, see [docs/ARCHITECTURE.md](doc
 # Install with all dependencies
 uv pip install -e ".[dev,ml,web]"
 
-# Train ML model (required after fresh clone)
+# Train ML model (optional — a pretrained model ships in src/matcher/_model/ and
+# is used automatically when data/models/ has no local model; a locally trained
+# model takes precedence. Keep the shipped model in lockstep with FEATURE_VERSION:
+# tests/unit/test_shipped_model.py fails if they diverge — reship with
+# `uv run matcher train -o src/matcher/_model/matcher_model_combined.joblib`)
 uv run matcher train
 
 # Train + export Spark-portable model for Overture matching

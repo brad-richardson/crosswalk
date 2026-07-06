@@ -182,23 +182,39 @@ plan to close matcher's DX gap are in
 |--------|:-----:|:----------:|:------:|:----:|:-----:|:--------:|
 | naive floor | 5 | 5 | 4 | 5 | 5 | **24** |
 | Valhalla Meili | 5 | 4 | 4 | 4 | 4 | **21** |
-| matcher | 2 | 3 | 4 | 2 | 3 | **14** |
+| **matcher (post top-3 DX fixes)** | 5 | 3 | 4 | 3 | 4 | **19** |
+| ~~matcher (pre-fix)~~ | ~~2~~ | ~~3~~ | ~~4~~ | ~~2~~ | ~~3~~ | ~~**14**~~ |
 | Hootenanny 0.2.41 (emulated) | 3 | 2 | 3 | 1 | 1 | **10** |
 | Hootenanny 0.2.87 (native x86) | 1 | 1 | 2 | 2 | 2 | **8** |
 
-The headline is the **Meili (21) vs matcher (14)** gap: near-identical quality
-(F1 0.994 vs 0.996) but Meili gets there from one pip extra, no training, no labels,
-and an auto-built (cached) Overture graph in ~12 s, while matcher's fresh-clone path
-is clone → heavy install → **`matcher train`** (mandatory: `data/models/` is
-gitignored; ~35 s, labels *are* committed) → **`matcher data fetch`** (mandatory:
-`data/raw/` is gitignored) → stitch (~85 s). matcher's low steps/time scores come
-entirely from those two setup steps, not from stitch. The naive floor tops the
-rubric only because it does the least — it *is* the quality floor (F1 0.839 roads /
-0.365 sidewalks). The top-3 recommended fixes: **ship the 465 KB pretrained model**
-(+ a `FEATURE_VERSION` CI lockstep test, since model-load only *warns* on version
-mismatch today), **publish a PyPI wheel that bundles it**, and a **YAML-free
-`fetch-overture --bbox`** command — together collapsing cold-start to
-install → (fetch) → stitch, at matcher's higher quality.
+The pre-fix headline was a 7-point **Meili (21) vs matcher (14)** gap at
+near-identical quality (F1 0.994 vs 0.996): matcher's fresh-clone path was clone →
+heavy install → mandatory **`matcher train`** → mandatory **`matcher data fetch`** →
+stitch. The top-3 DX fixes from
+[`research/engine_dx_comparison.md`](../research/engine_dx_comparison.md) landed
+(2026-07-05) and close most of it:
+
+1. **Pretrained model ships in the package** (466 KB, calibrated) — `stitch` works
+   with zero training; a CI lockstep test (`tests/unit/test_shipped_model.py`)
+   fails any PR that bumps `FEATURE_VERSION` without reshipping, and model load
+   now hard-errors (was: warn) on a version mismatch outside the trusted bundled
+   path.
+2. **PyPI packaging** — installable `road-matcher` wheel (930 KB incl. model),
+   console script `matcher`; heavy tuning/imagery deps moved out of the core
+   install.
+3. **`matcher fetch-overture --bbox|--clip-target`** — YAML-free Overture
+   reference fetch with `--release` pinning and a `.meta.yaml` sidecar.
+
+Measured fresh cold start (throwaway venv, wheel install, 389-segment Boston
+slice): install **0.3 s** (warm uv cache) → `fetch-overture --clip-target`
+**33 s** (networked) → `stitch` **46 s** → bridge parquet. **Zero training, zero
+YAML, zero clone.** The re-scored rubric row: steps now Meili-equal (5); time 3
+(stitch itself is ~6× slower than Meili's match); dep weight unchanged (3 — the
+pip resolve is still numba/xgboost/geopandas-heavy); maint 4 (the retrain tax on
+`FEATURE_VERSION` bumps remains but is CI-enforced rather than silent). The
+remaining 2-point gap to Meili (dep weight + time) is inherent to the ML stack,
+not setup friction. The naive floor tops the rubric only because it does the
+least — it *is* the quality floor (F1 0.839 roads / 0.365 sidewalks).
 
 ## Takeaways
 

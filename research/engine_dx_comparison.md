@@ -29,15 +29,18 @@ Five axes: **Steps** to first result, **Dep weight** (pip vs Docker vs emulation
 |--------|:-----:|:----------:|:------:|:----:|:-----:|:--------:|------------------|
 | **Valhalla Meili** | 5 | 4 | 4 | 4 | 4 | **21** | One pip extra, auto-builds the graph, ARM-native, no model. The DX bar to beat. |
 | **naive floor** | 5 | 5 | 4 | 5 | 5 | **24** | Trivial to run — but it *is* the floor (F1 0.839 roads / 0.365 sidewalks). |
-| **matcher** | 2 | 3 | 4 | 2 | 3 | **14** | Best quality, worst cold-start: clone + heavy install + **train** + **fetch** + stitch. |
+| **matcher (post top-3 fixes, 2026-07-05)** | 5 | 3 | 4 | 3 | 4 | **19** | `pip install road-matcher` → `fetch-overture --clip-target` → `stitch`. No train, no YAML, no clone. See "Post-fix update" below. |
+| ~~matcher (pre-fix)~~ | ~~2~~ | ~~3~~ | ~~4~~ | ~~2~~ | ~~3~~ | ~~**14**~~ | Best quality, worst cold-start: clone + heavy install + **train** + **fetch** + stitch. |
 | **Hootenanny 0.2.41** (emulated) | 3 | 2 | 3 | 1 | 1 | **10** | Prebuilt amd64 image under x86 emulation on ARM; wall time invalid; frozen 2018. |
 | **Hootenanny 0.2.87** (native x86) | 1 | 1 | 2 | 2 | 2 | **8** | No runnable image — multi-hour source build or a native-x86 box; snap-merge aborts. |
 
 > The naive floor scores highest on pure DX precisely because it does the least.
 > Read the rubric as "effort to first result," not "quality" — quality is in
-> `BENCHMARK_RESULTS.md`. The interesting comparison is **Meili (21) vs matcher
-> (14)**: a 7-point DX gap at near-identical quality (0.994 vs 0.996), and the whole
-> of Part 2 is about closing it.
+> `BENCHMARK_RESULTS.md`. The interesting comparison was **Meili (21) vs matcher
+> (14)**: a 7-point DX gap at near-identical quality (0.994 vs 0.996). The whole of
+> Part 2 was about closing it — and the top-3 fixes landed (see "Post-fix update"
+> at the end), re-scoring matcher to **19** with the residual 2-point gap (dep
+> weight + stitch time) inherent to the ML stack rather than setup friction.
 
 ### Cold-start narratives
 
@@ -251,3 +254,69 @@ Two surprises worth flagging:
   the hard error is at **train** time on stale *label* features; **model load only
   *warns*** on a `feature_version` mismatch. A shipped model would keep loading and
   silently degrade — hence the recommended CI lockstep test in #1.
+
+---
+
+## Post-fix update (2026-07-05) — the top-3 landed
+
+All three recommended fixes shipped; matcher's rubric row is re-scored **14 → 19**.
+
+**What shipped:**
+
+1. **Pretrained model committed into the package** —
+   `src/matcher/_model/matcher_model_combined.joblib` (466 KB, isotonic
+   calibration included). `stitch` uses it automatically whenever
+   `data/models/` has no locally trained model (a local model always takes
+   precedence). *Committed-in-repo* was chosen over a release-asset fetch: at
+   <0.5 MB/retrain the repo-bloat cost is trivial for a hobby-scale retrain
+   cadence (git history grows by one small blob per reship; the labels' LFS
+   parquets dwarf it), while a first-run download would add a network dependency,
+   a fetch code path, and a "which asset matches this commit?" versioning problem
+   that the in-tree copy solves for free.
+   The **silent-degradation trap is closed twice over**: model load now
+   **hard-errors** on a `feature_version` mismatch (escape hatches:
+   `--allow-version-mismatch` / `MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1`; the
+   trusted bundled path is exempt), and the CI lockstep test
+   (`tests/unit/test_shipped_model.py`) fails any PR that bumps
+   `FEATURE_VERSION` without reshipping the bundled artifact — retrain + reship
+   must land in the same PR (`matcher train -o src/matcher/_model/…`). The test
+   also asserts the shipped calibration knots are present and the feature list
+   matches `config.FEATURE_COLUMNS`.
+2. **PyPI packaging** — the distribution is **`road-matcher`** (verified
+   available on PyPI 2026-07; `matcher` is taken), import package and console
+   script stay `matcher`. The wheel is **930 KB including the model**; the sdist
+   is trimmed to the package (was dragging labels/research/cbench, 11 MB → 0.9 MB).
+   Core deps were slimmed to what stitch needs: `optuna` (tuning-script-only) and
+   `pillow`/`mercantile` (imagery) moved to extras; unused `lightgbm` dropped;
+   `networkx` — a real stitch dependency the cold-start test caught — moved *into*
+   core. Not yet published (publishing is the user's act); `uv build` artifacts +
+   `docs/RELEASING.md` checklist, with PyPI trusted publishing as the recommended
+   path.
+3. **`matcher fetch-overture`** — YAML-free reference fetch:
+   `--bbox xmin,ymin,xmax,ymax` or `--clip-target my_roads.parquet` (bbox derived
+   from the target's extent — the zero-thought path), `--release` pinning
+   (default: latest), 1 km topology buffer (`--buffer-m`), optional
+   `--connectors`, and the `.meta.yaml` sidecar with the `release` field the
+   factory needs.
+
+**Measured cold start** (throwaway venv, wheel install, 389-segment downtown-Boston
+slice as the user's "local data"; Apple Silicon, warm uv cache):
+
+```text
+uv venv --python 3.12 && uv pip install road_matcher-0.2.0-py3-none-any.whl   # 0.3 s
+matcher fetch-overture --clip-target my_roads.parquet -o ref.parquet          # 33 s (network)
+matcher stitch -r ref.parquet -t my_roads.parquet -o bridge.parquet           # 46 s
+```
+
+Total **~80 s to a 537-row bridge parquet (370/389 targets matched) with zero
+training, zero YAML, zero clone** — vs the pre-fix path of clone + install +
+train (35 s) + hand-authored YAML or config-gated fetch + stitch.
+
+**Honest re-score:** Steps 2→**5** (install → fetch → stitch; with parquets already
+in hand it is install → stitch, Meili-equal). Time 2→**3** (no train step, but
+stitch itself is still ~6× Meili's match). Dep weight stays **3** (the pip resolve
+is still numba/xgboost/geopandas-heavy — one resolve, but a heavy one). Config
+stays **4**. Maint 3→**4** (the retrain tax on `FEATURE_VERSION` bumps remains,
+but it is now CI-enforced and versioned in-repo rather than silent). Σ = **19/25**
+vs Meili's 21; the residual gap is engine-inherent (dependency mass + match time),
+not cold-start friction.

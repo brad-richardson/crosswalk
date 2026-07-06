@@ -28,12 +28,28 @@ class PipelineError(Exception):
     pass
 
 
+def _default_model_path() -> Path:
+    """Resolve the model the pipeline scores with when no explicit path is given.
+
+    A locally trained model (``settings.model_path``) takes precedence; otherwise
+    fall back to the pretrained model shipped inside the package (so a fresh
+    clone / pip install can stitch with zero training). Must stay in lockstep
+    with the fallback in ``score_candidates_from_geodataframes`` — the
+    calibration probe below inspects whichever model actually scores.
+    """
+    from ..config import bundled_model_path
+
+    local = settings.model_path
+    return local if local.exists() else bundled_model_path()
+
+
 def _calibration_active() -> bool:
     """Whether the pipeline's active model applies isotonic calibration.
 
-    ``run_pipeline`` always scores with ``settings.model_path``, so that is the
-    model inspected. Short-circuits without loading the model when calibration is
-    globally disabled (``MLMatcher.calibration_active`` can never be True then).
+    Inspects the same model the default scoring path resolves
+    (``_default_model_path()``: local ``settings.model_path``, else the bundled
+    pretrained model). Short-circuits without loading the model when calibration
+    is globally disabled (``MLMatcher.calibration_active`` can never be True then).
     """
     # Short-circuit when calibration is globally disabled: skip the model load
     # (and its I/O) entirely — the answer is unconditionally False.
@@ -43,7 +59,9 @@ def _calibration_active() -> bool:
     from ..matching.ml import MLMatcher
 
     try:
-        return MLMatcher(model_path=str(settings.model_path)).calibration_active
+        return MLMatcher(
+            model_path=str(_default_model_path()), allow_version_mismatch=True
+        ).calibration_active
     except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
         logger.warning(f"Could not determine calibration state: {exc}")
         return False
@@ -190,6 +208,7 @@ def score_candidates_from_geodataframes(
     n_jobs: int = -1,
     model_path: str | None = None,
     auto_select: bool = False,
+    allow_version_mismatch: bool = False,
 ) -> tuple[list, ProjectionResult]:
     """Project, block, and score candidates from GeoDataFrames.
 
@@ -240,19 +259,31 @@ def score_candidates_from_geodataframes(
 
     # Score candidates using ML
     if model_path:
-        matcher = MLMatcher(model_path=model_path)
+        matcher = MLMatcher(model_path=model_path, allow_version_mismatch=allow_version_mismatch)
     elif auto_select:
         matcher = MLMatcher(auto_select=True)
     else:
         from ..config import settings as _settings
 
-        _model_path = _settings.model_path
-        if not _model_path.exists():
-            raise FileNotFoundError(
-                f"ML model not found at {_model_path}. "
-                "Run 'matcher train' to train the model on labeled data."
+        # Local trained model takes precedence; else the pretrained model shipped
+        # in the package (fresh clone / pip install stitches with zero training).
+        # Keep this resolution in lockstep with _default_model_path().
+        _model_path = _default_model_path()
+        if _model_path == _settings.model_path:
+            matcher = MLMatcher(
+                model_path=str(_model_path), allow_version_mismatch=allow_version_mismatch
             )
-        matcher = MLMatcher(model_path=str(_model_path))
+        else:
+            if not _model_path.exists():
+                raise FileNotFoundError(
+                    f"ML model not found at {_settings.model_path} and no bundled "
+                    f"model at {_model_path}. Run 'matcher train' to train on "
+                    "labeled data."
+                )
+            # The bundled artifact's version lockstep with FEATURE_VERSION is
+            # enforced by CI (tests/unit/test_shipped_model.py), so it is trusted.
+            logger.info(f"Using pretrained model shipped with matcher: {_model_path}")
+            matcher = MLMatcher(model_path=str(_model_path), allow_version_mismatch=True)
 
     results = matcher.score_candidates(
         candidates,
@@ -1196,6 +1227,7 @@ def run_pipeline(
     n_jobs: int = -1,
     run_screen: bool = False,
     screen_tests: list[str] | None = None,
+    allow_version_mismatch: bool = False,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -1250,6 +1282,7 @@ def run_pipeline(
         ref_class_column=ref_class_column,
         target_class_column=target_class_column,
         n_jobs=n_jobs,
+        allow_version_mismatch=allow_version_mismatch,
     )
     # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326).
     # Computed from the pre-projection (filtered) frames; row order is preserved.

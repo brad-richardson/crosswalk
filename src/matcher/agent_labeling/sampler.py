@@ -328,7 +328,8 @@ def _score_with_ml(
     """
     from ..matching.ml import MLMatcher
 
-    matcher = MLMatcher(model_path=str(model_path))
+    # Sampling scores are advisory (candidate triage): stale model warns only.
+    matcher = MLMatcher(model_path=str(model_path), allow_version_mismatch=True)
     logger.info(f"Loaded ML model from {model_path}")
 
     return matcher.score_candidates(
