@@ -9,7 +9,12 @@ script remain `matcher`.
 
 - The `matcher` package (`src/matcher/`), including the **pretrained model**
   `src/matcher/_model/matcher_model_combined.joblib` (~466 KB, isotonic
-  calibration bundled). Total wheel size ~930 KB.
+  calibration bundled).
+- The **Spark-portable model** `src/matcher/_model/spark_model.json` (~1.1 MB
+  XGBoost-native booster) + `src/matcher/_model/spark_manifest.json` (feature
+  list, feature_version, hyperparams, isotonic calibration knots). Spark
+  consumers import these from the wheel via `from matcher.spark import
+  spark_model_json, spark_manifest` (see docs/ARCHITECTURE.md).
 - The sdist is trimmed to `src/` + `README.md` + `pyproject.toml`
   (`[tool.hatch.build.targets.sdist]`) — without that it drags labels/research/
   cbench (~11 MB).
@@ -23,6 +28,20 @@ script remain `matcher`.
    ```bash
    uv run matcher train -o src/matcher/_model/matcher_model_combined.joblib
    uv run pytest tests/unit/test_shipped_model.py -q
+   ```
+
+   The **Spark-portable model** has its own lockstep gate
+   (`tests/unit/test_shipped_spark_model.py`): its manifest `feature_version`
+   must equal `config.FEATURE_VERSION` and its `features` must exactly match
+   `config.SPARK_PORTABLE_FEATURES`. If you bumped features (or the
+   Spark-portable feature set / hyperparams) since the last reship, re-export
+   and copy the two artifacts into the package:
+
+   ```bash
+   uv run matcher export-spark-model -o data/models/export
+   cp data/models/export/model.json    src/matcher/_model/spark_model.json
+   cp data/models/export/manifest.json src/matcher/_model/spark_manifest.json
+   uv run pytest tests/unit/test_shipped_spark_model.py -q
    ```
 
 2. **Version bump** — update `version` in `pyproject.toml` AND `__version__` in

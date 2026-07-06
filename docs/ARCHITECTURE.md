@@ -15,6 +15,54 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 
 The trained model is not committed to git. After cloning, run `matcher train` before using `-m xgboost`.
 
+### Shipped models (bundled in the wheel)
+
+Two pretrained artifacts are committed under `src/matcher/_model/` and ship in
+the wheel, so `pip install road-matcher` needs zero training:
+
+| Artifact | What it is | Consumer |
+|----------|------------|----------|
+| `matcher_model_combined.joblib` | Full 79-feature calibrated model | `matcher stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
+| `spark_model.json` + `spark_manifest.json` | Spark-portable 28-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
+
+Both are kept in lockstep with `config.FEATURE_VERSION` by CI
+(`test_shipped_model.py`, `test_shipped_spark_model.py`) — a feature bump fails
+those tests until the artifacts are re-exported in the same PR (see
+docs/RELEASING.md).
+
+#### Spark-portable model shipping and consumption
+
+The Spark-portable model is a first-class shipped artifact: `matcher
+export-spark-model` trains the 28-feature geometry-only subset (no topology,
+graph, or spatial-index features) and writes `model.json` + `manifest.json`;
+those are copied into the package as `spark_model.json` / `spark_manifest.json`
+and included in the wheel by `pyproject.toml`'s `[tool.hatch.build.targets.wheel]
+artifacts` rule.
+
+A Spark job consumes them with **no heavy imports** — `matcher.spark` touches
+only the stdlib at import time (numpy is lazy, imported inside
+`apply_calibration`), so `import matcher.spark` never pulls in
+shapely/geopandas/xgboost/pandas:
+
+```python
+from matcher.spark import spark_model_json, spark_manifest, apply_calibration
+
+manifest = spark_manifest()
+features = manifest["features"]            # ordered; broadcast as the column order
+booster.load_model(bytearray(spark_model_json().encode()))
+# ... score to raw P(match), then (optionally) calibrate:
+calibrated = apply_calibration(raw_scores, manifest["calibration"])
+```
+
+`apply_calibration` reproduces `IsotonicCalibrator.transform` exactly
+(`np.interp` over the manifest's `calibration.x_thresholds`/`y_thresholds` with
+endpoint clipping). The manifest ships `calibration.applied = false` — the knots
+are emitted so the Spark job *can* remap raw scores to calibrated `P(match)`;
+whether to consume them (and re-fit downstream thresholds on calibrated scores)
+is a consumer decision. A job that prefers not to depend on the installed
+package can instead vendor the two `src/matcher/_model/spark_*.json` files
+directly out of the wheel.
+
 ## Decision Thresholds
 
 All thresholds are configurable in `config.py`.

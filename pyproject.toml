@@ -96,10 +96,12 @@ include = ["/src", "/README.md", "/pyproject.toml"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/matcher"]
-# Ship the pretrained model in the wheel so `pip install road-matcher` can stitch
+# Ship the pretrained models in the wheel so `pip install road-matcher` can stitch
 # with zero training (lockstep with FEATURE_VERSION enforced by
-# tests/unit/test_shipped_model.py).
-artifacts = ["src/matcher/_model/*.joblib"]
+# tests/unit/test_shipped_model.py), and Spark consumers can import the
+# Spark-portable booster + manifest straight from the package instead of
+# hand-copying files (lockstep enforced by tests/unit/test_shipped_spark_model.py).
+artifacts = ["src/matcher/_model/*.joblib", "src/matcher/_model/*.json"]
 
 [tool.ruff]
 line-length = 100
