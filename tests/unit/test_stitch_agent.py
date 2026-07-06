@@ -7,6 +7,7 @@ consensus rules, evidence metadata, and eval matching.
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import subprocess
@@ -1360,10 +1361,10 @@ def test_opencode_registered_and_v3_panel_composition():
 
 
 def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
-    """Prompt MUST precede every -f flag, else -f swallows it as a filename.
+    """Prompt goes via stdin (not argv); -m model and one -f per attached image.
 
-    Also verifies -m model placement and one -f per attached image (overview +
-    each existing option_<letter>.png).
+    The prompt used to be a positional arg, but a large group's prompt exceeds
+    the OS single-arg limit (E2BIG), so it is now piped via stdin.
     """
     import subprocess as sp
 
@@ -1387,13 +1388,11 @@ def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
 
     cmd = captured["cmd"]
     assert cmd[:2] == ["opencode", "run"]
-    # The prompt is the positional arg immediately after `run`.
-    assert cmd[2] == "PROMPT TEXT"
-    # -m model appears, and BEFORE any -f flag.
+    # The prompt is piped via stdin, never placed on argv.
+    assert captured["kwargs"]["input"] == "PROMPT TEXT"
+    assert "PROMPT TEXT" not in cmd
+    # -m model appears.
     assert "-m" in cmd and cmd[cmd.index("-m") + 1] == "openrouter/qwen/x"
-    first_f = cmd.index("-f")
-    assert cmd.index("PROMPT TEXT") < first_f
-    assert cmd.index("-m") < first_f
     # One -f per image: overview + option_A + option_B = 3.
     assert cmd.count("-f") == 3
     f_args = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "-f"]
@@ -1788,3 +1787,86 @@ def test_hard_fail_propagates_through_run_provider_on_group(monkeypatch):
             {"A": [("r1", "t1")]},
             invocation_budget_s=0.0,
         )
+
+
+def test_deterministic_oserror_fast_fails_without_backoff(monkeypatch):
+    """An E2BIG-class OSError hard-fails immediately (no wasted backoff budget)."""
+    clock = _install_fake_clock(monkeypatch)
+
+    def arg_too_long(*_a, **_k):
+        raise OSError(errno.E2BIG, "Argument list too long")
+
+    with pytest.raises(sr.ProviderInvocationError, match="not retryable"):
+        _attempt(arg_too_long, budget=300.0)
+    assert clock.sleeps == []  # failed on the first attempt, never slept
+
+
+def test_missing_binary_oserror_fast_fails(monkeypatch):
+    """A missing-CLI (ENOENT) failure is deterministic -> immediate hard-fail."""
+    _install_fake_clock(monkeypatch)
+
+    def no_binary(*_a, **_k):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    with pytest.raises(sr.ProviderInvocationError, match="not retryable"):
+        _attempt(no_binary, budget=300.0)
+
+
+def test_transient_oserror_still_backs_off(monkeypatch):
+    """A non-fatal OSError (e.g. ECONNREFUSED) keeps the backoff-then-hardfail path."""
+    clock = _install_fake_clock(monkeypatch)
+
+    def conn_refused(*_a, **_k):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+
+    with pytest.raises(sr.ProviderInvocationError):
+        _attempt(conn_refused, budget=300.0)
+    assert clock.sleeps  # backed off (not a fatal errno), then gave up on budget
+
+
+# --- invoker transport contract: prompt must NOT go on argv (E2BIG regression) ---
+
+
+def _capture_subprocess_run(monkeypatch):
+    """Patch subprocess.run to capture cmd/input/cwd and return a clean result."""
+    cap = {}
+
+    def fake_run(cmd, input=None, **kw):
+        cap["cmd"] = list(cmd)
+        cap["input"] = input
+        cap["cwd"] = kw.get("cwd")
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"choice": "A"}', stderr="")
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    return cap
+
+
+# A prompt larger than the Linux single-arg limit (MAX_ARG_STRLEN ~128 KB): if any
+# invoker still put this on argv, a real exec would raise E2BIG.
+_BIG_PROMPT = "X" * 200_000
+
+
+def test_invoke_codex_prompt_via_stdin_not_argv(tmp_path, monkeypatch):
+    cap = _capture_subprocess_run(monkeypatch)
+    sr.invoke_codex(_BIG_PROMPT, tmp_path, ["A"], "gpt-5.5")
+    assert cap["input"] == _BIG_PROMPT  # prompt piped on stdin
+    assert _BIG_PROMPT not in cap["cmd"]  # never an argv element
+    assert "-" in cap["cmd"]  # stdin sentinel present
+
+
+def test_invoke_opencode_prompt_via_stdin_not_argv(tmp_path, monkeypatch):
+    cap = _capture_subprocess_run(monkeypatch)
+    sr.invoke_opencode(_BIG_PROMPT, tmp_path, ["A"], "openrouter/qwen/x")
+    assert cap["input"] == _BIG_PROMPT
+    assert _BIG_PROMPT not in cap["cmd"]
+    assert cap["cmd"][:2] == ["opencode", "run"]
+
+
+def test_invoke_agy_prompt_via_file_not_argv(tmp_path, monkeypatch):
+    cap = _capture_subprocess_run(monkeypatch)
+    sr.invoke_agy(_BIG_PROMPT, tmp_path, ["A"], "Gemini 3.5 Flash (Medium)")
+    assert _BIG_PROMPT not in cap["cmd"]  # not on argv
+    assert cap["cwd"] == str(tmp_path)  # agy runs in the group dir
+    pf = tmp_path / "panel_prompt.txt"
+    assert pf.exists() and pf.read_text() == _BIG_PROMPT  # prompt written to file
+    assert "--dangerously-skip-permissions" in cap["cmd"]

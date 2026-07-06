@@ -12,6 +12,7 @@ deliberately separate from ``labels/``. This module writes NOTHING into
 
 from __future__ import annotations
 
+import errno
 import json
 import re
 import subprocess
@@ -27,6 +28,14 @@ import yaml
 from loguru import logger
 
 from .panel_routing import REASON_ALL_ABSTAINED, REASON_CLASS_MISMATCH, derive_route_reason
+
+# OSError errnos that are deterministic for a fixed command: retrying identically
+# fails identically, so they hard-fail immediately rather than consuming the
+# backoff budget. E2BIG = argument list too long (the large-prompt bug); ENOENT =
+# missing binary; EACCES = permission denied; ENOEXEC/ENAMETOOLONG = malformed exec.
+_FATAL_ERRNOS = frozenset(
+    {errno.E2BIG, errno.ENOENT, errno.EACCES, errno.ENOEXEC, errno.ENAMETOOLONG}
+)
 
 # ---------------------------------------------------------------------------
 # Provider panel configuration
@@ -347,6 +356,12 @@ def invoke_codex(
 ) -> str:
     """Invoke the codex CLI. Native multi-image via -i, JSON written to -o file.
 
+    The prompt is piped via STDIN (``codex exec ... -``), not passed as an argv
+    string: a large group's prompt (>128 KB) exceeds the OS single-argument limit
+    (Linux MAX_ARG_STRLEN) and fails with E2BIG. codex reads instructions from
+    stdin when ``-`` is given. codex's read-only sandbox blocks reading a context
+    file, so stdin (not a file pointer) is the mechanism here.
+
     stdout is a transcript, so the answer is read from the -o output file.
     """
     imgs = _image_paths(group_dir, letters)
@@ -366,10 +381,10 @@ def invoke_codex(
         ]
         for img in imgs:
             cmd += ["-i", img]
-        cmd += ["-o", str(out_path), prompt]
+        cmd += ["-o", str(out_path), "-"]  # '-' => read the prompt from stdin
         result = subprocess.run(
             cmd,
-            input="",
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -390,25 +405,46 @@ def invoke_agy(
     timeout: int = 240,
     effort: str = "",
 ) -> str:
-    """Invoke the agy (Antigravity) CLI. =-form flags only; reads images by path.
+    """Invoke the agy (Antigravity) CLI via a FILE POINTER.
 
-    Effort is encoded in the model name (e.g. "Gemini 3.5 Flash (Medium)"), so
-    the ``effort`` argument is accepted for a uniform invoker signature but unused.
+    agy takes the prompt only as an argv value (``-p``) and does not read it from
+    stdin, so a large group's prompt (>128 KB) would exceed the OS single-argument
+    limit (Linux MAX_ARG_STRLEN) and fail with E2BIG. Instead the prompt is
+    written to ``panel_prompt.txt`` in the (scratch, per-invocation) group dir and
+    agy is given a tiny instruction to read it. agy is an agentic CLI that reads
+    files — and the images the prompt references — from its cwd;
+    ``--dangerously-skip-permissions`` avoids an interactive permission prompt in
+    non-interactive mode. (Unlike codex, agy is not sandboxed away from the file.)
+
+    Effort is encoded in the model name (e.g. "Gemini 3.5 Flash (Medium)"), so the
+    ``effort`` argument is accepted for a uniform invoker signature but unused.
     """
-    cmd = [
-        "agy",
-        "--print-timeout=2m",
-        f"--model={model}",
-        "-p",
-        prompt,
-    ]
-    result = subprocess.run(
-        cmd,
-        input="",
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    tmp_ctx = tempfile.TemporaryDirectory() if group_dir is None else None
+    work = Path(tmp_ctx.name) if tmp_ctx is not None else Path(group_dir)
+    try:
+        prompt_file = work / "panel_prompt.txt"
+        prompt_file.write_text(prompt)
+        cmd = [
+            "agy",
+            "--print-timeout=2m",
+            f"--model={model}",
+            "--dangerously-skip-permissions",
+            "-p",
+            f"Read the file {prompt_file.name} in the current directory (and any "
+            "image files it references), then output ONLY the answer it requests — "
+            "no other text.",
+        ]
+        result = subprocess.run(
+            cmd,
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(work),
+        )
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()
     _check_exit("agy", result)
     return result.stdout
 
@@ -423,10 +459,9 @@ def invoke_opencode(
 ) -> str:
     """Invoke the opencode CLI (OpenRouter-backed). Reads images by path via -f.
 
-    CRITICAL ordering: the prompt MUST be the positional argument immediately
-    after ``run`` and BEFORE any ``-f`` flags. ``-f`` takes an array of file
-    paths, so a prompt placed after it is swallowed as another filename and the
-    model receives no instruction. Multiple ``-f`` flags attach multiple images.
+    The prompt is piped via STDIN (no positional message) to avoid the OS
+    single-argument size limit on large groups (see ``invoke_codex``). ``-f``
+    attaches images by path; multiple ``-f`` flags attach multiple images.
 
     The model string carries everything opencode needs (provider/model/knobs),
     so ``effort`` is accepted for a uniform invoker signature but unused. opencode
@@ -434,12 +469,17 @@ def invoke_opencode(
     raw stdout is returned for JSON extraction.
     """
     imgs = _image_paths(group_dir, letters)
-    cmd = ["opencode", "run", prompt, "-m", model]
+    # Pipe the prompt via STDIN (no positional message) rather than as an argv
+    # string: a large group's prompt (>128 KB) exceeds the OS single-argument
+    # limit (Linux MAX_ARG_STRLEN) and fails with E2BIG. opencode reads the
+    # message from stdin when no positional message is given; -f still attaches
+    # images by path.
+    cmd = ["opencode", "run", "-m", model]
     for img in imgs:
         cmd += ["-f", img]
     result = subprocess.run(
         cmd,
-        input="",
+        input=prompt,
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -621,6 +661,15 @@ def _attempt_provider(
                 if isinstance(e, subprocess.TimeoutExpired)
                 else f"invocation error: {e}"
             )
+            # Deterministic OS errors (arg-list-too-long, missing binary, perms)
+            # will fail identically on every retry — hard-fail immediately instead
+            # of burning the whole backoff budget on a no-hope loop.
+            if isinstance(e, OSError) and e.errno in _FATAL_ERRNOS:
+                raise ProviderInvocationError(
+                    f"{provider.name} on group {group_id}: {err} (errno "
+                    f"{e.errno}={errno.errorcode.get(e.errno, '?')}, not retryable) — "
+                    f"halting the run."
+                ) from e
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ProviderInvocationError(
