@@ -641,8 +641,14 @@ async def stitching_review(
 
     all_groups = batch.get("groups", [])
     batch_total = len(all_groups)
+    # Position-based navigation walks ONLY the unreviewed queue (recomputed per
+    # request), so a reload lands on the first unreviewed group and paging never
+    # re-serves a completed one. The "N of M" counter is expressed relative to
+    # that queue (position within unreviewed / total unreviewed) so it stays
+    # coherent with the list actually being paged. Deep links by group_id are the
+    # exception: they address the FULL batch (they intentionally target reviewed
+    # groups for re-adjudication) and report batch position / batch total.
     groups = get_unreviewed_stitch_groups(dataset, all_groups)
-    reviewed_count = batch_total - len(groups)
 
     if group_id:
         # Deep link: render the requested group (even if already reviewed)
@@ -683,7 +689,7 @@ async def stitching_review(
                 "dataset": dataset,
                 "group": None,
                 "group_index": 0,
-                "total_groups": batch_total,
+                "total_groups": 0,
                 "no_groups": True,
                 "all_reviewed": True,
             },
@@ -702,8 +708,8 @@ async def stitching_review(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": reviewed_count,
-            "total_groups": batch_total,
+            "group_index": 0,
+            "total_groups": len(groups),
             "no_groups": False,
             **group_ctx,
         },
@@ -734,16 +740,29 @@ async def stitching_group(
         )
 
     all_groups = batch.get("groups", [])
+    batch_total = len(all_groups)
 
-    # Find group by ID, fall back to index
+    # Resolve the group + its display position. Two navigation modes:
+    #   - Deep link by group_id: exact match over the FULL batch (may be an
+    #     already-reviewed group — re-adjudication flows rely on this). Reports
+    #     batch position / batch total.
+    #   - Position-based paging (no/unknown group_id): index into the UNREVIEWED
+    #     queue only, so next/skip never revisit a completed group. Reports the
+    #     position within that queue / total unreviewed.
     group = None
+    display_index = group_index
+    display_total = batch_total
     if group_id:
-        for g in all_groups:
+        for i, g in enumerate(all_groups):
             if g.get("group_id") == group_id:
-                group = g
+                group, display_index, display_total = g, i, batch_total
                 break
-    if not group and 0 <= group_index < len(all_groups):
-        group = all_groups[group_index]
+    if group is None:
+        groups = get_unreviewed_stitch_groups(dataset, all_groups)
+        display_total = len(groups)
+        if 0 <= group_index < len(groups):
+            group = groups[group_index]
+            display_index = group_index
 
     if not group:
         return templates.TemplateResponse(
@@ -762,8 +781,8 @@ async def stitching_group(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": group_index,
-            "total_groups": len(all_groups),
+            "group_index": display_index,
+            "total_groups": display_total,
             **group_ctx,
         },
     )
@@ -982,10 +1001,11 @@ async def stitching_select(
             session_id="deanchored_v1" if deanchored else None,
         )
 
-    # Load next group
-    batch_total = len(all_groups)
+    # Save-and-advance: recompute the unreviewed queue AFTER recording, so the
+    # just-labeled group has dropped out. Serving groups[0] (the earliest
+    # remaining unreviewed group) can neither repeat the group we just recorded
+    # nor skip an unreviewed one. Counter is queue-relative (first of N remaining).
     groups = get_unreviewed_stitch_groups(dataset, all_groups)
-    reviewed_count = batch_total - len(groups)
 
     if not groups:
         return templates.TemplateResponse(
@@ -1005,8 +1025,8 @@ async def stitching_select(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": reviewed_count,
-            "total_groups": batch_total,
+            "group_index": 0,
+            "total_groups": len(groups),
             **group_ctx,
         },
     )
@@ -1035,9 +1055,10 @@ async def stitching_skip(
         )
 
     all_groups = batch.get("groups", [])
-    batch_total = len(all_groups)
+    # Skip walks ONLY the unreviewed queue (recomputed per request) so it never
+    # lands on a completed group. Counter is queue-relative (position within the
+    # unreviewed list / total unreviewed).
     groups = get_unreviewed_stitch_groups(dataset, all_groups)
-    reviewed_count = batch_total - len(groups)
 
     if not groups:
         return templates.TemplateResponse(
@@ -1046,7 +1067,8 @@ async def stitching_skip(
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    # Find the current group by ID and advance past it
+    # Find the current group by ID within the unreviewed queue and advance past
+    # it (wrapping so skipping the last returns to the first still-unreviewed).
     next_index = 0
     if group_id:
         for i, g in enumerate(groups):
@@ -1065,8 +1087,8 @@ async def stitching_skip(
             "dataset": dataset,
             "group": group,
             "group_geojson": geojson,
-            "group_index": reviewed_count + next_index,
-            "total_groups": batch_total,
+            "group_index": next_index,
+            "total_groups": len(groups),
             **group_ctx,
         },
     )
