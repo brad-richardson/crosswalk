@@ -2238,7 +2238,10 @@ def stitch_batch(
     import json
     from datetime import UTC, datetime
 
-    from ..agent_labeling.panel_routing import panel_failed_group_ids
+    from ..agent_labeling.panel_routing import (
+        attach_panel_route_reasons,
+        panel_failed_group_ids,
+    )
     from ..filenames import (
         PROJECT_ROOT,
         groups_sidecar_path,
@@ -2378,6 +2381,13 @@ def stitch_batch(
         # proposed assignment and offer the top-K alternatives as one-click
         # options ("verify, don't construct").
 
+        # Annotate each queued group with WHY the panel routed it to a human
+        # (panel_route_reason + a short display variant). Pure annotation from
+        # the latest consensus row — never changes which groups are selected.
+        n_reasons = attach_panel_route_reasons(selected, ds_name)
+        if n_reasons:
+            console.print(f"  Panel route reasons attached: {n_reasons}/{len(selected)}")
+
         # Fill in spatial context for each group
         console.print("  Filling spatial context...")
         _fill_spatial_context(selected, ds_name)
@@ -2484,6 +2494,7 @@ def stitch_refresh_queue(
     import json
     from datetime import UTC, datetime
 
+    from ..agent_labeling.panel_routing import attach_panel_route_reasons
     from ..filenames import (
         PROJECT_ROOT,
         bridge_filename,
@@ -2585,6 +2596,10 @@ def stitch_refresh_queue(
         if to_fill_context:
             console.print(f"  Filling spatial context for {len(to_fill_context)} entries...")
             _fill_spatial_context(to_fill_context, ds_name)
+
+        # Re-attach panel route reasons (rebuilt entries come from the sidecar,
+        # which carries no panel fields). Annotation only.
+        attach_panel_route_reasons(to_fill_context, ds_name)
 
         # Post-refresh parity: refreshable entries MUST now match the sidecar.
         post_drift = check_queue_optimizer_parity(new_queue, sidecar_by_id)

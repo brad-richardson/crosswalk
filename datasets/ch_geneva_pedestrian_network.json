@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "name": "ch_geneva_pedestrian_network",
+  "display_name": "Geneva Pedestrian Network (SPD)",
+  "type": "sidewalk",
+  "description": "Inventory of municipal pedestrian links in Geneva, including existing and planned segments.",
+  "source": {
+    "type": "arcgis",
+    "url": "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer/0",
+    "portal_url": "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/SPD_RESEAUX_PIETONS/FeatureServer"
+  },
+  "fetch": {
+    "id_prefix": "ch_geneva_ped",
+    "id_column": "objectid",
+    "class_column": "nature",
+    "class_mapping": {
+      "chemin": "footway",
+      "route": "footway"
+    },
+    "subclass_column": "statut",
+    "subclass_mapping": {
+      "existant": "sidewalk",
+      "à améliorer": "sidewalk",
+      "à créer": "sidewalk"
+    },
+    "bbox": [
+      5.95,
+      46.1,
+      6.25,
+      46.33
+    ],
+    "crs": "EPSG:4326"
+  },
+  "license": {
+    "status": "approved",
+    "geometry_status": "pending_review",
+    "spdx": null,
+    "name": "SITG open geodata terms (\"Conditions générales d'utilisation des géodonnées et produits du SITG en libre accès\") — Federal level A \"Accès libre\" = opendata.swiss \"Open use. Must provide the source.\"",
+    "url": "https://sitg.ge.ch/ressources/conditions-utilisation-donnees",
+    "capabilities": {
+      "redistribution_allowed": "yes",
+      "derivatives_allowed": "yes",
+      "commercial_use_allowed": "yes",
+      "attribution_required": "yes",
+      "share_alike_required": "no"
+    },
+    "attribution": "Contains data from the Système d'information du territoire à Genève (SITG) — Infrastructure cantonale de données géographiques (ICDG), République et canton de Genève, used under the SITG open-data terms (opendata.swiss \"Open use. Must provide the source\")."
+  },
+  "review": {
+    "panel_recommendation": "approve",
+    "panel_confidence": 0.85,
+    "panel_reviewed_at": "2026-07-06",
+    "evidence": [
+      {
+        "url": "https://sitg.ge.ch/ressources/conditions-utilisation-donnees",
+        "quote": "libre accès ... usage privé ou utilisation commerciale ... mention de la source ... requise",
+        "fetched_at": "2026-07-06"
+      }
+    ],
+    "note": "Panel approve (see research/license_burndown_2026_07.md): The dossier's primary evidence is confirmed. The evidence_quote is present VERBATIM on the claimed license_url (both the \"libre accès ... usage privé ou utilisation commerciale\" grant and the \"mention de la source ... requise\" attribution requirement)."
+  }
+}

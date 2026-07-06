@@ -289,6 +289,7 @@ def test_consensus_unanimous_auto_accept():
     assert c.routing == "auto_accept"
     assert c.choice == "A"
     assert c.edge_set == es
+    assert c.route_reason == "unanimous"
 
 
 def test_consensus_unanimous_none_routes_to_human():
@@ -296,6 +297,7 @@ def test_consensus_unanimous_none_routes_to_human():
     c = sr.compute_consensus(votes)
     assert c.consensus == "unanimous"
     assert c.routing == "human_review"  # NONE never auto-accepts
+    assert c.route_reason == "unanimous_none"
 
 
 def test_consensus_majority():
@@ -305,6 +307,7 @@ def test_consensus_majority():
     assert c.routing == "human_review"
     assert c.choice == "A"
     assert "agy=B" in c.minority
+    assert c.route_reason == "dissent:agy=B"
 
 
 def test_consensus_none_all_differ():
@@ -312,6 +315,7 @@ def test_consensus_none_all_differ():
     c = sr.compute_consensus(votes)
     assert c.consensus == "none"
     assert c.routing == "human_review"
+    assert c.route_reason == "no_majority"
 
 
 def test_consensus_abstention_breaks_unanimity():
@@ -320,6 +324,7 @@ def test_consensus_abstention_breaks_unanimity():
     c = sr.compute_consensus(votes)
     assert c.consensus == "majority"
     assert c.n_valid == 2
+    assert c.route_reason == "below_quorum:2"
 
 
 def test_consensus_all_abstain():
@@ -327,6 +332,7 @@ def test_consensus_all_abstain():
     c = sr.compute_consensus(votes)
     assert c.consensus == "none"
     assert c.n_valid == 0
+    assert c.route_reason == "all_abstained"
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +402,7 @@ def test_class_gate_passes_same_mode_auto_accept():
     votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
     c = sr.compute_consensus(votes, edge_classes=[("residential", "primary")])
     assert c.routing == "auto_accept"
-    assert c.route_reason == ""
+    assert c.route_reason == "unanimous"
 
 
 def test_class_gate_passes_missing_or_neutral_class():
@@ -427,17 +433,18 @@ def test_class_gate_passes_cycleway_cycleway_auto_accept():
     votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
     c = sr.compute_consensus(votes, edge_classes=[("cycleway", "cycleway")])
     assert c.routing == "auto_accept"
-    assert c.route_reason == ""
+    assert c.route_reason == "unanimous"
 
 
 def test_class_gate_only_affects_auto_accept():
     # A majority (non-auto-accept) verdict with a cross-mode chosen edge is NOT
-    # relabeled "class-mismatch" — it was already routed to human review.
+    # relabeled "class-mismatch" — it was already routed to human review, and
+    # its reason reflects the vote outcome (the dissent), not the class gate.
     es = frozenset({(R1, T1)})
     votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "B")]
     c = sr.compute_consensus(votes, edge_classes=[("footway", "residential")])
     assert c.routing == "human_review"
-    assert c.route_reason == ""  # reason reserved for the class-gate demotion
+    assert c.route_reason == "dissent:agy=B"
 
 
 def test_class_gate_disabled_without_edge_classes():
@@ -446,7 +453,7 @@ def test_class_gate_disabled_without_edge_classes():
     votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
     c = sr.compute_consensus(votes)
     assert c.routing == "auto_accept"
-    assert c.route_reason == ""
+    assert c.route_reason == "unanimous"
 
 
 # ---------------------------------------------------------------------------
@@ -1458,6 +1465,19 @@ def test_four_voter_consensus_unanimous_needs_all_four():
     assert c2.consensus == "majority"
     assert c2.routing == "human_review"
     assert "opencode=B" in c2.minority
+    assert c2.route_reason == "dissent:opencode=B"
+    # 3 agree + 1 abstain: quorum met (>=3 valid) but the abstention blocked
+    # full unanimity — stamped "abstention", not below_quorum.
+    three_abstain = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("agy", "A", es),
+        _vote("opencode", "ABSTAIN"),
+    ]
+    c3 = sr.compute_consensus(three_abstain)
+    assert c3.consensus == "majority"
+    assert c3.routing == "human_review"
+    assert c3.route_reason == "abstention"
 
 
 # ---------------------------------------------------------------------------

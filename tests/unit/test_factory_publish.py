@@ -151,6 +151,30 @@ def test_assembly_writes_page_and_indexes(factory_root, tmp_path, empty_datasets
     assert rel_index.exists()
 
 
+def test_page_join_example_uses_current_overture_release_and_bbox(
+    factory_root, tmp_path, empty_datasets_dir
+):
+    """The geometry-join example must not bake the bridge release into the
+    Overture S3 path (old releases age off Overture's bucket) and must carry
+    the bbox predicate that makes the planet-wide scan prunable."""
+    from crosswalk.factory.publish import OVERTURE_RELEASE_EXAMPLE
+
+    staging = tmp_path / "staging"
+    assemble_staging(
+        factory_root,
+        staging,
+        _registry(),
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+    html = (staging / INDEX_HTML).read_text()
+    assert f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE_EXAMPLE}" in html
+    assert f"s3://overturemaps-us-west-2/release/{RELEASE}" not in html
+    assert "bbox.xmin BETWEEN" in html
+    # Bridge URL still uses the bridge release.
+    assert f"bridges/release={RELEASE}/dataset=us_ok_roads/bridge.parquet" in html
+
+
 def test_index_json_correctness(factory_root, tmp_path, empty_datasets_dir):
     staging = tmp_path / "staging"
     assemble_staging(

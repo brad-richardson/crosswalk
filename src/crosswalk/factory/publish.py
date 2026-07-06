@@ -50,6 +50,13 @@ BRIDGES_PREFIX = "bridges"
 # ``--site-url``; this placeholder makes the examples copy-pasteable in shape.
 DEFAULT_SITE_URL = "https://bridges.example.com"
 
+# Overture release used in the generated geometry-join example. Deliberately NOT
+# the bridge release: Overture's S3 bucket only keeps recent releases, so old
+# release paths 404. GERS ids are stable across releases (~99% measured
+# survival), so joining a bridge against a newer Overture release works.
+# Check https://docs.overturemaps.org for the current release.
+OVERTURE_RELEASE_EXAMPLE = "2026-06-17.0"
+
 
 # --------------------------------------------------------------------------
 # Checksums
@@ -501,7 +508,12 @@ def render_credibility_page(report: PublishReport) -> str:
 
     # Raw placeholders — the whole query string is HTML-escaped exactly once below.
     example_release = latest or "<release>"
-    example_ds = next((d.dataset for r in report.releases for d in r.published), "<dataset>")
+    published_ds = sorted({d.dataset for r in report.releases for d in r.published})
+    example_ds = (
+        "us_montana_missoula"
+        if "us_montana_missoula" in published_ds
+        else (published_ds[0] if published_ds else "<dataset>")
+    )
     q_dataset = (
         f"SELECT * FROM read_parquet(\n"
         f"  '{site}/bridges/release={example_release}/dataset={example_ds}/bridge.parquet'\n"
@@ -512,6 +524,30 @@ def render_credibility_page(report: PublishReport) -> str:
         f"FROM read_parquet(\n"
         f"  '{site}/bridges/release={example_release}/all_bridges.parquet'\n"
         f")\nWHERE gers_id = '<gers-id>';"
+    )
+    q_join = (
+        f"INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;\n"
+        f"SET s3_region = 'us-west-2';\n"
+        f"WITH bridge AS (\n"
+        f"  SELECT * FROM read_parquet(\n"
+        f"    '{site}/bridges/release={example_release}/dataset={example_ds}/bridge.parquet'\n"
+        f"  )\n"
+        f"  WHERE match_decision = 'match'\n"
+        f")\n"
+        f"SELECT b.local_id, b.gers_id, b.confidence, ST_AsText(s.geometry) AS overture_wkt\n"
+        f"FROM bridge b\n"
+        f"JOIN read_parquet(\n"
+        f"  -- Overture release: check https://docs.overturemaps.org for the latest.\n"
+        f"  -- GERS ids are stable across releases, so it need not match the bridge release.\n"
+        f"  's3://overturemaps-us-west-2/release/{OVERTURE_RELEASE_EXAMPLE}"
+        f"/theme=transportation/type=segment/*',\n"
+        f"  hive_partitioning=true\n"
+        f") s ON s.id = b.gers_id\n"
+        f"-- bbox: Missoula, MT (us_montana_missoula). Swap bbox + dataset together —\n"
+        f"-- e.g. Seattle: xmin -122.44 / -122.22, ymin 47.49 / 47.74.\n"
+        f"WHERE s.bbox.xmin BETWEEN -114.41 AND -113.68\n"
+        f"  AND s.bbox.ymin BETWEEN 46.72 AND 47.14\n"
+        f"LIMIT 100;"
     )
 
     published_table = (
@@ -606,6 +642,12 @@ def render_credibility_page(report: PublishReport) -> str:
   <p><strong>Reverse lookup — which local datasets reference a GERS id</strong>
   (searches every published dataset in a release at once):</p>
   <pre>{escape(q_reverse)}</pre>
+  <p><strong>Join to Overture geometry</strong> (DuckDB CLI). Bridge tables carry IDs
+  only — join <code>gers_id</code> to Overture's transportation theme, read straight
+  from Overture's public S3, to get geometry. The theme covers the whole planet, but
+  the bbox filter lets DuckDB skip almost all of it — only the parts covering your
+  city are downloaded:</p>
+  <pre>{escape(q_join)}</pre>
 
   <h2>Published datasets</h2>
   <p class="lead"><strong>matched</strong> counts confident matches only — borderline
