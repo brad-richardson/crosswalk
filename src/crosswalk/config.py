@@ -808,6 +808,21 @@ class MatcherSettings(BaseSettings):
         description="Cap on persisted rejected edges per group (highest-confidence "
         "kept). Records ``n_rejected_total`` + ``rejected_truncated`` when exceeded.",
     )
+    # Full candidate-graph persistence (learned-resolver flip condition #1, see
+    # docs/SCALING_ROADMAP.md). Per group, ``candidate_edges`` records EVERY
+    # candidate pair in the group's connected component that passed the optimizer
+    # candidate floor (min_confidence), each with its ML confidence and a
+    # ``selected`` flag (True iff the pair is in THIS group's optimizer
+    # assignment). Unlike ``rejected_edges`` it is uncapped, includes pairs
+    # selected elsewhere (marked ``selected_elsewhere``), and uses one uniform
+    # minimal schema — the complete pre-selection graph the resolver trains on.
+    # Additive sibling key: no existing consumer reads it.
+    stitch_persist_candidate_graph: bool = Field(
+        default=True,
+        description="Persist the FULL per-component candidate graph per group in the "
+        "sidecar (``candidate_edges``: every floor-passing pair with confidence + "
+        "selected flag). Learned-resolver flip condition #1; additive.",
+    )
 
     # --- Confidence-drop prune (M2 / resolver Phase 1) -------------------------
     # Post-optimizer prune of group (M:N/1:N/N:1) selections: drop a selected
