@@ -4,9 +4,10 @@ The 3-provider stitching panel (see :mod:`stitch_runner`) votes on M:N group edg
 selections and writes a ``consensus.csv`` per batch. This module promotes the
 subset of those verdicts that are safe to treat as durable labels -- only
 *unanimous* auto-accept groups -- into ``labels/stitching`` alongside the human
-labels, tagged with the labeler ``panel_unanimous_v2`` so their provenance stays
-visible (v1 tagged the earlier sonnet/gpt-5.4/Gemini-Flash-Low panel; the tag is
-bumped whenever the panel composition changes).
+labels, tagged with the labeler ``panel_unanimous_v3`` so their provenance stays
+visible (v1 tagged the earlier sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the
+Opus 4.8/gpt-5.5/Gemini-3.5-Flash panel on pre-enrichment packs; the tag is
+bumped whenever the panel composition OR its pack inputs change).
 
 Gates (applied in order; the first failing gate decides the group and is
 reported):
@@ -26,7 +27,7 @@ reported):
      is left untouched.
 
 Writing is idempotent: rows are upserted by ``group_id`` under the
-``panel_unanimous_v2`` labeler, so re-running never duplicates and always
+``panel_unanimous_v3`` labeler, so re-running never duplicates and always
 refreshes to the latest consensus. Previously exported panel rows are excluded
 from the human-precedence check (they are not human), so re-runs stay accurate.
 """
@@ -53,10 +54,13 @@ from .stitch_eval import (
 from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mode_edge
 
 # Bumped v1 -> v2 when the panel composition changed (Opus 4.8 / gpt-5.5 /
-# Gemini 3.5 Flash Medium). Existing v1 labels stay untouched; future waves are
-# tagged v2. Any labeler with the PANEL_LABELER_PREFIX is a panel (non-human)
-# label and is excluded from the human-precedence check below.
-PANEL_LABELER = "panel_unanimous_v2"
+# Gemini 3.5 Flash Medium); v2 -> v3 when the evidence-pack inputs changed
+# (#302 enrichment: per-edge overlap meters, BORDERLINE tags, junction zoom
+# crops -- votes are not comparable across pack versions, see
+# research/panel_enriched_ab.md). Existing v1/v2 labels stay untouched; future
+# waves are tagged v3. Any labeler with the PANEL_LABELER_PREFIX is a panel
+# (non-human) label and is excluded from the human-precedence check below.
+PANEL_LABELER = "panel_unanimous_v3"
 PANEL_LABELER_PREFIX = "panel_"
 
 # Per-group outcome reasons (stable strings for reporting/tests).
@@ -426,7 +430,7 @@ def write_exports(
     dataset: str,
     labels_dir: Path,
 ) -> int:
-    """Persist the report's exported groups as ``panel_unanimous_v2`` labels.
+    """Persist the report's exported groups as ``panel_unanimous_v3`` labels.
 
     Upserts by ``group_id`` (the store replaces an existing row for the same
     group_id), so this is idempotent. The source batch name is recorded in the

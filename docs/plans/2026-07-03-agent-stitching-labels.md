@@ -95,12 +95,16 @@ Empirical CLI probe results (all panel members 2/2 correct, valid JSON):
 
 - **Panel v1 (labeler `panel_unanimous_v1`): claude (sonnet) + codex (gpt-5.4,
   low) + agy (Gemini 3.5 Flash Low)** — the original composition.
-- **Panel v2 (labeler `panel_unanimous_v2`, default as of 2026-07-05): claude
+- **Panel v2 (default as of 2026-07-05): claude
   (Opus 4.8, `--effort medium`) + codex (gpt-5.5, low) + agy (Gemini 3.5 Flash
   Medium)** — three heterogeneous model families. Composition change → labeler
-  tag bump (v1 rows stay untouched; `stitch_export` excludes any `panel_*`
-  labeler from human precedence). Validated against settled v1 groups before
-  shipping (see `research/panel_v2_validation.md`).
+  tag bump to `panel_unanimous_v2` (v1 rows stay untouched; `stitch_export`
+  excludes any `panel_*` labeler from human precedence). Validated against
+  settled v1 groups before shipping (see `research/panel_v2_validation.md`).
+  The export labeler was bumped again to **`panel_unanimous_v3`** later on
+  2026-07-05 when the #302 pack enrichment changed the panel's *inputs* (same
+  composition; votes not comparable across pack versions — see
+  `research/panel_enriched_ab.md`).
 - `gemini` CLI is DEAD for individual tiers (IneligibleTierError → Antigravity
   is the Google path). Do not use agy's Claude/GPT-OSS models in the panel
   (collapses diversity; GPT-OSS is text-only anyway). `opencode` not
