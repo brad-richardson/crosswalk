@@ -1366,6 +1366,7 @@ def export_stitch_panel(
         REASON_HUMAN_PRECEDENCE,
         plan_exports,
         write_exports,
+        write_vote_provenance,
     )
 
     # Support both repeatable --batch and comma-separated values.
@@ -1430,6 +1431,20 @@ def export_stitch_panel(
 
     written = write_exports(report, dataset, labels_dir)
     console.print(f"[green]Wrote {written} panel labels to {labels_dir}/dataset={dataset}[/green]")
+
+    # Best-effort: labels are already persisted above, so a malformed batch CSV
+    # must not crash the command and leave an inconsistent "failed" export.
+    try:
+        n_votes, n_consensus = write_vote_provenance(batch_dirs, dataset)
+        console.print(
+            f"[green]Archived vote provenance: {n_votes} ballots, {n_consensus} consensus "
+            f"rows to labels/votes/dataset={dataset}[/green]"
+        )
+    except Exception as e:  # noqa: BLE001 - provenance is best-effort, never fail the export
+        console.print(
+            f"[yellow]Warning: vote-provenance archival skipped ({e}); "
+            f"labels were still written.[/yellow]"
+        )
 
 
 @agent_app.command("import")

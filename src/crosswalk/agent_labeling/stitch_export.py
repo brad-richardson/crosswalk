@@ -452,3 +452,77 @@ def write_exports(
         )
         written += 1
     return written
+
+
+def write_vote_provenance(
+    batch_dirs: list[Path],
+    dataset: str,
+    votes_dir: Path = Path("labels/votes"),
+) -> tuple[int, int]:
+    """Snapshot raw panel ballots + consensus into a git-tracked location.
+
+    The panel writes ``votes.csv`` (every raw ballot) and ``consensus.csv`` per
+    batch, but those live under the batch dir in the git-ignored ``data/`` tree,
+    so the audit trail behind every exported label is never committed. This
+    copies them into ``labels/votes/dataset=<dataset>/`` — which *is* tracked —
+    tagging each row with a ``source_batch`` column for cross-batch traceability.
+
+    **Accumulates** like the label store: the existing archived files are read
+    back and merged with the current batches, so exporting batches across
+    *separate* invocations (``stitch-export -b b1`` then later ``-b b2``) never
+    drops earlier ballots — matching ``write_exports``, which only upserts the
+    labels for the groups in each run. Idempotent via dedup (votes by
+    ``source_batch``/``group_id``/``provider``, consensus by
+    ``source_batch``/``group_id``; ``keep="last"`` lets a re-run refresh a batch).
+
+    ``source_batch`` is the batch dir *basename*, so duplicate basenames in one
+    call would collapse distinct ballots — we refuse that rather than lose data.
+    Field-level best-effort: an empty or malformed batch CSV is skipped, not
+    fatal. Returns ``(n_vote_rows, n_consensus_rows)``.
+    """
+    out_dir = Path(votes_dir) / f"dataset={dataset}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    names = [Path(bd).name for bd in batch_dirs]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ValueError(
+            f"batch dirs have duplicate basenames {dupes}; the source_batch tag "
+            "would collapse them and lose ballots — pass uniquely-named batch dirs."
+        )
+
+    def _read_csv(path: Path) -> pd.DataFrame | None:
+        if not path.exists():
+            return None
+        try:
+            return pd.read_csv(path, dtype={"group_id": str})
+        except pd.errors.EmptyDataError:
+            return None
+
+    def _collect(filename: str, dedupe_on: list[str]) -> int:
+        frames = []
+        # Existing archive first (already carries source_batch); current batches
+        # append after it, so keep="last" lets a re-run supersede a stale batch.
+        existing = _read_csv(out_dir / filename)
+        if existing is not None:
+            frames.append(existing)
+        for bd in batch_dirs:
+            df = _read_csv(Path(bd) / filename)
+            if df is None:
+                continue
+            if "source_batch" in df.columns:  # a re-archived tree; re-tag cleanly
+                df = df.drop(columns="source_batch")
+            df.insert(0, "source_batch", Path(bd).name)
+            frames.append(df)
+        if not frames:
+            return 0
+        merged = pd.concat(frames, ignore_index=True)
+        keys = [c for c in dedupe_on if c in merged.columns]
+        if keys:
+            merged = merged.drop_duplicates(subset=keys, keep="last")
+        merged.to_csv(out_dir / filename, index=False)
+        return len(merged)
+
+    n_votes = _collect("votes.csv", ["source_batch", "group_id", "provider"])
+    n_consensus = _collect("consensus.csv", ["source_batch", "group_id"])
+    return n_votes, n_consensus
