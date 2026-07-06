@@ -88,3 +88,6 @@ mbench_results.jsonl
 # Claude-mem auto-generated files (keep root CLAUDE.md)
 **/CLAUDE.md
 !/CLAUDE.md
+
+# Local secrets / env files (never commit)
+.env*

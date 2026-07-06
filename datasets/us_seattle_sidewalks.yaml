@@ -38,7 +38,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-02-08T23:36:05.118340+00:00'
+    fetched_at: '2026-07-06T18:59:21.708492+00:00'
     bbox:
     - -122.45
     - 47.48
@@ -50,7 +50,7 @@ last_fetch:
     - -122.20667027264943
     - 47.788983111749914
     bbox_buffer_m: 1000.0
-    feature_count: 165503
+    feature_count: 169457
     geometry_types:
     - LineString
     output_path: data/raw
