@@ -57,6 +57,17 @@
             {{ group.review_tier }}
         </span>
         {% endif %}
+        {% if group.get('panel_route_reason') %}
+        <!-- Why the agent panel routed this group to human review (one chip,
+             not a vote dump). Title carries the machine-readable code. -->
+        <span class="collapse-hide panel-route-chip"
+              title="panel route reason: {{ group.get('panel_route_reason') }}"
+              style="font-size: 0.7rem; color: var(--text-muted);
+                     border: 1px solid var(--border-color, rgba(128,128,128,0.4));
+                     border-radius: 999px; padding: 1px 7px; white-space: nowrap;">
+            panel: {{ group.get('panel_route_reason_human') or group.get('panel_route_reason') }}
+        </span>
+        {% endif %}
         <!-- De-anchored review mode switch. A plain link (full-page navigation)
              so the mode is carried in the URL; toggling reloads the current
              group in the other mode. In de-anchored mode the reviewer labels

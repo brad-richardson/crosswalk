@@ -1046,6 +1046,256 @@ class TestPanelRouting:
 
 
 # ---------------------------------------------------------------------------
+# panel_routing — route-reason derivation for historical consensus rows
+# ---------------------------------------------------------------------------
+
+
+def _crow(**kw):
+    """A consensus.csv-shaped row (all-string values, like csv.DictReader)."""
+    row = {
+        "group_id": "g1",
+        "consensus": "majority",
+        "choice": "A",
+        "edge_set": "[]",
+        "routing": "human_review",
+        "n_votes": "3",
+        "n_valid": "3",
+        "minority": "",
+        "mean_confidence": "0.9",
+        "route_reason": "",
+    }
+    row.update({k: str(v) for k, v in kw.items()})
+    return row
+
+
+class TestDeriveRouteReason:
+    def _derive(self, **kw):
+        from crosswalk.agent_labeling.panel_routing import derive_route_reason
+
+        return derive_route_reason(_crow(**kw))
+
+    def test_auto_accept_is_unanimous(self):
+        assert self._derive(consensus="unanimous", routing="auto_accept") == "unanimous"
+
+    def test_unanimous_none(self):
+        assert (
+            self._derive(consensus="unanimous", choice="NONE", routing="human_review")
+            == "unanimous_none"
+        )
+
+    def test_majority_with_dissent(self):
+        assert self._derive(minority="agy=B") == "dissent:agy=B"
+
+    def test_majority_with_multiple_dissenters_normalized(self):
+        # Real minority strings join with "; " (e.g. Seattle 3fcab92c).
+        assert self._derive(minority="codex=F; agy=A") == "dissent:codex=F,agy=A"
+
+    def test_majority_no_dissent_below_quorum(self):
+        # 2 agree + 1 abstain (unanimity needs >=3 valid).
+        assert self._derive(n_valid="2", minority="") == "below_quorum:2"
+
+    def test_majority_no_dissent_with_quorum_is_abstention(self):
+        # 4-voter panel: 3 agree + 1 abstain — quorum met, abstention blocked it.
+        assert self._derive(n_votes="4", n_valid="3", minority="") == "abstention"
+
+    def test_none_is_no_majority(self):
+        assert self._derive(consensus="none", choice="D", minority="agy=A") == "no_majority"
+
+    def test_all_abstained(self):
+        assert (
+            self._derive(
+                consensus="none",
+                choice="",
+                n_valid="0",
+                minority="all providers abstained",
+            )
+            == "all_abstained"
+        )
+
+    def test_existing_reason_wins(self):
+        # An informative stamped reason (the class gate's, or phase-2's
+        # size_gated) is authoritative — never re-derived.
+        assert (
+            self._derive(consensus="unanimous", route_reason="class-mismatch") == "class-mismatch"
+        )
+        assert self._derive(route_reason="size_gated", minority="codex=D") == "size_gated"
+
+    def test_legacy_tier_echo_stamps_are_rederived(self):
+        # Phase-2 stamped bare tier echoes ("majority"/"none") — strictly less
+        # informative than the row's own columns, so they are re-derived.
+        assert self._derive(route_reason="majority", minority="codex=D") == "dissent:codex=D"
+        assert self._derive(route_reason="none", consensus="none", minority="agy=A") == (
+            "no_majority"
+        )
+        # Its unanimous_NONE spelling is normalized to the canonical code.
+        assert (
+            self._derive(route_reason="unanimous_NONE", consensus="unanimous", choice="NONE")
+            == "unanimous_none"
+        )
+
+    def test_unanimous_non_none_human_review_is_class_mismatch(self):
+        # Pre-stamp history: only the class gate demotes a unanimous non-NONE
+        # verdict to human_review.
+        assert (
+            self._derive(consensus="unanimous", choice="A", routing="human_review")
+            == "class-mismatch"
+        )
+
+    def test_nan_and_missing_columns_are_safe(self):
+        from crosswalk.agent_labeling.panel_routing import derive_route_reason
+
+        # pandas-shaped row: NaN route_reason/minority, numeric counts.
+        row = {
+            "consensus": "majority",
+            "choice": "A",
+            "routing": "human_review",
+            "minority": float("nan"),
+            "n_votes": 3,
+            "n_valid": 2,
+            "route_reason": float("nan"),
+        }
+        assert derive_route_reason(row) == "below_quorum:2"
+        assert derive_route_reason({}) == ""
+
+    def test_stamp_matches_derivation(self):
+        # The runner's stamped reason and the historical derivation must agree:
+        # blank out the stamp and re-derive from the row's own columns.
+        from crosswalk.agent_labeling.panel_routing import derive_route_reason
+        from crosswalk.agent_labeling.stitch_runner import Vote, compute_consensus
+
+        def vote(provider, choice):
+            return Vote(
+                group_id="g",
+                provider=provider,
+                model="m",
+                choice=choice,
+                confidence=0.9,
+                reasoning="",
+                edge_set=frozenset({("r1", "t1")}),
+            )
+
+        panels = [
+            [vote("claude", "A"), vote("codex", "A"), vote("agy", "A")],
+            [vote("claude", "NONE"), vote("codex", "NONE"), vote("agy", "NONE")],
+            [vote("claude", "A"), vote("codex", "A"), vote("agy", "B")],
+            [vote("claude", "A"), vote("codex", "B"), vote("agy", "NONE")],
+            [vote("claude", "A"), vote("codex", "A"), vote("agy", "ABSTAIN")],
+            [vote("claude", "ABSTAIN"), vote("codex", "ABSTAIN"), vote("agy", "ABSTAIN")],
+        ]
+        for votes in panels:
+            c = compute_consensus(votes)
+            assert c.route_reason
+            rederived = derive_route_reason(
+                {
+                    "consensus": c.consensus,
+                    "choice": c.choice,
+                    "routing": c.routing,
+                    "minority": c.minority,
+                    "n_votes": c.n_votes,
+                    "n_valid": c.n_valid,
+                    "route_reason": "",
+                }
+            )
+            assert rederived == c.route_reason
+
+
+class TestHumanizeRouteReason:
+    def test_known_codes(self):
+        from crosswalk.agent_labeling.panel_routing import humanize_route_reason as h
+
+        assert h("unanimous_none") == "panel unanimous: none of the options fit"
+        assert h("dissent:codex=B") == "codex dissented — voted B"
+        assert h("dissent:codex=F,agy=A") == "codex dissented — voted F; agy dissented — voted A"
+        assert h("below_quorum:2") == "only 2 valid votes — below quorum"
+        assert "cross-mode" in h("class-mismatch")
+        assert h("no_majority") == "panel split — no majority choice"
+        assert h("all_abstained") == "all panelists abstained"
+        assert h("abstention") == "an abstention blocked unanimity"
+        assert h("unanimous") == "panel unanimous — auto-accepted"
+
+    def test_unknown_and_blank(self):
+        from crosswalk.agent_labeling.panel_routing import humanize_route_reason as h
+
+        assert h("") == ""
+        assert h("size_gated") == "over the size gate — too large to auto-accept"
+        assert h("some_new_code") == "some new code"
+
+
+class TestAttachPanelRouteReasons:
+    """The stitch-batch queue writer attaches panel_route_reason per group."""
+
+    def _write_consensus_rows(self, batch_dir, rows, mtime=None):
+        import csv as _csv
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            w.writeheader()
+            w.writerows(rows)
+        if mtime is not None:
+            import os
+
+            os.utime(cpath, (mtime, mtime))
+
+    def test_attaches_reason_and_human_variant(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        root = tmp_path / "batches"
+        self._write_consensus_rows(
+            root / "ds_a",
+            [
+                _crow(group_id="g1", minority="codex=B"),
+                _crow(group_id="g2", consensus="unanimous", choice="NONE"),
+            ],
+            mtime=1000,
+        )
+        groups = [{"group_id": "g1"}, {"group_id": "g2"}, {"group_id": "never_voted"}]
+        n = attach_panel_route_reasons(groups, "ds_a", root)
+        assert n == 2
+        assert groups[0]["panel_route_reason"] == "dissent:codex=B"
+        assert groups[0]["panel_route_reason_human"] == "codex dissented — voted B"
+        assert groups[1]["panel_route_reason"] == "unanimous_none"
+        assert groups[1]["panel_route_reason_human"] == ("panel unanimous: none of the options fit")
+        # Never-voted groups are left untouched.
+        assert "panel_route_reason" not in groups[2]
+
+    def test_latest_wave_reason_wins(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        root = tmp_path / "batches"
+        self._write_consensus_rows(
+            root / "ds_a", [_crow(group_id="g1", minority="codex=B")], mtime=1000
+        )
+        self._write_consensus_rows(
+            root / "ds_a_phase2",
+            [_crow(group_id="g1", consensus="none", choice="D", minority="agy=A")],
+            mtime=2000,
+        )
+        groups = [{"group_id": "g1"}]
+        attach_panel_route_reasons(groups, "ds_a", root)
+        assert groups[0]["panel_route_reason"] == "no_majority"
+
+    def test_annotation_only_never_reshapes_groups(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        root = tmp_path / "batches"
+        self._write_consensus_rows(root / "ds_a", [_crow(group_id="g1")], mtime=1000)
+        groups = [{"group_id": "g1", "edges": [{"ref_id": "r", "target_id": "t"}]}]
+        before_ids = [g["group_id"] for g in groups]
+        attach_panel_route_reasons(groups, "ds_a", root)
+        assert [g["group_id"] for g in groups] == before_ids
+        assert groups[0]["edges"] == [{"ref_id": "r", "target_id": "t"}]
+
+    def test_no_batches_is_noop(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        groups = [{"group_id": "g1"}]
+        assert attach_panel_route_reasons(groups, "ds_a", tmp_path / "none") == 0
+        assert "panel_route_reason" not in groups[0]
+
+
+# ---------------------------------------------------------------------------
 # StitchingLabelStore
 # ---------------------------------------------------------------------------
 
@@ -3091,6 +3341,63 @@ class TestStaleProposalUI:
         finally:
             for p in patches:
                 p.stop()
+
+
+class TestPanelRouteReasonChip:
+    """A queued group carrying panel_route_reason renders a single chip telling
+    the reviewer WHY the agent panel routed it to human review; groups without
+    the field (never voted / legacy queue) render no chip."""
+
+    DATASET = "test_ds"
+
+    def _batch(self, with_reason):
+        group = {
+            "group_id": "greason",
+            "match_type": "1:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1", 0.9)],
+        }
+        if with_reason:
+            group["panel_route_reason"] = "dissent:codex=B"
+            group["panel_route_reason_human"] = "codex dissented — voted B"
+        return {"dataset_id": self.DATASET, "groups": [group]}
+
+    def _fragment(self, with_reason):
+        from unittest.mock import patch
+
+        from fastapi.testclient import TestClient
+
+        from crosswalk.web.app import create_app
+
+        patches = [
+            patch("crosswalk.web.routes.stitching.list_datasets", return_value=[self.DATASET]),
+            patch(
+                "crosswalk.web.routes.stitching.load_stitch_batch",
+                return_value=self._batch(with_reason),
+            ),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            client = TestClient(create_app())
+            return client.get(
+                f"/stitching-review/group?dataset={self.DATASET}&group_id=greason&group_index=0"
+            ).text
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_chip_renders_human_reason_and_code(self):
+        html = self._fragment(with_reason=True)
+        assert "panel-route-chip" in html
+        assert "codex dissented — voted B" in html
+        # Machine-readable code carried in the title for hover/debug.
+        assert "dissent:codex=B" in html
+
+    def test_no_chip_without_reason(self):
+        html = self._fragment(with_reason=False)
+        assert "panel-route-chip" not in html
 
 
 class TestDeAnchoredMode:

@@ -26,6 +26,8 @@ import pandas as pd
 import yaml
 from loguru import logger
 
+from .panel_routing import REASON_ALL_ABSTAINED, REASON_CLASS_MISMATCH, derive_route_reason
+
 # ---------------------------------------------------------------------------
 # Provider panel configuration
 # ---------------------------------------------------------------------------
@@ -758,7 +760,11 @@ class Consensus:
     n_valid: int
     minority: str  # summary of dissenting votes
     mean_confidence: float
-    route_reason: str = ""  # e.g. "class-mismatch" when the class gate demotes
+    # Machine-readable code for WHY the group routed the way it did, stamped on
+    # every row (codes enumerated in panel_routing: unanimous, unanimous_none,
+    # dissent:<provider>=<choice>, below_quorum:<n>, abstention, no_majority,
+    # all_abstained, class-mismatch).
+    route_reason: str = ""
 
 
 def compute_consensus(
@@ -797,6 +803,7 @@ def compute_consensus(
             0,
             "all providers abstained",
             0.0,
+            route_reason=REASON_ALL_ABSTAINED,
         )
 
     top_choice = max(tally, key=lambda c: len(tally[c]))
@@ -825,7 +832,23 @@ def compute_consensus(
     # "supplied, nothing to gate on" — only None disables the gate.
     if routing == "auto_accept" and edge_classes is not None and has_cross_mode_edge(edge_classes):
         routing = "human_review"
-        route_reason = "class-mismatch"
+        route_reason = REASON_CLASS_MISMATCH
+
+    # Stamp a reason on EVERY row (not just gate demotions) so consensus.csv
+    # says why each group routed the way it did. The derivation is shared with
+    # the historical-row reader (panel_routing.derive_route_reason), so the
+    # stamp and the derived-for-history codes can never diverge.
+    if not route_reason:
+        route_reason = derive_route_reason(
+            {
+                "consensus": consensus,
+                "choice": top_choice,
+                "routing": routing,
+                "minority": minority,
+                "n_votes": len(votes),
+                "n_valid": n_valid,
+            }
+        )
 
     return Consensus(
         group_id=group_id,
