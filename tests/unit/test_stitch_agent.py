@@ -502,24 +502,27 @@ def test_run_provider_abstains_after_retries(monkeypatch):
     assert vote.error
 
 
-def test_run_provider_cli_failure_records_stderr(monkeypatch):
-    """Non-zero CLI exit is an invocation failure, not a parse error."""
+def test_run_provider_cli_failure_hard_fails(monkeypatch):
+    """A non-zero CLI exit is a provider-down signal -> hard-fail, not abstain.
+
+    (Previously this abstained; the panel now halts on invocation/quota errors
+    rather than silently dropping the voter. budget=0 hard-fails immediately.)
+    """
 
     def failing_invoker(prompt, group_dir, letters, model, timeout, effort=""):
         raise RuntimeError("codex exited with code 2: auth expired")
 
     monkeypatch.setitem(sr._INVOKERS, "codex", failing_invoker)
-    vote = sr.run_provider_on_group(
-        sr.ProviderSpec("codex", "m"),
-        "g",
-        None,
-        "prompt",
-        ["A"],
-        {"A": [(R1, T1)]},
-    )
-    assert vote.choice == "ABSTAIN"
-    assert "invocation error" in vote.error
-    assert "auth expired" in vote.error
+    with pytest.raises(sr.ProviderInvocationError, match="auth expired"):
+        sr.run_provider_on_group(
+            sr.ProviderSpec("codex", "m"),
+            "g",
+            None,
+            "prompt",
+            ["A"],
+            {"A": [(R1, T1)]},
+            invocation_budget_s=0.0,
+        )
 
 
 def test_check_exit_raises_with_truncated_stderr():
@@ -1433,14 +1436,23 @@ def test_opencode_vote_parses_through_runner(monkeypatch):
     assert vote.edge_set == frozenset({(R1, T1)})
 
 
-def test_opencode_abstains_on_failure(monkeypatch):
+def test_opencode_hard_fails_on_invocation_error(monkeypatch):
+    """opencode quota exhaustion halts the run (was: abstain). budget=0 = immediate."""
+
     def failing(prompt, group_dir, letters, model, timeout, effort=""):
         raise RuntimeError("opencode exited with code 1: quota exceeded")
 
     monkeypatch.setitem(sr._INVOKERS, "opencode", failing)
-    vote = sr.run_provider_on_group(sr.OPENCODE_QWEN, "g", None, "prompt", ["A"], {"A": [(R1, T1)]})
-    assert vote.choice == "ABSTAIN"
-    assert "quota exceeded" in vote.error
+    with pytest.raises(sr.ProviderInvocationError, match="quota exceeded"):
+        sr.run_provider_on_group(
+            sr.OPENCODE_QWEN,
+            "g",
+            None,
+            "prompt",
+            ["A"],
+            {"A": [(R1, T1)]},
+            invocation_budget_s=0.0,
+        )
 
 
 def test_four_voter_consensus_unanimous_needs_all_four():
