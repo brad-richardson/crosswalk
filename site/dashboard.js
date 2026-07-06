@@ -157,7 +157,7 @@ function manifestHref(r) {
 }
 function base() {
   const override = new URLSearchParams(location.search).get("base");
-  return (override || (window.MATCHER_CONFIG || {}).DEFAULT_BASE_URL || "").replace(/\/+$/, "");
+  return (override || (window.CROSSWALK_CONFIG || {}).DEFAULT_BASE_URL || "").replace(/\/+$/, "");
 }
 function emptyRow(cols) {
   return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;

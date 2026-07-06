@@ -16,7 +16,7 @@
  *
  * The `?base=` query parameter (if present) wins over DEFAULT_BASE_URL.
  */
-window.MATCHER_CONFIG = {
+window.CROSSWALK_CONFIG = {
   // TODO(go-live): replace with your R2 public domain, e.g.
   //   "https://bridges.example.com"  (custom domain)  or
   //   "https://pub-<hash>.r2.dev"    (bucket r2.dev URL)
