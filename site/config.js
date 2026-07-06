@@ -17,10 +17,10 @@
  * The `?base=` query parameter (if present) wins over DEFAULT_BASE_URL.
  */
 window.CROSSWALK_CONFIG = {
-  // TODO(go-live): replace with your R2 public domain, e.g.
-  //   "https://bridges.example.com"  (custom domain)  or
-  //   "https://pub-<hash>.r2.dev"    (bucket r2.dev URL)
-  DEFAULT_BASE_URL: "https://bridges.example.com",
+  // R2 public development URL for the crosswalk-bridges bucket. r2.dev is
+  // rate-limited / dev-tier; swap to a custom domain (e.g. under bradr.dev)
+  // for production traffic.
+  DEFAULT_BASE_URL: "https://pub-1960acc8b68148ac82da2fd033be804f.r2.dev",
 
   // Pinned DuckDB-WASM release (loaded from jsDelivr as an ES module).
   DUCKDB_WASM_VERSION: "1.32.0",
