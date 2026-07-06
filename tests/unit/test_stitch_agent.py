@@ -1799,6 +1799,105 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     assert set(votes_df["group_id"]) == {"g1", "g2"}
 
 
+def _breaker_panel_and_invokers(monkeypatch, failing_invoker):
+    """3-provider panel where claude/codex vote A and agy uses failing_invoker."""
+
+    def ok_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", ok_invoker)
+    monkeypatch.setitem(sr._INVOKERS, "codex", ok_invoker)
+    monkeypatch.setitem(sr._INVOKERS, "agy", failing_invoker)
+    return [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+
+def test_run_batch_timeout_breaker_halts_after_consecutive(tmp_path, monkeypatch):
+    """N consecutive timeout-abstains from ONE provider promote to provider-down halt.
+
+    Completed groups must be flushed to the partials before the raise so the run
+    stays resumable.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4"):
+        _write_min_pack(batch_dir, gid)
+
+    def always_timeout(prompt, group_dir, letters, model, timeout, effort=""):
+        raise subprocess.TimeoutExpired(cmd="agy", timeout=timeout)
+
+    panel = _breaker_panel_and_invokers(monkeypatch, always_timeout)
+    with pytest.raises(sr.ProviderInvocationError, match="consecutive"):
+        sr.run_batch(batch_dir, panel=panel)
+    # Groups before the breaker group were flushed and are resumable.
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    assert set(votes["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_timeout_breaker_resets_on_success(tmp_path, monkeypatch):
+    """A successful vote resets the consecutive-timeout count — no false halt."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4", "g5"):
+        _write_min_pack(batch_dir, gid)
+
+    calls = {"n": 0}
+
+    def intermittent(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        if calls["n"] == 3:  # succeed on the 3rd group only
+            return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+        raise subprocess.TimeoutExpired(cmd="agy", timeout=timeout)
+
+    panel = _breaker_panel_and_invokers(monkeypatch, intermittent)
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)  # must NOT raise
+    assert set(cons_df["group_id"]) == {"g1", "g2", "g3", "g4", "g5"}
+    agy = votes_df[votes_df["provider"] == "agy"]
+    assert (agy["choice"] == "ABSTAIN").sum() == 4
+
+
+def test_run_batch_overflow_abstains_do_not_trip_breaker(tmp_path, monkeypatch):
+    """Context overflow is a group property: monsters in a row never halt the run."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4"):
+        _write_min_pack(batch_dir, gid)
+
+    def always_overflow(prompt, group_dir, letters, model, timeout, effort=""):
+        raise sr.GroupScopedProviderError(
+            "agy context overflow: prompt exceeds the model's context window"
+        )
+
+    panel = _breaker_panel_and_invokers(monkeypatch, always_overflow)
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)  # must NOT raise
+    assert set(cons_df["group_id"]) == {"g1", "g2", "g3", "g4"}
+    agy = votes_df[votes_df["provider"] == "agy"]
+    assert (agy["choice"] == "ABSTAIN").all()
+
+
+def test_quota_and_rate_limit_messages_not_misclassified_as_group_scoped():
+    """Marker-set breadth guard: provider-down bodies must stay provider-down.
+
+    Broadening _CONTEXT_OVERFLOW_MARKERS to something colliding with a realistic
+    quota/rate-limit message would silently convert #334 halts into abstains.
+    """
+    provider_down_bodies = [
+        "429 rate limit reached for gpt-5.5: limit 30000 tokens per min",
+        "insufficient_quota: you exceeded your current quota",
+        "401 unauthorized: invalid api key",
+        "upstream connect error or disconnect/reset before headers",
+        "billing hard limit has been reached",
+    ]
+    for body in provider_down_bodies:
+        result = subprocess.CompletedProcess(args=["codex"], returncode=1, stdout="", stderr=body)
+        with pytest.raises(RuntimeError) as exc_info:
+            sr._check_exit("codex", result)
+        assert not isinstance(exc_info.value, sr.GroupScopedProviderError), body
+
+
 def test_run_batch_resume_rejects_mismatched_panel(tmp_path, monkeypatch):
     """Partials written by a DIFFERENT panel are ignored: every group re-runs.
 
@@ -1967,15 +2066,95 @@ def test_budget_exhaustion_backs_off_exponentially(monkeypatch):
     assert abs(sum(clock.sleeps) - 300.0) < 1e-6
 
 
-def test_timeout_hard_fails_after_budget(monkeypatch):
-    """A persistent timeout is an invocation failure -> hard-fail (chosen scope)."""
-    _install_fake_clock(monkeypatch)
+def test_timeout_abstains_immediately_without_retry(monkeypatch):
+    """A timeout is group-scoped: abstain on ONE attempt (no backoff), run continues.
+
+    Retrying a timeout just burns another full timeout window, and halting lets
+    one oversized group kill a whole wave; a hung *provider* still halts via the
+    generic nonzero-exit path.
+    """
+    clock = _install_fake_clock(monkeypatch)
+    calls = {"n": 0}
 
     def always_timeout(*_a, **_k):
+        calls["n"] += 1
         raise subprocess.TimeoutExpired(cmd="claude", timeout=5)
 
-    with pytest.raises(sr.ProviderInvocationError, match="timeout after"):
-        _attempt(always_timeout, budget=30.0)
+    vote = _attempt(always_timeout, budget=300.0)
+    assert vote.choice == "ABSTAIN"
+    assert "timeout after" in vote.error
+    assert calls["n"] == 1  # single attempt, no retry
+    assert clock.sleeps == []  # and no backoff sleeps
+
+
+def test_context_overflow_abstains_and_continues(monkeypatch):
+    """A context-window overflow is deterministic per group -> abstain, not halt."""
+    clock = _install_fake_clock(monkeypatch)
+    calls = {"n": 0}
+
+    def overflowing(*_a, **_k):
+        calls["n"] += 1
+        raise sr.GroupScopedProviderError(
+            "codex context overflow: prompt exceeds the model's context window"
+        )
+
+    vote = _attempt(overflowing, budget=300.0)
+    assert vote.choice == "ABSTAIN"
+    assert "context overflow" in vote.error
+    assert calls["n"] == 1
+    assert clock.sleeps == []
+
+
+def test_check_exit_classifies_context_overflow_beyond_snippet():
+    """Overflow markers are scanned in the FULL output, not the 500-char snippet.
+
+    codex prints a long banner + echoed prompt to stderr before its overflow
+    line; truncating first would misclassify the overflow as provider-down.
+    """
+    banner = "OpenAI Codex v0.142.5\n" + ("x" * 600) + "\n"
+    result = subprocess.CompletedProcess(
+        args=["codex"],
+        returncode=1,
+        stdout="",
+        stderr=banner + "ERROR: Codex ran out of room in the model's context window.",
+    )
+    with pytest.raises(sr.GroupScopedProviderError, match="context overflow"):
+        sr._check_exit("codex", result)
+
+
+def test_check_exit_classifies_cli_internal_timeout():
+    """agy's own 'timeout waiting for response' is group-scoped, not provider-down."""
+    result = subprocess.CompletedProcess(
+        args=["agy"], returncode=1, stdout="", stderr="Error: timeout waiting for response"
+    )
+    with pytest.raises(sr.GroupScopedProviderError, match="response timeout"):
+        sr._check_exit("agy", result)
+
+
+def test_check_exit_generic_failure_still_runtime_error():
+    """Non-group-scoped nonzero exits keep the provider-down classification."""
+    result = subprocess.CompletedProcess(
+        args=["codex"], returncode=1, stdout="", stderr="401 unauthorized"
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        sr._check_exit("codex", result)
+    assert not isinstance(exc_info.value, sr.GroupScopedProviderError)
+
+
+def test_invoke_agy_print_timeout_derived_from_timeout(monkeypatch, tmp_path):
+    """agy's internal response timer follows the caller's timeout (was: 2m hardcoded)."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    sr.invoke_agy("PROMPT", tmp_path, ["A"], "Gemini 3.5 Flash (Medium)", timeout=240)
+    assert "--print-timeout=225s" in captured["cmd"]
+    # Floor: never below 30s even with a tiny caller timeout.
+    sr.invoke_agy("PROMPT", tmp_path, ["A"], "Gemini 3.5 Flash (Medium)", timeout=20)
+    assert "--print-timeout=30s" in captured["cmd"]
 
 
 def test_invocation_error_recovers_within_budget(monkeypatch):

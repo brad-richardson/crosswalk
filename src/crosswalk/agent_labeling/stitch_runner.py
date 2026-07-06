@@ -284,27 +284,77 @@ def _image_paths(group_dir: Path, letters: list[str]) -> list[str]:
     return imgs
 
 
+#: Substrings that identify a context-window overflow in a provider CLI's
+#: output. Deterministic for the (group, provider) pair: the same prompt will
+#: overflow on every retry, but other groups remain servable, so this must be
+#: classified as group-scoped (abstain + continue), never provider-down (halt).
+#: Scanned over the FULL stdout+stderr, not the 500-char error snippet — codex
+#: prints a long banner + echoed prompt before its overflow line.
+_CONTEXT_OVERFLOW_MARKERS = (
+    "context window",
+    "context length",
+    "context_length_exceeded",
+    "prompt is too long",
+    "input is too long",
+    "too many tokens",
+    "maximum context",
+)
+
+#: CLI-internal response-timeout messages (the CLI exits nonzero after its own
+#: timer fires, e.g. agy's ``Error: timeout waiting for response``). Same fate
+#: as a subprocess timeout: abstain on this group, keep the run going.
+_CLI_TIMEOUT_MARKERS = ("timeout waiting for response",)
+
+#: Consecutive timeout-abstentions from ONE provider before ``run_batch``
+#: promotes it to the #334 provider-down halt. One or two slow oversized groups
+#: abstain and the wave survives; a provider hanging on every group in a row is
+#: provider health, not group size.
+_TIMEOUT_BREAKER_N = 3
+
+
+class GroupScopedProviderError(RuntimeError):
+    """A provider failure that is deterministic for THIS group, not provider health.
+
+    E.g. the group's prompt exceeds the model's context window, or the response
+    timed out on an oversized group. Retrying the same group cannot succeed and
+    halting the run would let one monster group kill a whole wave — instead the
+    runner records an ABSTAIN vote (with the error trail) and continues; the
+    group then routes to human review via the abstention/below-quorum path.
+    """
+
+
 def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
     """Raise on non-zero CLI exit so failures don't masquerade as parse errors.
 
-    Includes truncated stderr in the message; the runner records it in the
-    abstention error trail.
+    Group-scoped failures (context overflow, CLI-internal response timeout) are
+    classified from the full output and raised as :class:`GroupScopedProviderError`;
+    everything else raises ``RuntimeError`` with truncated stderr, which the
+    runner treats as potential provider-down (backoff, then halt).
     """
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()[:500]
-        raise RuntimeError(f"{provider} exited with code {result.returncode}: {stderr}")
+        stderr = (result.stderr or "").strip()
+        combined = f"{result.stdout or ''}\n{stderr}".lower()
+        if any(m in combined for m in _CONTEXT_OVERFLOW_MARKERS):
+            raise GroupScopedProviderError(
+                f"{provider} context overflow: prompt exceeds the model's context window"
+            )
+        if any(m in combined for m in _CLI_TIMEOUT_MARKERS):
+            raise GroupScopedProviderError(f"{provider} CLI-internal response timeout")
+        raise RuntimeError(f"{provider} exited with code {result.returncode}: {stderr[:500]}")
 
 
 class ProviderInvocationError(RuntimeError):
     """A voter's CLI/API failed and did not recover within the retry budget.
 
     Raised for invocation/API failures (nonzero exit, quota exhaustion,
-    rate-limit, network, timeout) that persist through the backoff window.
+    rate-limit, network) that persist through the backoff window.
     It propagates out of ``run_batch`` to HALT the run rather than silently
     degrading the panel to fewer voters — a quota-exhausted provider abstaining
     would quietly weaken quorum on every subsequent group. Parse/validation
-    failures do NOT raise this (a single malformed response still abstains);
-    only genuine provider-down conditions do. The run is resumable: completed
+    failures do NOT raise this (a single malformed response still abstains).
+    Neither do group-scoped failures — context overflow and timeouts abstain on
+    that group and keep the run going (see :class:`GroupScopedProviderError`);
+    only genuine provider-down conditions halt. The run is resumable: completed
     groups are already flushed to ``votes.partial.csv``.
     """
 
@@ -424,9 +474,14 @@ def invoke_agy(
     try:
         prompt_file = work / "panel_prompt.txt"
         prompt_file.write_text(prompt)
+        # agy's internal response timer must be derived from the caller's timeout
+        # (with margin so agy fails with its own clean error before the subprocess
+        # kill): the old hardcoded 2m silently starved large groups that Gemini
+        # needs >120s to answer, surfacing as a spurious "provider down".
+        print_timeout_s = max(30, timeout - 15)
         cmd = [
             "agy",
-            "--print-timeout=2m",
+            f"--print-timeout={print_timeout_s}s",
             f"--model={model}",
             "--dangerously-skip-permissions",
             "-p",
@@ -628,21 +683,40 @@ def _attempt_provider(
 ) -> Vote:
     """Run one provider, distinguishing two failure classes with opposite fates:
 
-    * **Invocation/API failure** (nonzero exit, quota, rate-limit, network,
-      timeout) — back off (exponential, capped 60s) and retry until
+    * **Invocation/API failure** (nonzero exit incl. quota, rate-limit, network,
+      missing binary) — back off (exponential, capped 60s) and retry until
       ``invocation_budget_s`` (default 5 min) is spent, then raise
       :class:`ProviderInvocationError` to HALT the run rather than silently
       degrade the panel to fewer voters. Only *expected external* failures are
       caught — subprocess/OS errors and the nonzero-exit ``RuntimeError`` from
       ``_check_exit``; an unexpected exception type (a programming bug inside an
       invoker) propagates immediately instead of masquerading as a quota error
-      and burning the whole budget. Note the budget bounds when a *retry may
-      start*, not total wall time: a persistent timeout can run up to
-      ``invocation_budget_s + timeout``, and if ``invocation_budget_s <=
-      timeout`` it gets a single attempt.
+      and burning the whole budget.
+    * **Group-scoped failure** (context-window overflow, response timeout) —
+      ABSTAIN immediately and keep the run going. These are deterministic for
+      the (group, provider) pair: retrying burns budget without hope (overflow)
+      or another full timeout window (timeout), and halting would let one
+      monster group kill a whole wave. The abstention carries the error trail,
+      and the group routes to human review via abstention/below-quorum.
     * **Parse/validation failure** (malformed output) — retry up to ``retries``
       times, then ABSTAIN. A single bad response should not kill a whole sweep.
     """
+
+    def _abstain(error: str, raw: str = "") -> Vote:
+        return Vote(
+            group_id=group_id,
+            provider=provider.name,
+            model=provider.model,
+            choice="ABSTAIN",
+            confidence=0.0,
+            reasoning="",
+            edge_set=frozenset(),
+            latency_s=0.0,
+            timestamp=datetime.now(UTC).isoformat(),
+            raw=raw[:2000],
+            error=error,
+        )
+
     last_parse_err = ""
     last_raw = ""
     parse_attempts = 0
@@ -652,15 +726,28 @@ def _attempt_provider(
         start = time.monotonic()
         try:
             raw = invoker(prompt, group_dir, letters, provider.model, timeout, provider.effort)
-        except (subprocess.SubprocessError, OSError, RuntimeError) as e:
-            # Expected external failure (timeout, nonzero exit incl. quota/auth,
-            # missing binary, network). Unexpected exception types are NOT caught
-            # here — a programming bug must fail fast, not retry as a "quota" error.
-            err = (
-                f"timeout after {timeout}s"
-                if isinstance(e, subprocess.TimeoutExpired)
-                else f"invocation error: {e}"
+        except GroupScopedProviderError as e:
+            # Deterministic for this (group, provider): same prompt, same fate.
+            # Abstain loudly and let the run continue.
+            logger.warning(
+                f"{provider.name} group {group_id}: {e}; abstaining (group-scoped, "
+                f"not retryable) and continuing the run"
             )
+            return _abstain(f"group-scoped: {e}")
+        except subprocess.TimeoutExpired:
+            # Retrying a timeout just burns another full timeout window, and a
+            # group whose prompt is too slow for this provider is a property of
+            # the group, not provider health -> abstain, don't halt the wave.
+            logger.warning(
+                f"{provider.name} group {group_id}: timeout after {timeout}s; "
+                f"abstaining and continuing the run"
+            )
+            return _abstain(f"timeout after {timeout}s")
+        except (subprocess.SubprocessError, OSError, RuntimeError) as e:
+            # Expected external failure (nonzero exit incl. quota/auth, missing
+            # binary, network). Unexpected exception types are NOT caught
+            # here — a programming bug must fail fast, not retry as a "quota" error.
+            err = f"invocation error: {e}"
             # Deterministic OS errors (arg-list-too-long, missing binary, perms)
             # will fail identically on every retry — hard-fail immediately instead
             # of burning the whole backoff budget on a no-hope loop.
@@ -710,19 +797,7 @@ def _attempt_provider(
                 break  # exhausted parse retries -> abstain (keep the panel going)
 
     # Parse retries exhausted -> abstention.
-    return Vote(
-        group_id=group_id,
-        provider=provider.name,
-        model=provider.model,
-        choice="ABSTAIN",
-        confidence=0.0,
-        reasoning="",
-        edge_set=frozenset(),
-        latency_s=0.0,
-        timestamp=datetime.now(UTC).isoformat(),
-        raw=last_raw[:2000],
-        error=last_parse_err,
-    )
+    return _abstain(last_parse_err, raw=last_raw)
 
 
 def run_panel_on_group(
@@ -1136,6 +1211,16 @@ def run_batch(
         )
 
     pending = [d for d in group_dirs if d.name not in done_ids]
+    # Circuit breaker: a provider whose votes are timeout-abstentions on
+    # _TIMEOUT_BREAKER_N consecutive groups is treated as genuinely hung
+    # (network blackhole with no fast error) and promotes to the #334
+    # provider-down halt. Per-group timeout abstains keep a wave alive when one
+    # oversized group is slow; a hang on EVERY group is provider health, and
+    # letting it degrade the panel silently is exactly what #334 forbids.
+    # Context-overflow abstains do NOT count: overflow is a property of the
+    # group's prompt size, and several monsters in a row say nothing about the
+    # provider. Any successful vote (or non-timeout abstain) resets the count.
+    consecutive_timeouts: dict[str, int] = {}
     for i, gdir in enumerate(pending):
         gid = gdir.name
         logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
@@ -1147,6 +1232,19 @@ def run_batch(
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
         )
+        for v in votes:
+            if v.choice == "ABSTAIN" and v.error.startswith("timeout after"):
+                consecutive_timeouts[v.provider] = consecutive_timeouts.get(v.provider, 0) + 1
+                if consecutive_timeouts[v.provider] >= _TIMEOUT_BREAKER_N:
+                    _flush()  # keep completed groups resumable past the halt
+                    raise ProviderInvocationError(
+                        f"{v.provider}: timed out on {_TIMEOUT_BREAKER_N} consecutive "
+                        f"groups (last: {gid}) — treating as provider-down and halting "
+                        f"the run. Completed groups were flushed; fix the provider and "
+                        f"re-run with --resume."
+                    )
+            else:
+                consecutive_timeouts[v.provider] = 0
         vote_rows.extend(_vote_row(v) for v in votes)
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
