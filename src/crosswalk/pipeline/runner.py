@@ -392,6 +392,147 @@ def _extract_name_string(name) -> str:
     return ""
 
 
+def _compute_candidate_graph_by_group(
+    results: list,
+    optimized: list,
+    assignment_by_gid: dict[str, list],
+    min_confidence: float,
+    sliver_edges: set[tuple[Any, Any]],
+    glue_min_confidence: float | None,
+) -> dict[str, list[dict]]:
+    """Attribute the FULL pre-selection candidate graph to sidecar groups.
+
+    Learned-resolver flip condition #1 (docs/SCALING_ROADMAP.md): persist every
+    candidate edge the optimizer saw — not just the selected assignment — so
+    under-selection is learnable. Recomputes the optimizer's connected
+    components from the SAME inputs it used (``find_match_components`` is
+    deterministic), deduplicates to the highest-confidence result per
+    (ref, target) pair, and attributes every component edge to EXACTLY ONE
+    sidecar group.
+
+    Attribution rule (components are enumerated pre-decomposition, so edges are
+    attributed to the post-decomposition groups; ties break on the
+    lexicographically smallest ``group_id`` for determinism):
+
+    1. A pair in some group's optimizer assignment belongs to THAT group.
+    2. Else, a group containing BOTH endpoints (in-product alternative).
+    3. Else, a group containing the ref endpoint.
+    4. Else, a group containing the target endpoint.
+    5. Else (neither endpoint was selected into any group — e.g. both resolved
+       as 1:1 leftovers), the smallest group_id among groups touching the
+       component, so no candidate in a grouped component is ever lost.
+
+    Components that produced NO sidecar group (pure-1:1 components) have no
+    group to attach to and are not represented — by construction the sidecar
+    only carries non-1:1 groups. An assignment pair absent from every component
+    (e.g. greedy expansion recovered an unattached weak edge) is added back to
+    its own group so ``candidate_edges`` is always a superset of the group's
+    assignment.
+
+    Per edge: ``ref_id``, ``target_id``, ``confidence`` (raw ML score, rounded
+    like every other sidecar confidence), ``selected`` (True iff the pair is in
+    the OWNING group's assignment), and ``selected_elsewhere: true`` only when a
+    non-selected edge was selected by the optimizer somewhere else (another
+    group or a 1:1 match) — so a resolver never learns a genuinely-selected pair
+    as an optimizer drop.
+
+    Returns:
+        Mapping of ``group_id`` -> candidate edge dicts, each list sorted by
+        (ref_id, target_id) for deterministic output.
+    """
+    from ..matching.optimizer import find_match_components
+
+    gid_refs = {gid: {str(r.ref_id) for r in assign} for gid, assign in assignment_by_gid.items()}
+    gid_tgts = {
+        gid: {str(r.target_id) for r in assign} for gid, assign in assignment_by_gid.items()
+    }
+    pair_to_assignment_gid: dict[tuple[str, str], str] = {}
+    for gid, assign in assignment_by_gid.items():
+        for r in assign:
+            pair_to_assignment_gid.setdefault((str(r.ref_id), str(r.target_id)), gid)
+
+    # Every pair the optimizer selected ANYWHERE (groups + 1:1), post-prune.
+    selected_global = {(str(r.ref_id), str(r.target_id)) for r in optimized}
+
+    # Recompute the optimizer's components. Deterministic given the same
+    # inputs (results, floor, sliver set, glue prune) the optimizer used.
+    components = find_match_components(
+        results,
+        min_confidence,
+        sliver_edges=sliver_edges,
+        glue_min_confidence=glue_min_confidence,
+    )
+
+    # Best result per pair within each component + node -> component index.
+    node_comp: dict[tuple[str, str], int] = {}
+    comp_best: list[dict[tuple[str, str], Any]] = []
+    for ci, comp in enumerate(components):
+        best: dict[tuple[str, str], Any] = {}
+        for r in comp:
+            pair = (str(r.ref_id), str(r.target_id))
+            prev = best.get(pair)
+            if prev is None or r.confidence > prev.confidence:
+                best[pair] = r
+        comp_best.append(best)
+        for rid, tid in best:
+            node_comp[("ref", rid)] = ci
+            node_comp[("target", tid)] = ci
+
+    # Groups touching each component. A group's nodes normally live in one
+    # component, but greedy expansion can stitch nodes across components, so
+    # membership is collected per node rather than assumed.
+    comp_gids: dict[int, set[str]] = defaultdict(set)
+    for gid in assignment_by_gid:
+        for rid in gid_refs[gid]:
+            ci = node_comp.get(("ref", rid))
+            if ci is not None:
+                comp_gids[ci].add(gid)
+        for tid in gid_tgts[gid]:
+            ci = node_comp.get(("target", tid))
+            if ci is not None:
+                comp_gids[ci].add(gid)
+
+    def _edge_dict(pair: tuple[str, str], confidence: float, selected: bool) -> dict:
+        edge = {
+            "ref_id": pair[0],
+            "target_id": pair[1],
+            "confidence": round(float(confidence), 4),
+            "selected": selected,
+        }
+        if not selected and pair in selected_global:
+            edge["selected_elsewhere"] = True
+        return edge
+
+    by_gid: dict[str, dict[tuple[str, str], dict]] = defaultdict(dict)
+    for ci, gids in comp_gids.items():
+        gids_sorted = sorted(gids)
+        for pair, r in comp_best[ci].items():
+            rid, tid = pair
+            owner = pair_to_assignment_gid.get(pair)
+            if owner is None:
+                owner = next(
+                    (g for g in gids_sorted if rid in gid_refs[g] and tid in gid_tgts[g]), None
+                )
+            if owner is None:
+                owner = next((g for g in gids_sorted if rid in gid_refs[g]), None)
+            if owner is None:
+                owner = next((g for g in gids_sorted if tid in gid_tgts[g]), None)
+            if owner is None:
+                owner = gids_sorted[0]
+            selected = pair_to_assignment_gid.get(pair) == owner
+            by_gid[owner][pair] = _edge_dict(pair, r.confidence, selected)
+
+    # Completeness backstop: every assignment pair appears in its own group's
+    # candidate list even when it was in no component (see docstring).
+    for gid, assign in assignment_by_gid.items():
+        for r in assign:
+            pair = (str(r.ref_id), str(r.target_id))
+            if pair not in by_gid[gid]:
+                by_gid[gid][pair] = _edge_dict(pair, r.confidence, True)
+
+    return {gid: [pairs[p] for p in sorted(pairs)] for gid, pairs in by_gid.items()}
+
+
 def _export_groups_sidecar(
     results: list,
     optimized: list,
@@ -406,6 +547,7 @@ def _export_groups_sidecar(
     target_proj: gpd.GeoDataFrame | None = None,
     pruned_pairs: set[tuple[Any, Any]] | None = None,
     pruned_group_ids: dict[tuple[Any, Any], Any] | None = None,
+    glue_min_confidence: float | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -426,6 +568,12 @@ def _export_groups_sidecar(
             component adjacency (must be the SAME set the optimizer used so
             sidecar groups match optimizer grouping). When None, it is
             recomputed here from the provided GeoDataFrames.
+        glue_min_confidence: The grouping-only glue prune the optimizer ran
+            with. Used ONLY to reproduce the optimizer's components for the
+            full candidate-graph persistence (``candidate_edges``); pass the
+            same value given to ``optimize_matches_with_grouping`` so the
+            recomputed components match exactly. None (legacy callers) builds
+            components with no glue prune.
 
     Returns:
         Path to sidecar file, or None if no groups to export
@@ -505,6 +653,22 @@ def _export_groups_sidecar(
 
     persist_rejected = settings.stitch_persist_rejected_edges
     rejected_cap = settings.stitch_rejected_edges_max_per_group
+
+    # Full candidate-graph persistence (learned-resolver flip condition #1):
+    # every floor-passing candidate pair in each group's component, attributed
+    # to exactly one group with a ``selected`` flag. Purely additive sibling key
+    # (``candidate_edges``); no existing key or consumer is affected. See
+    # ``_compute_candidate_graph_by_group`` for the attribution rule.
+    candidate_graph_by_gid: dict[str, list[dict]] = {}
+    if settings.stitch_persist_candidate_graph and assignment_by_gid:
+        candidate_graph_by_gid = _compute_candidate_graph_by_group(
+            results=results,
+            optimized=optimized,
+            assignment_by_gid=assignment_by_gid,
+            min_confidence=min_confidence,
+            sliver_edges=sliver_edges,
+            glue_min_confidence=glue_min_confidence,
+        )
 
     # Projected (metric) geometry + name lookups for corridor/structure analysis
     # (contiguity tolerance is in meters, so WGS84 geoms cannot be used here).
@@ -881,6 +1045,13 @@ def _export_groups_sidecar(
                 "n_assignment_components": per_group["n_assignment_components"],
                 "largest_biconnected_block": per_group["largest_biconnected_block"],
                 "oversized_group": oversized,
+                # Full candidate graph (learned-resolver flip condition #1):
+                # EVERY floor-passing candidate pair in this group's component,
+                # attributed to exactly one group, with the optimizer's decision
+                # (`selected`). Uncapped, minimal uniform schema; empty when
+                # settings.stitch_persist_candidate_graph is off.
+                "candidate_edges": candidate_graph_by_gid.get(group_id, []),
+                "n_candidate_edges": len(candidate_graph_by_gid.get(group_id, [])),
                 # M2 candidate-graph persistence: non-selected candidates the
                 # optimizer saw for this group's nodes (sibling to `edges`).
                 "rejected_edges": rejected_edges,
@@ -1153,6 +1324,7 @@ def optimize_and_export(
         target_proj=target,
         pruned_pairs=pruned_pairs,
         pruned_group_ids=pruned_group_ids,
+        glue_min_confidence=glue_min_confidence,
     )
 
     if progress_callback:

@@ -94,7 +94,14 @@ Goal: make under-selection learnable and bank the cheap optimizer win.
   rejected, with confidences and structural features), not just selections.
   ~0.5 wk; prerequisite for every learned-resolver step. Also fixes the
   review-UI blind spot the user hit personally (extra plausible edges invisible
-  because rejected candidates are discarded).
+  because rejected candidates are discarded). **DONE in two layers**: #282
+  added `rejected_edges` (non-selected candidates incident to a group's nodes,
+  capped per group, with the structural layer); the follow-up
+  `candidate_edges` key persists the FULL per-component floor-passing candidate
+  graph per group — uncapped, uniform minimal schema (`confidence`, `selected`,
+  `selected_elsewhere`), deterministic single-group attribution — flipping the
+  #272 "persist the full candidate graph" condition
+  (`stitch_persist_candidate_graph`, default on).
 - Ship the flag-gated confidence-drop prune from the #272 eval (the
   one-parameter model that beats the prototype: clean-slice F1 0.872 vs 0.828
   keep-all baseline) behind the stitch gate. **DONE — per-dataset opt-in
