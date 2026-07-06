@@ -1859,6 +1859,46 @@ def test_run_batch_timeout_breaker_resets_on_success(tmp_path, monkeypatch):
     assert (agy["choice"] == "ABSTAIN").sum() == 4
 
 
+def test_empty_output_hard_fails_after_budget(monkeypatch):
+    """Empty output from a zero-exit CLI is provider failure -> backoff, then halt.
+
+    Observed live: agy at its daily quota cap returns exit 0 with empty
+    stdout/stderr on EVERY call. Routing that through the parse path would
+    silently degrade the panel on all remaining groups (the #334 failure mode,
+    invisible to both the nonzero-exit halt and the timeout breaker).
+    """
+    _install_fake_clock(monkeypatch)
+
+    def always_empty(*_a, **_k):
+        return "   \n"
+
+    with pytest.raises(sr.ProviderInvocationError, match="empty output"):
+        _attempt(always_empty, budget=30.0)
+
+
+def test_empty_output_recovers_on_retry(monkeypatch):
+    """A transient empty response that clears on retry yields a normal vote."""
+    _install_fake_clock(monkeypatch)
+    calls = {"n": 0}
+
+    def flaky_empty(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ""
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    vote = _attempt(flaky_empty, budget=60.0)
+    assert vote.choice == "A"
+    assert calls["n"] == 2
+
+
+def test_no_agy_panel_swaps_in_opencode():
+    """The quota-outage fallback panel is claude + codex + opencode (no agy)."""
+    panel = sr.get_panel("no-agy")
+    assert [p.name for p in panel] == ["claude", "codex", "opencode"]
+    assert panel[2].model == sr.OPENCODE_QWEN.model
+
+
 def test_run_batch_overflow_abstains_do_not_trip_breaker(tmp_path, monkeypatch):
     """Context overflow is a group property: monsters in a row never halt the run."""
     batch_dir = tmp_path / "batch"

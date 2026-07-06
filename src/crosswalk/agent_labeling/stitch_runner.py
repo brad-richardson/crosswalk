@@ -71,10 +71,18 @@ OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-23
 # Named panel configurations. DEFAULT_PANEL (the 3-voter production panel) is the
 # default; the 4th voter ships behind the opt-in ``v3-candidate`` panel only, so
 # production waves are unaffected until the export rule is validated and flipped.
+#
+# ``no-agy`` is a QUOTA-OUTAGE fallback (observed 2026-07-06: agy silently
+# returns exit 0 + empty output when its daily cap is hit): it swaps agy for the
+# opencode/Qwen voter so a wave can proceed 3-wide. NOTE: panel composition is
+# part of export-label provenance (v1->v2 bumped the export labeler) — labels
+# produced under this composition must NOT be exported as ``panel_unanimous_v3``
+# without an explicit decision to bump/mark the labeler.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
     "v2": DEFAULT_PANEL,
     "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
+    "no-agy": [DEFAULT_PANEL[0], DEFAULT_PANEL[1], OPENCODE_QWEN],
 }
 
 
@@ -773,6 +781,30 @@ def _attempt_provider(
             backoff = min(backoff * 2, 60.0)
             continue
         latency = time.monotonic() - start
+        if not raw or not raw.strip():
+            # Empty output from a zero-exit CLI is PROVIDER failure, not model
+            # output: observed live when agy hits its daily quota cap — every
+            # call returns exit 0 with empty stdout/stderr. Routing it through
+            # the parse path would abstain per group and silently degrade the
+            # panel on every remaining group (the exact #334 failure mode,
+            # invisible to both the nonzero-exit halt and the timeout breaker).
+            # Classify as an invocation failure: backoff, then halt.
+            err = "invocation error: empty output (exit 0) — provider likely quota-capped"
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProviderInvocationError(
+                    f"{provider.name} on group {group_id}: {err}; gave up after "
+                    f"{invocation_budget_s:.0f}s of backed-off retries. Halting the run "
+                    f"rather than degrading the panel — fix quota/credentials and resume."
+                )
+            sleep_s = min(backoff, remaining)
+            logger.warning(
+                f"{provider.name} group {group_id}: {err}; retrying in {sleep_s:.0f}s "
+                f"({remaining:.0f}s budget left)"
+            )
+            time.sleep(sleep_s)
+            backoff = min(backoff * 2, 60.0)
+            continue
         last_raw = raw
         try:
             choice, confidence, reasoning = parse_vote(raw, valid)
