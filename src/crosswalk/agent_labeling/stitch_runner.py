@@ -286,6 +286,20 @@ def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
         raise RuntimeError(f"{provider} exited with code {result.returncode}: {stderr}")
 
 
+class ProviderInvocationError(RuntimeError):
+    """A voter's CLI/API failed and did not recover within the retry budget.
+
+    Raised for invocation/API failures (nonzero exit, quota exhaustion,
+    rate-limit, network, timeout) that persist through the backoff window.
+    It propagates out of ``run_batch`` to HALT the run rather than silently
+    degrading the panel to fewer voters — a quota-exhausted provider abstaining
+    would quietly weaken quorum on every subsequent group. Parse/validation
+    failures do NOT raise this (a single malformed response still abstains);
+    only genuine provider-down conditions do. The run is resumable: completed
+    groups are already flushed to ``votes.partial.csv``.
+    """
+
+
 def invoke_claude(
     prompt: str,
     group_dir: Path,
@@ -517,8 +531,13 @@ def run_provider_on_group(
     timeout: int = 240,
     retries: int = 1,
     collect_feedback: bool = False,
+    invocation_budget_s: float = 300.0,
 ) -> Vote:
-    """Run one provider on one group, validate, retry once on invalid output.
+    """Run one provider on one group; abstain on bad output, hard-fail if down.
+
+    Parse/validation failures retry ``retries`` times then abstain. Invocation/
+    API failures (nonzero exit, quota, rate-limit, timeout) back off and retry
+    within ``invocation_budget_s``, then raise :class:`ProviderInvocationError`.
 
     Each invocation runs against an isolated scratch copy of the pack so a
     provider that writes derived files (e.g. agy crops) never pollutes the
@@ -546,6 +565,7 @@ def run_provider_on_group(
             timeout,
             retries,
             collect_feedback,
+            invocation_budget_s=invocation_budget_s,
         )
     finally:
         if tmp_ctx is not None:
@@ -564,21 +584,57 @@ def _attempt_provider(
     timeout,
     retries,
     collect_feedback=False,
+    invocation_budget_s: float = 300.0,
 ) -> Vote:
-    last_err = ""
+    """Run one provider, distinguishing two failure classes with opposite fates:
+
+    * **Invocation/API failure** (nonzero exit, quota, rate-limit, network,
+      timeout) — back off (exponential, capped 60s) and retry until
+      ``invocation_budget_s`` (default 5 min) is spent, then raise
+      :class:`ProviderInvocationError` to HALT the run rather than silently
+      degrade the panel to fewer voters. Only *expected external* failures are
+      caught — subprocess/OS errors and the nonzero-exit ``RuntimeError`` from
+      ``_check_exit``; an unexpected exception type (a programming bug inside an
+      invoker) propagates immediately instead of masquerading as a quota error
+      and burning the whole budget. Note the budget bounds when a *retry may
+      start*, not total wall time: a persistent timeout can run up to
+      ``invocation_budget_s + timeout``, and if ``invocation_budget_s <=
+      timeout`` it gets a single attempt.
+    * **Parse/validation failure** (malformed output) — retry up to ``retries``
+      times, then ABSTAIN. A single bad response should not kill a whole sweep.
+    """
+    last_parse_err = ""
     last_raw = ""
-    for attempt in range(retries + 1):
+    parse_attempts = 0
+    deadline = time.monotonic() + invocation_budget_s
+    backoff = 5.0
+    while True:
         start = time.monotonic()
         try:
             raw = invoker(prompt, group_dir, letters, provider.model, timeout, provider.effort)
-        except subprocess.TimeoutExpired:
-            # Retrying a timeout just burns another full timeout window; abstain.
-            last_err = f"timeout after {timeout}s"
-            last_raw = ""
-            break
-        except Exception as e:  # noqa: BLE001 - record any invocation failure
-            last_err = f"invocation error: {e}"
-            last_raw = ""
+        except (subprocess.SubprocessError, OSError, RuntimeError) as e:
+            # Expected external failure (timeout, nonzero exit incl. quota/auth,
+            # missing binary, network). Unexpected exception types are NOT caught
+            # here — a programming bug must fail fast, not retry as a "quota" error.
+            err = (
+                f"timeout after {timeout}s"
+                if isinstance(e, subprocess.TimeoutExpired)
+                else f"invocation error: {e}"
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProviderInvocationError(
+                    f"{provider.name} on group {group_id}: {err}; gave up after "
+                    f"{invocation_budget_s:.0f}s of backed-off retries. Halting the run "
+                    f"rather than degrading the panel — fix quota/credentials and resume."
+                ) from e
+            sleep_s = min(backoff, remaining)
+            logger.warning(
+                f"{provider.name} group {group_id}: {err}; retrying in {sleep_s:.0f}s "
+                f"({remaining:.0f}s budget left)"
+            )
+            time.sleep(sleep_s)
+            backoff = min(backoff * 2, 60.0)
             continue
         latency = time.monotonic() - start
         last_raw = raw
@@ -598,10 +654,13 @@ def _attempt_provider(
                 pack_feedback=_extract_pack_feedback(raw) if collect_feedback else "",
             )
         except ValueError as e:
-            last_err = f"parse/validation: {e}"
-            logger.warning(f"{provider.name} group {group_id} attempt {attempt}: {e}")
+            parse_attempts += 1
+            last_parse_err = f"parse/validation: {e}"
+            logger.warning(f"{provider.name} group {group_id} parse attempt {parse_attempts}: {e}")
+            if parse_attempts > retries:
+                break  # exhausted parse retries -> abstain (keep the panel going)
 
-    # All attempts failed -> abstention
+    # Parse retries exhausted -> abstention.
     return Vote(
         group_id=group_id,
         provider=provider.name,
@@ -613,7 +672,7 @@ def _attempt_provider(
         latency_s=0.0,
         timestamp=datetime.now(UTC).isoformat(),
         raw=last_raw[:2000],
-        error=last_err,
+        error=last_parse_err,
     )
 
 
@@ -623,8 +682,16 @@ def run_panel_on_group(
     panel: list[ProviderSpec],
     timeout: int = 240,
     collect_feedback: bool = False,
+    invocation_budget_s: float = 300.0,
 ) -> list[Vote]:
-    """Run the full panel on one group in parallel (one thread per provider)."""
+    """Run the full panel on one group in parallel (one thread per provider).
+
+    A provider that stays down past ``invocation_budget_s`` raises
+    ProviderInvocationError, which propagates out to halt ``run_batch``. The halt
+    is not instantaneous: ``ThreadPoolExecutor.__exit__`` waits for the other
+    providers (possibly mid-backoff) before re-raising — acceptable since we are
+    aborting anyway and completed groups are already flushed for ``--resume``.
+    """
     letters, options_by_letter, _meta = _load_group_context(group_dir)
     prompt = (group_dir / "prompt.txt").read_text()
     if collect_feedback:
@@ -640,6 +707,7 @@ def run_panel_on_group(
             options_by_letter,
             timeout,
             collect_feedback=collect_feedback,
+            invocation_budget_s=invocation_budget_s,
         )
 
     with ThreadPoolExecutor(max_workers=len(panel)) as ex:
@@ -938,6 +1006,7 @@ def run_batch(
     limit: int = 0,
     collect_feedback: bool = False,
     resume: bool = False,
+    invocation_budget_s: float = 300.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the panel over every generated group in a batch dir.
 
@@ -1021,7 +1090,14 @@ def run_batch(
     for i, gdir in enumerate(pending):
         gid = gdir.name
         logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
-        votes = run_panel_on_group(gid, gdir, panel, timeout, collect_feedback=collect_feedback)
+        votes = run_panel_on_group(
+            gid,
+            gdir,
+            panel,
+            timeout,
+            collect_feedback=collect_feedback,
+            invocation_budget_s=invocation_budget_s,
+        )
         vote_rows.extend(_vote_row(v) for v in votes)
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first

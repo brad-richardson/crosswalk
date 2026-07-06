@@ -1046,6 +1046,12 @@ def run_stitch_panel(
     batch_dir: Path = typer.Option(..., "--batch", "-b", help="Batch dir with evidence packs"),
     group_ids: str = typer.Option(None, "--group-ids", help="Comma-separated subset to run"),
     timeout: int = typer.Option(240, "--timeout", help="Per-provider timeout (s)"),
+    invocation_budget: float = typer.Option(
+        300.0,
+        "--invocation-budget",
+        help="Seconds to back off + retry a down provider (quota/rate-limit/network) "
+        "before hard-failing the run. Worst-case wall time is this + one --timeout.",
+    ),
     limit: int = typer.Option(0, "--limit", "-l", help="Max groups (0=all)"),
     claude_model: str = typer.Option("claude-opus-4-8", "--claude-model"),
     claude_effort: str = typer.Option("medium", "--claude-effort"),
@@ -1088,7 +1094,12 @@ def run_stitch_panel(
         crosswalk agent stitch-run --batch data/agents/stitching/batches/us_boston_streets
         crosswalk agent stitch-run --batch <dir> --panel v3-candidate  # 4-voter candidate
     """
-    from ..agent_labeling.stitch_runner import ProviderSpec, get_panel, run_batch
+    from ..agent_labeling.stitch_runner import (
+        ProviderInvocationError,
+        ProviderSpec,
+        get_panel,
+        run_batch,
+    )
 
     if not batch_dir.exists():
         console.print(f"[red]Batch dir not found: {batch_dir}[/red]")
@@ -1119,15 +1130,24 @@ def run_stitch_panel(
         console.print(
             "  [yellow]pack-feedback ON: appending diagnostic self-report request[/yellow]"
         )
-    votes_df, consensus_df = run_batch(
-        batch_dir,
-        panel=panel,
-        group_ids=gids,
-        timeout=timeout,
-        limit=limit,
-        collect_feedback=pack_feedback,
-        resume=resume,
-    )
+    try:
+        votes_df, consensus_df = run_batch(
+            batch_dir,
+            panel=panel,
+            group_ids=gids,
+            timeout=timeout,
+            limit=limit,
+            collect_feedback=pack_feedback,
+            resume=resume,
+            invocation_budget_s=invocation_budget,
+        )
+    except ProviderInvocationError as e:
+        console.print(f"[red]Panel halted — provider down:[/red] {e}")
+        console.print(
+            "[yellow]Completed groups were flushed; re-run with --resume once the "
+            "provider is healthy to continue.[/yellow]"
+        )
+        raise typer.Exit(1) from e
 
     console.print(f"[green]{len(consensus_df)} groups, {len(votes_df)} votes[/green]")
     tier_counts = consensus_df["consensus"].value_counts().to_dict()
