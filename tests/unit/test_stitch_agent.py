@@ -7,6 +7,7 @@ consensus rules, evidence metadata, and eval matching.
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import subprocess
@@ -1788,3 +1789,38 @@ def test_hard_fail_propagates_through_run_provider_on_group(monkeypatch):
             {"A": [("r1", "t1")]},
             invocation_budget_s=0.0,
         )
+
+
+def test_deterministic_oserror_fast_fails_without_backoff(monkeypatch):
+    """An E2BIG-class OSError hard-fails immediately (no wasted backoff budget)."""
+    clock = _install_fake_clock(monkeypatch)
+
+    def arg_too_long(*_a, **_k):
+        raise OSError(errno.E2BIG, "Argument list too long")
+
+    with pytest.raises(sr.ProviderInvocationError, match="not retryable"):
+        _attempt(arg_too_long, budget=300.0)
+    assert clock.sleeps == []  # failed on the first attempt, never slept
+
+
+def test_missing_binary_oserror_fast_fails(monkeypatch):
+    """A missing-CLI (ENOENT) failure is deterministic -> immediate hard-fail."""
+    _install_fake_clock(monkeypatch)
+
+    def no_binary(*_a, **_k):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    with pytest.raises(sr.ProviderInvocationError, match="not retryable"):
+        _attempt(no_binary, budget=300.0)
+
+
+def test_transient_oserror_still_backs_off(monkeypatch):
+    """A non-fatal OSError (e.g. ECONNREFUSED) keeps the backoff-then-hardfail path."""
+    clock = _install_fake_clock(monkeypatch)
+
+    def conn_refused(*_a, **_k):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+
+    with pytest.raises(sr.ProviderInvocationError):
+        _attempt(conn_refused, budget=300.0)
+    assert clock.sleeps  # backed off (not a fatal errno), then gave up on budget
