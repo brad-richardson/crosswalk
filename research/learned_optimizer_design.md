@@ -136,8 +136,9 @@ One training row per (group, candidate edge), built by extending the existing
   keep the `clean` / `split` / `lost` provenance tags. Only `clean` rows enter
   the headline eval; `split` rows may enter training down-weighted (round 2
   precedent).
-- Candidate universe per group = sidecar `edges` ∪ `rejected_edges` (which
-  includes `pruned: true` rows) — after §3, the uncapped parquet universe.
+- Candidate universe per group = the #344 `candidate_edges` list (uncapped;
+  supersedes `edges` ∪ `rejected_edges` as the universe) — after §3 stage 2,
+  the same universe with feature columns, as parquet.
 - `y = 1` iff the edge ∈ the label's `selected_edges`; rows from unanimous-NONE
   groups (§2.4) are all `y = 0`.
 - Sample weight = labeler trust × vote margin: human 1.0; panel-unanimous 1.0
@@ -219,7 +220,7 @@ contract this design needs it to satisfy. The guiding split: **groups.json stays
 the human/UI artifact (capped, readable, back-compat); a parquet sidecar becomes
 the resolver's canonical substrate (uncapped, feature-complete, joinable).**
 
-### 3.1 What exists (post-#282/#284) and what is missing
+### 3.1 What exists (post-#282/#284/#344) and what is missing
 
 The sidecar already persists, per group: selected `edges` and `rejected_edges`
 (sibling key, byte-invariant for `edges` consumers), each with `confidence`,
@@ -228,18 +229,26 @@ alignment fracs, the structural layer from `compute_group_structure`
 `is_sliver`), `selected` and `pruned` flags; per group `n_edges`, `n_corridors`,
 `n_assignment_components`, `largest_biconnected_block`, `oversized_group`,
 `n_pruned`, `n_rejected_total`, `rejected_truncated`
-(`config.py::stitch_persist_rejected_edges`, cap 64/group).
+(`config.py::stitch_persist_rejected_edges`, cap 64/group). Since #344 (stage 1
+of this prerequisite) each group also carries **`candidate_edges`**: every
+floor-passing candidate pair in the group's component, **uncapped**, attributed
+to exactly one group, with `confidence`, `selected`, and `selected_elsewhere`
+(`pipeline/runner.py::_compute_candidate_graph_by_group`) — a deliberately
+minimal uniform schema that closes the "under-selection unlearnable" gap at the
+pair level.
 
-Missing, and blocking round 3 (flip condition #3 in round 2):
+Still missing, and blocking round 3 (flip condition #3 in round 2):
 
 1. **The 78 pair features for candidate edges.** They exist for only ~5% of
-   group edges via `labels/features/` (pair-labeled pairs only). Yet the full
-   vectors are computed for *every scored candidate* at match time — the factory
+   group edges via `labels/features/` (pair-labeled pairs only), and #344's
+   `candidate_edges` carries no feature columns. Yet the full vectors are
+   computed for *every scored candidate* at match time — the factory
    `scored_cache.py` already serializes `MatchResult.features` per candidate
    (`features_json`). The data exists in memory in `optimize_and_export`; it is
    simply not persisted keyed to groups outside the factory path.
-2. **Uncapped candidates.** The 64/group JSON cap truncates exactly the monster
-   groups whose over-selection is the headline defect.
+2. **The structural layer on candidate edges** (degree, bridge, corridor ids) —
+   present on `edges`/`rejected_edges`, absent from the minimal
+   `candidate_edges` schema.
 3. **Rank/margin context** at selection time (cheap to derive, but persisting it
    pins the exact decode inputs).
 
@@ -257,10 +266,16 @@ every persisted group (selected + rejected + pruned, **no cap**):
 | structural layer | `degree_ref`, `degree_tgt`, `is_bridge`, `biconnected_block`, `corridor_ref`, `corridor_tgt` |
 | group context (denormalized) | `match_type`, `n_edges`, `n_corridors`, `n_assignment_components`, `largest_biconnected_block`, `oversized_group` |
 | pair features | the 78 `FEATURE_COLUMNS` as native float64 columns (NaN-preserving, not JSON — columnar reads matter for training) |
+| UDF-derivability extras (§5.5) | `ref_class`, `target_class`, `ref_length_m`, `target_length_m`, `lateral_offset_signed_m` |
 | provenance | `feature_version`, `model_hash`, `schema_version` (file-level metadata is fine) |
 
 Geometries are **not** duplicated here — groups.json already carries WGS84
-geometries per group and the parquet joins to it on `group_id`.
+geometries per group and the parquet joins to it on `group_id`. The five
+"extras" columns exist so that every group-level aggregate in §4.2 tier 3 and
+every decode constraint in §4.1 is computable from parquet columns alone,
+without repo-side geometry — the Spark-portability constraint (§5.5) demands
+it, and it is what makes this parquet the training *and* the Spark scoring
+substrate rather than a training-only export.
 
 **Size estimate.** ~90 float columns ≈ 720 B/row raw. Seattle (21.7k selected +
 25.6k rejected pre-cap ≈ 50k rows) ≈ 36 MB raw → ~10–15 MB snappy parquet, next
@@ -275,10 +290,12 @@ JSON `rejected_edges` list and its cap stay as-is for the UI. Flag:
 `stitch_persist_candidates` default True, mirroring
 `stitch_persist_rejected_edges`.
 
-**Convergence note for the in-flight task:** the two non-negotiables from this
-design's perspective are (a) *uncapped* group candidate rows, (b) the 78
-features as *typed columns keyed by (group_id, ref_id, target_id)*. Everything
-else (exact column naming, whether group context is denormalized) is
+**Convergence note (stage 2, following #344's stage 1):** the three
+non-negotiables from this design's perspective are (a) *uncapped* group
+candidate rows (already true of #344's `candidate_edges`), (b) the 78 features
+as *typed columns keyed by (group_id, ref_id, target_id)*, (c) the §5.5
+UDF-derivability rule — no resolver input may require repo-side state.
+Everything else (exact column naming, whether group context is denormalized) is
 negotiable.
 
 ---
@@ -339,11 +356,16 @@ Three tiers, all available per-row from the §3 parquet:
      asymmetry the prune cannot express.
    - *Name/class*: full similarity families, dead on some datasets (§2.5) but
      decisive on others.
-3. **New group-level aggregates** (computed at decode time, cheap):
+3. **New group-level aggregates** (computed at decode time from persisted
+   per-edge columns only — the §5.5 derivability rule):
    - corridor-geometry: per-corridor-pair aggregate lateral offset mean/IQR and
      *offset sign consistency* along the corridor (a separated cycleway sits
      consistently ~2–8 m on one side; a lane-on-road sits near 0 with mixed
-     sign);
+     sign). Flag: the shipped `lateral_offset_m` is an unsigned magnitude
+     (`compute_perpendicular_offset` uses `shapely.distance`), so sign
+     consistency needs a new per-edge `lateral_offset_signed_m` column computed
+     at match time and persisted in the §3.2 parquet — it cannot be derived
+     downstream;
    - *exclusive-lane evidence*: does the ref segment have a competing same-class
      candidate elsewhere in the group with better geometry (if the road
      centerline already has a road-class target, the cycleway edge is
@@ -399,7 +421,9 @@ edge (`selected`, `resolver_score`, `resolver_dropped`), which keeps the gate,
 the review UI, and shadow mode (§7) all working from one artifact. Under-selection
 repair (promoting a rejected edge) is in scope for the resolver at this seam —
 the rejected candidates are in memory here; the guarantee "never emit an edge the
-optimizer never generated as a candidate" is preserved.
+optimizer never generated as a candidate" is preserved. A further argument for
+this seam: score-then-decode over persisted columns is exactly the shape that
+ports to Spark unchanged (§5.5).
 
 ### 5.2 Determinism
 
@@ -431,6 +455,99 @@ switch (default True), `learned_resolver_overrides` per-dataset allowlist
 back to the prune path. No global default, ever — the #284 lesson (a
 Boston-tuned setting silently over-pruned never-tuned datasets) is baked into
 the rollout design.
+
+### 5.5 Spark portability (a first-class design constraint)
+
+Spark is Overture's big-data framework of choice, and the repo already ships a
+Spark-portable *pair* model consumed by the tf-data-platform sister project:
+XGBoost-native JSON booster + feature manifest bundled in the wheel under
+`crosswalk/_model/`, exposed via the import-light accessors in
+`src/crosswalk/spark.py` (stdlib-only at module import; numpy lazy inside
+`apply_calibration`), kept in `FEATURE_VERSION` lockstep by
+`tests/unit/test_shipped_spark_model.py`. The resolver must be integratable the
+same way — this is a **design constraint, not a port to be attempted later**,
+and it shapes three decisions already made above.
+
+**(a) Scoring artifact contract.** The per-edge resolver model ships exactly
+like the pair model: an XGBoost-native JSON booster at
+`crosswalk/_model/spark_resolver_model.json` plus
+`spark_resolver_manifest.json` carrying the ordered resolver feature list
+(column order is the contract, as with the pair manifest's `features`), the
+`feature_version` it was trained against, a note that inputs are already
+**calibrated** confidences (the resolver consumes the pair model's calibrated
+`P(match)`; a Spark job chains `apply_calibration` from the existing manifest
+before resolver scoring), and the **decode hyperparameters** (eF1 variant,
+overlap threshold, corridor-gap penalty weights) so decode behavior is pinned
+by the artifact, not by repo code drift. Accessors `spark_resolver_model_json()`
+/ `spark_resolver_manifest()` join `crosswalk.spark`, preserving its
+stdlib-only-at-import guarantee; a `tests/unit/test_shipped_spark_resolver_model.py`
+mirrors the existing lockstep test pattern (feature-version equality, feature
+list vs config, decode params present).
+
+**(b) The decode must be Spark-mappable.** The constrained expected-F1 decode
+is implemented as a **pure, deterministic function over numpy arrays** — edge
+probabilities plus the group's structure columns (alignment fracs, corridor
+ids, sliver flags, segment lengths) in, a boolean keep-mask out. No shapely, no
+pandas, no repo state, no I/O. That makes it runnable inside
+`groupBy("group_id").applyInPandas(...)`: groups are small (p99 ≤ 10 edges;
+monsters route to humans and never reach the decode), so per-group decode is
+embarrassingly parallel with **no cross-group state** — the same property that
+makes it unit-testable against sidecar fixtures locally. This constraint is an
+additional, independent reason the per-edge XGBoost + local decode architecture
+beats the alternatives from §4.1: a GNN would put torch on every executor for
+sub-second-total work, and global/ILP-style structured prediction would drag in
+solver dependencies and cross-partition coordination that `applyInPandas`
+cannot express. The §4.1 constraints are therefore specified in *column* terms
+— span overlap from the persisted alignment fracs × `ref_length_m` /
+`target_length_m` (the frac-space equivalent of `MAX_ALIGNMENT_OVERLAP_M`),
+corridor gaps from fracs grouped by `corridor_ref`/`corridor_tgt` — never by
+re-measuring geometry.
+
+**(c) Feature computability rule.** Every input the resolver consumes must be
+either (i) a persisted candidate-graph column (#344's `candidate_edges` for
+ids/confidence/selected; the stage-2 `candidates.parquet` of §3.2 for features
+and structure) or (ii) derivable *inside the UDF* from those columns with
+group-local numpy — never from repo-side state (GeoDataFrames, spatial
+indexes, settings). Audit of §4.2 against this rule:
+
+| feature tier | verdict |
+|---|---|
+| 26 sidecar features (tier 1) | Derivable in-UDF from `confidence` + structure + span columns (group-relative aggregates are group-local by construction) |
+| 78 pair features (tier 2) | Persisted columns by design. The context-heavy ones (Parallel Sibling, crossing-angle, graphlet, topology) need full-dataset spatial context to *compute* — so they are computed once at match time repo-side and **persisted**; the UDF never recomputes them. This is the load-bearing reason tier 2 must live in the parquet at all |
+| group aggregates (tier 3) | Derivable in-UDF **except** three inputs that must be added as persisted columns (now in §3.2): `lateral_offset_signed_m` (shipped offset is unsigned; sign consistency is not derivable downstream), `ref_class`/`target_class` (exclusive-lane evidence needs per-edge classes; groups.json holds them group-level only), `ref_length_m`/`target_length_m` (frac→meter conversion for overlap/gap constraints) |
+
+No proposed feature had to be dropped; three required persistence instead of
+derivation, and §3.2 was amended accordingly.
+
+**Typical Spark use** (mirroring the `crosswalk/spark.py` docstring style):
+
+```python
+from crosswalk.spark import (
+    spark_manifest, spark_model_json, apply_calibration,
+    spark_resolver_manifest, spark_resolver_model_json, decode_group,
+)
+
+r_manifest = spark_resolver_manifest()
+r_features = r_manifest["features"]        # broadcast; column order matters
+booster.load_model(bytearray(spark_resolver_model_json().encode()))
+# 1. pandas_udf: score candidate edges -> P(keep) per row
+# 2. per-group decode, no cross-group state:
+df.groupBy("group_id").applyInPandas(
+    lambda pdf: pdf.assign(
+        keep=decode_group(
+            pdf["p_keep"].to_numpy(),
+            pdf[STRUCTURE_COLS].to_numpy(),
+            r_manifest["decode"],
+        )
+    ),
+    schema=out_schema,
+)
+```
+
+`decode_group` ships in `crosswalk.spark` under the same lazy-numpy discipline
+as `apply_calibration`, and a parity test asserts it is bit-identical to the
+decode the local pipeline runs — the train/serve-skew defense of §7, extended
+to Spark/local skew.
 
 ---
 
@@ -513,14 +630,15 @@ Dependencies flow downward; R1–R3 can interleave with L1–L2.
 
 | # | PR | Depends on | Acceptance criteria |
 |---|---|---|---|
-| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — converge with the in-flight persistence task | — | Schema per §3.2 (uncapped group rows, 78 typed feature cols, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on |
+| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 78 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on |
 | **L1** | Empty-set label export (unanimous-NONE → `selected_edges=[]`, §2.4a) + eval support for empty truth sets | — | Round-trips through `labels/stitching/` + `stitch_eval` mapping; gate metrics well-defined for empty labels; the 4 known cross-mode groups exported after human confirm |
 | **L2** | De-anchored review mode + 30–50-group unbiased slice (§2.4b) | P1 (UI reads full candidate set) | Slice committed with `deanchored` provenance; render_review_diffs cross-product check clean |
 | **L3** | Targeted cross-mode panel waves (Bogotá bike, SG footpaths) to ≥ 20 reject groups | L1 | ≥ 20 labeled cross-mode groups, held out of training by construction |
 | **R1** | Training-table builder v3: join parquet features, soft-vote rows from `labels/votes/`, sample weights (§2.2) | P1 | Row counts match §2.3 within noise; parity test vs runtime featurizer; deterministic under PYTHONHASHSEED |
 | **R2** | Round-3 offline eval at 150+ groups: extended features, eF1 + constrained decode, LODO + bootstrap + de-anchored slice | R1, L2; label base ≥ 150 mapped | A `research/learned_stitcher_round3.md` with §6.2 tables; explicit GO/NO-GO per dataset. **This is the go/no-go gate for everything below** |
 | **R3** | Cross-mode acceptance run (§6.3) | R2, L3 | ≥ 80% cross-mode groups emptied, same-mode recall regression ≤ 0.01 |
-| **I1** | Runtime integration behind `learned_resolver_overrides` (empty allowlist) + shadow mode: `resolver_score`/`resolver_dropped` annotated per edge, zero behavior change | P1, R2 GO | Empty-allowlist run byte-identical; determinism test; latency ≤ 1 s added on Seattle; fallback paths unit-tested |
+| **I1** | Runtime integration behind `learned_resolver_overrides` (empty allowlist) + shadow mode: `resolver_score`/`resolver_dropped` annotated per edge, zero behavior change | P1, R2 GO | Empty-allowlist run byte-identical; determinism test; latency ≤ 1 s added on Seattle; fallback paths unit-tested; decode implemented as the pure numpy function of §5.5(b) |
+| **S1** | Spark-portable resolver export: `crosswalk/_model/spark_resolver_model.json` + manifest, `crosswalk.spark` accessors + `decode_group`, lockstep + local/Spark decode-parity tests (§5.5a) | I1 | `import crosswalk.spark` stays stdlib-only; lockstep test red on FEATURE_VERSION drift; decode parity bit-identical on the committed fixture |
 | **I2..n** | Per-dataset allowlist flips, one PR each, Boston first (§6.4) | I1, R2/R3 GO for that dataset | §6.2 criteria met on that dataset; before/after table + gate output in PR; floors in `mbench/datasets.toml` re-baselined if raised |
 | **D1** | Docs: ARCHITECTURE.md thresholds-table row, SCALING_ROADMAP M3 status, BENCHMARKING gate notes | I1 | Consistency with shipped flags |
 
@@ -539,7 +657,10 @@ post-optimizer integration point, not a dependency).
   :1251, `group_is_structurally_simple` :1302, `compute_group_structure` :1337
 - `src/crosswalk/pipeline/runner.py` — `_effective_prune_threshold` :128, prune
   seam :1109–1133, sidecar build (rejected/pruned recording) :700–900,
-  `optimize_and_export` :997
+  `optimize_and_export` :997, `_compute_candidate_graph_by_group` (#344
+  `candidate_edges`)
+- `src/crosswalk/spark.py` — import-light Spark accessors (pair model precedent
+  for §5.5); `tests/unit/test_shipped_spark_model.py` (lockstep test pattern)
 - `src/crosswalk/config.py` — `stitch_persist_rejected_edges` :784 (cap 64),
   prune allowlist commentary :795–834
 - `src/crosswalk/resolver/` — `features.py` (26 sidecar features), `round2.py`
