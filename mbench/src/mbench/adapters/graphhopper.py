@@ -138,12 +138,21 @@ def parse_matches_tsv(
     ``trace_attributes`` returns directly. Feeding full edge lengths to the overlap
     filter would unfairly inflate a parallel/crossing edge clipped by a couple of
     trace points up to its full length. We recover a faithful matched-length from the
-    trace density: observations are ~``densify_m`` apart, so an edge carrying
-    ``n_states`` of them spans ~``n_states * densify_m`` meters, capped at the edge's
-    full length. This is the honest equivalent of Valhalla's matched sub-length, and
-    it naturally zeroes out "bridged" edges (routed *between* observations with none
-    snapped onto them: ``n_states == 0`` -> 0 m -> filtered), which are GraphHopper's
-    parallel/connecting false positives.
+    trace density: each observation snapped onto an edge represents ~``densify_m`` of
+    trace that lies on it, so ``n_states`` of them cover ~``n_states * densify_m``
+    meters, capped at the edge's full length. This zeroes out "bridged" edges
+    (``n_states == 0`` -> 0 m -> filtered), GraphHopper's parallel/connecting false
+    positives.
+
+    Note the estimator counts ``n_states`` gaps, not ``n_states - 1``. The strict
+    geometric span of ``k`` points is ``(k-1)`` gaps, but that under-credits the
+    partial trace entering/leaving the edge on either side of the snapped points, and
+    empirically it is far too aggressive: switching to ``(n_states-1)`` craters recall
+    (Boston 1.000 -> 0.687, 84 genuine matches dropped) because legitimately-matched
+    short edges often carry only 1-2 observations. Since Meili — using Valhalla's
+    *actual* matched sub-length — achieves a true recall of 1.000 on the same slice,
+    per-observation crediting (``n_states * densify_m``) is the estimator that
+    preserves that recall; the ``-1`` variant is measurably wrong for this use.
     """
     rows: list[tuple[str, str, float]] = []
     if tsv_path.exists():
@@ -172,10 +181,18 @@ def parse_matches_tsv(
     return matches
 
 
-def _graph_cache_dir(base: Path, reference: Path) -> Path:
-    """Deterministic per-reference cache dir (keyed by name + size + mtime)."""
+def _graph_cache_dir(base: Path, reference: Path, vehicle: str, min_network: int) -> Path:
+    """Deterministic cache dir keyed by reference identity AND build-time params.
+
+    The built GraphHopper graph embeds vehicle-specific encoded values
+    (``<vehicle>_access``/``_average_speed``) and the subnetwork-prune result, so a
+    warm reload with a different ``vehicle`` or ``min_network_size`` would mismatch
+    the stored graph (``importOrLoad`` errors on encoded-value mismatch). Folding
+    both into the key gives each build its own cache dir — so e.g. ``vehicle=foot``
+    and ``vehicle=car`` runs coexist and neither forces a rebuild of the other.
+    """
     st = reference.stat()
-    key = f"{reference.stem}_{st.st_size}_{int(st.st_mtime)}"
+    key = f"{reference.stem}_{st.st_size}_{int(st.st_mtime)}_{vehicle}_mn{min_network}"
     return (base / key).resolve()
 
 
@@ -216,7 +233,7 @@ class GraphHopperAdapter:
         jbang = _require_jbang()
 
         cache_base = Path(kwargs.get("graph_cache_dir", output_dir / "graph_cache"))
-        cache_dir = _graph_cache_dir(cache_base, reference)
+        cache_dir = _graph_cache_dir(cache_base, reference, vehicle, min_network)
         cache_dir.mkdir(parents=True, exist_ok=True)
         pbf_path = cache_dir / "graph.osm.pbf"
         id_map_path = cache_dir / "id_map.json"

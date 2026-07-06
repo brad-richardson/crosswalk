@@ -28,12 +28,17 @@
 //
 // Args: <pbf> <gh_graph_dir> <traces_tsv> <out_tsv> <vehicle> <measurement_sigma_m> <min_network_size> <workers>
 
+import static com.graphhopper.json.Statement.If;
+import static com.graphhopper.json.Statement.Op.LIMIT;
+import static com.graphhopper.json.Statement.Op.MULTIPLY;
+
 import com.graphhopper.GraphHopper;
+import com.graphhopper.config.Profile;
 import com.graphhopper.matching.EdgeMatch;
 import com.graphhopper.matching.MapMatching;
 import com.graphhopper.matching.MatchResult;
 import com.graphhopper.matching.Observation;
-import com.graphhopper.routing.TestProfiles;
+import com.graphhopper.util.CustomModel;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.PMap;
 import com.graphhopper.util.shapes.GHPoint;
@@ -74,7 +79,14 @@ public class GraphHopperRunner {
         hopper.setOSMFile(pbf);
         hopper.setGraphHopperLocation(ghDir);
         hopper.setEncodedValuesString(vehicle + "_access, " + vehicle + "_average_speed");
-        hopper.setProfiles(TestProfiles.accessAndSpeed("profile", vehicle));
+        // Access + speed custom model for the chosen vehicle: block edges the vehicle
+        // cannot use (priority 0) and cap speed at its per-edge average. (This is the
+        // same model as the core TestProfiles.accessAndSpeed helper, inlined so the
+        // runner depends only on stable public API, not a test-named utility class.)
+        CustomModel customModel = new CustomModel()
+                .addToPriority(If("!" + vehicle + "_access", MULTIPLY, "0"))
+                .addToSpeed(If("true", LIMIT, vehicle + "_average_speed"));
+        hopper.setProfiles(new Profile("profile").setCustomModel(customModel));
         // Keep every edge snappable: no subnetwork pruning (mirrors Valhalla, which
         // snaps to anything) so recall is not capped by dropped small components.
         hopper.setMinNetworkSize(minNetwork);

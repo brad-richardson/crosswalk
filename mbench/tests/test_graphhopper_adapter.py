@@ -34,7 +34,9 @@ def _write(tmp_path, lines):
 
 class TestParseMatches:
     def test_maps_way_id_to_gers_and_filters(self, tmp_path):
-        # way 1: 50m matched over a 100m target -> conf 0.5; way 2: 40m -> 0.4.
+        # matched span = n_states * densify, capped at full edge length. way 1: 6 pts
+        # @100m -> 600m capped at edge 50m -> 50m -> conf 0.5; way 2: 5 pts -> capped
+        # at 40m -> 0.4.
         p = _write(tmp_path, ["t1\t1,50.0,6;2,40.0,5"])
         df = parse_matches_tsv(p, ID_MAP, {"t1": 100.0}, 0.1, 8.0, densify_m=100.0)
         got = dict(zip(df["ref_id"], df["confidence"]))
@@ -51,15 +53,15 @@ class TestParseMatches:
         assert set(df["ref_id"]) == {"gers-a"}
 
     def test_density_caps_matched_length(self, tmp_path):
-        # A 200m parallel edge clipped by a single 5m-spaced observation is counted
-        # as ~5m (density estimate), NOT its full 200m — below both min_frac (50m on
-        # a 500m target) and min_m (8m) -> dropped.
+        # A 200m parallel edge clipped by a single 5m-spaced observation is credited
+        # ~5m (1 * densify), NOT its full 200m — below both min_frac (50m on a 500m
+        # target) and min_m (8m) -> dropped.
         p = _write(tmp_path, ["t1\t3,200.0,1"])
         df = parse_matches_tsv(p, ID_MAP, {"t1": 500.0}, 0.1, 8.0, densify_m=5.0)
         assert len(df) == 0
 
     def test_full_length_when_many_observations(self, tmp_path):
-        # Same edge but 10 observations -> ~100m matched (> min_m 8m) -> kept.
+        # Same edge but 10 observations -> ~100m matched (10*10, > min_m 8m) -> kept.
         p = _write(tmp_path, ["t1\t3,200.0,10"])
         df = parse_matches_tsv(p, ID_MAP, {"t1": 500.0}, 0.1, 8.0, densify_m=10.0)
         assert set(df["ref_id"]) == {"gers-c"}
