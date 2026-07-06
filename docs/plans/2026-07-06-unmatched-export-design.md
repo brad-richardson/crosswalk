@@ -76,8 +76,13 @@ real outputs, and a phased build plan.
   `FringeTest` (`src/crosswalk/screen/__init__.py`).
 - **License gate v1.** `datasets/licenses.toml` has a single `status` field;
   `LicenseRegistry.decision()` is default-deny
-  (`src/crosswalk/factory/licenses.py:77-119`). 8 datasets are `approved`
-  (all US public domain); the rest `pending_review`.
+  (`src/crosswalk/factory/licenses.py:77-119`). 5 datasets are `approved`
+  (all US public domain: usfs flathead/lolo, montana missoula/helena/bozeman);
+  the rest `pending_review`. Registry entries now also carry
+  `panel_recommendation` / `panel_confidence` / `proposed_attribution` fields
+  from the license research panel (#320) — the `geometry_status` addition below
+  slots alongside those, and geometry-level review can reuse the panel's
+  evidence dossiers.
 - **Publisher layout.** Hive `bridges/release=<R>/dataset=<name>/`, immutable
   releases, per-release `index.json` + `checksums.txt`, top-level `index.json`
   + credibility `index.html`, Pages browser in `site/` (DuckDB-WASM)
@@ -436,10 +441,15 @@ gzipped GeoJSON) — no partitioning concerns.
 1. `export_unmatched()` in `resolution/unmatched.py`: fix the id/attribute bug,
    reason tiers from scored results + bridge rows, `length_m` + `<5 m` drop +
    `is_short`, `nearest_gers_*`, `best_candidate_*`, provenance columns. Wire
-   into `optimize_and_export()` (`pipeline/runner.py:1177`); manifest counts
-   redefined from the artifact (per-tier counts added to `manifest.json`).
+   into `optimize_and_export()` (`pipeline/runner.py:1177`) AND into the
+   second `generate_unmatched_report` call site at the zero-candidate
+   early-return (`pipeline/runner.py:1050`), which must emit the same schema
+   (every row `no_candidate` there).
 2. `geometry_status` in `licenses.toml` + `LicenseRegistry` (default-deny);
-   set `approved` for the 5 factory US-PD datasets.
+   set `approved` only for the US-public-domain entries already
+   bridge-approved (the 5 federal/Montana datasets). The other factory
+   datasets (Singapore ×2, Bogotá) are not US-PD and stay default-deny until
+   their geometry-redistribution terms pass human review.
 3. `assemble_staging()` unmatched pass: `unmatched/release=…` tree, geojson.gz,
    `unmatched_meta.json` (with the non-import disclaimer), `ATTRIBUTION.txt`,
    index.json + checksums extensions; credibility page counts + disclaimer.
