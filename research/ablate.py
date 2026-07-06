@@ -12,12 +12,12 @@ from pathlib import Path
 
 from loguru import logger
 
-from matcher.config import DEFAULT_SNAP_TOLERANCE_M, settings
-from matcher.matching import optimize_matches_with_grouping
-from matcher.matching.score_propagation import PropagationParams, propagate_scores
-from matcher.pipeline.runner import score_candidates_from_geodataframes
-from matcher.resolution import generate_bridge_file
-from matcher.utils import ensure_projected_crs
+from crosswalk.config import DEFAULT_SNAP_TOLERANCE_M, settings
+from crosswalk.matching import optimize_matches_with_grouping
+from crosswalk.matching.score_propagation import PropagationParams, propagate_scores
+from crosswalk.pipeline.runner import score_candidates_from_geodataframes
+from crosswalk.resolution import generate_bridge_file
+from crosswalk.utils import ensure_projected_crs
 
 CONFIGS = {
     "off": None,
@@ -36,7 +36,7 @@ def main():
 
     import geopandas as gpd
 
-    from matcher.utils.geometry import filter_to_linestrings
+    from crosswalk.utils.geometry import filter_to_linestrings
 
     reference = filter_to_linestrings(gpd.read_parquet(ref_path), source_name="reference")
     target = filter_to_linestrings(gpd.read_parquet(tgt_path), source_name="target")
