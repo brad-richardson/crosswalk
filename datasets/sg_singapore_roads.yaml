@@ -38,7 +38,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-02-08T23:33:03.866812+00:00'
+    fetched_at: '2026-07-06T18:49:19.944836+00:00'
     bbox:
     - 103.6
     - 1.2
@@ -50,7 +50,7 @@ last_fetch:
     - 104.05898560588257
     - 1.5089831117499102
     bbox_buffer_m: 1000.0
-    feature_count: 220345
+    feature_count: 226348
     geometry_types:
     - LineString
     output_path: data/raw
@@ -87,8 +87,8 @@ quality_fingerprint:
     secondary: 1204
     motorway: 308
 notes: LTA ships RD_CD (road code) column completely empty (verified 100% null on
-  the Aug 2025 and Mar 2026 releases). No stable unique ID column available -
-  only RD_CD_DESC (road name, 3818 unique across 15326 segments) and RD_CATG__1 (6
-  classification categories). Resolved 2026-07 by switching id_column to the synthetic
-  _geom_hash id (see fetch comment). Revisit if LTA restores RD_CD in a future release.
-  Requires LTA_API_KEY env var (DataMall AccountKey header) - never commit the key.
+  the Aug 2025 and Mar 2026 releases). No stable unique ID column available - only
+  RD_CD_DESC (road name, 3818 unique across 15326 segments) and RD_CATG__1 (6 classification
+  categories). Resolved 2026-07 by switching id_column to the synthetic _geom_hash
+  id (see fetch comment). Revisit if LTA restores RD_CD in a future release. Requires
+  LTA_API_KEY env var (DataMall AccountKey header) - never commit the key.
