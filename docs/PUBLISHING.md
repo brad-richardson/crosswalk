@@ -280,7 +280,7 @@ overwrite identical bytes idempotently.
 
 ### What the user does when ready
 
-1. Create an R2 bucket (e.g. `matcher-bridges`) and an R2 API token
+1. Create an R2 bucket (e.g. `crosswalk-bridges`) and an R2 API token
    (Object Read & Write). Attach a public custom domain / `r2.dev` URL for HTTPS
    reads.
 2. Export the four env vars above in the publishing shell.
