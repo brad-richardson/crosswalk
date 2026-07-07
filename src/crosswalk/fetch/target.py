@@ -38,7 +38,7 @@ from loguru import logger
 
 from ..datasets.schema import FetchConfig, get_dataset_config, list_dataset_configs
 from ..filenames import target_filename
-from ..utils.geometry import convert_polygons_to_centerlines
+from ..utils.geometry import convert_polygons_to_centerlines, flatten_to_linestring
 from ..utils.linear_ref import create_trivial_lr
 from .arcgis import fetch_arcgis_layer
 from .normalize import (
@@ -191,20 +191,15 @@ def _transform_download_data(
         if len(gdf) == 0:
             return gdf
 
-    # Convert single-part MultiLineStrings to LineStrings
+    # Flatten MultiLineStrings to LineStrings (merge contiguous parts, else
+    # longest disjoint part) rather than dropping multi-part data.
     multi_mask = gdf.geometry.geom_type == "MultiLineString"
     if multi_mask.any():
+        gdf.geometry = gdf.geometry.apply(flatten_to_linestring)
+        n_flattened = int((multi_mask & (gdf.geometry.geom_type == "LineString")).sum())
+        logger.info(f"Flattened {n_flattened} MultiLineStrings to LineStrings")
 
-        def to_linestring(geom):
-            if geom.geom_type == "MultiLineString" and len(geom.geoms) == 1:
-                return geom.geoms[0]
-            return geom
-
-        gdf.geometry = gdf.geometry.apply(to_linestring)
-        n_converted = (gdf.geometry.geom_type == "LineString").sum() - (~multi_mask).sum()
-        logger.info(f"Converted {n_converted} single-part MultiLineStrings to LineStrings")
-
-    # Filter to LineStrings only (drop remaining MultiLineStrings, Points, etc.)
+    # Filter to LineStrings only (drop remaining non-line geoms: Points, etc.)
     linestring_mask = gdf.geometry.geom_type == "LineString"
     if not linestring_mask.all():
         n_filtered = (~linestring_mask).sum()

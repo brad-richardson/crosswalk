@@ -1598,7 +1598,7 @@ def register_commands(app: typer.Typer) -> None:
         from ..features.pipeline import prepare_worker_data
         from ..filenames import find_overture_segments, find_target_file
         from ..matching.ml import _compute_feature_chunk, _init_worker
-        from ..utils.geometry import filter_to_linestrings
+        from ..utils.geometry import filter_to_linestrings, flatten_to_linestring
 
         # Process by dataset - get unique datasets from keys to process
         datasets = sorted(set(d for _, _, d in keys_to_process))
@@ -1725,7 +1725,14 @@ def register_commands(app: typer.Typer) -> None:
                     )
                 else:
                     used_stored += 1
-                    stored_target_overrides[target_id] = pair_data["target_geometry"]
+                    # Normalize stored geometries the same way the load boundary
+                    # (filter_to_linestrings) does: a stored MultiLineString would
+                    # otherwise reach the sibling search unflattened and error-NaN
+                    # the pair (there are 0 today, but this closes the gap the raw
+                    # data.parquet override path would otherwise leave open).
+                    stored_target_overrides[target_id] = flatten_to_linestring(
+                        pair_data["target_geometry"]
+                    )
                     if target_lookup is None or target_id not in target_lookup.index:
                         target_names = pair_data.get("target_names")
                         stored_target_attrs[target_id] = {
@@ -1739,7 +1746,9 @@ def register_commands(app: typer.Typer) -> None:
                     # reference geometry so the pair stays resolvable (mirrors the
                     # target-side augmentation below).
                     if str(gers_id) not in ref_lookup.index:
-                        stored_ref_overrides[gers_id] = pair_data["ref_geometry"]
+                        stored_ref_overrides[gers_id] = flatten_to_linestring(
+                            pair_data["ref_geometry"]
+                        )
                         stored_ref_attrs[gers_id] = {
                             "names": pair_data.get("ref_names"),
                             "names_lr": pair_data.get("ref_names_lr"),

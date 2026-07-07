@@ -127,7 +127,7 @@ class TestLoadGdf:
         assert loaded.crs.to_epsg() == 4326
 
     def test_load_gdf_filters_linestrings(self, tmp_path):
-        """Non-LineString geometries are dropped."""
+        """Non-LineString geometries are dropped; MultiLineStrings are flattened."""
         gdf = gpd.GeoDataFrame(
             {
                 "id": ["ls", "ml", "pt"],
@@ -144,8 +144,10 @@ class TestLoadGdf:
 
         loader = DatasetLoader(tmp_path)
         loaded = loader._load_gdf(path)
-        assert len(loaded) == 1
-        assert loaded.iloc[0]["id"] == "ls"
+        # The Point is dropped; the MultiLineString is flattened and retained.
+        assert len(loaded) == 2
+        assert list(loaded["id"]) == ["ls", "ml"]
+        assert all(g.geom_type == "LineString" for g in loaded.geometry)
 
     def test_load_gdf_empty_after_filter(self, tmp_path):
         """ValueError when no LineStrings remain after filtering."""
