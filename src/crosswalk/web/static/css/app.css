@@ -1912,12 +1912,22 @@ body {
     display: none;
 }
 
+/* Single-row, horizontally scrollable option strip (~1.25 cards peek so the
+   scroll affordance is obvious). Replaces the old 3-row wrapping grid. */
 .assignment-option-list {
     display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    max-height: 132px;
-    overflow-y: auto;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.assignment-option-list::-webkit-scrollbar {
+    height: 0;
 }
 
 .assignment-option {
@@ -1925,8 +1935,11 @@ body {
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;
+    flex: 0 0 auto;
+    min-width: 132px;
+    scroll-snap-align: start;
     min-height: 40px;
-    padding: 5px 10px;
+    padding: 7px 11px;
     border-radius: 8px;
     border: 1px solid var(--border-primary);
     background: var(--bg-secondary);
@@ -2127,7 +2140,11 @@ body {
     transform: rotate(180deg);
 }
 
-/* Collapsed: hide everything but the header slim bar so the map gets the screen */
+/* Collapsed: hide the tabs + panels + actions so the ribbon alone floats over
+   the map. (Legacy selectors kept for any non-tabbed render path.) */
+.group-card.collapsed .stitch-tabs,
+.group-card.collapsed .stitch-panels,
+.group-card.collapsed .pair-confirm-panel,
 .group-card.collapsed .assignment-options,
 .group-card.collapsed .segment-toggles,
 .group-card.collapsed .sliver-control,
@@ -2139,7 +2156,7 @@ body {
     display: none;
 }
 
-.group-card.collapsed .group-card-header {
+.group-card.collapsed .group-ribbon {
     margin-bottom: 0;
 }
 
@@ -2156,4 +2173,329 @@ body {
         width: 40px;
         height: 40px;
     }
+}
+
+/* ============================================================
+   Stitching review — tabbed information architecture
+   Ribbon (always on) + Review / Assignment / Details panels.
+   ============================================================ */
+
+/* --- meta ribbon --- */
+.group-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.ribbon-count {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.group-ribbon .pair-confidence {
+    margin-left: 2px;
+}
+
+.ribbon-pos {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.group-ribbon .panel-collapse-btn {
+    margin-left: 6px;
+}
+
+/* --- tab bar --- */
+.stitch-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border-primary);
+    margin-bottom: 12px;
+}
+
+.stitch-tab {
+    flex: 1;
+    padding: 8px 4px 9px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    position: relative;
+    touch-action: manipulation;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.stitch-tab-sub {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    opacity: 0.75;
+    margin-top: 1px;
+}
+
+.stitch-tab[aria-selected="true"] {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+}
+
+.stitch-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
+}
+
+.stitch-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.stitch-panel[hidden] {
+    display: none;
+}
+
+.stitch-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* --- REVIEW: current-assignment summary --- */
+.review-summary {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: 10px;
+    padding: 11px 13px;
+}
+
+.rs-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.rs-label {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.rs-auto {
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #4caf50;
+    border: 1px solid rgba(76, 175, 80, 0.5);
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+
+.rs-conf {
+    margin-left: auto;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.rs-sub {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 5px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- REVIEW: why-here --- */
+.why-here {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.why-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #d0a24a;
+    flex: 0 0 auto;
+    margin-top: 5px;
+}
+
+/* --- REVIEW: from-scratch switch (overrides the .deanchor-toggle pill) --- */
+.scratch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 13px;
+    border-radius: 10px;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-secondary);
+    text-decoration: none;
+    color: var(--text-primary);
+}
+
+.scratch-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.scratch-sub {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.scratch-switch {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    position: relative;
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.scratch-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #c9c9d0;
+    transition: transform 0.18s ease, background 0.18s ease;
+}
+
+/* Active (from-scratch on): tint the row subtly, flip the switch — NOT the whole
+   row purple (that .deanchor-toggle.active default is overridden here). */
+.scratch-row.active {
+    background: rgba(108, 92, 231, 0.14);
+    border-color: rgba(108, 92, 231, 0.5);
+    color: var(--text-primary);
+}
+
+.scratch-row.active .scratch-switch {
+    background: #6c5ce7;
+    border-color: #6c5ce7;
+}
+
+.scratch-row.active .scratch-switch::after {
+    transform: translateX(18px);
+    background: #fff;
+}
+
+/* --- ASSIGNMENT: hint + context separator --- */
+.assign-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* Full-width break inside the wrapping pill grid: core pills above, context below. */
+.pill-context-sep {
+    flex: 0 0 100%;
+    width: 100%;
+    font-size: 0.6rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    opacity: 0.75;
+    padding: 4px 2px 1px;
+    border-top: 1px dashed var(--border-primary);
+    margin-top: 2px;
+}
+
+/* --- DETAILS: blocks, nearby chips, tags --- */
+.details-block {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.details-block-head {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.nearby-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.nearby-chip {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 5px 9px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.nearby-chip b {
+    color: var(--text-primary);
+}
+
+.details-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.details-meta-row:empty {
+    display: none;
+}
+
+.details-tag {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border-primary);
+    border-radius: 999px;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+.sliver-sub {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.85;
+    margin-top: 1px;
+}
+
+/* stale-proposal notice (styling moved out of inline attrs) */
+.stale-proposal-notice {
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: rgba(220, 140, 0, 0.15);
+    border: 1px solid rgba(220, 140, 0, 0.5);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-bottom: 4px;
 }

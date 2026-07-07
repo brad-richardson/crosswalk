@@ -57,12 +57,15 @@
         if (progressEl && progressContainer) {
             progressContainer.innerHTML = '<span class="progress-label">' + progressEl.textContent + '</span>';
         }
-        // Reflect the pre-seeded assignment in the live confidence display
+        // Restore the active tab for the freshly-swapped group, then reflect the
+        // pre-seeded assignment in the live confidence / Review summary.
+        applyStitchTab();
         refreshSelectionUI();
     });
 
     // Reflect the pre-seeded assignment for the initially-rendered group
     document.addEventListener('DOMContentLoaded', function () {
+        applyStitchTab();
         refreshSelectionUI();
     });
 
@@ -687,8 +690,66 @@
         updateSummaries(sel);
         updateSliverIndicator(sel);
         updateContextNotice();
+        updateReviewSummary();
         if (window.matcherUpdateCoverageGaps) {
             window.matcherUpdateCoverageGaps(sel);
+        }
+    }
+
+    // --- Tabbed panel IA (Review / Assignment / Details) ---
+    // The active tab is remembered across the HTMX swap chain (and reloads) so
+    // paging to the next group keeps the reviewer on the tab they were using.
+    function currentStitchTab() {
+        if (window.__stitchTab) return window.__stitchTab;
+        try { return localStorage.getItem('stitchTab') || 'review'; } catch (e) { return 'review'; }
+    }
+    function applyStitchTab() {
+        var name = currentStitchTab();
+        var panels = document.querySelectorAll('.stitch-panel');
+        if (!panels.length) return;
+        var matched = false;
+        for (var j = 0; j < panels.length; j++) {
+            var m = panels[j].getAttribute('data-tab-panel') === name;
+            panels[j].hidden = !m;
+            if (m) matched = true;
+        }
+        if (!matched) { name = 'review'; window.__stitchTab = 'review';
+            for (var k = 0; k < panels.length; k++)
+                panels[k].hidden = panels[k].getAttribute('data-tab-panel') !== 'review';
+        }
+        var tabs = document.querySelectorAll('.stitch-tab');
+        for (var i = 0; i < tabs.length; i++)
+            tabs[i].setAttribute('aria-selected', String(tabs[i].getAttribute('data-tab') === name));
+    }
+    function switchStitchTab(name) {
+        window.__stitchTab = name;
+        try { localStorage.setItem('stitchTab', name); } catch (e) {}
+        applyStitchTab();
+    }
+
+    // Mirror the active option (or manual state) into the Review-tab summary so
+    // the reviewer sees what "Select This" would record without leaving Review.
+    function updateReviewSummary() {
+        var label = document.getElementById('rs-label');
+        var meta = document.getElementById('rs-meta');
+        var conf = document.getElementById('rs-conf');
+        var autoBadge = document.getElementById('rs-auto');
+        if (!label && !meta) return;  // de-anchored / no-options render: nothing to sync
+        var liveConf = document.getElementById('group-confidence');
+        var confText = liveConf ? liveConf.textContent.trim() : '';
+        if (conf) conf.textContent = confText;
+        var selOpt = document.querySelector('.assignment-option.selected');
+        if (selOpt) {
+            var l = selOpt.querySelector('.opt-label');
+            var m = selOpt.querySelector('.opt-meta');
+            if (label && l) label.textContent = l.textContent.replace(/auto/i, '').trim();
+            if (meta && m) meta.textContent = m.textContent.trim();
+            if (autoBadge) autoBadge.style.display = selOpt.classList.contains('is-optimizer') ? '' : 'none';
+        } else {
+            // Manual edits active (no exact option selected).
+            if (label) label.textContent = 'Manual selection';
+            if (autoBadge) autoBadge.style.display = 'none';
+            if (meta) meta.textContent = 'edited by hand — confirm on submit';
         }
     }
 

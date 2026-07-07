@@ -3522,7 +3522,11 @@ class TestDeAnchoredMode:
             normal = self._fragment(client, deanchored=False)
             da = self._fragment(client, deanchored=True)
             assert "deanchor-toggle" in normal and "&deanchored=1" in normal
-            assert 'class="deanchor-toggle active"' in da
+            # The toggle carries the `active` class + aria-checked in de-anchored
+            # mode. It renders as `scratch-row deanchor-toggle active` (the
+            # tabbed IA styles it as a full-width switch on the Review tab), so
+            # match the class token and state rather than an exact attribute.
+            assert "deanchor-toggle active" in da and 'aria-checked="true"' in da
         finally:
             self._stop(patches)
 
