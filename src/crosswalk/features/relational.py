@@ -106,6 +106,39 @@ def _offset_stats(
     return mean_offset, offset_iqr, offset_p95, offset_pn
 
 
+def flatten_multipart_line(geom):
+    """Normalize a MultiLineString to a single LineString for coordinate access.
+
+    Multi-part geometries reach the sibling search from raw datasets that still
+    contain MultiLineStrings (ingest converts single-part ones and newer fetches
+    drop the rest, but several shipped datasets predate that) and from stored
+    backfill geometries. ``np.array(geom.coords)`` raises NotImplementedError on
+    them, which used to error-NaN the whole pair's feature set (#347).
+
+    Contiguous parts are merged with ``shapely.line_merge``; when the parts are
+    disjoint the longest part is used (dominant-part approximation, consistent
+    with ingest's single-part conversion in ``fetch/target.py``).
+
+    Args:
+        geom: Any geometry. Non-MultiLineString inputs are returned unchanged.
+
+    Returns:
+        A LineString when the input is a mergeable/non-degenerate
+        MultiLineString, otherwise the input geometry unchanged (including
+        empty MultiLineStrings, which callers already guard with ``is_empty``).
+    """
+    if geom is None or geom.is_empty or geom.geom_type != "MultiLineString":
+        return geom
+    merged = shapely.line_merge(geom)
+    if merged.geom_type == "LineString":
+        return merged
+    # Disjoint parts (line_merge stayed multi-part): take the longest part.
+    parts = shapely.get_parts(merged)
+    if len(parts) == 0:
+        return merged
+    return parts[int(np.argmax(shapely.length(parts)))]
+
+
 class ParallelSiblingResult(NamedTuple):
     """Result of parallel sibling detection.
 
@@ -199,11 +232,12 @@ def _precompute_context_arrays(
     # value-identical to np.array(geom.coords) per geometry. include_z matches
     # the dimensionality np.array(geom.coords) would produce; mixed 2D/3D
     # datasets fall back to per-geometry extraction to preserve per-geom shape.
-    # Only Point/LineString/LinearRing expose .coords; np.array(geom.coords) on
-    # multi-part geometries and polygons raises NotImplementedError. Store None
-    # for those so the per-pair fallback re-runs np.array(geom.coords) and
-    # raises the IDENTICAL exception the pre-optimization code raised (the
-    # affected pair gets error features either way — behavior preserved).
+    # Only Point/LineString/LinearRing expose .coords. MultiLineStrings are
+    # flattened below (merge contiguous parts, else longest part) so the
+    # sibling search gets usable coordinates instead of error-NaNing the whole
+    # pair (#347). Other coordinate-sequence-less geometries (e.g. polygons)
+    # store None so the per-pair fallback re-runs np.array(geom.coords) and
+    # raises the same NotImplementedError as before.
     type_ids = shapely_mod.get_type_id(geom_arr)
     has_coords_seq = (type_ids >= 0) & (type_ids <= 2)
 
@@ -224,6 +258,16 @@ def _precompute_context_arrays(
             all_coords[offsets[i] : offsets[i + 1]] if has_coords_seq[i] else None
             for i in range(len(geometries))
         ]
+
+    # Fill coordinates for multi-part lines by flattening (identical to the
+    # per-pair fallback in find_parallel_sibling, so both paths agree). A
+    # degenerate flatten (still multi-part/empty) keeps None; the per-pair
+    # fallback then skips the candidate via its is_empty guard.
+    mls_type_id = 5  # shapely.GeometryType.MULTILINESTRING
+    for i in np.flatnonzero(valid & (type_ids == mls_type_id)):
+        flat = flatten_multipart_line(geometries[i])
+        if flat.geom_type == "LineString" and not flat.is_empty:
+            coords_list[i] = np.array(flat.coords)
 
     # Gross headings (exact formula from compute_crossing_angle_features)
     headings = np.full(len(geometries), np.nan)
@@ -894,6 +938,14 @@ def find_parallel_sibling(
     if segment.is_empty:
         return ParallelSiblingResult(False, float("inf"), 0.0)
 
+    # Multi-part segments (raw datasets that still contain MultiLineStrings,
+    # stored backfill geometries) don't expose .coords; normalize to a single
+    # LineString instead of letting np.array(segment.coords) raise and
+    # error-NaN the whole pair's feature set (#347).
+    segment = flatten_multipart_line(segment)
+    if segment.is_empty:
+        return ParallelSiblingResult(False, float("inf"), 0.0)
+
     # Query spatial index with buffer
     buffer_geom = segment.buffer(max_offset)
     candidate_indices = spatial_index.query(buffer_geom)
@@ -939,10 +991,15 @@ def find_parallel_sibling(
         candidate_coords = ctx_coords[candidate_idx] if ctx_coords is not None else None
         if candidate_coords is None:
             # Not precomputed (no context, or geometry without a coordinate
-            # sequence). np.array(geom.coords) raises NotImplementedError for
-            # multi-part geometries — intentionally identical to the
-            # pre-optimization behavior (the pair gets error features).
-            candidate_coords = np.array(candidate_geom.coords)
+            # sequence). Multi-part candidates are flattened exactly like the
+            # context build does (_precompute_context_arrays), so the
+            # precomputed and fallback paths stay value-identical (#347).
+            # Other coordinate-sequence-less geometries (e.g. polygons) still
+            # raise NotImplementedError as before.
+            candidate_flat = flatten_multipart_line(candidate_geom)
+            if candidate_flat.is_empty:
+                continue
+            candidate_coords = np.array(candidate_flat.coords)
         # Direct numba call (== compute_parallel_alignment with
         # use_local_alignment=True, return_fraction=True): both geometries are
         # known non-empty here, so the wrapper's is_empty checks (2 GEOS calls
