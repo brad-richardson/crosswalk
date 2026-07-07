@@ -2,6 +2,7 @@
    the optimizer's proposal is hidden (collapsed behind an opt-in reveal) and no
    styling leaks which edges it chose. Defaulted so every render path is safe. #}
 {% set deanchored = deanchored if deanchored is defined else False %}
+{% set opt_optimizer = (options | selectattr('is_optimizer') | first) if (options is defined and options) else None %}
 <!-- Hidden progress text for JS to read after HTMX swap -->
 <span id="group-progress-text" style="display:none">Group {{ group_index + 1 }} of {{ total_groups }}</span>
 
@@ -29,67 +30,40 @@
      data-group-id="{{ group.group_id }}"
      data-stale="{{ '1' if group.get('stale_grouping') else '0' }}">
 
-    <!-- Header: match type + counts + confidence + tier -->
-    <div class="group-card-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <!-- ===== Meta ribbon: always visible, one calm line ===== -->
+    <div class="group-ribbon" id="group-ribbon">
         <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
             {{ group.match_type }}
         </span>
-        <span class="group-count-summary" style="font-size: 0.8rem; color: var(--text-muted);">
+        <span class="ribbon-count">
             {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
         </span>
-        {% if context_ref_details is defined and (context_ref_details or context_target_details) %}
-        <span class="collapse-hide" style="font-size: 0.7rem; color: var(--text-muted);">
-            {% if context_capped is defined and context_capped %}
-            (+{{ context_ref_total }}R / +{{ context_target_total }}T nearby, showing nearest {{ context_ref_details | length }}R / {{ context_target_details | length }}T)
-            {% else %}
-            (+{{ context_ref_details | length }}R / +{{ context_target_details | length }}T nearby)
-            {% endif %}
-        </span>
-        {% endif %}
-        <span class="pair-confidence" id="group-confidence" style="margin-left: 4px;">
+        <span class="pair-confidence" id="group-confidence">
             {% if deanchored %}&mdash;{% else %}{{ "%.0f" | format(avg_confidence * 100) }}%{% endif %}
         </span>
-        <span class="group-progress-inline" style="font-size: 0.7rem; color: var(--text-muted);">
-            {{ group_index + 1 }}/{{ total_groups }}
-        </span>
-        {% if group.review_tier is defined %}
-        <span class="collapse-hide" style="font-size: 0.7rem; color: var(--text-muted);">
-            {{ group.review_tier }}
-        </span>
-        {% endif %}
-        {% if group.get('panel_route_reason') %}
-        <!-- Why the agent panel routed this group to human review (one chip,
-             not a vote dump). Title carries the machine-readable code. -->
-        <span class="collapse-hide panel-route-chip"
-              title="panel route reason: {{ group.get('panel_route_reason') }}"
-              style="font-size: 0.7rem; color: var(--text-muted);
-                     border: 1px solid var(--border-color, rgba(128,128,128,0.4));
-                     border-radius: 999px; padding: 1px 7px; white-space: nowrap;">
-            panel: {{ group.get('panel_route_reason_human') or group.get('panel_route_reason') }}
-        </span>
-        {% endif %}
-        <!-- De-anchored review mode switch. A plain link (full-page navigation)
-             so the mode is carried in the URL; toggling reloads the current
-             group in the other mode. In de-anchored mode the reviewer labels
-             from a blank slate with the optimizer's proposal hidden, giving an
-             unbiased eval slice (stamped session_id=deanchored_v1). -->
-        <a class="deanchor-toggle{% if deanchored %} active{% endif %}"
-           id="deanchor-toggle"
-           href="/stitching-review?dataset={{ dataset }}{% if group.group_id %}&group_id={{ group.group_id }}{% endif %}{% if not deanchored %}&deanchored=1{% endif %}"
-           role="switch" aria-checked="{{ 'true' if deanchored else 'false' }}"
-           title="De-anchored review: label from a blank slate with the optimizer's proposal hidden"
-           style="margin-left: auto; font-size: 0.7rem; text-decoration: none;">
-           {% if deanchored %}&#9673; de-anchored{% else %}&#9678; de-anchor{% endif %}
-        </a>
+        <span class="ribbon-pos">{{ group_index + 1 }}/{{ total_groups }}</span>
         <button type="button" class="panel-collapse-btn" id="panel-collapse-btn"
                 onclick="togglePanelCollapse()"
                 title="Collapse / expand panel"
                 aria-label="Collapse or expand assignment panel"
-                aria-expanded="true"
-                style="margin-left: 4px;">
+                aria-expanded="true">
             <span class="panel-collapse-icon" aria-hidden="true">&#9662;</span>
         </button>
     </div>
+
+    <!-- ===== Tab bar ===== -->
+    <div class="stitch-tabs" id="stitch-tabs" role="tablist">
+        <button type="button" class="stitch-tab" role="tab" data-tab="review"
+                aria-selected="true" onclick="switchStitchTab('review')">Review</button>
+        <button type="button" class="stitch-tab" role="tab" data-tab="assign"
+                aria-selected="false" onclick="switchStitchTab('assign')">
+            Assignment<span class="stitch-tab-sub">edit edges</span></button>
+        <button type="button" class="stitch-tab" role="tab" data-tab="details"
+                aria-selected="false" onclick="switchStitchTab('details')">
+            Details<span class="stitch-tab-sub">metadata</span></button>
+    </div>
+
+    <div class="stitch-panels" id="stitch-panels">
 
     {% if group.get('stale_grouping') %}
     <!-- Stale-proposal notice: this queue entry's group no longer exists in the
@@ -97,15 +71,62 @@
          proposed assignment and option cards could not be refreshed and may be
          out of date. Ratifying it still records a label; the pair-confirmation
          panel shows exactly what would be stored. -->
-    <div class="stale-proposal-notice" id="stale-proposal-notice" role="status"
-         style="margin: 4px 0 8px; padding: 6px 8px; border-radius: 4px;
-                background: rgba(220, 140, 0, 0.15); border: 1px solid rgba(220, 140, 0, 0.5);
-                color: var(--text-muted); font-size: 0.72rem;">
+    <div class="stale-proposal-notice" id="stale-proposal-notice" role="status">
         &#9888; Stale proposal — the grouping has changed since this batch was
         generated. This option may be out of date; confirm the pairs before recording.
     </div>
     {% endif %}
 
+    <!-- ============ TAB: REVIEW ============ -->
+    <div class="stitch-panel" data-tab-panel="review">
+        <!-- Current assignment summary. Live-updated by updateReviewSummary()
+             as the reviewer picks options / edits pills on the Assignment tab. -->
+        <div class="review-summary" id="review-summary">
+            {% if deanchored %}
+            <div class="rs-main"><span class="rs-label">Build from scratch</span></div>
+            <div class="rs-sub">No optimizer proposal shown — decide, then reveal on the Assignment tab.</div>
+            {% elif opt_optimizer %}
+            <div class="rs-main">
+                <span class="rs-label" id="rs-label">{{ opt_optimizer.label }}</span>
+                <span class="rs-auto" id="rs-auto">auto</span>
+                <span class="rs-conf" id="rs-conf">{{ "%.0f" | format(opt_optimizer.mean_confidence * 100) }}%</span>
+            </div>
+            <div class="rs-sub" id="rs-meta">{{ opt_optimizer.edge_count }} edge{{ '' if opt_optimizer.edge_count == 1 else 's' }} &middot; {{ group.ref_ids | length }} refs &rarr; {{ group.target_ids | length }} targets</div>
+            {% else %}
+            <div class="rs-main"><span class="rs-label" id="rs-label">Manual selection</span>
+                <span class="rs-conf" id="rs-conf"></span></div>
+            <div class="rs-sub" id="rs-meta">Pick or edit on the Assignment tab.</div>
+            {% endif %}
+        </div>
+
+        {% if group.get('panel_route_reason') %}
+        <!-- Why this group needs a human: the agent panel's route reason. -->
+        <div class="why-here" title="panel route reason: {{ group.get('panel_route_reason') }}">
+            <span class="why-dot" aria-hidden="true"></span>
+            Here because the agent panel couldn&rsquo;t auto-accept &mdash;
+            {{ group.get('panel_route_reason_human') or group.get('panel_route_reason') }}.
+        </div>
+        {% endif %}
+
+        <!-- From-scratch (de-anchored) review switch. A plain link (full-page
+             navigation) so the mode is carried in the URL and stays set across
+             groups; toggling reloads the current group in the other mode. In
+             from-scratch mode the reviewer labels from a blank slate with the
+             optimizer's proposal hidden (unbiased eval slice, session_id=deanchored_v1). -->
+        <a class="scratch-row deanchor-toggle{% if deanchored %} active{% endif %}"
+           id="deanchor-toggle"
+           href="/stitching-review?dataset={{ dataset }}{% if group.group_id %}&group_id={{ group.group_id }}{% endif %}{% if not deanchored %}&deanchored=1{% endif %}"
+           role="switch" aria-checked="{{ 'true' if deanchored else 'false' }}"
+           title="From scratch: label from a blank slate with the optimizer's proposal hidden">
+            <span class="scratch-label">From scratch
+                <span class="scratch-sub">Hide the proposal and build the match on a blank slate.</span>
+            </span>
+            <span class="scratch-switch" aria-hidden="true"></span>
+        </a>
+    </div>
+
+    <!-- ============ TAB: ASSIGNMENT ============ -->
+    <div class="stitch-panel" data-tab-panel="assign" hidden>
     <!-- Assignment option picker (verify, don't construct).
          De-anchored mode collapses the proposals behind an explicit opt-in
          reveal so the reviewer forms a judgment on a blank slate first; no
@@ -155,6 +176,7 @@
         </div>
     </div>
     {% endif %}
+    <p class="assign-hint collapse-hide">Swipe options sideways, or tap pills below to edit by hand.</p>
     {% endif %}
 
     <!-- Per-segment toggle pills -->
@@ -170,7 +192,8 @@
                         data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
                         title="{{ ref.id }}">R{{ loop.index }}</button>
                 {% endfor %}
-                {% if context_ref_details is defined %}
+                {% if context_ref_details is defined and context_ref_details %}
+                <span class="pill-context-sep">nearby &mdash; map only, not saved</span>
                 {% for ref in context_ref_details %}
                 <button class="segment-pill segment-pill-context segment-pill-context-ref"
                         data-context="true"
@@ -192,7 +215,8 @@
                         data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"
                         title="{{ tgt.id }}">T{{ loop.index }}</button>
                 {% endfor %}
-                {% if context_target_details is defined %}
+                {% if context_target_details is defined and context_target_details %}
+                <span class="pill-context-sep">nearby &mdash; map only, not saved</span>
                 {% for tgt in context_target_details %}
                 <button class="segment-pill segment-pill-context segment-pill-context-target"
                         data-context="true"
@@ -205,80 +229,117 @@
             </div>
         </div>
     </div>
-
-    <!-- Sliver-edge exclusion (default: exclude). The cross-product manual path
-         silently pulls in near-zero-overlap junction edges; excluding them keeps
-         human labels clean. Option picks are exact edge sets and unaffected. -->
-    <div class="sliver-control">
-        <label class="sliver-toggle-label" title="Include near-zero-overlap junction 'sliver' edges in a manual selection">
-            <input type="checkbox" id="include-slivers-toggle" onchange="onSliverToggle()">
-            <span>include sliver edges</span>
-        </label>
-        <span class="sliver-indicator" id="sliver-indicator"
-              data-group-sliver-count="{{ sliver_count if sliver_count is defined else 0 }}"></span>
-    </div>
-
-    <!-- Three-line summary: ID, Class, Name (tap to expand) -->
-    <div class="group-summary" onclick="toggleGroupDetails()">
-        {% if id_summary is defined %}
-        <div class="summary-line">
-            <span class="summary-label">ID</span>
-            <span class="summary-value">{{ id_summary }}</span>
-        </div>
-        {% endif %}
-        {% if class_summary is defined %}
-        <div class="summary-line">
-            <span class="summary-label">Class</span>
-            <span class="summary-value" id="summary-class-value">{{ class_summary }}</span>
-        </div>
-        {% endif %}
-        {% if name_summary is defined %}
-        <div class="summary-line">
-            <span class="summary-label">Name</span>
-            <span class="summary-value" id="summary-name-value">{{ name_summary }}</span>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Expandable details -->
-    <div class="group-details" id="group-details">
-        <div class="details-section">
-            <div class="details-header">Ref</div>
-            {% for ref in ref_details %}
-            <div class="detail-row">
-                <span class="detail-id" title="{{ ref.id }}">{{ ref.id }}</span>
-                <span class="detail-attr">{{ ref.cls or '\u2014' }}</span>
-                <span class="detail-attr">{{ ref.name or '\u2014' }}</span>
-            </div>
-            {% endfor %}
-        </div>
-        <div class="details-section">
-            <div class="details-header">Target</div>
-            {% for tgt in target_details %}
-            <div class="detail-row">
-                <span class="detail-id" title="{{ tgt.id }}">{{ tgt.id }}</span>
-                <span class="detail-attr">{{ tgt.cls or '\u2014' }}</span>
-                <span class="detail-attr">{{ tgt.name or '\u2014' }}</span>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
     {% endif %}
 
     <!-- Non-blocking notice surfaced when context pills are toggled on. Context
          segments are NOT part of this group; toggling them controls map
-         visibility only and they are never written to the stored label. This
-         notice makes that explicit at submit time (previously it happened
-         silently) without hard-blocking the legitimate map-visibility toggle.
-         Populated by updateContextNotice(). -->
+         visibility only and they are never written to the stored label. -->
     <div class="context-notice" id="context-notice" style="display:none" role="status"></div>
+    </div>
+
+    <!-- ============ TAB: DETAILS ============ -->
+    <div class="stitch-panel" data-tab-panel="details" hidden>
+        {% if context_ref_details is defined and (context_ref_details or context_target_details) %}
+        <div class="details-block">
+            <div class="details-block-head">Nearby (not in group)</div>
+            <div class="nearby-chips">
+                {% if context_capped is defined and context_capped %}
+                <span class="nearby-chip"><b>+{{ context_ref_total }}</b> refs</span>
+                <span class="nearby-chip"><b>+{{ context_target_total }}</b> targets</span>
+                <span class="nearby-chip">showing nearest <b>{{ context_ref_details | length }}</b> / <b>{{ context_target_details | length }}</b></span>
+                {% else %}
+                <span class="nearby-chip"><b>+{{ context_ref_details | length }}</b> refs</span>
+                <span class="nearby-chip"><b>+{{ context_target_details | length }}</b> targets</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if ref_details is defined %}
+        <!-- Three-line summary: ID, Class, Name (tap to expand) -->
+        <div class="group-summary" onclick="toggleGroupDetails()">
+            {% if id_summary is defined %}
+            <div class="summary-line">
+                <span class="summary-label">ID</span>
+                <span class="summary-value">{{ id_summary }}</span>
+            </div>
+            {% endif %}
+            {% if class_summary is defined %}
+            <div class="summary-line">
+                <span class="summary-label">Class</span>
+                <span class="summary-value" id="summary-class-value">{{ class_summary }}</span>
+            </div>
+            {% endif %}
+            {% if name_summary is defined %}
+            <div class="summary-line">
+                <span class="summary-label">Name</span>
+                <span class="summary-value" id="summary-name-value">{{ name_summary }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Expandable details -->
+        <div class="group-details" id="group-details">
+            <div class="details-section">
+                <div class="details-header">Ref</div>
+                {% for ref in ref_details %}
+                <div class="detail-row">
+                    <span class="detail-id" title="{{ ref.id }}">{{ ref.id }}</span>
+                    <span class="detail-attr">{{ ref.cls or '—' }}</span>
+                    <span class="detail-attr">{{ ref.name or '—' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="details-section">
+                <div class="details-header">Target</div>
+                {% for tgt in target_details %}
+                <div class="detail-row">
+                    <span class="detail-id" title="{{ tgt.id }}">{{ tgt.id }}</span>
+                    <span class="detail-attr">{{ tgt.cls or '—' }}</span>
+                    <span class="detail-attr">{{ tgt.name or '—' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="details-meta-row">
+            {% if group.review_tier is defined %}
+            <span class="details-tag">tier: {{ group.review_tier }}</span>
+            {% endif %}
+            {% if group.get('panel_route_reason') %}
+            <span class="details-tag panel-route-chip"
+                  title="panel route reason: {{ group.get('panel_route_reason') }}">
+                panel: {{ group.get('panel_route_reason_human') or group.get('panel_route_reason') }}
+            </span>
+            {% endif %}
+        </div>
+
+        <!-- Advanced: sliver-edge inclusion (default: exclude). The cross-product
+             manual path silently pulls in near-zero-overlap junction edges;
+             excluding them keeps human labels clean. Stays set across groups.
+             Option picks are exact edge sets and unaffected. -->
+        <div class="details-block">
+            <div class="details-block-head">Advanced</div>
+            <div class="sliver-control">
+                <label class="sliver-toggle-label" title="Include near-zero-overlap junction 'sliver' edges in a manual selection">
+                    <input type="checkbox" id="include-slivers-toggle" onchange="onSliverToggle()">
+                    <span>Include sliver edges
+                        <span class="sliver-sub">near-zero-overlap junctions in manual edits &middot; off by default</span>
+                    </span>
+                </label>
+                <span class="sliver-indicator" id="sliver-indicator"
+                      data-group-sliver-count="{{ sliver_count if sliver_count is defined else 0 }}"></span>
+            </div>
+        </div>
+    </div>
+
+    </div><!-- /stitch-panels -->
 
     <!-- Pair-confirmation panel (inline, htmx-friendly — no native dialog).
          Shown before recording a manual/de-anchored cross-product submit, and
          before ratifying a potentially-stale option pick. Lists the exact pairs
-         that would be stored (ref → target, per-pair confidence, sliver flag);
-         each is untickable and unticked pairs are excluded from the label.
-         Populated + toggled by openPairConfirm()/renderPairConfirm() in page.html. -->
+         that would be stored; each is untickable and unticked pairs are excluded. -->
     <div class="pair-confirm-panel" id="pair-confirm-panel" role="group"
          aria-label="Confirm pairs to record" style="display:none; margin-top: 8px;">
         <div class="pair-confirm-header" id="pair-confirm-header"
@@ -299,7 +360,7 @@
         </div>
     </div>
 
-    <!-- Action buttons -->
+    <!-- Action buttons: shared across tabs, always visible below the panels. -->
     <div class="card-actions" id="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">
         <form style="flex: 1;" id="select-form"
               hx-post="/stitching-review/select"
@@ -321,9 +382,7 @@
                  group stays de-anchored and its label is stamped accordingly. -->
             <input type="hidden" name="deanchored" value="{{ 1 if deanchored else 0 }}">
             <!-- Set to 1 by the client's confirm dialog when the reviewer
-                 explicitly confirms an EMPTY de-anchored submit (reject-all).
-                 The server refuses unconfirmed empty de-anchored submits so a
-                 blank-slate misclick can't record a false reject-all label. -->
+                 explicitly confirms an EMPTY de-anchored submit (reject-all). -->
             <input type="hidden" name="confirm_reject_all" id="confirm-reject-all" value="">
             <button type="submit" class="btn-select">
                 Select This
