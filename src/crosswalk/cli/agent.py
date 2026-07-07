@@ -1370,23 +1370,36 @@ def export_stitch_panel(
     labels_dir: Path = typer.Option(Path("labels/stitching"), "--labels", "-l"),
     max_edges: int = typer.Option(20, "--max-edges", help="Skip groups with > this many edges"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report only; write nothing"),
+    empty_set: bool = typer.Option(
+        True,
+        "--empty-set/--no-empty-set",
+        help=(
+            "Also export unanimous-NONE verdicts (panel rejected every option) as "
+            "empty-set reject-all labels tagged panel_unanimous_none_v3. Default on "
+            "(this is required label production for the learned resolver); pass "
+            "--no-empty-set to plan/write the accept path only."
+        ),
+    ),
     allow_nonstandard_panel: bool = typer.Option(
         False,
         "--allow-nonstandard-panel",
         help=(
             "Export even when a batch's votes.csv provider set differs from the "
             "default claude+codex+agy panel (e.g. --panel no-agy). Labels are "
-            "still stamped panel_unanimous_v3, so only use this after an explicit "
-            "provenance decision."
+            "still stamped with the panel_unanimous_* labelers, so only use this "
+            "after an explicit provenance decision."
         ),
     ),
 ):
     """Export unanimous panel consensus into human-equivalent stitching labels.
 
-    Only unanimous ``auto_accept`` groups are candidates. Gates are applied in
-    order and reported per group: (a) auto_accept, (b) edge count <= max-edges,
-    (c) class-consistency, (d) sliver canonicalization, (e) human precedence.
-    Exported rows use the labeler ``panel_unanimous_v3`` and upsert by group_id
+    Two verdict classes are promoted. Unanimous ``auto_accept`` groups export
+    their chosen edge set (labeler ``panel_unanimous_v3``); with ``--empty-set``
+    (default) unanimous-NONE groups export a reject-all EMPTY-SET label (labeler
+    ``panel_unanimous_none_v3``, ``selected_edges == []``). Gates are applied in
+    order and reported per group: (a) routing, (b) size, (c) class-consistency,
+    (d) sliver canonicalization, (e) human precedence (the class/sliver gates are
+    vacuous on an empty set and are skipped there). Rows upsert by group_id
     (idempotent). Batches voted by a nonstandard panel composition are refused
     unless ``--allow-nonstandard-panel`` is passed (composition is provenance).
 
@@ -1427,22 +1440,31 @@ def export_stitch_panel(
             console.print(
                 f"[red]Batch {name} was voted by a nonstandard panel "
                 f"({', '.join(sorted(providers))}) — refusing to stamp its labels "
-                f"panel_unanimous_v3. Re-run with --allow-nonstandard-panel only "
-                f"after an explicit provenance decision.[/red]"
+                f"with the panel_unanimous_* labelers. Re-run with "
+                f"--allow-nonstandard-panel only after an explicit provenance "
+                f"decision.[/red]"
             )
         raise typer.Exit(1)
 
-    report = plan_exports(batch_dirs, dataset, labels_dir, max_edges=max_edges)
+    report = plan_exports(
+        batch_dirs, dataset, labels_dir, max_edges=max_edges, export_empty_set=empty_set
+    )
 
+    none_note = f", {report.n_unanimous_none} unanimous-NONE candidates" if empty_set else ""
     console.print(
         f"[bold]Panel export: {report.n_total_groups} merged groups, "
-        f"{report.n_auto_accept} auto_accept candidates[/bold]"
+        f"{report.n_auto_accept} auto_accept candidates{none_note}[/bold]"
     )
     console.print(f"  Batches (in precedence order): {', '.join(b.name for b in batch_dirs)}")
 
     # Per-group report.
     for g in report.groups:
-        if g.exported:
+        if g.exported and g.is_empty_set:
+            console.print(
+                f"  [green]EXPORT-EMPTY[/green] {g.group_id} [{g.source_batch}] "
+                f"{g.match_type} reject-all (0 edges) conf={g.mean_confidence:.3f}"
+            )
+        elif g.exported:
             slivers = f" (-{g.n_slivers_dropped} sliver)" if g.n_slivers_dropped else ""
             console.print(
                 f"  [green]EXPORT[/green] {g.group_id} [{g.source_batch}] "
@@ -1461,8 +1483,9 @@ def export_stitch_panel(
                 f"  [yellow]SKIP[/yellow]   {g.group_id} [{g.source_batch}] -> {g.reason}{extra}"
             )
 
+    empty_note = f" ({len(report.exported_empty)} empty-set)" if empty_set else ""
     console.print(
-        f"\n[bold]Summary:[/bold] {len(report.exported)} exported, "
+        f"\n[bold]Summary:[/bold] {len(report.exported)} exported{empty_note}, "
         f"{len(report.skipped)} skipped, "
         f"{report.total_slivers_dropped()} sliver edges dropped"
     )
@@ -1475,7 +1498,12 @@ def export_stitch_panel(
         return
 
     written = write_exports(report, dataset, labels_dir)
-    console.print(f"[green]Wrote {written} panel labels to {labels_dir}/dataset={dataset}[/green]")
+    n_empty = len(report.exported_empty)
+    empty_written = f" ({n_empty} reject-all empty-set)" if n_empty else ""
+    console.print(
+        f"[green]Wrote {written} panel labels{empty_written} to "
+        f"{labels_dir}/dataset={dataset}[/green]"
+    )
 
     # Best-effort: labels are already persisted above, so a malformed batch CSV
     # must not crash the command and leave an inconsistent "failed" export.

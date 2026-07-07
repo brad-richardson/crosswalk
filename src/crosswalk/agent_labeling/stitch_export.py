@@ -2,34 +2,67 @@
 
 The 3-provider stitching panel (see :mod:`stitch_runner`) votes on M:N group edge
 selections and writes a ``consensus.csv`` per batch. This module promotes the
-subset of those verdicts that are safe to treat as durable labels -- only
-*unanimous* auto-accept groups -- into ``labels/stitching`` alongside the human
-labels, tagged with the labeler ``panel_unanimous_v3`` so their provenance stays
-visible (v1 tagged the earlier sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the
-Opus 4.8/gpt-5.5/Gemini-3.5-Flash panel on pre-enrichment packs; the tag is
-bumped whenever the panel composition OR its pack inputs change).
+subset of those verdicts that are safe to treat as durable labels into
+``labels/stitching`` alongside the human labels, tagged with a ``panel_*``
+labeler so their provenance stays visible (v1 tagged the earlier
+sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the Opus 4.8/gpt-5.5/Gemini-3.5-Flash
+panel on pre-enrichment packs; the tag is bumped whenever the panel composition
+OR its pack inputs change).
+
+Two verdict classes are promoted:
+
+  * **Unanimous accept** (routing == ``auto_accept``) -> a normal pair label with
+    the panel's chosen edge set, tagged ``panel_unanimous_v3``.
+  * **Unanimous NONE** (all panelists voted "none of the options fit"; routed to
+    ``human_review`` with route_reason ``unanimous_none``) -> an EMPTY-SET pair
+    label (``selected_edges == []``), tagged ``panel_unanimous_none_v3``. This is
+    the reject-all ground truth the learned group resolver needs to train/eval on
+    rejects (see ``research/learned_optimizer_design.md`` §2.4a / milestone L1):
+    the cross-mode defect (a cycleway wrongly grouped with a parallel road) has
+    exactly this shape -- the correct answer is "select nothing". Empty-set export
+    is on by default; pass ``export_empty_set=False`` (CLI ``--no-empty-set``) to
+    skip it.
+
+The empty-set label uses the SAME on-disk representation as a human reject-all
+review (PAIR semantics, ``selected_edges == "[]"``, ``num_refs/num_targets == 0``),
+so it round-trips through every consumer that already handles reject-all human
+labels -- ``stitch_eval.recover_labeled_groups`` (``empty`` bucket),
+``recover_empty_reject_all`` / ``mbench.map_labels_to_groups`` (verbatim group_id
+recovery), the ``edge_prf`` empty-vs-empty perfect score, and
+``render_review_diffs`` (``is_reject_all``).
 
 Gates (applied in order; the first failing gate decides the group and is
 reported):
 
-  a. routing == ``auto_accept`` (unanimous, non-NONE) -- everything else is not a
-     candidate at all.
-  b. candidate edge count <= ``max_edges`` (default 20) -- huge groups stay for
-     human review.
+  a. routing gate -- an ``auto_accept`` row takes the accept path; a
+     ``unanimous_none`` row takes the empty-set path (when ``export_empty_set``);
+     everything else is not a candidate at all.
+  b. size gate -- accept groups: huge/tangled groups stay for human review
+     (structural gate, or flat ``max_edges`` fallback). Empty-set groups apply
+     ONLY the hard backstop ceiling on the group's candidate size (see
+     :func:`_gate_empty_group`): the corridor/assignment-tangle sub-gate targets
+     *selection greediness*, which is irrelevant to an empty selection, and it
+     would wrongly block the 2-corridor cross-mode reject this path exists to
+     capture.
   c. class-consistency gate -- reuses the panel runner's cross-mode rule
      (:func:`stitch_runner.has_cross_mode_edge`) on the chosen edge set
      (pedestrian / vehicular / bike; any two different modes are cross-mode).
+     Vacuous on an empty set (no edges to gate), so it is skipped on the
+     empty-set path -- correctly, since the whole point is to record cross-mode
+     rejects.
   d. sliver canonicalization -- drops junction-sliver edges (shared definition in
-     :func:`crosswalk.matching.sliver`); if that empties the set the group is
-     skipped.
+     :func:`crosswalk.matching.sliver`); if that empties the set the accept group
+     is skipped. Skipped on the empty-set path (the emptiness is intentional, not
+     a sliver artifact).
   e. human precedence -- a group already covered by a *human* label (by exact
      group_id or by edge-overlap, reusing :func:`stitch_eval.map_human_labels_to_groups`)
-     is left untouched.
+     is left untouched. Applies to both paths.
 
-Writing is idempotent: rows are upserted by ``group_id`` under the
-``panel_unanimous_v3`` labeler, so re-running never duplicates and always
-refreshes to the latest consensus. Previously exported panel rows are excluded
-from the human-precedence check (they are not human), so re-runs stay accurate.
+Writing is idempotent: rows are upserted by ``group_id`` under the appropriate
+``panel_*`` labeler, so re-running never duplicates and always refreshes to the
+latest consensus. Previously exported panel rows (any ``panel_`` prefix) are
+excluded from the human-precedence check (they are not human), so re-runs stay
+accurate.
 """
 
 from __future__ import annotations
@@ -45,6 +78,7 @@ from ..config import settings
 from ..labeling.stitching_store import StitchingLabelStore
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
+from .panel_routing import REASON_UNANIMOUS_NONE, _int_or_none, derive_route_reason
 from .stitch_eval import (
     _is_set_label,
     _load_group_metadata,
@@ -62,6 +96,18 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 # (non-human) label and is excluded from the human-precedence check below.
 PANEL_LABELER = "panel_unanimous_v3"
 PANEL_LABELER_PREFIX = "panel_"
+
+# Distinct labeler for unanimous-NONE (reject-all / empty-set) verdicts. Kept
+# UNDER the ``panel_`` prefix so every consumer that buckets labels by that
+# prefix -- the human-precedence filter here, ``mbench.eval.stitch_metrics``
+# (``_labeler_class`` -> "panel"), ``xprod``/``cli.data`` -- still classes it as
+# a non-human panel label. A *separate* tag (rather than reusing PANEL_LABELER)
+# keeps reject-all ground truth sliceable on its own in per-labeler eval: it is
+# semantically a different verdict (select nothing vs select a subset) and the
+# cross-mode acceptance test reports rejects as their own table
+# (research/learned_optimizer_design.md §6.3). Version suffix tracks PANEL_LABELER
+# (same panel composition / pack inputs).
+PANEL_NONE_LABELER = "panel_unanimous_none_v3"
 
 #: The provider composition PANEL_LABELER is valid provenance for. Composition
 #: changes have historically bumped the labeler (v1 -> v2), so a batch run with
@@ -120,6 +166,9 @@ class GroupExport:
     mean_confidence: float = 0.0
     selected_edges: list[dict] = field(default_factory=list)
     human_group_id: str = ""
+    # True for a unanimous-NONE (reject-all) export: selected_edges is empty and
+    # the row is stamped PANEL_NONE_LABELER. False for a normal accept export.
+    is_empty_set: bool = False
 
 
 @dataclass
@@ -130,10 +179,23 @@ class ExportReport:
     n_total_groups: int
     n_auto_accept: int
     groups: list[GroupExport]
+    # Count of unanimous-NONE candidate groups seen (the empty-set path's analog
+    # of ``n_auto_accept``). Zero when ``export_empty_set`` is off.
+    n_unanimous_none: int = 0
 
     @property
     def exported(self) -> list[GroupExport]:
         return [g for g in self.groups if g.exported]
+
+    @property
+    def exported_empty(self) -> list[GroupExport]:
+        """Exported reject-all (empty-set) groups."""
+        return [g for g in self.groups if g.exported and g.is_empty_set]
+
+    @property
+    def exported_nonempty(self) -> list[GroupExport]:
+        """Exported normal (non-empty accept) groups."""
+        return [g for g in self.groups if g.exported and not g.is_empty_set]
 
     @property
     def skipped(self) -> list[GroupExport]:
@@ -227,6 +289,38 @@ def _meta_from_group(grp: dict) -> dict | None:
     }
 
 
+def _is_unanimous_none(row: dict) -> bool:
+    """True when a consensus row is a unanimous-NONE (reject-all) verdict.
+
+    Reuses the shared route-reason derivation so it matches both freshly-stamped
+    rows (``route_reason == "unanimous_none"``) and historical waves that predate
+    the stamp (derived from ``consensus == "unanimous"`` + ``choice == "NONE"``).
+    A unanimous-NONE row routes to ``human_review`` (it is never ``auto_accept``),
+    so it is disjoint from the accept path.
+
+    Defense-in-depth quorum check (this path mints reject ground truth): the
+    derivation trusts the ``consensus`` column verbatim, but "unanimous" is only
+    meaningful with a full quorum (``compute_consensus`` requires >= 3 agreeing
+    valid votes). A hand-edited or pre-quorum-rule historical row claiming
+    ``consensus=unanimous`` with ``n_valid < 3`` must not be exported, so:
+
+    * ``n_valid`` present -> require ``n_valid >= 3`` (contradicting evidence
+      blocks the export even when a ``route_reason`` stamp is present);
+    * ``n_valid`` missing/unparseable -> conservatively require the explicit
+      ``route_reason`` stamp (written only by ``compute_consensus``, which
+      enforces the quorum) rather than deriving from consensus/choice alone.
+    """
+    if derive_route_reason(row) != REASON_UNANIMOUS_NONE:
+        return False
+    n_valid = _int_or_none(row.get("n_valid"))
+    if n_valid is not None:
+        return n_valid >= 3
+    # No n_valid evidence: trust only the compute_consensus stamp (accepting the
+    # legacy "unanimous_NONE" spelling normalized by derive_route_reason).
+    stamp = str(row.get("route_reason") or "").strip()
+    return stamp in (REASON_UNANIMOUS_NONE, "unanimous_NONE")
+
+
 def plan_exports(
     batch_dirs: list[Path],
     dataset: str,
@@ -235,6 +329,7 @@ def plan_exports(
     max_assignment_components: int | None = None,
     soft_max_edges: int | None = None,
     backstop_max_edges: int | None = None,
+    export_empty_set: bool = True,
 ) -> ExportReport:
     """Run the export gates over merged consensus and return a full plan.
 
@@ -249,6 +344,11 @@ def plan_exports(
     not the primary gate. When a group lacks structure fields (an older
     batch.json predating the structure sidecar) the gate falls back to the flat
     ``max_edges`` cap on the selected edge set.
+
+    When ``export_empty_set`` (default), unanimous-NONE groups (all panelists
+    voted "none of the options fit") additionally become EMPTY-SET candidates:
+    reject-all pair labels with ``selected_edges == []`` (see
+    :func:`_gate_empty_group`). Set it False to plan the accept path only.
     """
     if max_assignment_components is None:
         max_assignment_components = settings.stitch_export_max_assignment_components
@@ -285,12 +385,16 @@ def plan_exports(
         human_df = human_df[~labeler.str.startswith(PANEL_LABELER_PREFIX, na=False)]
     human_gids = set(human_df["group_id"].astype(str)) if not human_df.empty else set()
 
-    # Metadata + candidate edges for auto-accept groups (for the class gate and
+    # Metadata + candidate edges for candidate groups (for the class gate and
     # the human edge-overlap mapping, reusing the eval module's approach).
+    # Includes unanimous-NONE groups when empty-set export is on, so their
+    # human-precedence edge-overlap check has the group's candidate edges.
     candidate_metas: dict[str, dict] = {}
     candidate_edges: dict[str, frozenset] = {}
     for gid, (bd, row) in merged.items():
-        if str(row.get("routing")) != "auto_accept":
+        is_accept = str(row.get("routing")) == "auto_accept"
+        is_none = export_empty_set and _is_unanimous_none(row)
+        if not (is_accept or is_none):
             continue
         grp = batch_groups.get(bd, {}).get(gid)
         # Prefer per-group metadata.yaml; fall back to batch.json (ids + classes)
@@ -331,32 +435,50 @@ def plan_exports(
 
     groups: list[GroupExport] = []
     n_auto = 0
+    n_none = 0
     for gid, (bd, row) in sorted(merged.items()):
-        # Gate (a): only unanimous auto-accept rows are candidates.
-        if str(row.get("routing")) != "auto_accept":
-            continue
-        n_auto += 1
-        groups.append(
-            _gate_group(
-                gid=gid,
-                bd=bd,
-                row=row,
-                grp=batch_groups.get(bd, {}).get(gid, {}),
-                meta=candidate_metas.get(gid),
-                human_gids=human_gids,
-                overlap_map=overlap_map,
-                max_edges=max_edges,
-                max_assignment_components=max_assignment_components,
-                soft_max_edges=soft_max_edges,
-                backstop_max_edges=backstop_max_edges,
+        # Gate (a): route each candidate row to its path. auto_accept -> accept
+        # gates; unanimous-NONE -> empty-set gates (when enabled). Everything
+        # else is not a candidate at all.
+        if str(row.get("routing")) == "auto_accept":
+            n_auto += 1
+            groups.append(
+                _gate_group(
+                    gid=gid,
+                    bd=bd,
+                    row=row,
+                    grp=batch_groups.get(bd, {}).get(gid, {}),
+                    meta=candidate_metas.get(gid),
+                    human_gids=human_gids,
+                    overlap_map=overlap_map,
+                    max_edges=max_edges,
+                    max_assignment_components=max_assignment_components,
+                    soft_max_edges=soft_max_edges,
+                    backstop_max_edges=backstop_max_edges,
+                )
             )
-        )
+        elif export_empty_set and _is_unanimous_none(row):
+            n_none += 1
+            groups.append(
+                _gate_empty_group(
+                    gid=gid,
+                    bd=bd,
+                    row=row,
+                    grp=batch_groups.get(bd, {}).get(gid, {}),
+                    meta=candidate_metas.get(gid),
+                    human_gids=human_gids,
+                    overlap_map=overlap_map,
+                    max_edges=max_edges,
+                    backstop_max_edges=backstop_max_edges,
+                )
+            )
 
     return ExportReport(
         dataset=dataset,
         n_total_groups=len(merged),
         n_auto_accept=n_auto,
         groups=groups,
+        n_unanimous_none=n_none,
     )
 
 
@@ -458,16 +580,90 @@ def _gate_group(
     )
 
 
+def _gate_empty_group(
+    gid: str,
+    bd: Path,
+    row: dict,
+    grp: dict,
+    meta: dict | None,
+    human_gids: set[str],
+    overlap_map: dict[str, str],
+    max_edges: int,
+    backstop_max_edges: int,
+) -> GroupExport:
+    """Gate a unanimous-NONE group into an EMPTY-SET (reject-all) export.
+
+    Gate (a) (unanimous-NONE) is applied by the caller. The remaining gates are
+    tailored to an empty selection:
+
+      * **Size** — apply ONLY the hard backstop ceiling on the group's *candidate*
+        edge count (``n_edges`` / ``len(edges)``, since the selected set is empty
+        by definition). The corridor/assignment-tangle sub-gate that
+        :func:`_gate_group` uses guards against a too-greedy *selection*; an empty
+        selection has no such risk, and that sub-gate would wrongly block the
+        2-corridor cross-mode reject (parallel road + cycleway) this path exists
+        to capture. A genuine monster still routes to a human (``over_max_edges``).
+        With no structure fields, fall back to the flat ``max_edges`` cap.
+      * **Class** — skipped. ``has_cross_mode_edge`` on an empty edge set is
+        vacuously False; a cross-mode reject is exactly what we want to record.
+      * **Sliver** — skipped. The emptiness is the intended verdict, not a sliver
+        artifact, so it must not be reclassified as ``emptied_by_sliver``.
+      * **Human precedence** — same as the accept path (exact group_id or
+        edge-overlap). A prior human reject-all on this group matches by group_id.
+    """
+    match_type = str(grp.get("match_type") or (meta.get("match_type") if meta else "") or "")
+    try:
+        mean_conf = float(row.get("mean_confidence") or 0.0)
+    except (ValueError, TypeError):
+        mean_conf = 0.0
+
+    def _mk(reason: str, **kw) -> GroupExport:
+        return GroupExport(
+            group_id=gid,
+            source_batch=bd.name,
+            exported=(reason == REASON_EXPORTED),
+            reason=reason,
+            match_type=match_type,
+            n_edges_raw=0,  # a reject-all selects nothing
+            mean_confidence=mean_conf,
+            is_empty_set=True,
+            **kw,
+        )
+
+    # Size gate: hard backstop ceiling on the group's candidate size only.
+    n_group_edges = grp.get("n_edges")
+    if n_group_edges is None:
+        n_group_edges = len(grp.get("edges", []))
+    ceiling = backstop_max_edges if grp.get("n_edges") is not None else max_edges
+    if int(n_group_edges) > ceiling:
+        return _mk(REASON_OVER_MAX, n_edges_final=0)
+
+    # Human precedence (exact group_id or edge-overlap): never overwrite a human.
+    if gid in human_gids or gid in overlap_map:
+        return _mk(
+            REASON_HUMAN_PRECEDENCE,
+            n_edges_final=0,
+            human_group_id=(gid if gid in human_gids else overlap_map[gid]),
+        )
+
+    # Export the empty set (reject-all).
+    return _mk(REASON_EXPORTED, n_edges_final=0, selected_edges=[])
+
+
 def write_exports(
     report: ExportReport,
     dataset: str,
     labels_dir: Path,
 ) -> int:
-    """Persist the report's exported groups as ``panel_unanimous_v3`` labels.
+    """Persist the report's exported groups as ``panel_*`` stitching labels.
 
-    Upserts by ``group_id`` (the store replaces an existing row for the same
-    group_id), so this is idempotent. The source batch name is recorded in the
-    ``session_id`` field for provenance. Returns the number of rows written.
+    Accept groups are stamped ``panel_unanimous_v3`` with their chosen edge set;
+    reject-all (empty-set) groups are stamped ``panel_unanimous_none_v3`` with
+    ``selected_edges == []`` (PAIR semantics, num_refs/num_targets == 0 — the same
+    on-disk shape as a human reject-all). Upserts by ``group_id`` (the store
+    replaces an existing row for the same group_id), so this is idempotent. The
+    source batch name is recorded in the ``session_id`` field for provenance.
+    Returns the number of rows written.
     """
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     written = 0
@@ -480,7 +676,7 @@ def write_exports(
             match_type=g.match_type,
             num_refs=len(ref_ids),
             num_targets=len(tgt_ids),
-            labeler=PANEL_LABELER,
+            labeler=PANEL_NONE_LABELER if g.is_empty_set else PANEL_LABELER,
             session_id=g.source_batch,
         )
         written += 1

@@ -16,6 +16,7 @@ import yaml
 
 from crosswalk.agent_labeling.stitch_export import (
     PANEL_LABELER,
+    PANEL_NONE_LABELER,
     REASON_CLASS_MISMATCH,
     REASON_EMPTIED_BY_SLIVER,
     REASON_EXPORTED,
@@ -112,9 +113,9 @@ def make_batch(batch_dir: Path, dataset: str, groups: list[dict]) -> Path:
                     "choice": g.get("choice", "A"),
                     "edge_set": json.dumps([[r, t] for r, t in g["edges"]]),
                     "routing": g["routing"],
-                    "n_votes": 3,
-                    "n_valid": 3,
-                    "minority": "",
+                    "n_votes": g.get("n_votes", 3),
+                    "n_valid": g.get("n_valid", 3),
+                    "minority": g.get("minority", ""),
                     "mean_confidence": g.get("mean_confidence", 0.9),
                     "route_reason": g.get("route_reason", "unanimous_non_none_small"),
                 }
@@ -836,3 +837,302 @@ def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
     b = tmp_path / "batch_novotes"
     b.mkdir()
     assert nonstandard_panel_batches([b]) == {}
+
+
+# ---------------------------------------------------------------------------
+# Unanimous-NONE -> empty-set (reject-all) export (resolver L1)
+# ---------------------------------------------------------------------------
+
+
+def _none_group(group_id: str, candidate_edges, **kw) -> dict:
+    """A unanimous-NONE group: routed to human_review, empty consensus edge set.
+
+    ``candidate_edges`` are the group's real candidate pairs (present in
+    batch.json), while the consensus ``edges`` (chosen set) is empty -- the panel
+    rejected every option. ``route_reason`` defaults to the fresh stamp; pass
+    ``route_reason=""`` to exercise the historical-derivation path.
+    """
+    return {
+        "group_id": group_id,
+        "routing": "human_review",
+        "consensus": "unanimous",
+        "choice": "NONE",
+        "edges": [],  # empty consensus edge set (reject-all)
+        "candidate_edges": list(candidate_edges),
+        "route_reason": kw.pop("route_reason", "unanimous_none"),
+        **kw,
+    }
+
+
+def test_unanimous_none_exported_as_empty_set(tmp_path, labels_dir):
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("gnone", [("r1", "t1"), ("r2", "t2")])],
+    )
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["gnone"]
+    assert g.exported
+    assert g.is_empty_set
+    assert g.reason == REASON_EXPORTED
+    assert g.selected_edges == []
+    assert g.n_edges_final == 0
+    assert report.n_unanimous_none == 1
+    assert report.exported_empty == [g]
+    assert report.exported_nonempty == []
+
+
+def test_unanimous_none_derived_without_stamp(tmp_path, labels_dir):
+    # A historical wave with a blank route_reason is still recognized as
+    # unanimous-NONE from consensus=unanimous + choice=NONE.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("gnone", [("r1", "t1")], route_reason="")],
+    )
+    g = _by_gid(_plan([b], labels_dir))["gnone"]
+    assert g.exported and g.is_empty_set
+
+
+def test_unanimous_none_below_quorum_not_exported(tmp_path, labels_dir):
+    # Defense-in-depth: a hand-edited / hypothetical pre-quorum-rule historical
+    # row claiming consensus=unanimous + choice=NONE with n_valid < 3 must NOT
+    # mint reject ground truth — with or without the route_reason stamp
+    # (contradicting n_valid evidence wins over the stamp).
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group("g_derived", [("r1", "t1")], n_valid=2, route_reason=""),
+            _none_group("g_stamped", [("r2", "t2")], n_valid=2),
+        ],
+    )
+    report = _plan([b], labels_dir)
+    assert "g_derived" not in _by_gid(report)
+    assert "g_stamped" not in _by_gid(report)
+    assert report.n_unanimous_none == 0
+
+
+def test_unanimous_none_missing_n_valid_requires_stamp(tmp_path, labels_dir):
+    # No n_valid evidence at all: only the compute_consensus route_reason stamp
+    # (which enforces the quorum at write time) is trusted; derivation from the
+    # consensus/choice columns alone is not.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group("g_stamped", [("r1", "t1")], n_valid="", n_votes=""),
+            _none_group("g_derived", [("r2", "t2")], n_valid="", n_votes="", route_reason=""),
+        ],
+    )
+    report = _plan([b], labels_dir)
+    gids = _by_gid(report)
+    assert gids["g_stamped"].exported and gids["g_stamped"].is_empty_set
+    assert "g_derived" not in gids
+    assert report.n_unanimous_none == 1
+
+
+def test_unanimous_none_writes_reject_all_row(tmp_path, labels_dir):
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("gnone", [("r1", "t1")], match_type="M:N")],
+    )
+    report = _plan([b], labels_dir)
+    written = write_exports(report, DATASET, Path(labels_dir))
+    assert written == 1
+
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    row = df.iloc[0]
+    # Same on-disk shape as a human reject-all: PAIR semantics, empty edges, 0/0.
+    assert row["labeler"] == PANEL_NONE_LABELER
+    assert row["labeler"].startswith("panel_")  # stays non-human for all consumers
+    assert json.loads(row["selected_edges"]) == []
+    assert row["num_refs"] == 0 and row["num_targets"] == 0
+    assert str(row.get("label_semantics") or "pair") == "pair"
+    assert row["session_id"] == "b1"
+
+
+def test_non_unanimous_none_not_exported(tmp_path, labels_dir):
+    # A NONE that carries a dissent (majority, not unanimous) is NOT a candidate.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group(
+                "gmaj",
+                [("r1", "t1")],
+                consensus="majority",
+                minority="codex=A",
+                route_reason="",  # force derivation -> dissent, not unanimous_none
+            )
+        ],
+    )
+    report = _plan([b], labels_dir)
+    assert "gmaj" not in _by_gid(report)  # not a candidate at all
+    assert report.n_unanimous_none == 0
+
+
+def test_empty_set_human_precedence_by_group_id(tmp_path, labels_dir):
+    # A prior human reject-all on the same group_id must not be overwritten.
+    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
+    store.add("gnone", [], "M:N", 0, 0, "brad", "s1")  # human reject-all
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("gnone", [("r1", "t1")])],
+    )
+    g = _by_gid(_plan([b], labels_dir))["gnone"]
+    assert not g.exported
+    assert g.reason == REASON_HUMAN_PRECEDENCE
+    assert g.is_empty_set
+
+
+def test_empty_set_human_precedence_by_edge_overlap(tmp_path, labels_dir):
+    # A human ACCEPT label sharing a candidate edge blocks the empty-set export.
+    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
+    store.add("old_hash", [{"ref_id": "r1", "target_id": "t1"}], "M:N", 1, 1, "brad", "s1")
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("new_hash", [("r1", "t1"), ("r2", "t2")])],
+    )
+    g = _by_gid(_plan([b], labels_dir))["new_hash"]
+    assert not g.exported
+    assert g.reason == REASON_HUMAN_PRECEDENCE
+    assert g.human_group_id == "old_hash"
+
+
+def test_empty_set_cross_mode_still_exported(tmp_path, labels_dir):
+    # The class gate is vacuous on an empty set, so a cross-mode reject
+    # (road ref + cycleway target, the co_bogota_bike_network shape) still
+    # exports -- this is the whole point of empty-set labels.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group(
+                "xmode_none",
+                [("r1", "t1")],
+                ref_classes={"r1": "primary"},
+                target_classes={"t1": "cycleway"},
+            )
+        ],
+    )
+    g = _by_gid(_plan([b], labels_dir))["xmode_none"]
+    assert g.exported and g.is_empty_set
+
+
+def test_empty_set_multi_corridor_tangle_still_exported(tmp_path, labels_dir):
+    # The corridor/assignment-tangle sub-gate (which blocks small tangles on the
+    # accept path) is NOT applied to empty sets: a 3-corridor reject exports.
+    edges = [(f"r{i}", f"t{i}") for i in range(6)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group(
+                "tangle_none",
+                edges,
+                n_edges=6,
+                n_corridors=3,
+                n_assignment_components=3,
+            )
+        ],
+    )
+    g = _by_gid(_plan([b], labels_dir))["tangle_none"]
+    assert g.exported and g.is_empty_set
+
+
+def test_empty_set_over_backstop_blocked(tmp_path, labels_dir):
+    # A genuine monster reject (candidate size over the hard backstop) still
+    # routes to a human rather than auto-committing a blanket NONE.
+    edges = [(f"r{i}", f"t{i}") for i in range(45)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("giant_none", edges, n_edges=45)],
+    )
+    g = _by_gid(_plan([b], labels_dir, backstop_max_edges=40))["giant_none"]
+    assert not g.exported
+    assert g.reason == REASON_OVER_MAX
+    assert g.is_empty_set
+
+
+def test_empty_set_over_flat_max_without_structure(tmp_path, labels_dir):
+    # Without structure fields, the empty-set ceiling is the flat max_edges on the
+    # group's candidate count.
+    edges = [(f"r{i}", f"t{i}") for i in range(25)]
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("big_none", edges)],  # no n_edges field -> flat cap
+    )
+    g = _by_gid(_plan([b], labels_dir, max_edges=20))["big_none"]
+    assert not g.exported
+    assert g.reason == REASON_OVER_MAX
+
+
+def test_empty_set_disabled_flag(tmp_path, labels_dir):
+    # export_empty_set=False: unanimous-NONE is not a candidate; accepts still are.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group("gnone", [("r1", "t1")]),
+            {"group_id": "gyes", "routing": "auto_accept", "edges": [("r2", "t2")]},
+        ],
+    )
+    report = _plan([b], labels_dir, export_empty_set=False)
+    gids = _by_gid(report)
+    assert "gnone" not in gids
+    assert gids["gyes"].exported
+    assert report.n_unanimous_none == 0
+
+
+def test_empty_set_round_trip_through_store(tmp_path, labels_dir):
+    # Store -> load -> recovery: the panel empty-set label is recovered exactly
+    # like a human reject-all (empty bucket / verbatim group_id).
+    from crosswalk.agent_labeling.stitch_eval import (
+        recover_empty_reject_all,
+        recover_labeled_groups,
+    )
+
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_none_group("gnone", [("r1", "t1")])],
+    )
+    write_exports(_plan([b], labels_dir), DATASET, Path(labels_dir))
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+
+    groups = [{"group_id": "gnone", "edges": [{"ref_id": "r1", "target_id": "t1"}]}]
+    rec = recover_labeled_groups(groups, df)
+    assert rec["empty"] == ["gnone"]  # classified as reject-all, not set/clean/lost
+    assert rec["clean"] == [] and rec["set"] == []
+
+    emp = recover_empty_reject_all(groups, df)
+    assert emp["recovered"] == ["gnone"] and emp["unrecoverable"] == []
+
+
+def test_empty_and_accept_coexist(tmp_path, labels_dir):
+    # A batch with both an accept and a reject-all group exports both, each with
+    # its own labeler.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {"group_id": "gyes", "routing": "auto_accept", "edges": [("r1", "t1")]},
+            _none_group("gno", [("r2", "t2")]),
+        ],
+    )
+    report = _plan([b], labels_dir)
+    assert len(report.exported) == 2
+    assert {g.group_id for g in report.exported_empty} == {"gno"}
+    assert {g.group_id for g in report.exported_nonempty} == {"gyes"}
+
+    write_exports(report, DATASET, Path(labels_dir))
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"]))
+    assert labelers["gyes"] == PANEL_LABELER
+    assert labelers["gno"] == PANEL_NONE_LABELER
