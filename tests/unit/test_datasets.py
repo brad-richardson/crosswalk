@@ -490,6 +490,82 @@ class TestSurgicalYamlUpdate:
         assert reloaded.quality_fingerprint.total_segments == 99
         assert reloaded.quality_hold.reason == "keep me"
 
+    def test_mid_block_column0_comment_does_not_corrupt(self, monkeypatch, tmp_path):
+        """A column-0 comment splitting the owned block must not orphan a stale
+        indented tail that shadows the freshly written values."""
+        import yaml as yaml_module
+
+        from crosswalk.datasets.schema import load_dataset_config
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "midcomment_ds.yaml"
+        path.write_text(
+            "name: midcomment_ds  # keep this inline comment\n"
+            "last_fetch:\n"
+            "  target:\n"
+            "    fetched_at: '2026-01-01T00:00:00+00:00'\n"
+            "# stray column-0 comment inside the machine-owned block\n"
+            "    feature_count: 1\n"
+            "quality_hold:\n"
+            "  reason: keep me\n"
+        )
+
+        assert self._run_update("midcomment_ds") is not None
+        after = path.read_text()
+
+        # No duplicate/shadowed owned block: exactly one last_fetch key, and a
+        # plain parse of the file sees the NEW values, not a stale tail.
+        assert after.count("last_fetch:") == 1
+        parsed = yaml_module.safe_load(after)
+        assert parsed["last_fetch"]["reference"]["feature_count"] == 42
+        assert parsed["last_fetch"]["target"]["feature_count"] == 1  # carried over
+        reloaded = load_dataset_config(path)
+        assert reloaded.last_fetch.reference.feature_count == 42
+        assert reloaded.last_fetch.target.feature_count == 1
+        # Human bytes outside the owned block are untouched
+        assert after.startswith("name: midcomment_ds  # keep this inline comment\n")
+        assert after.endswith("quality_hold:\n  reason: keep me\n")
+
+    def test_update_is_idempotent(self, monkeypatch, tmp_path):
+        """Applying the identical update twice leaves the file byte-identical."""
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "idem_ds.yaml"
+        path.write_text(COMMENTED_CONFIG.replace("commented_ds", "idem_ds"))
+
+        assert self._run_update("idem_ds") is not None
+        first = path.read_text()
+        assert self._run_update("idem_ds") is not None
+        second = path.read_text()
+        assert second == first
+
+    def test_safety_net_falls_back_to_full_save(self, monkeypatch, tmp_path, caplog):
+        """If the splice does not verify (bad text), fall back to full
+        re-serialization: comments are lost but values are correct."""
+        import logging
+
+        from crosswalk.datasets import schema as schema_module
+        from crosswalk.datasets.schema import load_dataset_config
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "broken_splice_ds.yaml"
+        path.write_text(COMMENTED_CONFIG.replace("commented_ds", "broken_splice_ds"))
+
+        # Force a pathological splice result (unparsable YAML)
+        monkeypatch.setattr(
+            schema_module,
+            "_replace_top_level_block",
+            lambda text, key, block_yaml: ":::[ not yaml",
+        )
+        with caplog.at_level(logging.WARNING, logger="crosswalk.datasets.schema"):
+            assert self._run_update("broken_splice_ds") is not None
+        assert any("did not verify" in rec.getMessage() for rec in caplog.records)
+
+        # Fallback wrote a full, correct re-serialization
+        reloaded = load_dataset_config(path)
+        assert reloaded.last_fetch.reference.feature_count == 42
+        assert reloaded.last_fetch.target.feature_count == 10
+        assert reloaded.quality_hold.since == "2026-07-06"
+
 
 class TestApplyClassMapping:
     """Tests for apply_class_mapping function."""
