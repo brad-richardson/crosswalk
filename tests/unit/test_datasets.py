@@ -316,6 +316,181 @@ class TestYAMLSaving:
         assert schema_load(path).quality_hold.since == "2026-07-06"
 
 
+# A hand-curated config: full-line comments, inline comments, a comment
+# directly above the machine-owned block, keys both before and after it,
+# and a blank-line separator that must survive the surgical update.
+COMMENTED_CONFIG = """\
+# Curation notes for the Bogotá surface-code mapping — do not lose me.
+name: commented_ds
+display_name: Commented Dataset  # inline: display comment
+type: road
+fetch:
+  id_column: RID_8  # inline: RID_8 prefix derivation notes
+  # full-line comment inside a human-authored block
+  class_column: strassenklasse2
+# comment immediately above the machine-owned block
+last_fetch:
+  target:
+    fetched_at: '2026-01-01T00:00:00+00:00'
+    feature_count: 10
+
+# hold placed 2026-07-06 pending cross-mode fix
+quality_hold:
+  reason: cross-mode defect  # inline: trailing comment on held reason
+  since: '2026-07-06'
+notes: trailing human notes
+"""
+
+
+class TestSurgicalYamlUpdate:
+    """Fetch-style updates must not strip comments or reflow human YAML (#339)."""
+
+    def _datasets_dir(self, monkeypatch, tmp_path):
+        from crosswalk.datasets import schema as schema_module
+
+        monkeypatch.setattr(schema_module, "get_datasets_dir", lambda: tmp_path)
+        return tmp_path
+
+    def _run_update(self, name):
+        from datetime import UTC, datetime
+
+        from crosswalk.datasets.schema import update_last_fetch
+
+        return update_last_fetch(
+            name,
+            fetch_type="reference",
+            fetched_at=datetime(2026, 7, 7, 12, 0, 0, tzinfo=UTC),
+            bbox=(-71.2, 42.2, -70.9, 42.4),
+            feature_count=42,
+            geometry_types=["LineString"],
+            output_path="data/raw",
+        )
+
+    def test_update_preserves_all_human_bytes(self, monkeypatch, tmp_path):
+        """Everything outside the owned last_fetch block stays byte-identical."""
+        from crosswalk.datasets.schema import load_dataset_config
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "commented_ds.yaml"
+        path.write_text(COMMENTED_CONFIG)
+
+        result = self._run_update("commented_ds")
+        assert result is not None
+        after = path.read_text()
+
+        # Bytes before the owned block are untouched
+        prefix = COMMENTED_CONFIG.split("last_fetch:\n")[0]
+        assert after.startswith(prefix)
+        # Bytes after the owned block — including the blank-line separator and
+        # the comment lines around quality_hold — are untouched
+        suffix = (
+            "\n# hold placed 2026-07-06 pending cross-mode fix\n"
+            + COMMENTED_CONFIG.split("\n# hold placed 2026-07-06 pending cross-mode fix\n")[1]
+        )
+        assert after.endswith(suffix)
+        # Every comment survives byte-identical
+        for line in COMMENTED_CONFIG.splitlines():
+            if "#" in line:
+                assert line in after.splitlines()
+
+        # The owned block itself carries the new values (and keeps target)
+        reloaded = load_dataset_config(path)
+        assert reloaded.last_fetch.reference.feature_count == 42
+        assert reloaded.last_fetch.reference.bbox == (-71.2, 42.2, -70.9, 42.4)
+        assert reloaded.last_fetch.target.feature_count == 10
+        assert reloaded.quality_hold.since == "2026-07-06"
+        assert reloaded.notes == "trailing human notes"
+
+    def test_update_appends_block_when_absent(self, monkeypatch, tmp_path):
+        """Missing owned block is appended; file without trailing newline is fine."""
+        from crosswalk.datasets.schema import load_dataset_config
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "no_fetch_ds.yaml"
+        original = "# keep me\nname: no_fetch_ds\ntype: road  # inline"
+        path.write_text(original)  # no trailing newline, no last_fetch
+
+        assert self._run_update("no_fetch_ds") is not None
+        after = path.read_text()
+        assert after.startswith(original + "\n")
+        assert "\nlast_fetch:\n" in after
+        assert "# keep me" in after and "# inline" in after
+        assert load_dataset_config(path).last_fetch.reference.feature_count == 42
+
+    def test_update_when_block_is_last_in_file(self, monkeypatch, tmp_path):
+        """Owned block at EOF is replaced in place; preceding bytes untouched."""
+        from crosswalk.datasets.schema import load_dataset_config
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "tail_ds.yaml"
+        head = "name: tail_ds  # inline comment\ntype: road\n"
+        path.write_text(
+            head + "last_fetch:\n  target:\n    fetched_at: '2026-01-01T00:00:00+00:00'\n"
+        )
+
+        assert self._run_update("tail_ds") is not None
+        after = path.read_text()
+        assert after.startswith(head)
+        reloaded = load_dataset_config(path)
+        assert reloaded.last_fetch.reference.feature_count == 42
+        assert reloaded.last_fetch.target is not None
+
+    def test_comment_free_file_roundtrips(self, monkeypatch, tmp_path):
+        """A machine-written (comment-free) config still updates correctly."""
+        from crosswalk.datasets.schema import (
+            DatasetConfig as SchemaDatasetConfig,
+        )
+        from crosswalk.datasets.schema import (
+            load_dataset_config,
+            save_dataset_config,
+        )
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "plain_ds.yaml"
+        save_dataset_config(SchemaDatasetConfig(name="plain_ds", type="road"), path)
+        before = path.read_text()
+
+        assert self._run_update("plain_ds") is not None
+        after = path.read_text()
+        assert after.startswith(before)  # original keys byte-identical, block appended
+        assert load_dataset_config(path).last_fetch.reference.output_path == "data/raw"
+
+    def test_quality_fingerprint_update_preserves_comments(self, monkeypatch, tmp_path):
+        """The other machine-owned block (quality_fingerprint) is surgical too."""
+        from datetime import UTC, datetime
+
+        from crosswalk.datasets.schema import (
+            QualityFingerprintConfig,
+            load_dataset_config,
+            update_quality_fingerprint,
+        )
+
+        datasets_dir = self._datasets_dir(monkeypatch, tmp_path)
+        path = datasets_dir / "fp_ds.yaml"
+        content = (
+            "# provenance comment\n"
+            "name: fp_ds\n"
+            "quality_fingerprint:\n"
+            "  computed_at: '2026-01-01T00:00:00+00:00'\n"
+            "  total_segments: 1\n"
+            "quality_hold:\n"
+            "  reason: keep me  # inline hold comment\n"
+        )
+        path.write_text(content)
+
+        fp = QualityFingerprintConfig(
+            computed_at=datetime(2026, 7, 7, tzinfo=UTC), total_segments=99
+        )
+        assert update_quality_fingerprint("fp_ds", fp) is not None
+
+        after = path.read_text()
+        assert after.startswith("# provenance comment\nname: fp_ds\n")
+        assert after.endswith("quality_hold:\n  reason: keep me  # inline hold comment\n")
+        reloaded = load_dataset_config(path)
+        assert reloaded.quality_fingerprint.total_segments == 99
+        assert reloaded.quality_hold.reason == "keep me"
+
+
 class TestApplyClassMapping:
     """Tests for apply_class_mapping function."""
 
