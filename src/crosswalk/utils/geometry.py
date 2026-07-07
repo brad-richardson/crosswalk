@@ -35,61 +35,89 @@ def geometry_length_meters(geom) -> float:
         return geom.length * 111000.0
 
 
+def flatten_to_linestring(geom):
+    """Normalize a MultiLineString to a single LineString.
+
+    Merges contiguous parts with shapely.line_merge; when parts stay disjoint,
+    returns the longest part (dominant-part approximation). Non-MultiLineString
+    inputs (and empty/None) are returned unchanged.
+    """
+    if geom is None or geom.is_empty or geom.geom_type != "MultiLineString":
+        return geom
+    merged = shapely.line_merge(geom)
+    if merged.geom_type == "LineString":
+        return merged
+    parts = shapely.get_parts(merged)
+    if len(parts) == 0:
+        return merged
+    return parts[int(np.argmax(shapely.length(parts)))]
+
+
 def filter_to_linestrings(
     gdf: gpd.GeoDataFrame,
     source_name: str = "dataset",
 ) -> gpd.GeoDataFrame:
-    """Filter GeoDataFrame to only LineString geometries, dropping MultiLineStrings.
+    """Normalize to a LineString-only GeoDataFrame.
 
-    MultiLineString geometries are filtered out at ingest time as they typically
-    represent bad data or edge cases that complicate downstream processing.
-    A warning is logged when MultiLineStrings are dropped.
+    This is the boundary that enforces the LineString-only invariant the whole
+    feature layer relies on. MultiLineStrings are **flattened** to a single
+    LineString (contiguous parts merged via ``shapely.line_merge``, otherwise the
+    longest disjoint part is kept) rather than dropped, so real multi-part data is
+    retained instead of silently discarded. Only genuinely non-line geometries are
+    dropped: null/empty, Points, Polygons, and any degenerate MultiLineString that
+    did not flatten to a LineString.
 
     Args:
         gdf: Input GeoDataFrame with geometry column
         source_name: Name of the data source for logging (e.g., "reference", "target")
 
     Returns:
-        GeoDataFrame with only LineString geometries
+        GeoDataFrame with only LineString geometries (MultiLineStrings flattened)
     """
     if gdf.empty:
         return gdf
 
     original_count = len(gdf)
+    geom_col = gdf.geometry.name
 
-    # Count null/empty geometries explicitly
-    null_mask = gdf.geometry.isna() | gdf.geometry.is_empty
-    null_count = null_mask.sum()
+    # Flatten multi-part MultiLineStrings to LineStrings (in place on a copy).
+    gdf = gdf.copy()
+    mls_mask = gdf.geometry.geom_type == "MultiLineString"
+    multilinestring_count = int(mls_mask.sum())
+    if multilinestring_count > 0:
+        gdf.loc[mls_mask, geom_col] = gdf.loc[mls_mask, geom_col].apply(flatten_to_linestring)
 
-    # Count different geometry types (excluding nulls)
+    # Recompute types after flattening; anything not a LineString is dropped.
     geom_types = gdf.geometry.geom_type
-    multilinestring_count = (geom_types == "MultiLineString").sum()
-    linestring_count = (geom_types == "LineString").sum()
-    other_count = original_count - multilinestring_count - linestring_count - null_count
+    null_mask = gdf.geometry.isna() | gdf.geometry.is_empty
+    null_count = int(null_mask.sum())
 
-    # Filter to only LineString geometries (this also excludes nulls)
-    mask = geom_types == "LineString"
-    filtered = gdf[mask].copy()
+    line_mask = geom_types == "LineString"
+    flattened_count = int((mls_mask & line_mask).sum())
+    # Non-line geometries that remain (Points, Polygons, degenerate MLS, nulls).
+    other_count = original_count - int(line_mask.sum()) - null_count
 
-    # Log warnings for filtered geometries
+    filtered = gdf[line_mask & ~null_mask].copy()
+
+    # Log an INFO count of MLS successfully flattened.
+    if flattened_count > 0:
+        logger.info(
+            f"Flattened {flattened_count} MultiLineString geometries to LineStrings "
+            f"in {source_name} (merged contiguous parts / longest disjoint part)."
+        )
+
+    # Warnings only for genuinely dropped geometries.
     if null_count > 0:
         logger.warning(
             f"Filtered {null_count} null/empty geometries from {source_name} "
             f"({null_count}/{original_count} features)."
         )
 
-    if multilinestring_count > 0:
-        logger.warning(
-            f"Filtered {multilinestring_count} MultiLineString geometries from {source_name} "
-            f"({multilinestring_count}/{original_count} features). "
-            f"MultiLineStrings are not supported and likely represent bad data."
-        )
-
     if other_count > 0:
         logger.warning(
             f"Filtered {other_count} non-LineString geometries from {source_name} "
             f"({other_count}/{original_count} features). "
-            f"Only LineString geometries are supported."
+            f"Only LineString geometries are supported (MultiLineStrings are flattened)."
         )
 
     if len(filtered) == 0 and original_count > 0:
