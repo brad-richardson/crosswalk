@@ -187,16 +187,18 @@ When making changes to matching logic, feature computation, or optimization, run
 ```bash
 # Before changes (on main branch)
 git checkout main
-uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
-    data/raw/us_boston_streets_v1.0.parquet \
+uv run crosswalk stitch us_boston_streets \
     -m xgboost -o data/output/before_us_boston_streets_bridge.parquet
 
 # After changes (on feature branch)
 git checkout feature-branch
-uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
-    data/raw/us_boston_streets_v1.0.parquet \
+uv run crosswalk stitch us_boston_streets \
     -m xgboost -o data/output/after_us_boston_streets_bridge.parquet
 ```
+
+Always pass the **dataset name** (not raw `-r`/`-t` paths): since #350 the
+resolver-prune allowlist keys on dataset identity, so a path-only invocation
+runs with the prune off and the comparison numbers won't match production.
 
 Include comparison in PR description:
 
@@ -218,8 +220,7 @@ vs `labels/stitching/`), which pair-level F1 does not measure:
 
 ```bash
 # Fresh output for an armed dataset, then gate it (nonzero exit on regression)
-uv run crosswalk stitch data/raw/us_boston_streets_overture_segments_v1.0.parquet \
-    data/raw/us_boston_streets_v1.0.parquet \
+uv run crosswalk stitch us_boston_streets \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 uv run mbench run crosswalk us_boston_streets -c mbench/datasets.toml --gate
 ```
