@@ -950,7 +950,11 @@ def create_subline(line: LineString, start_frac: float, end_frac: float) -> Line
     Returns:
         A new LineString representing the segment, or None if the input is invalid.
     """
-    if line is None or line.is_empty or line.length == 0:
+    if line is None or line.is_empty:
+        return None
+
+    length = line.length  # hoisted: each .length access is a GEOS call
+    if length == 0:
         return None
 
     # Clamp fractions to valid range
@@ -966,8 +970,8 @@ def create_subline(line: LineString, start_frac: float, end_frac: float) -> Line
         return None
 
     # Calculate absolute distances along the line
-    start_dist = line.length * start_frac
-    end_dist = line.length * end_frac
+    start_dist = length * start_frac
+    end_dist = length * end_frac
 
     result = substring(line, start_dist, end_dist)
     if not isinstance(result, LineString) or result.is_empty:

@@ -854,8 +854,10 @@ class TestParallelSiblingDetection:
         elapsed = time.perf_counter() - start
 
         assert len(result) == n_segments
-        # 5 second threshold - allows for CI variance while catching major regressions
-        assert elapsed < 5.0, (
+        # 8 second threshold — catches major regressions while tolerating CI
+        # runner noise (the old 5.0s bound flaked at 5.04s on a noisy runner).
+        # Typical local time is well under 2s.
+        assert elapsed < 8.0, (
             f"Sibling detection too slow: {elapsed:.2f}s for {n_segments} segments"
         )
 

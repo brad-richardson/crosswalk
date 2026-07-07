@@ -53,6 +53,7 @@ import shapely as shapely_mod
 from shapely import LineString, get_coordinates, line_interpolate_point, points
 from shapely import distance as shapely_distance
 
+from ._exact_stats import percentile_sorted
 from ._jit_helpers import (
     collinear_gap_ratio_numba,
     compute_angle_histogram_numba,
@@ -511,7 +512,17 @@ def _compute_hausdorff_stats(
     all_min_dists = np.concatenate([dists_a_to_b, dists_b_to_a])
 
     mean_dist = float(np.mean(all_min_dists))
-    p95_dist = float(np.percentile(all_min_dists, 95))
+    # Exact scalar replacement for np.percentile(all_min_dists, 95) — avoids
+    # ~50 µs of numpy quantile machinery per pair (see _exact_stats.py).
+    # percentile_sorted contract: 1-D float64, finite (shapely.distance yields
+    # finite floats), NaN handled by the fallback branch, q < 100 — the regime
+    # where the replica is bitwise-equal to np.percentile (it diverges for
+    # +inf inputs at q=100 and for float32; keep those unreachable).
+    sorted_dists = np.sort(all_min_dists)
+    if np.isnan(sorted_dists[-1]):
+        p95_dist = float(np.percentile(all_min_dists, 95))
+    else:
+        p95_dist = percentile_sorted(sorted_dists, 95.0)
 
     return mean_dist, p95_dist
 
@@ -566,7 +577,9 @@ def compute_heading_consistency(
     if sampled_points is not None:
         return compute_heading_consistency_numba(sampled_points)
 
-    if line.length < sample_interval * 2:
+    length = line.length  # hoisted: each .length access is a GEOS call
+
+    if length < sample_interval * 2:
         # Short segment: use actual vertices instead of skipping entirely.
         # Need >= 3 vertices to compute any heading change.
         coords = get_coordinates(line)
@@ -575,8 +588,8 @@ def compute_heading_consistency(
         return compute_heading_consistency_numba(coords)
 
     # Normal path: sample points along the line using vectorized Shapely interpolation
-    n_samples = max(3, int(line.length / sample_interval))
-    distances = np.linspace(0, line.length, n_samples)
+    n_samples = max(3, int(length / sample_interval))
+    distances = np.linspace(0, length, n_samples)
     pts = line_interpolate_point(line, distances)
     sampled_points = get_coordinates(pts)
 
@@ -1046,6 +1059,36 @@ def compute_crossing_angle_features(
     dy = shapely_mod.get_y(ends) - shapely_mod.get_y(starts)
     neighbor_headings = (np.degrees(np.arctan2(dy, dx)) + 360) % 360
 
+    return crossing_angle_from_headings(
+        candidate, neighbor_headings, sample_interval, transverse_threshold, neutral
+    )
+
+
+def crossing_angle_from_headings(
+    candidate: LineString,
+    neighbor_headings: np.ndarray,
+    sample_interval: float,
+    transverse_threshold: float,
+    neutral: dict[str, float],
+) -> dict[str, float]:
+    """Crossing-angle statistics given precomputed neighbor gross headings.
+
+    Shared tail of compute_crossing_angle_features(). Also called directly by
+    the fast path in compute.py::_compute_crossing_angle, which looks up
+    per-segment headings precomputed in the SiblingSearchContext instead of
+    re-deriving them from geometries on every call.
+
+    Args:
+        candidate: The segment being evaluated (projected CRS, meters)
+        neighbor_headings: Gross headings (degrees 0-360) of different-tier
+            neighbors, one per neighbor
+        sample_interval: Distance between heading sample points (meters)
+        transverse_threshold: Angle threshold for "transverse" classification
+        neutral: Dict returned when no statistics can be computed
+
+    Returns:
+        Dict with crossing_angle_min/mean/std and transverse_neighbor_fraction.
+    """
     # Sample local headings along the candidate (vectorized Shapely + numpy)
     candidate_headings = _sample_local_headings(candidate, sample_interval)
     if len(candidate_headings) == 0:

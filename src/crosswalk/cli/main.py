@@ -9,7 +9,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 import typer
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ..eval_utils import DEFAULT_QUALITY_THRESHOLD
 from .utils import console
@@ -837,24 +836,23 @@ def register_commands(app: typer.Typer) -> None:
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                task = progress.add_task("Stitching...", total=None)
+            # Plain status line instead of a rich spinner: rich's live display
+            # runs a background refresher thread, and the parallel feature
+            # phase only takes the fork/COW fast path from a single-threaded
+            # process (features/pipeline.py::_should_use_fork) — the spinner
+            # thread would silently force the slow pickle-per-worker path.
+            # Pipeline logs already stream progress.
+            console.print("Stitching...")
 
-                result = run_pipeline(
-                    reference_path=ref_path,
-                    target_path=tgt_path,
-                    output_path=out_path,
-                    method=method,
-                    buffer_distance_m=buffer_distance_m,
-                    n_jobs=workers,
-                    allow_version_mismatch=allow_version_mismatch,
-                )
-
-                progress.update(task, completed=True)
+            result = run_pipeline(
+                reference_path=ref_path,
+                target_path=tgt_path,
+                output_path=out_path,
+                method=method,
+                buffer_distance_m=buffer_distance_m,
+                n_jobs=workers,
+                allow_version_mismatch=allow_version_mismatch,
+            )
 
             console.print(f"[green]Matched {result.n_matched} / {result.n_target} features[/green]")
             console.print(f"[green]Bridge file: {out_path}[/green]")
