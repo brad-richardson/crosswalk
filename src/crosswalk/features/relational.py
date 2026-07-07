@@ -90,6 +90,10 @@ def _offset_stats(
         )
         return mean_offset, offset_iqr, offset_p95, offset_pn
 
+    # percentile_sorted contract: 1-D float64, finite (shapely.distance yields
+    # finite floats), NaN handled by the fallback above, q < 100 — the regime
+    # where the replica is bitwise-equal to np.percentile (it diverges for
+    # +inf inputs at q=100 and for float32; keep those unreachable).
     p25 = percentile_sorted(sorted_offsets, 25.0)
     p75 = percentile_sorted(sorted_offsets, 75.0)
     offset_iqr = float(p75 - p25)

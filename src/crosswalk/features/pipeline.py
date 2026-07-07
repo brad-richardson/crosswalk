@@ -13,6 +13,7 @@ compute_features_only().
 import logging
 import multiprocessing
 import sys
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, NamedTuple
@@ -475,6 +476,35 @@ def prepare_worker_data(
     )
 
 
+def _should_use_fork() -> bool:
+    """Decide whether the fork/COW worker_data shortcut is safe to use.
+
+    Both conditions must hold:
+
+    1. **Linux**: fork + copy-on-write is the whole point of the shortcut
+       (worker_data is shared page-wise instead of pickled per worker).
+       macOS fork is unsafe with system frameworks; Windows has no fork.
+    2. **Single-threaded main thread**: forking a process that has other
+       live threads can deadlock the child (any lock held by a
+       non-forked thread stays locked forever in the child) — this is
+       exactly the hazard Python 3.14's forkserver default guards
+       against. The CLI stitch path reaches here from a single-threaded
+       main thread (the prepare_worker_data thread pools have exited),
+       so it qualifies. The web UI does NOT: it computes features from a
+       daemon thread (web/routes/labeling.py -> services ->
+       data_loader) while uvicorn's event loop and other daemon threads
+       are live, so it must take the pickling/forkserver initializer
+       path below instead.
+
+    Kept as a pure helper so the decision is testable without forking.
+    """
+    return (
+        sys.platform.startswith("linux")
+        and threading.current_thread() is threading.main_thread()
+        and threading.active_count() == 1
+    )
+
+
 class ParallelFeatureResult(NamedTuple):
     """Result of parallel feature computation."""
 
@@ -546,23 +576,20 @@ def compute_features_parallel(
     )
     t0 = time.perf_counter()
 
-    # On Linux, request the "fork" start method explicitly and set worker_data
-    # as a module-level global before forking. Child processes inherit the
-    # parent's memory via copy-on-write, avoiding the O(N_workers * pickle_time)
-    # cost of serializing multi-GB worker_data (STRtrees, geometry arrays, etc.)
-    # to each worker.
+    # When provably safe (see _should_use_fork), request the "fork" start
+    # method explicitly and set worker_data as a module-level global before
+    # forking. Child processes inherit the parent's memory via copy-on-write,
+    # avoiding the O(N_workers * pickle_time) cost of serializing multi-GB
+    # worker_data (STRtrees, geometry arrays, etc.) to each worker.
     #
     # Python 3.14 changed the default start method on Linux from "fork" to
     # "forkserver", which silently disabled this shortcut: every worker then
     # received worker_data via pickled initargs, serializing the whole
     # "parallel" phase behind the parent's pickling (measured: load average
     # ~1.8 on a 20-core machine during feature computation, phase wall time
-    # ~= single-process CPU time). Forking a process that has running threads
-    # is the hazard forkserver guards against; at this point in the pipeline
-    # the prepare_worker_data thread pools have exited, and this was the
-    # status-quo execution model on Python <= 3.13.
+    # ~= single-process CPU time).
     mp_context = None
-    if sys.platform.startswith("linux"):
+    if _should_use_fork():
         try:
             mp_context = multiprocessing.get_context("fork")
         except ValueError:  # pragma: no cover - fork unavailable
@@ -575,6 +602,10 @@ def compute_features_parallel(
         executor_kwargs: dict[str, Any] = {"max_workers": n_workers, "mp_context": mp_context}
         logger.debug("Using fork shortcut: worker_data set via module global (COW)")
     else:
+        logger.debug(
+            "Fork shortcut unavailable (non-Linux, or process is multi-threaded): "
+            "sending worker_data to workers via pickled initargs"
+        )
         executor_kwargs = {
             "max_workers": n_workers,
             "initializer": _init_worker,

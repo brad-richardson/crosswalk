@@ -514,6 +514,10 @@ def _compute_hausdorff_stats(
     mean_dist = float(np.mean(all_min_dists))
     # Exact scalar replacement for np.percentile(all_min_dists, 95) — avoids
     # ~50 µs of numpy quantile machinery per pair (see _exact_stats.py).
+    # percentile_sorted contract: 1-D float64, finite (shapely.distance yields
+    # finite floats), NaN handled by the fallback branch, q < 100 — the regime
+    # where the replica is bitwise-equal to np.percentile (it diverges for
+    # +inf inputs at q=100 and for float32; keep those unreachable).
     sorted_dists = np.sort(all_min_dists)
     if np.isnan(sorted_dists[-1]):
         p95_dist = float(np.percentile(all_min_dists, 95))
