@@ -10,12 +10,15 @@ that combines:
 Dataset configs are stored as YAML files in the `datasets/` directory at repo root.
 """
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class SourceConfig(BaseModel):
@@ -250,17 +253,8 @@ def _convert_lists_to_tuples(data: dict, tuple_keys: set[str]) -> dict:
     return result
 
 
-def save_dataset_config(config: DatasetConfig, path: Path) -> Path:
-    """Save a dataset configuration to YAML.
-
-    Args:
-        config: Configuration to save
-        path: Output path
-
-    Returns:
-        Path to saved file
-    """
-    # Convert to dict, handling datetime and tuple serialization
+def _config_to_yaml_data(config: DatasetConfig) -> dict:
+    """Convert a DatasetConfig to a plain dict ready for yaml.dump."""
     data = config.model_dump(exclude_none=True, exclude_unset=True)
 
     # Handle datetime serialization in last_fetch sub-fields
@@ -276,13 +270,160 @@ def save_dataset_config(config: DatasetConfig, path: Path) -> Path:
         ].isoformat()
 
     # Convert tuples to lists for YAML
-    data = _convert_tuples_to_lists(data)
+    return _convert_tuples_to_lists(data)
+
+
+def save_dataset_config(config: DatasetConfig, path: Path) -> Path:
+    """Save a dataset configuration to YAML.
+
+    Full re-serialization: this strips any comments present in an existing
+    file, so it is only appropriate for genuinely new configs (discovery,
+    classification export). Machine updates to existing, human-curated
+    configs must go through :func:`_update_owned_blocks` instead.
+
+    Args:
+        config: Configuration to save
+        path: Output path
+
+    Returns:
+        Path to saved file
+    """
+    data = _config_to_yaml_data(config)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     return path
+
+
+def _replace_top_level_block(text: str, key: str, block_yaml: str) -> str:
+    """Textually replace one top-level YAML block, leaving all other bytes intact.
+
+    The block starts at the column-0 line ``key:`` and extends through all
+    following indented (or blank) lines. A column-0 ``#`` comment is part of
+    the block when indented content still follows it (otherwise splicing would
+    leave an orphaned indented tail that shadows the new values); it is a
+    boundary — and preserved — only when the next non-blank, non-comment line
+    is another column-0 key, or at EOF. Blank lines immediately before the
+    next section are treated as human formatting and preserved. If the key is
+    absent, the block is appended at the end of the file.
+
+    Args:
+        text: Full YAML file text
+        key: Top-level key to replace (must be a plain, unquoted key)
+        block_yaml: Replacement YAML text for the block (must end with a newline)
+
+    Returns:
+        Updated file text
+    """
+    lines = text.splitlines(keepends=True)
+    prefix = f"{key}:"
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith(prefix) and (
+            len(line.rstrip("\r\n")) == len(prefix) or line[len(prefix)] in " \t"
+        ):
+            start = i
+            break
+
+    if start is None:
+        # Block absent — append at end (normalizing a missing trailing newline)
+        if text and not text.endswith("\n"):
+            text += "\n"
+        return text + block_yaml
+
+    # Scan past the block: indented continuation lines and blank lines
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() == "" or line[0] in (" ", "\t"):
+            end += 1
+            continue
+        if line[0] == "#":
+            # Column-0 comment: block-interior if indented content still
+            # follows (past blanks and further column-0 comments) — leaving it
+            # in place would orphan that indented tail as a stale duplicate of
+            # the owned block. Boundary only before another column-0 key/EOF.
+            lookahead = end + 1
+            interior = False
+            while lookahead < len(lines):
+                nxt = lines[lookahead]
+                if nxt.strip() == "" or nxt[0] == "#":
+                    lookahead += 1
+                    continue
+                interior = nxt[0] in (" ", "\t")
+                break
+            if interior:
+                end = lookahead
+                continue
+            break
+        break
+    # Blank lines between the owned block and the next section belong to the
+    # human formatting of what follows — back them out of the replaced region.
+    while end > start + 1 and lines[end - 1].strip() == "":
+        end -= 1
+
+    return "".join(lines[:start]) + block_yaml + "".join(lines[end:])
+
+
+def _update_owned_blocks(config: DatasetConfig, config_path: Path, keys: tuple[str, ...]) -> None:
+    """Surgically rewrite only machine-owned top-level blocks of a config file.
+
+    ``yaml.dump`` of a full ``model_dump()`` strips human comments and rewraps
+    long scalars (issue #339). Fetch-style updates therefore re-serialize only
+    the machine-owned block(s) — e.g. ``last_fetch``, ``quality_fingerprint`` —
+    and splice them into the existing file text, leaving every human-authored
+    byte untouched.
+
+    Safety net: before writing, the spliced text is re-parsed and the owned
+    keys' values are compared against the intended subtrees. If the splice
+    produced anything unexpected (unparsable YAML, stale/shadowed values),
+    the update falls back to full re-serialization — comments are lost in
+    that case, but correctness beats comments.
+
+    Args:
+        config: Updated configuration (source of the new block values)
+        config_path: Existing YAML file to update
+        keys: Top-level keys owned by the machine to replace/append
+    """
+    if not config_path.exists():
+        save_dataset_config(config, config_path)
+        return
+
+    data = _config_to_yaml_data(config)
+    text = config_path.read_text(encoding="utf-8")
+    for key in keys:
+        if key not in data:
+            continue
+        block_yaml = yaml.dump(
+            {key: data[key]},
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        text = _replace_top_level_block(text, key, block_yaml)
+
+    # Verify the surgical splice before writing it
+    try:
+        parsed = yaml.safe_load(text)
+        splice_ok = isinstance(parsed, dict) and all(
+            parsed.get(key) == data[key] for key in keys if key in data
+        )
+    except yaml.YAMLError:
+        splice_ok = False
+
+    if not splice_ok:
+        logger.warning(
+            "Surgical YAML update of %s for %s did not verify; falling back to "
+            "full re-serialization (comments in the file will be lost)",
+            keys,
+            config_path,
+        )
+        save_dataset_config(config, config_path)
+        return
+
+    config_path.write_text(text, encoding="utf-8")
 
 
 def load_dataset_config(path: Path) -> DatasetConfig:
@@ -430,9 +571,10 @@ def update_last_fetch(
     # Update the correct sub-field
     setattr(config.last_fetch, fetch_type, fetch_info)
 
-    # Save back
+    # Save back surgically: only the machine-owned last_fetch block is
+    # rewritten, so human comments/formatting elsewhere survive (issue #339)
     config_path = get_datasets_dir() / f"{name}.yaml"
-    save_dataset_config(config, config_path)
+    _update_owned_blocks(config, config_path, ("last_fetch",))
 
     return config
 
@@ -457,9 +599,10 @@ def update_quality_fingerprint(
     # Update quality_fingerprint
     config.quality_fingerprint = fingerprint
 
-    # Save back
+    # Save back surgically: only the machine-owned quality_fingerprint block
+    # is rewritten, so human comments/formatting elsewhere survive (issue #339)
     config_path = get_datasets_dir() / f"{name}.yaml"
-    save_dataset_config(config, config_path)
+    _update_owned_blocks(config, config_path, ("quality_fingerprint",))
 
     return config
 
