@@ -84,60 +84,33 @@ def _effective_glue_min_confidence() -> float:
     return settings.optimizer_glue_min_confidence_raw
 
 
-# Known bridge-output filename prefixes emitted by the documented before/after
-# comparison workflow (CLAUDE.md). Stripped so ``before_us_boston_streets`` /
-# ``after_us_boston_streets`` resolve to the tuned ``us_boston_streets`` allowlist
-# entry instead of missing the override.
-_PRUNE_FILENAME_PREFIXES = ("before_", "after_")
-
-
-def _resolve_prune_dataset(output_path: Path, allowlist: dict[str, float]) -> str | None:
-    """Resolve the allowlist dataset key for a bridge output filename.
-
-    The prune allowlist (``resolver_prune_overrides``) is keyed by dataset name —
-    the bridge output stem minus the ``_bridge`` suffix (e.g. ``us_boston_streets``
-    from ``us_boston_streets_bridge.parquet``). Resolution is robust to the
-    documented before/after comparison workflow, which writes
-    ``before_<dataset>_bridge.parquet`` / ``after_<dataset>_bridge.parquet``:
-
-    1. Exact match on the derived stem always wins.
-    2. Otherwise strip a known comparison prefix (``before_`` / ``after_``) and
-       retry an EXACT match.
-
-    Only exact (post-prefix-strip) matches count, so overlapping dataset names
-    never collide: a file for a hypothetical ``us_boston_streets_2`` (no allowlist
-    entry) does NOT resolve to the ``us_boston_streets`` key — substring/boundary
-    containment is deliberately avoided. Returns the resolved key, or None when the
-    filename matches no allowlist entry.
-    """
-    name = output_path.name
-    suffix = "_bridge.parquet"
-    stem = name[: -len(suffix)] if name.endswith(suffix) else output_path.stem
-    # 1. Exact match wins (covers the canonical ``<dataset>_bridge.parquet``).
-    if stem in allowlist:
-        return stem
-    # 2. Strip a known before/after comparison prefix and retry exactly.
-    for prefix in _PRUNE_FILENAME_PREFIXES:
-        if stem.startswith(prefix):
-            stripped = stem[len(prefix) :]
-            if stripped in allowlist:
-                return stripped
-    return None
-
-
-def _effective_prune_threshold(output_path: Path, dataset_key: str | None = None) -> float:
+def _effective_prune_threshold(dataset_key: str | None) -> float:
     """Resolve the confidence-drop prune floor for this run (0 = disabled).
 
     The prune is PER-DATASET OPT-IN via an allowlist: it applies ONLY to datasets
-    with an explicit, validated threshold in ``settings.resolver_prune_overrides``
-    (keyed by the dataset name derived from the bridge output filename), and only
-    while ``settings.resolver_prune_enabled`` (the master switch) is True. A dataset
-    absent from the allowlist is NOT pruned — the floor is dataset-dependent and
-    the Boston-tuned 0.96 over-prunes never-tuned / sidewalk-like sets (#284 sweep),
-    so applying it by default silently over-prunes. An allowlist value <= 0 keeps a
-    listed dataset explicitly disabled. Returns 0.0 when the prune is off, which
+    with an explicit, validated threshold in ``settings.resolver_prune_overrides``,
+    and only while ``settings.resolver_prune_enabled`` (the master switch) is True.
+    A dataset absent from the allowlist is NOT pruned — the floor is
+    dataset-dependent and the Boston-tuned 0.96 over-prunes never-tuned /
+    sidewalk-like sets (#284 sweep), so applying it by default silently
+    over-prunes. An allowlist value <= 0 keeps a listed dataset explicitly
+    disabled. Returns 0.0 when the prune is off, which
     ``apply_confidence_drop_prune`` treats as a no-op (selections byte-identical to
     the pre-prune pipeline).
+
+    KEYED ON DATASET IDENTITY ONLY (#348). ``dataset_key`` is the dataset name the
+    caller already knows — ``crosswalk stitch``'s dataset argument or the factory
+    pair name. It is NEVER derived from the output path: the previous
+    filename-based resolution (bridge stem minus ``_bridge``, with ``before_`` /
+    ``after_`` prefix stripping) silently skipped pruning for any other output
+    name (e.g. ``after4_us_boston_streets_bridge.parquet``), changing match counts
+    mid-measurement. ``dataset_key=None`` means the run has no dataset identity
+    (raw ``--reference``/``--target`` path mode without a dataset name) — the
+    prune is off and a log line says so.
+
+    Every branch logs its decision loudly so a run's prune state is never silent:
+    enabled (dataset @ threshold), not allowlisted, explicitly disabled, no
+    dataset identity, master switch off, or calibration guard.
 
     Calibration guard: every allowlist operating point was tuned and validated ONLY
     on CALIBRATED ``MatchResult.confidence`` (#272/#284). Unlike the glue prune, NO
@@ -146,42 +119,45 @@ def _effective_prune_threshold(output_path: Path, dataset_key: str | None = None
     so nearly every non-top M:N/1:N/N:1 edge would be dropped, collapsing multi-edge
     groups to their single best edge. So, mirroring the glue-prune guarantee, the
     prune is skipped when the active model applies no calibration.
-
-    ``dataset_key`` lets a caller resolve the allowlist by an explicit dataset name
-    instead of the bridge output filename. The bridge-table factory uses this
-    because its output is ``…/dataset=<name>/bridge.parquet`` — the filename alone
-    ("bridge") carries no dataset identity — so passing the dataset name keeps the
-    factory's prune behavior identical to ``crosswalk stitch``'s
-    ``<name>_bridge.parquet`` path.
     """
     if not settings.resolver_prune_enabled:
+        logger.info(
+            "Resolver confidence-drop prune OFF: master switch "
+            "settings.resolver_prune_enabled is False."
+        )
+        return 0.0
+
+    if dataset_key is None:
+        # No dataset identity for this run (raw --reference/--target path mode
+        # without a dataset name). The allowlist is keyed by dataset name, so
+        # there is nothing to resolve — the prune is off. Deriving an identity
+        # from the output filename is exactly the #348 footgun, so we never do.
+        logger.info(
+            "Resolver confidence-drop prune OFF: no dataset identity for this run "
+            "(raw path mode). The allowlist (settings.resolver_prune_overrides) is "
+            "keyed by dataset name; pass a dataset name to 'crosswalk stitch' to "
+            "apply a tuned prune."
+        )
         return 0.0
 
     allowlist = settings.resolver_prune_overrides or {}
-    if dataset_key is not None:
-        dataset = dataset_key if dataset_key in allowlist else None
-    else:
-        dataset = _resolve_prune_dataset(output_path, allowlist)
-    if dataset is None:
+    if dataset_key not in allowlist:
         # Not in the validated allowlist: opt-in only, so the prune is off. One
         # info line makes the skip visible (vs. silently over-pruning by default).
-        # Name the TRUE dataset when a caller passed one: the factory's output is
-        # ``…/dataset=<name>/bridge.parquet``, so ``output_path.name`` is the
-        # useless, dataset-blind ``"bridge.parquet"`` for every factory dataset —
-        # indistinguishable in a multi-dataset sweep. Fall back to the filename
-        # only when no explicit key was supplied (``crosswalk stitch``'s
-        # ``<name>_bridge.parquet`` carries its own identity).
-        identity = dataset_key if dataset_key is not None else output_path.name
         logger.info(
-            f"Resolver confidence-drop prune off for '{identity}': dataset "
+            f"Resolver confidence-drop prune OFF for dataset '{dataset_key}': "
             "not in the validated allowlist (settings.resolver_prune_overrides). "
             "Tune it via the #284 sweep recipe before enabling."
         )
         return 0.0
 
-    threshold = max(0.0, float(allowlist[dataset]))
+    threshold = max(0.0, float(allowlist[dataset_key]))
     if threshold <= 0:
         # Explicitly disabled for this dataset (allowlist value <= 0).
+        logger.info(
+            f"Resolver confidence-drop prune OFF for dataset '{dataset_key}': "
+            "explicitly disabled (allowlist value <= 0)."
+        )
         return 0.0
 
     if not _calibration_active():
@@ -192,6 +168,11 @@ def _effective_prune_threshold(output_path: Path, dataset_key: str | None = None
             "floor is validated, so pruning here would silently over-prune."
         )
         return 0.0
+
+    logger.info(
+        f"Resolver confidence-drop prune ON for dataset '{dataset_key}': "
+        f"allowlisted @ threshold {threshold} (calibrated confidence floor)."
+    )
     return threshold
 
 
@@ -1200,9 +1181,11 @@ def optimize_and_export(
         ref_id_column: Reference ID column name.
         target_id_column: Target ID column name.
         progress_callback: Optional progress callback.
-        prune_dataset_key: Explicit dataset name for resolver-prune allowlist
-            resolution (see :func:`_effective_prune_threshold`). None keeps the
-            filename-derived behavior used by ``crosswalk stitch``.
+        prune_dataset_key: Dataset identity for resolver-prune allowlist
+            resolution (see :func:`_effective_prune_threshold`) — the dataset
+            name the caller already knows (``crosswalk stitch`` dataset argument,
+            factory pair name). NEVER derived from ``output_path`` (#348). None
+            means the run has no dataset identity, so the prune is off (logged).
 
     Returns:
         PipelineResult with statistics.
@@ -1289,7 +1272,7 @@ def optimize_and_export(
     # sidecar attribute every pruned edge to its group so ``n_pruned`` is exact
     # even for pendant edges whose both endpoints leave the surviving group.
     pruned_group_ids: dict[tuple[Any, Any], Any] = {}
-    prune_threshold = _effective_prune_threshold(output_path, dataset_key=prune_dataset_key)
+    prune_threshold = _effective_prune_threshold(prune_dataset_key)
     if prune_threshold > 0:
         from ..matching.optimizer import apply_confidence_drop_prune
 
@@ -1400,6 +1383,7 @@ def run_pipeline(
     run_screen: bool = False,
     screen_tests: list[str] | None = None,
     allow_version_mismatch: bool = False,
+    prune_dataset_key: str | None = None,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -1418,6 +1402,9 @@ def run_pipeline(
         target_class_column: Class column in target
         run_screen: Whether to run screen tests after matching
         screen_tests: Specific screen tests to run (None = all)
+        prune_dataset_key: Dataset identity for the resolver-prune allowlist
+            (see :func:`_effective_prune_threshold`). NEVER derived from
+            ``output_path`` (#348). None = no dataset identity, prune off.
 
     Returns:
         PipelineResult with statistics
@@ -1479,6 +1466,7 @@ def run_pipeline(
         ref_id_column=ref_id_column,
         target_id_column=target_id_column,
         progress_callback=progress_callback,
+        prune_dataset_key=prune_dataset_key,
     )
 
 

@@ -835,10 +835,12 @@ class MatcherSettings(BaseSettings):
     # dataset over-prunes at the wrong floor (#284's own sweep showed the
     # Boston-tuned 0.96 regresses sidewalk-like sets below keep-all). So the prune
     # applies ONLY to datasets with an explicit, validated threshold in
-    # ``resolver_prune_overrides`` — the allowlist. A dataset NOT in the map is
-    # NOT pruned (effective threshold 0.0, a no-op byte-identical to the pre-prune
-    # pipeline); ``runner.py::_effective_prune_threshold`` emits a one-line info
-    # log so the skip is visible. This replaces the previous "global default 0.96
+    # ``resolver_prune_overrides`` — the allowlist, keyed on DATASET IDENTITY (the
+    # dataset name the runner is told, never the output filename — #348). A dataset
+    # NOT in the map is NOT pruned (effective threshold 0.0, a no-op byte-identical
+    # to the pre-prune pipeline); ``runner.py::_effective_prune_threshold`` logs
+    # every run's prune decision (on/off + why) so the state is never silent.
+    # This replaces the previous "global default 0.96
     # for every dataset" behaviour, which silently over-pruned the ~30 never-tuned
     # datasets. Tune a new dataset via the #284 sweep recipe (see SCALING_ROADMAP
     # M2) BEFORE adding its floor to the allowlist.
@@ -874,7 +876,10 @@ class MatcherSettings(BaseSettings):
     resolver_prune_overrides: dict[str, float] = Field(
         default_factory=lambda: {"us_boston_streets": 0.96, "us_seattle_sidewalks": 0.90},
         description="Allowlist of per-dataset confidence-drop prune thresholds, keyed "
-        "by dataset name (the bridge output stem minus ``_bridge``). ONLY datasets "
+        "by DATASET IDENTITY — the dataset name passed to the runner (``crosswalk "
+        "stitch`` dataset argument / factory pair name), NEVER derived from the "
+        "output filename (#348). A run without a dataset identity (raw -r/-t path "
+        "mode) is never pruned. ONLY datasets "
         "listed here are pruned (and only when ``resolver_prune_enabled``); a dataset "
         "absent from the map is never pruned. The value is the absolute (calibrated) "
         "confidence floor for a SELECTED group edge — edges below it are dropped, "

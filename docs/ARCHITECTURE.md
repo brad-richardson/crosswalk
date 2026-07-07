@@ -142,18 +142,22 @@ re-counted. With attribution present the count is authoritative (independent of
 `stitch_persist_rejected_edges`); `sum(n_pruned)` equals the number of dropped edges.
 The optimal floor is **dataset-dependent**, so the prune is **per-dataset opt-in**:
 `runner.py::_effective_prune_threshold` applies it ONLY to datasets present in the
-`resolver_prune_overrides` **allowlist** (keyed by the dataset name derived from the
-bridge output filename), and only while the `resolver_prune_enabled` master switch
-(default **True**) is set. A dataset absent from the allowlist is **not pruned** (a
-one-line info log records the skip); an allowlist value ≤ 0 keeps a listed dataset
-explicitly disabled. There is **no global default floor** — the previous
+`resolver_prune_overrides` **allowlist**, and only while the `resolver_prune_enabled`
+master switch (default **True**) is set. The allowlist is keyed on **dataset
+identity** — the dataset name the runner is told (`crosswalk stitch`'s dataset
+argument / the factory pair name), **never** anything derived from the output
+filename (#348: the old filename-stem resolution silently skipped pruning for any
+nonstandard output name like `after4_<dataset>_bridge.parquet`, changing match
+counts mid-measurement; the output path now plays no part, so any `-o` name prunes
+identically). A run with **no dataset identity** (raw `-r`/`-t` path mode without a
+dataset name) is never pruned. A dataset absent from the allowlist is **not
+pruned**; an allowlist value ≤ 0 keeps a listed dataset explicitly disabled. Every
+run logs its prune decision — enabled (dataset @ threshold), not allowlisted, no
+dataset identity, master switch off, or calibration guard — so the state is never
+silent. There is **no global default floor** — the previous
 `resolver_prune_min_confidence` (0.96 applied to every dataset without an override)
 has been removed, because #284's own sweep showed that Boston-tuned 0.96 over-prunes
-never-tuned / sidewalk-like sets. Filename resolution is robust to the documented
-before/after comparison workflow: `before_<dataset>_bridge.parquet` /
-`after_<dataset>_bridge.parquet` resolve to `<dataset>` by exact match after
-stripping a known prefix (overlapping names like `us_boston_streets_2` never
-collide — only exact post-strip matches count).
+never-tuned / sidewalk-like sets.
 Because every validated floor was tuned on **calibrated** confidence and no raw
 operating point exists, `_effective_prune_threshold` also skips the prune (returns
 0.0) when the active model applies no calibration — so an uncalibrated model does
