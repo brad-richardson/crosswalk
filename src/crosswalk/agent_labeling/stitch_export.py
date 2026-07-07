@@ -78,7 +78,7 @@ from ..config import settings
 from ..labeling.stitching_store import StitchingLabelStore
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
-from .panel_routing import REASON_UNANIMOUS_NONE, derive_route_reason
+from .panel_routing import REASON_UNANIMOUS_NONE, _int_or_none, derive_route_reason
 from .stitch_eval import (
     _is_set_label,
     _load_group_metadata,
@@ -297,8 +297,28 @@ def _is_unanimous_none(row: dict) -> bool:
     the stamp (derived from ``consensus == "unanimous"`` + ``choice == "NONE"``).
     A unanimous-NONE row routes to ``human_review`` (it is never ``auto_accept``),
     so it is disjoint from the accept path.
+
+    Defense-in-depth quorum check (this path mints reject ground truth): the
+    derivation trusts the ``consensus`` column verbatim, but "unanimous" is only
+    meaningful with a full quorum (``compute_consensus`` requires >= 3 agreeing
+    valid votes). A hand-edited or pre-quorum-rule historical row claiming
+    ``consensus=unanimous`` with ``n_valid < 3`` must not be exported, so:
+
+    * ``n_valid`` present -> require ``n_valid >= 3`` (contradicting evidence
+      blocks the export even when a ``route_reason`` stamp is present);
+    * ``n_valid`` missing/unparseable -> conservatively require the explicit
+      ``route_reason`` stamp (written only by ``compute_consensus``, which
+      enforces the quorum) rather than deriving from consensus/choice alone.
     """
-    return derive_route_reason(row) == REASON_UNANIMOUS_NONE
+    if derive_route_reason(row) != REASON_UNANIMOUS_NONE:
+        return False
+    n_valid = _int_or_none(row.get("n_valid"))
+    if n_valid is not None:
+        return n_valid >= 3
+    # No n_valid evidence: trust only the compute_consensus stamp (accepting the
+    # legacy "unanimous_NONE" spelling normalized by derive_route_reason).
+    stamp = str(row.get("route_reason") or "").strip()
+    return stamp in (REASON_UNANIMOUS_NONE, "unanimous_NONE")
 
 
 def plan_exports(

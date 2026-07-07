@@ -1386,8 +1386,8 @@ def export_stitch_panel(
         help=(
             "Export even when a batch's votes.csv provider set differs from the "
             "default claude+codex+agy panel (e.g. --panel no-agy). Labels are "
-            "still stamped panel_unanimous_v3, so only use this after an explicit "
-            "provenance decision."
+            "still stamped with the panel_unanimous_* labelers, so only use this "
+            "after an explicit provenance decision."
         ),
     ),
 ):
@@ -1440,8 +1440,9 @@ def export_stitch_panel(
             console.print(
                 f"[red]Batch {name} was voted by a nonstandard panel "
                 f"({', '.join(sorted(providers))}) — refusing to stamp its labels "
-                f"panel_unanimous_v3. Re-run with --allow-nonstandard-panel only "
-                f"after an explicit provenance decision.[/red]"
+                f"with the panel_unanimous_* labelers. Re-run with "
+                f"--allow-nonstandard-panel only after an explicit provenance "
+                f"decision.[/red]"
             )
         raise typer.Exit(1)
 

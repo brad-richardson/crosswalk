@@ -894,6 +894,44 @@ def test_unanimous_none_derived_without_stamp(tmp_path, labels_dir):
     assert g.exported and g.is_empty_set
 
 
+def test_unanimous_none_below_quorum_not_exported(tmp_path, labels_dir):
+    # Defense-in-depth: a hand-edited / hypothetical pre-quorum-rule historical
+    # row claiming consensus=unanimous + choice=NONE with n_valid < 3 must NOT
+    # mint reject ground truth — with or without the route_reason stamp
+    # (contradicting n_valid evidence wins over the stamp).
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group("g_derived", [("r1", "t1")], n_valid=2, route_reason=""),
+            _none_group("g_stamped", [("r2", "t2")], n_valid=2),
+        ],
+    )
+    report = _plan([b], labels_dir)
+    assert "g_derived" not in _by_gid(report)
+    assert "g_stamped" not in _by_gid(report)
+    assert report.n_unanimous_none == 0
+
+
+def test_unanimous_none_missing_n_valid_requires_stamp(tmp_path, labels_dir):
+    # No n_valid evidence at all: only the compute_consensus route_reason stamp
+    # (which enforces the quorum at write time) is trusted; derivation from the
+    # consensus/choice columns alone is not.
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            _none_group("g_stamped", [("r1", "t1")], n_valid="", n_votes=""),
+            _none_group("g_derived", [("r2", "t2")], n_valid="", n_votes="", route_reason=""),
+        ],
+    )
+    report = _plan([b], labels_dir)
+    gids = _by_gid(report)
+    assert gids["g_stamped"].exported and gids["g_stamped"].is_empty_set
+    assert "g_derived" not in gids
+    assert report.n_unanimous_none == 1
+
+
 def test_unanimous_none_writes_reject_all_row(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
