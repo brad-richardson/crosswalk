@@ -67,6 +67,17 @@ web = [
     "pillow>=10.0",  # tile rendering (web/routes/tiles.py)
     "mercantile>=1.2",
 ]
+spark = [
+    # Distributed geospatial backend (design: docs/plans/2026-02-22-spark-dual-backend-design.md).
+    # Only needed to exercise the Spark/Sedona integration path (e.g. scoring the
+    # bundled Spark-portable booster inside a SparkSession, Sedona spatial joins).
+    # Requires a JDK (Temurin 17) at runtime; the Sedona jars are pulled at
+    # session start via spark.jars.packages, so no jar files are vendored here.
+    # pyspark 3.5.x <-> apache-sedona 1.6.x is the tested pairing.
+    "pyspark>=3.5,<3.6",
+    "apache-sedona>=1.6,<1.7",
+    "shapely>=2.0",  # Sedona Python <-> Shapely geometry bridge
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
@@ -122,4 +133,5 @@ pythonpath = ["src"]
 addopts = "-n auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "spark: marks tests that need the Spark/Sedona stack + a JDK (deselect with '-m \"not spark\"'; select with '-m spark'). Requires the [spark] extra.",
 ]
