@@ -136,20 +136,26 @@ def test_resolver_not_imported_by_production_code():
     #   from .resolver / ..resolver / ...resolver [...] import ...   (relative)
     #   from . / .. / ... import resolver                            (relative)
     patterns = [
-        re.compile(r"^\s*import\s+matcher\.resolver\b", re.MULTILINE),
-        re.compile(r"^\s*from\s+matcher\.resolver\b", re.MULTILINE),
+        re.compile(r"^\s*import\s+crosswalk\.resolver\b", re.MULTILINE),
+        re.compile(r"^\s*from\s+crosswalk\.resolver\b", re.MULTILINE),
         re.compile(r"^\s*from\s+\.+resolver\b", re.MULTILINE),
         re.compile(r"^\s*from\s+\.+\s+import\s+(?:[^\n]*[\s,(])?resolver\b", re.MULTILINE),
     ]
 
-    src = pathlib.Path(__file__).resolve().parents[2] / "src" / "matcher"
+    src = pathlib.Path(__file__).resolve().parents[2] / "src" / "crosswalk"
+    assert src.is_dir(), f"guard test points at a missing tree: {src}"
+    scanned = 0
     offenders = []
     for py in src.rglob("*.py"):
         if "resolver" in py.parts:
             continue
+        scanned += 1
         text = py.read_text()
         if any(p.search(text) for p in patterns):
             offenders.append(str(py.relative_to(src)))
+    # If the package tree ever moves/renames again, fail loudly instead of
+    # passing vacuously over zero files (the post-rename `src/matcher` bug).
+    assert scanned > 50, f"guard scanned only {scanned} files under {src} — wrong tree?"
     assert not offenders, f"production code imports experimental resolver: {offenders}"
 
 
@@ -437,3 +443,121 @@ def test_candidate_graph_featurize_over_full_universe():
     row_b = feat[feat["ref_id"] == "B"].iloc[0]
     assert row_b["conf_is_group_min"] == 1
     assert row_b["n_share_tgt"] == 2  # A and B both compete for T
+
+
+# --- empty-set (reject-all) labels (design §2.4a) ----------------------------
+
+
+def test_empty_set_label_emits_all_candidates_keep0():
+    """A reject-all label (selected_edges=[]) mapped by verbatim group_id emits
+    the group's full candidate universe with keep=0 and provenance=empty — the
+    'select nothing' shape the cross-mode defect requires (design §2.4a)."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.95, selected=True),
+            _cand("B", "T", 0.40, selected=False),
+        ],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    human = _labels([_label_row("g1", [])])  # group_id matches verbatim
+    df = build_edge_table([grp], human, "ds")
+    assert len(df) == 2
+    assert set(df["provenance"]) == {"empty"}
+    assert (df["keep"] == 0).all()
+    # the optimizer DID select A->T: that keep=0/selected=True row is the
+    # over-selection signal an empty label uniquely provides
+    row_a = df[df["ref_id"] == "A"].iloc[0]
+    assert bool(row_a["selected"]) is True and row_a["keep"] == 0
+    assert df.attrs["build_stats"]["empty_rows"] == 2
+
+
+def test_empty_set_label_respects_rule5_and_selected_elsewhere():
+    """Empty-label rows go through the same rule-5 / selected_elsewhere gates as
+    labeled-group rows."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.95, selected=True),
+            _cand("B", "T", 0.80, selected=False, selected_elsewhere=True),
+            _cand("X", "Y", 0.60, selected=False),  # rule-5 noise
+        ],
+        ref_ids=["A"],
+        target_ids=["T"],
+    )
+    human = _labels([_label_row("g1", [])])
+    df = build_edge_table([grp], human, "ds")
+    assert set(df["ref_id"]) == {"A"}
+    stats = df.attrs["build_stats"]
+    assert stats["rule5_filtered"] == 1
+    assert stats["selected_elsewhere_excluded"] == 1
+
+
+def test_empty_set_label_on_legacy_group_emits_zero_rows():
+    """A reject-all label mapped to a group WITHOUT candidate_edges emits no
+    rows (the capped legacy view cannot express the full candidate universe) and
+    is counted in empty_legacy_skipped."""
+    grp = _group("g1", [_edge("A", "T", 0.99)])  # pre-#344, no candidate_edges
+    human = _labels([_label_row("g1", [])])
+    df = build_edge_table([grp], human, "ds")
+    assert df.empty
+    assert df.attrs["build_stats"]["empty_legacy_skipped"] == 1
+
+
+def test_empty_set_label_unrecovered_group_counted():
+    """An empty label whose group_id no longer exists is counted, not emitted."""
+    grp = _group_cg("g1", [_cand("A", "T", 0.95, selected=True)], ref_ids=["A"], target_ids=["T"])
+    human = _labels([_label_row("gone", [])])
+    df = build_edge_table([grp], human, "ds")
+    assert df.empty
+    assert df.attrs["build_stats"]["empty_unrecovered"] == 1
+
+
+def test_include_empty_flag_off_excludes_reject_all_rows():
+    grp = _group_cg("g1", [_cand("A", "T", 0.95, selected=True)], ref_ids=["A"], target_ids=["T"])
+    human = _labels([_label_row("g1", [])])
+    df = build_edge_table([grp], human, "ds", include_empty=False)
+    assert df.empty
+
+
+# --- self-reporting build stats ----------------------------------------------
+
+
+def test_build_stats_attached_and_consistent():
+    """The per-build counters are attached as df.attrs['build_stats'] and agree
+    with the frame."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.99, selected=True),
+            _cand("B", "T", 0.40, selected=False),
+        ],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    human = _labels([_label_row("hg1", [("A", "T")])])
+    df = build_edge_table([grp], human, "ds")
+    stats = df.attrs["build_stats"]
+    assert stats["rows"] == len(df) == 2
+    assert stats["positives"] == int(df["keep"].sum()) == 1
+    assert stats["negatives"] == 1
+    assert stats["candidate_groups"] == 1 and stats["legacy_groups"] == 0
+
+
+def test_human_selected_outside_candidate_graph_counted():
+    """A human-selected edge present in the legacy view (edges/rejected_edges)
+    but missing from candidate_edges (below floor / glue-pruned / attributed
+    elsewhere) is counted as a lost positive — visible, not silent."""
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, selected=True)],  # candidate universe misses B->T
+        ref_ids=["A"],
+        target_ids=["T"],
+        edges=[_edge("A", "T", 0.99)],
+    )
+    grp["rejected_edges"] = [_edge("B", "T", 0.2, selected=False)]  # legacy knows B->T
+    human = _labels([_label_row("hg1", [("A", "T"), ("B", "T")])])  # human kept BOTH
+    df = build_edge_table([grp], human, "ds")
+    assert set(df["ref_id"]) == {"A"}  # B->T not in the candidate universe
+    assert df.attrs["build_stats"]["human_selected_outside_candidate_graph"] == 1

@@ -37,26 +37,38 @@ Data reality (verified 2026-07, see the prototype writeup + the round-3 design
 * Ground truth = curated ``labels/stitching/`` ``selected_edges``. Labels map
   to current sidecar groups by edge overlap (group_id churns on any component
   shift) via ``stitch_eval.recover_labeled_groups`` — reused here verbatim.
+* **Empty-set (reject-all) labels** — pair-semantics rows with
+  ``selected_edges == []`` (the design §2.4a gap, exported since the
+  unanimous-NONE export landed) — carry no edges to overlap on, so they map by
+  verbatim ``group_id`` only (same rule as ``stitch_eval.
+  recover_empty_reject_all``). On the candidate-graph path they emit every
+  (rule-5-filtered, non-``selected_elsewhere``) candidate edge with ``keep=0``
+  — the "select nothing" group shape the cross-mode defect needs. On the
+  legacy path they emit ZERO rows: the label asserts "nothing in the full
+  candidate set should be kept", and the capped ``edges``+``rejected_edges``
+  view cannot represent that full set faithfully, so emitting partial
+  negatives would understate the group's reject-all semantics silently.
 
 The row key is ``(group_id, ref_id, target_id)`` — the same key the design's
 stage-2 ``candidates.parquet`` feature columns join on, so no competing scheme
 is introduced.
 
 Provenance is preserved on every row so the eval can slice by dataset,
-labeler, and clean-vs-split mapping.
+labeler, and clean-vs-split-vs-empty mapping. Each build logs a one-line stats
+summary (rows, label split, rule-5 drops, ``selected_elsewhere`` exclusions,
+human-selected edges missing from the candidate graph) and attaches the same
+dict as ``df.attrs["build_stats"]``.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
 import pandas as pd
+from loguru import logger
 
 from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
-
-logger = logging.getLogger(__name__)
 
 EDGE_LABEL_COL = "keep"
 
@@ -202,6 +214,14 @@ def _rows_from_candidate_graph(
     within-group decision for this group, so — following the design's
     endpoint-membership recommendation — it is dropped when neither ``ref_id``
     is in the group's ``ref_ids`` nor ``target_id`` in its ``target_ids``.
+
+    Recall accounting: a human-selected edge known to the group's legacy view
+    (``edges``/``rejected_edges``) but NOT emitted here — below the candidate
+    floor, glue/sliver-pruned out of the reconstructed component, attributed to
+    another group, or rule-5 filtered — is counted in
+    ``stats["human_selected_outside_candidate_graph"]``. The drop is deliberate
+    (the resolver can never select an edge outside its candidate universe) but
+    the design cares about measuring that recall ceiling, so it must be visible.
     """
     grp_refs = {str(x) for x in group.get("ref_ids", [])}
     grp_tgts = {str(x) for x in group.get("target_ids", [])}
@@ -218,6 +238,7 @@ def _rows_from_candidate_graph(
     candidate_edges = group.get("candidate_edges", [])
     n_edges = len(candidate_edges)
     rows: list[dict] = []
+    emitted: set[tuple[str, str]] = set()
     for cand in candidate_edges:
         key = _edge_key(cand)
         stats["candidate_seen"] += 1
@@ -232,7 +253,13 @@ def _rows_from_candidate_graph(
         merged = {**struct_lookup.get(key, {}), **cand}
         if key not in struct_lookup:
             stats["new_negatives"] += int(not cand.get("selected", False))
+        emitted.add(key)
         rows.append(_edge_row(merged, group, n_edges, dataset_id, hgid, hrow, provenance, human_es))
+
+    # Lost positives vs the legacy universe (see docstring "Recall accounting").
+    stats["human_selected_outside_candidate_graph"] += sum(
+        1 for key in human_es if key in struct_lookup and key not in emitted
+    )
     return rows
 
 
@@ -271,6 +298,7 @@ def build_edge_table(
     include_rejected: bool = True,
     prefer_candidate_graph: bool = True,
     filter_rule5: bool = True,
+    include_empty: bool = True,
 ) -> pd.DataFrame:
     """Build a per-edge training table for one dataset.
 
@@ -291,6 +319,13 @@ def build_edge_table(
       before. A single warning is logged noting the uncapped under-selection
       universe is unavailable for those groups.
 
+    Empty-set (reject-all) labels — pair rows with ``selected_edges == []`` —
+    map by verbatim ``group_id`` (no edges to overlap on) and emit the group's
+    full candidate universe with ``keep=0`` and ``provenance="empty"``: the
+    design §2.4a "select nothing" shape. Legacy groups cannot express the full
+    universe, so an empty label on a legacy group emits zero rows and is
+    counted + warned (``empty_legacy_skipped``).
+
     Args:
         groups: sidecar groups (from :func:`load_sidecar_groups`).
         human_df: curated stitching labels for this dataset.
@@ -307,9 +342,14 @@ def build_edge_table(
             path (e.g. for A/B comparison against the pre-#344 behavior).
         filter_rule5: candidate-graph path only — drop rule-5 attribution noise
             (candidate edges with neither endpoint in the group). Default True.
+        include_empty: if True (default), emit all-``keep=0`` rows for
+            reject-all labels whose group_id still exists (candidate-graph
+            groups only; see above).
 
     Returns:
-        DataFrame with one row per (group, edge). Empty if no labels map.
+        DataFrame with one row per (group, edge); empty if no labels map. The
+        per-build counters are logged once and attached as
+        ``df.attrs["build_stats"]``.
     """
     rec = recover_labeled_groups(groups, human_df)
     gmap = {g["group_id"]: g for g in groups}
@@ -318,14 +358,32 @@ def build_edge_table(
     mapped: list[tuple[str, str, str]] = [(hgid, bg, "clean") for hgid, bg in rec["clean"]]
     if include_split:
         mapped += [(hgid, bg, "split") for hgid, bg, _, _ in rec["split"]]
+    # Empty-set (reject-all) labels carry no edges, so edge-overlap recovery is
+    # impossible; they survive only on a verbatim group_id match — the same rule
+    # as stitch_eval.recover_empty_reject_all.
+    n_empty_unrecovered = 0
+    if include_empty:
+        for hgid in rec["empty"]:
+            if hgid in gmap:
+                mapped.append((hgid, hgid, "empty"))
+            else:
+                n_empty_unrecovered += 1
 
-    stats = {
+    stats: dict[str, int] = {
+        "rows": 0,
+        "positives": 0,
+        "negatives": 0,
         "candidate_seen": 0,
         "rule5_filtered": 0,
         "selected_elsewhere_excluded": 0,
         "new_negatives": 0,
+        "human_selected_outside_candidate_graph": 0,
+        "empty_rows": 0,
+        "empty_legacy_skipped": 0,
+        "empty_unrecovered": n_empty_unrecovered,
+        "legacy_groups": 0,
+        "candidate_groups": 0,
     }
-    n_legacy_groups = 0
     rows: list[dict] = []
     for hgid, bg, provenance in mapped:
         group = gmap.get(bg)
@@ -334,30 +392,53 @@ def build_edge_table(
         hrow = human_by[hgid]
         human_es = _human_edge_set(hrow["selected_edges"])
         if prefer_candidate_graph and _group_has_candidate_graph(group):
-            rows.extend(
-                _rows_from_candidate_graph(
-                    group, dataset_id, hgid, hrow, provenance, human_es, filter_rule5, stats
-                )
+            stats["candidate_groups"] += 1
+            new_rows = _rows_from_candidate_graph(
+                group, dataset_id, hgid, hrow, provenance, human_es, filter_rule5, stats
             )
+            if provenance == "empty":
+                stats["empty_rows"] += len(new_rows)
+            rows.extend(new_rows)
+        elif provenance == "empty":
+            # A reject-all label asserts "keep nothing from the FULL candidate
+            # set"; the capped legacy view cannot represent that set, so partial
+            # keep=0 rows would silently understate the label. Emit nothing.
+            stats["empty_legacy_skipped"] += 1
         else:
-            n_legacy_groups += 1
+            stats["legacy_groups"] += 1
             rows.extend(
                 _rows_from_legacy_edges(
                     group, dataset_id, hgid, hrow, provenance, human_es, include_rejected
                 )
             )
 
-    if n_legacy_groups:
+    df = pd.DataFrame(rows)
+    stats["rows"] = len(df)
+    if len(df):
+        stats["positives"] = int(df[EDGE_LABEL_COL].sum())
+        stats["negatives"] = int((df[EDGE_LABEL_COL] == 0).sum())
+
+    if stats["legacy_groups"]:
         logger.warning(
-            "build_edge_table[%s]: %d/%d labeled groups have no candidate_edges "
+            "build_edge_table[{}]: {}/{} labeled groups have no candidate_edges "
             "(pre-#344 or stitch_persist_candidate_graph=False); falling back to "
             "edges+rejected_edges — the uncapped under-selection universe is "
             "unavailable for those groups.",
             dataset_id,
-            n_legacy_groups,
+            stats["legacy_groups"],
             len(mapped),
         )
-    return pd.DataFrame(rows)
+    if stats["empty_legacy_skipped"]:
+        logger.warning(
+            "build_edge_table[{}]: {} reject-all (empty-set) labels map to groups "
+            "without candidate_edges; the legacy view cannot express the full "
+            "candidate universe, so they emit no rows.",
+            dataset_id,
+            stats["empty_legacy_skipped"],
+        )
+    logger.info("build_edge_table[{}]: {}", dataset_id, stats)
+    df.attrs["build_stats"] = stats
+    return df
 
 
 def build_multi_dataset_table(
