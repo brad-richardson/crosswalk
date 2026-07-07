@@ -846,11 +846,15 @@ class TestGlueMinConfidenceCalibratedOperatingPoint:
         )
 
 
-class TestEffectivePruneThresholdCalibrationGuard:
-    """The resolver confidence-drop prune (#282/#284) was validated ONLY on
-    CALIBRATED confidence. Its operating points must NOT be applied to raw
-    XGBoost scores — mirroring the glue prune, the prune is skipped when the
-    active model applies no calibration (else it silently over-prunes).
+class TestEffectivePruneThreshold:
+    """Resolution of the resolver confidence-drop prune floor (#282/#284/#348).
+
+    The allowlist is keyed on DATASET IDENTITY — the dataset name the runner is
+    told (``crosswalk stitch`` dataset argument / factory pair name) — NEVER on
+    anything derived from the output path (#348: the old filename-stem
+    resolution silently skipped pruning for nonstandard output names). It was
+    also validated ONLY on CALIBRATED confidence, so the prune is skipped when
+    the active model applies no calibration (else it silently over-prunes).
     """
 
     def _patch_calibration(self, monkeypatch, active: bool):
@@ -868,8 +872,6 @@ class TestEffectivePruneThresholdCalibrationGuard:
 
     def test_allowlisted_dataset_applies_its_threshold(self, monkeypatch):
         """A dataset present in the allowlist prunes at its validated floor."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -882,18 +884,12 @@ class TestEffectivePruneThresholdCalibrationGuard:
         )
         self._patch_calibration(monkeypatch, active=True)
 
-        assert runner._effective_prune_threshold(
-            Path("data/output/us_boston_streets_bridge.parquet")
-        ) == pytest.approx(0.96)
-        assert runner._effective_prune_threshold(
-            Path("data/output/us_seattle_sidewalks_bridge.parquet")
-        ) == pytest.approx(0.90)
+        assert runner._effective_prune_threshold("us_boston_streets") == pytest.approx(0.96)
+        assert runner._effective_prune_threshold("us_seattle_sidewalks") == pytest.approx(0.90)
 
     def test_non_allowlisted_dataset_is_off(self, monkeypatch):
         """A dataset ABSENT from the allowlist is never pruned (opt-in only) —
         no global default floor is applied, so it returns 0.0."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -907,16 +903,40 @@ class TestEffectivePruneThresholdCalibrationGuard:
         self._patch_calibration(monkeypatch, active=True)
 
         # de_berlin_streets is not in the allowlist -> prune off.
-        assert (
-            runner._effective_prune_threshold(Path("data/output/de_berlin_streets_bridge.parquet"))
-            == 0.0
-        )
+        assert runner._effective_prune_threshold("de_berlin_streets") == 0.0
+
+    def test_no_dataset_identity_is_off_and_logged(self, monkeypatch):
+        """dataset_key=None (raw -r/-t path mode, no dataset name) -> prune off,
+        WITHOUT loading a model, and a log line says why (never silent)."""
+        import io
+
+        from loguru import logger
+
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
+
+        import crosswalk.matching.ml as ml_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("MLMatcher must not be loaded without a dataset identity")
+
+        monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, format="{message}", level="INFO")
+        try:
+            assert runner._effective_prune_threshold(None) == 0.0
+        finally:
+            logger.remove(handler_id)
+        assert "no dataset identity" in sink.getvalue()
 
     def test_master_switch_off_disables_all(self, monkeypatch):
         """resolver_prune_enabled=False turns the prune off for every dataset,
         even allowlisted ones — WITHOUT loading a model."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -930,15 +950,10 @@ class TestEffectivePruneThresholdCalibrationGuard:
             raise AssertionError("MLMatcher must not be loaded when the master switch is off")
 
         monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
-        assert (
-            runner._effective_prune_threshold(Path("data/output/us_boston_streets_bridge.parquet"))
-            == 0.0
-        )
+        assert runner._effective_prune_threshold("us_boston_streets") == 0.0
 
     def test_override_le_zero_disables_regardless(self, monkeypatch):
         """An allowlist value <= 0 keeps a listed dataset explicitly disabled."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -947,14 +962,12 @@ class TestEffectivePruneThresholdCalibrationGuard:
         monkeypatch.setattr(settings, "resolver_prune_overrides", {"ds": 0.0})
         self._patch_calibration(monkeypatch, active=True)
 
-        assert runner._effective_prune_threshold(Path("data/output/ds_bridge.parquet")) == 0.0
+        assert runner._effective_prune_threshold("ds") == 0.0
 
     def test_prune_skipped_when_calibration_globally_disabled(self, monkeypatch):
         """enable_calibration=False must skip the prune WITHOUT loading a model:
         the calibrated-tuned floor is invalid on raw scores. Uses an allowlisted
         dataset so the calibration guard (not the allowlist) is what disables it."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -968,17 +981,12 @@ class TestEffectivePruneThresholdCalibrationGuard:
             raise AssertionError("MLMatcher must not be loaded when calibration is disabled")
 
         monkeypatch.setattr(ml_mod, "MLMatcher", _boom)
-        assert (
-            runner._effective_prune_threshold(Path("data/output/us_boston_streets_bridge.parquet"))
-            == 0.0
-        )
+        assert runner._effective_prune_threshold("us_boston_streets") == 0.0
 
     def test_prune_skipped_when_model_not_calibrated(self, monkeypatch):
         """Calibration enabled globally but the loaded model carries no
         calibrator (calibration_active False) -> prune must be skipped even for
         an allowlisted dataset."""
-        from pathlib import Path
-
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -992,23 +1000,13 @@ class TestEffectivePruneThresholdCalibrationGuard:
         self._patch_calibration(monkeypatch, active=False)
 
         # allowlisted datasets are still skipped when the model is uncalibrated
-        assert (
-            runner._effective_prune_threshold(Path("data/output/us_boston_streets_bridge.parquet"))
-            == 0.0
-        )
-        assert (
-            runner._effective_prune_threshold(
-                Path("data/output/us_seattle_sidewalks_bridge.parquet")
-            )
-            == 0.0
-        )
+        assert runner._effective_prune_threshold("us_boston_streets") == 0.0
+        assert runner._effective_prune_threshold("us_seattle_sidewalks") == 0.0
 
-    def test_before_after_filename_variants_resolve(self, monkeypatch):
-        """The documented before/after comparison workflow writes
-        ``before_<dataset>_bridge.parquet`` / ``after_<dataset>_bridge.parquet``.
-        Both must resolve to the allowlisted dataset's threshold."""
-        from pathlib import Path
-
+    def test_exact_key_only_no_substring_collision(self, monkeypatch):
+        """Only exact keys count: a hypothetical ``us_boston_streets_2`` (no
+        allowlist entry) must NOT resolve to the ``us_boston_streets`` override;
+        with its own entry, its own value wins."""
         from crosswalk.config import settings
         from crosswalk.pipeline import runner
 
@@ -1017,102 +1015,20 @@ class TestEffectivePruneThresholdCalibrationGuard:
         monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
         self._patch_calibration(monkeypatch, active=True)
 
-        for name in (
-            "before_us_boston_streets_bridge.parquet",
-            "after_us_boston_streets_bridge.parquet",
-        ):
-            assert runner._effective_prune_threshold(Path(f"data/output/{name}")) == pytest.approx(
-                0.96
-            ), name
+        assert runner._effective_prune_threshold("us_boston_streets_2") == 0.0
 
-    def test_overlapping_dataset_names_no_false_positive(self, monkeypatch):
-        """Only exact (post-prefix-strip) matches count: a file for a hypothetical
-        ``us_boston_streets_2`` (no allowlist entry) must NOT resolve to the
-        ``us_boston_streets`` override — no substring/boundary collision."""
-        from pathlib import Path
-
-        from crosswalk.config import settings
-        from crosswalk.pipeline import runner
-
-        monkeypatch.setattr(settings, "enable_calibration", True)
-        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
-        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
-        self._patch_calibration(monkeypatch, active=True)
-
-        # us_boston_streets_2 is a different dataset with no entry -> off.
-        assert (
-            runner._effective_prune_threshold(
-                Path("data/output/us_boston_streets_2_bridge.parquet")
-            )
-            == 0.0
-        )
-        assert (
-            runner._effective_prune_threshold(
-                Path("data/output/before_us_boston_streets_2_bridge.parquet")
-            )
-            == 0.0
-        )
-        # but when us_boston_streets_2 IS allowlisted, its own entry wins exactly.
         monkeypatch.setattr(
             settings,
             "resolver_prune_overrides",
             {"us_boston_streets": 0.96, "us_boston_streets_2": 0.88},
         )
-        assert runner._effective_prune_threshold(
-            Path("data/output/us_boston_streets_2_bridge.parquet")
-        ) == pytest.approx(0.88)
-        assert runner._effective_prune_threshold(
-            Path("data/output/us_boston_streets_bridge.parquet")
-        ) == pytest.approx(0.96)
+        assert runner._effective_prune_threshold("us_boston_streets_2") == pytest.approx(0.88)
+        assert runner._effective_prune_threshold("us_boston_streets") == pytest.approx(0.96)
 
-    def test_factory_layout_path_resolves_via_dataset_key(self, monkeypatch):
-        """Guard the factory's prune-allowlist wiring against future regression.
-
-        The bridge-table factory writes ``…/dataset=<name>/bridge.parquet`` — the
-        filename ("bridge") carries no dataset identity, so the factory passes
-        ``dataset_key=<name>``. That override must resolve the allowlist exactly as
-        ``crosswalk stitch``'s ``<name>_bridge.parquet`` filename does. This behavior
-        already works (the ``dataset_key`` path predates this change); the test
-        exists so a later refactor cannot silently drop the override and fall back
-        to filename parsing — which (correctly) resolves the bare "bridge.parquet"
-        to nothing, leaving an allowlisted dataset unpruned.
-        """
-        from pathlib import Path
-
-        from crosswalk.config import settings
-        from crosswalk.pipeline import runner
-
-        monkeypatch.setattr(settings, "enable_calibration", True)
-        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
-        monkeypatch.setattr(
-            settings,
-            "resolver_prune_overrides",
-            {"us_boston_streets": 0.96, "us_seattle_sidewalks": 0.90},
-        )
-        self._patch_calibration(monkeypatch, active=True)
-
-        factory_path = Path(
-            "data/factory/release=2026-01-21.0/dataset=us_boston_streets/bridge.parquet"
-        )
-        # With the dataset_key override the factory path resolves to the floor.
-        assert runner._effective_prune_threshold(
-            factory_path, dataset_key="us_boston_streets"
-        ) == pytest.approx(0.96)
-        assert runner._effective_prune_threshold(
-            Path("data/factory/release=2026-01-21.0/dataset=us_seattle_sidewalks/bridge.parquet"),
-            dataset_key="us_seattle_sidewalks",
-        ) == pytest.approx(0.90)
-        # Guard rail: WITHOUT the override the "bridge.parquet" filename resolves to
-        # nothing, so the prune would be silently OFF for an allowlisted dataset —
-        # exactly why the factory must pass dataset_key (and must keep doing so).
-        assert runner._effective_prune_threshold(factory_path) == 0.0
-
-    def test_non_allowlisted_factory_dataset_logs_true_name(self, monkeypatch):
-        """A non-allowlisted factory dataset stays OFF (correct) but the skip log
-        must name the true dataset — not the dataset-blind ``"bridge.parquet"``
-        filename, which is indistinguishable across a multi-dataset sweep."""
+    def test_enabled_run_logs_dataset_and_threshold(self, monkeypatch):
+        """When the prune is ON, a loud log line names the dataset and its
+        threshold — the run's prune state must never be silent (#348)."""
         import io
-        from pathlib import Path
 
         from loguru import logger
 
@@ -1124,18 +1040,38 @@ class TestEffectivePruneThresholdCalibrationGuard:
         monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
         self._patch_calibration(monkeypatch, active=True)
 
-        factory_path = Path(
-            "data/factory/release=2026-01-21.0/dataset=co_bogota_bike_network/bridge.parquet"
-        )
         sink = io.StringIO()
         handler_id = logger.add(sink, format="{message}", level="INFO")
         try:
-            assert (
-                runner._effective_prune_threshold(
-                    factory_path, dataset_key="co_bogota_bike_network"
-                )
-                == 0.0
-            )
+            assert runner._effective_prune_threshold("us_boston_streets") == pytest.approx(0.96)
+        finally:
+            logger.remove(handler_id)
+        log_text = sink.getvalue()
+        assert "prune ON" in log_text
+        assert "us_boston_streets" in log_text
+        assert "0.96" in log_text
+
+    def test_non_allowlisted_dataset_logs_true_name(self, monkeypatch):
+        """A non-allowlisted dataset stays OFF (correct) and the skip log names
+        the true dataset — e.g. the factory's ``pair.name`` for its dataset-blind
+        ``…/dataset=<name>/bridge.parquet`` outputs, which are otherwise
+        indistinguishable across a multi-dataset sweep."""
+        import io
+
+        from loguru import logger
+
+        from crosswalk.config import settings
+        from crosswalk.pipeline import runner
+
+        monkeypatch.setattr(settings, "enable_calibration", True)
+        monkeypatch.setattr(settings, "resolver_prune_enabled", True)
+        monkeypatch.setattr(settings, "resolver_prune_overrides", {"us_boston_streets": 0.96})
+        self._patch_calibration(monkeypatch, active=True)
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, format="{message}", level="INFO")
+        try:
+            assert runner._effective_prune_threshold("co_bogota_bike_network") == 0.0
         finally:
             logger.remove(handler_id)
 

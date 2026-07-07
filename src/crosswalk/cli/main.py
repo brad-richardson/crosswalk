@@ -768,8 +768,12 @@ def register_commands(app: typer.Typer) -> None:
         output_dir = PROJECT_ROOT / "data" / "output"
         loader = DatasetLoader()
 
-        # Build list of (dataset_name, ref_path, target_path, output_path)
-        jobs: list[tuple[str, Path, Path, Path]] = []
+        # Build list of (display_name, ref_path, target_path, output_path,
+        # dataset_identity). dataset_identity is the TRUE dataset name (the
+        # dataset argument / DatasetLoader key) used to resolve the resolver-prune
+        # allowlist — never derived from file paths or the output filename (#348).
+        # None = raw path mode without a dataset name = no identity = prune off.
+        jobs: list[tuple[str, Path, Path, Path, str | None]] = []
 
         # Validate --reference and --target are provided together
         if (reference is not None) != (target is not None):
@@ -787,14 +791,17 @@ def register_commands(app: typer.Typer) -> None:
                 tgt = loader.find_target_path(ds)
                 if ref and tgt:
                     out = output_dir / bridge_filename(ds)
-                    jobs.append((ds, ref, tgt, out))
+                    jobs.append((ds, ref, tgt, out, ds))
                 else:
                     console.print(f"  [yellow]Skipping {ds}: missing files[/yellow]")
         elif reference is not None and target is not None:
-            # Explicit file paths provided
+            # Explicit file paths provided. The reference stem is only a DISPLAY
+            # name fallback — it is a filename, not a dataset identity, so it
+            # must not key the prune allowlist (only an explicit dataset
+            # argument carries identity here).
             ds_name = dataset or reference.stem
             out = output or (output_dir / bridge_filename(ds_name))
-            jobs.append((ds_name, reference, target, out))
+            jobs.append((ds_name, reference, target, out, dataset))
         elif dataset:
             ref = loader.find_reference_path(dataset)
             tgt = loader.find_target_path(dataset)
@@ -807,12 +814,12 @@ def register_commands(app: typer.Typer) -> None:
                 console.print(f"[red]Could not find target file for '{dataset}'[/red]")
                 raise typer.Exit(1)
             out = output or (output_dir / bridge_filename(dataset))
-            jobs.append((dataset, ref, tgt, out))
+            jobs.append((dataset, ref, tgt, out, dataset))
         else:
             console.print("[red]Provide a dataset name or --all or --reference/--target[/red]")
             raise typer.Exit(1)
 
-        for ds_name, ref_path, tgt_path, out_path in jobs:
+        for ds_name, ref_path, tgt_path, out_path, ds_identity in jobs:
             console.print(f"\n[bold blue]Stitching {ds_name}...[/bold blue]")
             console.print(f"  Reference: {ref_path}")
             console.print(f"  Target: {tgt_path}")
@@ -852,6 +859,7 @@ def register_commands(app: typer.Typer) -> None:
                 buffer_distance_m=buffer_distance_m,
                 n_jobs=workers,
                 allow_version_mismatch=allow_version_mismatch,
+                prune_dataset_key=ds_identity,
             )
 
             console.print(f"[green]Matched {result.n_matched} / {result.n_target} features[/green]")
