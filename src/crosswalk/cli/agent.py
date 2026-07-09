@@ -1091,8 +1091,11 @@ def generate_stitch_batch(
     decomposition_manifest: dict[str, dict] = {}
     decomposed_parents: list[dict] = []
     if decompose:
+        # Route-reason vocabulary shared with the consensus-time size gate
+        # (#386): an oversized irreducible sub-problem is size_gated to human
+        # review, exactly like an over-backstop group.
+        from ..agent_labeling.panel_routing import REASON_SIZE_GATED
         from ..matching.group_decomposition import (
-            REASON_SIZE_GATED,
             build_subproblem_group,
             decompose_group,
         )

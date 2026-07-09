@@ -59,11 +59,6 @@ STATUS_COMPLETE = "complete"
 STATUS_FAILED = "failed"
 STATUS_UNVOTED = "unvoted"
 
-#: Route-reason vocabulary for an oversized (irreducible) sub-problem: it is
-#: size-gated out of the panel flow, aligned with the panel-routing code used
-#: for groups too large to auto-accept.
-REASON_SIZE_GATED = "size_gated"
-
 Pair = tuple[str, str]
 
 
